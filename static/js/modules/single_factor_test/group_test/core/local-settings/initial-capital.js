@@ -38,28 +38,10 @@
     }
 
     function ensureExtraControls() {
-        var input = getInput();
-        if (!input || getCurrencyInput()) return;
-        var container = input.parentNode;
-        if (!container) return;
-
-        var currency = document.createElement('input');
-        currency.id = 'group_base_currency';
-        currency.type = 'text';
-        currency.value = 'CNY';
-        currency.placeholder = '基础货币';
-        currency.style.cssText = 'width:80px;margin-left:8px;padding:4px 6px;';
-        container.appendChild(currency);
-
-        var fee = document.createElement('input');
-        fee.id = 'group_currency_conversion_fee_rate';
-        fee.type = 'number';
-        fee.min = '0';
-        fee.step = '0.000001';
-        fee.value = '0';
-        fee.placeholder = '换汇佣金率';
-        fee.style.cssText = 'width:120px;margin-left:8px;padding:4px 6px;';
-        container.appendChild(fee);
+        // Controls are now defined in HTML template — verify they exist.
+        getInput();
+        getCurrencyInput();
+        getConversionFeeInput();
     }
 
     function collect() {

@@ -1023,6 +1023,7 @@ def test_settlement_price_marks_open_margin_positions_only_on_day_end():
         returns_np=returns,
         price_np=price,
         settlement_price_np=settlement_price,
+        settlement_bar_mask=np.array([[False], [True]], dtype=bool),
         open_rate_mat=np.zeros((1, 1), dtype=float),
         close_rate_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
@@ -1038,8 +1039,11 @@ def test_settlement_price_marks_open_margin_positions_only_on_day_end():
         initial_capital=1000.0,
     )
 
-    np.testing.assert_array_equal(result["margin_occupied_np"][:, 0], [100000, 110000])
-    np.testing.assert_array_equal(result["cash_np"][:, 0], [0, 90000])
+    assert np.isnan(result["post_settlement_cash_np"][0, 0])
+    np.testing.assert_array_equal(result["post_settlement_cash_np"][1:, 0], [90000])
+    np.testing.assert_array_equal(result["margin_occupied_np"][:, 0], [100000, 100000])
+    np.testing.assert_array_equal(result["pre_rebalance_cash_np"][:, 0], [100000, 90000])
+    np.testing.assert_array_equal(result["cash_np"][:, 0], [0, 100000])
     np.testing.assert_array_equal(result["total_equity_np"][:, 0], [100000, 200000])
 
 

@@ -45,6 +45,7 @@ class GroupRunResult:
     total_equity_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     pre_rebalance_cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     post_rebalance_cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    post_settlement_cash_np: np.ndarray | None = None  # (T, M) float64 minor units — 盯市后现金（非结算bar为NaN）
     cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     buy_fee_amount_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     sell_fee_amount_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
