@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import List, cast
-
-from tools.base.UniqueObject import UniqueObject
+from typing import Any, List, cast
 from tools.products.Futures import FuturesContract
 import Settings as Settings
 
@@ -223,7 +221,7 @@ def build_submission_tree():
             contract_to_future,
         )
         contract_tree = (sector_category * daynight_category).get_tree_with_parents(
-            all_objects=cast(List[UniqueObject], contracts),
+            all_objects=cast(List[Any], contracts),
             ancester=Product,
         )
         return combine_trees(product_tree, contract_tree).tree

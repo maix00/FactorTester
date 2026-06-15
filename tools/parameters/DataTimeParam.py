@@ -12,7 +12,7 @@ from tools.data.DataTime import DataTime
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 if TYPE_CHECKING:
-    from tools.base.UniqueObject import UniqueObject
+    from typing import Any
 
 class DataTimeParam(Parameter):
     def __init__(self, alias: Optional[str] = None,
@@ -55,15 +55,15 @@ class DataTimeParam(Parameter):
         dt = self._rectify_value(value, **kwargs)
         return str(dt.ts) if dt.ts is not None else str(dt)
 
-    def is_date(self, object: 'Optional[UniqueObject]' = None, value: Optional[Any] = None, **kwargs) -> bool:
+    def is_date(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'day'
 
-    def is_time(self, object: 'Optional[UniqueObject]' = None, value: Optional[Any] = None, **kwargs) -> bool:
+    def is_time(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'exact'
 
-    def _resolve(self, object: 'Optional[UniqueObject]', value: Optional[Any], **kwargs) -> Optional[DataTime]:
+    def _resolve(self, object: 'Optional[Any]', value: Optional[Any], **kwargs) -> Optional[DataTime]:
         if object is not None:
             return self.get_value(object)
         if value is not None:

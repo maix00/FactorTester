@@ -16,7 +16,7 @@ import pandas as pd
 from typing import Any, Callable, List, Optional, cast
 from weakref import WeakKeyDictionary
 
-from tools import UniqueObject
+from tools.base.UniqueNameObject import UniqueNameObject
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -108,14 +108,14 @@ def _format_timedelta(td: pd.Timedelta) -> str:
 # Parameter —— 持有 ValueSpace 的参数基类
 # ═════════════════════════════════════════════════════════════════════════════
 
-class Parameter(UniqueObject):
+class Parameter(UniqueNameObject):
     """
     参数对象：持有值空间和默认值，提供注册表存储不同对象的参数值。
 
     只做三件事：
       1. 持有 ValueSpace 和默认值
-      2. 提供 WeakKeyDictionary 注册表（键为 UniqueObject 实例）
-      3. 继承 UniqueObject 实现全局重用
+      2. 提供 WeakKeyDictionary 注册表（键为 Any 实例）
+      3. 继承 UniqueNameObject 实现全局重用
 
     属性（兼容旧 API）：
         rectify_value   → 代理到 self._value_space.rectify
@@ -139,7 +139,7 @@ class Parameter(UniqueObject):
         self.default_value = value_space.rectify(default_value)
         if default_value not in value_space:
             raise ValueError(f"Default value {default_value} not in space")
-        # 注册表：WeakKeyDictionary，key 为 UniqueObject 实例
+        # 注册表：WeakKeyDictionary，key 为实例
         self._registry = WeakKeyDictionary()
 
         # 兼容旧 API：属性代理到 _value_space
@@ -162,14 +162,14 @@ class Parameter(UniqueObject):
         return self
 
     # ── 注册表操作 ──
-    def register(self, obj: UniqueObject, value: Any, **kwargs) -> None:
+    def register(self, obj: Any, value: Any, **kwargs) -> None:
         self.check_in_space(value)
         self._registry[obj] = self._value_space.rectify(value)
 
-    def unregister(self, obj: UniqueObject) -> None:
+    def unregister(self, obj: Any) -> None:
         self._registry.pop(obj, None)
 
-    def get_value(self, obj: UniqueObject) -> Any:
+    def get_value(self, obj: Any) -> Any:
         return self._registry.get(obj, self.default_value)
 
     # ── 表达式树代理 ──

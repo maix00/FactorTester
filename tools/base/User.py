@@ -9,13 +9,13 @@
 # alias 取 @ 之前的原始用户名（如 '张三'），用于前端展示。
 # =============================================================================
 from typing import List, Optional, TYPE_CHECKING
-from tools.base.UniqueObject import UniqueObject
+from tools.base.UniqueNameObject import UniqueNameObject
 
 if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester
 
 
-class User(UniqueObject):
+class User(UniqueNameObject):
     """
     系统用户。
 

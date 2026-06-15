@@ -37,7 +37,7 @@ _WATCH_EXACT = {'Settings'}
 # 不 reload 的模块（有复杂全局状态，reload 会出问题）
 _SKIP_RELOAD = {
     'start_server',          # 自己
-    'tools.base.UniqueObject',
+    'tools.base.UniqueNameObject',
     'tools.base.IdleResourceManager',
 }
 # 前缀匹配 — 整个子树都不参与热重载（单元测试勿 reload）

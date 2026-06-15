@@ -26,7 +26,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
-from tools import UniqueObject, DataColumn, DataFreq
+from tools.base.UniqueNameObject import UniqueNameObject
+from tools import DataColumn, DataFreq
 from tools.base.User import User
 from tools.data.DataTime import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
@@ -75,7 +76,7 @@ def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     from tools.data.DataIndex import DataIndex
     return DataIndex(idx).signal_index
 
-class FactorTester(UniqueObject):
+class FactorTester(UniqueNameObject):
     """
     因子测试器。
 
@@ -92,11 +93,9 @@ class FactorTester(UniqueObject):
 
     def __new__(cls, alias: Optional[str] = None, *args, user=None, **kwargs):
         core_alias = alias if alias else cls.__name__
-        # 将 user name 嵌入 alias，避免不同用户的同名 tester 冲突
         if user is not None:
             user_name = getattr(user, 'alias', str(user))
             core_alias = f"{user_name}:{core_alias}"
-        # 显式构造 name = FactorTester:{user_prefix}:{core_alias}:{uuid}
         name = f"{cls.__name__}:{core_alias}:{uuid.uuid4().hex}"
         kwargs.pop('name', None)
         instance = super().__new__(cls, name=name, alias=core_alias, **kwargs)

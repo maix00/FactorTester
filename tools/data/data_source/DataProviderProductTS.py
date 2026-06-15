@@ -7,32 +7,33 @@
 #   - 支持判断一个 Product 是否在此数据源中存在实际文件。
 #   - 所有实例由 _DataMultipleProviderMeta 元类维护的按子类注册表。
 #   - 路径解析通过 PathResolver 可插拔（默认 LocalPathResolver）。
+#
+# 继承链：DataProvider（key/label/ensure_schema）+ _DataMultipleProviderMeta（注册表）
 # =============================================================================
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from tools.base.UniqueObject import UniqueObject
 from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
-from tools.data import _DataMultipleProviderMeta
+from tools.data.data_source.DataProvider import DataProvider, _DataMultipleProviderMeta
 
 
-class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
+class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
     """
     品种时序数据提供器。
 
     描述一个具体的数据来源，主要把 Product 映射到实际文件路径。
 
     属性：
-        alias     (str)         : 数据源唯一识别名
+        key       (str)         : 数据源唯一识别名（继承自 DataProvider，等价于旧 alias）
         freq      (DataFreq)    : 本源提供的数据频率，如 MIN1、DAY1
         timezone  (str|None)    : 时区，概与 Product 不匹配则该源对其不可用
 
     初始化参数：
-        alias                 : 数据源别名（唯一标识）
+        key                   : 数据源唯一标识
         data_freq             : 数据频率
         get_object_path       : (Product) -> 文件路径 的回调函数
         if_object_is_in_source: (Product) -> bool 的回调，默认检查文件是否存在
@@ -40,16 +41,13 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
         data_cols_mapping     : {csv列名: DataColumn} 映射，将文件中的数据列映射到 DataColumn.name
     """
 
-    def __new__(cls, alias: str, *args, **kwargs):
-        return super().__new__(cls, alias=alias, **kwargs)
-
-    def __init__(self, alias: str, data_freq: Any,
-                 get_object_path: Optional[Callable[[UniqueObject], Any]] = None,
+    def __init__(self, key: str, data_freq: Any,
+                 get_object_path: Optional[Callable[[Any], Any]] = None,
                  path_resolver: Optional[PathResolver] = None,
-                 if_object_is_in_source: Optional[Callable[[UniqueObject], bool]] = None, *args, **kwargs):
+                 if_object_is_in_source: Optional[Callable[[Any], bool]] = None,
+                 label: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(alias=alias)
-            self.alias = alias
+            super().__init__(key=key, label=label or key)
             self.freq = DataFreq(data_freq)    # 数据频率对象
             # 第一个被创建的源自动成为默认源
             if not DataProviderProductTS.all():
@@ -67,7 +65,7 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
             # 如果未提供可用性检测函数，默认检查文件是否存在且非空
             if if_object_is_in_source is None:
                 import os
-                self._if_object_is_in_source_func = lambda object: os.path.isfile(self.get_path(object))
+                self._if_object_is_in_source_func = lambda obj: os.path.isfile(self.get_path(obj))
             else:
                 self._if_object_is_in_source_func = if_object_is_in_source
             self.timezone = kwargs.get('timezone', None)
@@ -76,18 +74,18 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
 
 
     # ── 路径委托 ──
-    def get_path(self, obj: UniqueObject) -> str:
+    def get_path(self, obj: Any) -> str:
         """通过内部 PathResolver 获取对象路径。"""
         return self._path_resolver.get_path(self, obj)
 
-    def __contains__(self, object: UniqueObject) -> bool:
+    def __contains__(self, obj: Any) -> bool:
         """
-        支持 object in data_source 语法，判断某个 Product 是否在此数据源中存在实际数据。
+        支持 obj in data_source 语法，判断某个 Product 是否在此数据源中存在实际数据。
         必须时区匹配（如 Product.timezone == DataProviderProductTS.timezone）。
         """
-        if hasattr(object, 'timezone') and getattr(object, 'timezone') != self.timezone:
+        if hasattr(obj, 'timezone') and getattr(obj, 'timezone') != self.timezone:
             return False
-        return self._if_object_is_in_source_func(object)
+        return self._if_object_is_in_source_func(obj)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         """设置时间列映射：将数据文件内的时间列名映射到 DataFreq.name，将被用于构建多级索引。"""
@@ -104,8 +102,7 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
 
     def delete(self):
         """删除本数据源并从注册表中移除。"""
-        type(self)._ensure_registry().pop(self.alias, None)
-        super().delete()
+        type(self)._ensure_registry().pop(self.key, None)
 
 if __name__ == '__main__':
     ds1 = DataProviderProductTS('source1', data_freq='1D', get_object_path=lambda _: None)

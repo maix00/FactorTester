@@ -13,7 +13,7 @@ from typing import Any, cast
 from weakref import WeakValueDictionary
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from tools.base.UniqueObject import UniqueObject
+from tools.base.UniqueNameObject import UniqueNameObject
 
 # 标准时间单位→简短名称映射（pd.Timedelta.components 属性名 → DataFreq 名称组成单元）
 units = {'days': 'DAY', 'hours': 'HOUR', 'minutes': 'MIN', 'seconds': 'SECOND', 
@@ -51,7 +51,7 @@ class DataFreqMeta(ABCMeta):
         """Compatible with Enum-like access patterns."""
         return cls._instances
     
-class DataFreq(UniqueObject, metaclass=DataFreqMeta):
+class DataFreq(UniqueNameObject, metaclass=DataFreqMeta):
     """
     数据频率类。
 
@@ -70,6 +70,10 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
     value: pd.Timedelta
     name: str
     alias: str
+
+    def __init__(self, *args, **kwargs):
+        """__init__ 被 __new__ 旁路，但声明接受任意参数以避免 TypeError。"""
+        pass
 
     def __new__(cls, freq: Any):
         """

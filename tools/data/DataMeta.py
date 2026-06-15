@@ -26,7 +26,7 @@ from typing import List, Dict, Optional, Tuple, Any, cast
 import numpy as np
 import pandas as pd
 
-from tools.base.UniqueObject import UniqueObject
+from tools.base.UniqueNameObject import UniqueNameObject
 from tools.base.IdleResourceManager import IdleResourceManager
 from tools.data.DataIndex import DataIndex
 from tools.data.DataFreq import DataFreq
@@ -38,7 +38,7 @@ _DATAMETA_NAMESPACE = "datameta"
 # 默认空闲 TTL（秒）：5 分钟无访问后自动回收
 _DEFAULT_IDLE_TTL = 300
 
-class DataMeta(UniqueObject):
+class DataMeta(UniqueNameObject):
     """
     数据元信息对象。
 
@@ -52,11 +52,11 @@ class DataMeta(UniqueObject):
     一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
     """
 
-    def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
+    def __new__(cls, object: Any, alias: Optional[str] = None, *args, **kwargs):
         alias = alias if alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
         return super().__new__(cls, alias=alias, **kwargs)
 
-    def __init__(self, object: UniqueObject, data_freq: DataFreq, 
+    def __init__(self, object: Any, data_freq: DataFreq, 
                  alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             alias = alias if alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))

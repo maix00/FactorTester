@@ -29,7 +29,8 @@ from tools.factors.FactorExpr import (
     OperandExpr,
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
-from tools import UniqueObject, DataMeta
+from tools.base.UniqueNameObject import UniqueNameObject
+from tools import DataMeta
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 
@@ -42,11 +43,11 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(UniqueObject, FactorExpr):
+class FactorFamily(UniqueNameObject, FactorExpr):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
-    继承链：UniqueObject（全局唯一实例管理）+ FactorExpr（表达式树定义与求值）。
+    继承链：UniqueNameObject（别名去重）+ FactorExpr（表达式树定义与求值）。
 
     使用方式：
       1. 声明式（推荐）— 子类重写 factor_expr()，返回表达式树，params 自动从 ParamRef 节点收集
@@ -106,7 +107,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             name = f"{core_alias}:{uuid.uuid4().hex}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
-        instance = UniqueObject.__new__(cls, name=name, alias=alias, **kwargs)
+        instance = UniqueNameObject.__new__(cls, name=name, alias=alias, **kwargs)
         
         if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)

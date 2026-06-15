@@ -10,7 +10,7 @@
 # 在因子测试中，Category 用于按行业、夜盘时段等维度对产品分组，
 # 分别在每个类别内计算 IC 或分组收益。
 # =============================================================================
-from tools import UniqueObject
+from tools import UniqueNameObject
 from weakref import WeakValueDictionary
 from typing import Any, Dict, Optional, Tuple, Type, List
 
@@ -58,7 +58,7 @@ class Category(FinRangeParam):
     def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, alias=alias, **kwargs)
 
-    def __init__(self, alias: str, type: Type[UniqueObject], categories: List[str], *args, **kwargs):
+    def __init__(self, alias: str, type: Type[Any], categories: List[str], *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(alias=alias, value_space=categories, *args, **kwargs)
             self.type = type
@@ -71,20 +71,20 @@ class Category(FinRangeParam):
             self.parent_categories = []
             self.objs = []
 
-    def _whether_is_in_category(self, catname: str, obj: UniqueObject, *args, **kwargs) -> bool:
+    def _whether_is_in_category(self, catname: str, obj: Any, *args, **kwargs) -> bool:
         raise NotImplementedError
     
-    def is_in_category(self, catname: str, obj: UniqueObject, *args, **kwargs) -> bool:
+    def is_in_category(self, catname: str, obj: Any, *args, **kwargs) -> bool:
         assert catname in self.categories, f"Category name '{catname}' is not in the categories of this Category."
         assert isinstance(obj, self.type), f"Object '{obj}' is not of the correct type for this Category."
         return self.whether_is_in_category(catname, obj, *args, **kwargs)
     
-    def get_obj_of_catname(self, catname: str, all_objects: List[UniqueObject], *args, **kwargs) -> List[UniqueObject]:
+    def get_obj_of_catname(self, catname: str, all_objects: List[Any], *args, **kwargs) -> List[Any]:
         if catname == 'Others':
             return [obj for obj in all_objects if not any(self.whether_is_in_category(c, obj, *args, **kwargs) for c in self.categories if c != 'Others')]
         return [obj for obj in all_objects if self.whether_is_in_category(catname, obj, *args, **kwargs)]
 
-    def get_catname_of_obj(self, obj: UniqueObject, *args, **kwargs) -> Optional[str]:
+    def get_catname_of_obj(self, obj: Any, *args, **kwargs) -> Optional[str]:
         for catname in self.categories:
             if catname == 'Others':
                 continue
@@ -92,7 +92,7 @@ class Category(FinRangeParam):
                 return catname
         return 'Others'
 
-    def __mul__(self, other: 'Category', all_objects: List[UniqueObject] = []) -> 'Category': #type: ignore
+    def __mul__(self, other: 'Category', all_objects: List[Any] = []) -> 'Category': #type: ignore
         if isinstance(other, Category):
             all_objects = all_objects if all_objects is not None else list(set(self.objs) & set(other.objs))
             if all_objects and self.whether_contained_in(other, all_objects):
@@ -110,7 +110,7 @@ class Category(FinRangeParam):
             new_alias = f"{self.alias}×{other.alias}"
             new_categories = [f"({c1}×{c2})" for c1 in self.categories for c2 in other.categories if c1 != 'Others' and c2 != 'Others']
             new_categories.append('Others')
-            def new_whether_is_in_category(catname: str, obj: UniqueObject, *args, **kwargs):
+            def new_whether_is_in_category(catname: str, obj: Any, *args, **kwargs):
                 if catname == 'Others':
                     return not any(self.whether_is_in_category(c1, obj, *args, **kwargs) and other.whether_is_in_category(c2, obj, *args, **kwargs)
                                    for c1 in self.categories for c2 in other.categories if c1 != 'Others' and c2 != 'Others')
@@ -136,10 +136,10 @@ class Category(FinRangeParam):
         else:
             raise TypeError(f"Unsupported operand type(s) for *: 'Category' and '{type(other).__name__}'")
         
-    def mul_under_objs(self, other: 'Category', all_objects: List[UniqueObject]) -> 'Category':
+    def mul_under_objs(self, other: 'Category', all_objects: List[Any]) -> 'Category':
         return self.__mul__(other, all_objects=all_objects)
         
-    def whether_contained_in(self, other: 'Category', all_objects: List[UniqueObject]) -> bool:
+    def whether_contained_in(self, other: 'Category', all_objects: List[Any]) -> bool:
         if self.type not in other.type.__mro__:
             return False
         for catname in self.categories:
@@ -155,13 +155,13 @@ class Category(FinRangeParam):
                     return False
         return True
     
-    def get_tree_with_parents(self, all_objects: Optional[List[UniqueObject]] = None, word: str = object_word,
-                              ancester: Optional[Type[UniqueObject]] = None) -> CategoryTree:
+    def get_tree_with_parents(self, all_objects: Optional[List[Any]] = None, word: str = object_word,
+                              ancester: Optional[Type[Any]] = None) -> CategoryTree:
         res, _ = self._get_tree_with_parents(all_objects=all_objects, word=word, ancester=ancester)
         return res
         
-    def _get_tree_with_parents(self, all_objects: Optional[List[UniqueObject]] = None, word: str = object_word,
-                              ancester: Optional[Type[UniqueObject]] = None) -> Tuple[CategoryTree, List[Any]]:
+    def _get_tree_with_parents(self, all_objects: Optional[List[Any]] = None, word: str = object_word,
+                              ancester: Optional[Type[Any]] = None) -> Tuple[CategoryTree, List[Any]]:
         if all_objects is None:
             all_objects = self.objs
         if not self.parent_categories:
@@ -191,13 +191,13 @@ class Category(FinRangeParam):
                 list.append(thislist + [parent.alias])
         return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
 
-    def get_tree(self, all_objects: Optional[List[UniqueObject]] = None, word: str = object_word,
-                 ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> CategoryTree:
+    def get_tree(self, all_objects: Optional[List[Any]] = None, word: str = object_word,
+                 ancester: Optional[Type[Any]] = None, *args, **kwargs) -> CategoryTree:
         res, _ = self._get_tree(all_objects=all_objects, word=word, ancester=ancester)
         return res
 
-    def _get_tree(self, all_objects: Optional[List[UniqueObject]] = None, word: str = object_word,
-                  ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> Tuple[CategoryTree, List[Any]]:
+    def _get_tree(self, all_objects: Optional[List[Any]] = None, word: str = object_word,
+                  ancester: Optional[Type[Any]] = None, *args, **kwargs) -> Tuple[CategoryTree, List[Any]]:
         if all_objects is None:
             all_objects = self.objs
         tree = {}
@@ -216,12 +216,12 @@ class Category(FinRangeParam):
         return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
     
     def get_tree_with_parents_without_products(self, word: str = object_word,
-                              ancester: Optional[Type[UniqueObject]] = None) -> CategoryTree:
+                              ancester: Optional[Type[Any]] = None) -> CategoryTree:
         res, _ = self._get_tree_with_parents_without_products(word=word, ancester=ancester)
         return res
 
     def _get_tree_with_parents_without_products(self, word: str = object_word,
-                              ancester: Optional[Type[UniqueObject]] = None) -> Tuple[CategoryTree, List[Any]]:
+                              ancester: Optional[Type[Any]] = None) -> Tuple[CategoryTree, List[Any]]:
         if not self.parent_categories:
             res, list = self._get_tree_without_products(word=word, ancester=ancester)
             return res, [list]
@@ -250,12 +250,12 @@ class Category(FinRangeParam):
         return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
     
     def get_tree_without_products(self, word: str = object_word,
-            ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> CategoryTree:
+            ancester: Optional[Type[Any]] = None, *args, **kwargs) -> CategoryTree:
         res, _ = self._get_tree_without_products(word=word, ancester=ancester, *args, **kwargs)
         return res
     
     def _get_tree_without_products(self, word: str = object_word,
-            ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> Tuple[CategoryTree, List[Any]]:
+            ancester: Optional[Type[Any]] = None, *args, **kwargs) -> Tuple[CategoryTree, List[Any]]:
         tree = {}
         for catname in self.categories:
             catname_alias = self.get_value_alias(catname)
@@ -269,7 +269,7 @@ class Category(FinRangeParam):
                     break
         return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
         
-def _climb_to_ancester(Tree: CategoryTree, ancester: Type[UniqueObject], word: str = object_word) -> CategoryTree:
+def _climb_to_ancester(Tree: CategoryTree, ancester: Type[Any], word: str = object_word) -> CategoryTree:
     tree = Tree.tree
     if ancester in tree:
         return Tree
@@ -323,16 +323,16 @@ def combine_trees(Tree1: CategoryTree, Tree2: CategoryTree, word: str = object_w
     return CategoryTree({key: combined_tree})
         
 if __name__ == "__main__":
-    Cat1 = Category(alias='Cat1', type=UniqueObject, categories=['A', 'B'])
+    Cat1 = Category(alias='Cat1', type=UniqueNameObject, categories=['A', 'B'])
     Cat1.whether_is_in_category = lambda catname, obj, *args, **kwargs: obj.alias.startswith(catname) and catname in Cat1.categories
-    Cat2 = Category(alias='Cat2', type=UniqueObject, categories=['X', 'Y'])
+    Cat2 = Category(alias='Cat2', type=UniqueNameObject, categories=['X', 'Y'])
     Cat2.whether_is_in_category = lambda catname, obj, *args, **kwargs: obj.alias.endswith(catname) and catname in Cat2.categories
     Cat3 = Cat1 * Cat2
 
-    obj1 = UniqueObject(name='A1X')
-    obj2 = UniqueObject(name='B2Y')
-    obj3 = UniqueObject(name='A3Y')
-    obj4 = UniqueObject(name='B4X')
+    obj1 = UniqueNameObject(name='A1X')
+    obj2 = UniqueNameObject(name='B2Y')
+    obj3 = UniqueNameObject(name='A3Y')
+    obj4 = UniqueNameObject(name='B4X')
 
     print(Cat3.whether_is_in_category('(A×X)', obj1))  # True
     print(Cat3.whether_is_in_category('(B×Y)', obj2))  # True

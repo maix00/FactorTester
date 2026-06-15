@@ -11,13 +11,13 @@ Product 抽象基类 — 所有金融产品的统一接口。
 from typing import List, Optional, Any, TYPE_CHECKING, cast
 import pandas as pd
 
-from tools.base.UniqueObject import UniqueObject
+from tools.base.UniqueNameObject import UniqueNameObject
 from tools.data.DataMeta import DataMeta
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 from tools.data import DataProviderProductTS as DataSource
 
-class Product(UniqueObject):
+class Product(UniqueNameObject):
     """
     金融产品基类。
 

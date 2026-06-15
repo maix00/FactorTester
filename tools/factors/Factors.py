@@ -29,9 +29,11 @@
 import numpy as np
 import pandas as pd
 import uuid
+import threading
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
+from weakref import WeakValueDictionary
 
-from tools import UniqueObject, DataFreq
+from tools import DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult
@@ -40,12 +42,12 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.FactorTester import FactorTester
 
-class Factor(UniqueObject, FactorExpr):
+class Factor(FactorExpr):
     """
     量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
 
     继承 FactorExpr → 是一个表达式节点，可参与表达式组合（+, -, cs_rank 等）。
-    继承 UniqueObject → 同一 alias 全局唯一实例。
+    内联去重 → 同 (alias, structural_key) 全局唯一实例（search 模式）。
 
     属性：
         _resolved_expr (FactorExpr)  : 已解析的纯表达式树（无 ParamRef）
@@ -60,6 +62,12 @@ class Factor(UniqueObject, FactorExpr):
         returns        (DataFrame)   : 因子对应的收益率序列（calc_returns 后设置）
         _source_freq   (DataFreq)    : 数据源频率（从 family 继承）
     """
+
+    # 内联去重缓存（替代 UniqueObject 的 L1+L2+L3）
+    _instances: Dict[Tuple, 'Factor'] = {}
+    _instances_lock = threading.Lock()
+    _alias_index: Dict[Tuple, WeakValueDictionary] = {}
+    _alias_index_lock = threading.Lock()
 
     # 运行时动态属性（calc 后设置）
     _expr: FactorExpr
@@ -128,7 +136,37 @@ class Factor(UniqueObject, FactorExpr):
             name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
         else:
             name = f"{core_alias}:{uuid.uuid4().hex}"
-        instance = UniqueObject.__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', core_alias), search=kwargs.pop('search', True), **kwargs)
+        name = kwargs.pop('name', name)
+        alias = kwargs.pop('alias', core_alias)
+        search = kwargs.pop('search', True)
+
+        # --- structural_key（L3）---
+        sk = expr._structural_key()
+
+        # --- search 模式（L2）：按 alias + structural_key 查找已有实例 ---
+        if search and alias is not None:
+            with cls._alias_index_lock:
+                if (alias, sk) in cls._alias_index:
+                    for inst in cls._alias_index[(alias, sk)].values():
+                        if inst.__class__ is cls:
+                            return inst
+
+        # --- 去重（L1）：按 (name, sk) 返回已有实例 ---
+        key_2d = (name, sk)
+        with cls._instances_lock:
+            if key_2d in cls._instances:
+                return cls._instances[key_2d]
+            instance = super().__new__(cls)
+            cls._instances[key_2d] = instance
+
+        instance.name = name
+        instance.alias = alias
+        instance._key_2d = key_2d
+
+        # alias 索引
+        with cls._alias_index_lock:
+            cls._alias_index.setdefault((alias, sk), WeakValueDictionary())[key_2d] = instance
+
         if not hasattr(instance, '_initialized'):
             instance._expr = expr
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
@@ -136,7 +174,7 @@ class Factor(UniqueObject, FactorExpr):
             instance.family = family
             instance._intermediate_factor_data = {}
             instance._intermediate_alias_index = {}
-            super().__init__(instance, _local_only=False)
+            super(FactorExpr, instance).__init__()
         return instance
     
     def _structural_key(self) -> Tuple:
