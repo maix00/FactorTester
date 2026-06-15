@@ -11,5 +11,5 @@ def test_local_sql_registry_exposes_openctp_store(monkeypatch, tmp_path):
     stores = local_sql_data.list_stores()
     openctp_store = next(store for store in stores if store["key"] == "openctp")
 
-    assert openctp_store["label"] == "本地数据 (onlinedata.sqlite)"
+    assert openctp_store["label"] == "统一本地数据 (onlinedata.sqlite)"
     assert openctp_store["database"].endswith("onlinedata.sqlite")

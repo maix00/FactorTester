@@ -17,23 +17,23 @@ def _hub() -> DataHub:
     return DataHub.get_instance()
 
 
-# ── 初始化：注册 openctp store ──────────────────────────────────
+# ── 初始化：注册统一本地数据 store ───────────────────────────────
 
-def _openctp_store_path() -> str:
+def _sqlite_store_path() -> str:
     import Settings
     return str(Settings.CACHE_DB_PATH)
 
 
-def _ensure_openctp_store() -> str:
+def _ensure_sqlite_store() -> str:
     from sources.OpenCTP.client import ensure_sqlite_store
     return ensure_sqlite_store()
 
 
 _hub().register_sqlite_store(SQLiteStore(
     key="openctp",
-    label="本地数据 (onlinedata.sqlite)",
-    path_getter=_openctp_store_path,
-    ensure=_ensure_openctp_store,
+    label="统一本地数据 (onlinedata.sqlite)",
+    path_getter=_sqlite_store_path,
+    ensure=_ensure_sqlite_store,
 ))
 
 
