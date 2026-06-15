@@ -16,9 +16,9 @@ from tools.factors.tests.single_factor_test.group.core import (
     build_flat_membership_from_groups,
     _build_product_remap_matrix,
     _build_group_memberships_from_shared,
+    _build_settlement_bar_mask,
     _emit_progress,
     _load_group_trade_prices,
-    _load_group_settlement_prices,
     _load_group_trade_returns,
     _prepare_group_shared_inputs,
     _remap_membership_to_trade,
@@ -737,7 +737,6 @@ class FactorGroupTester:
         P = len(plan.trade_product_names)
         merged_returns_np = np.full((T, P), np.nan, dtype=float)
         merged_price_np = np.full((T, P), np.nan, dtype=float)
-        merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
         global_products_by_name: dict[str, Any] = {}
 
         if plan.entry_trade_valid_cols is None:
@@ -773,27 +772,16 @@ class FactorGroupTester:
                 end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
-            local_settlement_price_np = _load_group_settlement_prices(
-                factor,
-                trade_valid_cols=list(trade_valid_cols),
-                source_freq=entry.shared_inputs.source_freq,
-                start_dt=self.start_dt,
-                end_dt=self.end_dt,
-                index_list=entry.shared_inputs.index_list,
-            )
             for local_col_idx, product in enumerate(trade_valid_cols):
                 product_name = getattr(product, "name", str(product))
                 global_products_by_name.setdefault(product_name, product)
                 global_col_idx = plan.trade_product_positions[product_name]
                 local_returns_col = np.asarray(local_returns_np[:, local_col_idx], dtype=float)
                 local_price_col = np.asarray(local_price_np[:, local_col_idx], dtype=float)
-                local_settlement_col = np.asarray(local_settlement_price_np[:, local_col_idx], dtype=float)
                 returns_missing = np.isnan(merged_returns_np[:, global_col_idx])
                 price_missing = np.isnan(merged_price_np[:, global_col_idx])
-                settlement_missing = np.isnan(merged_settlement_price_np[:, global_col_idx])
                 merged_returns_np[returns_missing, global_col_idx] = local_returns_col[returns_missing]
                 merged_price_np[price_missing, global_col_idx] = local_price_col[price_missing]
-                merged_settlement_price_np[settlement_missing, global_col_idx] = local_settlement_col[settlement_missing]
 
         ordered_trade_products = [global_products_by_name[name] for name in plan.trade_product_names]
         signal_valid_cols = list(dict.fromkeys(
@@ -803,6 +791,10 @@ class FactorGroupTester:
         ))
         plan.merged_returns_np = merged_returns_np
         plan.merged_price_np = merged_price_np
+        settlement_mask = _build_settlement_bar_mask(first_entry.shared_inputs.index_list)
+        merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
+        if settlement_mask.size:
+            merged_settlement_price_np[settlement_mask] = merged_price_np[settlement_mask]
         plan.merged_settlement_price_np = merged_settlement_price_np
         plan.merged_spec_bundle = _resolve_group_trade_specs(
             signal_valid_cols=signal_valid_cols,
