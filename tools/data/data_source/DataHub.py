@@ -27,7 +27,9 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -38,7 +40,7 @@ from tools.base.IdleResourceManager import IdleResourceManager
 logger = logging.getLogger(__name__)
 
 
-# ── SQLiteStore 数据结构 ───────────────────────────────────────────
+# ── 数据结构 ───────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class SQLiteStore:
     """描述一个本地 SQLite 数据库。"""
@@ -51,6 +53,13 @@ class SQLiteStore:
         if self.ensure is not None:
             return self.ensure()
         return self.path_getter()
+
+
+@dataclass(frozen=True)
+class VisitSource:
+    """描述一个参与访问追踪的数据源。"""
+    key: str
+    label: str
 
 
 class DataHub:
@@ -72,6 +81,7 @@ class DataHub:
         # ── SQLite 管理 ──
         self._sqlite_stores: Dict[str, SQLiteStore] = {}  # store_key → SQLiteStore
         self._providers: Dict[str, 'DataProvider'] = {}
+        self._visit_sources: Dict[str, VisitSource] = {}  # source_key → VisitSource
 
         # ── DataFrame 加载器 ──
         self._loaders: Dict[str, Callable[..., pd.DataFrame]] = {}
@@ -180,6 +190,91 @@ class DataHub:
             "offset": offset,
             "database": store.path(),
         }
+
+    # ═══════════════════════════════════════════════════════════════
+    # Visit 访问追踪（替代 sources/visits/registry.py + _store.py）
+    # ═══════════════════════════════════════════════════════════════
+
+    def register_visit_source(self, key: str, label: str) -> VisitSource:
+        """注册一个参与访问追踪的数据源。内置 ensure_schema 会自动建表。"""
+        source = VisitSource(key=key, label=label)
+        self._visit_sources[key] = source
+        logger.info("VisitSource registered: %s (%s)", key, label)
+        return source
+
+    def iter_visit_sources(self) -> List[VisitSource]:
+        """返回所有已注册的 VisitSource（按 key 排序）。"""
+        return [
+            self._visit_sources[key]
+            for key in sorted(self._visit_sources)
+        ]
+
+    def ensure_visits_schema(self) -> None:
+        """确保 source_visits 表存在于 openctp store 中。"""
+        # 如果 openctp store 尚未注册，自动注册
+        if "openctp" not in self._sqlite_stores:
+            from sources.OpenCTP.client import CACHE_DB_PATH
+            self.register_store("openctp", CACHE_DB_PATH)
+        with self._connect_sqlite("openctp") as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_visits (
+                    source_key TEXT PRIMARY KEY,
+                    source_label TEXT NOT NULL,
+                    last_access_date TEXT NOT NULL,
+                    last_access_at REAL NOT NULL
+                )
+                """
+            )
+
+    def record_visit(self, source_key: str, *,
+                     source_label: str,
+                     access_date: date | str | None = None) -> str:
+        """记录一次数据源访问。"""
+        visit_date = (
+            access_date.isoformat() if isinstance(access_date, date)
+            else str(access_date or date.today().isoformat())
+        )
+        self.ensure_visits_schema()
+        with self._connect_sqlite("openctp") as conn:
+            conn.execute(
+                """
+                INSERT INTO source_visits (source_key, source_label, last_access_date, last_access_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(source_key) DO UPDATE SET
+                    source_label = excluded.source_label,
+                    last_access_date = excluded.last_access_date,
+                    last_access_at = excluded.last_access_at
+                """,
+                (source_key, source_label, visit_date, time.time()),
+            )
+        return visit_date
+
+    def get_visit(self, source_key: str) -> Dict[str, Any] | None:
+        """查询某个数据源的最后访问记录。"""
+        try:
+            self.ensure_visits_schema()
+            with self._connect_sqlite("openctp") as conn:
+                row = conn.execute(
+                    """
+                    SELECT source_key, source_label, last_access_date, last_access_at
+                    FROM source_visits
+                    WHERE source_key = ?
+                    """,
+                    (source_key,),
+                ).fetchone()
+            if row is None:
+                return None
+            return dict(row)
+        except Exception:
+            return None
+
+    def get_latest_access_date(self, source_key: str) -> str | None:
+        """查询某数据源的最后访问日期字符串。"""
+        visit = self.get_visit(source_key)
+        if visit is None:
+            return None
+        return str(visit["last_access_date"])
 
     # ═══════════════════════════════════════════════════════════════
     # 旧 SQLite Store 管理（底层数据库路径，可选用）
