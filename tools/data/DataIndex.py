@@ -284,6 +284,26 @@ class DataIndex:
             result = result.tz_localize(None)
         return cast(pd.DatetimeIndex, result.normalize())
 
+    def settlement_bar_mask(self) -> np.ndarray:
+        """标记每个自然日最后一个 bar。
+
+        这里按 signal_index 的实际顺序来分日，不看 trading_day 字段。
+        适用于 MIN1 / 更细粒度日内索引，尤其是含日盘和夜盘的品种。
+        """
+        ts = self.finest_index
+        if len(ts) == 0:
+            return np.zeros(0, dtype=bool)
+        days = pd.DatetimeIndex(ts).normalize()
+        mask = np.zeros(len(ts), dtype=bool)
+        if len(ts) == 1:
+            mask[0] = True
+            return mask
+        day_change = np.flatnonzero(days[1:].to_numpy() != days[:-1].to_numpy()) + 1
+        boundaries = np.concatenate([day_change, np.array([len(ts)], dtype=int)])
+        for end in boundaries:
+            mask[end - 1] = True
+        return mask
+
     # ── 时间切片 ──────────────────────────────────────────────────────────
 
     def slice_by(self, start: Any = None, end: Any = None) -> np.ndarray:

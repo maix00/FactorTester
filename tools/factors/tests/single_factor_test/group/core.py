@@ -771,49 +771,6 @@ def _load_group_trade_prices(
     return price_np
 
 
-def _load_group_settlement_prices(
-    factor: Factor,
-    *,
-    trade_valid_cols: list,
-    source_freq: DataFreq,
-    start_dt: Optional[Any] = None,
-    end_dt: Optional[Any] = None,
-    index_list: list,
-) -> np.ndarray:
-    from tools.factors.expr import ColumnRef
-
-    raw_settlement_prices = ColumnRef(DataColumn.SETTLEMENT_PRICE).evaluate(
-        products=trade_valid_cols,
-        freq=source_freq,
-        start_calc_point=start_dt,
-    )
-    settlement_price_src = align_table_for_group(factor, raw_settlement_prices)
-    settlement_price_src.index = DataIndex(settlement_price_src.index).signal_index
-    di = DataIndex(settlement_price_src.index)
-    mask = di.slice_by_datatime(start_dt, end_dt)
-    settlement_price_src = cast(pd.DataFrame, settlement_price_src[mask])
-    settlement_price_src = settlement_price_src.reindex(index=index_list, columns=trade_valid_cols)
-    return settlement_price_src[trade_valid_cols].to_numpy(dtype=float)
-
-
-def _build_settlement_bar_mask(index_list: list[Any]) -> np.ndarray:
-    if not index_list:
-        return np.zeros(0, dtype=bool)
-    ts = pd.DatetimeIndex(index_list)
-    days = ts.normalize()
-    mask = np.zeros(len(ts), dtype=bool)
-    if len(ts) == 1:
-        mask[0] = True
-        return mask
-    day_change = np.flatnonzero(days[1:].to_numpy() != days[:-1].to_numpy()) + 1
-    boundaries = np.concatenate([day_change, np.array([len(ts)], dtype=int)])
-    start = 0
-    for end in boundaries:
-        mask[end - 1] = True
-        start = end
-    return mask
-
-
 def _resolve_group_trade_specs(
     *,
     signal_valid_cols: list,
@@ -2134,7 +2091,7 @@ def simulate_group_trading_book(
         settlement_price_arr = np.asarray(settlement_price_np, dtype=float)
         if settlement_price_arr.shape != (T, P):
             raise ValueError(f"settlement_price_np shape={settlement_price_arr.shape} != {(T, P)}")
-    settlement_bar_mask = _build_settlement_bar_mask(time_index)
+    settlement_bar_mask = DataIndex(pd.Index(time_index)).settlement_bar_mask()
 
     if settlement_price_arr is not None and bool(np.isfinite(settlement_price_arr).any()):
         def _run_fifo_settlement_path() -> dict:
