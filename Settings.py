@@ -14,6 +14,7 @@ from __future__ import annotations
 # =============================================================================
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 import pandas as pd
 
 # 按成交量 top-k 筛选时保留的品种比例（0~1）
@@ -34,6 +35,9 @@ default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
 # data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
 from scripts.data_dir import DATA_DIR
+
+if TYPE_CHECKING:
+    from tools.products.categories.Category import CategoryTree
 
 # 统一本地 sqlite 路径（所有镜像库合并到一个文件）
 CACHE_DIR = Path(DATA_DIR) / 'cache' / 'localdata'
