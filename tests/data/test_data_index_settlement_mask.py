@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.data.DataIndex import DataIndex
+from tools.data.types.DataIndex import DataIndex
 
 
 def test_end_of_trading_day_uses_last_bar_of_each_trading_day():

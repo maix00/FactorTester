@@ -12,13 +12,13 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataFreq import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data import DataProviderProductTS as DataSource
-    from tools.data.ProductDataView import ProductDataView
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
     from .leaf import ConstExpr, ColumnRef, ParamRef
     from .composite import CompositeExpr

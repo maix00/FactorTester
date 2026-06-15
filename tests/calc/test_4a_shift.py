@@ -34,9 +34,9 @@ from openpyxl.styles import Alignment
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.DataIndex import finest_index
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataIndex import finest_index
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataFreq import DataFreq
 from tools.factors.FactorExpr import ColumnRef, EvaluateContext, ShiftOp
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester

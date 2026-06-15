@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataFreq import DataFreq
 from tools.factors import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.parameters import WindowParam

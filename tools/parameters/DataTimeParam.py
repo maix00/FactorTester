@@ -8,7 +8,7 @@
 import pandas as pd
 from typing import Optional, Any, TYPE_CHECKING
 
-from tools.data.DataTime import DataTime
+from tools.data.types.DataTime import DataTime
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 if TYPE_CHECKING:

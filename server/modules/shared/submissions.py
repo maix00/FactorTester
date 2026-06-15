@@ -49,7 +49,7 @@ def _find_submission(id_time: str, page_uuid: str | None):
 def _trailing_year_volume_stats(product):
     """Return daily-volume liquidity summaries relative to the latest data date."""
     import pandas as pd
-    from tools.data.DataColumn import DataColumn
+    from tools.data.types.DataColumn import DataColumn
 
     empty_result = {
         'latest_volume': None,

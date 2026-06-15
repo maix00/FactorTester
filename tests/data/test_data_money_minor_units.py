@@ -1,6 +1,6 @@
 import numpy as np
 
-from tools.data.DataMoneyMinorUnits import DataMoneyMinorUnits, minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
+from tools.data.types.DataMoneyMinorUnits import DataMoneyMinorUnits, minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
 
 
 def test_money_minor_units_rounds_only_after_amount_is_formed():

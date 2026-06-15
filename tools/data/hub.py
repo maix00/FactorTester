@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List
 import pandas as pd
 
 if TYPE_CHECKING:
-    from tools.data.data_source.DataProvider import DataProvider, DataProviderSync
+    from .providers.DataProvider import DataProvider, DataProviderSync
 
 from tools.base.IdleResourceManager import IdleResourceManager
 

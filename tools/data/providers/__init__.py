@@ -1,18 +1,15 @@
-"""数据源框架 — 元类、抽象基类、注册表。"""
-
 from .DataProvider import (
     _DataProviderMeta,
     _DataMultipleProviderMeta,
     DataProvider,
     DataProviderSync,
 )
-
-from .DataHub import DataHub
+from .DataProviderProductTS import DataProviderProductTS
 
 __all__ = [
     "_DataProviderMeta",
     "_DataMultipleProviderMeta",
     "DataProvider",
     "DataProviderSync",
-    "DataHub",
+    "DataProviderProductTS",
 ]

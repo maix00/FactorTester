@@ -12,9 +12,9 @@ from typing import List, Optional, Any, TYPE_CHECKING, cast
 import pandas as pd
 
 from tools.base.UniqueNameObject import UniqueNameObject
-from tools.data.ProductDataView import ProductDataView
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.views.ProductDataView import ProductDataView
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataFreq import DataFreq
 from tools.data import DataProviderProductTS as DataSource
 
 class Product(UniqueNameObject):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataFreq import DataFreq
 from tools.factors.FactorExpr import FactorExpr, build_panel_timeline
 
 

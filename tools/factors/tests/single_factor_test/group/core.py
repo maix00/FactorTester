@@ -12,11 +12,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from Settings import factor_info_path
-from tools.data.DataColumn import DataColumn
-from tools.data.DataCurrency import CurrencyConversionContext, normalize_currency, require_product_currency_vector
-from tools.data.DataFreq import DataFreq
-from tools.data.DataIndex import DataIndex
-from tools.data.DataMoneyMinorUnits import minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataCurrency import CurrencyConversionContext, normalize_currency, require_product_currency_vector
+from tools.data.types.DataFreq import DataFreq
+from tools.data.types.DataIndex import DataIndex
+from tools.data.types.DataMoneyMinorUnits import minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
 from tools.factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.NextReturns import NextReturns

@@ -8,7 +8,7 @@ class NextReturns(FactorFamily):
 
     @staticmethod
     def factor_expr():
-        from tools.data.DataColumn import DataColumn
+        from tools.data.types.DataColumn import DataColumn
         from tools.parameters import DataColumnParam, WindowParam, TypeParam
 
         SC = DataColumnParam('SC', default_value=DataColumn.CLOSE_ADJUSTED)

@@ -16,9 +16,9 @@ from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from tools.base.DistributedComponents import PathResolver, LocalPathResolver
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
-from tools.data.data_source.DataProvider import DataProvider, _DataMultipleProviderMeta
+from ..types.DataColumn import DataColumn
+from ..types.DataFreq import DataFreq
+from .DataProvider import DataProvider, _DataMultipleProviderMeta
 
 
 class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):

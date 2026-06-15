@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.data.data_source.DataHub import DataHub, SQLiteStore  # noqa: F401
+from tools.data.hub import DataHub, SQLiteStore  # noqa: F401
 
 
 def _hub() -> DataHub:

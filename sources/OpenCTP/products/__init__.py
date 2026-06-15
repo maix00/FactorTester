@@ -1,6 +1,6 @@
 """OpenCTP 品种列表同步模块。"""
 
-from tools.data.data_source.DataHub import DataHub
+from tools.data.hub import DataHub
 
 from ._store import (
     SOURCE_KEY,

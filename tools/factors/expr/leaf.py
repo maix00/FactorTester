@@ -12,13 +12,13 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataColumn import DataColumn
+from tools.data.types.DataFreq import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data import DataProviderProductTS as DataSource
-    from tools.data.ProductDataView import ProductDataView
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -63,7 +63,7 @@ class ColumnRef(FactorExpr):
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
-        from tools.data.ProductDataView import ProductDataView
+        from tools.data.views.ProductDataView import ProductDataView
 
         products = ctx.products
         freq = ctx.freq
@@ -80,7 +80,7 @@ class ColumnRef(FactorExpr):
                     series_dict[p] = preloaded_df[self.column.name]
                     continue
                 if preloaded_df is not None:
-                    from tools.data.ProductDataView import ProductDataView
+                    from tools.data.views.ProductDataView import ProductDataView
                     raw_col = ProductDataView._get_nonadjusted_col_name(self.column.name)
                     if ProductDataView._check_is_adjusted(self.column.name) and raw_col in preloaded_df.columns:
                         series_dict[p] = preloaded_df[raw_col]

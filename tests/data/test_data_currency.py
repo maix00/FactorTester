@@ -2,7 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.data.DataCurrency import CurrencyConversionContext, require_product_currency_vector
+from tools.data.types.DataCurrency import DataCurrency, CurrencyConversionContext, require_product_currency_vector
+
+
+def test_data_currency_normalizes_code():
+    currency = DataCurrency("usd")
+
+    assert currency.code == "USD"
+    assert str(currency) == "USD"
 
 
 def test_currency_context_allows_single_currency_without_fx_data():

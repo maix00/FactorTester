@@ -299,7 +299,7 @@ class Factor(FactorExpr):
         start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
 
         # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.data.ProductDataView import ProductDataView
+        from tools.data.views.ProductDataView import ProductDataView
 
         preloaded: dict = {}
         column_refs = self._expr.column_refs

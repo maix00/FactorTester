@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.data.DataFreq import DataFreq
+from tools.data.types.DataFreq import DataFreq
 from tools.factors.FactorExpr import ConstExpr, build_panel_timeline
 from tools.factors.expr.rolling import RollingExpr
 

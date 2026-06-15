@@ -34,7 +34,7 @@ _DAY_LEVEL_PREFIXES = ('DAY', 'WEEK', 'MONTH', 'YEAR')
 
 def _is_day_level_name(name: str) -> bool:
     """判断层级名是否表示天倍数级别（如 _SIGNAL@DAY1 / _SIGNAL@WEEK1）。"""
-    from tools.data.DataFreq import DataFreq
+    from .DataFreq import DataFreq
 
     name_upper = str(name).upper()
     if name_upper in {"TRADING_DAY", "TRADE_DAY"} or name_upper.endswith("_TRADING_DAY"):
@@ -270,7 +270,7 @@ class DataIndex:
         时机：信号层名如 '_SIGNAL@MIN5' → DataFreq('MIN5')
               否则从实际时间戳间隔推断。
         """
-        from tools.data.DataFreq import DataFreq
+        from .DataFreq import DataFreq
 
         sig_name = self.signal_name
         if sig_name and _SIGNAL_PREFIX in sig_name:
@@ -357,7 +357,7 @@ class DataIndex:
         守卫：
         - exact 精度要求 signal_index 频率 < 1day（日内），否则天级索引无法做日内截断
         """
-        from tools.data.DataTime import DataTime  # noqa: F811
+        from .DataTime import DataTime  # noqa: F811
 
         if not isinstance(start_dt, DataTime) or not isinstance(end_dt, DataTime):
             raise TypeError("slice_by_datatime expects two DataTime objects")
@@ -370,7 +370,7 @@ class DataIndex:
         if precision == "day":
             di_for_slice = self
             if self.is_multi:
-                from tools.data.DataFreq import DataFreq
+                from .DataFreq import DataFreq
                 day_name = next(
                     (n for n in self.raw.names
                      if n and _is_day_level_name(str(n))),
@@ -429,7 +429,7 @@ class DataIndex:
         """从 signal_index 的首尾生成 date_range（用于构建 calendar_index）。"""
         if len(self.signal_index) == 0:
             return pd.DatetimeIndex([])
-        from tools.data.DataFreq import DataFreq
+        from .DataFreq import DataFreq
         freq_obj = DataFreq(freq)
         return pd.date_range(
             start=self.signal_index[0],
@@ -460,7 +460,6 @@ def finest_index(index: pd.Index) -> pd.DatetimeIndex:
     """取索引的最精细时间列 — 始终返回最后一层 DatetimeIndex，零构造开销。
 
     调用方无需构造 DataIndex 实例：
-        from tools.data.DataIndex import finest_index
         ts = finest_index(df.index)
 
     与 MultiIndex 中的 _SIGNAL@ 命名约定无关；

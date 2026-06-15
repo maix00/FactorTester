@@ -12,7 +12,7 @@ import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import get_factor_tester, get_session_params
-from tools.data.DataIndex import finest_index
+from tools.data.types.DataIndex import finest_index
 from . import shared_bp
 from server.services.api_response import api_fail, api_ok, route_guard
 from .factor_data_helpers import (

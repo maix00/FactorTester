@@ -11,7 +11,7 @@ import pytest
 from types import SimpleNamespace
 import pandas as pd
 from tools import DataFreq
-from tools.data.DataTime import DataTime
+from tools.data.types.DataTime import DataTime
 from tools.factors.tests.single_factor_test.group.core import (
     simulate_group_trading_book,
     GroupTradeSpecBundle,

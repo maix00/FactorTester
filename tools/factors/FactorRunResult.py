@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Optional
 import pandas as pd
 
 if TYPE_CHECKING:
-    from tools.data.DataFreq import DataFreq
+    from tools.data.types.DataFreq import DataFreq
     from tools.factors.Factors import Factor
     from tools.factors.tests.single_factor_test.group.result import GroupRunResult
     from tools.factors.expr.timeline import PanelTimeline

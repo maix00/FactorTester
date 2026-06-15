@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from tools.data.data_source.DataHub import DataHub
+from tools.data.hub import DataHub
 from ._source import SOURCE_NAME, discover_source_url, fetch_table as _fetch_table
 from ._store import ensure_sqlite_store, load_latest_source_metadata, load_latest_table, save_table
 

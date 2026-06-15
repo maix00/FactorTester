@@ -119,7 +119,7 @@ def _extract_docstring_description(docstring: str | None) -> str:
 
 def scan_data_columns() -> List[DataColumnEntry]:
     """扫描 DataColumn 枚举，提取所有数据列字段。"""
-    from tools.data.DataColumn import DataColumn
+    from tools.data.types.DataColumn import DataColumn
     entries = []
     for member in DataColumn:
         # 从枚举成员的 docstring 或源码推测中文描述
@@ -344,7 +344,7 @@ def scan_param_types() -> List[ParamTypeEntry]:
 
 def scan_frequency_types() -> List[dict]:
     """扫描已创建的 DataFreq 实例。通过访问常见频率触发懒加载。"""
-    from tools.data.DataFreq import DataFreq
+    from tools.data.types.DataFreq import DataFreq
     # 触发常见频率的懒加载实例化，并用列表保持引用防止 WeakValueDictionary GC
     _freqs = []
     for attr in ('MIN1', 'MIN5', 'MIN15', 'MIN30', 'MIN60', 'DAY1'):

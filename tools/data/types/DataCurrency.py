@@ -14,12 +14,31 @@ import numpy as np
 FxRateProvider = Callable[[str, str, Any], float | None]
 
 
+@dataclass(frozen=True)
+class DataCurrency:
+    code: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", normalize_currency(self.code))
+
+    @property
+    def name(self) -> str:
+        return self.code
+
+    def __str__(self) -> str:
+        return self.code
+
+
 def normalize_currency(value: Any, default: str = "CNY") -> str:
+    if isinstance(value, DataCurrency):
+        return value.code
     code = str(value or default).strip().upper()
     return code or default
 
 
 def normalize_optional_currency(value: Any) -> str | None:
+    if isinstance(value, DataCurrency):
+        return value.code
     code = str(value or "").strip().upper()
     return code or None
 
