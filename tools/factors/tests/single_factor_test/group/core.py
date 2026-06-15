@@ -2390,7 +2390,7 @@ def simulate_group_trading_book(
                                 result[row_idx, p_idx] += buy_qty_p
                                 _lot_push(row_idx, p_idx, buy_qty_p, float(mark_contract_base[p_idx]))
                                 if np.isfinite(one_lot_margin_mat[row_idx, p_idx]):
-                                    occupied_minor[row_idx] += int(_round_minor_units(buy_qty_p * contract_value_base[p_idx] * (margin_ratios[row_idx, p_idx] if use_margin[row_idx, p_idx] else 1.0)))
+                                    occupied_minor[row_idx] += int(_round_minor_units(buy_qty_p * mark_contract_base[p_idx] * (margin_ratios[row_idx, p_idx] if use_margin[row_idx, p_idx] else 1.0)))
                                 cash_pool[row_idx] -= spent_here_minor
                                 cash_minor[row_idx] -= spent_here_minor
                                 spent_minor += spent_here_minor
@@ -2411,7 +2411,7 @@ def simulate_group_trading_book(
                                 if best_idx >= 0 and best_cost is not None:
                                     result[row_idx, best_idx] += lot_row[best_idx]
                                     _lot_push(row_idx, best_idx, float(lot_row[best_idx]), float(mark_contract_base[best_idx]))
-                                    occupied_minor[row_idx] += int(_round_minor_units(lot_row[best_idx] * contract_value_base[best_idx] * (margin_ratios[row_idx, best_idx] if use_margin[row_idx, best_idx] else 1.0)))
+                                    occupied_minor[row_idx] += int(_round_minor_units(lot_row[best_idx] * mark_contract_base[best_idx] * (margin_ratios[row_idx, best_idx] if use_margin[row_idx, best_idx] else 1.0)))
                                     cash_pool[row_idx] -= best_cost
                                     cash_minor[row_idx] -= best_cost
                                     changed_any = True
