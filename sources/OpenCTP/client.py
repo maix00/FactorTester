@@ -17,6 +17,7 @@ import re
 import sqlite3
 import time
 from datetime import date
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -29,6 +30,12 @@ import Settings
 BASE_URL = "http://dict.openctp.cn"
 CACHE_DIR = Settings.CACHE_DIR
 CACHE_DB_PATH = Settings.CACHE_DB_PATH
+SRC_RESPONSES_TABLE = "src_openctp_responses"
+SOURCE_RESPONSES_VIEW = "source_responses"
+LEGACY_RESPONSES_VIEW = "openctp_responses"
+SRC_CONTRACT_SPECS_TABLE = "src_openctp_cnfutures_contract_specs"
+SOURCE_CONTRACT_SPECS_VIEW = "source_contract_specs"
+LEGACY_CONTRACT_SPECS_VIEW = "openctp_cnfutures_contract_specs"
 ENDPOINTS = {
     "markets": "/markets",
     "products": "/products",
@@ -53,13 +60,31 @@ def _cache_key(query: dict[str, str]) -> str:
     return urlencode(sorted(query.items()))
 
 
+def _object_type(conn: sqlite3.Connection, name: str) -> str | None:
+    row = conn.execute("SELECT type FROM sqlite_master WHERE name = ?", (name,)).fetchone()
+    return None if row is None else str(row["type"])
+
+
+def _migrate_legacy_table(conn: sqlite3.Connection, legacy_name: str, raw_name: str) -> None:
+    legacy_type = _object_type(conn, legacy_name)
+    raw_type = _object_type(conn, raw_name)
+    if legacy_type == "table" and raw_type is None:
+        conn.execute(f'ALTER TABLE "{legacy_name}" RENAME TO "{raw_name}"')
+
+
+def _ensure_view(conn: sqlite3.Connection, view_name: str, raw_name: str) -> None:
+    view_type = _object_type(conn, view_name)
+    if view_type is None:
+        conn.execute(f'CREATE VIEW "{view_name}" AS SELECT * FROM "{raw_name}"')
+
+
 def _connect_cache() -> sqlite3.Connection:
     CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CACHE_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS openctp_responses (
+        CREATE TABLE IF NOT EXISTS src_openctp_responses (
             endpoint TEXT NOT NULL,
             query_key TEXT NOT NULL,
             query_json TEXT NOT NULL,
@@ -72,7 +97,7 @@ def _connect_cache() -> sqlite3.Connection:
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS openctp_cnfutures_contract_specs (
+        CREATE TABLE IF NOT EXISTS src_openctp_cnfutures_contract_specs (
             snapshot_date TEXT NOT NULL,
             ExchangeID TEXT,
             ProductID TEXT,
@@ -109,6 +134,12 @@ def _connect_cache() -> sqlite3.Connection:
         )
         """
     )
+    _migrate_legacy_table(conn, "openctp_responses", SRC_RESPONSES_TABLE)
+    _migrate_legacy_table(conn, "openctp_cnfutures_contract_specs", SRC_CONTRACT_SPECS_TABLE)
+    _ensure_view(conn, SOURCE_RESPONSES_VIEW, SRC_RESPONSES_TABLE)
+    _ensure_view(conn, LEGACY_RESPONSES_VIEW, SRC_RESPONSES_TABLE)
+    _ensure_view(conn, SOURCE_CONTRACT_SPECS_VIEW, SRC_CONTRACT_SPECS_TABLE)
+    _ensure_view(conn, LEGACY_CONTRACT_SPECS_VIEW, SRC_CONTRACT_SPECS_TABLE)
     return conn
 
 
@@ -134,7 +165,7 @@ def _read_cache(endpoint: str, query: dict[str, str]) -> list[dict[str, Any]] | 
     try:
         with _connect_cache() as conn:
             row = conn.execute(
-                "SELECT data_json FROM openctp_responses WHERE endpoint = ? AND query_key = ?",
+                f'SELECT data_json FROM "{SOURCE_RESPONSES_VIEW}" WHERE endpoint = ? AND query_key = ?',
                 (endpoint, _cache_key(query)),
             ).fetchone()
         if row is None:
@@ -150,7 +181,7 @@ def _write_cache(endpoint: str, query: dict[str, str], data: list[dict[str, Any]
         with _connect_cache() as conn:
             conn.execute(
                 """
-                INSERT INTO openctp_responses
+                INSERT INTO src_openctp_responses
                     (endpoint, query_key, query_json, url, data_json, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(endpoint, query_key) DO UPDATE SET
@@ -302,7 +333,7 @@ def _none_if_na(value: Any) -> Any:
 
 def _contract_specs_count() -> int:
     with _connect_cache() as conn:
-        row = conn.execute("SELECT COUNT(*) AS n FROM openctp_cnfutures_contract_specs").fetchone()
+        row = conn.execute(f'SELECT COUNT(*) AS n FROM "{SOURCE_CONTRACT_SPECS_VIEW}"').fetchone()
     return int(row["n"])
 
 
@@ -325,7 +356,7 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
         "StrikePrice", "InstLifePhase", "NormalizedInstrumentID", "updated_at",
     ]
     insert_sql = f"""
-        INSERT INTO openctp_cnfutures_contract_specs ({', '.join(columns)})
+        INSERT INTO src_openctp_cnfutures_contract_specs ({', '.join(columns)})
         VALUES ({', '.join('?' for _ in columns)})
         ON CONFLICT(snapshot_date, InstrumentID) DO UPDATE SET
             ExchangeID = excluded.ExchangeID,
@@ -480,7 +511,7 @@ def _contract_specs_sql_frame(where: str = "", params: tuple[Any, ...] = ()) -> 
             StrikePrice,
             InstLifePhase,
             NormalizedInstrumentID
-        FROM openctp_cnfutures_contract_specs
+        FROM src_openctp_cnfutures_contract_specs
     """
     if where:
         sql += " WHERE " + where
@@ -502,7 +533,7 @@ def read_cnfutures_contract_specs_for_date(
         rows = conn.execute(
             """
             SELECT DISTINCT snapshot_date
-            FROM openctp_cnfutures_contract_specs
+            FROM src_openctp_cnfutures_contract_specs
             WHERE snapshot_date <= ?
             ORDER BY snapshot_date DESC
             """,
@@ -512,7 +543,7 @@ def read_cnfutures_contract_specs_for_date(
         source = "historical_snapshot" if source_date == target else "historical_forward_fill"
         if source_date is None and allow_latest_fallback:
             latest = conn.execute(
-                "SELECT MAX(snapshot_date) AS snapshot_date FROM openctp_cnfutures_contract_specs"
+                f'SELECT MAX(snapshot_date) AS snapshot_date FROM "{SRC_CONTRACT_SPECS_TABLE}"'
             ).fetchone()
             source_date = str(latest["snapshot_date"]) if latest and latest["snapshot_date"] else None
             source = "latest_inferred"
@@ -556,7 +587,7 @@ def read_cnfutures_contract_specs_over_date_range(
         all_snapshots = sorted({
             str(r["snapshot_date"])
             for r in conn.execute(
-                "SELECT DISTINCT snapshot_date FROM openctp_cnfutures_contract_specs ORDER BY snapshot_date"
+                f'SELECT DISTINCT snapshot_date FROM "{SRC_CONTRACT_SPECS_TABLE}" ORDER BY snapshot_date'
             ).fetchall()
         })
 
@@ -664,7 +695,7 @@ def list_sqlite_tables() -> list[dict[str, Any]]:
             """
             SELECT name
             FROM sqlite_master
-            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
             ORDER BY name
             """
         ).fetchall()
