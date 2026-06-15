@@ -1012,6 +1012,37 @@ def test_group_fee_close_override_applies_to_close_today_when_unspecified():
     np.testing.assert_allclose(group_result.fee_costs_np[:, 0], [0.0, 0.02], atol=1e-12)
 
 
+def test_settlement_price_marks_open_margin_positions_only_on_day_end():
+    membership = np.array([[[True]], [[True]]], dtype=bool)
+    returns = np.zeros((2, 1), dtype=float)
+    price = np.array([[100.0], [100.0]], dtype=float)
+    settlement_price = np.array([[np.nan], [110.0]], dtype=float)
+
+    result = simulate_group_trading_book(
+        membership_np=membership,
+        returns_np=returns,
+        price_np=price,
+        settlement_price_np=settlement_price,
+        open_rate_mat=np.zeros((1, 1), dtype=float),
+        close_rate_mat=np.zeros((1, 1), dtype=float),
+        open_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fixed_mat=np.zeros((1, 1), dtype=float),
+        point_value_vec=np.array([1.0], dtype=float),
+        min_tick_vec=np.array([1.0], dtype=float),
+        min_trade_quantity_vec=np.array([1.0], dtype=float),
+        margin_ratio_mat=np.array([[0.10]], dtype=float),
+        is_margin_traded_vec=np.array([True], dtype=bool),
+        margin_modes=np.array(["margin"], dtype=object),
+        rebalance_modes=np.array(["buy_and_hold"], dtype=object),
+        product_currency_vec=np.array(["CNY"], dtype=object),
+        initial_capital=1000.0,
+    )
+
+    np.testing.assert_array_equal(result["margin_occupied_np"][:, 0], [100000, 110000])
+    np.testing.assert_array_equal(result["cash_np"][:, 0], [0, 90000])
+    np.testing.assert_array_equal(result["total_equity_np"][:, 0], [100000, 200000])
+
+
 def test_simulate_fee_amounts_include_ratio_and_fixed_fees():
     result = simulate_groups(
         membership_np=np.array([[[True]], [[False]]], dtype=bool),

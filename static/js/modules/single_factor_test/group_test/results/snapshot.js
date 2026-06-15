@@ -462,7 +462,6 @@
             var countLabel = col.count_label || ('持仓品种数(' + (count !== null && isFinite(count) ? count : 0) + ')');
             html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
             if (count !== null && isFinite(count)) {
-                html += '<div class="snapshot-col-count">' + count + '</div>';
                 html += '<div class="snapshot-col-count-label">' + _escape(countLabel) + '</div>';
             }
             html += '</th>';

@@ -18,6 +18,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     _build_group_memberships_from_shared,
     _emit_progress,
     _load_group_trade_prices,
+    _load_group_settlement_prices,
     _load_group_trade_returns,
     _prepare_group_shared_inputs,
     _remap_membership_to_trade,
@@ -59,6 +60,7 @@ class BatchExecutionPlan:
     merged_membership_np: np.ndarray
     merged_returns_np: np.ndarray | None = None
     merged_price_np: np.ndarray | None = None
+    merged_settlement_price_np: np.ndarray | None = None
     merged_spec_bundle: Any = None
     # Per-entry trade-dim data (built during plan construction)
     entry_trade_valid_cols: dict[int, list] | None = None
@@ -735,6 +737,7 @@ class FactorGroupTester:
         P = len(plan.trade_product_names)
         merged_returns_np = np.full((T, P), np.nan, dtype=float)
         merged_price_np = np.full((T, P), np.nan, dtype=float)
+        merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
         global_products_by_name: dict[str, Any] = {}
 
         if plan.entry_trade_valid_cols is None:
@@ -770,16 +773,27 @@ class FactorGroupTester:
                 end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
+            local_settlement_price_np = _load_group_settlement_prices(
+                factor,
+                trade_valid_cols=list(trade_valid_cols),
+                source_freq=entry.shared_inputs.source_freq,
+                start_dt=self.start_dt,
+                end_dt=self.end_dt,
+                index_list=entry.shared_inputs.index_list,
+            )
             for local_col_idx, product in enumerate(trade_valid_cols):
                 product_name = getattr(product, "name", str(product))
                 global_products_by_name.setdefault(product_name, product)
                 global_col_idx = plan.trade_product_positions[product_name]
                 local_returns_col = np.asarray(local_returns_np[:, local_col_idx], dtype=float)
                 local_price_col = np.asarray(local_price_np[:, local_col_idx], dtype=float)
+                local_settlement_col = np.asarray(local_settlement_price_np[:, local_col_idx], dtype=float)
                 returns_missing = np.isnan(merged_returns_np[:, global_col_idx])
                 price_missing = np.isnan(merged_price_np[:, global_col_idx])
+                settlement_missing = np.isnan(merged_settlement_price_np[:, global_col_idx])
                 merged_returns_np[returns_missing, global_col_idx] = local_returns_col[returns_missing]
                 merged_price_np[price_missing, global_col_idx] = local_price_col[price_missing]
+                merged_settlement_price_np[settlement_missing, global_col_idx] = local_settlement_col[settlement_missing]
 
         ordered_trade_products = [global_products_by_name[name] for name in plan.trade_product_names]
         signal_valid_cols = list(dict.fromkeys(
@@ -789,6 +803,7 @@ class FactorGroupTester:
         ))
         plan.merged_returns_np = merged_returns_np
         plan.merged_price_np = merged_price_np
+        plan.merged_settlement_price_np = merged_settlement_price_np
         plan.merged_spec_bundle = _resolve_group_trade_specs(
             signal_valid_cols=signal_valid_cols,
             valid_cols=ordered_trade_products,
@@ -851,36 +866,37 @@ class FactorGroupTester:
             _emit_progress("simulate", f"批次 {batch_label} 开始模拟", completed=0, total=1)
             try:
                 _, _, _, merged_group_result = _simulate_group_from_preloaded(
-                first_factor,
-                membership_np=plan.merged_membership_np,
-            returns_filled=returns_filled,
-            price_np=np.asarray(plan.merged_price_np, dtype=float),
-            valid_cols=spec_bundle.valid_cols,
-            index_list=list(first_entry.shared_inputs.index_list),
-            n_names=group_name_map,
-            group_configs=group_configs,
-            use_closetoday_vec=spec_bundle.use_closetoday_vec,
-            rebalance_mode=rebalance_mode,
-            initial_capital=initial_capital,
-            multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
-            base_currency=base_currency,
-            currency_conversion_fee_rate=currency_conversion_fee_rate,
-            start_dt=self.start_dt,
-            end_dt=self.end_dt,
-            source_freq=first_entry.shared_inputs.source_freq,
-            open_ratio_vec=spec_bundle.open_ratio_vec,
-            close_ratio_vec=spec_bundle.close_ratio_vec,
-            close_today_ratio_vec=spec_bundle.close_today_ratio_vec,
-            open_fixed_vec=spec_bundle.open_fixed_vec,
-            close_fixed_vec=spec_bundle.close_fixed_vec,
-            close_today_fixed_vec=spec_bundle.close_today_fixed_vec,
-            point_value_vec=spec_bundle.point_value_vec,
-            min_tick_vec=spec_bundle.min_tick_vec,
-            min_trade_quantity_vec=spec_bundle.min_trade_quantity_vec,
-            long_margin_ratio_vec=spec_bundle.long_margin_ratio_vec,
-            is_margin_traded_vec=spec_bundle.is_margin_traded_vec,
-            positions_by_variety_code_lower=spec_bundle.positions_by_variety_code_lower,
-        )
+                    first_factor,
+                    membership_np=plan.merged_membership_np,
+                    returns_filled=returns_filled,
+                    price_np=np.asarray(plan.merged_price_np, dtype=float),
+                    settlement_price_np=np.asarray(plan.merged_settlement_price_np, dtype=float) if plan.merged_settlement_price_np is not None else None,
+                    valid_cols=spec_bundle.valid_cols,
+                    index_list=list(first_entry.shared_inputs.index_list),
+                    n_names=group_name_map,
+                    group_configs=group_configs,
+                    use_closetoday_vec=spec_bundle.use_closetoday_vec,
+                    rebalance_mode=rebalance_mode,
+                    initial_capital=initial_capital,
+                    multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
+                    base_currency=base_currency,
+                    currency_conversion_fee_rate=currency_conversion_fee_rate,
+                    start_dt=self.start_dt,
+                    end_dt=self.end_dt,
+                    source_freq=first_entry.shared_inputs.source_freq,
+                    open_ratio_vec=spec_bundle.open_ratio_vec,
+                    close_ratio_vec=spec_bundle.close_ratio_vec,
+                    close_today_ratio_vec=spec_bundle.close_today_ratio_vec,
+                    open_fixed_vec=spec_bundle.open_fixed_vec,
+                    close_fixed_vec=spec_bundle.close_fixed_vec,
+                    close_today_fixed_vec=spec_bundle.close_today_fixed_vec,
+                    point_value_vec=spec_bundle.point_value_vec,
+                    min_tick_vec=spec_bundle.min_tick_vec,
+                    min_trade_quantity_vec=spec_bundle.min_trade_quantity_vec,
+                    long_margin_ratio_vec=spec_bundle.long_margin_ratio_vec,
+                    is_margin_traded_vec=spec_bundle.is_margin_traded_vec,
+                    positions_by_variety_code_lower=spec_bundle.positions_by_variety_code_lower,
+                )
             except IndexError as e:
                 raise IndexError(
                     f"simulate index error: batch_flat_count={batch_flat_count} "
