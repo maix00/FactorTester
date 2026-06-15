@@ -1,7 +1,7 @@
 """从 OpenCTP products 端点同步品种列表到本地 SQLite。
 
 数据源：http://dict.openctp.cn/products
-raw 表：src_openctp_products（onlinedata.sqlite）— 增量 INSERT，永不删除
+raw 表：src_openctp_products（unifieddata.sqlite）— 增量 INSERT，永不删除
   - 主键：(ExchangeID, ProductID)
   - LatestVisitDate：该品种最后一次在 API 中出现的时间（退市品种不会更新）
 VIEW：source_products（统一视图）、cnfutures_list（仅期货）

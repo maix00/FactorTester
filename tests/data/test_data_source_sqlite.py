@@ -14,7 +14,7 @@ from tools.data import _DataMultipleProviderMeta as DataSourceMeta
 
 def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):
     parquet_path = tmp_path / "sample.parquet"
-    sqlite_path = tmp_path / "cache" / "localdata" / "onlinedata.sqlite"
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
 
     pd.DataFrame(
         {

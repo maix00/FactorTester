@@ -2,7 +2,7 @@
 中国期货手续费率数据管理模块。
 
 数据来源：http://openctp.cn/fees.html （每日实时）
-本地存储：DATA_DIR/cache/localdata/onlinedata.sqlite
+本地存储：DATA_DIR/cache/localdata/unifieddata.sqlite
          表 openctp_cnfutures_contract_specs
 
 字段说明（从 openctp 表格提取）：

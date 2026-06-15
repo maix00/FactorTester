@@ -8,7 +8,7 @@ from server.services import accounts as account_store
 
 
 def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatch, tmp_path):
-    sqlite_path = tmp_path / "cache" / "localdata" / "onlinedata.sqlite"
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
 

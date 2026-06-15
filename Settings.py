@@ -39,9 +39,9 @@ from scripts.data_dir import DATA_DIR
 if TYPE_CHECKING:
     from tools.products.categories.Category import CategoryTree
 
-# 统一本地 sqlite 路径（所有镜像库合并到一个文件）
+# 统一主库 sqlite 路径（所有镜像库合并到一个文件）
 CACHE_DIR = Path(DATA_DIR) / 'cache' / 'localdata'
-CACHE_DB_PATH = CACHE_DIR / 'onlinedata.sqlite'
+CACHE_DB_PATH = CACHE_DIR / 'unifieddata.sqlite'
 
 # 日志文件存储目录
 logger_dir_path_default = os.path.join(DATA_DIR, 'factor_tester_log')

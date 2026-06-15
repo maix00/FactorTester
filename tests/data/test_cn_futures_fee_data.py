@@ -19,7 +19,7 @@ def _raw_fee_table() -> pd.DataFrame:
 def _isolate_fee_sql(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
     monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'localdata')
-    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', tmp_path / 'localdata' / 'onlinedata.sqlite')
+    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', tmp_path / 'localdata' / 'unifieddata.sqlite')
 
 
 def test_parse_contract_rows_keeps_contract_level_margin_specs():

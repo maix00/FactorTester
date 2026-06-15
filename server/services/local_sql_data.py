@@ -31,7 +31,7 @@ def _ensure_sqlite_store() -> str:
 
 _hub().register_sqlite_store(SQLiteStore(
     key="openctp",
-    label="统一本地数据 (onlinedata.sqlite)",
+    label="统一主库 (unifieddata.sqlite)",
     path_getter=_sqlite_store_path,
     ensure=_ensure_sqlite_store,
 ))

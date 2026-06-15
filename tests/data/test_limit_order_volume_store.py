@@ -109,7 +109,7 @@ def test_fetch_table_adds_source_columns(monkeypatch):
 
 
 def test_store_roundtrip_reads_latest_source_metadata(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(_store, "CACHE_DB_PATH", tmp_path / "localdata" / "onlinedata.sqlite")
+    monkeypatch.setattr(_store, "CACHE_DB_PATH", tmp_path / "localdata" / "unifieddata.sqlite")
 
     df = pd.DataFrame(
         [

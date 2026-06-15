@@ -19,7 +19,7 @@ def _write_json(path, payload):
 def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     data_dir = tmp_path / 'data'
     users_dir = data_dir / 'users'
-    unified_db = tmp_path / 'cache' / 'localdata' / 'onlinedata.sqlite'
+    unified_db = tmp_path / 'cache' / 'localdata' / 'unifieddata.sqlite'
 
     monkeypatch.setattr(account_store, 'ACCOUNTS_FILE', str(users_dir / 'accounts.json'))
     monkeypatch.setattr(account_store, 'ORGANIZATIONS_FILE', str(users_dir / 'organizations.json'))
@@ -60,7 +60,7 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     app = create_app()
 
     assert unified_db.exists()
-    assert set(datasets.keys()) == {'onlinedata.sqlite'}
+    assert set(datasets.keys()) == {'unifieddata.sqlite'}
 
     client = app.test_client()
     resp = client.get('/sqlite-web/')

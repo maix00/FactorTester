@@ -101,7 +101,7 @@ def test_public_fields_fill_missing_local_snapshot_from_product_resolver(monkeyp
 
 def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_path):
     monkeypatch.setattr(openctp_client, "CACHE_DIR", tmp_path / "openctp")
-    monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "localdata" / "onlinedata.sqlite")
+    monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "localdata" / "unifieddata.sqlite")
     calls = []
 
     class _Response:
@@ -125,7 +125,7 @@ def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_pat
 
     assert first == second == [{"InstrumentID": "IF2606"}]
     assert len(calls) == 1
-    with sqlite3.connect(tmp_path / "localdata" / "onlinedata.sqlite") as conn:
+    with sqlite3.connect(tmp_path / "localdata" / "unifieddata.sqlite") as conn:
         count = conn.execute("SELECT count(*) FROM openctp_responses").fetchone()[0]
         spec = conn.execute(
             "SELECT instrument_id, product_id, open_ratio, open_fixed FROM openctp_cnfutures_contract_specs"
