@@ -18,7 +18,7 @@ from tools.data.DataFreq import DataFreq
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data import DataProviderProductTS as DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -233,4 +233,3 @@ SMALL_VAL = ConstExpr(1e-10)
 # ═════════════════════════════════════════════════════════════════════════════
 # 信号对齐工具函数 & 表达式节点
 # ═════════════════════════════════════════════════════════════════════════════
-

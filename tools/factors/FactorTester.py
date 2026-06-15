@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester
 
 # ── 运行时上下文：活跃 FactorTester 与用户前缀 ──
-# 由 FactorTester / FactorFamily.test() 设置，Factor / DataMeta 读取
+# 由 FactorTester / FactorFamily.test() 设置，Factor / ProductDataView 读取
 _active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
 _active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
 

@@ -1,5 +1,5 @@
 """
-DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
+ProductDataView — 围绕 Product + DataFreq 的 DataFrame 视图层。
 
 核心职责：
   - 懒加载 DataFrame（委托 DataHub → IdleResourceManager 按 (namespace, key) 缓存）
@@ -28,21 +28,21 @@ import pandas as pd
 
 from tools.base.UniqueNameObject import UniqueNameObject
 from tools.data.data_source.DataHub import DataHub
-from tools.data.DataIndex import DataIndex
+from tools.data.DataIndex import DataIndex, finest_index
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data import DataProviderProductTS as DataSource
 
-# DataHub 中 DataMeta 使用的 namespace 常量
+# DataHub 中产品数据视图使用的 namespace 常量
 _DATAMETA_NAMESPACE = "datameta"
 # 默认空闲 TTL（秒）：5 分钟无访问后自动回收
 _DEFAULT_IDLE_TTL = 300
 
-class DataMeta(UniqueNameObject):
+class ProductDataView(UniqueNameObject):
     """
-    数据元信息对象。
+    产品数据视图。
 
-    封装了一个 Product 在特定 DataFreq 下的 DataFrame，并提供：
+    封装了一个 Product 在特定 DataFreq 下的 DataFrame 视图，并提供：
       - 懒加载 + IdleResourceManager 缓存（自动回收闲置数据）
       - 列名映射（原始文件列名 → DataColumn 标准名称）
       - 时间索引构建（将日期/时间列设为 MultiIndex）
@@ -68,13 +68,13 @@ class DataMeta(UniqueNameObject):
             self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
             self._day_periods: Optional[int] = None       # 缓存：每日 bar 数
 
-    # ── DataSource 管理 ──
+    # ── 兼容入口：旧代码仍可通过这里拿到当前选择的源 ──
 
     def list_available_sources(self) -> List[DataSource]:
-        return [s for s in DataSource if self.object in s and s.freq == self.freq]
+        return DataSource.available_for_product(self.object, self.freq)
     
     def next_available_source(self) -> Optional[DataSource]:
-        return next((s for s in DataSource if self.object in s and s.freq == self.freq), None)
+        return DataSource.select_for_product(self.object, self.freq)
 
     def is_available(self) -> bool:
         return bool(self.next_available_source())

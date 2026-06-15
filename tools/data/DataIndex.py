@@ -4,7 +4,7 @@
 #
 # DataIndex 封装 DatetimeIndex / MultiIndex（两列 DatetimeIndex，均以 _SIGNAL@ 命名）
 # 的时间层提取、时区对齐、精度转换、频率检测、时间截断等操作。
-# 它是 DataFreq/DataColumn/DataMeta 的同级数据层基础类型。
+# 它是 DataFreq/DataColumn/ProductDataView 的同级数据层基础类型。
 #
 # MultiIndex 场景：如 _SIGNAL@DAY1 + _SIGNAL@MIN5，表示同一组数据在不同时间精度下的索引。
 # DataIndex 通过 signal_index 属性自动选出合适的层。

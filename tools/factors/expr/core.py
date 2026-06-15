@@ -18,7 +18,7 @@ from tools.data.DataFreq import DataFreq
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data import DataProviderProductTS as DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
     from .leaf import ConstExpr, ColumnRef, ParamRef
     from .composite import CompositeExpr
@@ -33,7 +33,7 @@ class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
     Issue #2: 将 5 种 _evaluate() 签名变体统一为 ctx: EvaluateContext。
-    Issue #3: 新增 start_calc_point，替代 DataMeta 对 _active_tester 的隐式依赖。
+    Issue #3: 新增 start_calc_point，替代 ProductDataView 对 _active_tester 的隐式依赖。
     """
     products: Sequence['Product']
     freq: DataFreq

@@ -8,6 +8,7 @@ from tools.data.data_source.DataProvider import (
 )
 from tools.data.data_source.DataProviderProductTS import DataProviderProductTS
 from tools.data.data_source.DataHub import DataHub
+from tools.data.ProductDataView import ProductDataView
 
 __all__ = [
     "_DataProviderMeta",
@@ -16,4 +17,5 @@ __all__ = [
     "DataProviderSync",
     "DataProviderProductTS",
     "DataHub",
+    "ProductDataView",
 ]

@@ -18,6 +18,7 @@ from sources.LocalCNFutures.CNFutures import (
     exchange_map,
     get_all_futures_contract,
 )
+from tools.data import DataProviderProductTS as DataSource
 from tools.products.AdjustableTermStructure import AdjustableProductMixin
 from tools.products.Futures import (
     FuturesContract,
@@ -132,8 +133,7 @@ def available_sources_for_product(product, freq=None):
         sources = []
         freqs = [freq] if freq is not None else product.list_available_freqs()
         for data_freq in freqs:
-            meta = getattr(product, data_freq.name)
-            for source in meta.list_available_sources():
+            for source in DataSource.available_for_product(product, data_freq):
                 sources.append({
                     'alias': source.key,
                     'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),

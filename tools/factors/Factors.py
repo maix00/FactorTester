@@ -299,14 +299,14 @@ class Factor(FactorExpr):
         start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
 
         # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.data.DataMeta import DataMeta
+        from tools.data.ProductDataView import ProductDataView
 
         preloaded: dict = {}
         column_refs = self._expr.column_refs
         columns = list(cr.column.name for cr in column_refs)
         if columns:
             for p in products:
-                dm: DataMeta = getattr(p, freq.name)
+                dm: ProductDataView = getattr(p, freq.name)
                 data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
                 if not data.empty:
                     preloaded[(p, freq.name)] = data

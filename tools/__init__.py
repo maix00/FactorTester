@@ -3,7 +3,7 @@ from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data import DataProviderProductTS
-from tools.data.DataMeta import DataMeta
+from tools.data.ProductDataView import ProductDataView
 from tools.data.DataIndex import DataIndex
 from tools.data.DataTime import DataTime, TimePrecision
 

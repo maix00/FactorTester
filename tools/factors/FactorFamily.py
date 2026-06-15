@@ -30,7 +30,7 @@ from tools.factors.FactorExpr import (
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools.base.UniqueNameObject import UniqueNameObject
-from tools import DataMeta
+from tools import ProductDataView
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 
@@ -425,4 +425,3 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
         return expr.resolve(param_values=param_values, **kwargs)
-

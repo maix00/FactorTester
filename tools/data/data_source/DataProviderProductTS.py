@@ -72,6 +72,28 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
+    @classmethod
+    def available_for_product(cls, product: Any, freq: Any | None = None) -> list["DataProviderProductTS"]:
+        """返回当前注册表中，某个产品在指定频率下可用的数据源。"""
+        target_freq = DataFreq(freq) if freq is not None else None
+        return [
+            source for source in cls.all()
+            if product in source and (target_freq is None or source.freq == target_freq)
+        ]
+
+    @classmethod
+    def select_for_product(
+        cls,
+        product: Any,
+        freq: Any,
+        source: "DataProviderProductTS | None" = None,
+    ) -> "DataProviderProductTS | None":
+        """为某个产品+频率选择一个可用数据源，优先使用显式传入的 source。"""
+        target_freq = DataFreq(freq)
+        if source is not None and source.freq == target_freq and product in source:
+            return source
+        return next((item for item in cls.all() if product in item and item.freq == target_freq), None)
+
 
     # ── 路径委托 ──
     def get_path(self, obj: Any) -> str:

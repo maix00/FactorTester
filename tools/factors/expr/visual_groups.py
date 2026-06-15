@@ -18,7 +18,7 @@ from tools.data.DataFreq import DataFreq
 if TYPE_CHECKING:
     from tools.products.Product import Product
     from tools.data import DataProviderProductTS as DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -217,4 +217,3 @@ def get_visual_operator_category(visual_key: str, default: str = 'arithBinary') 
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1: 因子表达式基类
 # ═════════════════════════════════════════════════════════════════════════════
-
