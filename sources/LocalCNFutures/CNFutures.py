@@ -198,6 +198,59 @@ class CNFutures(Futures):
     def get_by_product_name(cls, product_name: str) -> Optional["CNFutures"]:
         return _CNFUTURES_BY_NAME.get(str(product_name))
 
+    # ------------------------------------------------------------------
+    # 品种中文名 → 品种代码 反向映射
+    # ------------------------------------------------------------------
+    _DESC_TO_CODE: Dict[str, str] | None = None  # lazy loaded
+
+    @classmethod
+    def desc_to_code(cls, desc: str, extra_map: Dict[str, str] | None = None) -> str:
+        """根据合约标的（中文名）返回品种代码。
+
+        数据源：sectors.csv 的「合约标的」→「品种代码」。
+        首次调用会构建缓存映射。
+        可传入 extra_map 补充 sectors.csv 覆盖不到的别名（如国信页面用名）。
+        未找到时返回原字符串。
+        """
+        if cls._DESC_TO_CODE is None:
+            cls._DESC_TO_CODE = {}
+            for _, row in _data.iterrows():
+                variety = str(row[variety_col_name]).strip()
+                code = str(row[code_col_name]).strip()
+                if variety and code:
+                    cls._DESC_TO_CODE[variety] = code
+        desc_str = str(desc)
+        # priority: extra_map > sectors.csv
+        if extra_map and desc_str in extra_map:
+            return extra_map[desc_str]
+        return cls._DESC_TO_CODE.get(desc_str, desc)
+
+    # ------------------------------------------------------------------
+    # 交易所 → 品种中文名列表（用于反向排除等场景）
+    # ------------------------------------------------------------------
+    _PRODUCTS_BY_EXCHANGE: Dict[str, List[str]] | None = None
+
+    @classmethod
+    def products_by_exchange(cls) -> Dict[str, List[str]]:
+        """返回 {交易所代码: [合约标的...]} 的映射。"""
+        if cls._PRODUCTS_BY_EXCHANGE is None:
+            result: Dict[str, List[str]] = {}
+            for _, row in _data.iterrows():
+                exch_raw = str(row.get(exchange_code_col_name, "")).strip()
+                variety = str(row.get(variety_col_name, "")).strip()
+                if not exch_raw or not variety:
+                    continue
+                exch_map = {
+                    "SHF": "SHFE", "CZC": "CZCE", "CFE": "CFFEX",
+                    "GFE": "GFEX", "DCE": "DCE", "INE": "INE",
+                }
+                exch_code = exch_map.get(exch_raw, exch_raw)
+                result.setdefault(exch_code, [])
+                if variety not in result[exch_code]:
+                    result[exch_code].append(variety)
+            cls._PRODUCTS_BY_EXCHANGE = result
+        return cls._PRODUCTS_BY_EXCHANGE
+
     @classmethod
     def get_contract_parent(cls, contract_uid: str, mapping_path: Optional[str] = None) -> Optional["CNFutures"]:
         contract_to_product, _ = _cn_futures_contract_maps(mapping_path)

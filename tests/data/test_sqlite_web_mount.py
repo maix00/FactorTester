@@ -19,14 +19,14 @@ def _write_json(path, payload):
 def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     data_dir = tmp_path / 'data'
     users_dir = data_dir / 'users'
-    openctp_db = tmp_path / 'cache' / 'openctp' / 'openctp.sqlite'
+    openctp_db = tmp_path / 'cache' / 'localdata' / 'onlinedata.sqlite'
     users_db = tmp_path / 'cache' / 'sqlite-web' / 'users.sqlite'
 
     monkeypatch.setattr(account_store, 'ACCOUNTS_FILE', str(users_dir / 'accounts.json'))
     monkeypatch.setattr(account_store, 'ORGANIZATIONS_FILE', str(users_dir / 'organizations.json'))
     monkeypatch.setattr(account_store, 'LEVELS_FILE', str(users_dir / 'levels.json'))
-    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'cache' / 'openctp')
-    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', openctp_client.CACHE_DIR / 'openctp.sqlite')
+    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'cache' / 'localdata')
+    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', openctp_client.CACHE_DIR / 'onlinedata.sqlite')
     monkeypatch.setattr(data_source_sqlite, 'PREVIEW_PRODUCTS_PER_SOURCE', 0)
     monkeypatch.setattr(user_sqlite, 'USER_SQLITE_DIR', users_db.parent)
     monkeypatch.setattr(user_sqlite, 'USER_SQLITE_PATH', users_db)
@@ -62,7 +62,7 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
 
     assert openctp_db.exists()
     assert users_db.exists()
-    assert set(datasets.keys()) == {'datasources.sqlite', 'openctp.sqlite', 'users.sqlite'}
+    assert set(datasets.keys()) == {'datasources.sqlite', 'onlinedata.sqlite', 'users.sqlite'}
 
     client = app.test_client()
     resp = client.get('/sqlite-web/')

@@ -18,15 +18,15 @@ def _raw_fee_table() -> pd.DataFrame:
 
 def _isolate_fee_sql(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
-    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'openctp')
-    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', tmp_path / 'openctp' / 'openctp.sqlite')
+    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'localdata')
+    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', tmp_path / 'localdata' / 'onlinedata.sqlite')
 
 
 def test_parse_contract_rows_keeps_contract_level_margin_specs():
     rows = FeeData._parse_contract_rows(_raw_fee_table())
 
     assert rows['contract_code'].tolist() == ['A2605', 'A2609']
-    assert rows['contract_key'].tolist() == ['A2605', 'A2609']
+    assert rows['NormalizedInstrumentID'].tolist() == ['A2605', 'A2609']
     assert rows.loc[0, 'long_margin_ratio'] == 0.12
     assert rows.loc[0, 'short_margin_fixed'] == 1300
 

@@ -12,7 +12,10 @@ from types import SimpleNamespace
 import pandas as pd
 from tools import DataFreq
 from tools.data.DataTime import DataTime
-from tools.factors.tests.single_factor_test.group.core import simulate_group_trading_book
+from tools.factors.tests.single_factor_test.group.core import (
+    simulate_group_trading_book,
+    GroupTradeSpecBundle,
+)
 from tools.factors.tests.single_factor_test.group.core import _simulate_group_from_preloaded
 
 
@@ -30,9 +33,9 @@ def simulate_groups(
     price_np: np.ndarray | None = None,
     open_fixed_mat: np.ndarray | None = None,
     close_fixed_mat: np.ndarray | None = None,
-    point_value_vec: np.ndarray | None = None,
-    min_tick_vec: np.ndarray | None = None,
-    min_trade_quantity_vec: np.ndarray | None = None,
+    point_value_mat: np.ndarray | None = None,
+    min_tick_mat: np.ndarray | None = None,
+    min_trade_quantity_mat: np.ndarray | None = None,
     margin_ratio_mat: np.ndarray | None = None,
     is_margin_traded_vec: np.ndarray | None = None,
     margin_modes: np.ndarray | list[str] | None = None,
@@ -42,17 +45,36 @@ def simulate_groups(
 ) -> dict:
     """Local adapter so the tests exercise the trading book directly."""
     _, M, P = membership_np.shape
-    prices = np.full((returns_np.shape[0], P), 1e-6, dtype=float) if price_np is None else np.asarray(price_np, dtype=float)
+    T = returns_np.shape[0]
+    prices = np.full((T, P), 1e-6, dtype=float) if price_np is None else np.asarray(price_np, dtype=float)
     open_fixed = np.zeros((M, P), dtype=float) if open_fixed_mat is None else np.asarray(open_fixed_mat, dtype=float)
     close_fixed = np.zeros((M, P), dtype=float) if close_fixed_mat is None else np.asarray(close_fixed_mat, dtype=float)
-    point_values = np.ones(P, dtype=float) if point_value_vec is None else np.asarray(point_value_vec, dtype=float)
-    min_ticks = np.full(P, 1e-6, dtype=float) if min_tick_vec is None else np.asarray(min_tick_vec, dtype=float)
-    lot_sizes = np.ones(P, dtype=float) if min_trade_quantity_vec is None else np.asarray(min_trade_quantity_vec, dtype=float)
-    margin_ratios = np.ones((M, P), dtype=float) if margin_ratio_mat is None else np.asarray(margin_ratio_mat, dtype=float)
+    point_values = np.ones(P, dtype=float) if point_value_mat is None else np.asarray(point_value_mat, dtype=float)
+    min_ticks = np.full(P, 1e-6, dtype=float) if min_tick_mat is None else np.asarray(min_tick_mat, dtype=float)
+    lot_sizes = np.ones(P, dtype=float) if min_trade_quantity_mat is None else np.asarray(min_trade_quantity_mat, dtype=float)
+    margin_ratios_1d = np.ones(P, dtype=float) if margin_ratio_mat is None else np.asarray(margin_ratio_mat, dtype=float)
     margin_flags = np.zeros(P, dtype=bool) if is_margin_traded_vec is None else np.asarray(is_margin_traded_vec, dtype=bool)
     margin_mode_arr = np.full(M, "cash", dtype=object) if margin_modes is None else np.asarray(margin_modes, dtype=object)
     rebalance_mode_arr = np.full(M, rebalance_mode, dtype=object) if rebalance_modes is None else np.asarray(rebalance_modes, dtype=object)
     currency_arr = np.full(P, "CNY", dtype=object) if product_currency_vec is None else np.asarray(product_currency_vec, dtype=object)
+
+    spec_bundle = GroupTradeSpecBundle(
+        valid_cols=[],
+        open_ratio_mat=np.tile(np.asarray(open_fee_mat, dtype=float).reshape(1, P), (T, 1)),
+        close_ratio_mat=np.tile(np.asarray(close_fee_mat, dtype=float).reshape(1, P), (T, 1)),
+        open_fixed_mat=np.tile(np.asarray(open_fixed).reshape(1, P), (T, 1)),
+        close_fixed_mat=np.tile(np.asarray(close_fixed).reshape(1, P), (T, 1)),
+        close_today_ratio_mat=np.tile(np.asarray(close_fee_mat, dtype=float).reshape(1, P), (T, 1)),
+        close_today_fixed_mat=np.tile(np.asarray(close_fixed).reshape(1, P), (T, 1)),
+        use_closetoday_vec=np.zeros(P, dtype=bool),
+        point_value_mat=np.tile(point_values.reshape(1, P), (T, 1)),
+        min_tick_mat=np.tile(min_ticks.reshape(1, P), (T, 1)),
+        min_trade_quantity_mat=np.tile(lot_sizes.reshape(1, P), (T, 1)),
+        long_margin_ratio_mat=np.tile(margin_ratios_1d.reshape(1, P), (T, 1)),
+        is_margin_traded_vec=margin_flags,
+        variety_codes_lower=[],
+        positions_by_variety_code_lower={},
+    )
     return simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_np,
@@ -65,11 +87,7 @@ def simulate_groups(
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=liquidity_modes,
         liquidity_percents=liquidity_percents,
-        point_value_vec=point_values,
-        min_tick_vec=min_ticks,
-        min_trade_quantity_vec=lot_sizes,
-        margin_ratio_mat=margin_ratios,
-        is_margin_traded_vec=margin_flags,
+        trade_specs=spec_bundle,
         margin_modes=margin_mode_arr,
         rebalance_modes=rebalance_mode_arr,
         product_currency_vec=currency_arr,
@@ -189,7 +207,7 @@ def test_simulate_each_period_equal_weight_zero_fee():
         close_fee_mat=fee,
         rebalance_mode='each_period',
         price_np=np.full((T, P), 0.01, dtype=float),
-        min_tick_vec=np.full(P, 0.01, dtype=float),
+        min_tick_mat=np.full(P, 0.01, dtype=float),
     )
 
     net = result['net_returns_np'][:, 0]
@@ -212,9 +230,9 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         close_fee_mat=fee,
         open_fixed_mat=fee,
         close_fixed_mat=fee,
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.array([[1.0], [0.10]]),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["margin", "margin"], dtype=object),
@@ -234,9 +252,9 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         close_fee_mat=fee[:1],
         open_fixed_mat=fee[:1],
         close_fixed_mat=fee[:1],
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.array([[0.10]]),
         is_margin_traded_vec=np.array([True]),
         margin_modes=np.array(["margin"], dtype=object),
@@ -265,16 +283,16 @@ def test_group_run_result_hold_amounts_use_simulated_target_not_end_valuation():
         start_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
         end_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
         source_freq=DataFreq.DAY,
-        open_ratio_vec=np.zeros(1, dtype=float),
-        close_ratio_vec=np.zeros(1, dtype=float),
-        close_today_ratio_vec=np.zeros(1, dtype=float),
-        open_fixed_vec=np.zeros(1, dtype=float),
-        close_fixed_vec=np.zeros(1, dtype=float),
-        close_today_fixed_vec=np.zeros(1, dtype=float),
-        point_value_vec=np.ones(1, dtype=float),
-        min_tick_vec=np.ones(1, dtype=float),
-        min_trade_quantity_vec=np.ones(1, dtype=float),
-        long_margin_ratio_vec=np.ones(1, dtype=float),
+        open_ratio_mat=np.zeros(1, dtype=float),
+        close_ratio_mat=np.zeros(1, dtype=float),
+        close_today_ratio_mat=np.zeros(1, dtype=float),
+        open_fixed_mat=np.zeros(1, dtype=float),
+        close_fixed_mat=np.zeros(1, dtype=float),
+        close_today_fixed_mat=np.zeros(1, dtype=float),
+        point_value_mat=np.ones(1, dtype=float),
+        min_tick_mat=np.ones(1, dtype=float),
+        min_trade_quantity_mat=np.ones(1, dtype=float),
+        long_margin_ratio_mat=np.ones(1, dtype=float),
         is_margin_traded_vec=np.array([False], dtype=bool),
         positions_by_variety_code_lower={},
     )
@@ -301,16 +319,16 @@ def test_preloaded_group_requires_product_currency_metadata():
             start_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
             end_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
             source_freq=DataFreq.DAY,
-            open_ratio_vec=np.zeros(1, dtype=float),
-            close_ratio_vec=np.zeros(1, dtype=float),
-            close_today_ratio_vec=np.zeros(1, dtype=float),
-            open_fixed_vec=np.zeros(1, dtype=float),
-            close_fixed_vec=np.zeros(1, dtype=float),
-            close_today_fixed_vec=np.zeros(1, dtype=float),
-            point_value_vec=np.ones(1, dtype=float),
-            min_tick_vec=np.ones(1, dtype=float),
-            min_trade_quantity_vec=np.ones(1, dtype=float),
-            long_margin_ratio_vec=np.ones(1, dtype=float),
+            open_ratio_mat=np.zeros(1, dtype=float),
+            close_ratio_mat=np.zeros(1, dtype=float),
+            close_today_ratio_mat=np.zeros(1, dtype=float),
+            open_fixed_mat=np.zeros(1, dtype=float),
+            close_fixed_mat=np.zeros(1, dtype=float),
+            close_today_fixed_mat=np.zeros(1, dtype=float),
+            point_value_mat=np.ones(1, dtype=float),
+            min_tick_mat=np.ones(1, dtype=float),
+            min_trade_quantity_mat=np.ones(1, dtype=float),
+            long_margin_ratio_mat=np.ones(1, dtype=float),
             is_margin_traded_vec=np.array([False], dtype=bool),
             positions_by_variety_code_lower={},
         )
@@ -325,9 +343,9 @@ def test_trading_book_rounds_aggregated_fixed_fee_per_order_to_minor_units():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.array([[0.001]], dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -351,9 +369,9 @@ def test_trading_book_rounds_aggregated_fixed_fee_per_order_to_minor_units():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.array([[0.01]], dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -376,9 +394,9 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([100.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([100.0]),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -396,9 +414,9 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([1.0]),
-        min_tick_vec=np.array([0.01]),
-        min_trade_quantity_vec=np.array([100.0]),
+        point_value_mat=np.array([1.0]),
+        min_tick_mat=np.array([0.01]),
+        min_trade_quantity_mat=np.array([100.0]),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -418,9 +436,9 @@ def test_trading_book_initial_capital_changes_affordability():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([10.0]),
-        min_tick_vec=np.array([1.0]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([10.0]),
+        min_tick_mat=np.array([1.0]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -450,9 +468,9 @@ def test_trading_book_allocates_integer_lots_by_weight_when_budget_is_tight():
         close_fee_mat=fee,
         open_fixed_mat=fee,
         close_fixed_mat=fee,
-        point_value_vec=np.array([1.0, 1.0, 1.0]),
-        min_tick_vec=np.array([0.01, 0.01, 0.01]),
-        min_trade_quantity_vec=np.array([1.0, 1.0, 1.0]),
+        point_value_mat=np.array([1.0, 1.0, 1.0]),
+        min_tick_mat=np.array([0.01, 0.01, 0.01]),
+        min_trade_quantity_mat=np.array([1.0, 1.0, 1.0]),
         margin_ratio_mat=np.ones((1, 3), dtype=float),
         is_margin_traded_vec=np.array([False, False, False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -473,9 +491,9 @@ def test_each_period_opens_margin_contract_when_cash_covers_one_lot_cost():
         close_fee_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([10.0]),
-        min_tick_vec=np.array([1.0]),
-        min_trade_quantity_vec=np.array([1.0]),
+        point_value_mat=np.array([10.0]),
+        min_tick_mat=np.array([1.0]),
+        min_trade_quantity_mat=np.array([1.0]),
         margin_ratio_mat=np.array([[0.10]], dtype=float),
         is_margin_traded_vec=np.array([True]),
         margin_modes=np.array(["margin"], dtype=object),
@@ -496,9 +514,9 @@ def test_each_period_equal_allocates_by_margin_cash_cost_not_notional():
         close_fee_mat=np.zeros((1, 2), dtype=float),
         open_fixed_mat=np.zeros((1, 2), dtype=float),
         close_fixed_mat=np.zeros((1, 2), dtype=float),
-        point_value_vec=np.array([10.0, 10.0]),
-        min_tick_vec=np.ones(2, dtype=float),
-        min_trade_quantity_vec=np.ones(2, dtype=float),
+        point_value_mat=np.array([10.0, 10.0]),
+        min_tick_mat=np.ones(2, dtype=float),
+        min_trade_quantity_mat=np.ones(2, dtype=float),
         margin_ratio_mat=np.array([[0.10, 0.20]], dtype=float),
         is_margin_traded_vec=np.array([True, True]),
         margin_modes=np.array(["margin"], dtype=object),
@@ -522,9 +540,9 @@ def test_trading_book_money_outputs_are_cent_quantized():
         close_fee_mat=np.full((1, 2), 0.00234, dtype=float),
         open_fixed_mat=np.full((1, 2), 0.017, dtype=float),
         close_fixed_mat=np.full((1, 2), 0.019, dtype=float),
-        point_value_vec=np.ones(2, dtype=float),
-        min_tick_vec=np.full(2, 0.01, dtype=float),
-        min_trade_quantity_vec=np.ones(2, dtype=float),
+        point_value_mat=np.ones(2, dtype=float),
+        min_tick_mat=np.full(2, 0.01, dtype=float),
+        min_trade_quantity_mat=np.ones(2, dtype=float),
         margin_ratio_mat=np.full((1, 2), 0.12, dtype=float),
         is_margin_traded_vec=np.array([True, True]),
         margin_modes=np.array(["margin"], dtype=object),
@@ -564,9 +582,9 @@ def test_each_period_offsets_redundant_sell_buy_fees_when_position_unchanged():
         close_fee_mat=np.full((1, 1), 0.02, dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.ones(1, dtype=float),
-        min_tick_vec=np.ones(1, dtype=float),
-        min_trade_quantity_vec=np.ones(1, dtype=float),
+        point_value_mat=np.ones(1, dtype=float),
+        min_tick_mat=np.ones(1, dtype=float),
+        min_trade_quantity_mat=np.ones(1, dtype=float),
         margin_ratio_mat=np.ones((1, 1), dtype=float),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
@@ -596,8 +614,8 @@ def test_simulate_each_period_percent_liquidity_caps_execution_only():
         liquidity_modes=np.array(['percent'], dtype=object),
         liquidity_percents=np.array([50.0], dtype=float),
         price_np=np.array([[0.01, 0.01]], dtype=float),
-        min_tick_vec=np.array([0.01, 0.01], dtype=float),
-        min_trade_quantity_vec=np.ones(2, dtype=float),
+        min_tick_mat=np.array([0.01, 0.01], dtype=float),
+        min_trade_quantity_mat=np.ones(2, dtype=float),
     )
 
     # Ideal target is still [0.5, 0.5]. Capacity is [0.1, 0.4],
@@ -624,8 +642,8 @@ def test_simulate_liquidity_does_not_reweight_rebalance_target():
         liquidity_modes=np.array(['percent'], dtype=object),
         liquidity_percents=np.array([100.0], dtype=float),
         price_np=np.array([[0.01, 0.01]], dtype=float),
-        min_tick_vec=np.array([0.01, 0.01], dtype=float),
-        min_trade_quantity_vec=np.ones(2, dtype=float),
+        min_tick_mat=np.array([0.01, 0.01], dtype=float),
+        min_trade_quantity_mat=np.ones(2, dtype=float),
     )
 
     # Cash-equal allocation iteratively fills P0 up to its liquidity cap (0.8)
@@ -657,7 +675,7 @@ def test_simulate_liquidity_caps_sells_before_buying_and_preserves_cash():
         liquidity_modes=np.array(['percent'], dtype=object),
         liquidity_percents=np.array([100.0], dtype=float),
         price_np=np.full((T, P), 0.01, dtype=float),
-        min_tick_vec=np.full(P, 0.01, dtype=float),
+        min_tick_mat=np.full(P, 0.01, dtype=float),
     )
 
     # t=1 can sell only 0.25 of P0 and buy only 0.25 of P1.
@@ -900,9 +918,9 @@ def test_recycle_allows_new_member_when_idle_cash_exists():
         price_np=price,
         open_fee_mat=fee,
         close_fee_mat=fee,
-        point_value_vec=np.array([1.0, 1.0]),
-        min_tick_vec=np.array([1.0, 1.0]),
-        min_trade_quantity_vec=np.array([1.0, 1.0]),
+        point_value_mat=np.array([1.0, 1.0]),
+        min_tick_mat=np.array([1.0, 1.0]),
+        min_trade_quantity_mat=np.array([1.0, 1.0]),
         margin_ratio_mat=np.array([[0.1, 0.1]]),
         is_margin_traded_vec=np.array([True, True]),
         margin_modes=np.array(["margin"], dtype=object),
@@ -937,7 +955,7 @@ def test_simulate_close_today_overrides_close_fee():
         open_fee_mat=open_fee, close_fee_mat=close_rate,
         rebalance_mode='buy_and_hold',
         price_np=np.full((2, 1), 0.01, dtype=float),
-        min_tick_vec=np.array([0.01], dtype=float),
+        min_tick_mat=np.array([0.01], dtype=float),
     )
 
     net = result['net_returns_np'][:, 0]
@@ -959,8 +977,8 @@ def test_simulate_exposes_rebalance_cash_equity_and_fee_amounts():
         close_fee_mat=np.full((1, 2), 0.02, dtype=float),
         rebalance_mode='each_period',
         price_np=np.full((2, 2), 100.0, dtype=float),
-        min_tick_vec=np.ones(2, dtype=float),
-        min_trade_quantity_vec=np.ones(2, dtype=float),
+        min_tick_mat=np.ones(2, dtype=float),
+        min_trade_quantity_mat=np.ones(2, dtype=float),
         initial_capital=1000.0,
     )
 
@@ -994,16 +1012,16 @@ def test_group_fee_close_override_applies_to_close_today_when_unspecified():
         start_dt=DataTime.parse('2026-01-01 09:30:00'),
         end_dt=DataTime.parse('2026-01-01 09:31:00'),
         source_freq=DataFreq.MIN1,
-        open_ratio_vec=np.zeros(1, dtype=float),
-        close_ratio_vec=np.zeros(1, dtype=float),
-        close_today_ratio_vec=np.zeros(1, dtype=float),
-        open_fixed_vec=np.zeros(1, dtype=float),
-        close_fixed_vec=np.zeros(1, dtype=float),
-        close_today_fixed_vec=np.zeros(1, dtype=float),
-        point_value_vec=np.ones(1, dtype=float),
-        min_tick_vec=np.ones(1, dtype=float),
-        min_trade_quantity_vec=np.ones(1, dtype=float),
-        long_margin_ratio_vec=np.ones(1, dtype=float),
+        open_ratio_mat=np.zeros(1, dtype=float),
+        close_ratio_mat=np.zeros(1, dtype=float),
+        close_today_ratio_mat=np.zeros(1, dtype=float),
+        open_fixed_mat=np.zeros(1, dtype=float),
+        close_fixed_mat=np.zeros(1, dtype=float),
+        close_today_fixed_mat=np.zeros(1, dtype=float),
+        point_value_mat=np.ones(1, dtype=float),
+        min_tick_mat=np.ones(1, dtype=float),
+        min_trade_quantity_mat=np.ones(1, dtype=float),
+        long_margin_ratio_mat=np.ones(1, dtype=float),
         is_margin_traded_vec=np.zeros(1, dtype=bool),
         positions_by_variety_code_lower={},
     )
@@ -1028,9 +1046,9 @@ def test_settlement_price_marks_open_margin_positions_only_on_day_end():
         close_rate_mat=np.zeros((1, 1), dtype=float),
         open_fixed_mat=np.zeros((1, 1), dtype=float),
         close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_vec=np.array([1.0], dtype=float),
-        min_tick_vec=np.array([1.0], dtype=float),
-        min_trade_quantity_vec=np.array([1.0], dtype=float),
+        point_value_mat=np.array([1.0], dtype=float),
+        min_tick_mat=np.array([1.0], dtype=float),
+        min_trade_quantity_mat=np.array([1.0], dtype=float),
         margin_ratio_mat=np.array([[0.10]], dtype=float),
         is_margin_traded_vec=np.array([True], dtype=bool),
         margin_modes=np.array(["margin"], dtype=object),
@@ -1057,8 +1075,8 @@ def test_simulate_fee_amounts_include_ratio_and_fixed_fees():
         close_fixed_mat=np.full((1, 1), 3.0, dtype=float),
         rebalance_mode='each_period',
         price_np=np.full((2, 1), 100.0, dtype=float),
-        min_tick_vec=np.ones(1, dtype=float),
-        min_trade_quantity_vec=np.ones(1, dtype=float),
+        min_tick_mat=np.ones(1, dtype=float),
+        min_trade_quantity_mat=np.ones(1, dtype=float),
         initial_capital=1000.0,
     )
 
@@ -1099,7 +1117,7 @@ def test_empty_group_sells_only_tradable_holdings_in_mixed_session():
         rebalance_mode='buy_and_hold',
         data_has_bar=np.array([[True, True], [False, True]], dtype=bool),
         price_np=np.full((2, 2), 0.01, dtype=float),
-        min_tick_vec=np.full(2, 0.01, dtype=float),
+        min_tick_mat=np.full(2, 0.01, dtype=float),
     )
 
     # t=0 holds 0.5/0.5; t=1 can only sell P1, so fee = 0.5 * 10%.

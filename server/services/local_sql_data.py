@@ -33,7 +33,7 @@ def _ensure_openctp_store() -> str:
 _STORE_REGISTRY: dict[str, SQLiteStore] = {
     "openctp": SQLiteStore(
         key="openctp",
-        label="OpenCTP 字段数据",
+        label="本地数据 (onlinedata.sqlite)",
         path_getter=_openctp_store_path,
         ensure=_ensure_openctp_store,
     ),

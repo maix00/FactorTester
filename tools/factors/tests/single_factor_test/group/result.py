@@ -23,12 +23,12 @@ class GroupRunResult:
     products_by_group: dict | None = None  # None → lazily built on first access
     _products_by_group_cache: dict | None = field(default=None, init=False, repr=False)
     valid_cols: list = field(default_factory=list)
-    open_ratio_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
-    open_fixed_vec: np.ndarray | None = None
-    close_ratio_vec: np.ndarray = field(default_factory=lambda: np.empty(0))     # 平昨
-    close_fixed_vec: np.ndarray | None = None                                  # 平昨
-    close_today_ratio_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
-    close_today_fixed_vec: np.ndarray | None = None
+    open_ratio_mat: np.ndarray = field(default_factory=lambda: np.empty(0))
+    open_fixed_mat: np.ndarray | None = None
+    close_ratio_mat: np.ndarray = field(default_factory=lambda: np.empty(0))     # 平昨
+    close_fixed_mat: np.ndarray | None = None                                  # 平昨
+    close_today_ratio_mat: np.ndarray = field(default_factory=lambda: np.empty(0))
+    close_today_fixed_mat: np.ndarray | None = None
     use_closetoday_vec: np.ndarray | None = None                               # per-product bool
     index_list: list = field(default_factory=list)
     multi_session_active: bool = False
@@ -51,10 +51,10 @@ class GroupRunResult:
     sell_fee_amount_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     initial_capital: float | None = None
     price_np: np.ndarray | None = None
-    point_value_vec: np.ndarray | None = None
-    min_tick_vec: np.ndarray | None = None
-    min_trade_quantity_vec: np.ndarray | None = None
-    margin_ratio_vec: np.ndarray | None = None
+    point_value_mat: np.ndarray | None = None
+    min_tick_mat: np.ndarray | None = None
+    min_trade_quantity_mat: np.ndarray | None = None
+    margin_ratio_mat: np.ndarray | None = None
     is_margin_traded_vec: np.ndarray | None = None
     base_currency: str = "CNY"
     product_currency_vec: np.ndarray | None = None

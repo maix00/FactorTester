@@ -179,18 +179,18 @@ class GroupSharedInputs:
 @dataclass(slots=True)
 class GroupTradeSpecBundle:
     valid_cols: list
-    open_ratio_vec: np.ndarray
-    open_fixed_vec: np.ndarray
-    close_ratio_vec: np.ndarray      # 平昨 (close_yesterday)
-    close_fixed_vec: np.ndarray      # 平昨 (close_yesterday)
-    close_today_ratio_vec: np.ndarray
-    close_today_fixed_vec: np.ndarray
-    use_closetoday_vec: np.ndarray   # per-product bool: True=平今, False=平昨
-    point_value_vec: np.ndarray
-    min_tick_vec: np.ndarray
-    min_trade_quantity_vec: np.ndarray
-    long_margin_ratio_vec: np.ndarray
-    is_margin_traded_vec: np.ndarray
+    open_ratio_mat: np.ndarray           # (T, P)
+    open_fixed_mat: np.ndarray           # (T, P)
+    close_ratio_mat: np.ndarray          # (T, P) — 平昨 (close_yesterday)
+    close_fixed_mat: np.ndarray          # (T, P) — 平昨 (close_yesterday)
+    closetoday_ratio_mat: np.ndarray    # (T, P)
+    closetoday_fixed_mat: np.ndarray    # (T, P)
+    use_closetoday_vec: np.ndarray       # (P,) — per-product bool: True=平今, False=平昨
+    multiplier_mat: np.ndarray          # (T, P) — 别名 point_value, 数据源字段 multiplier
+    min_tick_mat: np.ndarray             # (T, P)
+    min_trade_quantity_mat: np.ndarray   # (T, P)
+    long_margin_ratio_mat: np.ndarray    # (T, P)
+    is_margin_traded_vec: np.ndarray     # (P,)
     variety_codes_lower: list[str]
     positions_by_variety_code_lower: dict[str, list[int]]
 
@@ -244,12 +244,12 @@ def slice_group_run_result(
         membership_np=np.take(group_result.membership_np, group_indices, axis=1),
         products_by_group=new_products_by_group,
         valid_cols=list(group_result.valid_cols),
-        open_ratio_vec=np.asarray(group_result.open_ratio_vec).copy(),
-        open_fixed_vec=None if group_result.open_fixed_vec is None else np.asarray(group_result.open_fixed_vec).copy(),
-        close_ratio_vec=np.asarray(group_result.close_ratio_vec).copy(),
-        close_fixed_vec=None if group_result.close_fixed_vec is None else np.asarray(group_result.close_fixed_vec).copy(),
-        close_today_ratio_vec=np.asarray(group_result.close_today_ratio_vec).copy(),
-        close_today_fixed_vec=None if group_result.close_today_fixed_vec is None else np.asarray(group_result.close_today_fixed_vec).copy(),
+        open_ratio_mat=np.asarray(group_result.open_ratio_mat).copy(),
+        open_fixed_mat=None if group_result.open_fixed_mat is None else np.asarray(group_result.open_fixed_mat).copy(),
+        close_ratio_mat=np.asarray(group_result.close_ratio_mat).copy(),
+        close_fixed_mat=None if group_result.close_fixed_mat is None else np.asarray(group_result.close_fixed_mat).copy(),
+        closetoday_ratio_mat=np.asarray(group_result.closetoday_ratio_mat).copy(),
+        closetoday_fixed_mat=None if group_result.closetoday_fixed_mat is None else np.asarray(group_result.closetoday_fixed_mat).copy(),
         use_closetoday_vec=None if group_result.use_closetoday_vec is None else np.asarray(group_result.use_closetoday_vec).copy(),
         index_list=list(group_result.index_list),
         multi_session_active=bool(group_result.multi_session_active),
@@ -272,10 +272,10 @@ def slice_group_run_result(
         sell_fee_amount_np=_take_group_axis(group_result.sell_fee_amount_np),
         initial_capital=group_result.initial_capital,
         price_np=None if group_result.price_np is None else np.asarray(group_result.price_np).copy(),
-        point_value_vec=None if group_result.point_value_vec is None else np.asarray(group_result.point_value_vec).copy(),
-        min_tick_vec=None if group_result.min_tick_vec is None else np.asarray(group_result.min_tick_vec).copy(),
-        min_trade_quantity_vec=None if group_result.min_trade_quantity_vec is None else np.asarray(group_result.min_trade_quantity_vec).copy(),
-        margin_ratio_vec=None if group_result.margin_ratio_vec is None else np.asarray(group_result.margin_ratio_vec).copy(),
+        multiplier_mat=None if group_result.multiplier_mat is None else np.asarray(group_result.multiplier_mat).copy(),
+        min_tick_mat=None if group_result.min_tick_mat is None else np.asarray(group_result.min_tick_mat).copy(),
+        min_trade_quantity_mat=None if group_result.min_trade_quantity_mat is None else np.asarray(group_result.min_trade_quantity_mat).copy(),
+        margin_ratio_mat=None if group_result.margin_ratio_mat is None else np.asarray(group_result.margin_ratio_mat).copy(),
         is_margin_traded_vec=None if group_result.is_margin_traded_vec is None else np.asarray(group_result.is_margin_traded_vec).copy(),
         base_currency=str(getattr(group_result, "base_currency", "CNY") or "CNY"),
         product_currency_vec=None if getattr(group_result, "product_currency_vec", None) is None else np.asarray(group_result.product_currency_vec).copy(),
@@ -854,6 +854,7 @@ def _resolve_group_trade_specs(
     fee: float,
     fee_modifications: list | None = None,
     use_closetoday: bool = False,
+    index_list: pd.DatetimeIndex | list | None = None,
 ) -> GroupTradeSpecBundle:
     term_structure_paths = list(dict.fromkeys(
         path
@@ -886,47 +887,7 @@ def _resolve_group_trade_specs(
     for idx, code_lower in enumerate(variety_codes_lower):
         positions_by_variety_code_lower.setdefault(code_lower, []).append(idx)
 
-    _spec_field_names = (
-        "open_ratio",
-        "close_ratio",
-        "closetoday_ratio",
-        "open_fixed",
-        "close_fixed",
-        "closetoday_fixed",
-        "multiplier",
-        "min_tick",
-        "min_trade_quantity",
-        "long_margin_ratio",
-    )
-    _spec_bundles: list[dict[str, Any]] = []
-    try:
-        from sources.OpenCTP.fields import get_products_fields
-        _spec_bundles = get_products_fields(list(valid_cols), list(_spec_field_names))
-    except Exception:
-        _spec_bundles = [{} for _ in valid_cols]
-    _spec_bundle_by_id: dict[int, dict[str, Any]] = {}
-    for col, bundle in zip(valid_cols, _spec_bundles):
-        merged_bundle = dict(bundle or {})
-        if not merged_bundle:
-            for field in _spec_field_names:
-                value = getattr(col, field, None)
-                if value not in (None, ""):
-                    merged_bundle[field] = value
-        _spec_bundle_by_id[id(col)] = merged_bundle
-
-    half_fee = float(fee) / 2.0
-    open_ratio_list: list[float] = []
-    open_fixed_list: list[float] = []
-    close_ratio_list: list[float] = []       # 平昨 (close_yesterday)
-    close_today_ratio_list: list[float] = []
-    close_fixed_list: list[float] = []       # 平昨 (close_yesterday)
-    close_today_fixed_list: list[float] = []
-    use_closetoday_list: list[bool] = []
-    point_value_list: list[float] = []
-    min_tick_list: list[float] = []
-    min_trade_quantity_list: list[float] = []
-    long_margin_ratio_list: list[float] = []
-    is_margin_traded_list: list[bool] = []
+    P = len(valid_cols)
 
     # ── Build modifications_by_variety from fee_modifications ──
     modifications_by_variety: dict[str, dict] = {}
@@ -942,83 +903,126 @@ def _resolve_group_trade_specs(
                 if fname in VALID_FEE_FIELDS:
                     fields[fname] = float(fval)
 
-    # 字段名映射：FeeModification field name → _pick_value 的 product_field / col 属性名
+    # ── Time-varying specs via date-range query (if index_list provided) ──
+    db_time_specs: dict[str, pd.DataFrame] = {}
+    if index_list is not None and len(index_list) > 0:
+        _spec_field_names = (
+            "multiplier", "min_tick", "min_trade_quantity", "long_margin_ratio",
+            "open_ratio", "open_fixed", "close_ratio", "close_fixed",
+            "closetoday_ratio", "closetoday_fixed",
+        )
+        try:
+            from sources.OpenCTP.fields import get_products_specs_over_date_range
+            db_time_specs = get_products_specs_over_date_range(
+                products=list(valid_cols),
+                trading_days=index_list,
+                fields=list(_spec_field_names),
+            )
+        except Exception:
+            db_time_specs = {}
+
+    T = len(index_list) if index_list is not None else 1
+
+    # ── Compute product-level defaults for fallback ──
+    half_fee = float(fee) / 2.0
+
+    # Static product attributes (not time-varying)
+    use_closetoday_list: list[bool] = []
+    is_margin_traded_list: list[bool] = []
+
+    # Per-product defaults (used when DB has no data)
+    prod_open_ratio: list[float] = []
+    prod_open_fixed: list[float] = []
+    prod_close_ratio: list[float] = []
+    prod_close_fixed: list[float] = []
+    prod_closetoday_ratio: list[float] = []
+    prod_closetoday_fixed: list[float] = []
+    prod_multiplier: list[float] = []
+    prod_min_tick: list[float] = []
+    prod_min_trade_qty: list[float] = []
+    prod_long_margin_ratio: list[float] = []
+
     _MOD_FIELD_TO_PRODUCT_FIELD = {
         "open_ratio": "open_ratio",
         "close_yesterday_ratio": "close_ratio",
-        "close_today_ratio": "close_today_ratio",
+        "closetoday_ratio": "closetoday_ratio",
         "open_fixed": "open_fixed",
         "close_yesterday_fixed": "close_fixed",
-        "close_today_fixed": "close_today_fixed",
+        "closetoday_fixed": "closetoday_fixed",
     }
 
     for col in valid_cols:
-        bundle = _spec_bundle_by_id.get(id(col), {})
         mod_overrides = modifications_by_variety.get(
             variety_code_by_id.get(id(col), ""), {}
         )
 
         def _pick_value(default: Any, product_field: str) -> Any:
-            """优先级：modification > bundle(product字段) > col属性 > default"""
-            # 1. fee_modification 覆盖
             mod_val = mod_overrides.get(product_field)
             if mod_val not in (None, ""):
                 return mod_val
-            # 2. bundle (产品数据库字段)
-            bundle_value = bundle.get(product_field)
-            if bundle_value not in (None, ""):
-                return bundle_value
-            # 3. col 属性
             return getattr(col, product_field, default)
 
-        open_ratio_list.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
-        open_fixed_list.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
-        # close (平昨 / close_yesterday)
+        prod_open_ratio.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
+        prod_open_fixed.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
         close_ratio_val = _coerce_float(_pick_value(half_fee, "close_yesterday_ratio"), half_fee)
-        close_ratio_list.append(close_ratio_val)
+        prod_close_ratio.append(close_ratio_val)
         close_fixed_val = _coerce_float(_pick_value(0.0, "close_yesterday_fixed"), 0.0)
-        close_fixed_list.append(close_fixed_val)
-        # close_today (平今)
-        close_today_ratio_list.append(_coerce_float(
-            _pick_value(close_ratio_val, "close_today_ratio"),
-            close_ratio_val,
-        ))
-        close_today_fixed_list.append(_coerce_float(
-            _pick_value(close_fixed_val, "close_today_fixed"),
-            close_fixed_val,
-        ))
-        use_closetoday_list.append(bool(
-            getattr(col, "use_closetoday", None) or use_closetoday
-        ))
-        point_value_list.append(_coerce_float(
-            _pick_value(1.0, "multiplier") if "multiplier" in bundle
-            else getattr(col, "point_value", None) or 1.0,
-            1.0,
-        ))
-        min_tick_list.append(_coerce_float(_pick_value(0.0, "min_tick"), 0.0))
-        min_trade_quantity_list.append(_coerce_float(
-            _pick_value(getattr(col, "min_trade_quantity", 1.0) or 1.0, "min_trade_quantity"),
-            1.0,
-        ))
-        long_margin_ratio_list.append(_coerce_float(
-            _pick_value(1.0, "long_margin_ratio"),
-            1.0,
-        ))
+        prod_close_fixed.append(close_fixed_val)
+        prod_closetoday_ratio.append(_coerce_float(_pick_value(close_ratio_val, "closetoday_ratio"), close_ratio_val))
+        prod_closetoday_fixed.append(_coerce_float(_pick_value(close_fixed_val, "closetoday_fixed"), close_fixed_val))
+
+    for col in valid_cols:
+        use_closetoday_list.append(bool(getattr(col, "use_closetoday", None) or use_closetoday))
+        point_val = getattr(col, "point_value", None)
+        if point_val is None or point_val == 1.0:
+            prod_multiplier.append(float(getattr(col, "multiplier", 1.0) or 1.0))
+        else:
+            prod_multiplier.append(float(point_val))
+        prod_min_tick.append(float(getattr(col, "min_tick", 0.0) or 0.0))
+        prod_min_trade_qty.append(float(getattr(col, "min_trade_quantity", 1.0) or 1.0))
+        prod_long_margin_ratio.append(float(getattr(col, "long_margin_ratio", 1.0) or 1.0))
         is_margin_traded_list.append(bool(getattr(col, "is_margin_traded", False)))
+
+    # ── Build (T, P) matrices ──
+    def _build_mat(field: str, per_product_defaults: list[float], default_fallback: float = 0.0) -> np.ndarray:
+        """Build (T, P) matrix: prefer DB time-series, then per-product default as constant column, then scalar fallback."""
+        df = db_time_specs.get(field)
+        if df is not None and not df.empty:
+            idx = pd.DatetimeIndex(index_list) if index_list is not None else pd.DatetimeIndex([])
+            mat = df.reindex(index=idx).to_numpy(dtype=float)
+            # Fill NaN with per-product defaults expanded to (T, P)
+            defaults_arr = np.asarray(per_product_defaults, dtype=float).reshape(1, P)
+            mask = np.isnan(mat)
+            mat = np.where(mask, np.broadcast_to(defaults_arr, (T, P))[mask.any(axis=1, keepdims=True) * mask], mat)
+            mat = np.nan_to_num(mat, nan=default_fallback)
+            return mat
+        else:
+            return np.broadcast_to(np.asarray(per_product_defaults, dtype=float).reshape(1, P), (T, P)).copy()
+
+    open_ratio_mat = _build_mat("open_ratio", prod_open_ratio, half_fee)
+    open_fixed_mat = _build_mat("open_fixed", prod_open_fixed, 0.0)
+    close_ratio_mat = _build_mat("close_ratio", prod_close_ratio, half_fee)
+    close_fixed_mat = _build_mat("close_fixed", prod_close_fixed, 0.0)
+    closetoday_ratio_mat = _build_mat("closetoday_ratio", prod_closetoday_ratio, half_fee)
+    closetoday_fixed_mat = _build_mat("closetoday_fixed", prod_closetoday_fixed, 0.0)
+    multiplier_mat = _build_mat("multiplier", prod_multiplier, 1.0)
+    min_tick_mat = _build_mat("min_tick", prod_min_tick, 0.0)
+    min_trade_quantity_mat = _build_mat("min_trade_quantity", prod_min_trade_qty, 1.0)
+    long_margin_ratio_mat = _build_mat("long_margin_ratio", prod_long_margin_ratio, 1.0)
 
     return GroupTradeSpecBundle(
         valid_cols=list(valid_cols),
-        open_ratio_vec=np.asarray(open_ratio_list, dtype=float),
-        open_fixed_vec=np.asarray(open_fixed_list, dtype=float),
-        close_ratio_vec=np.asarray(close_ratio_list, dtype=float),
-        close_fixed_vec=np.asarray(close_fixed_list, dtype=float),
-        close_today_ratio_vec=np.asarray(close_today_ratio_list, dtype=float),
-        close_today_fixed_vec=np.asarray(close_today_fixed_list, dtype=float),
+        open_ratio_mat=open_ratio_mat,
+        open_fixed_mat=open_fixed_mat,
+        close_ratio_mat=close_ratio_mat,
+        close_fixed_mat=close_fixed_mat,
+        closetoday_ratio_mat=closetoday_ratio_mat,
+        closetoday_fixed_mat=closetoday_fixed_mat,
         use_closetoday_vec=np.asarray(use_closetoday_list, dtype=bool),
-        point_value_vec=np.asarray(point_value_list, dtype=float),
-        min_tick_vec=np.asarray(min_tick_list, dtype=float),
-        min_trade_quantity_vec=np.asarray(min_trade_quantity_list, dtype=float),
-        long_margin_ratio_vec=np.asarray(long_margin_ratio_list, dtype=float),
+        multiplier_mat=multiplier_mat,
+        min_tick_mat=min_tick_mat,
+        min_trade_quantity_mat=min_trade_quantity_mat,
+        long_margin_ratio_mat=long_margin_ratio_mat,
         is_margin_traded_vec=np.asarray(is_margin_traded_list, dtype=bool),
         variety_codes_lower=variety_codes_lower,
         positions_by_variety_code_lower=positions_by_variety_code_lower,
@@ -1169,21 +1173,11 @@ def _simulate_group_from_preloaded(
     start_dt: Optional[Any] = None,  # DataTime
     end_dt: Optional[Any] = None,    # DataTime
     source_freq: DataFreq,
-    open_ratio_vec: np.ndarray,
-    close_ratio_vec: np.ndarray,
-    close_today_ratio_vec: np.ndarray,
-    open_fixed_vec: np.ndarray,
-    close_fixed_vec: np.ndarray,
-    close_today_fixed_vec: np.ndarray,
-    point_value_vec: np.ndarray,
-    min_tick_vec: np.ndarray,
-    min_trade_quantity_vec: np.ndarray,
-    long_margin_ratio_vec: np.ndarray,
-    is_margin_traded_vec: np.ndarray,
-    positions_by_variety_code_lower: dict[str, list[int]],
+    spec_bundle: GroupTradeSpecBundle,
 ) -> tuple[Any, pd.DataFrame, np.ndarray, GroupRunResult]:
     liquidity_capacity_np: np.ndarray | None = None
     group_count = membership_np.shape[1]
+    T_periods = len(index_list)
     P = len(valid_cols)
     base_currency = normalize_currency(base_currency)
     product_currency_vec = require_product_currency_vector(
@@ -1191,6 +1185,17 @@ def _simulate_group_from_preloaded(
         explicit=product_currency_vec,
         default=None,
     )
+
+    # Unpack trade spec matrices from bundle
+    open_ratio_mat = spec_bundle.open_ratio_mat
+    close_ratio_mat = spec_bundle.close_ratio_mat
+    closetoday_ratio_mat = spec_bundle.closetoday_ratio_mat
+    open_fixed_mat = spec_bundle.open_fixed_mat
+    close_fixed_mat = spec_bundle.close_fixed_mat
+    closetoday_fixed_mat = spec_bundle.closetoday_fixed_mat
+    use_closetoday_vec = spec_bundle.use_closetoday_vec
+    is_margin_traded_vec = spec_bundle.is_margin_traded_vec
+    positions_by_variety_code_lower = spec_bundle.positions_by_variety_code_lower
 
     def _liquidity_mode_from_spec(spec: dict | None) -> str:
         if not isinstance(spec, dict):
@@ -1226,36 +1231,14 @@ def _simulate_group_from_preloaded(
         if drm in _VALID_MODES:
             rebalance_modes_list[g_idx] = drm
 
-    margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
-    open_ratio_mat = np.tile(open_ratio_vec, (group_count, 1))
-    close_ratio_mat = np.tile(close_ratio_vec, (group_count, 1))
-    close_today_ratio_mat = np.tile(close_today_ratio_vec, (group_count, 1))
-    open_fixed_mat = np.tile(open_fixed_vec, (group_count, 1))
-    close_fixed_mat = np.tile(close_fixed_vec, (group_count, 1))
-    close_today_fixed_mat = np.tile(close_today_fixed_vec, (group_count, 1))
-
-    # Apply per-group fee overrides from group_configs
-    for g_idx, cfg in enumerate(_group_configs):
-        if g_idx >= group_count:
-            continue
-        fee_override = cfg.get("fee_override") if isinstance(cfg, dict) else None
-        if not isinstance(fee_override, dict):
-            continue
-        if 'open' in fee_override and fee_override['open'] is not None:
-            open_ratio_mat[g_idx, :] = float(fee_override['open'])
-        if 'close' in fee_override and fee_override['close'] is not None:
-            close_override = float(fee_override['close'])
-            close_ratio_mat[g_idx, :] = close_override
-            if fee_override.get('close_today') is None:
-                close_today_ratio_mat[g_idx, :] = close_override
-        if 'close_today' in fee_override and fee_override['close_today'] is not None:
-            close_today_ratio_mat[g_idx, :] = float(fee_override['close_today'])
-
-
-    # Build per-product effective close matrices using use_closetoday_vec
-    use_closetoday_brd = use_closetoday_vec[np.newaxis, :]  # (1, P) -> broadcast across groups
-    effective_close_ratio_mat = np.where(use_closetoday_brd, close_today_ratio_mat, close_ratio_mat)
-    effective_close_fixed_mat = np.where(use_closetoday_brd, close_today_fixed_mat, close_fixed_mat)
+    # Fee matrices from spec_bundle are (T, P). Per-group fee overrides are applied
+    # inside simulate_group_trading_book via group_configs.
+    # Build effective close matrices using use_closetoday_vec — broadcast across time.
+    use_closetoday_brd = use_closetoday_vec[np.newaxis, :]  # (1, P)
+    effective_open_ratio_mat = open_ratio_mat  # (T, P)
+    effective_open_fixed_mat = open_fixed_mat  # (T, P)
+    effective_close_ratio_mat = np.where(use_closetoday_brd, closetoday_ratio_mat, close_ratio_mat)
+    effective_close_fixed_mat = np.where(use_closetoday_brd, closetoday_fixed_mat, close_fixed_mat)
 
     group_liquidity_modes = liquidity_modes_list
     group_liquidity_percents = liquidity_percents_list
@@ -1277,19 +1260,16 @@ def _simulate_group_from_preloaded(
         price_np=price_np,
         settlement_price_np=settlement_price_np,
         settlement_bar_mask=settlement_bar_mask,
-        open_rate_mat=open_ratio_mat,
+        open_rate_mat=effective_open_ratio_mat,
         close_rate_mat=effective_close_ratio_mat,
-        open_fixed_mat=open_fixed_mat,
+        open_fixed_mat=effective_open_fixed_mat,
         close_fixed_mat=effective_close_fixed_mat,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=group_liquidity_modes if group_liquidity_modes else None,
         liquidity_percents=group_liquidity_percents if group_liquidity_percents else None,
-        point_value_vec=point_value_vec,
-        min_tick_vec=min_tick_vec,
-        min_trade_quantity_vec=min_trade_quantity_vec,
-        margin_ratio_mat=margin_ratio_mat,
-        is_margin_traded_vec=is_margin_traded_vec,
+        trade_specs=spec_bundle,
+        group_configs=_group_configs,
         margin_modes=group_margin_modes,
         rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
@@ -1354,9 +1334,9 @@ def _simulate_group_from_preloaded(
         membership_np=membership_np,
         products_by_group=None,  # lazily built by get_products_by_group()
         valid_cols=valid_cols,
-        open_ratio_vec=open_ratio_vec,
-        close_ratio_vec=close_ratio_vec,
-        close_today_ratio_vec=close_today_ratio_vec,
+        open_ratio_mat=open_ratio_mat,
+        close_ratio_mat=close_ratio_mat,
+        closetoday_ratio_mat=closetoday_ratio_mat,
         index_list=index_list,
         multi_session_active=multi_session_active,
         rebalance_mode=rebalance_mode,
@@ -1378,14 +1358,15 @@ def _simulate_group_from_preloaded(
         sell_fee_amount_np=sim_result.get('sell_fee_amount_np'),
         initial_capital=float(initial_capital),
         price_np=price_np,
-        open_fixed_vec=open_fixed_vec,
-        close_fixed_vec=close_fixed_vec,
-        close_today_fixed_vec=close_today_fixed_vec,
-        point_value_vec=point_value_vec,
-        min_tick_vec=min_tick_vec,
-        min_trade_quantity_vec=min_trade_quantity_vec,
-        margin_ratio_vec=long_margin_ratio_vec,
+        open_fixed_mat=open_fixed_mat,
+        close_fixed_mat=close_fixed_mat,
+        closetoday_fixed_mat=closetoday_fixed_mat,
+        multiplier_mat=spec_bundle.multiplier_mat,
+        min_tick_mat=spec_bundle.min_tick_mat,
+        min_trade_quantity_mat=spec_bundle.min_trade_quantity_mat,
+        margin_ratio_mat=spec_bundle.long_margin_ratio_mat,
         is_margin_traded_vec=is_margin_traded_vec,
+        use_closetoday_vec=use_closetoday_vec,
         base_currency=base_currency,
         product_currency_vec=np.asarray(product_currency_vec, dtype=object),
         currency_conversion_fee_rate=float(currency_conversion_fee_rate or 0.0),
@@ -2045,11 +2026,8 @@ def simulate_group_trading_book(
     liquidity_capacity_np: np.ndarray | None = None,
     liquidity_modes: np.ndarray | list[str] | None = None,
     liquidity_percents: np.ndarray | list[float] | None = None,
-    point_value_vec: np.ndarray,
-    min_tick_vec: np.ndarray,
-    min_trade_quantity_vec: np.ndarray,
-    margin_ratio_mat: np.ndarray,
-    is_margin_traded_vec: np.ndarray,
+    trade_specs: GroupTradeSpecBundle,
+    group_configs: list | None = None,
     margin_modes: np.ndarray | list[str],
     rebalance_modes: np.ndarray | list[str],
     initial_capital: float = 100000000.0,
@@ -2068,12 +2046,19 @@ def simulate_group_trading_book(
     if tradable_mask_arr is not None and tradable_mask_arr.shape != (T, P):
         raise ValueError(f"tradable_mask_np shape={tradable_mask_arr.shape} != {(T, P)}")
 
-    point_values = np.asarray(point_value_vec, dtype=float).reshape(P)
-    point_values = np.where(np.isfinite(point_values) & (point_values > 0), point_values, 1.0)
-    min_ticks = np.asarray(min_tick_vec, dtype=float).reshape(P)
-    lot_sizes = np.asarray(min_trade_quantity_vec, dtype=float).reshape(P)
-    lot_sizes = np.where(np.isfinite(lot_sizes) & (lot_sizes > 0), lot_sizes, 1.0)
-    margin_flags = np.asarray(is_margin_traded_vec, dtype=bool).reshape(P)
+    # Unpack trade_specs: all (T, P) mat fields + (P,) vec fields
+    multiplier_mat_arr = np.asarray(trade_specs.multiplier_mat, dtype=float)
+    if multiplier_mat_arr.shape != (T, P):
+        raise ValueError(f"multiplier_mat shape={multiplier_mat_arr.shape} != {(T, P)}")
+    multiplier_mat_arr = np.where(np.isfinite(multiplier_mat_arr) & (multiplier_mat_arr > 0), multiplier_mat_arr, 1.0)
+    min_tick_mat_arr = np.asarray(trade_specs.min_tick_mat, dtype=float)
+    if min_tick_mat_arr.shape != (T, P):
+        raise ValueError(f"min_tick_mat shape={min_tick_mat_arr.shape} != {(T, P)}")
+    min_trade_qty_mat_arr = np.asarray(trade_specs.min_trade_quantity_mat, dtype=float)
+    if min_trade_qty_mat_arr.shape != (T, P):
+        raise ValueError(f"min_trade_quantity_mat shape={min_trade_qty_mat_arr.shape} != {(T, P)}")
+    min_trade_qty_mat_arr = np.where(np.isfinite(min_trade_qty_mat_arr) & (min_trade_qty_mat_arr > 0), min_trade_qty_mat_arr, 1.0)
+    margin_flags = np.asarray(trade_specs.is_margin_traded_vec, dtype=bool).reshape(P)
     margin_modes_arr = np.asarray(margin_modes, dtype=object)
     rebalance_modes_arr = np.asarray(rebalance_modes, dtype=object)
     if margin_modes_arr.shape[0] != M:
@@ -2081,11 +2066,21 @@ def simulate_group_trading_book(
     if rebalance_modes_arr.shape[0] != M:
         raise ValueError(f"rebalance_modes length={rebalance_modes_arr.shape[0]} != groups={M}")
 
-    close_rate_mat = np.asarray(close_rate_mat, dtype=float)
-    close_fixed_mat = np.asarray(close_fixed_mat, dtype=float)
-    open_rate_mat = np.asarray(open_rate_mat, dtype=float)
-    open_fixed_mat = np.asarray(open_fixed_mat, dtype=float)
-    margin_ratios = np.asarray(margin_ratio_mat, dtype=float)
+    close_rate_mat_arr = np.asarray(close_rate_mat, dtype=float)
+    if close_rate_mat_arr.shape != (T, P):
+        raise ValueError(f"close_rate_mat shape={close_rate_mat_arr.shape} != {(T, P)}")
+    close_fixed_mat_arr = np.asarray(close_fixed_mat, dtype=float)
+    if close_fixed_mat_arr.shape != (T, P):
+        raise ValueError(f"close_fixed_mat shape={close_fixed_mat_arr.shape} != {(T, P)}")
+    open_rate_mat_arr = np.asarray(open_rate_mat, dtype=float)
+    if open_rate_mat_arr.shape != (T, P):
+        raise ValueError(f"open_rate_mat shape={open_rate_mat_arr.shape} != {(T, P)}")
+    open_fixed_mat_arr = np.asarray(open_fixed_mat, dtype=float)
+    if open_fixed_mat_arr.shape != (T, P):
+        raise ValueError(f"open_fixed_mat shape={open_fixed_mat_arr.shape} != {(T, P)}")
+    margin_ratios = np.asarray(trade_specs.long_margin_ratio_mat, dtype=float)
+    if margin_ratios.shape != (T, P):
+        raise ValueError(f"long_margin_ratio_mat shape={margin_ratios.shape} != {(T, P)}")
     margin_ratios = np.where(np.isfinite(margin_ratios) & (margin_ratios > 0), margin_ratios, 1.0)
     liquidity_modes_arr = np.asarray(liquidity_modes, dtype=object) if liquidity_modes is not None else np.full(M, "infinite", dtype=object)
     liquidity_percents_arr = np.asarray(liquidity_percents, dtype=float) if liquidity_percents is not None else np.full(M, 100.0, dtype=float)
@@ -2094,8 +2089,6 @@ def simulate_group_trading_book(
         raise ValueError(
             f"liquidity_capacity_np shape={liquidity_capacity_arr.shape} != {(T, P)}"
         )
-    lot_sizes_row = lot_sizes[np.newaxis, :]
-    point_values_row = point_values[np.newaxis, :]
     use_margin = (margin_modes_arr == "margin")[:, np.newaxis] & margin_flags[np.newaxis, :]
     hold_rows = np.isin(rebalance_modes_arr, ["buy_and_hold", "recycle"])
     recycle_rows = rebalance_modes_arr == "recycle"
@@ -2156,11 +2149,11 @@ def simulate_group_trading_book(
     prev_post_rebalance_total = equity.copy()
     prev_post_rebalance_cash = equity.copy()
 
-    def _round_price(raw_price: np.ndarray) -> np.ndarray:
+    def _round_price(raw_price: np.ndarray, min_ticks_t: np.ndarray) -> np.ndarray:
         px = np.asarray(raw_price, dtype=float)
-        valid_tick = np.isfinite(min_ticks) & (min_ticks > 0)
+        valid_tick = np.isfinite(min_ticks_t) & (min_ticks_t > 0)
         rounded = px.copy()
-        rounded[valid_tick] = np.round(px[valid_tick] / min_ticks[valid_tick]) * min_ticks[valid_tick]
+        rounded[valid_tick] = np.round(px[valid_tick] / min_ticks_t[valid_tick]) * min_ticks_t[valid_tick]
         # Fallback: round to 2 decimal places for products without min_tick
         no_tick = np.isfinite(px) & (~valid_tick)
         if no_tick.any():
@@ -2186,8 +2179,8 @@ def simulate_group_trading_book(
 
     lot_books = [[deque() for _ in range(P)] for _ in range(M)]
 
-    def _contract_value_base_from_price(price_row: np.ndarray, valuated_mask: np.ndarray, *, ts: Any) -> np.ndarray:
-        contract_value = np.asarray(price_row, dtype=float) * point_values
+    def _contract_value_base_from_price(price_row: np.ndarray, valuated_mask: np.ndarray, *, ts: Any, multipliers_t: np.ndarray) -> np.ndarray:
+        contract_value = np.asarray(price_row, dtype=float) * multipliers_t
         contract_value = np.where(valuated_mask & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
         contract_value_base = contract_value.copy()
         for p_idx in range(P):
@@ -2225,7 +2218,7 @@ def simulate_group_trading_book(
             base = float(lot_base if mark_base is None else mark_base)
             if not np.isfinite(base) or base <= 0:
                 continue
-            ratio = float(margin_ratios[row_idx, p_idx]) if use_margin[row_idx, p_idx] else 1.0
+            ratio = float(margin_ratios_t[p_idx]) if use_margin[row_idx, p_idx] else 1.0
             total += float(lot_qty) * base * ratio
         return total
 
@@ -2247,18 +2240,52 @@ def simulate_group_trading_book(
         if pct > _last_sim_report or t == T - 1:
             _last_sim_report = pct
             _emit_progress("simulate", f"交易账本模拟 {t+1}/{T}", completed=t + 1, total=T)
-        price_t = _round_price(prices[t])
+        # Per-period trade specs (P,)
+        multipliers_t = multiplier_mat_arr[t]
+        min_ticks_t = min_tick_mat_arr[t]
+        lot_sizes_t = min_trade_qty_mat_arr[t]
+        margin_ratios_t = margin_ratios[t]
+        open_rate_t = open_rate_mat_arr[t]
+        close_rate_t = close_rate_mat_arr[t]
+        open_fixed_t = open_fixed_mat_arr[t]
+        close_fixed_t = close_fixed_mat_arr[t]
+
+        # Default: post-rebalance cash starts as previous period's post-rebalance cash.
+        # Will be updated if settlement or rebalance happens.
+        post_rebalance_cash = prev_post_rebalance_cash.copy()
+
+        # Apply per-group fee overrides: build (M, P) rate matrices for this period
+        open_rate_by_group = np.tile(open_rate_t, (M, 1))          # (M, P)
+        close_rate_by_group = np.tile(close_rate_t, (M, 1))
+        open_fixed_by_group = np.tile(open_fixed_t, (M, 1))
+        close_fixed_by_group = np.tile(close_fixed_t, (M, 1))
+        group_cfgs = group_configs or []
+        for g_idx, cfg in enumerate(group_cfgs):
+            if g_idx >= M or not isinstance(cfg, dict):
+                continue
+            fee_ov = cfg.get("fee_override")
+            if not isinstance(fee_ov, dict):
+                continue
+            if 'open' in fee_ov and fee_ov['open'] is not None:
+                open_rate_by_group[g_idx, :] = float(fee_ov['open'])
+            if 'close' in fee_ov and fee_ov['close'] is not None:
+                close_ov = float(fee_ov['close'])
+                close_rate_by_group[g_idx, :] = close_ov
+            if 'close_today' in fee_ov and fee_ov['close_today'] is not None:
+                close_rate_by_group[g_idx, :] = float(fee_ov['close_today'])
+
+        price_t = _round_price(prices[t], min_ticks_t)
         valuated = np.isfinite(price_t) & (price_t > 0)
         executable = valuated if tradable_mask_arr is None else (valuated & tradable_mask_arr[t])
         executable_row = executable[np.newaxis, :]
-        contract_value = price_t * point_values
+        contract_value = price_t * multipliers_t
         contract_value = np.where(valuated & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
         contract_value_base = contract_value.copy()
         for p_idx in range(P):
             contract_value_base[p_idx] = float(currency_context.to_base(contract_value[p_idx], product_currency_arr[p_idx], time_index[t]))
         contract_value_row = contract_value[np.newaxis, :]
         contract_value_base_row = contract_value_base[np.newaxis, :]
-        lot_row = lot_sizes.copy()
+        lot_row = lot_sizes_t.copy()
         lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
         contract_value_minor_units = _round_minor_units(contract_value_base)
         settlement_bar_row = settlement_bar_mask[t] if t < len(settlement_bar_mask) else np.zeros(P, dtype=bool)
@@ -2270,6 +2297,7 @@ def simulate_group_trading_book(
                     raw_settlement_price,
                     valid_settlement,
                     ts=time_index[t],
+                    multipliers_t=multipliers_t,
                 )
                 pre_rebalance_cash_before_settlement = (
                     _from_minor_units(
@@ -2278,7 +2306,7 @@ def simulate_group_trading_book(
                             - np.nansum(
                                 np.where(
                                     use_margin,
-                                    quantities * contract_value_base_row * margin_ratios,
+                                    quantities * contract_value_base_row * margin_ratios_t,
                                     quantities * contract_value_base_row,
                                 ),
                                 axis=1,
@@ -2317,16 +2345,16 @@ def simulate_group_trading_book(
                     prev_post_rebalance_total = equity.copy()
         one_lot_margin_mat = np.where(
             use_margin,
-            lot_row * contract_value_base * margin_ratios,
+            lot_row * contract_value_base * margin_ratios_t,
             lot_row * contract_value_base,
         )
         one_lot_margin_display_mat = one_lot_margin_mat
-        one_lot_fee_display_mat = lot_row * contract_value * open_rate_mat + lot_row * open_fixed_mat
+        one_lot_fee_display_mat = lot_row * contract_value * open_rate_by_group + lot_row * open_fixed_by_group
         prev_notional = np.where(executable_row, quantities * contract_value_base_row, 0.0)
         pre_rebalance_total = equity.copy()
         pre_rebalance_occupied = np.where(
             use_margin,
-            prev_notional * margin_ratios,
+            prev_notional * margin_ratios_t,
             prev_notional,
         )
         # 如果本期未调仓 (membership_unchanged)，沿用上期调仓后现金
@@ -2426,12 +2454,12 @@ def simulate_group_trading_book(
                         sell_qty = float(max_lots) * lot
                         sell_notional_minor_units = int(round(sell_qty * cv_minor_units))
                         if use_margin[row_idx, p_idx]:
-                            cash_released_minor_units = int(np.floor(sell_notional_minor_units * margin_ratios[row_idx, p_idx] + 1e-9))
+                            cash_released_minor_units = int(np.floor(sell_notional_minor_units * margin_ratios_t[p_idx] + 1e-9))
                         else:
                             cash_released_minor_units = sell_notional_minor_units
                         close_fee_here_minor_units = int(_round_minor_units(
-                            (sell_notional_minor_units / 100.0) * close_rate_mat[row_idx, p_idx]
-                            + float(currency_context.to_base(sell_qty * close_fixed_mat[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
+                            (sell_notional_minor_units / 100.0) * close_rate_by_group[row_idx, p_idx]
+                            + float(currency_context.to_base(sell_qty * close_fixed_by_group[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
                         ))
                         realized_here_minor_units = int(_round_minor_units(
                             _lot_realize_sell(row_idx, p_idx, sell_qty, float(contract_value_base[p_idx]))
@@ -2448,12 +2476,12 @@ def simulate_group_trading_book(
                 qty = float(lots) * lot_row[p_idx]
                 notional_minor_units = int(_round_minor_units(qty * contract_value_base[p_idx]))
                 if use_margin[row_idx, p_idx]:
-                    margin_minor_units = int(_round_minor_units((notional_minor_units / 100.0) * margin_ratios[row_idx, p_idx]))
+                    margin_minor_units = int(_round_minor_units((notional_minor_units / 100.0) * margin_ratios_t[p_idx]))
                 else:
                     margin_minor_units = notional_minor_units
                 fee_minor_units = int(_round_minor_units(
-                    (notional_minor_units / 100.0) * open_rate_mat[row_idx, p_idx]
-                    + float(currency_context.to_base(qty * open_fixed_mat[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
+                    (notional_minor_units / 100.0) * open_rate_by_group[row_idx, p_idx]
+                    + float(currency_context.to_base(qty * open_fixed_by_group[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
                 ))
                 return max(0, margin_minor_units + fee_minor_units)
 
@@ -2650,10 +2678,10 @@ def simulate_group_trading_book(
             buy_fixed_base = np.zeros_like(buy_qty, dtype=float)
             sell_fixed_base = np.zeros_like(sell_qty, dtype=float)
             for p_idx in range(P):
-                buy_fixed_base[:, p_idx] = currency_context.to_base(buy_qty[:, p_idx] * open_fixed_mat[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
-                sell_fixed_base[:, p_idx] = currency_context.to_base(sell_qty[:, p_idx] * close_fixed_mat[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
-            buy_fee_minor_units = _round_minor_units(buy_notional * open_rate_mat + buy_fixed_base)
-            sell_fee_minor_units = _round_minor_units(sell_notional * close_rate_mat + sell_fixed_base)
+                buy_fixed_base[:, p_idx] = currency_context.to_base(buy_qty[:, p_idx] * open_fixed_by_group[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
+                sell_fixed_base[:, p_idx] = currency_context.to_base(sell_qty[:, p_idx] * close_fixed_by_group[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
+            buy_fee_minor_units = _round_minor_units(buy_notional * open_rate_by_group + buy_fixed_base)
+            sell_fee_minor_units = _round_minor_units(sell_notional * close_rate_by_group + sell_fixed_base)
             buy_fee = _from_minor_units(buy_fee_minor_units)
             sell_fee = _from_minor_units(sell_fee_minor_units)
             fee_amount = buy_fee + sell_fee
@@ -2675,7 +2703,7 @@ def simulate_group_trading_book(
         post_rebalance_total = _from_minor_units(_floor_minor_units(equity) - _round_minor_units(total_fee_amount))
         start_occupied = np.where(
             use_margin,
-            position_notional * margin_ratios,
+            position_notional * margin_ratios_t,
             position_notional,
         )
         post_rebalance_cash = _from_minor_units(
@@ -2684,13 +2712,13 @@ def simulate_group_trading_book(
         net = gross - fee_ratio
         end_equity = _from_minor_units(_round_minor_units(equity * (1.0 + net)))
         end_price = price_t * (1.0 + returns_np[t])
-        end_contract_value_base = end_price * point_values
+        end_contract_value_base = end_price * multipliers_t
         for p_idx in range(P):
             end_contract_value_base[p_idx] = float(currency_context.to_base(end_contract_value_base[p_idx], product_currency_arr[p_idx], time_index[t]))
         end_notional = _from_minor_units(_round_minor_units(desired_quantities * end_contract_value_base[np.newaxis, :]))
         end_occupied = np.where(
             use_margin,
-            end_notional * margin_ratios,
+            end_notional * margin_ratios_t,
             end_notional,
         )
         end_occupied = _from_minor_units(_floor_minor_units(np.nansum(end_occupied, axis=1)))

@@ -918,7 +918,7 @@ class FactorGroupTester:
                     index_list=list(first_entry.shared_inputs.index_list),
                     n_names=group_name_map,
                     group_configs=group_configs,
-                    use_closetoday_vec=spec_bundle.use_closetoday_vec,
+                    spec_bundle=spec_bundle,
                     rebalance_mode=rebalance_mode,
                     initial_capital=initial_capital,
                     multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
@@ -927,18 +927,6 @@ class FactorGroupTester:
                     start_dt=self.start_dt,
                     end_dt=self.end_dt,
                     source_freq=first_entry.shared_inputs.source_freq,
-                    open_ratio_vec=spec_bundle.open_ratio_vec,
-                    close_ratio_vec=spec_bundle.close_ratio_vec,
-                    close_today_ratio_vec=spec_bundle.close_today_ratio_vec,
-                    open_fixed_vec=spec_bundle.open_fixed_vec,
-                    close_fixed_vec=spec_bundle.close_fixed_vec,
-                    close_today_fixed_vec=spec_bundle.close_today_fixed_vec,
-                    point_value_vec=spec_bundle.point_value_vec,
-                    min_tick_vec=spec_bundle.min_tick_vec,
-                    min_trade_quantity_vec=spec_bundle.min_trade_quantity_vec,
-                    long_margin_ratio_vec=spec_bundle.long_margin_ratio_vec,
-                    is_margin_traded_vec=spec_bundle.is_margin_traded_vec,
-                    positions_by_variety_code_lower=spec_bundle.positions_by_variety_code_lower,
                 )
             except IndexError as e:
                 raise IndexError(

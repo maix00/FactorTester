@@ -42,10 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 汇总页 URL
-# ---------------------------------------------------------------------------
 INDEX_URL = "https://www.guosenqh.com.cn/main/kfzx/pzxx/gpzxxhz/index.shtml"
-_STATIC_SOURCE_URL = "https://www.guosenqh.com.cn/main/a/20260519/12800.shtml?id=1391"
 
 # 要查找的链接标题关键词
 _LINK_TITLE_KEYWORD = "每笔下单数量限制"
@@ -154,19 +151,7 @@ def discover_source_url(index_url: str = INDEX_URL) -> tuple[str, date | None]:
             logger.info("发现最新页: %s (日期=%s)", source_url, source_date)
             return source_url, source_date
 
-    raise RuntimeError(
-        f"汇总页未找到关键词「{_LINK_TITLE_KEYWORD}」的链接: {index_url}"
-    )
-
-
-def _resolve_source_metadata() -> tuple[str, str]:
-    """Resolve the latest source URL/date, falling back to the static snapshot."""
-    try:
-        source_url, source_date = discover_source_url()
-        return source_url, source_date.isoformat() if source_date is not None else ""
-    except Exception as exc:  # pragma: no cover - network fallback
-        logger.warning("自动发现最新来源失败，回退到静态快照: %s", exc)
-        return _STATIC_SOURCE_URL, "2026-05-19"
+    raise RuntimeError(f"汇总页未找到关键词「{_LINK_TITLE_KEYWORD}」的链接: {index_url}")
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +165,12 @@ _TABLE_COLUMNS = ["exchange", "product", "limit_order", "market_order", "note"]
 _NO_MARKET_FLAG = "没有市价指令"
 
 
-def fetch_table(url: str | None = None) -> "pd.DataFrame":
+def fetch_table(
+    url: str | None = None,
+    *,
+    source_url: str | None = None,
+    source_date: str | None = None,
+) -> "pd.DataFrame":
     """从国信期货页面抓取限价单表格，返回 DataFrame。
 
     列：exchange, product, limit_order, market_order, note
@@ -192,7 +182,9 @@ def fetch_table(url: str | None = None) -> "pd.DataFrame":
 
     import pandas as pd
 
-    target_url = url or SOURCE_URL
+    target_url = url or source_url
+    if not target_url:
+        raise ValueError("fetch_table requires a URL")
     req = Request(target_url, headers={"User-Agent": "Mozilla/5.0"})
     with urlopen(req, timeout=15) as resp:
         content = resp.read().decode("utf-8", errors="replace")
@@ -222,29 +214,40 @@ def fetch_table(url: str | None = None) -> "pd.DataFrame":
     # 将「没有市价指令」映射为 0（方便数值比较），其他保持原样
     df["market_order"] = df["market_order"].replace(_NO_MARKET_FLAG, "0手")
 
+    resolved_source_url = source_url or target_url
+    resolved_source_date = source_date or _parse_date_from_url(resolved_source_url)
+    df["source_url"] = resolved_source_url
+    df["source_date"] = resolved_source_date.isoformat() if isinstance(resolved_source_date, date) else (resolved_source_date or "")
+
     logger.info("从 %s 解析到 %d 行数据", target_url, len(df))
     return df
 
 
+SOURCE_NAME: str = "国信期货 — 各品种每笔下单数量限制"
+
+
 def _main() -> None:
+    import sys
+    from pathlib import Path
+
     import pandas as pd
+
+    if __package__ in (None, ""):
+        root = Path(__file__).resolve().parents[3]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+    from sources.Guosen.LimitOrderVolume import SOURCE_DATE, SOURCE_URL, fetch_table as package_fetch_table
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.width", 0)
     pd.set_option("display.max_colwidth", None)
 
-    df = fetch_table()
+    df = package_fetch_table()
     print(f"SOURCE_URL: {SOURCE_URL}")
     print(f"SOURCE_DATE: {SOURCE_DATE}")
     print(df.to_string(index=False))
-
-
-# ---------------------------------------------------------------------------
-# 模块级常量
-# ---------------------------------------------------------------------------
-SOURCE_URL, SOURCE_DATE = _resolve_source_metadata()
-SOURCE_NAME: str = "国信期货 — 各品种每笔下单数量限制"
 
 
 if __name__ == "__main__":
