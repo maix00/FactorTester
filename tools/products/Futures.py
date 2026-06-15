@@ -4,7 +4,7 @@
 提供 FuturesContract（具体合约）和 Futures（主办合约／主指数合约）两层结构。
 Futures 通过 roller_info 表维护「历史交易日 → 对应主办合约」的映射关系。
 
-roller_info 的闲置释放由 tools.base.IdleResourceManager 统一管理。
+roller_info 的闲置释放由 DataHub → IdleResourceManager 统一管理。
 """
 import pandas as pd
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
@@ -12,7 +12,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 from tools.products.Product import Product
-from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.data_source.DataHub import DataHub
 from tools.data.DataIndex import DataIndex
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
@@ -67,24 +67,24 @@ class Futures(AdjustableProductMixin, Product):
     def _ensure_roller_info(self):
         """
         确保 self.roller_info 可用。
-        从 IdleResourceManager 的全局缓存中拿全量数据（按 path 去重），
+        从 DataHub 的全局缓存中拿全量数据（按 path 去重），
         筛出当前品种的切片赋给 self.roller_info。
         全局缓存释放后 self.roller_info 即为失效视图，下次调用会重新加载。
         """
-        manager = IdleResourceManager.get_instance()
+        hub = DataHub.get_instance()
         path = self.get_roller_info_path()
         if not path:
             raise ValueError(f"roller_info_path not set for {self.name}")
 
         # 先 touch（无论是否已有缓存，更新该 path 的 last_access）
-        manager.touch('roller_info', path)
+        hub.touch('roller_info', path)
 
         # 如果 self.roller_info 仍有效（底层缓存未被释放），直接返回
         if self.roller_info is not None:
             return
 
         # 从全局缓存加载全量 roller_info（多个品种共享同一个 path）
-        ri = manager.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
+        ri = hub.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
         assert ri is not None
         ri['STARTDATE'] = pd.to_datetime(ri['STARTDATE'])
         ri['ENDDATE'] = pd.to_datetime(ri['ENDDATE'])

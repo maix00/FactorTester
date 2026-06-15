@@ -2,7 +2,7 @@
 DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
 
 核心职责：
-  - 懒加载 DataFrame（委托 IdleResourceManager 按 (namespace, path) 缓存）
+  - 懒加载 DataFrame（委托 DataHub → IdleResourceManager 按 (namespace, key) 缓存）
   - 列名映射（原始 Parquet 列名 → DataColumn 标准枚举）
   - 时间索引构建（将日期列 + 时间列组合为 MultiIndex）
   - 复权价格计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
@@ -13,11 +13,11 @@ DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
   product.DAY1.get_data(start=..., end=...)  # 时间范围切片
 
 缓存策略：
-  - IdleResourceManager 统一管理，namespace='datameta'
+  - DataHub 统一管理，namespace='datameta'
   - 同一 parquet 文件被多个品种共享时只加载一次
   - 默认 300 秒 TTL，每次访问自动刷新时间戳
 
-注意：本对象不保留 self.data 属性，所有数据通过 IdleResourceManager 存取。
+注意：本对象不保留 self.data 属性，所有数据通过 DataHub 存取。
 """
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ import numpy as np
 import pandas as pd
 
 from tools.base.UniqueNameObject import UniqueNameObject
-from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.data_source.DataHub import DataHub
 from tools.data.DataIndex import DataIndex
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data import DataProviderProductTS as DataSource
 
-# IdleResourceManager 中 DataMeta 使用的 namespace 常量
+# DataHub 中 DataMeta 使用的 namespace 常量
 _DATAMETA_NAMESPACE = "datameta"
 # 默认空闲 TTL（秒）：5 分钟无访问后自动回收
 _DEFAULT_IDLE_TTL = 300
@@ -113,7 +113,7 @@ class DataMeta(UniqueNameObject):
     # ── 资源 ID ──
 
     def _resource_id(self) -> str:
-        """生成 IdleResourceManager 的 resource_id: '{source_alias}:{product_name}:{freq_name}'。"""
+        """生成 DataHub 的 resource key: '{source_alias}:{product_name}:{freq_name}'。"""
         source = self.get_current_source()
         return f"{source.key}:{self.object.name}:{self.freq.name}"
 
@@ -227,18 +227,15 @@ class DataMeta(UniqueNameObject):
                         raise ValueError(f"Column {col} not found in data")
             return cast(pd.DataFrame, df)
 
-        # 通过 IdleResourceManager 缓存
-        manager = IdleResourceManager.get_instance()
-        resource_id = self._resource_id()
+        # 通过 DataHub 缓存（传自定义 reader 保留实例上下文）
+        hub = DataHub.get_instance()
+        resource_key = self._resource_id()
 
-        if force_reload:
-            # 强制重载：先清理缓存
-            manager._cache.pop((_DATAMETA_NAMESPACE, resource_id), None)
-            manager.registry.remove(f"{_DATAMETA_NAMESPACE}:{resource_id}")
-
-        df = manager.load(
+        return hub.load(
             namespace=_DATAMETA_NAMESPACE,
-            path=resource_id,
+            key=resource_key,
+            ttl=_DEFAULT_IDLE_TTL,
+            force_reload=force_reload,
             reader=lambda _: self._load_and_process(
                 source=source,
                 data_cols_mapping=data_cols_mapping,
@@ -247,13 +244,11 @@ class DataMeta(UniqueNameObject):
                 filter_object=filter_object,
                 filter_object_attr=filter_object_attr,
             ),
-            ttl=_DEFAULT_IDLE_TTL,
         )
-        return df
     
     def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
         """
-        获取 DataFrame（通过 IdleResourceManager 缓存 + 自动回收）。
+        获取 DataFrame（通过 DataHub 缓存 + 自动回收）。
         start_calc_point: DataTime | None，为 None 时不截断。
         copy=True 时返回副本，避免外部修改影响缓存。
 

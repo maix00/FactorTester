@@ -250,6 +250,14 @@ class IdleResourceManager:
         resource_id = self._to_resource_id(namespace, path)
         self._registry.record_use(resource_id)
 
+    def invalidate(self, namespace: str, path: str):
+        """强制从缓存和 registry 中删除指定资源。"""
+        resource_id = self._to_resource_id(namespace, path)
+        key = (namespace, path)
+        with self._cache_lock:
+            self._cache.pop(key, None)
+        self._registry.remove(resource_id)
+
     # ── 内部 ──
 
     @staticmethod
@@ -258,10 +266,12 @@ class IdleResourceManager:
 
     def _on_recycle(self, resource_id: str):
         """Reaper 回调：从缓存中删除超时资源。"""
-        # resource_id 格式：namespace:path
         for key in list(self._cache.keys()):
             if self._to_resource_id(*key) == resource_id:
                 with self._cache_lock:
-                    self._cache.pop(key, None)
+                    entry = self._cache.pop(key, None)
+                if entry is not None:
+                    logger.info("[IdleResourceManager] 回收闲置资源: %s", resource_id)
+                    print(f"[IdleResourceManager] 回收闲置资源: {resource_id}")
                 break
 
