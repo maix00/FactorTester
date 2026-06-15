@@ -4,6 +4,7 @@ from .DataProvider import (
     _DataProviderMeta,
     _DataMultipleProviderMeta,
     DataProvider,
+    DataProviderSync,
 )
 
 from .DataHub import DataHub
@@ -12,5 +13,6 @@ __all__ = [
     "_DataProviderMeta",
     "_DataMultipleProviderMeta",
     "DataProvider",
+    "DataProviderSync",
     "DataHub",
 ]
