@@ -31,25 +31,32 @@ class _DataMultipleProviderMeta(ABCMeta):
 
     不硬编码任何子类名；所有引用通过 cls 动态解析。
     """
-    # 使用强引用注册表，避免实例在仅有弱引用时被 GC 回收。
-    _data_sources: Dict[str, Any] = {}  # 全局实例缓存，键为 alias
+    # 按子类隔离注册表，避免不同子类同名 alias 冲突。
+    _sources_registry: Dict[type, Dict[str, Any]] = {}
+
+    def _ensure_registry(cls):
+        """为当前子类懒初始化独立注册表。"""
+        if cls not in cls._sources_registry:
+            cls._sources_registry[cls] = {}
+        return cls._sources_registry[cls]
 
     def __iter__(cls):
         """for item in cls 语法支持。"""
-        return iter(cls._data_sources.values())
+        return iter(cls._ensure_registry().values())
 
     def __contains__(cls, item):
         """in 运算符支持。"""
-        return item in cls._data_sources.values()
+        return item in cls._ensure_registry().values()
 
     def __getitem__(cls, name: str):
         """cls['alias'] 下标语法。"""
-        return cls._data_sources[name]
+        return cls._ensure_registry()[name]
 
     def _register_source(cls, source):
-        """将源注册到全局字典中（若未重复注册）。"""
-        if source.alias not in cls._data_sources:
-            cls._data_sources[source.alias] = source
+        """将源注册到当前子类的独立字典中（若未重复注册）。"""
+        reg = cls._ensure_registry()
+        if source.alias not in reg:
+            reg[source.alias] = source
         return source
 
     def get_default_source(cls):
@@ -141,12 +148,12 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
 
     @classmethod
     def all(cls):
-        """返回已注册的所有 DataProviderProductTS 实例列表。"""
-        return list(cls._data_sources.values())
-    
+        """返回已注册的所有实例列表。"""
+        return list(cls._ensure_registry().values())
+
     def delete(self):
-        """删除本数据源并从元类字典中移除。"""
-        _DataMultipleProviderMeta._data_sources.pop(self.alias, None)
+        """删除本数据源并从注册表中移除。"""
+        _DataMultipleProviderMeta._ensure_registry(type(self)).pop(self.alias, None)
         super().delete()
 
 if __name__ == '__main__':

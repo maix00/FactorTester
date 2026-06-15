@@ -141,9 +141,10 @@ def sync_data_source_sqlite_store() -> str:
     sources = scan_data_sources()
     source_objects = {}
     try:
-        from tools.data.DataProviderProductTS import _DataMultipleProviderMeta as DataSourceMeta
+        from tools.data.DataProviderProductTS import DataProviderProductTS, _DataMultipleProviderMeta as DataSourceMeta
 
-        source_objects = dict(sorted(DataSourceMeta._data_sources.items()))
+        registry = DataSourceMeta._ensure_registry(DataProviderProductTS)
+        source_objects = dict(sorted(registry.items()))
     except Exception:
         source_objects = {}
 

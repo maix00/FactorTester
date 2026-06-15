@@ -301,11 +301,12 @@ def scan_settings() -> List[SettingEntry]:
 
 def scan_data_sources() -> List[DataSourceEntry]:
     """扫描当前已注册的 DataSource 实例，不负责触发加载。"""
-    from tools.data.DataProviderProductTS import _DataMultipleProviderMeta as DataSourceMeta
+    from tools.data.DataProviderProductTS import DataProviderProductTS, _DataMultipleProviderMeta as DataSourceMeta
     entries = []
     try:
-        # DataSourceMeta._data_sources 是强引用字典
-        for alias, source in sorted(DataSourceMeta._data_sources.items()):
+        # 通过元类获取 DataProviderProductTS 子类的独立注册表
+        registry = DataSourceMeta._ensure_registry(DataProviderProductTS)
+        for alias, source in sorted(registry.items()):
             cols_list = []
             data_cols = getattr(source, 'data_cols_mapping', None) or {}
             for csv_col, dc in data_cols.items():

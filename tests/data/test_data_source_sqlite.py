@@ -67,8 +67,8 @@ def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         DataSourceMeta,
-        "_data_sources",
-        {"test_source": source},
+        "_sources_registry",
+        {DataSource: {"test_source": source}},
         raising=False,
     )
 
