@@ -98,7 +98,7 @@ class ColumnRef(FactorExpr):
                 try:
                     ds = dm.set_current_source(source)
                 except ValueError as e:
-                    raise Warning(f"ColumnRef: source {source.alias} is not compatible with product {p.name} at freq {freq.name}") from e
+                    raise Warning(f"ColumnRef: source {source.key} is not compatible with product {p.name} at freq {freq.name}") from e
             if dm.next_available_source() is None:
                 continue  # 无可用数据源，跳过此品种
             col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA

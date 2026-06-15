@@ -135,7 +135,7 @@ def available_sources_for_product(product, freq=None):
             meta = getattr(product, data_freq.name)
             for source in meta.list_available_sources():
                 sources.append({
-                    'alias': source.alias,
+                    'alias': source.key,
                     'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),
                 })
         unique = {}

@@ -84,7 +84,7 @@ class DataMeta(UniqueNameObject):
             self.current_source = source
             return source
         else:
-            raise ValueError(f"Data source {source.alias} is not available for object {self.object.name}")
+            raise ValueError(f"Data source {source.key} is not available for object {self.object.name}")
         
     def get_current_source(self) -> DataSource:
         if not hasattr(self, 'current_source'):
@@ -115,7 +115,7 @@ class DataMeta(UniqueNameObject):
     def _resource_id(self) -> str:
         """生成 IdleResourceManager 的 resource_id: '{source_alias}:{product_name}:{freq_name}'。"""
         source = self.get_current_source()
-        return f"{source.alias}:{self.object.name}:{self.freq.name}"
+        return f"{source.key}:{self.object.name}:{self.freq.name}"
 
     # ── 数据加载（委托给 IdleResourceManager） ──
 
