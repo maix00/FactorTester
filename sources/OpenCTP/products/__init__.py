@@ -1,6 +1,6 @@
 """OpenCTP 品种列表同步模块。"""
 
-from sources.visits import register_visit_source
+from tools.data.data_source.DataHub import DataHub
 
 from ._store import (
     SOURCE_KEY,
@@ -10,7 +10,7 @@ from ._store import (
     load_products_list,
 )
 
-register_visit_source(SOURCE_KEY, SOURCE_LABEL)
+DataHub.get_instance().register_visit_source(SOURCE_KEY, SOURCE_LABEL)
 
 __all__ = [
     "sync_products_from_openctp",

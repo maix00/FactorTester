@@ -12,12 +12,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from tools.data.data_source.DataHub import DataHub
 from ._source import SOURCE_NAME, discover_source_url, fetch_table as _fetch_table
 from ._store import ensure_sqlite_store, load_latest_source_metadata, load_latest_table, save_table
-from sources.visits import get_latest_access_date, record_visit, register_visit_source
 
 SOURCE_KEY = "Guosen/LimitOrderVolume"
-register_visit_source(SOURCE_KEY, SOURCE_NAME)
+hub = DataHub.get_instance()
+hub.register_visit_source(SOURCE_KEY, SOURCE_NAME)
 
 
 def _today_str() -> str:
@@ -48,7 +49,7 @@ def load_source_metadata() -> tuple[str, str]:
     cached = _load_local_metadata()
     source_url: str | None = None
     source_date: str | None = None
-    today_visited = get_latest_access_date(SOURCE_KEY) == _today_str()
+    today_visited = hub.get_latest_access_date(SOURCE_KEY) == _today_str()
     if today_visited and cached is not None:
         return cached
 
@@ -75,13 +76,13 @@ def fetch_table(url: str | None = None):
     if url is not None:
         df = _fetch_table(url=url, source_url=url)
         save_table(df)
-        record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=_today_str())
+        hub.record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=_today_str())
         return df
 
     today = _today_str()
     cached = _load_local_table()
     local_metadata = _load_local_metadata()
-    if get_latest_access_date(SOURCE_KEY) == today:
+    if hub.get_latest_access_date(SOURCE_KEY) == today:
         if cached is not None:
             return cached
 
@@ -93,13 +94,13 @@ def fetch_table(url: str | None = None):
         raise
 
     if local_metadata is not None and local_metadata[1] == source_date:
-        record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=today)
+        hub.record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=today)
         if cached is not None:
             return cached
         # 本地元数据还在但表数据丢了，兜底回抓一次。
 
     df = _load_online_table(source_url, source_date)
-    record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=today)
+    hub.record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=today)
     return df
 
 

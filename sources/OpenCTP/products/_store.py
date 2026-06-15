@@ -16,7 +16,6 @@ from datetime import date
 from typing import Any
 
 from tools.data.data_source.DataHub import DataHub
-from sources.visits import record_visit
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +128,8 @@ def sync_products_from_openctp(*, refresh: bool = False) -> list[dict[str, Any]]
                 )
                 updated_count += 1
 
-    record_visit(SOURCE_KEY, source_label=SOURCE_LABEL)
+    hub = DataHub.get_instance()
+    hub.record_visit(SOURCE_KEY, source_label=SOURCE_LABEL)
     logger.info(
         "cnproducts_list 同步完成：共 %d 个品种，本次新增 %d，更新日期 %d",
         len(rows),

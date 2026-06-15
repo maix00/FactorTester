@@ -31,9 +31,12 @@ import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, List
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from tools.data.data_source.DataProvider import DataProvider, DataProviderSync
 
 from tools.base.IdleResourceManager import IdleResourceManager
 
@@ -80,7 +83,7 @@ class DataHub:
             raise RuntimeError("Use DataHub.get_instance()")
         # ── SQLite 管理 ──
         self._sqlite_stores: Dict[str, SQLiteStore] = {}  # store_key → SQLiteStore
-        self._providers: Dict[str, 'DataProvider'] = {}
+        self._providers: dict[str, DataProvider] = {}
         self._visit_sources: Dict[str, VisitSource] = {}  # source_key → VisitSource
 
         # ── DataFrame 加载器 ──
@@ -307,7 +310,7 @@ class DataHub:
 
     # ── DataProvider 管理 ──
 
-    def register_provider(self, provider: 'DataProvider') -> 'DataProvider':
+    def register_provider(self, provider: DataProvider) -> DataProvider:
         if provider.key in self._providers:
             logger.warning("DataProvider %s already registered, skipping", provider.key)
             return self._providers[provider.key]
@@ -318,11 +321,11 @@ class DataHub:
     def unregister_provider(self, key: str) -> None:
         self._providers.pop(key, None)
 
-    def get_provider(self, key: str) -> 'DataProvider | None':
+    def get_provider(self, key: str) -> DataProvider | None:
         return self._providers.get(key)
 
     @property
-    def providers(self) -> List['DataProvider']:
+    def providers(self) -> list[DataProvider]:
         return list(self._providers.values())
 
     def sync(self, provider_key: str | None = None, refresh: bool = False) -> Dict[str, int]:
@@ -337,7 +340,10 @@ class DataHub:
             store_key = getattr(provider, '_store_key', 'openctp')
             with self.connect_store(store_key) as conn:
                 try:
-                    n = provider.sync(conn, refresh=refresh)
+                    if hasattr(provider, 'sync'):
+                        n = provider.sync(conn, refresh=refresh)  # type: ignore[union-attr]
+                    else:
+                        n = 0
                     results[provider.key] = n
                 except Exception:
                     logger.exception("sync failed for %s", provider.key)
