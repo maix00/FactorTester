@@ -64,8 +64,8 @@ class _DataMultipleProviderMeta(_DataProviderMeta):
     def _register_source(cls, source):
         """将源注册到当前子类的独立字典中（若未重复注册）。"""
         reg = cls._ensure_registry()
-        if source.alias not in reg:
-            reg[source.alias] = source
+        if source.key not in reg:
+            reg[source.key] = source
         return source
 
     def get_default_source(cls):

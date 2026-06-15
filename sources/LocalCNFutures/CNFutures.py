@@ -286,7 +286,7 @@ def get_all_futures_contract() -> List[Product]:
     from tools import DataFreq
     from tools.data import DataProviderProductTS
     futures_contract_ds_min1 = DataProviderProductTS(
-        alias = 'LocalCNFuturesContractMIN1',
+        key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
             os.path.isfile(os.path.join(data_dir_min, f"{object.alias}.{data_type}")),
@@ -349,7 +349,7 @@ def get_all_futures() -> List[CNFutures]:
     from tools import DataFreq
     from tools.data import DataProviderProductTS
     futures_ds_min1 = DataProviderProductTS(
-        alias = 'LocalCNFuturesMIN1',
+        key = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
         get_object_path=lambda object: get_object_path(object, data_dir_min),
         timezone = 'Asia/Shanghai',
@@ -357,7 +357,7 @@ def get_all_futures() -> List[CNFutures]:
         data_cols_mapping=datacolumn_map_reversed,
     )
     futures_ds_day1 = DataProviderProductTS(
-        alias = 'LocalCNFuturesDAY1',
+        key = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         get_object_path=lambda object: get_object_path(object, data_dir_day),
         timezone = 'Asia/Shanghai',
