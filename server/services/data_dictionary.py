@@ -301,7 +301,7 @@ def scan_settings() -> List[SettingEntry]:
 
 def scan_data_sources() -> List[DataSourceEntry]:
     """扫描当前已注册的 DataSource 实例，不负责触发加载。"""
-    from tools.data.DataSource import DataSourceMeta
+    from tools.data.DataProviderProductTS import _DataProviderMeta as DataSourceMeta
     entries = []
     try:
         # DataSourceMeta._data_sources 是强引用字典

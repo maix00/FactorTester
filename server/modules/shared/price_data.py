@@ -14,7 +14,7 @@ from flask import request, jsonify
 from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
 from tools.data.DataIndex import finest_index
-from tools.data.DataSource import DataSource
+from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
 from tools.products.Futures import Futures
 from tools.products.product_utils import get_contract_desc, get_product_contracts
 from .price_data_helpers import format_price_row

@@ -7,7 +7,8 @@ import pandas as pd
 
 from server.services import data_source_sqlite
 from server.services.data_dictionary import DataSourceEntry
-from tools.data.DataSource import DataSource, DataSourceMeta
+from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
+from tools.data.DataProviderProductTS import _DataProviderMeta as DataSourceMeta
 
 
 def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):

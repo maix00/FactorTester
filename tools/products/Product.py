@@ -15,7 +15,7 @@ from tools.base.UniqueObject import UniqueObject
 from tools.data.DataMeta import DataMeta
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
-from tools.data.DataSource import DataSource
+from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
 
 class Product(UniqueObject):
     """

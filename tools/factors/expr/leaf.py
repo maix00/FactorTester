@@ -17,7 +17,7 @@ from tools.data.DataFreq import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data.DataSource import DataSource
+    from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
     from tools.data.DataMeta import DataMeta
     from tools.parameters.Parameter import Parameter
 
@@ -57,7 +57,7 @@ class ColumnRef(FactorExpr):
         - 若未指定：遍历 DataSource 找到第一个可用且包含所需列的源
         - 若无注册的数据源：返回 None，由 DataMeta 自行加载
         """
-        from tools.data.DataSource import DataSource as DS
+        from tools.data.DataProviderProductTS import DataProviderProductTS as DS
 
         if source is not None and source.freq == freq and product in source:
             return source

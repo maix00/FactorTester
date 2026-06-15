@@ -283,8 +283,9 @@ def get_all_futures_contract() -> List[Product]:
 
     data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
 
-    from tools import DataSource, DataFreq
-    futures_contract_ds_min1 = DataSource(
+    from tools import DataFreq
+    from tools.data.DataProviderProductTS import DataProviderProductTS
+    futures_contract_ds_min1 = DataProviderProductTS(
         alias = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
@@ -345,8 +346,9 @@ def get_object_path(object: Product, folder: str):
 def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
-    from tools import DataSource, DataFreq
-    futures_ds_min1 = DataSource(
+    from tools import DataFreq
+    from tools.data.DataProviderProductTS import DataProviderProductTS
+    futures_ds_min1 = DataProviderProductTS(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
         get_object_path=lambda object: get_object_path(object, data_dir_min),
@@ -354,7 +356,7 @@ def get_all_futures() -> List[CNFutures]:
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
     )
-    futures_ds_day1 = DataSource(
+    futures_ds_day1 = DataProviderProductTS(
         alias = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         get_object_path=lambda object: get_object_path(object, data_dir_day),

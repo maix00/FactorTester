@@ -1,6 +1,6 @@
 # =============================================================================
-# tools/data/DataSource.py
-# 数据源模块
+# tools/data/DataProviderProductTS.py
+# 品种时序数据提供器
 #
 # 描述一个具体的数据来源（如本地 CSV/Parquet 目录）：
 #   - 包含数据频率、文件路径函数、列名映射表、时区等元数据。
@@ -19,21 +19,21 @@ from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 
-class DataSourceMeta(ABCMeta):
+class _DataProviderMeta(ABCMeta):
     """
-    DataSource 的元类。
+    DataProviderProductTS 的元类。
 
-    实现了全局 DataSource 注册表，支持：
-      - for ds in DataSource  遍历所有已注册的数据源
-      - ds in DataSource       判断某个源是否已注册
-      - DataSource['alias']    按别名查找
+    实现了全局 DataProviderProductTS 注册表，支持：
+      - for ds in DataProviderProductTS  遍历所有已注册的数据源
+      - ds in DataProviderProductTS       判断某个源是否已注册
+      - DataProviderProductTS['alias']    按别名查找
       - 默认数据源管理：第一个被创建的源自动成为默认源
     """
     # 使用强引用注册表，避免 source 在仅有弱引用时被 GC 回收。
-    _data_sources: Dict[str, 'DataSource'] = {}  # 全局数据源实例缓存，键为 alias
+    _data_sources: Dict[str, 'DataProviderProductTS'] = {}  # 全局数据源实例缓存，键为 alias
 
     def __iter__(cls):
-        """for ds in DataSource 语法支持。"""
+        """for ds in DataProviderProductTS 语法支持。"""
         return iter(cls._data_sources.values())
 
     def __contains__(cls, item):
@@ -41,27 +41,27 @@ class DataSourceMeta(ABCMeta):
         return item in cls._data_sources.values()
 
     def __getitem__(cls, name: str):
-        """DataSource['alias'] 下标语法。"""
+        """DataProviderProductTS['alias'] 下标语法。"""
         return cls._data_sources[name]
 
-    def _register_source(cls, source: 'DataSource') -> 'DataSource':
+    def _register_source(cls, source: 'DataProviderProductTS') -> 'DataProviderProductTS':
         """将源注册到全局字典中（若未重复注册）。"""
         if source.alias not in cls._data_sources:
             cls._data_sources[source.alias] = source
         return source
 
-    def get_default_source(cls) -> 'DataSource':
+    def get_default_source(cls) -> 'DataProviderProductTS':
         """获取当前默认数据源。"""
         return cls.default_source
 
-    def set_default_source(cls, source: 'DataSource') -> 'DataSource':
+    def set_default_source(cls, source: 'DataProviderProductTS') -> 'DataProviderProductTS':
         """设置默认数据源。"""
         cls.default_source = source
         return source
 
-class DataSource(UniqueObject, metaclass=DataSourceMeta):
+class DataProviderProductTS(UniqueObject, metaclass=_DataProviderMeta):
     """
-    数据源。
+    品种时序数据提供器。
 
     描述一个具体的数据来源，主要把 Product 映射到实际文件路径。
 
@@ -78,7 +78,7 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
         time_cols_mapping     : {csv列名: DataFreq} 映射，将文件中的时间列映射到 DataFreq.name
         data_cols_mapping     : {csv列名: DataColumn} 映射，将文件中的数据列映射到 DataColumn.name
     """
-    default_source: 'DataSource'
+    default_source: 'DataProviderProductTS'
 
     def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, alias=alias, **kwargs)
@@ -92,9 +92,9 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
             self.alias = alias
             self.freq = DataFreq(data_freq)    # 数据频率对象
             # 第一个被创建的源自动成为默认源
-            if not DataSource.all():
-                DataSource.set_default_source(self)
-            DataSource._register_source(self)  # 注册到元类管理的字典
+            if not DataProviderProductTS.all():
+                DataProviderProductTS.set_default_source(self)
+            DataProviderProductTS._register_source(self)  # 注册到元类管理的字典
 
             # ── 路径解析（可插拔） ──
             if path_resolver is not None:
@@ -123,7 +123,7 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
     def __contains__(self, object: UniqueObject) -> bool:
         """
         支持 object in data_source 语法，判断某个 Product 是否在此数据源中存在实际数据。
-        必须时区匹配（如 Product.timezone == DataSource.timezone）。
+        必须时区匹配（如 Product.timezone == DataProviderProductTS.timezone）。
         """
         if hasattr(object, 'timezone') and getattr(object, 'timezone') != self.timezone:
             return False
@@ -139,16 +139,16 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
 
     @classmethod
     def all(cls):
-        """返回已注册的所有 DataSource 实例列表。"""
+        """返回已注册的所有 DataProviderProductTS 实例列表。"""
         return list(cls._data_sources.values())
     
     def delete(self):
         """删除本数据源并从元类字典中移除。"""
-        DataSourceMeta._data_sources.pop(self.alias, None)
+        _DataProviderMeta._data_sources.pop(self.alias, None)
         super().delete()
 
 if __name__ == '__main__':
-    ds1 = DataSource('source1', data_freq='1D', get_object_path=lambda _: None)
+    ds1 = DataProviderProductTS('source1', data_freq='1D', get_object_path=lambda _: None)
     print(ds1)
-    ds = DataSource.get_default_source()
+    ds = DataProviderProductTS.get_default_source()
     print(ds)

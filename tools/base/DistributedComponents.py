@@ -2,8 +2,8 @@
 # tools/base/DistributedComponents.py
 # 分布式数据组件抽象接口 + 默认本地实现
 #
-# 为 DataSource 预留分布式扩展点：
-#   - PathResolver: 将 (DataSource, Product) 映射到存储路径
+# 为 DataProviderProductTS 预留分布式扩展点：
+#   - PathResolver: 将 (DataProviderProductTS, Product) 映射到存储路径
 #
 # 默认本地实现（LocalPathResolver）完全兼容现有行为；
 # 分布式部署时替换为 Redis / RPC / S3 实现即可，上层代码零改动。
