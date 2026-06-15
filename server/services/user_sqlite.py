@@ -8,20 +8,16 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from pathlib import Path
 from typing import Any
 
-from scripts.data_dir import DATA_DIR
-from server.services.local_sql_data import SQLiteStore, register_store
+import Settings
 
-
-USER_SQLITE_DIR = Path(DATA_DIR) / "cache" / "sqlite-web"
-USER_SQLITE_PATH = USER_SQLITE_DIR / "users.sqlite"
+USER_SQLITE_PATH = Settings.CACHE_DB_PATH
 
 
 def _connect() -> sqlite3.Connection:
-    USER_SQLITE_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(USER_SQLITE_PATH)
+    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -104,7 +100,7 @@ def sync_user_sqlite_store() -> str:
             LEVELS_FILE,
         )
     except Exception:
-        return str(USER_SQLITE_PATH)
+        return str(Settings.CACHE_DB_PATH)
 
     accounts = _read_json(ACCOUNTS_FILE)
     organizations = _read_json(ORGANIZATIONS_FILE)
@@ -175,19 +171,9 @@ def sync_user_sqlite_store() -> str:
                 if isinstance(row, dict)
             ],
         )
-    return str(USER_SQLITE_PATH)
+    return str(Settings.CACHE_DB_PATH)
 
 
 def ensure_user_sqlite_store() -> str:
     """Ensure the SQLite mirror exists and is up-to-date."""
     return sync_user_sqlite_store()
-
-
-register_store(
-    SQLiteStore(
-        key="users",
-        label="用户数据镜像",
-        path_getter=lambda: str(USER_SQLITE_PATH),
-        ensure=ensure_user_sqlite_store,
-    )
-)

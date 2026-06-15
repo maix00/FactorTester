@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 
+import Settings
 from server import create_app
 from server.services import accounts as account_store
 from server.services import data_source_sqlite
 from server.services import sqlite_web_mount
-from server.services import user_sqlite
 from sources.OpenCTP import client as openctp_client
 from sqlite_web.sqlite_web import datasets
 
@@ -19,17 +19,16 @@ def _write_json(path, payload):
 def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     data_dir = tmp_path / 'data'
     users_dir = data_dir / 'users'
-    openctp_db = tmp_path / 'cache' / 'localdata' / 'onlinedata.sqlite'
-    users_db = tmp_path / 'cache' / 'sqlite-web' / 'users.sqlite'
+    unified_db = tmp_path / 'cache' / 'localdata' / 'onlinedata.sqlite'
 
     monkeypatch.setattr(account_store, 'ACCOUNTS_FILE', str(users_dir / 'accounts.json'))
     monkeypatch.setattr(account_store, 'ORGANIZATIONS_FILE', str(users_dir / 'organizations.json'))
     monkeypatch.setattr(account_store, 'LEVELS_FILE', str(users_dir / 'levels.json'))
-    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'cache' / 'localdata')
-    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', openctp_client.CACHE_DIR / 'onlinedata.sqlite')
+    monkeypatch.setattr(Settings, 'CACHE_DIR', tmp_path / 'cache' / 'localdata')
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', unified_db)
+    monkeypatch.setattr(openctp_client, 'CACHE_DIR', Settings.CACHE_DIR)
+    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', Settings.CACHE_DB_PATH)
     monkeypatch.setattr(data_source_sqlite, 'PREVIEW_PRODUCTS_PER_SOURCE', 0)
-    monkeypatch.setattr(user_sqlite, 'USER_SQLITE_DIR', users_db.parent)
-    monkeypatch.setattr(user_sqlite, 'USER_SQLITE_PATH', users_db)
     monkeypatch.setattr(sqlite_web_mount, '_mounted_app', None)
 
     _write_json(users_dir / 'accounts.json', [{
@@ -60,9 +59,8 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     datasets.clear()
     app = create_app()
 
-    assert openctp_db.exists()
-    assert users_db.exists()
-    assert set(datasets.keys()) == {'datasources.sqlite', 'onlinedata.sqlite', 'users.sqlite'}
+    assert unified_db.exists()
+    assert set(datasets.keys()) == {'onlinedata.sqlite'}
 
     client = app.test_client()
     resp = client.get('/sqlite-web/')

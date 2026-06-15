@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+import Settings
 from tools.data.hub import DataHub
 
 logger = logging.getLogger(__name__)
@@ -116,5 +117,5 @@ def load_source_metadata() -> tuple[str, str]:
     cached = load_latest_source_metadata()
     if cached is not None:
         return cached
-    logger.error("本地缓存不可用: %s", CACHE_DB_PATH)
+    logger.error("本地缓存不可用: %s", Settings.CACHE_DB_PATH)
     raise RuntimeError("无法获取数据来源的 URL 和日期，请检查网络连接或本地缓存。")

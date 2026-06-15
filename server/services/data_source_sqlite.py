@@ -5,27 +5,21 @@ import os
 import re
 import sqlite3
 import time
-from pathlib import Path
 from typing import Any
 
 import duckdb
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+import Settings
 from server.services.data_dictionary import scan_data_sources
-from server.services.local_sql_data import SQLiteStore, register_store
 
-
-DATA_SOURCE_SQLITE_DIR = Path(DATA_DIR) / "cache" / "sqlite-web"
-DATA_SOURCE_SQLITE_PATH = DATA_SOURCE_SQLITE_DIR / "datasources.sqlite"
 PREVIEW_PRODUCTS_PER_SOURCE = 1
 PREVIEW_ROW_LIMIT = 80
-Settings = None
 
 
 def _connect() -> sqlite3.Connection:
-    DATA_SOURCE_SQLITE_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATA_SOURCE_SQLITE_PATH)
+    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -130,10 +124,6 @@ def sync_data_source_sqlite_store() -> str:
         pass
 
     try:
-        global Settings
-        if Settings is None:
-            import importlib
-            Settings = importlib.import_module("Settings")
         products = list(Settings.get_all_products())
     except Exception:
         products = []
@@ -239,18 +229,8 @@ def sync_data_source_sqlite_store() -> str:
                 )
                 preview_budget -= 1
 
-    return str(DATA_SOURCE_SQLITE_PATH)
+    return str(Settings.CACHE_DB_PATH)
 
 
 def ensure_data_source_sqlite_store() -> str:
     return sync_data_source_sqlite_store()
-
-
-register_store(
-    SQLiteStore(
-        key="datasources",
-        label="DataSource 元数据与 Parquet 预览",
-        path_getter=lambda: str(DATA_SOURCE_SQLITE_PATH),
-        ensure=ensure_data_source_sqlite_store,
-    )
-)

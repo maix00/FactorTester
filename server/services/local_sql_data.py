@@ -20,8 +20,8 @@ def _hub() -> DataHub:
 # ── 初始化：注册 openctp store ──────────────────────────────────
 
 def _openctp_store_path() -> str:
-    from sources.OpenCTP.client import CACHE_DB_PATH
-    return str(CACHE_DB_PATH)
+    import Settings
+    return str(Settings.CACHE_DB_PATH)
 
 
 def _ensure_openctp_store() -> str:

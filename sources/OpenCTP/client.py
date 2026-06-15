@@ -17,19 +17,18 @@ import re
 import sqlite3
 import time
 from datetime import date
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+import Settings
 
 
 BASE_URL = "http://dict.openctp.cn"
-CACHE_DIR = Path(DATA_DIR) / "cache" / "localdata"
-CACHE_DB_PATH = CACHE_DIR / "onlinedata.sqlite"
+CACHE_DIR = Settings.CACHE_DIR
+CACHE_DB_PATH = Settings.CACHE_DB_PATH
 ENDPOINTS = {
     "markets": "/markets",
     "products": "/products",

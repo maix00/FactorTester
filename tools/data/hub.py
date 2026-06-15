@@ -216,8 +216,8 @@ class DataHub:
         """确保 source_visits 表存在于 openctp store 中。"""
         # 如果 openctp store 尚未注册，自动注册
         if "openctp" not in self._sqlite_stores:
-            from sources.OpenCTP.client import CACHE_DB_PATH
-            self.register_store("openctp", CACHE_DB_PATH)
+            import Settings
+            self.register_store("openctp", Settings.CACHE_DB_PATH)
         with self._connect_sqlite("openctp") as conn:
             conn.execute(
                 """

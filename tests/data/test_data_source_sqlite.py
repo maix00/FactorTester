@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+import Settings
 from server.services import data_source_sqlite
 from server.services.data_dictionary import DataSourceEntry
 from tools.data import DataProviderProductTS as DataSource
@@ -13,7 +14,7 @@ from tools.data import _DataMultipleProviderMeta as DataSourceMeta
 
 def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):
     parquet_path = tmp_path / "sample.parquet"
-    sqlite_path = tmp_path / "cache" / "sqlite-web" / "datasources.sqlite"
+    sqlite_path = tmp_path / "cache" / "localdata" / "onlinedata.sqlite"
 
     pd.DataFrame(
         {
@@ -34,16 +35,8 @@ def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):
         data_cols_mapping={"open_price": "OPEN", "close_price": "CLOSE"},
     )
 
-    monkeypatch.setattr(
-        data_source_sqlite,
-        "DATA_SOURCE_SQLITE_DIR",
-        sqlite_path.parent,
-    )
-    monkeypatch.setattr(
-        data_source_sqlite,
-        "DATA_SOURCE_SQLITE_PATH",
-        sqlite_path,
-    )
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
     monkeypatch.setattr(
         data_source_sqlite,
         "scan_data_sources",
@@ -58,13 +51,9 @@ def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):
         ],
     )
     monkeypatch.setattr(
-        data_source_sqlite,
-        "Settings",
-        SimpleNamespace(
-            get_all_products=lambda: [
-                SimpleNamespace(name="TEST.DCE", alias="TEST.DCE", timezone="Asia/Shanghai")
-            ]
-        ),
+        Settings,
+        "get_all_products",
+        lambda: [SimpleNamespace(name="TEST.DCE", alias="TEST.DCE", timezone="Asia/Shanghai")],
     )
     monkeypatch.setattr(
         DataSourceMeta,
