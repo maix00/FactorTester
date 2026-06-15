@@ -20,7 +20,7 @@ from waitress import serve
 from server import create_app
 from server.services.accounts import accounts_lock, load_accounts
 from server.services.runtime_state import current_user
-from tools.cache.IdleResourceManager import IdleResourceManager
+from tools.data.cache.IdleResourceManager import IdleResourceManager
 
 app = create_app()
 
@@ -38,7 +38,7 @@ _WATCH_EXACT = {'Settings'}
 _SKIP_RELOAD = {
     'start_server',          # 自己
     'tools.base.UniqueNameObject',
-    'tools.cache.IdleResourceManager',
+    'tools.data.cache.IdleResourceManager',
 }
 # 前缀匹配 — 整个子树都不参与热重载（单元测试勿 reload）
 _SKIP_RELOAD_PREFIXES = ('tests.',)

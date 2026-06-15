@@ -129,7 +129,7 @@ def touch_session_activity() -> None:
         return
     sid = get_session_id()
     try:
-        from tools.cache.IdleResourceManager import IdleResourceManager
+        from tools.data.cache.IdleResourceManager import IdleResourceManager
         IdleResourceManager.get_instance().registry.record_use(session_resource_id(sid))
     except Exception:
         pass
@@ -143,7 +143,7 @@ def check_session_idle() -> bool:
     if sid is None:
         return False
     try:
-        from tools.cache.IdleResourceManager import IdleResourceManager
+        from tools.data.cache.IdleResourceManager import IdleResourceManager
         idle_list = IdleResourceManager.get_instance().registry.get_idle_resources(SESSION_IDLE_TIMEOUT)
         return session_resource_id(sid) in idle_list
     except Exception:
@@ -153,7 +153,7 @@ def check_session_idle() -> bool:
 def cleanup_session_resource(sid: str) -> None:
     """从 registry 和 params_store 中清理指定 session。"""
     try:
-        from tools.cache.IdleResourceManager import IdleResourceManager
+        from tools.data.cache.IdleResourceManager import IdleResourceManager
         IdleResourceManager.get_instance().registry.remove(session_resource_id(sid))
     except Exception:
         pass
