@@ -242,6 +242,11 @@ class FactorGroupTester:
         memberships_by_triple: dict[tuple, np.ndarray] = {}
 
         # Unique factor aliases per tester
+        total_unique_factors = sum(
+            len(set(g.factor_alias for g in tester_groups))
+            for (_tester, tester_groups) in tester_by_id.values()
+        )
+        factor_prep_idx = 0
         for tester_id, (tester, tester_groups) in tester_by_id.items():
             unique_factor_aliases = list(dict.fromkeys(
                 (g.factor_alias, g.tester_id) for g in tester_groups
@@ -250,6 +255,9 @@ class FactorGroupTester:
                 factor = tester.resolve_factor(factor_alias)
                 if factor is None:
                     continue
+                factor_prep_idx += 1
+                _emit_progress("factor_eval", f"准备因子数据 {factor_prep_idx}/{total_unique_factors}：{factor_alias}",
+                               completed=factor_prep_idx - 1, total=total_unique_factors)
                 shared_inputs = _prepare_group_shared_inputs(
                     tester,
                     factor,
@@ -298,7 +306,10 @@ class FactorGroupTester:
             si = spec_index_by_group.get(flat_idx, flat_idx)
             groups_by_spec_key.setdefault((si, group.triple_key), []).append(group)
 
+        total_spec_keys = len(groups_by_spec_key)
+        flat_idx = 0
         for (si, triple), spec_groups in groups_by_spec_key.items():
+            flat_idx += 1
             first_group = spec_groups[0]
             factor_alias = first_group.factor_alias
             n_groups = first_group.n_groups
@@ -311,6 +322,8 @@ class FactorGroupTester:
             if factor is None:
                 continue
 
+            _emit_progress("flat_membership", f"展开分组隶属度 {flat_idx}/{total_spec_keys}：{factor_alias}",
+                           completed=flat_idx - 1, total=total_spec_keys)
             try:
                 si_membership_np, si_flat_info = build_flat_membership_from_groups(
                     spec_groups,
@@ -744,8 +757,9 @@ class FactorGroupTester:
 
         total_entries = len(plan.entries)
         for entry_idx, entry in enumerate(plan.entries, start=1):
-            _emit_progress("trade_data", f"加载交易数据 {entry_idx}/{total_entries}",
-                           completed=entry_idx - 1, total=total_entries)
+            _emit_progress("trade_data", f"加载收益数据 {entry_idx}/{total_entries}",
+                           completed=entry_idx - 1, total=total_entries,
+                           sub_step="load_returns")
             factor = entry.tester.resolve_factor(entry.factor_alias)
             if factor is None:
                 raise ValueError(f"未找到因子 {entry.factor_alias}")
@@ -763,6 +777,9 @@ class FactorGroupTester:
                 end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
+            _emit_progress("trade_data", f"加载价格数据 {entry_idx}/{total_entries}",
+                           completed=entry_idx - 1, total=total_entries,
+                           sub_step="load_prices")
             local_price_np = _load_group_trade_prices(
                 factor,
                 trade_valid_cols=list(trade_valid_cols),
@@ -772,6 +789,9 @@ class FactorGroupTester:
                 end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
+            _emit_progress("trade_data", f"合并品种数据 {entry_idx}/{total_entries}",
+                           completed=entry_idx - 1, total=total_entries,
+                           sub_step="merge_products")
             for local_col_idx, product in enumerate(trade_valid_cols):
                 product_name = getattr(product, "name", str(product))
                 global_products_by_name.setdefault(product_name, product)
@@ -793,6 +813,9 @@ class FactorGroupTester:
         plan.merged_price_np = merged_price_np
         # Remap settlement_bar_mask from signal→trade dimension (per-product,
         # since different exchanges settle at different times).
+        _emit_progress("trade_data", "处理结算数据",
+                       completed=0, total=1,
+                       sub_step="settlement")
         merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
         merged_settlement_mask = np.zeros((T, P), dtype=bool)
         for entry in plan.entries:
@@ -812,6 +835,9 @@ class FactorGroupTester:
             merged_settlement_price_np[merged_settlement_mask] = merged_price_np[merged_settlement_mask]
         plan.merged_settlement_price_np = merged_settlement_price_np
         plan.merged_settlement_bar_mask = merged_settlement_mask
+        _emit_progress("trade_data", "计算交易规格",
+                       completed=0, total=1,
+                       sub_step="spec_bundle")
         plan.merged_spec_bundle = _resolve_group_trade_specs(
             signal_valid_cols=signal_valid_cols,
             valid_cols=ordered_trade_products,
@@ -838,14 +864,18 @@ class FactorGroupTester:
         batch_label = f"{batch_index + 1}/{batch_total}"
         set_batch_context(batch_index, batch_total, batch_label)
         try:
-            _emit_progress("trade_data", f"批次 {batch_label} 加载交易数据",
-                           completed=0, total=1)
+            _emit_progress("trade_data", f"批次 {batch_label} 开始加载交易数据",
+                           completed=0, total=1,
+                           sub_step="start")
             plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications, use_closetoday=use_closetoday)
             first_entry = plan.entries[0]
             first_factor = first_entry.tester.resolve_factor(first_entry.factor_alias)
             if first_factor is None or plan.merged_returns_np is None or plan.merged_price_np is None or plan.merged_spec_bundle is None:
                 raise ValueError("merged batch plan is incomplete")
             spec_bundle = plan.merged_spec_bundle
+            _emit_progress("trade_data", f"批次 {batch_label} 填充缺失收益",
+                           completed=0, total=1,
+                           sub_step="fill_returns")
             returns_raw = np.asarray(plan.merged_returns_np, dtype=float)
             returns_filled = np.where(np.isnan(returns_raw) | np.isinf(returns_raw) | (returns_raw <= -1.0), 0.0, returns_raw)
             group_name_map = {
@@ -857,6 +887,9 @@ class FactorGroupTester:
             # Build per-group configs: one config dict per global group index.
             # Each entry contributes its groups via flat_group_info.
             batch_flat_count = plan.merged_membership_np.shape[1]
+            _emit_progress("trade_data", f"批次 {batch_label} 构建分组配置，扁平组 {batch_flat_count} 个",
+                           completed=0, total=1,
+                           sub_step="build_configs")
             group_configs: list[dict] = [{} for _ in range(batch_flat_count)]
             for simulation_index, group_indices in plan.group_slices.items():
                 entry = entries_by_simulation_index[simulation_index]
@@ -869,7 +902,8 @@ class FactorGroupTester:
                     group_configs[local_to_global.get(flat_pos, flat_pos)] = dict(info)
 
             _emit_progress("trade_data", f"批次 {batch_label} 交易数据就绪，扁平组 {batch_flat_count} 个，品种 {len(spec_bundle.valid_cols)} 个",
-                           completed=1, total=1)
+                           completed=1, total=1,
+                           sub_step="ready")
 
             _emit_progress("simulate", f"批次 {batch_label} 开始模拟", completed=0, total=1)
             try:
@@ -914,6 +948,10 @@ class FactorGroupTester:
                     f"plan.merged_price_np.shape={plan.merged_price_np.shape if plan.merged_price_np is not None else None} "
                     f"P={len(spec_bundle.valid_cols)} | {e}"
                 ) from e
+
+            _emit_progress("simulate", f"批次 {batch_label} 模拟完成，开始切片",
+                           completed=1, total=1,
+                           sub_step="slicing")
 
             out: list[dict[str, Any]] = []
             for simulation_index, group_indices in plan.group_slices.items():

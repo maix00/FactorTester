@@ -280,26 +280,29 @@
                 if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
                     batchMgr.syncRows(newTotal);
-                    // 后端告知的 phases：[{key, label}, ...]
+                    // 后端告知的 phases：[{key, label, sub_steps?}, ...]
                     if (payload.phases && payload.phases.length) {
                         var phaseKeys = [];
                         var labelMap = {};
+                        var subStepLabelMap = {};
                         for (var pi = 0; pi < payload.phases.length; pi++) {
                             var pitem = payload.phases[pi];
                             if (pitem.key) {
                                 phaseKeys.push(pitem.key);
                                 if (pitem.label) labelMap[pitem.key] = pitem.label;
+                                if (pitem.sub_steps) subStepLabelMap[pitem.key] = pitem.sub_steps;
                             }
                         }
                         batchMgr.registerPhases(phaseKeys);
                         batchMgr.setPhaseLabels(labelMap);
+                        batchMgr.setSubStepLabels(subStepLabelMap);
                     }
                     // 回放缓存的无 batch_index 全局进度
                     if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
                         var pending = pendingGlobalProgress;
                         pendingGlobalProgress = [];
                         for (var p = 0; p < pending.length; p++) {
-                            batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message);
+                            batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message, pending[p].sub_step);
                         }
                     }
                 } else if (event === 'progress') {
@@ -307,16 +310,17 @@
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));
                     if (bi !== undefined && bi >= 0) {
-                        batchMgr.updateRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message);
+                        batchMgr.updateRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     } else if (!_hasRows) {
                         pendingGlobalProgress.push({
                             phase: payload.phase,
                             completed: payload.completed || 0,
                             total: payload.total || 0,
-                            message: payload.message
+                            message: payload.message,
+                            sub_step: payload.sub_step
                         });
                     } else {
-                        batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message);
+                        batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
                 }
             });

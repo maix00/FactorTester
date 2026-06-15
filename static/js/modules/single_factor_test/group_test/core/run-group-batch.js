@@ -50,6 +50,8 @@
     function createProductCoverageBatchManager(opts) {
         var progressContainer = opts.progressContainer;
         var phaseLabels = Object.assign({ init: '准备' }, opts.phaseLabels || {});
+        /** { phaseKey: { subStepKey: label, ... } }  — phases 元数据中的 sub_steps */
+        var subStepLabels = opts.subStepLabels || {};
         var skipPhases = { info: true, product_coverage_batch: true, init: true };
         // 不在下拉历史中显示的阶段（但仍参与进度条更新）
         var hideInHistory = { batch: true };
@@ -69,9 +71,15 @@
             phaseOrder.push(phase);
         }
 
+        /** 设置子步骤标签（由 run-test.js 传入 phases 元数据中的 sub_steps） */
+        function setSubStepLabels(labels) {
+            subStepLabels = Object.assign({}, labels || {});
+        }
+
         /** 计算阶段全局进度百分比，永不回退。
          *  均匀分配：每个非隐藏阶段占据相等的进度条宽度。
-         *  阶段内按 completed/total 线性填充。 */
+         *  阶段内按 completed/total 线性填充。
+         *  当 phase 有子步骤时，completed/total 按所有子步骤聚合计算。 */
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
@@ -82,7 +90,6 @@
                     visiblePhases.push(phaseOrder[i]);
                 }
             }
-            // 如果当前 phase 不在列表中（动态发现），追加
             if (visiblePhases.indexOf(phase) < 0 && !skipPhases[phase] && !hideInHistory[phase]) {
                 visiblePhases.push(phase);
             }
@@ -94,10 +101,37 @@
 
             // 每个阶段占 1/numPhases 的宽度
             var segmentWidth = 100 / numPhases;
-            var localFrac = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+            var localFrac;
+            if (row.phaseHistory[phase] && row.phaseHistory[phase].subSteps && !_subStepsEmpty(row.phaseHistory[phase].subSteps)) {
+                // 有子步骤：聚合所有子步骤的完成度
+                var agg = _aggregateSubSteps(row.phaseHistory[phase].subSteps);
+                localFrac = agg.total > 0 ? Math.max(0, Math.min(1, agg.completed / agg.total)) : 0;
+            } else {
+                localFrac = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+            }
             var newPct = Math.round((phaseIdx + localFrac) * segmentWidth);
             if (newPct > (row.pct || 0)) row.pct = newPct;
             return row.pct;
+        }
+
+        /** 聚合子步骤：total = 所有子步骤 total 之和，completed = 所有已完成子步骤 total + 当前进行中子步骤的 completed */
+        function _aggregateSubSteps(subSteps) {
+            var aggTotal = 0, aggCompleted = 0;
+            var keys = Object.keys(subSteps);
+            for (var k = 0; k < keys.length; k++) {
+                var ss = subSteps[keys[k]];
+                aggTotal += ss.total || 0;
+                if (ss.done) {
+                    aggCompleted += ss.total || 0;
+                } else {
+                    aggCompleted += ss.completed || 0;
+                }
+            }
+            return { completed: aggCompleted, total: aggTotal };
+        }
+
+        function _subStepsEmpty(subSteps) {
+            return Object.keys(subSteps).length === 0;
         }
 
         // ---- 下拉历史面板 ----
@@ -116,28 +150,58 @@
                     completed: h.completed,
                     total: h.total,
                     done: h.done,
-                    message: _escapeProgressHtml(h.message || '')
+                    message: _escapeProgressHtml(h.message || ''),
+                    subSteps: h.subSteps || null,
+                    subStepKeys: h.subStepKeys || null
                 });
             }
             if (!items.length) {
                 row.historyEl.innerHTML = '<div style="color:#98a2b3;padding:4px 0;">暂无阶段记录</div>';
                 return;
             }
-            var html = items.map(function(it) {
+            var htmlParts = [];
+            for (var ii = 0; ii < items.length; ii++) {
+                var it = items[ii];
                 var count = it.total > 0 ? (it.completed + '/' + it.total) : '--';
                 var status = it.done ? '✓ 已完成' : '◷ 进行中';
                 var color = it.done ? '#12a150' : '#0078d4';
-                return '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
+                htmlParts.push(
+                    '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
                     + '<span style="font-weight:600;color:#475467;">' + it.label + '</span>'
                     + '<span style="color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;" title="' + count + '">' + count + '</span>'
                     + '<span style="color:' + color + ';white-space:nowrap;">' + status + '</span>'
                     + '<span style="color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + it.message + '">' + it.message + '</span>'
-                    + '</div>';
-            }).join('');
-            row.historyEl.innerHTML = html;
+                    + '</div>'
+                );
+
+                // 渲染子步骤（缩进显示）
+                if (it.subSteps && it.subStepKeys) {
+                    for (var sk = 0; sk < it.subStepKeys.length; sk++) {
+                        var skey = it.subStepKeys[sk];
+                        var ss = it.subSteps[skey];
+                        if (!ss) continue;
+                        var phaseSubs = subStepLabels[it.phase] || {};
+                        var ssLabel = _escapeProgressHtml(phaseSubs[skey] || skey);
+                        var ssCount = ss.total > 0 ? (ss.completed + '/' + ss.total) : '--';
+                        var ssDone = ss.total > 0 && ss.completed >= ss.total;
+                        var ssStatus = ssDone ? '✓' : (it.done ? '✓' : '◷');
+                        var ssColor = ssDone ? '#12a150' : (it.done ? '#12a150' : '#0078d4');
+                        var ssMsg = _escapeProgressHtml(ss.message || '');
+                        htmlParts.push(
+                            '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:1px 0;font-size:10px;color:#667085;">'
+                            + '<span style="padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + ssLabel + '">└ ' + ssLabel + '</span>'
+                            + '<span style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;" title="' + ssCount + '">' + ssCount + '</span>'
+                            + '<span style="color:' + ssColor + ';white-space:nowrap;">' + ssStatus + '</span>'
+                            + '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + ssMsg + '">' + ssMsg + '</span>'
+                            + '</div>'
+                        );
+                    }
+                }
+            }
+            row.historyEl.innerHTML = htmlParts.join('');
         }
 
-        function _recordPhaseProgress(row, phase, completed, total, message) {
+        function _recordPhaseProgress(row, phase, completed, total, message, subStep) {
             if (!phase || skipPhases[phase]) return;
 
             // info 类型：不创建新条目，只更新消息
@@ -170,7 +234,6 @@
             var newCompleted = Math.max(existing.completed || 0, completed || 0);
             var newTotal = Math.max(existing.total || 0, total || 0);
             // 如果 phase 被重新进入（如 simulate 在多个 batch 中重复），done 必须重置
-            // done 只根据当前进度判断，不沿用上次的标记
             var isNowDone = newTotal > 0 && newCompleted >= newTotal;
             // 跳过类消息（total=0 表示"已有缓存跳过"）不覆盖已有的有意义消息
             var skipLike = (total != null && total === 0) || (message && message.indexOf('跳过') >= 0);
@@ -178,11 +241,39 @@
             if (message && (!skipLike || !bestMessage)) {
                 bestMessage = message;
             }
+
+            // 子步骤处理
+            var existingSubs = existing.subSteps || {};
+            var existingSubKeys = existing.subStepKeys || [];
+            if (subStep) {
+                var oldSub = existingSubs[subStep] || {};
+                var subComp = Math.max(oldSub.completed || 0, completed || 0);
+                var subTot = Math.max(oldSub.total || 0, total || 0);
+                var subDone = subTot > 0 && subComp >= subTot;
+                existingSubs[subStep] = {
+                    completed: subComp,
+                    total: subTot,
+                    done: subDone,
+                    message: message || oldSub.message || ''
+                };
+                if (existingSubKeys.indexOf(subStep) < 0) {
+                    existingSubKeys.push(subStep);
+                }
+
+                // 有子步骤时，阶段的 completed/total 按聚合计算
+                var agg = _aggregateSubSteps(existingSubs);
+                newCompleted = agg.completed;
+                newTotal = agg.total;
+                isNowDone = newTotal > 0 && newCompleted >= newTotal;
+            }
+
             row.phaseHistory[phase] = {
                 completed: newCompleted,
                 total: newTotal,
                 message: bestMessage,
-                done: isNowDone
+                done: isNowDone,
+                subSteps: existingSubs,
+                subStepKeys: existingSubKeys.length > 0 ? existingSubKeys : null
             };
             _renderPhaseHistory(row);
         }
@@ -276,21 +367,29 @@
             return newRow;
         }
 
-        function _updateCoverageBatchRow(index, phase, completed, total, message) {
+        function _updateCoverageBatchRow(index, phase, completed, total, message, subStep) {
             var row = _ensureCoverageBatchRow(index, '');
 
             _registerPhase(phase);
             _computePct(row, phase, completed, total);
-            _recordPhaseProgress(row, phase, completed, total, message);
+            _recordPhaseProgress(row, phase, completed, total, message, subStep);
 
             // 更新阶段名
             if (phase && !skipPhases[phase] && row.phaseEl) {
                 row.phaseEl.textContent = phaseLabels[phase] || phase;
             }
-            // 更新消息行
-            if (message && row.messageEl) {
-                row.messageEl.textContent = message;
-                row.messageEl.title = message;
+            // 更新消息行：如果有子步骤，显示 "阶段名 › 子步骤标签：消息"
+            if (row.messageEl) {
+                var displayMsg = message || '';
+                if (subStep && phase) {
+                    var phaseSubs = subStepLabels[phase] || {};
+                    var subLabel = phaseSubs[subStep] || subStep;
+                    displayMsg = (phaseLabels[phase] || phase) + ' › ' + subLabel + (message ? '：' + message : '');
+                }
+                if (displayMsg) {
+                    row.messageEl.textContent = displayMsg;
+                    row.messageEl.title = displayMsg;
+                }
             }
             // 更新进度条
             if (!skipPhases[phase] && row.fillEl) {
@@ -308,10 +407,10 @@
             ensureRow: _ensureCoverageBatchRow,
             updateRow: _updateCoverageBatchRow,
 
-            updateAllRows: function(phase, completed, total, message) {
+            updateAllRows: function(phase, completed, total, message, subStep) {
                 var keys = Object.keys(coverageBatchRows);
                 for (var k = 0; k < keys.length; k++) {
-                    _updateCoverageBatchRow(parseInt(keys[k]), phase, completed, total, message);
+                    _updateCoverageBatchRow(parseInt(keys[k]), phase, completed, total, message, subStep);
                 }
             },
 
@@ -414,6 +513,8 @@
                     _renderPhaseHistory(coverageBatchRows[indices[j]]);
                 }
             },
+
+            setSubStepLabels: setSubStepLabels,
 
             getPhaseLabels: function() { return phaseLabels; },
 

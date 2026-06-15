@@ -43,7 +43,19 @@ def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     - membership  — 计算分组隶属度
     - remap       — 产品重新映射
     - trade_data  — 加载交易数据（returns + prices + specs）
+      sub_step 可选值：
+        - start          — 开始加载
+        - load_returns   — 加载收益数据
+        - load_prices    — 加载价格数据
+        - merge_products — 合并品种数据
+        - settlement     — 处理结算数据
+        - spec_bundle    — 计算交易规格
+        - fill_returns   — 填充缺失收益
+        - build_configs  — 构建分组配置
+        - ready          — 交易数据就绪
     - simulate    — 交易模拟中
+      sub_step 可选值：
+        - slicing       — 结果切片
     - product_coverage_batch — product coverage batch 级进度
     - flat_membership — 展平隶属度
     - serialize   — 结果序列化

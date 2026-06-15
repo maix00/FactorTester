@@ -13,9 +13,21 @@ GROUP_TEST_PHASES = [
     {"key": "membership",      "label": "分组隶属"},
     {"key": "flat_membership", "label": "展开隶属"},
     {"key": "remap",           "label": "产品映射"},
-    {"key": "trade_data",      "label": "交易数据"},
+    {"key": "trade_data",      "label": "交易数据", "sub_steps": {
+        "start":          "开始加载",
+        "load_returns":   "加载收益",
+        "load_prices":    "加载价格",
+        "merge_products": "合并品种",
+        "settlement":     "处理结算",
+        "spec_bundle":    "计算规格",
+        "fill_returns":   "填充收益",
+        "build_configs":  "构建配置",
+        "ready":          "数据就绪",
+    }},
     {"key": "liquidity",       "label": "流动性容量"},
-    {"key": "simulate",        "label": "模拟中"},
+    {"key": "simulate",        "label": "模拟中", "sub_steps": {
+        "slicing":        "结果切片",
+    }},
     {"key": "batch",           "label": "批次结果"},
     {"key": "serialize",       "label": "序列化"},
 ]
