@@ -141,7 +141,7 @@ def sync_data_source_sqlite_store() -> str:
     sources = scan_data_sources()
     source_objects = {}
     try:
-        from tools.data.DataProviderProductTS import _DataProviderMeta as DataSourceMeta
+        from tools.data.DataProviderProductTS import _DataMultipleProviderMeta as DataSourceMeta
 
         source_objects = dict(sorted(DataSourceMeta._data_sources.items()))
     except Exception:

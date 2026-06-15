@@ -19,21 +19,23 @@ from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 
-class _DataProviderMeta(ABCMeta):
+class _DataMultipleProviderMeta(ABCMeta):
     """
-    DataProviderProductTS 的元类。
+    数据多提供器元类 — 可为任意子类提供全局注册表。
 
-    实现了全局 DataProviderProductTS 注册表，支持：
-      - for ds in DataProviderProductTS  遍历所有已注册的数据源
-      - ds in DataProviderProductTS       判断某个源是否已注册
-      - DataProviderProductTS['alias']    按别名查找
-      - 默认数据源管理：第一个被创建的源自动成为默认源
+    任一使用本元类的子类自动获得：
+      - for ds in SubClass          遍历所有已注册的实例
+      - ds in SubClass              判断某个实例是否已注册
+      - SubClass['alias']           按别名查找
+      - 默认实例管理：第一个被创建的实例自动成为默认
+
+    不硬编码任何子类名；所有引用通过 cls 动态解析。
     """
-    # 使用强引用注册表，避免 source 在仅有弱引用时被 GC 回收。
-    _data_sources: Dict[str, 'DataProviderProductTS'] = {}  # 全局数据源实例缓存，键为 alias
+    # 使用强引用注册表，避免实例在仅有弱引用时被 GC 回收。
+    _data_sources: Dict[str, Any] = {}  # 全局实例缓存，键为 alias
 
     def __iter__(cls):
-        """for ds in DataProviderProductTS 语法支持。"""
+        """for item in cls 语法支持。"""
         return iter(cls._data_sources.values())
 
     def __contains__(cls, item):
@@ -41,25 +43,25 @@ class _DataProviderMeta(ABCMeta):
         return item in cls._data_sources.values()
 
     def __getitem__(cls, name: str):
-        """DataProviderProductTS['alias'] 下标语法。"""
+        """cls['alias'] 下标语法。"""
         return cls._data_sources[name]
 
-    def _register_source(cls, source: 'DataProviderProductTS') -> 'DataProviderProductTS':
+    def _register_source(cls, source):
         """将源注册到全局字典中（若未重复注册）。"""
         if source.alias not in cls._data_sources:
             cls._data_sources[source.alias] = source
         return source
 
-    def get_default_source(cls) -> 'DataProviderProductTS':
+    def get_default_source(cls):
         """获取当前默认数据源。"""
         return cls.default_source
 
-    def set_default_source(cls, source: 'DataProviderProductTS') -> 'DataProviderProductTS':
+    def set_default_source(cls, source):
         """设置默认数据源。"""
         cls.default_source = source
         return source
 
-class DataProviderProductTS(UniqueObject, metaclass=_DataProviderMeta):
+class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
     """
     品种时序数据提供器。
 
@@ -144,7 +146,7 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataProviderMeta):
     
     def delete(self):
         """删除本数据源并从元类字典中移除。"""
-        _DataProviderMeta._data_sources.pop(self.alias, None)
+        _DataMultipleProviderMeta._data_sources.pop(self.alias, None)
         super().delete()
 
 if __name__ == '__main__':
