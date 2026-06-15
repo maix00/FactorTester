@@ -60,6 +60,7 @@ class BatchExecutionPlan:
     merged_returns_np: np.ndarray | None = None
     merged_price_np: np.ndarray | None = None
     merged_settlement_price_np: np.ndarray | None = None
+    merged_settlement_bar_mask: np.ndarray | None = None
     merged_spec_bundle: Any = None
     # Per-entry trade-dim data (built during plan construction)
     entry_trade_valid_cols: dict[int, list] | None = None
@@ -790,11 +791,27 @@ class FactorGroupTester:
         ))
         plan.merged_returns_np = merged_returns_np
         plan.merged_price_np = merged_price_np
-        settlement_mask = np.asarray(first_entry.shared_inputs.settlement_bar_mask, dtype=bool)
+        # Remap settlement_bar_mask from signal→trade dimension (per-product,
+        # since different exchanges settle at different times).
         merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
-        if settlement_mask.size:
-            merged_settlement_price_np[settlement_mask] = merged_price_np[settlement_mask]
+        merged_settlement_mask = np.zeros((T, P), dtype=bool)
+        for entry in plan.entries:
+            signal_mask = np.asarray(entry.shared_inputs.settlement_bar_mask, dtype=bool)
+            trade_valid_cols = plan.entry_trade_valid_cols.get(entry.simulation_index)
+            if not trade_valid_cols:
+                continue
+            for local_col_idx, product in enumerate(trade_valid_cols):
+                product_name = getattr(product, "name", str(product))
+                global_col_idx = plan.trade_product_positions[product_name]
+                # Map signal-column → trade-column: find matching signal position
+                for sig_col_idx, sig_product in enumerate(entry.shared_inputs.signal_valid_cols):
+                    if getattr(sig_product, "name", str(sig_product)) == product_name:
+                        merged_settlement_mask[:, global_col_idx] |= signal_mask[:, sig_col_idx]
+                        break
+        if merged_settlement_mask.any():
+            merged_settlement_price_np[merged_settlement_mask] = merged_price_np[merged_settlement_mask]
         plan.merged_settlement_price_np = merged_settlement_price_np
+        plan.merged_settlement_bar_mask = merged_settlement_mask
         plan.merged_spec_bundle = _resolve_group_trade_specs(
             signal_valid_cols=signal_valid_cols,
             valid_cols=ordered_trade_products,
@@ -862,7 +879,7 @@ class FactorGroupTester:
                     returns_filled=returns_filled,
                     price_np=np.asarray(plan.merged_price_np, dtype=float),
                     settlement_price_np=np.asarray(plan.merged_settlement_price_np, dtype=float) if plan.merged_settlement_price_np is not None else None,
-                    settlement_bar_mask=np.asarray(first_entry.shared_inputs.settlement_bar_mask, dtype=bool),
+                    settlement_bar_mask=np.asarray(plan.merged_settlement_bar_mask, dtype=bool) if plan.merged_settlement_bar_mask is not None else None,
                     valid_cols=spec_bundle.valid_cols,
                     index_list=list(first_entry.shared_inputs.index_list),
                     n_names=group_name_map,
