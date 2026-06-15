@@ -5,11 +5,13 @@ from tools.data.data_source.DataProvider import (
     _DataMultipleProviderMeta,
     DataProvider,
 )
+from tools.data.data_source.DataProviderProductTS import DataProviderProductTS
 from tools.data.data_source.DataHub import DataHub
 
 __all__ = [
     "_DataProviderMeta",
     "_DataMultipleProviderMeta",
     "DataProvider",
+    "DataProviderProductTS",
     "DataHub",
 ]

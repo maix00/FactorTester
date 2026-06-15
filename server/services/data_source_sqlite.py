@@ -141,7 +141,7 @@ def sync_data_source_sqlite_store() -> str:
     sources = scan_data_sources()
     source_objects = {}
     try:
-        from tools.data.DataProviderProductTS import DataProviderProductTS
+        from tools.data import DataProviderProductTS
         from tools.data import _DataMultipleProviderMeta as DataSourceMeta
 
         registry = DataSourceMeta._ensure_registry(DataProviderProductTS)

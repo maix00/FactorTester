@@ -284,7 +284,7 @@ def get_all_futures_contract() -> List[Product]:
     data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
 
     from tools import DataFreq
-    from tools.data.DataProviderProductTS import DataProviderProductTS
+    from tools.data import DataProviderProductTS
     futures_contract_ds_min1 = DataProviderProductTS(
         alias = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
@@ -347,7 +347,7 @@ def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
     from tools import DataFreq
-    from tools.data.DataProviderProductTS import DataProviderProductTS
+    from tools.data import DataProviderProductTS
     futures_ds_min1 = DataProviderProductTS(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,

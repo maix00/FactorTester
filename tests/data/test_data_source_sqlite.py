@@ -7,7 +7,7 @@ import pandas as pd
 
 from server.services import data_source_sqlite
 from server.services.data_dictionary import DataSourceEntry
-from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
+from tools.data import DataProviderProductTS as DataSource
 from tools.data import _DataMultipleProviderMeta as DataSourceMeta
 
 

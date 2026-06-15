@@ -1,5 +1,5 @@
 # =============================================================================
-# tools/data/DataProviderProductTS.py
+# tools/data/data_source/DataProviderProductTS.py
 # 品种时序数据提供器
 #
 # 描述一个具体的数据来源（如本地 CSV/Parquet 目录）：
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from tools.base.UniqueObject import UniqueObject
 from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn

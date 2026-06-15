@@ -31,7 +31,7 @@ from tools.base.IdleResourceManager import IdleResourceManager
 from tools.data.DataIndex import DataIndex
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
-from tools.data.DataProviderProductTS import DataProviderProductTS as DataSource
+from tools.data import DataProviderProductTS as DataSource
 
 # IdleResourceManager 中 DataMeta 使用的 namespace 常量
 _DATAMETA_NAMESPACE = "datameta"
