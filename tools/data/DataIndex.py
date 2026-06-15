@@ -36,11 +36,15 @@ def _is_day_level_name(name: str) -> bool:
     """判断层级名是否表示天倍数级别（如 _SIGNAL@DAY1 / _SIGNAL@WEEK1）。"""
     from tools.data.DataFreq import DataFreq
 
+    name_upper = str(name).upper()
+    if name_upper in {"TRADING_DAY", "TRADE_DAY"} or name_upper.endswith("_TRADING_DAY"):
+        return True
     freq_str = name.split(_SIGNAL_PREFIX, 1)[-1] if _SIGNAL_PREFIX in name else name
     try:
         return DataFreq(freq_str).is_day_multiple()
     except Exception:
-        return freq_str.upper().startswith(_DAY_LEVEL_PREFIXES)
+        freq_upper = freq_str.upper()
+        return freq_upper.startswith(_DAY_LEVEL_PREFIXES) or freq_upper in {"TRADING_DAY", "TRADE_DAY"}
 
 
 def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:

@@ -116,7 +116,15 @@ def _end_of_trading_day_mask_for_column(index: pd.Index, values: np.ndarray) -> 
     raw_index = di.raw
     if isinstance(raw_index, pd.MultiIndex):
         day_level = next(
-            (i for i, name in enumerate(raw_index.names) if name and str(name).upper().endswith("DAY1")),
+            (
+                i
+                for i, name in enumerate(raw_index.names)
+                if name and (
+                    str(name).upper().endswith("DAY1")
+                    or str(name).upper() in {"TRADING_DAY", "TRADE_DAY"}
+                    or str(name).upper().endswith("_TRADING_DAY")
+                )
+            ),
             None,
         )
         if day_level is not None:
