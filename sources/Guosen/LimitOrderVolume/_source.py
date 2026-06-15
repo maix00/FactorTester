@@ -30,10 +30,14 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date
+from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +116,7 @@ def _discover_source_url_via_browser(index_url: str = INDEX_URL) -> tuple[str, d
     for a in soup.find_all("a"):
         text = a.get_text(strip=True)
         if _LINK_TITLE_KEYWORD in text:
-            href = a.get("href", "").strip()
+            href = str(a.get("href") or "").strip()
             if not href:
                 continue
             source_url = _resolve_url(href, index_url)
@@ -142,7 +146,7 @@ def discover_source_url(index_url: str = INDEX_URL) -> tuple[str, date | None]:
     for a in soup.find_all("a"):
         text = a.get_text(strip=True)
         if _LINK_TITLE_KEYWORD in text:
-            href = a.get("href", "").strip()
+            href = str(a.get("href") or "").strip()
             if not href:
                 continue
             source_url = _resolve_url(href, index_url)
