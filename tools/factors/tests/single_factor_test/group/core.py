@@ -98,6 +98,42 @@ _TARGET_REBUILD_MAX_ITERATIONS = 8
 _EACH_PERIOD_TARGET_MAX_ITERATIONS = 16
 
 
+def _end_of_trading_day_mask_for_column(index: pd.Index, values: np.ndarray) -> np.ndarray:
+    """Return a mask for the last finite bar of each trading day for one column."""
+    di = DataIndex(index)
+    raw_index = di.raw
+    if isinstance(raw_index, pd.MultiIndex):
+        day_level = next(
+            (i for i, name in enumerate(raw_index.names) if name and str(name).upper().endswith("DAY1")),
+            None,
+        )
+        if day_level is not None:
+            day_values = pd.DatetimeIndex(raw_index.get_level_values(day_level))
+        else:
+            day_values = pd.DatetimeIndex(di.finest_index).normalize()
+    else:
+        day_values = pd.DatetimeIndex(di.finest_index).normalize()
+
+    values_arr = np.asarray(values, dtype=float)
+    finite = np.isfinite(values_arr)
+    mask = np.zeros(len(values_arr), dtype=bool)
+    if not finite.any():
+        return mask
+
+    finite_positions = np.flatnonzero(finite)
+    finite_days = day_values[finite_positions]
+    if len(finite_positions) == 1:
+        mask[finite_positions[0]] = True
+        return mask
+
+    day_arr = finite_days.to_numpy()
+    day_change = np.flatnonzero(day_arr[1:] != day_arr[:-1]) + 1
+    boundaries = np.concatenate([day_change, np.array([len(finite_positions)], dtype=int)])
+    for end in boundaries:
+        mask[finite_positions[end - 1]] = True
+    return mask
+
+
 @dataclass(slots=True)
 class GroupSharedInputs:
     start_date: Any
@@ -113,6 +149,7 @@ class GroupSharedInputs:
     signal_returns_np: np.ndarray
     present_np: np.ndarray
     signal_update_mask: np.ndarray
+    settlement_bar_mask: np.ndarray
     index_list: list
     T: int
     P: int
@@ -424,11 +461,26 @@ def _prepare_group_shared_inputs(
         start_calc_point=start_dt,
     )
     price_src = align_table_for_group(factor, raw_prices)
+    settlement_bar_mask_df = pd.DataFrame(
+        np.column_stack(
+            [
+                _end_of_trading_day_mask_for_column(
+                    price_src.index,
+                    price_src.iloc[:, col_idx].to_numpy(dtype=float),
+                )
+                for col_idx in range(price_src.shape[1])
+            ]
+        ) if price_src.shape[1] > 0 else np.zeros((len(price_src.index), 0), dtype=bool),
+        index=price_src.index,
+        columns=signal_valid_cols,
+    )
     price_src.index = DataIndex(price_src.index).signal_index
     di_p = DataIndex(price_src.index)
     mask_p = di_p.slice_by_datatime(start_dt, end_dt)
     price_src = cast(pd.DataFrame, price_src[mask_p])
     price_src = price_src.reindex(index=common_index, columns=signal_valid_cols)
+    settlement_bar_mask_df = cast(pd.DataFrame, settlement_bar_mask_df[mask_p])
+    settlement_bar_mask_df = settlement_bar_mask_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
     if price_src.isna().all(axis=None):
         raise ValueError(f"{factor.alias}: 无法取得分组回测交易价格列 {price_col.name}")
 
@@ -488,7 +540,9 @@ def _prepare_group_shared_inputs(
     present_df = present_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
     if trim_start > 0 or trim_end < len(_all_nan):
         present_df = present_df.iloc[trim_start:trim_end]
+        settlement_bar_mask_df = settlement_bar_mask_df.iloc[trim_start:trim_end]
     present_np = present_df.to_numpy(dtype=bool)
+    settlement_bar_mask = settlement_bar_mask_df.to_numpy(dtype=bool)
 
     index_list = list(table_src.index)
     T = len(index_list)
@@ -527,6 +581,7 @@ def _prepare_group_shared_inputs(
         signal_returns_np=signal_returns_np,
         present_np=present_np,
         signal_update_mask=np.asarray(signal_update_mask, dtype=bool),
+        settlement_bar_mask=np.asarray(settlement_bar_mask, dtype=bool),
         index_list=index_list,
         T=T,
         P=P,
@@ -1978,6 +2033,7 @@ def simulate_group_trading_book(
     product_currency_vec: np.ndarray | list[str] | None = None,
     currency_conversion_fee_rate: float = 0.0,
     time_index: list | None = None,
+    settlement_bar_mask: np.ndarray | None = None,
 ) -> dict:
     """Simulate grouped trading with quantities, fees, cash, margin, and per-period tradability."""
     T, M, P = membership_np.shape
@@ -2091,7 +2147,17 @@ def simulate_group_trading_book(
         settlement_price_arr = np.asarray(settlement_price_np, dtype=float)
         if settlement_price_arr.shape != (T, P):
             raise ValueError(f"settlement_price_np shape={settlement_price_arr.shape} != {(T, P)}")
-    settlement_bar_mask = DataIndex(pd.Index(time_index)).settlement_bar_mask()
+    if settlement_bar_mask is not None:
+        settlement_bar_mask = np.asarray(settlement_bar_mask, dtype=bool)
+        if settlement_bar_mask.ndim == 1:
+            settlement_bar_mask = np.broadcast_to(settlement_bar_mask.reshape(T, 1), (T, P))
+        elif settlement_bar_mask.shape != (T, P):
+            raise ValueError(f"settlement_bar_mask shape={settlement_bar_mask.shape} != {(T, P)}")
+    else:
+        settlement_bar_mask = np.broadcast_to(
+            DataIndex(pd.Index(time_index)).end_of_trading_day().reshape(T, 1),
+            (T, P),
+        )
 
     if settlement_price_arr is not None and bool(np.isfinite(settlement_price_arr).any()):
         def _run_fifo_settlement_path() -> dict:
@@ -2182,16 +2248,13 @@ def simulate_group_trading_book(
                 pre_rebalance_total_minor = cash_minor + occupied_minor
                 pre_rebalance_cash_minor = cash_minor.copy()
 
-                settlement_bar = bool(settlement_bar_mask[t]) if t < len(settlement_bar_mask) else False
+                settlement_bar_row = settlement_bar_mask[t] if t < len(settlement_bar_mask) else np.zeros(P, dtype=bool)
                 settlement_px = np.asarray(settlement_price_arr[t], dtype=float) if settlement_price_arr is not None else price_t
                 settlement_px = np.where(np.isfinite(settlement_px) & (settlement_px > 0), settlement_px, price_t)
                 settlement_base = _contract_base_row(settlement_px, ts=time_index[t])
 
                 executable_row = executable[np.newaxis, :]
-                if settlement_bar:
-                    mark_contract_base = settlement_base
-                else:
-                    mark_contract_base = contract_value_base
+                mark_contract_base = np.where(settlement_bar_row, settlement_base, contract_value_base)
                 mark_contract_minor = _round_minor_units(mark_contract_base)
 
                 one_lot_margin_mat = np.where(
@@ -2359,7 +2422,7 @@ def simulate_group_trading_book(
                 quantities = _buy_equal_alloc(buy_mask, available_cash_minor)
 
                 settlement_realized_minor = np.zeros(M, dtype=np.int64)
-                if settlement_bar:
+                if np.any(settlement_bar_row):
                     new_occupied_minor = np.zeros(M, dtype=np.int64)
                     for row_idx in range(M):
                         row_settle_minor = 0
@@ -2406,7 +2469,9 @@ def simulate_group_trading_book(
                 margin_occupied_np[t] = occupied_minor
                 target_amounts_np[t] = _round_minor_units(quantities * mark_contract_base[np.newaxis, :])
                 target_amounts_before_floor_np[t] = _round_minor_units(quantities_old * contract_value_base[np.newaxis, :])
-                prev_end_amounts_np[t] = _round_minor_units(quantities * settlement_base[np.newaxis, :] if settlement_bar else quantities * contract_value_base[np.newaxis, :])
+                prev_end_amounts_np[t] = _round_minor_units(
+                    quantities * np.where(settlement_bar_row[np.newaxis, :], settlement_base[np.newaxis, :], contract_value_base[np.newaxis, :])
+                )
                 buy_fee_amount_np[t] = fee_minor
                 sell_fee_amount_np[t] = 0
                 trade_notional_ratio_np[t] = np.divide(

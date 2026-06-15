@@ -43,6 +43,22 @@ def _is_day_level_name(name: str) -> bool:
         return freq_str.upper().startswith(_DAY_LEVEL_PREFIXES)
 
 
+def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:
+    values = pd.DatetimeIndex(values)
+    mask = np.zeros(len(values), dtype=bool)
+    if len(values) == 0:
+        return mask
+    if len(values) == 1:
+        mask[0] = True
+        return mask
+    normalized = values.normalize()
+    day_change = np.flatnonzero(normalized[1:].to_numpy() != normalized[:-1].to_numpy()) + 1
+    boundaries = np.concatenate([day_change, np.array([len(values)], dtype=int)])
+    for end in boundaries:
+        mask[end - 1] = True
+    return mask
+
+
 class DataIndex:
     """时间索引管理器 — 封装 DatetimeIndex / MultiIndex（纯时间层）的操作。
 
@@ -284,25 +300,25 @@ class DataIndex:
             result = result.tz_localize(None)
         return cast(pd.DatetimeIndex, result.normalize())
 
-    def settlement_bar_mask(self) -> np.ndarray:
-        """标记每个自然日最后一个 bar。
+    def end_of_trading_day(self) -> np.ndarray:
+        """标记每个交易日最后一个 bar。
 
-        这里按 signal_index 的实际顺序来分日，不看 trading_day 字段。
-        适用于 MIN1 / 更细粒度日内索引，尤其是含日盘和夜盘的品种。
+        优先使用 raw MultiIndex 里的交易日层（通常是 DAY1 / trading_day）。
+        如果拿不到交易日层，再退回到时间戳按日归组。
         """
+        idx = self.raw
+        if isinstance(idx, pd.MultiIndex):
+            day_level = next(
+                (i for i, name in enumerate(idx.names) if name and _is_day_level_name(str(name))),
+                None,
+            )
+            if day_level is not None:
+                trading_days = pd.DatetimeIndex(idx.get_level_values(day_level))
+                return _last_in_groups(trading_days)
         ts = self.finest_index
         if len(ts) == 0:
             return np.zeros(0, dtype=bool)
-        days = pd.DatetimeIndex(ts).normalize()
-        mask = np.zeros(len(ts), dtype=bool)
-        if len(ts) == 1:
-            mask[0] = True
-            return mask
-        day_change = np.flatnonzero(days[1:].to_numpy() != days[:-1].to_numpy()) + 1
-        boundaries = np.concatenate([day_change, np.array([len(ts)], dtype=int)])
-        for end in boundaries:
-            mask[end - 1] = True
-        return mask
+        return _last_in_groups(pd.DatetimeIndex(ts).normalize())
 
     # ── 时间切片 ──────────────────────────────────────────────────────────
 

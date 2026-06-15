@@ -28,7 +28,6 @@ from tools.factors.tests.single_factor_test.group.core import (
     clear_batch_context,
     slice_group_run_result,
 )
-from tools.data.DataIndex import DataIndex
 from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES
 
 
@@ -791,7 +790,7 @@ class FactorGroupTester:
         ))
         plan.merged_returns_np = merged_returns_np
         plan.merged_price_np = merged_price_np
-        settlement_mask = DataIndex(pd.Index(first_entry.shared_inputs.index_list)).settlement_bar_mask()
+        settlement_mask = np.asarray(first_entry.shared_inputs.settlement_bar_mask, dtype=bool)
         merged_settlement_price_np = np.full((T, P), np.nan, dtype=float)
         if settlement_mask.size:
             merged_settlement_price_np[settlement_mask] = merged_price_np[settlement_mask]
@@ -863,6 +862,7 @@ class FactorGroupTester:
                     returns_filled=returns_filled,
                     price_np=np.asarray(plan.merged_price_np, dtype=float),
                     settlement_price_np=np.asarray(plan.merged_settlement_price_np, dtype=float) if plan.merged_settlement_price_np is not None else None,
+                    settlement_bar_mask=np.asarray(first_entry.shared_inputs.settlement_bar_mask, dtype=bool),
                     valid_cols=spec_bundle.valid_cols,
                     index_list=list(first_entry.shared_inputs.index_list),
                     n_names=group_name_map,
