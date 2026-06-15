@@ -14,8 +14,29 @@ from typing import Any, Dict
 
 
 class _DataProviderMeta(ABCMeta):
-    """数据提供器基类元类 — 提供按子类隔离的注册表 + 契约方法。"""
+    """数据提供器基类元类 — 仅声明 ensure_schema 契约。"""
 
+    @abstractmethod
+    def ensure_schema(cls, conn) -> None:
+        """
+        在给定 sqlite3.Connection 上建表/VIEW。
+        必须由 DataProvider 子类实现。
+        """
+        ...
+
+
+class _DataMultipleProviderMeta(_DataProviderMeta):
+    """
+    数据多提供器元类 — 为任意子类提供按类隔离的全局注册表。
+
+    任一使用本元类的子类自动获得：
+      - for ds in SubClass          遍历所有已注册的实例
+      - ds in SubClass              判断某个实例是否已注册
+      - SubClass['alias']           按别名查找
+      - 默认实例管理：第一个被创建的实例自动成为默认
+
+    不硬编码任何子类名；所有引用通过 cls 动态解析。
+    """
     # 按子类隔离注册表，避免不同子类同名 alias 冲突。
     _sources_registry: Dict[type, Dict[str, Any]] = {}
     _default_sources: Dict[type, Any] = {}
@@ -55,20 +76,6 @@ class _DataProviderMeta(ABCMeta):
         """设置当前子类的默认数据源。"""
         cls._default_sources[cls] = source
         return source
-
-    # ── 契约方法（由子类实现）──
-
-    @abstractmethod
-    def ensure_schema(cls, conn) -> None:
-        """
-        在给定 sqlite3.Connection 上建表/VIEW。
-        必须由 DataProvider 子类实现。
-        """
-        ...
-
-
-class _DataMultipleProviderMeta(_DataProviderMeta):
-    """多实例注册表元类 — 继承 _DataProviderMeta 的全部注册表能力，无额外覆盖。"""
 
 
 class DataProvider(ABC, metaclass=_DataProviderMeta):
