@@ -33,6 +33,7 @@ class _DataMultipleProviderMeta(ABCMeta):
     """
     # 按子类隔离注册表，避免不同子类同名 alias 冲突。
     _sources_registry: Dict[type, Dict[str, Any]] = {}
+    _default_sources: Dict[type, Any] = {}
 
     def _ensure_registry(cls):
         """为当前子类懒初始化独立注册表。"""
@@ -60,12 +61,12 @@ class _DataMultipleProviderMeta(ABCMeta):
         return source
 
     def get_default_source(cls):
-        """获取当前默认数据源。"""
-        return cls.default_source
+        """获取当前子类的默认数据源。"""
+        return cls._default_sources.get(cls)
 
     def set_default_source(cls, source):
-        """设置默认数据源。"""
-        cls.default_source = source
+        """设置当前子类的默认数据源。"""
+        cls._default_sources[cls] = source
         return source
 
 class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
@@ -87,7 +88,6 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
         time_cols_mapping     : {csv列名: DataFreq} 映射，将文件中的时间列映射到 DataFreq.name
         data_cols_mapping     : {csv列名: DataColumn} 映射，将文件中的数据列映射到 DataColumn.name
     """
-    default_source: 'DataProviderProductTS'
 
     def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, alias=alias, **kwargs)
