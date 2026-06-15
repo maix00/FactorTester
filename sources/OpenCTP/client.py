@@ -573,6 +573,126 @@ def read_cnfutures_contract_specs_for_date(
     return df
 
 
+def read_cnfutures_contract_specs_over_date_range(
+    trading_days: list | pd.DatetimeIndex,
+    *,
+    variety_codes: list[str] | None = None,
+    fee_data_dir: str | Path | None = None,
+) -> pd.DataFrame:
+    """Read per-variety contract specs aligned to a list of trading days.
+
+    Each trading_day is forward-filled from the nearest available snapshot:
+    for each date in *trading_days* we find the latest snapshot_date <= that date.
+    Returns a DataFrame indexed by ``(date, variety_code)`` with one row per
+    (trading_day, variety) combination.
+
+    Columns returned: multiplier, min_tick, min_trade_quantity,
+    long_margin_ratio, open_ratio, open_fixed, close_ratio, close_fixed,
+    closetoday_ratio, closetoday_fixed, plus product_class (for reference).
+    """
+    sync_cnfutures_contract_specs_from_fee_parquet(data_dir=fee_data_dir)
+
+    if not isinstance(trading_days, pd.DatetimeIndex):
+        trading_days = pd.DatetimeIndex(trading_days)
+    trading_days = trading_days.sort_values()
+
+    date_strs = [d.strftime("%Y%m%d") for d in trading_days]
+
+    with _connect_cache() as conn:
+        # Get all distinct snapshot_dates
+        all_snapshots = sorted({
+            str(r["snapshot_date"])
+            for r in conn.execute(
+                "SELECT DISTINCT snapshot_date FROM openctp_cnfutures_contract_specs ORDER BY snapshot_date"
+            ).fetchall()
+        })
+
+    if not all_snapshots:
+        raise FileNotFoundError("未找到任何合约规格快照")
+
+    # Build mapping: each trading_day → nearest snapshot_date (forward-fill)
+    snap_map: dict[str, str] = {}
+    snap_idx = 0
+    for ds in date_strs:
+        # Advance snap_idx to the last snapshot <= ds
+        while snap_idx + 1 < len(all_snapshots) and all_snapshots[snap_idx + 1] <= ds:
+            snap_idx += 1
+        if all_snapshots[snap_idx] <= ds:
+            snap_map[ds] = all_snapshots[snap_idx]
+        else:
+            # No snapshot on or before this date — use the earliest available
+            snap_map[ds] = all_snapshots[0]
+
+    # Build unique snapshot_dates to query
+    unique_snaps = sorted(set(snap_map.values()))
+    placeholders = ",".join("?" for _ in unique_snaps)
+    where_clause = f"snapshot_date IN ({placeholders})"
+    params = tuple(unique_snaps)
+
+    if variety_codes:
+        vc_placeholders = ",".join("?" for _ in variety_codes)
+        where_clause += f" AND product_id IN ({vc_placeholders})"
+        params = params + tuple(str(vc).upper() for vc in variety_codes)
+
+    df = _contract_specs_sql_frame(where_clause, params)
+    if df.empty:
+        return pd.DataFrame()
+
+    # For each variety, keep the row with max open_interest to dedup
+    if "open_interest" in df.columns:
+        df = df.sort_values(["date", "variety_code", "open_interest"], ascending=[True, True, False])
+    df = df.drop_duplicates(subset=["date", "variety_code"], keep="first")
+
+    # Remap snapshot_date → trading_day
+    reverse_map = {v: k for k, v in snap_map.items()}
+    df["trading_day"] = df["date"].map(reverse_map)
+    df["trading_day"] = pd.to_datetime(df["trading_day"], format="%Y%m%d")
+
+    # Build aligned rows: for each (trading_day, variety_code) pair
+    required_pairs = pd.DataFrame(
+        [(td, vc) for td in date_strs for vc in (variety_codes or df["variety_code"].unique())],
+        columns=["trading_day", "variety_code"],
+    )
+    required_pairs["trading_day"] = pd.to_datetime(required_pairs["trading_day"], format="%Y%m%d")
+    required_pairs["variety_code"] = required_pairs["variety_code"].astype(str).str.upper()
+
+    # Merge with actual data, forward-fill missing
+    spec_cols = [
+        "multiplier", "min_tick", "min_trade_quantity", "long_margin_ratio",
+        "open_ratio", "open_fixed", "close_ratio", "close_fixed",
+        "closetoday_ratio", "closetoday_fixed",
+    ]
+    aligned = required_pairs.merge(
+        df[["trading_day", "variety_code"] + spec_cols],
+        on=["trading_day", "variety_code"],
+        how="left",
+    )
+    # Forward-fill per variety_code
+    for col in spec_cols:
+        if col in aligned.columns:
+            aligned[col] = aligned.groupby("variety_code")[col].ffill()
+
+    # Fill remaining NaN with safe defaults
+    defaults = {
+        "multiplier": 1.0,
+        "min_tick": 0.0,
+        "min_trade_quantity": 1.0,
+        "long_margin_ratio": 1.0,
+        "open_ratio": 0.0,
+        "open_fixed": 0.0,
+        "close_ratio": 0.0,
+        "close_fixed": 0.0,
+        "closetoday_ratio": 0.0,
+        "closetoday_fixed": 0.0,
+    }
+    for col, default in defaults.items():
+        if col in aligned.columns:
+            aligned[col] = aligned[col].fillna(default)
+
+    aligned = aligned.set_index(["trading_day", "variety_code"]).sort_index()
+    return aligned
+
+
 def read_latest_cnfutures_product_specs(*, fee_data_dir: str | Path | None = None) -> pd.DataFrame:
     """Read latest product-level display specs from contract specs in SQLite."""
     df = read_cnfutures_contract_specs_for_date(
