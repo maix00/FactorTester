@@ -256,6 +256,48 @@ def get_products_fields(
     ]
 
 
+def get_products_specs_over_date_range(
+    products: list[Any] | tuple[Any, ...],
+    trading_days: pd.DatetimeIndex | list,
+    fields: list[str] | tuple[str, ...] | set[str],
+    *,
+    markets: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Resolve contract specs for multiple products across a date range.
+
+    Returns a dict mapping each field name to a ``(T, P)`` DataFrame
+    indexed by trading_day (rows) and variety_code (columns).
+    """
+    from .client import read_cnfutures_contract_specs_over_date_range
+
+    ordered_products = list(products)
+    ordered_fields = [canonical_field(f) for f in fields]
+
+    variety_codes = [str(getattr(p, "variety_code", _product_code(p))).upper() for p in ordered_products]
+    product_to_vc = {p: vc for p, vc in zip(ordered_products, variety_codes)}
+
+    df = read_cnfutures_contract_specs_over_date_range(
+        trading_days=trading_days,
+        variety_codes=variety_codes,
+    )
+
+    result: dict[str, pd.DataFrame] = {}
+    for field in ordered_fields:
+        if field not in df.columns:
+            continue
+        mat = df[field].unstack(level="variety_code")
+        # Reorder columns to match input product order
+        existing = [vc for vc in variety_codes if vc in mat.columns]
+        mat = mat.reindex(columns=existing)
+        # Fill per-column (product) forward and backward
+        mat = mat.ffill().bfill()
+        # Cast to float64 numpy-safe
+        mat = mat.astype(float)
+        result[field] = mat
+
+    return result
+
+
 def make_field_getter(field: str) -> Callable[[Any], Any]:
     return lambda product: get_product_field(product, field)
 
