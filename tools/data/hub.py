@@ -38,7 +38,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from .providers.DataProvider import DataProvider, DataProviderSync
 
-from tools.base.IdleResourceManager import IdleResourceManager
+from tools.cache.IdleResourceManager import IdleResourceManager
 
 logger = logging.getLogger(__name__)
 

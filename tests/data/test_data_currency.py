@@ -18,6 +18,11 @@ def test_currency_context_allows_single_currency_without_fx_data():
     assert float(ctx.to_base(12.34, "USD")) == 12.34
 
 
+def test_currency_context_requires_explicit_base_currency():
+    with pytest.raises(ValueError, match="需要显式指定 base_currency"):
+        CurrencyConversionContext()
+
+
 def test_currency_context_raises_when_cross_currency_fx_is_missing():
     ctx = CurrencyConversionContext(base_currency="CNY")
 
