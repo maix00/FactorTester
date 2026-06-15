@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+import Settings
+from server.services import unified_sqlite
+
+
+def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "server.services.data_source_sqlite.ensure_data_source_sqlite_store",
+        lambda: calls.append("data_source") or str(sqlite_path),
+    )
+    monkeypatch.setattr(
+        "server.services.user_sqlite.ensure_user_sqlite_store",
+        lambda: calls.append("users") or str(sqlite_path),
+    )
+    monkeypatch.setattr(
+        "server.services.factor_metadata_sqlite.ensure_factor_metadata_sqlite_store",
+        lambda: calls.append("factor_metadata") or str(sqlite_path),
+    )
+    monkeypatch.setattr(
+        "server.services.data_dictionary_sqlite.ensure_data_dictionary_sqlite_store",
+        lambda: calls.append("data_dictionary") or str(sqlite_path),
+    )
+
+    class DummyHub:
+        def ensure_visits_schema(self):
+            calls.append("visits")
+
+    monkeypatch.setattr("tools.data.hub.DataHub.get_instance", lambda: DummyHub())
+
+    path = unified_sqlite.ensure_unified_sqlite_store()
+    assert path == str(sqlite_path)
+    assert calls == ["data_source", "users", "factor_metadata", "data_dictionary", "visits"]

@@ -5,9 +5,7 @@ from flask import redirect, session
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from server.services.local_sql_data import iter_stores
-from server.services.factor_metadata_sqlite import ensure_factor_metadata_sqlite_store
-from server.services.data_dictionary_sqlite import ensure_data_dictionary_sqlite_store
-from tools.data.hub import DataHub
+from server.services.unified_sqlite import ensure_unified_sqlite_store
 
 
 _mounted_app = None
@@ -21,14 +19,8 @@ def build_sqlite_web_app(secret_key):
 
     from sqlite_web.sqlite_web import app as sqlite_web_app
     from sqlite_web.sqlite_web import initialize_app
-    from server.services.data_source_sqlite import ensure_data_source_sqlite_store
-    from server.services.user_sqlite import ensure_user_sqlite_store
 
-    ensure_data_source_sqlite_store()
-    ensure_user_sqlite_store()
-    ensure_factor_metadata_sqlite_store()
-    ensure_data_dictionary_sqlite_store()
-    DataHub.get_instance().ensure_visits_schema()
+    ensure_unified_sqlite_store()
 
     db_paths = [store.path() for store in iter_stores()]
     initialize_app(db_paths, read_only=True)
