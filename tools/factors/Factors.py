@@ -70,6 +70,9 @@ class Factor(FactorExpr):
     _alias_index_lock = threading.Lock()
 
     # 运行时动态属性（calc 后设置）
+    name: str
+    alias: Optional[str] = None
+    _key_2d: Tuple
     _expr: FactorExpr
     _func_expr: FactorExpr
     _source_expr: FactorExpr
