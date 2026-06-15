@@ -272,6 +272,4 @@ class IdleResourceManager:
                     entry = self._cache.pop(key, None)
                 if entry is not None:
                     logger.info("[IdleResourceManager] 回收闲置资源: %s", resource_id)
-                    print(f"[IdleResourceManager] 回收闲置资源: {resource_id}")
                 break
-
