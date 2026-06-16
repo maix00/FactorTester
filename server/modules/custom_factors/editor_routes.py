@@ -16,7 +16,9 @@ from server.modules.shared.param_meta import serialize_param_meta
 from server.services.accounts import can_view_user_scope
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
+from server.services.accounts import get_account, is_super_admin_account
 from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_workspace import build_factor_workspace, push_factor_workspace, sync_factor_workspace
 
 
 @cf_bp.route('/api/validate', methods=['POST'])
@@ -172,6 +174,36 @@ def api_source_root():
         'source_root': source_root,
         'resolved_root': factor_source_root(username),
     })
+
+
+@cf_bp.route('/api/workspace/build', methods=['POST'])
+@login_required
+def api_build_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    result = build_factor_workspace(username)
+    return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/sync', methods=['POST'])
+@login_required
+def api_sync_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    result = sync_factor_workspace(username)
+    return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/push', methods=['POST'])
+@login_required
+def api_push_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    result = push_factor_workspace(username, allow_public_write=is_super_admin_account(get_account(username)))
+    return jsonify({'success': True, **result})
 
 
 @cf_bp.route('/api/params/preset', methods=['GET'])

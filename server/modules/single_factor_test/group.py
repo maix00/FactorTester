@@ -1547,6 +1547,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                             f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
                             f'进入 simulate 的分组为 {simulated_flat_count} 个。'
                             f'详细错误：{detail_msg}'
+                        ),
+                    }
     for raw_result in raw_results:
         idx = int(raw_result.get('simulation_index', -1))
         if idx < 0 or idx >= sim_index:

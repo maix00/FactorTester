@@ -131,7 +131,7 @@ def docs_dev_deployment():
 def docs_tools():
     """工具类代码概览页——带目录导览，点击进入单个文件。"""
     import os
-    from server.services.tool_docs import scan_tool_files
+    from tools.tool_docs import scan_tool_files
     tools_dir = os.path.join(os.getcwd(), 'tools')
     return render_template('tools_doc.html', files=scan_tool_files(tools_dir))
 

@@ -125,7 +125,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │     ├─ runtime_state.py     ← 当前用户上下文
 │     ├─ api_response.py      ← 统一响应格式
 │     ├─ http_auth.py         ← HTTP 认证中间件
-│     └─ tool_docs.py         ← 源码文档生成器
+│     └─ tools/tool_docs.py   ← 源码文档生成器
 │
 ├─ tools/                ← 核心引擎（无 Flask，无 HTTP）
 │  ├─ factors/

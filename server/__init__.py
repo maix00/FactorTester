@@ -45,7 +45,10 @@ def create_app() -> Flask:
     from server.modules.single_factor_test import sft_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import cf_bp
+    from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
+
+    register_custom_factor_routes()
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)

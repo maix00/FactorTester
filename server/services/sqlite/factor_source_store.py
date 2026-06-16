@@ -51,6 +51,32 @@ def _load_source(source_kind: str, owner_username: str, factor_id: str) -> str |
         return None
 
 
+def get_factor_source_record(source_kind: str, owner_username: str, factor_id: str) -> dict[str, Any] | None:
+    try:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            _ensure_schema(conn)
+            row = conn.execute(
+                """
+                SELECT source_kind, owner_username, factor_id, factor_name, source_code, updated_at
+                FROM factor_sources
+                WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
+                """,
+                (source_kind, owner_username or '', factor_id),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "source_kind": row["source_kind"],
+                "owner_username": row["owner_username"],
+                "factor_id": row["factor_id"],
+                "factor_name": row["factor_name"],
+                "source_code": row["source_code"],
+                "updated_at": float(row["updated_at"] or 0.0),
+            }
+    except Exception:
+        return None
+
+
 def load_factor_source(source_kind: str, owner_username: str, factor_id: str) -> str | None:
     return _load_source(source_kind, owner_username, factor_id)
 

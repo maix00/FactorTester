@@ -86,6 +86,78 @@ async function saveFactorSourceRoot() {
     }
 }
 
+async function buildFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在建立本地工作区...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '建立本地工作区失败', 'error');
+            return;
+        }
+        _setFactorSourceRootStatus(
+            `已建立工作区，公共因子 ${data.public_factor_count || 0} 个，自定义因子 ${data.custom_factor_count || 0} 个`,
+            'success'
+        );
+    } catch (err) {
+        _setFactorSourceRootStatus('建立本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function syncFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在同步数据库到本地...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '同步本地工作区失败', 'error');
+            return;
+        }
+        _setFactorSourceRootStatus(
+            `已同步到本地，自定义因子 ${data.custom_factor_count || 0} 个，公共因子 ${data.public_factor_count || 0} 个`,
+            'success'
+        );
+    } catch (err) {
+        _setFactorSourceRootStatus('同步本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+let _factorWorkspaceAutoPushTimer = null;
+let _factorWorkspaceAutoPushInFlight = false;
+
+function startFactorWorkspaceAutoPush() {
+    if (_factorWorkspaceAutoPushTimer) return;
+    _factorWorkspaceAutoPushTimer = setInterval(() => {
+        if (_factorWorkspaceAutoPushInFlight) return;
+        const overlay = document.getElementById('factor-workspace-overlay');
+        if (!overlay || !overlay.classList.contains('open')) return;
+        _factorWorkspaceAutoPushInFlight = true;
+        fetch('/custom-factors/api/workspace/push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        }).catch(() => null).finally(() => {
+            _factorWorkspaceAutoPushInFlight = false;
+        });
+    }, 8000);
+}
+
+function stopFactorWorkspaceAutoPush() {
+    if (_factorWorkspaceAutoPushTimer) {
+        clearInterval(_factorWorkspaceAutoPushTimer);
+        _factorWorkspaceAutoPushTimer = null;
+    }
+    _factorWorkspaceAutoPushInFlight = false;
+}
+
 let _isAdmin = false;
 
 async function loadFactorFamilyList() {

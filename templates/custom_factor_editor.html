@@ -15,6 +15,34 @@
     <script src="/static/js/modules/shared/param_drawer_utils.js"></script>
 </head>
 <body>
+    <!-- 因子工作区 overlay -->
+    <div class="factor-workspace-overlay" id="factor-workspace-overlay" onclick="if(event.target===this)closeFactorWorkspaceOverlay()">
+        <div class="factor-workspace-panel">
+            <div class="factor-workspace-header">
+                <h2>因子工作区</h2>
+                <button class="factor-workspace-close" onclick="closeFactorWorkspaceOverlay()">✕</button>
+            </div>
+            <div class="factor-workspace-body">
+                <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;margin-bottom:14px;">
+                    <div style="font-size:12px;font-weight:600;color:#344054;margin-bottom:8px;">本地源码目录</div>
+                    <input id="factor-source-root-input"
+                           type="text"
+                           placeholder="留空则使用默认用户目录"
+                           style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;">
+                    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+                        <button class="btn-new" onclick="saveFactorSourceRoot()" style="flex:1;min-width:120px;padding:6px 10px;font-size:12px;">保存目录</button>
+                        <button onclick="buildFactorWorkspace()" style="flex:1;min-width:120px;padding:6px 10px;font-size:12px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;cursor:pointer;">建立</button>
+                        <button onclick="syncFactorWorkspace()" style="flex:1;min-width:120px;padding:6px 10px;font-size:12px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;cursor:pointer;">同步</button>
+                    </div>
+                    <div id="factor-source-root-status" style="margin-top:6px;font-size:12px;color:#667085;line-height:1.4;"></div>
+                </div>
+                <div style="font-size:12px;color:#667085;line-height:1.6;">
+                    建立会把数据库中的公共因子、自定义因子与工具索引同步到本机工作区；同步会把数据库最新内容刷新到本地。
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 全因子概览弹窗 -->
     <div class="all-factors-overlay" id="all-factors-overlay" onclick="if(event.target===this)closeAllFactorsOverlay()">
         <div class="all-factors-panel">
@@ -121,18 +149,7 @@
                     <input type="checkbox" id="include-subordinate-factors" onchange="loadFactorFamilyList()" style="width:auto;margin:0;">
                     搜索/查看下级用户因子
                 </label>
-                <div style="margin-top:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
-                    <div style="font-size:12px;font-weight:600;color:#344054;margin-bottom:8px;">本地源码目录</div>
-                    <input id="factor-source-root-input"
-                           type="text"
-                           placeholder="留空则使用默认用户目录"
-                           style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;">
-                    <div style="display:flex;gap:6px;margin-top:8px;">
-                        <button class="btn-new" onclick="saveFactorSourceRoot()" style="flex:1;padding:6px 10px;font-size:12px;">保存目录</button>
-                        <button onclick="loadFactorSourceRoot()" style="padding:6px 10px;font-size:12px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;cursor:pointer;">重载</button>
-                    </div>
-                    <div id="factor-source-root-status" style="margin-top:6px;font-size:12px;color:#667085;line-height:1.4;"></div>
-                </div>
+                <button class="btn-new" onclick="openFactorWorkspaceOverlay()" style="margin-top:12px;padding:8px 10px;font-size:12px;">打开因子工作区</button>
             </div>
             <div class="factor-family-list" id="factor-family-list">
                 <div class="factor-family-list-empty">加载中...</div>
@@ -174,6 +191,7 @@
     <script src="/static/js/modules/shared/client_param_table.js"></script>
     <script src="/static/js/modules/custom_factor_editor/param_drawer.js"></script>
     <script src="/static/js/modules/custom_factor_editor/all_factors_overview.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/factor_workspace_overlay.js"></script>
 
 
 
