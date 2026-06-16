@@ -4,7 +4,7 @@ Core Blueprint — 应用入口和页面路由。
 负责：
   - 首页 (/) 及功能页面（价格查看）渲染
   - /docs/* 文档体系全体路由（用户手册、开发者指南、数据字典、工具类源码）
-  - 数据字典页动态调用 data_dictionary 扫描器
+  - 数据字典页动态调用 datadict 扫描器
   - 工具类源码页 AST 解析 + 折叠渲染
 """
 
@@ -87,7 +87,7 @@ def docs_factor_editor():
 @core_bp.route('/docs/data-dictionary', methods=['GET'])
 def docs_data_dictionary():
     """数据字典 — 全量字段清单（SOE 合规审计用）。"""
-    from server.services.data_dictionary import build_data_dictionary, data_dictionary_to_dict
+    from server.services.datadict_scan import build_data_dictionary, data_dictionary_to_dict
     from server.services.sqlite.bootstrap import ensure_unified_sqlite_store, load_data_dictionary_snapshot
 
     ensure_unified_sqlite_store()

@@ -10,7 +10,7 @@ import duckdb
 import pandas as pd
 
 import Settings
-from server.services.data_dictionary import scan_data_sources
+from server.services.datadict_scan import scan_data_sources
 from tools.data.sqlite.db import connect_sqlite, replace_dataframe, safe_ident
 
 PREVIEW_PRODUCTS_PER_SOURCE = 1

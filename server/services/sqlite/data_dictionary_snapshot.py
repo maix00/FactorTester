@@ -101,7 +101,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 def sync_data_dictionary_sqlite_store() -> str:
     """Build and persist the current data dictionary snapshot."""
-    from server.services.data_dictionary import build_data_dictionary
+    from server.services.datadict_scan import build_data_dictionary
 
     dd = build_data_dictionary()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -172,7 +172,7 @@ def ensure_data_dictionary_sqlite_store() -> str:
 
 def load_data_dictionary_snapshot() -> dict[str, Any] | None:
     """Load the cached data dictionary snapshot if present."""
-    from server.services.data_dictionary import DataColumnEntry, DataDictionary, DataSourceEntry, FactorEntry, ParamEntry, ParamTypeEntry, SettingEntry
+    from server.services.datadict_scan import DataColumnEntry, DataDictionary, DataSourceEntry, FactorEntry, ParamEntry, ParamTypeEntry, SettingEntry
 
     try:
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -266,8 +266,6 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
             }
     except Exception:
         return None
-
-    from server.services.data_dictionary import DataDictionary
 
     dd = DataDictionary(
         generated_at=generated_at,

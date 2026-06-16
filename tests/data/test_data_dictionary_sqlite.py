@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import Settings
-from server.services import data_dictionary as data_dictionary_module
+from server.services import datadict_scan as data_dictionary_module
 from server.services.sqlite import data_dictionary_snapshot as data_dictionary_sqlite
 
 
