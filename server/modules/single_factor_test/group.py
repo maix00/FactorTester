@@ -1549,6 +1549,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                             f'详细错误：{detail_msg}'
                         ),
                     }
+    submission_results: list[dict | None] = [None] * sim_index
     for raw_result in raw_results:
         idx = int(raw_result.get('simulation_index', -1))
         if idx < 0 or idx >= sim_index:
