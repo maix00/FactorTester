@@ -844,6 +844,7 @@ class FactorGroupTester:
             fee=fee,
             fee_modifications=fee_modifications,
             use_closetoday=use_closetoday,
+            index_list=list(first_entry.shared_inputs.index_list),
         )
         return plan
 
