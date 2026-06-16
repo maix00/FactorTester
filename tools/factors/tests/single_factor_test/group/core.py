@@ -944,10 +944,10 @@ def _resolve_group_trade_specs(
 
     _MOD_FIELD_TO_PRODUCT_FIELD = {
         "open_ratio": "open_ratio",
-        "close_yesterday_ratio": "close_ratio",
+        "close_ratio": "close_ratio",
         "closetoday_ratio": "closetoday_ratio",
         "open_fixed": "open_fixed",
-        "close_yesterday_fixed": "close_fixed",
+        "close_fixed": "close_fixed",
         "closetoday_fixed": "closetoday_fixed",
     }
 
@@ -956,17 +956,20 @@ def _resolve_group_trade_specs(
             variety_code_by_id.get(id(col), ""), {}
         )
 
-        def _pick_value(default: Any, product_field: str) -> Any:
-            mod_val = mod_overrides.get(product_field)
+        def _pick_value(default: Any, field_name: str) -> Any:
+            """优先取 fee_modifications 覆盖，其次取产品对象属性，最后用 default。"""
+            mod_val = mod_overrides.get(field_name)
             if mod_val not in (None, ""):
                 return mod_val
+            # 通过映射表找到产品对象上实际的属性名
+            product_field = _MOD_FIELD_TO_PRODUCT_FIELD.get(field_name, field_name)
             return getattr(col, product_field, default)
 
         prod_open_ratio.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
         prod_open_fixed.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
-        close_ratio_val = _coerce_float(_pick_value(half_fee, "close_yesterday_ratio"), half_fee)
+        close_ratio_val = _coerce_float(_pick_value(half_fee, "close_ratio"), half_fee)
         prod_close_ratio.append(close_ratio_val)
-        close_fixed_val = _coerce_float(_pick_value(0.0, "close_yesterday_fixed"), 0.0)
+        close_fixed_val = _coerce_float(_pick_value(0.0, "close_fixed"), 0.0)
         prod_close_fixed.append(close_fixed_val)
         prod_closetoday_ratio.append(_coerce_float(_pick_value(close_ratio_val, "closetoday_ratio"), close_ratio_val))
         prod_closetoday_fixed.append(_coerce_float(_pick_value(close_fixed_val, "closetoday_fixed"), close_fixed_val))
@@ -1163,7 +1166,6 @@ def _simulate_group_from_preloaded(
     index_list: list,
     n_names: dict[int, str],
     group_configs: list[dict] | None = None,
-    use_closetoday_vec: np.ndarray,
     rebalance_mode: str,
     initial_capital: float,
     multi_session_active: bool,

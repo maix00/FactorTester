@@ -163,8 +163,9 @@
             for (var ii = 0; ii < items.length; ii++) {
                 var it = items[ii];
                 var count = it.total > 0 ? (it.completed + '/' + it.total) : '--';
-                var status = it.done ? '✓ 已完成' : '◷ 进行中';
-                var color = it.done ? '#12a150' : '#0078d4';
+                var isReallyDone = it.done && it.total > 0 && it.completed >= it.total;
+                var status = isReallyDone ? '✓ 已完成' : '◷ 进行中';
+                var color = isReallyDone ? '#12a150' : '#0078d4';
                 htmlParts.push(
                     '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
                     + '<span style="font-weight:600;color:#475467;">' + it.label + '</span>'
@@ -214,19 +215,28 @@
                 return;
             }
 
-            // 隐藏阶段：不记录历史，但标记前一个阶段完成
+            // 隐藏阶段：不记录历史，但标记前一个阶段完成（仅当前一个阶段确实已完成时）
             if (hideInHistory[phase]) {
-                if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
-                    row.phaseHistory[row.currentPhase].done = true;
+                var prevPhase = row.phaseHistory[row.currentPhase];
+                if (row.currentPhase && prevPhase) {
+                    // 只有当该阶段的实际进度已完成时才标记 done
+                    // 避免将未完成的阶段（如 simulate 0/1）错误标记为已完成
+                    if (prevPhase.total > 0 && prevPhase.completed >= prevPhase.total) {
+                        prevPhase.done = true;
+                    }
                 }
                 row.currentPhase = phase;
                 _renderPhaseHistory(row);
                 return;
             }
 
-            // 切换阶段时，标记上一个阶段完成
+            // 切换阶段时，标记上一个阶段完成（仅当前一阶段确实已完成时）
             if (row.currentPhase && row.currentPhase !== phase && row.phaseHistory[row.currentPhase]) {
-                row.phaseHistory[row.currentPhase].done = true;
+                var prev = row.phaseHistory[row.currentPhase];
+                // 只有当该阶段的实际进度已完成时才标记 done
+                if (prev.total > 0 && prev.completed >= prev.total) {
+                    prev.done = true;
+                }
             }
             row.currentPhase = phase;
 
@@ -396,9 +406,11 @@
                 row.fillEl.style.width = row.pct + '%';
                 row.fillEl.style.background = _phaseColor(phase);
             }
-            // 更新计数
-            if (total > 0) {
+            // 更新计数（仅当有意义的 progress 时更新）
+            if (total > 0 && !skipPhases[phase]) {
                 row.textEl.textContent = completed + '/' + total;
+            } else if (phase === 'info' && row.currentPhase) {
+                // info 消息不更新计数，保持上一个阶段的计数
             }
         }
 

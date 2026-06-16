@@ -1533,17 +1533,20 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         if isinstance(item, dict)
     )
     if simulated_flat_count != len(all_flat_groups):
-        return False, {
-            'success': False,
-            'error': (
-                f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
-                f'进入 simulate 的分组为 {simulated_flat_count} 个。'
-            ),
-            'simulation_errors': errors,
-            'status': 500,
-        }
-
-    submission_results: list[dict | None] = [None] * sim_index
+                    # Collect detailed error info to help diagnose the root cause
+                    error_details = []
+                    for err in errors:
+                        if isinstance(err, dict):
+                            error_details.append(err.get('error', str(err)))
+                        else:
+                            error_details.append(str(err))
+                    detail_msg = '; '.join(error_details) if error_details else '无详细错误信息'
+                    return False, {
+                        'success': False,
+                        'error': (
+                            f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
+                            f'进入 simulate 的分组为 {simulated_flat_count} 个。'
+                            f'详细错误：{detail_msg}'
     for raw_result in raw_results:
         idx = int(raw_result.get('simulation_index', -1))
         if idx < 0 or idx >= sim_index:
