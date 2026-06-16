@@ -1363,7 +1363,7 @@ def _simulate_group_from_preloaded(
         open_fixed_mat=open_fixed_mat,
         close_fixed_mat=close_fixed_mat,
         close_today_fixed_mat=closetoday_fixed_mat,
-        multiplier_mat=spec_bundle.multiplier_mat,
+        point_value_mat=spec_bundle.multiplier_mat,
         min_tick_mat=spec_bundle.min_tick_mat,
         min_trade_quantity_mat=spec_bundle.min_trade_quantity_mat,
         margin_ratio_mat=spec_bundle.long_margin_ratio_mat,
