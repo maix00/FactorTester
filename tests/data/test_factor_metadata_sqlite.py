@@ -4,6 +4,7 @@ import sqlite3
 
 import Settings
 from server.services.sqlite import factor_metadata as factor_metadata_sqlite
+from server.services.sqlite import factor_source_store
 from server.services import accounts as account_store
 
 
@@ -76,16 +77,56 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
     with sqlite3.connect(sqlite_path) as conn:
         conn.row_factory = sqlite3.Row
         catalog = conn.execute(
-            'SELECT source_kind, owner_username, factor_id, factor_name, source_code FROM factor_catalog ORDER BY source_kind, owner_username, factor_id'
+            'SELECT source_kind, owner_username, factor_id, factor_name, factor_family FROM factor_family_catalog ORDER BY source_kind, owner_username, factor_id'
         ).fetchall()
-        assert [(row["source_kind"], row["owner_username"], row["factor_id"], row["factor_name"], row["source_code"]) for row in catalog] == [
-            ("custom", "default$alice@1", "default$alice@1_Custom", "CustomFactor", "class CustomFactor(FactorFamily):\n    pass\n"),
-            ("public", "", "MmRet", "MmRet", "class MmRet(FactorFamily):\n    pass\n"),
+        assert [(row["source_kind"], row["owner_username"], row["factor_id"], row["factor_name"], row["factor_family"]) for row in catalog] == [
+            ("custom", "default$alice@1", "default$alice@1_Custom", "CustomFactor", "FactorFamily"),
+            ("public", "", "MmRet", "MmRet", "MmRet"),
         ]
 
         params = conn.execute(
-            'SELECT source_kind, owner_username, factor_id, param_index, alias FROM factor_catalog_params'
+            'SELECT source_kind, owner_username, factor_id, param_index, alias FROM factor_family_catalog_params'
         ).fetchall()
         assert [(row["source_kind"], row["owner_username"], row["factor_id"], row["param_index"], row["alias"]) for row in params] == [
             ("public", "", "MmRet", 0, "$N"),
         ]
+
+
+def test_factor_metadata_loads_sources_before_opening_write_connection(monkeypatch, tmp_path):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    factor_source_store.upsert_factor_source(
+        "public",
+        "",
+        "DbPublicFactor",
+        "DbPublicFactor",
+        "class DbPublicFactor(FactorFamily):\n    pass\n",
+    )
+
+    def _load_public_from_source_store():
+        rows = factor_source_store.list_factor_sources("public")
+        return [
+            {
+                "id": row["factor_id"],
+                "name": row["factor_name"],
+                "factor_family": "FactorFamily",
+                "chinese_name": "",
+                "description": "",
+                "math_expr": "",
+                "source_code": row["source_code"],
+                "category": "公共",
+                "source_file": "",
+                "is_public": True,
+                "params": [],
+            }
+            for row in rows
+        ]
+
+    monkeypatch.setattr(factor_metadata_sqlite, "_load_public_factors", _load_public_from_source_store)
+    monkeypatch.setattr(factor_metadata_sqlite, "_load_custom_factors", lambda username: [])
+    monkeypatch.setattr(account_store, "load_accounts", lambda: [])
+
+    path = factor_metadata_sqlite.ensure_factor_metadata_sqlite_store()
+    assert path == str(sqlite_path)

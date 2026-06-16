@@ -42,17 +42,7 @@ def factor_path(username: str, factor_id: str) -> str:
 
 
 def load_factor_source(username: str, factor_id: str) -> str | None:
-    source = load_factor_source_row('custom', username, factor_id)
-    if source:
-        return source
-    path = factor_path(username, factor_id)
-    if not os.path.exists(path):
-        return None
-    with open(path, 'r', encoding='utf-8') as file:
-        source = file.read()
-    if source:
-        upsert_factor_source_row('custom', username, factor_id, factor_id, source)
-    return source
+    return load_factor_source_row('custom', username, factor_id)
 
 
 def save_factor_source(username: str, factor_id: str, source_code: str) -> None:

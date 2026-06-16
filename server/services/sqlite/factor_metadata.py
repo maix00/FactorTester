@@ -12,6 +12,9 @@ from typing import Any
 import Settings
 from tools.data.sqlite.db import connect_sqlite
 
+CATALOG_TABLE = "factor_family_catalog"
+CATALOG_PARAMS_TABLE = "factor_family_catalog_params"
+
 
 def _load_public_factors() -> list[dict[str, Any]]:
     from server.modules.custom_factors.catalog import list_public_factors
@@ -39,8 +42,8 @@ def _account_display_name(account: dict[str, Any]) -> str:
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS factor_catalog (
+        f"""
+        CREATE TABLE IF NOT EXISTS {CATALOG_TABLE} (
             source_kind TEXT NOT NULL,
             owner_username TEXT NOT NULL DEFAULT '',
             owner_alias TEXT NOT NULL DEFAULT '',
@@ -50,7 +53,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             chinese_name TEXT,
             description TEXT,
             math_expr TEXT,
-            source_code TEXT NOT NULL DEFAULT '',
             category TEXT,
             source_file TEXT,
             is_public INTEGER NOT NULL,
@@ -60,18 +62,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-
-
-def _ensure_factor_catalog_source_code_column(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row["name"])
-        for row in conn.execute("PRAGMA table_info(factor_catalog)").fetchall()
-    }
-    if "source_code" not in columns:
-        conn.execute("ALTER TABLE factor_catalog ADD COLUMN source_code TEXT NOT NULL DEFAULT ''")
     conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS factor_catalog_params (
+        f"""
+        CREATE TABLE IF NOT EXISTS {CATALOG_PARAMS_TABLE} (
             source_kind TEXT NOT NULL,
             owner_username TEXT NOT NULL DEFAULT '',
             factor_id TEXT NOT NULL,
@@ -104,11 +97,11 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
     for row in rows:
         conn.execute(
             """
-            INSERT OR REPLACE INTO factor_catalog (
+            INSERT OR REPLACE INTO factor_family_catalog (
                 source_kind, owner_username, owner_alias, factor_id, factor_name,
-                factor_family, chinese_name, description, math_expr, source_code, category,
+                factor_family, chinese_name, description, math_expr, category,
                 source_file, is_public, load_error, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_kind,
@@ -120,7 +113,6 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
                 str(row.get("chinese_name") or row.get("desc") or ""),
                 str(row.get("description") or ""),
                 str(row.get("math_expr") or ""),
-                str(row.get("source_code") or ""),
                 str(row.get("category") or ""),
                 str(row.get("source_file") or ""),
                 1 if row.get("is_public") else 0,
@@ -137,7 +129,7 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
                 param = {}
             conn.execute(
                 """
-                INSERT OR REPLACE INTO factor_catalog_params (
+                INSERT OR REPLACE INTO factor_family_catalog_params (
                     source_kind, owner_username, factor_id, param_index,
                     alias, type, default_value, description, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -160,14 +152,24 @@ def sync_factor_metadata_sqlite_store() -> str:
     """Sync public and custom factor metadata into the unified SQLite store."""
     now = time.time()
     owner_alias_by_username = _account_map()
+    accounts = _load_accounts()
+
+    public_factors = _load_public_factors()
+    custom_factors_by_owner: dict[str, list[dict[str, Any]]] = {}
+    for account in accounts:
+        owner_username = str(account.get("username") or "").strip()
+        if not owner_username:
+            continue
+        try:
+            custom_factors_by_owner[owner_username] = _load_custom_factors(owner_username)
+        except Exception:
+            custom_factors_by_owner[owner_username] = []
 
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
-        _ensure_factor_catalog_source_code_column(conn)
-        conn.execute("DELETE FROM factor_catalog")
-        conn.execute("DELETE FROM factor_catalog_params")
+        conn.execute(f"DELETE FROM {CATALOG_TABLE}")
+        conn.execute(f"DELETE FROM {CATALOG_PARAMS_TABLE}")
 
-        public_factors = _load_public_factors()
         _insert_factor_rows(
             conn,
             public_factors,
@@ -177,18 +179,14 @@ def sync_factor_metadata_sqlite_store() -> str:
             now=now,
         )
 
-        for account in _load_accounts():
+        for account in accounts:
             owner_username = str(account.get("username") or "").strip()
             if not owner_username:
                 continue
             owner_alias = owner_alias_by_username.get(owner_username) or str(account.get("alias") or owner_username)
-            try:
-                custom_factors = _load_custom_factors(owner_username)
-            except Exception:
-                custom_factors = []
             _insert_factor_rows(
                 conn,
-                custom_factors,
+                custom_factors_by_owner.get(owner_username, []),
                 source_kind="custom",
                 owner_username=owner_username,
                 owner_alias=owner_alias,

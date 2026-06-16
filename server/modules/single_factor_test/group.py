@@ -1179,6 +1179,25 @@ def _serialize_group_simulation_result(
                 f"submission={submission_id} factor={factor_alias} key={ls_key}"
             )
 
+    # DEBUG: print groups key vs metrics key alignment for Issue #110
+    _debug_groups_keys = [g['key'] for g in groups_data]
+    _debug_metrics_keys = list(metrics.keys())
+    _debug_report_keys = []
+    if not report_df.empty:
+        for k in report_df.index:
+            _debug_report_keys.append(_metric_display_key(k, result_group_names))
+    print(f"[DEBUG #110] submission={submission_id} factor={factor_alias} n_total={n_total}")
+    print(f"[DEBUG #110]   groups_data keys: {_debug_groups_keys}")
+    print(f"[DEBUG #110]   report_df keys:  {_debug_report_keys}")
+    print(f"[DEBUG #110]   metrics keys:    {_debug_metrics_keys}")
+    print(f"[DEBUG #110]   result_group_names: {result_group_names}")
+    for g_idx, gd in enumerate(groups_data):
+        gk = gd['key']
+        eq_first = gd['total_equity'][0] if gd['total_equity'] else None
+        mt = metrics.get(gk, {})
+        mt_total_ret = mt.get('Total Return')
+        print(f"[DEBUG #110]   [{g_idx}] key='{gk}' equity[0]={eq_first} metrics.TotalReturn={mt_total_ret}")
+
     return {
         'success': True,
         'groups': groups_data,

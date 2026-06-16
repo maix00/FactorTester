@@ -42,12 +42,14 @@ def create_app() -> Flask:
     from server.core import core_bp
     from server.modules.templates import templates_bp
     from server.modules.shared import shared_bp
+    from server.modules.shared import register_routes as register_shared_routes
     from server.modules.single_factor_test import sft_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import cf_bp
     from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
 
+    register_shared_routes()
     register_custom_factor_routes()
 
     app.register_blueprint(auth_bp)

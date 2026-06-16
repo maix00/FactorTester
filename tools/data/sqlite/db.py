@@ -12,8 +12,9 @@ import pandas as pd
 def connect_sqlite(db_path: str | Path, *, foreign_keys: bool = False) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     if foreign_keys:
         conn.execute("PRAGMA foreign_keys = ON")
     return conn

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import Settings
 from server.services.sqlite import factor_source_settings as factor_source_settings_sqlite
+from server.services.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
 
 
 def _load_storage_module():
@@ -40,3 +41,26 @@ def test_factor_source_root_roundtrip_and_resolution(monkeypatch, tmp_path):
     factor_source_settings_sqlite.save_factor_source_root(username, "")
     assert factor_source_settings_sqlite.load_factor_source_root(username) is None
     assert factor_storage.custom_factor_dir(username) == os.path.join(str(fallback_root / username), "custom_factors")
+
+
+def test_factor_source_workspace_git_settings_roundtrip(monkeypatch, tmp_path):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    username = "default$alice@1"
+    assert factor_source_workspace_settings_sqlite.load_factor_source_workspace_settings(username) is None
+
+    factor_source_workspace_settings_sqlite.save_factor_source_workspace_settings(
+        username,
+        git_enabled=True,
+        git_repo_root="/tmp/workspace",
+        auto_sync_branch="main",
+        force_sync_branch="release",
+    )
+    settings = factor_source_workspace_settings_sqlite.load_factor_source_workspace_settings(username)
+    assert settings is not None
+    assert settings["git_enabled"] is True
+    assert settings["git_repo_root"] == "/tmp/workspace"
+    assert settings["auto_sync_branch"] == "main"
+    assert settings["force_sync_branch"] == "release"

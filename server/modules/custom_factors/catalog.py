@@ -53,25 +53,9 @@ def _load_factor_family_from_source(source_code: str, module_name: str) -> tuple
 
 
 def list_custom_factors(username: str) -> list:
-    """List a user's custom FactorFamily files with loaded metadata."""
+    """List a user's custom FactorFamily rows from the database."""
     factors = []
     rows = [row for row in list_factor_sources('custom') if row.get('owner_username') == username]
-    if not rows:
-        directory = custom_factor_dir(username)
-        if os.path.exists(directory):
-            for filename in sorted(os.listdir(directory), reverse=True):
-                if filename.endswith('.py'):
-                    factor_id = os.path.splitext(filename)[0]
-                    source_code = load_factor_source(username, factor_id) or ''
-                    if source_code:
-                        rows.append({
-                            'source_kind': 'custom',
-                            'owner_username': username,
-                            'factor_id': factor_id,
-                            'factor_name': factor_id,
-                            'source_code': source_code,
-                            'updated_at': time.time(),
-                        })
 
     for row in rows:
         factor_id = str(row.get('factor_id') or '')

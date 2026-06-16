@@ -18,7 +18,12 @@ from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
 from server.services.accounts import get_account, is_super_admin_account
 from server.services.factor_registry import get_factor_family_instance
-from server.services.factor_workspace import build_factor_workspace, push_factor_workspace, sync_factor_workspace
+from server.services.factor_workspace import (
+    build_factor_workspace,
+    get_factor_workspace_git_state,
+    push_factor_workspace,
+    sync_factor_workspace,
+)
 
 
 @cf_bp.route('/api/validate', methods=['POST'])
@@ -192,7 +197,9 @@ def api_sync_workspace():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    result = sync_factor_workspace(username)
+    data = request.get_json(silent=True) or {}
+    branch_mode = (data.get('branch_mode') or 'force').strip()
+    result = sync_factor_workspace(username, branch_mode=branch_mode)
     return jsonify({'success': True, **result})
 
 
@@ -202,8 +209,39 @@ def api_push_workspace():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    result = push_factor_workspace(username, allow_public_write=is_super_admin_account(get_account(username)))
+    data = request.get_json(silent=True) or {}
+    branch_mode = (data.get('branch_mode') or 'auto').strip()
+    result = push_factor_workspace(
+        username,
+        allow_public_write=is_super_admin_account(get_account(username)),
+        branch_mode=branch_mode,
+    )
     return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/git-settings', methods=['GET', 'POST'])
+@login_required
+def api_workspace_git_settings():
+    username = current_user()
+    if request.method == 'GET':
+        return jsonify({'success': True, **get_factor_workspace_git_state(username)})
+
+    data = request.get_json(silent=True) or {}
+    from server.services.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
+    git_enabled = bool(data.get('git_enabled'))
+    git_repo_root = (data.get('git_repo_root') or '').strip()
+    auto_sync_branch = (data.get('auto_sync_branch') or '').strip()
+    force_sync_branch = (data.get('force_sync_branch') or '').strip()
+    save_factor_source_workspace_settings(
+        username,
+        git_enabled=git_enabled,
+        git_repo_root=git_repo_root,
+        auto_sync_branch=auto_sync_branch,
+        force_sync_branch=force_sync_branch,
+    )
+    return jsonify({'success': True, **get_factor_workspace_git_state(username)})
+
+
 
 
 @cf_bp.route('/api/params/preset', methods=['GET'])

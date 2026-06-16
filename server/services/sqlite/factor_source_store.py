@@ -8,11 +8,13 @@ from typing import Any
 import Settings
 from tools.data.sqlite.db import connect_sqlite
 
+SOURCE_TABLE = "factor_family_sources"
+
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS factor_sources (
+        f"""
+        CREATE TABLE IF NOT EXISTS {SOURCE_TABLE} (
             source_kind TEXT NOT NULL,
             owner_username TEXT NOT NULL DEFAULT '',
             factor_id TEXT NOT NULL,
@@ -38,7 +40,7 @@ def _load_source(source_kind: str, owner_username: str, factor_id: str) -> str |
             row = conn.execute(
                 """
                 SELECT source_code
-                FROM factor_sources
+                FROM factor_family_sources
                 WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
                 """,
                 (source_kind, owner_username or '', factor_id),
@@ -58,7 +60,7 @@ def get_factor_source_record(source_kind: str, owner_username: str, factor_id: s
             row = conn.execute(
                 """
                 SELECT source_kind, owner_username, factor_id, factor_name, source_code, updated_at
-                FROM factor_sources
+                FROM factor_family_sources
                 WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
                 """,
                 (source_kind, owner_username or '', factor_id),
@@ -92,7 +94,7 @@ def upsert_factor_source(
         _ensure_schema(conn)
         conn.execute(
             """
-            INSERT INTO factor_sources (
+            INSERT INTO factor_family_sources (
                 source_kind, owner_username, factor_id, factor_name, source_code, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_kind, owner_username, factor_id) DO UPDATE SET
@@ -117,7 +119,7 @@ def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) 
         _ensure_schema(conn)
         conn.execute(
             """
-            DELETE FROM factor_sources
+            DELETE FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
             (source_kind, owner_username or '', factor_id),
@@ -137,7 +139,7 @@ def rename_factor_source(
         row = conn.execute(
             """
             SELECT source_code, factor_name, updated_at
-            FROM factor_sources
+            FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
             (source_kind, owner_username or '', old_factor_id),
@@ -146,14 +148,14 @@ def rename_factor_source(
             return str(Settings.CACHE_DB_PATH)
         conn.execute(
             """
-            DELETE FROM factor_sources
+            DELETE FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
             (source_kind, owner_username or '', old_factor_id),
         )
         conn.execute(
             """
-            INSERT INTO factor_sources (
+            INSERT INTO factor_family_sources (
                 source_kind, owner_username, factor_id, factor_name, source_code, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_kind, owner_username, factor_id) DO UPDATE SET
@@ -179,7 +181,7 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT source_kind, owner_username, factor_id, factor_name, source_code, updated_at
-            FROM factor_sources
+            FROM factor_family_sources
             WHERE source_kind = ?
             ORDER BY owner_username, factor_id
             """,

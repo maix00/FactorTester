@@ -22,6 +22,7 @@ let _editingSaveTarget = null; // {source:'custom'|'public', id:string, owner:st
 async function init() {
     await loadVisualOperatorRegistry();
     await loadFactorSourceRoot();
+    await loadFactorWorkspaceGitSettings();
     await loadFactorFamilyList();
 }
 
@@ -57,6 +58,99 @@ async function loadFactorSourceRoot() {
         }
     } catch (err) {
         _setFactorSourceRootStatus('读取本地目录失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+function _factorWorkspaceGitRepoRootInput() {
+    return document.getElementById('factor-workspace-git-repo-root');
+}
+
+function _factorWorkspaceGitAutoBranchInput() {
+    return document.getElementById('factor-workspace-auto-branch');
+}
+
+function _factorWorkspaceGitForceBranchInput() {
+    return document.getElementById('factor-workspace-force-branch');
+}
+
+function _factorWorkspaceGitStatus() {
+    return document.getElementById('factor-workspace-git-status');
+}
+
+function _factorWorkspaceBranchOptions() {
+    return document.getElementById('factor-workspace-branch-options');
+}
+
+function _setFactorWorkspaceGitStatus(message, kind) {
+    var el = _factorWorkspaceGitStatus();
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.color = kind === 'error' ? '#b42318' : (kind === 'success' ? '#067647' : '#667085');
+}
+
+function _renderFactorWorkspaceBranchOptions(branches) {
+    var datalist = _factorWorkspaceBranchOptions();
+    if (!datalist) return;
+    datalist.innerHTML = '';
+    (branches || []).forEach(branch => {
+        var option = document.createElement('option');
+        option.value = branch;
+        datalist.appendChild(option);
+    });
+}
+
+async function loadFactorWorkspaceGitSettings() {
+    try {
+        const res = await fetch('/custom-factors/api/workspace/git-settings');
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorWorkspaceGitStatus(data.error || '读取 Git 配置失败', 'error');
+            return;
+        }
+        var repoRootInput = _factorWorkspaceGitRepoRootInput();
+        var autoBranchInput = _factorWorkspaceGitAutoBranchInput();
+        var forceBranchInput = _factorWorkspaceGitForceBranchInput();
+        if (repoRootInput) repoRootInput.value = data.git_repo_root || '';
+        if (autoBranchInput) autoBranchInput.value = data.git_auto_sync_branch || '';
+        if (forceBranchInput) forceBranchInput.value = data.git_force_sync_branch || '';
+        _renderFactorWorkspaceBranchOptions(data.git_branches || []);
+        if (data.git_enabled) {
+            _setFactorWorkspaceGitStatus(
+                `Git: ${data.git_repo_root || '当前工作区'} · 当前 ${data.git_current_branch || '—'} · 自动 ${data.git_auto_sync_branch || '—'} · 强制 ${data.git_force_sync_branch || '—'}`,
+                'success'
+            );
+        } else {
+            _setFactorWorkspaceGitStatus('未检测到可用 Git，仍可正常使用工作区', 'neutral');
+        }
+    } catch (err) {
+        _setFactorWorkspaceGitStatus('读取 Git 配置失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function saveFactorWorkspaceGitSettings() {
+    var repoRootInput = _factorWorkspaceGitRepoRootInput();
+    var autoBranchInput = _factorWorkspaceGitAutoBranchInput();
+    var forceBranchInput = _factorWorkspaceGitForceBranchInput();
+    try {
+        const res = await fetch('/custom-factors/api/workspace/git-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                git_enabled: true,
+                git_repo_root: repoRootInput ? (repoRootInput.value || '').trim() : '',
+                auto_sync_branch: autoBranchInput ? (autoBranchInput.value || '').trim() : '',
+                force_sync_branch: forceBranchInput ? (forceBranchInput.value || '').trim() : '',
+            })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorWorkspaceGitStatus(data.error || '保存 Git 配置失败', 'error');
+            return;
+        }
+        await loadFactorWorkspaceGitSettings();
+        _setFactorWorkspaceGitStatus('已保存 Git 配置', 'success');
+    } catch (err) {
+        _setFactorWorkspaceGitStatus('保存 Git 配置失败: ' + (err && err.message ? err.message : err), 'error');
     }
 }
 
@@ -99,6 +193,7 @@ async function buildFactorWorkspace() {
             _setFactorSourceRootStatus(data.error || '建立本地工作区失败', 'error');
             return;
         }
+        await loadFactorWorkspaceGitSettings();
         _setFactorSourceRootStatus(
             `已建立工作区，公共因子 ${data.public_factor_count || 0} 个，自定义因子 ${data.custom_factor_count || 0} 个`,
             'success'
@@ -110,25 +205,24 @@ async function buildFactorWorkspace() {
 
 async function syncFactorWorkspace() {
     try {
-        _setFactorSourceRootStatus('正在同步数据库到本地...', 'neutral');
+        _setFactorSourceRootStatus('正在从数据库同步到本地...', 'neutral');
         const res = await fetch('/custom-factors/api/workspace/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify({ branch_mode: 'force' })
         });
         const data = await res.json();
         if (!data.success) {
             _setFactorSourceRootStatus(data.error || '同步本地工作区失败', 'error');
             return;
         }
-        _setFactorSourceRootStatus(
-            `已同步到本地，自定义因子 ${data.custom_factor_count || 0} 个，公共因子 ${data.public_factor_count || 0} 个`,
-            'success'
-        );
+        await loadFactorWorkspaceGitSettings();
+        _setFactorSourceRootStatus(`已同步到本地，自定义因子 ${data.custom_factor_count || 0} 个，公共因子 ${data.public_factor_count || 0} 个`, 'success');
     } catch (err) {
         _setFactorSourceRootStatus('同步本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
     }
 }
+
 
 let _factorWorkspaceAutoPushTimer = null;
 let _factorWorkspaceAutoPushInFlight = false;
@@ -143,7 +237,7 @@ function startFactorWorkspaceAutoPush() {
         fetch('/custom-factors/api/workspace/push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify({ branch_mode: 'auto' })
         }).catch(() => null).finally(() => {
             _factorWorkspaceAutoPushInFlight = false;
         });

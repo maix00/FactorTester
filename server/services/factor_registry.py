@@ -24,7 +24,6 @@ import threading
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily
-from server.services.user_storage import user_data_dir
 from server.modules.custom_factors.storage import load_factor_source, load_public_factor_source
 
 
@@ -85,9 +84,7 @@ def get_factor_family_instance(module_name, username: str | None = None):
                 _custom_factor_cache[(username, module_name)] = custom_factor
             return custom_factor
 
-        custom_dir = os.path.join(user_data_dir(username), 'custom_factors')
-        custom_path = os.path.join(custom_dir, f'{module_name}.py')
-        raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' or '{custom_path}' (user '{username}')")
+        raise ImportError(f"Cannot load factor '{module_name}': not found in public sources or database for user '{username}'")
 
     raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' and no active user session")
 
