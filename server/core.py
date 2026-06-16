@@ -88,8 +88,7 @@ def docs_factor_editor():
 def docs_data_dictionary():
     """数据字典 — 全量字段清单（SOE 合规审计用）。"""
     from server.services.data_dictionary import build_data_dictionary, data_dictionary_to_dict
-    from server.services.data_dictionary_sqlite import load_data_dictionary_snapshot
-    from server.services.unified_sqlite import ensure_unified_sqlite_store
+    from server.services.unified_sqlite import ensure_unified_sqlite_store, load_data_dictionary_snapshot
 
     ensure_unified_sqlite_store()
     dd = load_data_dictionary_snapshot()

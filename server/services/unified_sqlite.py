@@ -25,3 +25,10 @@ def ensure_unified_sqlite_store() -> str:
     DataHub.get_instance().ensure_visits_schema()
     Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return str(Settings.CACHE_DB_PATH)
+
+
+def load_data_dictionary_snapshot() -> dict | None:
+    """Load the cached data dictionary snapshot through the unified facade."""
+    from server.services.data_dictionary_sqlite import load_data_dictionary_snapshot as _load
+
+    return _load()
