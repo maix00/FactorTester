@@ -1,5 +1,7 @@
 """Routes supporting custom-factor source validation and visual editor metadata."""
 
+import os
+
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
@@ -8,6 +10,7 @@ from server.modules.custom_factors.source_helpers import (
     strip_factor_meta,
 )
 from server.modules.custom_factors.storage import load_factor_source
+from server.modules.custom_factors.storage import factor_source_root
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.accounts import can_view_user_scope
@@ -141,6 +144,33 @@ def api_visual_operators():
     return jsonify({
         'success': True,
         'groups': get_visual_operator_groups(),
+    })
+
+
+@cf_bp.route('/api/source-root', methods=['GET', 'POST'])
+@login_required
+def api_source_root():
+    username = current_user()
+    if request.method == 'GET':
+        from server.services.sqlite.factor_source_settings import load_factor_source_root
+        configured_root = load_factor_source_root(username) or ''
+        return jsonify({
+            'success': True,
+            'source_root': configured_root,
+            'resolved_root': factor_source_root(username),
+        })
+
+    data = request.get_json(silent=True) or {}
+    source_root = (data.get('source_root') or '').strip()
+    if source_root:
+        source_root = os.path.abspath(os.path.expanduser(source_root))
+
+    from server.services.sqlite.factor_source_settings import save_factor_source_root
+    save_factor_source_root(username, source_root)
+    return jsonify({
+        'success': True,
+        'source_root': source_root,
+        'resolved_root': factor_source_root(username),
     })
 
 

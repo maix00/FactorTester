@@ -21,7 +21,69 @@ let _editingSaveTarget = null; // {source:'custom'|'public', id:string, owner:st
 // ═══════════════════════════════════════════════════════════
 async function init() {
     await loadVisualOperatorRegistry();
+    await loadFactorSourceRoot();
     await loadFactorFamilyList();
+}
+
+function _factorSourceRootInput() {
+    return document.getElementById('factor-source-root-input');
+}
+
+function _factorSourceRootStatus() {
+    return document.getElementById('factor-source-root-status');
+}
+
+function _setFactorSourceRootStatus(message, kind) {
+    var el = _factorSourceRootStatus();
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.color = kind === 'error' ? '#b42318' : (kind === 'success' ? '#067647' : '#667085');
+}
+
+async function loadFactorSourceRoot() {
+    var input = _factorSourceRootInput();
+    if (!input) return;
+    try {
+        const res = await fetch('/custom-factors/api/source-root');
+        const data = await res.json();
+        if (data.success) {
+            input.value = data.source_root || '';
+            _setFactorSourceRootStatus(
+                data.resolved_root ? ('当前生效目录: ' + data.resolved_root) : '使用默认用户目录',
+                'neutral'
+            );
+        } else {
+            _setFactorSourceRootStatus(data.error || '读取本地目录失败', 'error');
+        }
+    } catch (err) {
+        _setFactorSourceRootStatus('读取本地目录失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function saveFactorSourceRoot() {
+    var input = _factorSourceRootInput();
+    if (!input) return;
+    var sourceRoot = (input.value || '').trim();
+    try {
+        const res = await fetch('/custom-factors/api/source-root', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_root: sourceRoot })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '保存本地目录失败', 'error');
+            return;
+        }
+        input.value = data.source_root || '';
+        _setFactorSourceRootStatus(
+            data.resolved_root ? ('已保存，当前生效目录: ' + data.resolved_root) : '已清空，使用默认用户目录',
+            'success'
+        );
+        await loadFactorFamilyList();
+    } catch (err) {
+        _setFactorSourceRootStatus('保存本地目录失败: ' + (err && err.message ? err.message : err), 'error');
+    }
 }
 
 let _isAdmin = false;

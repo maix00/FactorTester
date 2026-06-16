@@ -7,8 +7,26 @@ import os
 from server.services.user_storage import user_data_dir
 
 
+def _normalize_root(path: str | None) -> str | None:
+    root = str(path or '').strip()
+    if not root:
+        return None
+    return os.path.abspath(os.path.expanduser(root))
+
+
+def factor_source_root(username: str) -> str:
+    try:
+        from server.services.sqlite.factor_source_settings import load_factor_source_root
+        configured_root = _normalize_root(load_factor_source_root(username))
+        if configured_root:
+            return configured_root
+    except Exception:
+        pass
+    return user_data_dir(username)
+
+
 def custom_factor_dir(username: str) -> str:
-    directory = os.path.join(user_data_dir(username), 'custom_factors')
+    directory = os.path.join(factor_source_root(username), 'custom_factors')
     os.makedirs(directory, exist_ok=True)
     return directory
 
