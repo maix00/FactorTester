@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import Settings
-from server.services import unified_sqlite
+from server.services.sqlite import bootstrap as unified_sqlite
 
 
 def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
@@ -12,19 +12,19 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
     calls: list[str] = []
 
     monkeypatch.setattr(
-        "server.services.data_source_sqlite.ensure_data_source_sqlite_store",
+        "server.services.sqlite.data_source.ensure_data_source_sqlite_store",
         lambda: calls.append("data_source") or str(sqlite_path),
     )
     monkeypatch.setattr(
-        "server.services.user_sqlite.ensure_user_sqlite_store",
+        "server.services.sqlite.user.ensure_user_sqlite_store",
         lambda: calls.append("users") or str(sqlite_path),
     )
     monkeypatch.setattr(
-        "server.services.factor_metadata_sqlite.ensure_factor_metadata_sqlite_store",
+        "server.services.sqlite.factor_metadata.ensure_factor_metadata_sqlite_store",
         lambda: calls.append("factor_metadata") or str(sqlite_path),
     )
     monkeypatch.setattr(
-        "server.services.data_dictionary_sqlite.ensure_data_dictionary_sqlite_store",
+        "server.services.sqlite.data_dictionary.ensure_data_dictionary_sqlite_store",
         lambda: calls.append("data_dictionary") or str(sqlite_path),
     )
 
@@ -42,7 +42,7 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
 def test_unified_sqlite_load_data_dictionary_snapshot_proxies(monkeypatch):
     payload = {"generated_at": "x"}
     monkeypatch.setattr(
-        "server.services.data_dictionary_sqlite.load_data_dictionary_snapshot",
+        "server.services.sqlite.data_dictionary.load_data_dictionary_snapshot",
         lambda: payload,
     )
     assert unified_sqlite.load_data_dictionary_snapshot() == payload

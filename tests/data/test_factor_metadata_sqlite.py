@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import Settings
-from server.services import factor_metadata_sqlite
+from server.services.sqlite import factor_metadata as factor_metadata_sqlite
 from server.services import accounts as account_store
 
 

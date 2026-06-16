@@ -6,13 +6,7 @@ import time
 from typing import Any
 
 import Settings
-
-
-def _connect() -> sqlite3.Connection:
-    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from tools.data.sqlite.db import connect_sqlite, replace_rows
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -105,55 +99,42 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-
-
-def _replace_many(conn: sqlite3.Connection, table: str, columns: list[str], rows: list[tuple[Any, ...]]) -> None:
-    conn.execute(f'DELETE FROM {table}')
-    if not rows:
-        return
-    placeholders = ", ".join("?" for _ in columns)
-    conn.executemany(
-        f'INSERT OR REPLACE INTO {table} ({", ".join(columns)}) VALUES ({placeholders})',
-        rows,
-    )
-
-
 def sync_data_dictionary_sqlite_store() -> str:
     """Build and persist the current data dictionary snapshot."""
     from server.services.data_dictionary import build_data_dictionary
 
     dd = build_data_dictionary()
-    with _connect() as conn:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
             "INSERT OR REPLACE INTO data_dictionary_meta (key, value) VALUES (?, ?)",
             ("generated_at", dd.generated_at),
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_data_columns",
             ["name", "code", "description"],
             [(item.name, item.code, item.description) for item in dd.data_columns],
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_frequency_types",
             ["name", "value", "alias"],
             [(item["name"], item["value"], item["alias"]) for item in dd.frequency_types],
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_data_sources",
             ["alias", "freq", "timezone", "columns_count", "columns_list"],
             [(item.alias, item.freq, item.timezone, item.columns_count, item.columns_list) for item in dd.data_sources],
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_param_types",
             ["name", "alias", "description", "default_example"],
             [(item.name, item.alias, item.description, item.default_example) for item in dd.param_types],
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_factors",
             ["name", "desc", "description", "math_expr", "category", "source_file"],
@@ -170,13 +151,13 @@ def sync_data_dictionary_sqlite_store() -> str:
                     """,
                     (factor.name, idx, param.alias, param.type, param.default_value, param.description),
                 )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_settings",
             ["name", "value", "description"],
             [(item.name, item.value, item.description) for item in dd.settings],
         )
-        _replace_many(
+        replace_rows(
             conn,
             "data_dictionary_factor_categories",
             ["prefix", "name"],
@@ -194,7 +175,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
     from server.services.data_dictionary import DataColumnEntry, DataDictionary, DataSourceEntry, FactorEntry, ParamEntry, ParamTypeEntry, SettingEntry
 
     try:
-        with _connect() as conn:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             _ensure_schema(conn)
             generated_at_row = conn.execute(
                 "SELECT value FROM data_dictionary_meta WHERE key = 'generated_at'"

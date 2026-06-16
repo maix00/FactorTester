@@ -6,23 +6,13 @@ storage remains the existing JSON files under ``DATA_DIR/users``.
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from typing import Any
 
 import Settings
+from tools.data.sqlite.db import connect_sqlite
 
 USER_SQLITE_PATH = Settings.CACHE_DB_PATH
-
-
-def _connect() -> sqlite3.Connection:
-    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
 def _read_json(path: str) -> list[dict[str, Any]]:
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -106,7 +96,7 @@ def sync_user_sqlite_store() -> str:
     organizations = _read_json(ORGANIZATIONS_FILE)
     levels = _read_json(LEVELS_FILE)
 
-    with _connect() as conn:
+    with connect_sqlite(Settings.CACHE_DB_PATH, foreign_keys=True) as conn:
         _ensure_schema(conn)
         now = time.time()
         conn.execute("DELETE FROM accounts")

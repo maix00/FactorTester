@@ -5,7 +5,7 @@ from flask import redirect, session
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from server.services.local_sql_data import iter_stores
-from server.services.unified_sqlite import ensure_unified_sqlite_store
+from server.services.sqlite.bootstrap import ensure_unified_sqlite_store
 
 
 _mounted_app = None

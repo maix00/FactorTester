@@ -70,7 +70,7 @@ def save_accounts(accounts: list) -> None:
     with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as file:
         json.dump(accounts, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.user_sqlite import sync_user_sqlite_store
+        from server.services.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass
@@ -93,7 +93,7 @@ def save_organizations(organizations: list) -> None:
     with open(ORGANIZATIONS_FILE, 'w', encoding='utf-8') as file:
         json.dump(organizations, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.user_sqlite import sync_user_sqlite_store
+        from server.services.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass
@@ -116,7 +116,7 @@ def save_levels(levels: list) -> None:
     with open(LEVELS_FILE, 'w', encoding='utf-8') as file:
         json.dump(levels, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.user_sqlite import sync_user_sqlite_store
+        from server.services.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass

@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 import Settings
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _load_public_factors() -> list[dict[str, Any]]:
@@ -34,13 +35,6 @@ def _account_display_name(account: dict[str, Any]) -> str:
     from server.services.accounts import account_display_name
 
     return account_display_name(account)
-
-
-def _connect() -> sqlite3.Connection:
-    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -156,7 +150,7 @@ def sync_factor_metadata_sqlite_store() -> str:
     now = time.time()
     owner_alias_by_username = _account_map()
 
-    with _connect() as conn:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute("DELETE FROM factor_catalog")
         conn.execute("DELETE FROM factor_catalog_params")

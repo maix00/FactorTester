@@ -4,7 +4,7 @@ import sqlite3
 
 import Settings
 from server.services import data_dictionary as data_dictionary_module
-from server.services import data_dictionary_sqlite
+from server.services.sqlite import data_dictionary as data_dictionary_sqlite
 
 
 def test_data_dictionary_sqlite_store_roundtrip(monkeypatch, tmp_path):

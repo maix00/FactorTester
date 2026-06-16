@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sqlite3
 import time
 from typing import Any
@@ -12,24 +11,10 @@ import pandas as pd
 
 import Settings
 from server.services.data_dictionary import scan_data_sources
+from tools.data.sqlite.db import connect_sqlite, replace_dataframe, safe_ident
 
 PREVIEW_PRODUCTS_PER_SOURCE = 1
 PREVIEW_ROW_LIMIT = 80
-
-
-def _connect() -> sqlite3.Connection:
-    Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(Settings.CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _safe_ident(value: str, *, max_length: int = 80) -> str:
-    value = re.sub(r"[^0-9A-Za-z_]+", "_", value.strip())
-    value = re.sub(r"_+", "_", value).strip("_")
-    if not value:
-        value = "x"
-    return value[:max_length]
 
 
 def _read_parquet_preview(path: str, limit: int) -> pd.DataFrame:
@@ -100,12 +85,6 @@ def _clear_preview_tables(conn: sqlite3.Connection) -> None:
     ).fetchall()
     for row in rows:
         conn.execute(f'DROP TABLE IF EXISTS "{row["name"]}"')
-
-
-def _replace_dataframe(conn: sqlite3.Connection, table_name: str, df: pd.DataFrame) -> None:
-    df.to_sql(table_name, conn, if_exists="replace", index=False)
-
-
 def _product_name(product: Any) -> str:
     return str(getattr(product, "name", getattr(product, "alias", product)))
 
@@ -140,7 +119,7 @@ def sync_data_source_sqlite_store() -> str:
         source_objects = {}
 
     now = time.time()
-    with _connect() as conn:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute("DELETE FROM data_sources")
         conn.execute("DELETE FROM data_source_products")
@@ -206,12 +185,12 @@ def sync_data_source_sqlite_store() -> str:
                 if preview.empty:
                     continue
 
-                preview_table = f"preview__{_safe_ident(source_entry.alias)}__{_safe_ident(_product_alias(product))}"
+                preview_table = f"preview__{safe_ident(source_entry.alias)}__{safe_ident(_product_alias(product))}"
                 preview = preview.copy()
                 preview.insert(0, "__row_no__", range(1, len(preview) + 1))
                 preview.insert(0, "__product__", _product_name(product))
                 preview.insert(0, "__source__", source_entry.alias)
-                _replace_dataframe(conn, preview_table, preview)
+                replace_dataframe(conn, preview_table, preview)
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO data_source_previews (
