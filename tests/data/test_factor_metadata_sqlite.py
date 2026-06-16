@@ -23,6 +23,7 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
                 "chinese_name": "收益率动量",
                 "description": "示例公共因子",
                 "math_expr": "x",
+                "source_code": "class MmRet(FactorFamily):\n    pass\n",
                 "category": "Mm",
                 "source_file": "Factors/MmRet.py",
                 "is_public": True,
@@ -43,6 +44,7 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
                 "chinese_name": "自定义",
                 "description": "示例自定义因子",
                 "math_expr": "y",
+                "source_code": "class CustomFactor(FactorFamily):\n    pass\n",
                 "category": "自编",
                 "is_public": False,
                 "params": [],
@@ -74,11 +76,11 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
     with sqlite3.connect(sqlite_path) as conn:
         conn.row_factory = sqlite3.Row
         catalog = conn.execute(
-            'SELECT source_kind, owner_username, factor_id, factor_name FROM factor_catalog ORDER BY source_kind, owner_username, factor_id'
+            'SELECT source_kind, owner_username, factor_id, factor_name, source_code FROM factor_catalog ORDER BY source_kind, owner_username, factor_id'
         ).fetchall()
-        assert [(row["source_kind"], row["owner_username"], row["factor_id"], row["factor_name"]) for row in catalog] == [
-            ("custom", "default$alice@1", "default$alice@1_Custom", "CustomFactor"),
-            ("public", "", "MmRet", "MmRet"),
+        assert [(row["source_kind"], row["owner_username"], row["factor_id"], row["factor_name"], row["source_code"]) for row in catalog] == [
+            ("custom", "default$alice@1", "default$alice@1_Custom", "CustomFactor", "class CustomFactor(FactorFamily):\n    pass\n"),
+            ("public", "", "MmRet", "MmRet", "class MmRet(FactorFamily):\n    pass\n"),
         ]
 
         params = conn.execute(

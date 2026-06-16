@@ -50,6 +50,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             chinese_name TEXT,
             description TEXT,
             math_expr TEXT,
+            source_code TEXT NOT NULL DEFAULT '',
             category TEXT,
             source_file TEXT,
             is_public INTEGER NOT NULL,
@@ -59,6 +60,15 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _ensure_factor_catalog_source_code_column(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(factor_catalog)").fetchall()
+    }
+    if "source_code" not in columns:
+        conn.execute("ALTER TABLE factor_catalog ADD COLUMN source_code TEXT NOT NULL DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS factor_catalog_params (
@@ -96,9 +106,9 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
             """
             INSERT OR REPLACE INTO factor_catalog (
                 source_kind, owner_username, owner_alias, factor_id, factor_name,
-                factor_family, chinese_name, description, math_expr, category,
+                factor_family, chinese_name, description, math_expr, source_code, category,
                 source_file, is_public, load_error, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_kind,
@@ -110,6 +120,7 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
                 str(row.get("chinese_name") or row.get("desc") or ""),
                 str(row.get("description") or ""),
                 str(row.get("math_expr") or ""),
+                str(row.get("source_code") or ""),
                 str(row.get("category") or ""),
                 str(row.get("source_file") or ""),
                 1 if row.get("is_public") else 0,
@@ -152,6 +163,7 @@ def sync_factor_metadata_sqlite_store() -> str:
 
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
+        _ensure_factor_catalog_source_code_column(conn)
         conn.execute("DELETE FROM factor_catalog")
         conn.execute("DELETE FROM factor_catalog_params")
 

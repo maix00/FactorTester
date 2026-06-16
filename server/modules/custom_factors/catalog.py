@@ -37,6 +37,12 @@ def list_custom_factors(username: str) -> list:
         filepath = os.path.join(directory, filename)
         mtime = os.path.getmtime(filepath)
         updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+        source_code = ''
+        try:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                source_code = file.read()
+        except Exception:
+            source_code = ''
 
         try:
             module_name = f'_cf_{username}_{factor_id}'
@@ -65,6 +71,7 @@ def list_custom_factors(username: str) -> list:
                 'chinese_name': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
+                'source_code': strip_factor_meta(source_code),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': False,
                 'updated_at': updated_at,
@@ -78,6 +85,7 @@ def list_custom_factors(username: str) -> list:
                 'chinese_name': '',
                 'description': '',
                 'params': [],
+                'source_code': '',
                 'is_public': False,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -119,6 +127,12 @@ def list_public_factors() -> list:
             family = _factor_family_name(ff.__class__)
             mtime = os.path.getmtime(os.path.join(factors_dir, filename))
             updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+            source_code = ''
+            try:
+                with open(os.path.join(factors_dir, filename), 'r', encoding='utf-8') as file:
+                    source_code = file.read()
+            except Exception:
+                source_code = ''
             result.append({
                 'id': name,
                 'name': name,
@@ -127,6 +141,7 @@ def list_public_factors() -> list:
                 'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
+                'source_code': strip_factor_meta(source_code),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': True,
                 'updated_at': updated_at,
@@ -140,6 +155,7 @@ def list_public_factors() -> list:
                 'chinese_name': '',
                 'description': '',
                 'params': [],
+                'source_code': '',
                 'is_public': True,
                 'updated_at': '',
                 'load_error': True,
