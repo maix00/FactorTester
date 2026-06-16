@@ -60,3 +60,9 @@ class UniqueNameObject(ABC):
 
     def __hash__(self) -> int:
         return hash(self.name)
+
+    @classmethod
+    def get_all(cls) -> list[tuple[str, 'UniqueNameObject']]:
+        """返回该子类所有已注册实例的 (name, instance) 列表。"""
+        with cls._instances_lock:
+            return list(cls._instances.items())
