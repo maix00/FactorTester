@@ -28,8 +28,10 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
 
     stale_custom = custom_dir / "OldFactor.py"
     stale_public = public_dir / "OldPublic.py"
+    stale_root = workspace_root / "stale.txt"
     stale_custom.write_text("class OldFactor(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_public.write_text("class OldPublic(FactorFamily):\n    pass\n", encoding="utf-8")
+    stale_root.write_text("old\n", encoding="utf-8")
 
     factor_storage = _load_storage_module()
     monkeypatch.setattr(factor_workspace, "_storage", lambda: factor_storage)
@@ -71,12 +73,19 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert result["public_factor_count"] == 1
     assert not stale_custom.exists()
     assert not stale_public.exists()
+    assert not stale_root.exists()
     assert (custom_dir / "FreshFactor.py").read_text(encoding="utf-8") == "class FreshFactor(FactorFamily):\n    pass\n"
     assert (public_dir / "PublicFactor.py").read_text(encoding="utf-8") == "class PublicFactor(FactorFamily):\n    pass\n"
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
     assert (workspace_root / "tools_index.json").exists()
+    assert (workspace_root / "Settings.pyi").exists()
     factor_family_stub = (workspace_root / "tools" / "factors" / "FactorFamily.pyi").read_text(encoding="utf-8")
     parameters_stub = (workspace_root / "tools" / "factors" / "Parameters.pyi").read_text(encoding="utf-8")
+    factor_expr_wrapper_stub = (workspace_root / "tools" / "factors" / "FactorExpr.pyi").read_text(encoding="utf-8")
+    expr_pkg_stub = (workspace_root / "tools" / "factors" / "expr" / "__init__.pyi").read_text(encoding="utf-8")
+    tools_stub = (workspace_root / "tools" / "__init__.pyi").read_text(encoding="utf-8")
+    parameters_pkg_stub = (workspace_root / "tools" / "parameters" / "__init__.pyi").read_text(encoding="utf-8")
+    factors_pkg_stub = (workspace_root / "tools" / "factors" / "__init__.pyi").read_text(encoding="utf-8")
     assert "class FactorFamily" in factor_family_stub
     assert "def get_factor" in factor_family_stub
     assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()
@@ -84,6 +93,15 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert "FactorFreqParam" in parameters_stub
     assert "StartCalcPointParam" in parameters_stub
     assert "# 因子系统专用参数模块" in parameters_stub
+    assert "WindowParam" in parameters_pkg_stub
+    assert "FactorTester" not in factors_pkg_stub
+    assert "EvaluateContext" not in factors_pkg_stub
+    assert "visual_groups" not in factors_pkg_stub
+    assert "CLOSE" in factor_expr_wrapper_stub
+    assert "SMALL_VAL" in factor_expr_wrapper_stub
+    assert "CLOSE" in expr_pkg_stub
+    assert "SMALL_VAL" in expr_pkg_stub
+    assert "ProductDataView" in tools_stub
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()

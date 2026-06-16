@@ -182,7 +182,7 @@ async function saveFactorSourceRoot() {
 
 async function buildFactorWorkspace() {
     try {
-        _setFactorSourceRootStatus('正在建立本地工作区...', 'neutral');
+        _setFactorSourceRootStatus('正在清空并建立本地工作区...', 'neutral');
         const res = await fetch('/custom-factors/api/workspace/build', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -194,8 +194,9 @@ async function buildFactorWorkspace() {
             return;
         }
         await loadFactorWorkspaceGitSettings();
+        const commitSuffix = data.git_commit_sha ? `，已提交 ${data.git_commit_sha}` : '';
         _setFactorSourceRootStatus(
-            `已建立工作区，公共因子 ${data.public_factor_count || 0} 个，自定义因子 ${data.custom_factor_count || 0} 个`,
+            `已建立工作区，公共因子 ${data.public_factor_count || 0} 个，自定义因子 ${data.custom_factor_count || 0} 个${commitSuffix}`,
             'success'
         );
     } catch (err) {

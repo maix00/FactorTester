@@ -425,7 +425,10 @@ def _render_stub_module(source: str, filename: str) -> str:
             for decorator in decorators:
                 lines.append(f'@{decorator}')
             signature = _format_arguments(node.args)
-            return_annotation = _annotation_to_source(node.returns) if node.returns is not None else 'Any'
+            if node.name == '__init__':
+                return_annotation = 'None'
+            else:
+                return_annotation = _annotation_to_source(node.returns) if node.returns is not None else 'Any'
             lines.append(f'def {node.name}({signature}) -> {return_annotation}: ...')
         elif isinstance(node, ast.ClassDef):
             bases = []
@@ -454,7 +457,10 @@ def _render_stub_module(source: str, filename: str) -> str:
                     for decorator in decorators:
                         class_lines.append(f'@{decorator}')
                     signature = _format_arguments(child.args)
-                    return_annotation = _annotation_to_source(child.returns) if child.returns is not None else 'Any'
+                    if child.name == '__init__':
+                        return_annotation = 'None'
+                    else:
+                        return_annotation = _annotation_to_source(child.returns) if child.returns is not None else 'Any'
                     class_lines.append(f'def {child.name}({signature}) -> {return_annotation}: ...')
             if not class_lines:
                 class_lines.append('...')
@@ -469,13 +475,16 @@ def _render_stub_module(source: str, filename: str) -> str:
 def _write_workspace_root_stub(root: str) -> bool:
     path = os.path.join(root, 'tools', '__init__.pyi')
     content = '\n'.join([
-        'from tools.base.UniqueNameObject import UniqueNameObject',
-        'from tools.data.types.DataColumn import DataColumn',
-        'from tools.data.types.DataFreq import DataFreq',
-        'from tools.data.types.DataTime import DataTime, TimePrecision',
-        'from tools.data.views.ProductDataView import ProductDataView',
-        'from tools.factors.Factors import Factor',
-        'from tools.factors.FactorFamily import FactorFamily',
+        'from typing import Any',
+        '',
+        'class UniqueNameObject: ...',
+        'class DataColumn: ...',
+        'class DataFreq: ...',
+        'class DataTime: ...',
+        'class TimePrecision: ...',
+        'class ProductDataView: ...',
+        'class Factor: ...',
+        'class FactorFamily: ...',
         '',
         '__all__ = [',
         '    "UniqueNameObject",',
@@ -525,41 +534,49 @@ def _write_settings_stub(root: str) -> bool:
 def _write_factor_package_stub(root: str) -> bool:
     path = os.path.join(root, 'tools', 'factors', '__init__.pyi')
     content = '\n'.join([
-        'from tools.factors.Parameters import FactorNextPeriodReturns, ReturnFreqParam, FactorFreqParam, StartCalcPointParam, ReverseParam',
-        'from tools.factors.Factors import Factor',
-        'from tools.factors.FactorFamily import FactorFamily',
-        'from tools.factors.FactorExpr import (',
-        '    FactorExpr,',
-        '    ConstExpr,',
-        '    ParamRef,',
-        '    ColumnRef,',
-        '    OperandExpr,',
-        '    CompositeExpr,',
-        '    ShiftOp,',
-        '    CrossSectionalOp,',
-        '    WhereOp,',
-        '    TermStructureOp,',
-        '    signal_align,',
-        '    expr_max,',
-        '    expr_min,',
-        '    OPEN,',
-        '    HIGH,',
-        '    LOW,',
-        '    CLOSE,',
-        '    VOLUME,',
-        '    TURNOVER,',
-        '    OPEN_INTEREST,',
-        '    VWAP,',
-        '    SETTLE,',
-        '    OPEN_RAW,',
-        '    HIGH_RAW,',
-        '    LOW_RAW,',
-        '    CLOSE_RAW,',
-        '    SMALL_VAL,',
-        ')',
+        'from enum import Enum',
+        'from typing import Any',
+        '',
+        'class FactorExpr: ...',
+        'class Factor: ...',
+        'class FactorFamily: ...',
+        '',
+        'class ConstExpr(FactorExpr): ...',
+        'class ParamRef(FactorExpr): ...',
+        'class ColumnRef(FactorExpr): ...',
+        'class OperandExpr(FactorExpr): ...',
+        'class CompositeExpr(FactorExpr): ...',
+        'class ShiftOp(FactorExpr): ...',
+        'class CrossSectionalOp(FactorExpr): ...',
+        'class WhereOp(FactorExpr): ...',
+        'class TermStructureOp(FactorExpr): ...',
+        '',
+        'class FactorNextPeriodReturns(Enum): ...',
+        'ReturnFreqParam: Any = ...',
+        'FactorFreqParam: Any = ...',
+        'StartCalcPointParam: Any = ...',
+        'ReverseParam: Any = ...',
+        '',
+        'def signal_align(*args, **kwargs): ...',
+        'def expr_max(*args, **kwargs): ...',
+        'def expr_min(*args, **kwargs): ...',
+        'OPEN: FactorExpr = ...',
+        'HIGH: FactorExpr = ...',
+        'LOW: FactorExpr = ...',
+        'CLOSE: FactorExpr = ...',
+        'VOLUME: FactorExpr = ...',
+        'TURNOVER: FactorExpr = ...',
+        'OPEN_INTEREST: FactorExpr = ...',
+        'VWAP: FactorExpr = ...',
+        'SETTLE: FactorExpr = ...',
+        'OPEN_RAW: FactorExpr = ...',
+        'HIGH_RAW: FactorExpr = ...',
+        'LOW_RAW: FactorExpr = ...',
+        'CLOSE_RAW: FactorExpr = ...',
+        'SMALL_VAL: FactorExpr = ...',
         '',
         '__all__ = [',
-        '    "FactorNextPeriodReturns",',
+            '    "FactorNextPeriodReturns",',
         '    "ReturnFreqParam",',
         '    "FactorFreqParam",',
         '    "StartCalcPointParam",',
@@ -593,6 +610,37 @@ def _write_factor_package_stub(root: str) -> bool:
         '    "LOW_RAW",',
         '    "CLOSE_RAW",',
         '    "SMALL_VAL",',
+        ']',
+        '',
+    ])
+    return _write_text_if_changed(path, content)
+
+
+def _write_parameters_package_stub(root: str) -> bool:
+    path = os.path.join(root, 'tools', 'parameters', '__init__.pyi')
+    content = '\n'.join([
+        'from typing import Any',
+        '',
+        'class Parameter: ...',
+        'class TypeParam(Parameter): ...',
+        'class FinRangeParam(Parameter): ...',
+        'class TimeDeltaParam(Parameter): ...',
+        'class FactorParam(Parameter): ...',
+        'class ValueSpace: ...',
+        'class DataColumnParam(Parameter): ...',
+        'class DataTimeParam(Parameter): ...',
+        'class WindowParam(Parameter): ...',
+        '',
+        '__all__ = [',
+        '    "Parameter",',
+        '    "TypeParam",',
+        '    "FinRangeParam",',
+        '    "TimeDeltaParam",',
+        '    "FactorParam",',
+        '    "ValueSpace",',
+        '    "DataColumnParam",',
+        '    "DataTimeParam",',
+        '    "WindowParam",',
         ']',
         '',
     ])
@@ -739,6 +787,24 @@ def _remove_missing_files(directory: str, expected_names: set[str]) -> list[str]
     return removed
 
 
+def _clear_workspace_generated(root: str) -> list[str]:
+    removed: list[str] = []
+    if not os.path.isdir(root):
+        return removed
+    preserve = {'.git', '.gitignore'}
+    for name in sorted(os.listdir(root)):
+        if name in preserve:
+            continue
+        path = os.path.join(root, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+            removed.append(path)
+        elif os.path.exists(path):
+            os.remove(path)
+            removed.append(path)
+    return removed
+
+
 def _sync_tools_index(root: str) -> bool:
     tools_dir = os.path.join(os.getcwd(), 'tools')
     tool_files = scan_tool_files(tools_dir, include_symbols=True)
@@ -811,6 +877,26 @@ def _sync_vscode_settings(root: str) -> bool:
     return _merge_json_object(settings_path, updates)
 
 
+def _git_commit_all(root: str, message: str) -> str | None:
+    if not _git_binary_available() or not os.path.isdir(os.path.join(root, '.git')):
+        return None
+    status = _run_git(root, 'status', '--porcelain')
+    if status.returncode != 0:
+        return None
+    if not status.stdout.strip():
+        return None
+    add = _run_git(root, 'add', '-A')
+    if add.returncode != 0:
+        return None
+    commit = _run_git(root, 'commit', '-m', message)
+    if commit.returncode != 0:
+        return None
+    rev = _run_git(root, 'rev-parse', '--short', 'HEAD')
+    if rev.returncode != 0:
+        return None
+    return rev.stdout.strip() or None
+
+
 def _load_workspace_config(username: str) -> dict[str, Any]:
     settings = load_factor_source_workspace_settings(username) or {}
     return {
@@ -837,11 +923,15 @@ def get_factor_workspace_git_state(username: str) -> dict[str, Any]:
     }
 
 
-def sync_database_to_workspace(username: str, branch_mode: str = 'auto') -> dict[str, Any]:
+def sync_database_to_workspace(username: str, branch_mode: str = 'auto', clear_existing: bool = False) -> dict[str, Any]:
     root = _workspace_root(username)
     _ensure_workspace_layout(root)
     git_info = _ensure_git_workspace(root, username)
     selected_branch = _apply_workspace_git_branch(root, username, branch_mode)
+
+    cleared_files: list[str] = []
+    if clear_existing:
+        cleared_files = _clear_workspace_generated(root)
 
     custom_count = 0
     public_count = 0
@@ -889,6 +979,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = 'auto') -> dict
         'public_factor_dir': _workspace_public_dir(root),
         'git': git_info,
         'git_selected_branch': selected_branch,
+        'cleared_files': cleared_files,
         'custom_factor_count': custom_count,
         'public_factor_count': public_count,
         'touched_files': touched_files,
@@ -902,6 +993,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = 'auto') -> dict
         'public_factor_count': public_count,
         'git': git_info,
         'git_selected_branch': selected_branch,
+        'cleared_files': cleared_files,
         'touched_files': touched_files,
         'removed_files': removed_files,
         'tools_index_changed': tools_index_changed,
@@ -912,7 +1004,14 @@ def sync_database_to_workspace(username: str, branch_mode: str = 'auto') -> dict
 
 
 def build_factor_workspace(username: str) -> dict[str, Any]:
-    return sync_database_to_workspace(username, branch_mode='force')
+    result = sync_database_to_workspace(username, branch_mode='force', clear_existing=True)
+    git_info = result.get('git') or {}
+    if git_info.get('git_enabled'):
+        root = result.get('workspace_root') or _workspace_root(username)
+        commit_sha = _git_commit_all(str(root), 'chore: rebuild factor workspace')
+        if commit_sha:
+            result['git_commit_sha'] = commit_sha
+    return result
 
 
 def sync_factor_workspace(username: str, branch_mode: str = 'force') -> dict[str, Any]:
