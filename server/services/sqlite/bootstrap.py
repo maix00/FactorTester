@@ -12,7 +12,7 @@ def _call(func: Callable[[], str]) -> str:
 
 def ensure_unified_sqlite_store() -> str:
     """Ensure all unified-local SQLite mirrors are materialized."""
-    from server.services.sqlite.data_dictionary import ensure_data_dictionary_sqlite_store
+    from server.services.sqlite.data_dictionary_snapshot import ensure_data_dictionary_sqlite_store
     from server.services.sqlite.data_source import ensure_data_source_sqlite_store
     from server.services.sqlite.factor_metadata import ensure_factor_metadata_sqlite_store
     from server.services.sqlite.user import ensure_user_sqlite_store
@@ -29,6 +29,6 @@ def ensure_unified_sqlite_store() -> str:
 
 def load_data_dictionary_snapshot() -> dict | None:
     """Load the cached data dictionary snapshot through the unified facade."""
-    from server.services.sqlite.data_dictionary import load_data_dictionary_snapshot as _load
+    from server.services.sqlite.data_dictionary_snapshot import load_data_dictionary_snapshot as _load
 
     return _load()
