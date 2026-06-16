@@ -16,6 +16,7 @@ from server.modules.custom_factors.source_helpers import (
 from server.modules.custom_factors.storage import (
     delete_factor_source,
     load_factor_source,
+    load_public_factor_source,
     public_factor_path,
     rename_factor_source,
     save_factor_source,
@@ -169,8 +170,8 @@ def api_update_public_factor(factor_id):
     if not _current_user_is_super_admin():
         return jsonify({'success': False, 'error': '只有超级管理员可以修改公共因子家族'}), 403
 
-    existing_path = public_factor_path(factor_id)
-    if not os.path.exists(existing_path):
+    existing_source = load_public_factor_source(factor_id)
+    if existing_source is None:
         return jsonify({'success': False, 'error': '公共因子不存在'}), 404
 
     data = request.get_json(silent=True) or {}
@@ -183,9 +184,7 @@ def api_update_public_factor(factor_id):
     if class_name != factor_id:
         return jsonify({'success': False, 'error': '公共因子家族暂不支持重命名，请保持 class 名与文件名一致'}), 400
 
-    with open(existing_path, 'r', encoding='utf-8') as file:
-        old_source = file.read()
-    old_meta = parse_class_meta(old_source)
+    old_meta = parse_class_meta(existing_source)
     chinese_name = (data.get('chinese_name') or old_meta.get('chinese_name', '')).strip()
     description = (data.get('description') or old_meta.get('description', '')).strip()
     category = (data.get('category') or old_meta.get('category', '') or '公共').strip()

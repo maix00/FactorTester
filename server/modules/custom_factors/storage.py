@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import os
 
+from server.services.sqlite.factor_source_store import (
+    delete_factor_source as delete_factor_source_row,
+    load_factor_source as load_factor_source_row,
+    rename_factor_source as rename_factor_source_row,
+    upsert_factor_source as upsert_factor_source_row,
+)
 from server.services.user_storage import user_data_dir
 
 
@@ -36,14 +42,21 @@ def factor_path(username: str, factor_id: str) -> str:
 
 
 def load_factor_source(username: str, factor_id: str) -> str | None:
+    source = load_factor_source_row('custom', username, factor_id)
+    if source:
+        return source
     path = factor_path(username, factor_id)
     if not os.path.exists(path):
         return None
     with open(path, 'r', encoding='utf-8') as file:
-        return file.read()
+        source = file.read()
+    if source:
+        upsert_factor_source_row('custom', username, factor_id, factor_id, source)
+    return source
 
 
 def save_factor_source(username: str, factor_id: str, source_code: str) -> None:
+    upsert_factor_source_row('custom', username, factor_id, factor_id, source_code)
     path = factor_path(username, factor_id)
     with open(path, 'w', encoding='utf-8') as file:
         file.write(source_code)
@@ -54,6 +67,7 @@ def public_factor_path(factor_id: str) -> str:
 
 
 def save_public_factor_source(factor_id: str, source_code: str) -> None:
+    upsert_factor_source_row('public', '', factor_id, factor_id, source_code)
     path = public_factor_path(factor_id)
     with open(path, 'w', encoding='utf-8') as file:
         file.write(source_code)
@@ -61,11 +75,13 @@ def save_public_factor_source(factor_id: str, source_code: str) -> None:
 
 def rename_factor_source(username: str, old_factor_id: str, new_factor_id: str) -> bool:
     """Rename a custom factor file (and any companion .json/__pycache__)."""
+    source_exists = load_factor_source_row('custom', username, old_factor_id) is not None
+    rename_factor_source_row('custom', username, old_factor_id, new_factor_id, new_factor_id)
     old_path = factor_path(username, old_factor_id)
-    if not os.path.exists(old_path):
-        return False
+    existed = os.path.exists(old_path)
     new_path = factor_path(username, new_factor_id)
-    os.rename(old_path, new_path)
+    if existed:
+        os.rename(old_path, new_path)
 
     # Also rename companion .json if present
     old_json = os.path.join(custom_factor_dir(username), f'{old_factor_id}.json')
@@ -79,15 +95,33 @@ def rename_factor_source(username: str, old_factor_id: str, new_factor_id: str) 
         import shutil
         shutil.rmtree(pycache, ignore_errors=True)
 
-    return True
+    return source_exists or existed
 
 
 def delete_factor_source(username: str, factor_id: str) -> bool:
+    source_exists = load_factor_source_row('custom', username, factor_id) is not None
+    delete_factor_source_row('custom', username, factor_id)
     path = factor_path(username, factor_id)
+    existed = False
     if os.path.exists(path):
         os.remove(path)
-        return True
+        existed = True
     old_path = os.path.join(custom_factor_dir(username), f'{factor_id}.json')
     if os.path.exists(old_path):
         os.remove(old_path)
-    return False
+        existed = True
+    return source_exists or existed
+
+
+def load_public_factor_source(factor_id: str) -> str | None:
+    source = load_factor_source_row('public', '', factor_id)
+    if source:
+        return source
+    path = public_factor_path(factor_id)
+    if not os.path.exists(path):
+        return None
+    with open(path, 'r', encoding='utf-8') as file:
+        source = file.read()
+    if source:
+        upsert_factor_source_row('public', '', factor_id, factor_id, source)
+    return source

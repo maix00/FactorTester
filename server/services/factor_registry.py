@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tempfile
 import threading
 
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily
 from server.services.user_storage import user_data_dir
+from server.modules.custom_factors.storage import load_factor_source, load_public_factor_source
 
 
 _factor_family_cache: dict = {}
@@ -31,6 +33,31 @@ _factor_family_cache_lock = threading.Lock()
 _custom_factor_cache: dict = {}
 _custom_factor_cache_lock = threading.Lock()
 _chinese_names_cache: dict = {}
+
+
+def _build_factor_from_source(module_name: str, source_code: str) -> FactorFamily | None:
+    if not source_code:
+        return None
+    tmpdir = tempfile.mkdtemp(prefix='factor_src_')
+    tmpfile = os.path.join(tmpdir, f'{module_name}.py')
+    try:
+        with open(tmpfile, 'w', encoding='utf-8') as file:
+            file.write(source_code)
+        spec = importlib.util.spec_from_file_location(module_name, tmpfile)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for attr_name in dir(module):
+            obj = getattr(module, attr_name)
+            if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
+                return obj()
+        return None
+    except Exception:
+        return None
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def get_factor_family_instance(module_name, username: str | None = None):
@@ -41,33 +68,24 @@ def get_factor_family_instance(module_name, username: str | None = None):
 
     factors_dir = os.path.join(os.getcwd(), "Factors")
     module_path = os.path.join(factors_dir, f"{module_name}.py")
-    if os.path.exists(module_path):
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        if spec is not None and spec.loader is not None:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            ff = getattr(module, module_name)()
-            assert isinstance(ff, FactorFamily)
-            with _factor_family_cache_lock:
-                _factor_family_cache[module_name] = ff
-            return ff
+    source_code = load_public_factor_source(module_name) or ''
+    ff = _build_factor_from_source(module_name, source_code)
+    if ff is not None:
+        with _factor_family_cache_lock:
+            _factor_family_cache[module_name] = ff
+        return ff
 
     if username is None:
         username = session.get('username')
     if username:
-        custom_factor = get_custom_factor_instance(username, module_name)
+        custom_source = load_factor_source(username, module_name) or ''
+        custom_factor = _build_factor_from_source(module_name, custom_source)
         if custom_factor is not None:
+            with _custom_factor_cache_lock:
+                _custom_factor_cache[(username, module_name)] = custom_factor
             return custom_factor
 
         custom_dir = os.path.join(user_data_dir(username), 'custom_factors')
-        if os.path.isdir(custom_dir):
-            for filename in os.listdir(custom_dir):
-                if not filename.endswith('.py'):
-                    continue
-                factor_id = os.path.splitext(filename)[0]
-                custom_factor = get_custom_factor_instance(username, factor_id)
-                if custom_factor is not None and custom_factor.__class__.__name__ == module_name:
-                    return custom_factor
         custom_path = os.path.join(custom_dir, f'{module_name}.py')
         raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' or '{custom_path}' (user '{username}')")
 
@@ -75,28 +93,10 @@ def get_factor_family_instance(module_name, username: str | None = None):
 
 
 def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:
-    custom_path = os.path.join(user_data_dir(username), 'custom_factors', f'{factor_id}.py')
-    if not os.path.exists(custom_path):
+    source_code = load_factor_source(username, factor_id) or ''
+    if not source_code:
         return None
-
-    module_name = f'_cf_{username}_{factor_id}'
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, custom_path)
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        for attr_name in dir(module):
-            obj = getattr(module, attr_name)
-            if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
-                return obj()
-        return None
-    except Exception as e:
-        import logging
-        logger = logging.getLogger('factor_registry')
-        logger.warning("Cannot load custom factor '%s/%s': %s", username, factor_id, e)
-        return None
+    return _build_factor_from_source(f'_cf_{username}_{factor_id}', source_code)
 
 
 def get_custom_factor_instance(username: str, factor_id: str) -> FactorFamily | None:
