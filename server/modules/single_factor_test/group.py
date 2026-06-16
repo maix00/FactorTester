@@ -1679,6 +1679,20 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"elapsed={time.perf_counter() - request_started:.2f}s"
     )
     first_valid = valid_results[0] if valid_results else {}
+
+    # DEBUG #110: validate merged groups vs metrics key alignment
+    _merged_group_keys = [g.get('key') for g in merged_groups]
+    _merged_metric_keys = set(merged_metrics.keys())
+    _merged_missing = []
+    for g in merged_groups:
+        gk = g.get('key')
+        if not g.get('is_ls') and gk not in _merged_metric_keys:
+            _merged_missing.append(f"key='{gk}'")
+    if _merged_missing:
+        print(f"[DEBUG #110] MERGE MISMATCH: groups without metrics: {_merged_missing}")
+        print(f"[DEBUG #110]   merged_group_keys: {_merged_group_keys}")
+        print(f"[DEBUG #110]   merged_metric_keys: {sorted(_merged_metric_keys)}")
+
     return True, {
         'success': True,
         'groups': merged_groups,
