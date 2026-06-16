@@ -1179,24 +1179,40 @@ def _serialize_group_simulation_result(
                 f"submission={submission_id} factor={factor_alias} key={ls_key}"
             )
 
-    # DEBUG: print groups key vs metrics key alignment for Issue #110
+    # DEBUG #110: validate groups key vs metrics key alignment
     _debug_groups_keys = [g['key'] for g in groups_data]
     _debug_metrics_keys = list(metrics.keys())
     _debug_report_keys = []
     if not report_df.empty:
         for k in report_df.index:
             _debug_report_keys.append(_metric_display_key(k, result_group_names))
-    print(f"[DEBUG #110] submission={submission_id} factor={factor_alias} n_total={n_total}")
+    # Detect mismatches: non-LS groups missing from metrics
+    _missing_from_metrics = []
+    for g_idx, gd in enumerate(groups_data):
+        gk = gd['key']
+        if not gd.get('is_ls') and gk not in metrics:
+            _missing_from_metrics.append(f"[{g_idx}] key='{gk}'")
+    if _missing_from_metrics:
+        print(f"[DEBUG #110] *** MISMATCH *** submission={submission_id} factor={factor_alias}")
+        print(f"[DEBUG #110]   groups keys: {_debug_groups_keys}")
+        print(f"[DEBUG #110]   metrics keys: {_debug_metrics_keys}")
+        print(f"[DEBUG #110]   report_df keys: {_debug_report_keys}")
+        print(f"[DEBUG #110]   result_group_names: {result_group_names}")
+        print(f"[DEBUG #110]   missing from metrics: {_missing_from_metrics}")
+    # Also check report_df key alignment with groups_data keys
+    _report_mismatches = []
+    for g_idx in range(min(len(groups_data), len(_debug_report_keys))):
+        gk = groups_data[g_idx]['key']
+        rk = _debug_report_keys[g_idx]
+        if gk != rk:
+            _report_mismatches.append(f"[{g_idx}] groups.key='{gk}' vs report_df.key='{rk}'")
+    if _report_mismatches:
+        print(f"[DEBUG #110] *** REPORT_DF MISMATCH *** {_report_mismatches}")
+    # Print summary even if no mismatches (for diagnosis)
+    print(f"[DEBUG #110] OK submission={submission_id} factor={factor_alias} n_total={n_total}")
     print(f"[DEBUG #110]   groups_data keys: {_debug_groups_keys}")
     print(f"[DEBUG #110]   report_df keys:  {_debug_report_keys}")
     print(f"[DEBUG #110]   metrics keys:    {_debug_metrics_keys}")
-    print(f"[DEBUG #110]   result_group_names: {result_group_names}")
-    for g_idx, gd in enumerate(groups_data):
-        gk = gd['key']
-        eq_first = gd['total_equity'][0] if gd['total_equity'] else None
-        mt = metrics.get(gk, {})
-        mt_total_ret = mt.get('Total Return')
-        print(f"[DEBUG #110]   [{g_idx}] key='{gk}' equity[0]={eq_first} metrics.TotalReturn={mt_total_ret}")
 
     return {
         'success': True,
