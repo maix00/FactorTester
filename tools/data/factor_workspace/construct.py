@@ -12,6 +12,11 @@ from typing import Any
 
 from tools.data.factor_workspace import storage as factor_workspace_storage
 from tools.data.tech_docs import scan_tool_files
+from tools.decorators import (
+    collect_factor_workspace_import_dependencies,
+    extract_factor_workspace_exports,
+    has_factor_workspace_decorator,
+)
 
 from .pre import WorkspaceSourceSpec, collect_workspace_architecture
 
@@ -222,11 +227,8 @@ def _render_stub_module(source: str, filename: str) -> str:
     for node in tree.body:
         if isinstance(node, ast.Assign):
             if any(isinstance(target, ast.Name) and target.id == "__factor_workspace__" for target in node.targets):
-                from tools.decorators.factor_workspace import extract_factor_workspace_exports
-
                 workspace_exports = extract_factor_workspace_exports(tree)
                 break
-    from tools.decorators.factor_workspace import collect_factor_workspace_import_dependencies, has_factor_workspace_decorator
 
     needed_names = collect_factor_workspace_import_dependencies(tree, workspace_exports)
     is_package_init = filename == "__init__.py"
