@@ -8,17 +8,30 @@ import time
 
 from .user import User
 from tools.data.sqlite.account_manager import (
+    DEFAULT_SCOPE_KEY,
+    delete_param_config as _delete_param_config,
+    delete_scope as _delete_scope,
     delete_user_template_collections,
     delete_user_template_collection,
     ensure_account_manager_sqlite_store,
     iter_user_template_collections,
+    ensure_scope_exists as _ensure_scope_exists,
+    list_all_aliases_across_scopes as _list_all_aliases_across_scopes,
+    list_param_config_aliases as _list_param_config_aliases,
+    list_param_config_scopes as _list_param_config_scopes,
     load_accounts as _load_accounts,
     load_levels as _load_levels,
     load_organizations as _load_organizations,
+    load_param_config as _load_param_config,
+    load_product_groups as _load_product_groups,
     load_user_templates as _load_user_templates,
+    normalize_product_group as _normalize_product_group,
+    rename_scope as _rename_scope,
     save_accounts as _save_accounts,
     save_levels as _save_levels,
     save_organizations as _save_organizations,
+    save_param_config as _save_param_config,
+    save_product_groups as _save_product_groups,
     save_user_templates as _save_user_templates,
 )
 
@@ -399,6 +412,65 @@ def save_user_templates(
     scope_key: str | None = None,
 ) -> None:
     _save_user_templates(username, kind, templates, ff_alias=ff_alias, scope_key=scope_key)
+
+
+def load_product_groups(username: str) -> list:
+    ensure_account_manager_sqlite_store()
+    return _load_product_groups(username)
+
+
+def save_product_groups(username: str, groups: list) -> None:
+    ensure_account_manager_sqlite_store()
+    _save_product_groups(username, groups)
+
+
+def normalize_product_group(product_group: str | None) -> str:
+    return _normalize_product_group(product_group)
+
+
+def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> dict | None:
+    ensure_account_manager_sqlite_store()
+    return _load_param_config(username, ff_alias, scope_key)
+
+
+def save_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict:
+    ensure_account_manager_sqlite_store()
+    return _save_param_config(username, ff_alias, params_list, scope_key)
+
+
+def delete_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _delete_param_config(username, ff_alias, scope_key)
+
+
+def list_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
+    ensure_account_manager_sqlite_store()
+    return _list_param_config_aliases(username, scope_key)
+
+
+def list_param_config_scopes(username: str) -> list[str]:
+    ensure_account_manager_sqlite_store()
+    return _list_param_config_scopes(username)
+
+
+def list_all_aliases_across_scopes(username: str) -> dict[str, list[str]]:
+    ensure_account_manager_sqlite_store()
+    return _list_all_aliases_across_scopes(username)
+
+
+def ensure_scope_exists(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> str:
+    ensure_account_manager_sqlite_store()
+    return _ensure_scope_exists(username, scope_key)
+
+
+def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _rename_scope(username, old_scope_key, new_scope_key)
+
+
+def delete_scope(username: str, scope_key: str) -> bool:
+    ensure_account_manager_sqlite_store()
+    return _delete_scope(username, scope_key)
 
 
 def new_template_id() -> str:

@@ -151,7 +151,7 @@ def tmp_storage(monkeypatch):
 
 
 class TestTemplateStorageLifecycle:
-    """直接测试 user_storage 层的模板 JSON 读写（不经过 Flask 路由）。"""
+    """直接测试模板存储层的读写（不经过 Flask 路由）。"""
 
     USER = "testuser"
     SCOPE = "MmRet"

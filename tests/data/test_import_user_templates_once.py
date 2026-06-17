@@ -20,7 +20,7 @@ def test_import_user_templates_once_maps_legacy_layout_to_sqlite(monkeypatch, tm
     monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", db_path)
 
-    root = tmp_path / "user_storage"
+    root = tmp_path / "users"
     user_dir = root / "default$alice@1"
     _write_templates(user_dir / "time_templates.json", [{"id": "t1", "name": "time"}])
     _write_templates(user_dir / "params_templates" / "MmRet.json", [{"id": "p1", "name": "params"}])

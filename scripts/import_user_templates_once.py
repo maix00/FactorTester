@@ -45,7 +45,7 @@ def _import_file(username: str, kind: str, path: str, *, ff_alias: str | None = 
 
 
 def import_user_templates_once(source_root: str | None = None) -> dict[str, Any]:
-    root = os.path.abspath(os.path.expanduser(source_root or os.path.join(DATA_DIR, "user_storage")))
+    root = os.path.abspath(os.path.expanduser(source_root or os.path.join(DATA_DIR, "users")))
     result = {
         "source_root": root,
         "users": 0,
@@ -119,7 +119,7 @@ def import_user_templates_once(source_root: str | None = None) -> dict[str, Any]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import legacy user template JSON files into SQLite once.")
-    parser.add_argument("--source-root", default=None, help="Legacy user_storage root. Defaults to DATA_DIR/user_storage.")
+    parser.add_argument("--source-root", default=None, help="Legacy users root. Defaults to DATA_DIR/users.")
     args = parser.parse_args()
     print(import_user_templates_once(args.source_root))
     return 0

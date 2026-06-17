@@ -67,14 +67,23 @@ def save_user_templates(
     ff_alias: str | None = None,
     scope_key: str | None = None,
 ) -> None:
-    payload = json.dumps(
-        {
-            "ff_alias": ff_alias or (scope_key if scope_key else "unknown"),
-            "templates": [item for item in templates if isinstance(item, dict)],
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
+    save_user_template_payload(
+        username,
+        kind,
+        [item for item in templates if isinstance(item, dict)],
+        ff_alias=ff_alias,
+        scope_key=scope_key,
     )
+
+
+def save_user_template_payload(
+    username: str,
+    kind: str,
+    payload: dict[str, Any] | list[dict[str, Any]],
+    ff_alias: str | None = None,
+    scope_key: str | None = None,
+) -> None:
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_user_template_schema(conn)
@@ -86,7 +95,7 @@ def save_user_templates(
             ON CONFLICT(username, kind, scope_key, ff_alias)
             DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
             """,
-            (username, kind, _template_key(scope_key), _template_key(ff_alias), payload, now),
+            (username, kind, _template_key(scope_key), _template_key(ff_alias), payload_json, now),
         )
 
 
