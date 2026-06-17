@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 import Settings
+from tools.data import datadict_scan
 from tools.data.sqlite.db import connect_sqlite, replace_rows
 
 
@@ -101,9 +102,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 def sync_data_dictionary_sqlite_store() -> str:
     """Build and persist the current data dictionary snapshot."""
-    from server.services.datadict_scan import build_data_dictionary
-
-    dd = build_data_dictionary()
+    dd = datadict_scan.build_data_dictionary()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
@@ -172,8 +171,6 @@ def ensure_data_dictionary_sqlite_store() -> str:
 
 def load_data_dictionary_snapshot() -> dict[str, Any] | None:
     """Load the cached data dictionary snapshot if present."""
-    from server.services.datadict_scan import DataColumnEntry, DataDictionary, DataSourceEntry, FactorEntry, ParamEntry, ParamTypeEntry, SettingEntry
-
     try:
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             _ensure_schema(conn)
@@ -185,7 +182,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
             generated_at = str(generated_at_row["value"] or "")
 
             data_columns = [
-                DataColumnEntry(name=row["name"], code=row["code"], description=row["description"])
+                datadict_scan.DataColumnEntry(name=row["name"], code=row["code"], description=row["description"])
                 for row in conn.execute(
                     "SELECT name, code, description FROM data_dictionary_data_columns ORDER BY name"
                 ).fetchall()
@@ -197,7 +194,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
                 ).fetchall()
             ]
             data_sources = [
-                DataSourceEntry(
+                datadict_scan.DataSourceEntry(
                     alias=row["alias"],
                     freq=row["freq"],
                     timezone=row["timezone"],
@@ -209,7 +206,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
                 ).fetchall()
             ]
             param_types = [
-                ParamTypeEntry(
+                datadict_scan.ParamTypeEntry(
                     name=row["name"],
                     alias=row["alias"],
                     description=row["description"],
@@ -224,25 +221,27 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
                 "SELECT name, desc, description, math_expr, category, source_file FROM data_dictionary_factors ORDER BY name"
             ).fetchall()
             for row in factor_rows:
-                params = [
-                    ParamEntry(
-                        alias=param_row["alias"],
-                        type=param_row["type"],
-                        default_value=param_row["default_value"],
-                        description=param_row["description"],
+                params = []
+                param_rows = conn.execute(
+                    """
+                    SELECT alias, type, default_value, description
+                    FROM data_dictionary_factor_params
+                    WHERE factor_name = ?
+                    ORDER BY param_index
+                    """,
+                    (row["name"],),
+                ).fetchall()
+                for param_row in param_rows:
+                    params.append(
+                        datadict_scan.ParamEntry(
+                            alias=param_row["alias"],
+                            type=param_row["type"],
+                            default_value=param_row["default_value"],
+                            description=param_row["description"],
+                        )
                     )
-                    for param_row in conn.execute(
-                        """
-                        SELECT alias, type, default_value, description
-                        FROM data_dictionary_factor_params
-                        WHERE factor_name = ?
-                        ORDER BY param_index
-                        """,
-                        (row["name"],),
-                    ).fetchall()
-                ]
                 factors.append(
-                    FactorEntry(
+                    datadict_scan.FactorEntry(
                         name=row["name"],
                         desc=row["desc"],
                         description=row["description"],
@@ -253,7 +252,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
                     )
                 )
             settings = [
-                SettingEntry(name=row["name"], value=row["value"], description=row["description"])
+                datadict_scan.SettingEntry(name=row["name"], value=row["value"], description=row["description"])
                 for row in conn.execute(
                     "SELECT name, value, description FROM data_dictionary_settings ORDER BY name"
                 ).fetchall()
@@ -267,7 +266,7 @@ def load_data_dictionary_snapshot() -> dict[str, Any] | None:
     except Exception:
         return None
 
-    dd = DataDictionary(
+    dd = datadict_scan.DataDictionary(
         generated_at=generated_at,
         data_columns=data_columns,
         frequency_types=frequency_types,

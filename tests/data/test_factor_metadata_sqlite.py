@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 
 import Settings
-from server.services.sqlite import factor_metadata as factor_metadata_sqlite
-from server.services.sqlite import factor_source_store
-from server.services import accounts as account_store
+from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
+from tools.data.sqlite import factor_source_store
+from tools.data import accounts_store as account_store
 
 
 def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatch, tmp_path):

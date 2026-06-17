@@ -5,7 +5,7 @@ import json
 import Settings
 from server import create_app
 from server.services import accounts as account_store
-from server.services.sqlite import data_source as data_source_sqlite
+from tools.data.sqlite import data_source as data_source_sqlite
 from server.services import sqlite_web_mount
 from sources.OpenCTP import client as openctp_client
 from sqlite_web.sqlite_web import datasets

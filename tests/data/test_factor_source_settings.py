@@ -5,12 +5,12 @@ import os
 from pathlib import Path
 
 import Settings
-from server.services.sqlite import factor_source_settings as factor_source_settings_sqlite
-from server.services.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
+from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite
+from tools.data.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
 
 
 def _load_storage_module():
-    storage_path = Path(__file__).resolve().parents[2] / "server" / "modules" / "custom_factors" / "storage.py"
+    storage_path = Path(__file__).resolve().parents[2] / "tools" / "data" / "factor_workspace" / "storage.py"
     spec = importlib.util.spec_from_file_location("test_factor_storage_module", storage_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -24,7 +24,7 @@ def test_factor_source_root_roundtrip_and_resolution(monkeypatch, tmp_path):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "user_data_dir", lambda username: str(fallback_root / username))
+    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     custom_root = tmp_path / "alice-factor-root"

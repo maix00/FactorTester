@@ -6,11 +6,11 @@ import sqlite3
 from pathlib import Path
 
 import Settings
-from server.services.sqlite import factor_source_store
+from tools.data.sqlite import factor_source_store
 
 
 def _load_storage_module():
-    storage_path = Path(__file__).resolve().parents[2] / "server" / "modules" / "custom_factors" / "storage.py"
+    storage_path = Path(__file__).resolve().parents[2] / "tools" / "data" / "factor_workspace" / "storage.py"
     spec = importlib.util.spec_from_file_location("test_factor_storage_module_db", storage_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -25,7 +25,7 @@ def test_factor_source_sqlite_roundtrip(monkeypatch, tmp_path):
 
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "user_data_dir", lambda username: str(fallback_root / username))
+    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     factor_id = "DemoFactor"
@@ -95,7 +95,7 @@ def test_user_factor_load_does_not_import_local_directory(monkeypatch, tmp_path)
 
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "user_data_dir", lambda username: str(fallback_root / username))
+    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     factor_id = "LocalOnlyFactor"

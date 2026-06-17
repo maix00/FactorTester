@@ -26,12 +26,7 @@ import os
 import re
 import threading
 
-from server.services.user_storage import USERS_DIR
-
-
-ACCOUNTS_FILE = os.path.join(USERS_DIR, 'accounts.json')
-ORGANIZATIONS_FILE = os.path.join(USERS_DIR, 'organizations.json')
-LEVELS_FILE = os.path.join(USERS_DIR, 'levels.json')
+from tools.data.accounts_store import ACCOUNTS_FILE, LEVELS_FILE, ORGANIZATIONS_FILE, USERS_DIR
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
 levels_lock = threading.Lock()
@@ -70,7 +65,7 @@ def save_accounts(accounts: list) -> None:
     with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as file:
         json.dump(accounts, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.sqlite.user import sync_user_sqlite_store
+        from tools.data.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass
@@ -93,7 +88,7 @@ def save_organizations(organizations: list) -> None:
     with open(ORGANIZATIONS_FILE, 'w', encoding='utf-8') as file:
         json.dump(organizations, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.sqlite.user import sync_user_sqlite_store
+        from tools.data.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass
@@ -116,7 +111,7 @@ def save_levels(levels: list) -> None:
     with open(LEVELS_FILE, 'w', encoding='utf-8') as file:
         json.dump(levels, file, ensure_ascii=False, indent=2)
     try:
-        from server.services.sqlite.user import sync_user_sqlite_store
+        from tools.data.sqlite.user import sync_user_sqlite_store
         sync_user_sqlite_store()
     except Exception:
         pass

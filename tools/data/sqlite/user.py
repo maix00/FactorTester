@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 import Settings
+from tools.data.accounts_store import ACCOUNTS_FILE, ORGANIZATIONS_FILE, LEVELS_FILE
 from tools.data.sqlite.db import connect_sqlite
 
 USER_SQLITE_PATH = Settings.CACHE_DB_PATH
@@ -83,15 +84,6 @@ def _replace_rows(conn: sqlite3.Connection, table: str, rows: list[dict[str, Any
 
 def sync_user_sqlite_store() -> str:
     """Sync JSON user data into the SQLite mirror."""
-    try:
-        from server.services.accounts import (
-            ACCOUNTS_FILE,
-            ORGANIZATIONS_FILE,
-            LEVELS_FILE,
-        )
-    except Exception:
-        return str(Settings.CACHE_DB_PATH)
-
     accounts = _read_json(ACCOUNTS_FILE)
     organizations = _read_json(ORGANIZATIONS_FILE)
     levels = _read_json(LEVELS_FILE)
