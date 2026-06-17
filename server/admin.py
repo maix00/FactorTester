@@ -22,10 +22,10 @@ from tools.data.account_manage import (
     next_account_username,
     levels_lock, load_levels, save_levels, normalize_levels,
     list_levels_with_roots, root_level_id_for_org,
+    delete_user_template_data,
 )
 from server.services.http_auth import login_required
 from server.services.runtime_state import require_user
-from server.services.user_storage import archive_user_dir
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -514,5 +514,5 @@ def api_delete_user(target_username):
             if acct.get('parent_username') == target_username:
                 acct['parent_username'] = ''
         save_accounts(accounts)
-    archived_path = archive_user_dir(target_username)
-    return jsonify({'success': True, 'archived_path': archived_path or ''})
+    deleted_templates = delete_user_template_data(target_username)
+    return jsonify({'success': True, 'deleted_template_collections': deleted_templates})

@@ -4,21 +4,28 @@ import hashlib
 import hmac
 import re
 import threading
+import time
 
 from .user import User
-from tools.data.sqlite.user import (
-    ensure_user_sqlite_store,
+from tools.data.sqlite.account_manager import (
+    delete_user_template_collections,
+    delete_user_template_collection,
+    ensure_account_manager_sqlite_store,
+    iter_user_template_collections,
     load_accounts as _load_accounts,
     load_levels as _load_levels,
     load_organizations as _load_organizations,
+    load_user_templates as _load_user_templates,
     save_accounts as _save_accounts,
     save_levels as _save_levels,
     save_organizations as _save_organizations,
+    save_user_templates as _save_user_templates,
 )
 
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
 levels_lock = threading.Lock()
+templates_lock = threading.Lock()
 
 DEFAULT_ORGANIZATION_ID = 'default'
 DEFAULT_ORGANIZATION_NAME = '默认机构'
@@ -27,6 +34,7 @@ ROLE_ORG_ADMIN = 'org_admin'
 ROLE_LEVEL_ADMIN = 'level_admin'
 ROLE_USER = 'user'
 ADMIN_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN}
+_last_template_ts = 0
 
 
 def account_display_name(account: dict | None) -> str:
@@ -44,7 +52,7 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 
 
 def load_accounts() -> list:
-    ensure_user_sqlite_store()
+    ensure_account_manager_sqlite_store()
     return _load_accounts()
 
 
@@ -53,7 +61,7 @@ def save_accounts(accounts: list) -> None:
 
 
 def load_organizations() -> list:
-    ensure_user_sqlite_store()
+    ensure_account_manager_sqlite_store()
     return _load_organizations()
 
 
@@ -62,7 +70,7 @@ def save_organizations(organizations: list) -> None:
 
 
 def load_levels() -> list:
-    ensure_user_sqlite_store()
+    ensure_account_manager_sqlite_store()
     return _load_levels()
 
 
@@ -371,3 +379,84 @@ def can_manage_level(current_username: str | None, level_id: str | None) -> bool
         scope_levels = _descendant_level_ids(levels, account_level)
         return account_org == target_org and (target.get('id') or '') in scope_levels
     return False
+
+
+def load_user_templates(
+    username: str,
+    kind: str,
+    ff_alias: str | None = None,
+    scope_key: str | None = None,
+) -> list:
+    ensure_account_manager_sqlite_store()
+    return _load_user_templates(username, kind, ff_alias=ff_alias, scope_key=scope_key)
+
+
+def save_user_templates(
+    username: str,
+    kind: str,
+    templates: list,
+    ff_alias: str | None = None,
+    scope_key: str | None = None,
+) -> None:
+    _save_user_templates(username, kind, templates, ff_alias=ff_alias, scope_key=scope_key)
+
+
+def new_template_id() -> str:
+    """Return a unique, monotonically increasing millisecond-precision id."""
+    global _last_template_ts
+    ts = int(time.time() * 1000)
+    if ts <= _last_template_ts:
+        ts = _last_template_ts + 1
+    _last_template_ts = ts
+    return str(ts)
+
+
+def migrate_templates_on_rename(old_name: str, new_name: str) -> int:
+    """Update template collection keys and embedded ff_alias fields after factor rename."""
+    touched = 0
+    old_name = str(old_name or "")
+    new_name = str(new_name or "")
+    if not old_name or not new_name or old_name == new_name:
+        return 0
+
+    with templates_lock:
+        for collection in iter_user_template_collections():
+            username = collection.get("username") or ""
+            kind = collection.get("kind") or ""
+            scope_key = collection.get("scope_key") or ""
+            ff_alias = collection.get("ff_alias") or ""
+            templates = [dict(item) for item in collection.get("templates", []) if isinstance(item, dict)]
+
+            changed = False
+            for template in templates:
+                if template.get("ff_alias") == old_name:
+                    template["ff_alias"] = new_name
+                    changed = True
+
+            next_scope_key = new_name if scope_key == old_name else scope_key
+            next_ff_alias = new_name if ff_alias == old_name else ff_alias
+            if next_scope_key != scope_key or next_ff_alias != ff_alias:
+                changed = True
+
+            if changed:
+                save_user_templates(
+                    username,
+                    kind,
+                    templates,
+                    ff_alias=next_ff_alias or None,
+                    scope_key=next_scope_key or None,
+                )
+                if next_scope_key != scope_key or next_ff_alias != ff_alias:
+                    delete_user_template_collection(
+                        username,
+                        kind,
+                        ff_alias=ff_alias or None,
+                        scope_key=scope_key or None,
+                    )
+                touched += 1
+    return touched
+
+
+def delete_user_template_data(username: str) -> int:
+    with templates_lock:
+        return delete_user_template_collections(username)

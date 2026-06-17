@@ -11,7 +11,7 @@ from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
 from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite
 from tools.data.sqlite import factor_source_store as factor_source_store_sqlite
 from tools.data.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
-from tools.data.sqlite import user as user_sqlite
+from tools.data.sqlite import account_manager as account_manager_sqlite
 
 
 def _call(func: Callable[[], str]) -> str:
@@ -21,7 +21,7 @@ def _call(func: Callable[[], str]) -> str:
 def ensure_unified_sqlite_store() -> str:
     """Ensure all unified-local SQLite mirrors are materialized."""
     _call(data_source_sqlite.ensure_data_source_sqlite_store)
-    _call(user_sqlite.ensure_user_sqlite_store)
+    _call(account_manager_sqlite.ensure_account_manager_sqlite_store)
     _call(factor_metadata_sqlite.ensure_factor_metadata_sqlite_store)
     _call(factor_source_store_sqlite.ensure_factor_source_sqlite_store)
     _call(factor_source_settings_sqlite.ensure_factor_source_settings_sqlite_store)

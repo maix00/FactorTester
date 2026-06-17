@@ -17,6 +17,7 @@ from tools.data.account_manage import (
     can_view_user_scope,
     get_account,
     is_super_admin_account,
+    migrate_templates_on_rename,
 )
 from server.services.factor_registry import (
     get_custom_factor_instance,
@@ -25,7 +26,6 @@ from server.services.factor_registry import (
 )
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
-from server.services.user_storage import migrate_templates_on_rename
 from tools.data.factor_workspace.storage import (
     delete_factor_source,
     load_factor_source,

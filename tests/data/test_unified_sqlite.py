@@ -16,7 +16,7 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
         lambda: calls.append("data_source") or str(sqlite_path),
     )
     monkeypatch.setattr(
-        "tools.data.sqlite.user.ensure_user_sqlite_store",
+        "tools.data.sqlite.account_manager.ensure_account_manager_sqlite_store",
         lambda: calls.append("users") or str(sqlite_path),
     )
     monkeypatch.setattr(
