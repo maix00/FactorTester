@@ -24,7 +24,7 @@ import threading
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily
-from server.modules.custom_factors.storage import load_factor_source, load_public_factor_source
+from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source
 
 
 _factor_family_cache: dict = {}

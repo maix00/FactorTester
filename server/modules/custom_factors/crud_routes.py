@@ -13,15 +13,6 @@ from server.modules.custom_factors.source_helpers import (
     parse_class_meta,
     strip_factor_meta,
 )
-from server.modules.custom_factors.storage import (
-    delete_factor_source,
-    load_factor_source,
-    load_public_factor_source,
-    public_factor_path,
-    rename_factor_source,
-    save_factor_source,
-    save_public_factor_source,
-)
 from server.services.accounts import (
     can_view_user_scope,
     get_account,
@@ -35,6 +26,15 @@ from server.services.factor_registry import (
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
 from server.services.user_storage import migrate_templates_on_rename
+from tools.data.factor_workspace.storage import (
+    delete_factor_source,
+    load_factor_source,
+    load_public_factor_source,
+    public_factor_path,
+    rename_factor_source,
+    save_factor_source,
+    save_public_factor_source,
+)
 
 
 def _current_user_is_super_admin() -> bool:

@@ -1,4 +1,5 @@
 """SQLite store for factor source code."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -43,7 +44,7 @@ def _load_source(source_kind: str, owner_username: str, factor_id: str) -> str |
                 FROM factor_family_sources
                 WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
                 """,
-                (source_kind, owner_username or '', factor_id),
+                (source_kind, owner_username or "", factor_id),
             ).fetchone()
             if row is None:
                 return None
@@ -63,7 +64,7 @@ def get_factor_source_record(source_kind: str, owner_username: str, factor_id: s
                 FROM factor_family_sources
                 WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
                 """,
-                (source_kind, owner_username or '', factor_id),
+                (source_kind, owner_username or "", factor_id),
             ).fetchone()
             if row is None:
                 return None
@@ -104,10 +105,10 @@ def upsert_factor_source(
             """,
             (
                 source_kind,
-                owner_username or '',
+                owner_username or "",
                 factor_id,
                 factor_name or factor_id,
-                source_code or '',
+                source_code or "",
                 time.time(),
             ),
         )
@@ -122,7 +123,7 @@ def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) 
             DELETE FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
-            (source_kind, owner_username or '', factor_id),
+            (source_kind, owner_username or "", factor_id),
         )
     return str(Settings.CACHE_DB_PATH)
 
@@ -142,7 +143,7 @@ def rename_factor_source(
             FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
-            (source_kind, owner_username or '', old_factor_id),
+            (source_kind, owner_username or "", old_factor_id),
         ).fetchone()
         if row is None:
             return str(Settings.CACHE_DB_PATH)
@@ -151,7 +152,7 @@ def rename_factor_source(
             DELETE FROM factor_family_sources
             WHERE source_kind = ? AND owner_username = ? AND factor_id = ?
             """,
-            (source_kind, owner_username or '', old_factor_id),
+            (source_kind, owner_username or "", old_factor_id),
         )
         conn.execute(
             """
@@ -165,7 +166,7 @@ def rename_factor_source(
             """,
             (
                 source_kind,
-                owner_username or '',
+                owner_username or "",
                 new_factor_id,
                 new_factor_name or new_factor_id,
                 row["source_code"],
@@ -198,3 +199,4 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+

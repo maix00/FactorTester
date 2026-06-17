@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from server.services.sqlite.factor_source_store import list_factor_sources
+from tools.data.sqlite.factor_source_store import list_factor_sources
 
 from .git import _apply_workspace_git_branch, _ensure_git_workspace
-from .pre import (
+from . import storage as factor_workspace_storage
+from .construct import (
     _clear_workspace_generated,
     _ensure_workspace_layout,
     _remove_missing_files,
-    _storage,
     _sync_tools_index,
     _sync_tools_sdk,
     _sync_vscode_settings,
@@ -49,7 +49,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
         if owner_username != username:
             continue
         expected_custom_files.add(f"{factor_id}.py")
-        local_path = _storage().factor_path(username, factor_id)
+        local_path = factor_workspace_storage.factor_path(username, factor_id)
         if _write_text_if_changed(local_path, source_code):
             touched_files.append(local_path)
         custom_count += 1
@@ -76,7 +76,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
     manifest = {
         "workspace_root": root,
         "username": username,
-        "custom_factor_dir": _storage().custom_factor_dir(username),
+        "custom_factor_dir": factor_workspace_storage.custom_factor_dir(username),
         "public_factor_dir": _workspace_public_dir(root),
         "git": git_info,
         "git_selected_branch": selected_branch,
@@ -123,12 +123,12 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
             if not filename.endswith(".py"):
                 continue
             factor_id = filename[:-3]
-            source = _storage().load_factor_source(username, factor_id)
+            source = factor_workspace_storage.load_factor_source(username, factor_id)
             file_path = os.path.join(custom_dir, filename)
             with open(file_path, "r", encoding="utf-8") as file:
                 source_code = file.read()
             if source != source_code:
-                _storage().save_factor_source(username, factor_id, source_code)
+                factor_workspace_storage.save_factor_source(username, factor_id, source_code)
                 updated_custom += 1
 
     public_dir = _workspace_public_dir(root)
@@ -140,8 +140,8 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
             file_path = os.path.join(public_dir, filename)
             with open(file_path, "r", encoding="utf-8") as file:
                 source_code = file.read()
-            if _storage().load_public_factor_source(factor_id) != source_code:
-                _storage().save_public_factor_source(factor_id, source_code)
+            if factor_workspace_storage.load_public_factor_source(factor_id) != source_code:
+                factor_workspace_storage.save_public_factor_source(factor_id, source_code)
                 updated_public += 1
 
     return {
@@ -168,7 +168,7 @@ def push_factor_workspace(username: str, allow_public_write: bool = False, branc
             file_path = os.path.join(public_dir, filename)
             with open(file_path, "r", encoding="utf-8") as file:
                 source_code = file.read()
-            if _storage().load_public_factor_source(factor_id) != source_code:
+            if factor_workspace_storage.load_public_factor_source(factor_id) != source_code:
                 changed_public_files.append(file_path)
 
     if changed_public_files and not allow_public_write:

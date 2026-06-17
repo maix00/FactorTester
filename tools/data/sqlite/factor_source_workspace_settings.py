@@ -1,4 +1,5 @@
 """SQLite-backed settings for factor workspace git configuration."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -94,3 +95,4 @@ def save_factor_source_workspace_settings(
             ),
         )
     return str(Settings.CACHE_DB_PATH)
+

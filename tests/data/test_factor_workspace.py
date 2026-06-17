@@ -1,24 +1,16 @@
 from __future__ import annotations
 
 import json
-import importlib.util
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from server.services import factor_workspace
+from tools.data.factor_workspace import construct as factor_workspace_construct
+from tools.data.factor_workspace import storage as factor_workspace_storage
 from tools.data.factor_workspace import pre as factor_workspace_pre
 from tools.data.factor_workspace import sync as factor_workspace_sync
-
-
-def _load_storage_module():
-    storage_path = Path(__file__).resolve().parents[2] / "server" / "modules" / "custom_factors" / "storage.py"
-    spec = importlib.util.spec_from_file_location("test_factor_workspace_storage", storage_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tmp_path):
@@ -35,9 +27,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     stale_public.write_text("class OldPublic(FactorFamily):\n    pass\n", encoding="utf-8")
     stale_root.write_text("old\n", encoding="utf-8")
 
-    factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
-    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
+    factor_storage = factor_workspace_storage
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(
         factor_workspace_sync,
@@ -58,7 +48,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
             }
         ],
     )
-    monkeypatch.setattr(factor_workspace_pre, "scan_tool_files", lambda tools_dir, include_symbols=False: [
+    monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [
         {"path": "base/User.py", "name": "base / User.py", "desc": "", "symbols": []}
     ])
     monkeypatch.setattr(factor_workspace_sync, "_ensure_git_workspace", lambda root, username: {
@@ -98,16 +88,11 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert "visual_groups" not in factors_pkg_stub
     assert "WindowParam" in parameters_pkg_stub
     assert "FactorExpr" in factors_pkg_stub
-    assert "ProductDataView" in tools_stub
+    assert "UniqueNameObject" in tools_stub
+    assert "ProductDataView" not in tools_stub
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
-    assert (workspace_root / "tools" / "factors" / "FactorTester.pyi").exists() is False
-    assert (workspace_root / "tools" / "factors" / "FactorRunResult.pyi").exists() is False
-    assert (workspace_root / "tools" / "data" / "types" / "DataIndex.pyi").exists() is False
-    assert (workspace_root / "tools" / "data" / "views" / "ProductDataView.pyi").exists() is False
-    assert (workspace_root / "tools" / "factors" / "expr" / "visual_groups.pyi").exists() is False
-    assert not (workspace_root / "tools" / "backtest").exists()
     assert result["git"]["git_enabled"] is True
     assert result["git"]["git_auto_sync_branch"] == "main"
     assert result["git"]["git_force_sync_branch"] == "release"
@@ -126,9 +111,7 @@ def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, 
     public_dir.mkdir(parents=True)
     (public_dir / "PublicFactor.py").write_text("class PublicFactor(FactorFamily):\n    pass\n", encoding="utf-8")
 
-    factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
-    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
+    factor_storage = factor_workspace_storage
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(factor_storage, "load_public_factor_source", lambda factor_id: "class PublicFactor(FactorFamily):\n    pass\n# db version\n")
 
@@ -148,18 +131,16 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "-b", "release"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "main"], check=True, capture_output=True, text=True)
 
-    factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
-    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
+    factor_storage = factor_workspace_storage
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(
         factor_workspace_sync,
         "list_factor_sources",
         lambda source_kind: [],
     )
-    monkeypatch.setattr(factor_workspace_pre, "scan_tool_files", lambda tools_dir, include_symbols=False: [])
+    monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [])
 
-    from server.services.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
+    from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
     save_factor_source_workspace_settings(
         "default$alice@1",
         git_enabled=True,

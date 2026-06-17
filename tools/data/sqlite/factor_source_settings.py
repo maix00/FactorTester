@@ -1,4 +1,5 @@
 """SQLite-backed settings for factor source storage roots."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -47,7 +48,7 @@ def load_factor_source_root(username: str) -> str | None:
 def save_factor_source_root(username: str, source_root: str | None) -> str:
     if not username:
         return str(Settings.CACHE_DB_PATH)
-    normalized = str(source_root or '').strip()
+    normalized = str(source_root or "").strip()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         if normalized:
@@ -64,3 +65,4 @@ def save_factor_source_root(username: str, source_root: str | None) -> str:
         else:
             conn.execute("DELETE FROM factor_source_roots WHERE username = ?", (username,))
     return str(Settings.CACHE_DB_PATH)
+

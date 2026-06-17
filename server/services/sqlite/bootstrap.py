@@ -15,10 +15,10 @@ def ensure_unified_sqlite_store() -> str:
     from server.services.sqlite.data_dictionary_snapshot import ensure_data_dictionary_sqlite_store
     from server.services.sqlite.data_source import ensure_data_source_sqlite_store
     from server.services.sqlite.factor_metadata import ensure_factor_metadata_sqlite_store
-    from server.services.sqlite.factor_source_store import ensure_factor_source_sqlite_store
-    from server.services.sqlite.factor_source_settings import ensure_factor_source_settings_sqlite_store
-    from server.services.sqlite.factor_source_workspace_settings import ensure_factor_source_workspace_settings_sqlite_store
     from server.services.sqlite.user import ensure_user_sqlite_store
+    from tools.data.sqlite.factor_source_settings import ensure_factor_source_settings_sqlite_store
+    from tools.data.sqlite.factor_source_store import ensure_factor_source_sqlite_store
+    from tools.data.sqlite.factor_source_workspace_settings import ensure_factor_source_workspace_settings_sqlite_store
     from tools.data.hub import DataHub
 
     _call(ensure_data_source_sqlite_store)

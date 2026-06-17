@@ -7,12 +7,15 @@ import shutil
 import subprocess
 from typing import Any
 
-from server.services.sqlite.factor_source_workspace_settings import (
+from tools.data.sqlite.factor_source_workspace_settings import (
     load_factor_source_workspace_settings,
     save_factor_source_workspace_settings,
 )
+from tools.data.factor_workspace import storage as factor_workspace_storage
 
-from .pre import _workspace_root
+
+def _workspace_root(username: str) -> str:
+    return factor_workspace_storage.factor_source_root(username)
 
 
 def _git_binary_available() -> bool:
@@ -187,4 +190,3 @@ def get_factor_workspace_git_state(username: str) -> dict[str, Any]:
         "git_force_sync_branch": str(settings.get("force_sync_branch") or ""),
         "git_branches": branches,
     }
-

@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from server.modules.custom_factors.storage import factor_source_root
-from server.services.sqlite.factor_source_store import upsert_factor_source
+from tools.data.factor_workspace.storage import factor_source_root
+from tools.data.sqlite.factor_source_store import upsert_factor_source
 
 
 def import_user_factor_directory_once(username: str, source_root: str | None = None) -> dict[str, object]:
