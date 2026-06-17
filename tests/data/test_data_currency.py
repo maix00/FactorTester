@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.data.types import DataCurrency, CurrencyConversionContext, require_product_currency_vector
+from tools.data.types import DataCurrency
+from tools.data.types.currency import CurrencyConversionContext, require_product_currency_vector
 
 
 def test_data_currency_normalizes_code():

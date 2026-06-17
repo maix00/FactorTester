@@ -10,9 +10,9 @@ from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.data.hub import DataHub
 from tools.data.views.ProductDataView import ProductDataView
 from tools.data.types import DataColumn
-from tools.data.types import (
-    DataCurrency,
-    CurrencyConversionContext,
+from tools.data.types import DataCurrency
+from tools.data.types.currency import CurrencyConversionContext
+from tools.data.types.currency import (
     default_fx_rate_provider,
     normalize_currency,
     normalize_optional_currency,

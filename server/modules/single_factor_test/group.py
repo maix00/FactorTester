@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.data.types import normalize_currency, require_product_currency_vector
+from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns

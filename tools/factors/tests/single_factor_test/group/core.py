@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from Settings import factor_info_path
 from tools.data.types import DataColumn
-from tools.data.types import CurrencyConversionContext, normalize_currency, require_product_currency_vector
+from tools.data.types.currency import CurrencyConversionContext, normalize_currency, require_product_currency_vector
 from tools.data.types import DataFreq
 from tools.data.types import DataIndex
 from tools.data.types.currency_units import minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
