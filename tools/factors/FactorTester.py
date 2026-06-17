@@ -28,7 +28,7 @@ from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
 from tools.data.types import UniqueNameObject
-from tools import DataColumn, DataFreq
+from tools.data.types import DataColumn, DataFreq
 from tools.data.account_manage import User
 from tools.data.types import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns

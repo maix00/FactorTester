@@ -10,7 +10,7 @@
 # 在因子测试中，Category 用于按行业、夜盘时段等维度对产品分组，
 # 分别在每个类别内计算 IC 或分组收益。
 # =============================================================================
-from tools import UniqueNameObject
+from tools.data.types import UniqueNameObject
 from weakref import WeakValueDictionary
 from typing import Any, Dict, Optional, Tuple, Type, List
 

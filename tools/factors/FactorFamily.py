@@ -31,7 +31,7 @@ from tools.factors.FactorExpr import (
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools.data.types import UniqueNameObject
-from tools import ProductDataView
+from tools.data.views import ProductDataView
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 

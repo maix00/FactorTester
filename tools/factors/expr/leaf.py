@@ -17,7 +17,7 @@ from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data import DataProviderProductTS as DataSource
+    from tools.data.providers import DataProviderProductTS as DataSource
     from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
@@ -57,7 +57,7 @@ class ColumnRef(FactorExpr):
         - 若未指定：遍历 DataSource 找到第一个可用且包含所需列的源
         - 若无注册的数据源：返回 None，由 ProductDataView 自行加载
         """
-        from tools.data import DataProviderProductTS as DataSource
+        from tools.data.providers import DataProviderProductTS as DataSource
 
         return DataSource.select_for_product(product, freq, source)
 

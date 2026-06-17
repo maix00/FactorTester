@@ -35,7 +35,7 @@ from weakref import WeakValueDictionary
 
 from tools.decorators import factor_workspace
 from tools.decorators import tech_docs
-from tools import DataFreq
+from tools.data.types import DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult

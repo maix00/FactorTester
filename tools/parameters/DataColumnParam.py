@@ -1,7 +1,7 @@
 from typing import Optional, Any
 
 from tools.decorators import factor_workspace
-from tools import DataColumn
+from tools.data.types import DataColumn
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 @factor_workspace
@@ -33,13 +33,13 @@ class DataColumnParam(Parameter):
         )
 
     def col(self, col: Any):
-        from tools import DataColumn
+        from tools.data.types import DataColumn
         col = DataColumn(col)
         return self.get_value_alias(col)
 
 
 def _is_valid_datacolumn(value: Any) -> bool:
-    from tools import DataColumn
+    from tools.data.types import DataColumn
     try:
         DataColumn(value)
         return True

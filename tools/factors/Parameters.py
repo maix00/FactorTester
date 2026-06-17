@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Optional, Any
 
 from tools.decorators import factor_workspace
-from tools import DataColumn
+from tools.data.types import DataColumn
 from tools.parameters import Parameter, DataTimeParam, ValueSpace
 
 from Settings import default_test_start_date

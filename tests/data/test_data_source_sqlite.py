@@ -8,8 +8,8 @@ import pandas as pd
 import Settings
 from tools.data.sqlite import data_source as data_source_sqlite
 from tools.data.tech_docs.datadict_scan import DataSourceEntry
-from tools.data import DataProviderProductTS as DataSource
-from tools.data import _DataMultipleProviderMeta as DataSourceMeta
+from tools.data.providers import DataProviderProductTS as DataSource
+from tools.data.providers import _DataMultipleProviderMeta as DataSourceMeta
 
 
 def test_data_source_sqlite_mirror_builds_duckdb_preview(monkeypatch, tmp_path):

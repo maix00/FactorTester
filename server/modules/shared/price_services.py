@@ -18,7 +18,7 @@ from sources.LocalCNFutures.CNFutures import (
     exchange_map,
     get_all_futures_contract,
 )
-from tools.data import DataProviderProductTS as DataSource
+from tools.data.providers import DataProviderProductTS as DataSource
 from tools.products.AdjustableTermStructure import AdjustableProductMixin
 from tools.products.Futures import (
     FuturesContract,

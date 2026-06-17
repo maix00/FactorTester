@@ -302,8 +302,8 @@ def scan_settings() -> List[SettingEntry]:
 
 def scan_data_sources() -> List[DataSourceEntry]:
     """扫描当前已注册的 DataSource 实例，不负责触发加载。"""
-    from tools.data import DataProviderProductTS
-    from tools.data import _DataMultipleProviderMeta as DataSourceMeta
+    from tools.data.providers import DataProviderProductTS
+    from tools.data.providers import _DataMultipleProviderMeta as DataSourceMeta
     entries = []
     try:
         # 通过元类获取 DataProviderProductTS 子类的独立注册表

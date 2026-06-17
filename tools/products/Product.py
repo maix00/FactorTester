@@ -15,7 +15,7 @@ from tools.data.types import UniqueNameObject
 from tools.data.views.ProductDataView import ProductDataView
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
-from tools.data import DataProviderProductTS as DataSource
+from tools.data.providers import DataProviderProductTS as DataSource
 
 class Product(UniqueNameObject):
     """

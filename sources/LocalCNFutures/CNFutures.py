@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
-from tools import DataColumn
+from tools.data.types import DataColumn
 from scripts.data_dir import DATA_DIR
 
 _data = pd.read_csv(os.path.join(DATA_DIR, 'sectors.csv'))
@@ -283,8 +283,8 @@ def get_all_futures_contract() -> List[Product]:
 
     data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
 
-    from tools import DataFreq
-    from tools.data import DataProviderProductTS
+    from tools.data.types import DataFreq
+    from tools.data.providers import DataProviderProductTS
     futures_contract_ds_min1 = DataProviderProductTS(
         key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
@@ -346,8 +346,8 @@ def get_object_path(object: Product, folder: str):
 def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
-    from tools import DataFreq
-    from tools.data import DataProviderProductTS
+    from tools.data.types import DataFreq
+    from tools.data.providers import DataProviderProductTS
     futures_ds_min1 = DataProviderProductTS(
         key = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,

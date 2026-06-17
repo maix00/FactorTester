@@ -1,15 +1,5 @@
-from tools.data.types import UniqueNameObject
-from tools.data.providers.DistributedComponents import PathResolver, LocalPathResolver
-from tools.data.types import DataFreq
-from tools.data.types import DataColumn
-from tools.data import DataProviderProductTS
-from tools.data.views.ProductDataView import ProductDataView
-from tools.data.types import DataIndex
-from tools.data.types import DataTime, TimePrecision
+"""Top-level tools package.
 
-from tools.products import Product
-from tools.factors import Factor, FactorFamily
-
-__factor_workspace__ = (
-    "UniqueNameObject",
-)
+This package intentionally does not re-export submodule symbols.
+Import from the specific module that owns the semantic boundary.
+"""

@@ -250,7 +250,7 @@ class FactorParam(TypeParam):
                  *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
-        from tools import DataColumn
+        from tools.data.types import DataColumn
         from tools.factors.FactorExpr import FactorExpr, ParamRef, ColumnRef
         from tools.parameters.DataColumnParam import DataColumnParam
 

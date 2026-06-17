@@ -85,7 +85,7 @@ def serialize_param_options(param) -> list[dict]:
 
     if cls_name == 'DataColumnParam':
         try:
-            from tools import DataColumn
+            from tools.data.types import DataColumn
             return [
                 {
                     'value': col.value,
@@ -98,7 +98,7 @@ def serialize_param_options(param) -> list[dict]:
 
     if cls_name == 'FactorParam':
         try:
-            from tools import DataColumn
+            from tools.data.types import DataColumn
             return [
                 {
                     'value': col.value,

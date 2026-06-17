@@ -18,7 +18,7 @@ from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data import DataProviderProductTS as DataSource
+    from tools.data.providers import DataProviderProductTS as DataSource
     from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
