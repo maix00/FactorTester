@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 
-from tools import tool_docs
-from tools.tool_docs import VISIBILITY_ALL, VISIBILITY_PUBLIC, extract_tool_symbols, scan_tool_files
+from tools.data.tech_docs import tool_docs
+from tools.data.tech_docs import VISIBILITY_ALL, VISIBILITY_PUBLIC, extract_tool_symbols, scan_tool_files
 
 
 def test_extract_tool_symbols_public_respects_tech_docs_and_factor_workspace():

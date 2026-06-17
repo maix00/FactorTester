@@ -87,13 +87,9 @@ def docs_factor_editor():
 @core_bp.route('/docs/data-dictionary', methods=['GET'])
 def docs_data_dictionary():
     """数据字典 — 全量字段清单（SOE 合规审计用）。"""
-    from tools.data.tech_docs.datadict_scan import build_data_dictionary, data_dictionary_to_dict
-    from tools.data.sqlite.bootstrap import ensure_unified_sqlite_store, load_data_dictionary_snapshot
+    from tools.data.tech_docs import load_data_dictionary_cache
 
-    ensure_unified_sqlite_store()
-    dd = load_data_dictionary_snapshot()
-    if dd is None:
-        dd = data_dictionary_to_dict(build_data_dictionary())
+    dd = load_data_dictionary_cache()
     return render_template('docs/data_dictionary.html', dd=dd)
 
 
@@ -131,7 +127,7 @@ def docs_dev_deployment():
 def docs_tools():
     """工具类代码概览页——带目录导览，点击进入单个文件。"""
     import os
-    from tools.tool_docs import scan_tool_files
+    from tools.data.tech_docs import scan_tool_files
     from server.services.runtime_state import current_user
     from tools.data.account_manage import get_account, is_developer_account
 
@@ -148,7 +144,7 @@ def docs_tool_detail(rel_path):
     from flask import abort
     from server.services.runtime_state import current_user
     from tools.data.account_manage import get_account, is_developer_account
-    from tools.tool_docs import build_tool_doc_detail
+    from tools.data.tech_docs import build_tool_doc_detail
 
     tools_dir = os.path.join(os.getcwd(), 'tools')
     file_path = os.path.join(tools_dir, rel_path)

@@ -8,7 +8,7 @@
 import json
 import os
 
-from tools.tool_docs import scan_tool_files
+from tools.data.tech_docs import scan_tool_files
 
 
 if __name__ == '__main__':

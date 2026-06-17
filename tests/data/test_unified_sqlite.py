@@ -23,10 +23,6 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
         "tools.data.sqlite.factor_metadata.ensure_factor_metadata_sqlite_store",
         lambda: calls.append("factor_metadata") or str(sqlite_path),
     )
-    monkeypatch.setattr(
-        "tools.data.tech_docs.data_dictionary_snapshot.ensure_data_dictionary_sqlite_store",
-        lambda: calls.append("data_dictionary") or str(sqlite_path),
-    )
 
     class DummyHub:
         def ensure_visits_schema(self):
@@ -36,13 +32,4 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
 
     path = unified_sqlite.ensure_unified_sqlite_store()
     assert path == str(sqlite_path)
-    assert calls == ["data_source", "users", "factor_metadata", "data_dictionary", "visits"]
-
-
-def test_unified_sqlite_load_data_dictionary_snapshot_proxies(monkeypatch):
-    payload = {"generated_at": "x"}
-    monkeypatch.setattr(
-        "tools.data.tech_docs.data_dictionary_snapshot.load_data_dictionary_snapshot",
-        lambda: payload,
-    )
-    assert unified_sqlite.load_data_dictionary_snapshot() == payload
+    assert calls == ["data_source", "users", "factor_metadata", "visits"]

@@ -5,7 +5,6 @@ from typing import Callable
 
 import Settings
 from tools.data.hub import DataHub
-from tools.data.tech_docs import data_dictionary_snapshot as data_dictionary_sqlite
 from tools.data.sqlite import data_source as data_source_sqlite
 from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
 from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite
@@ -26,12 +25,6 @@ def ensure_unified_sqlite_store() -> str:
     _call(factor_source_store_sqlite.ensure_factor_source_sqlite_store)
     _call(factor_source_settings_sqlite.ensure_factor_source_settings_sqlite_store)
     _call(factor_source_workspace_settings_sqlite.ensure_factor_source_workspace_settings_sqlite_store)
-    _call(data_dictionary_sqlite.ensure_data_dictionary_sqlite_store)
     DataHub.get_instance().ensure_visits_schema()
     Settings.CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return str(Settings.CACHE_DB_PATH)
-
-
-def load_data_dictionary_snapshot() -> dict | None:
-    """Load the cached data dictionary snapshot through the unified facade."""
-    return data_dictionary_sqlite.load_data_dictionary_snapshot()

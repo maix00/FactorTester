@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from tools.tool_docs import scan_tool_files
 from tools.data.factor_workspace import storage as factor_workspace_storage
+from tools.data.tech_docs import scan_tool_files
 
 from .pre import WorkspaceSourceSpec, collect_workspace_architecture
 
