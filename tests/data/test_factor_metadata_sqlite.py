@@ -5,7 +5,6 @@ import sqlite3
 import Settings
 from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
 from tools.data.sqlite import factor_source_store
-from tools.data import accounts_store as account_store
 
 
 def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatch, tmp_path):
@@ -53,8 +52,8 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
         ],
     )
     monkeypatch.setattr(
-        account_store,
-        "load_accounts",
+        factor_metadata_sqlite,
+        "_load_accounts",
         lambda: [
             {
                 "username": "default$alice@1",
@@ -65,8 +64,8 @@ def test_factor_metadata_sqlite_store_syncs_public_and_custom_factors(monkeypatc
         ],
     )
     monkeypatch.setattr(
-        account_store,
-        "account_display_name",
+        factor_metadata_sqlite,
+        "_account_display_name",
         lambda account: account.get("alias") or account.get("username") or "",
     )
 
@@ -126,7 +125,7 @@ def test_factor_metadata_loads_sources_before_opening_write_connection(monkeypat
 
     monkeypatch.setattr(factor_metadata_sqlite, "_load_public_factors", _load_public_from_source_store)
     monkeypatch.setattr(factor_metadata_sqlite, "_load_custom_factors", lambda username: [])
-    monkeypatch.setattr(account_store, "load_accounts", lambda: [])
+    monkeypatch.setattr(factor_metadata_sqlite, "_load_accounts", lambda: [])
 
     path = factor_metadata_sqlite.ensure_factor_metadata_sqlite_store()
     assert path == str(sqlite_path)

@@ -2,9 +2,7 @@
 Account, organization, and hierarchy permission helpers.
 
 数据模型：
-  accounts.json      — 用户列表 [{username, alias, hash, salt, role, organization_id, ...}]
-  organizations.json — 机构列表 [{id, name}]
-  levels.json        — 层级列表（树形结构，每个节点带 children，关联 organization_id）
+  accounts / organizations / levels 均存于统一 sqlite 主库
 
 角色体系：
   super_admin   — 超级管理员（全局权限）
@@ -21,12 +19,19 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import os
 import re
 import threading
 
-from tools.data.accounts_store import ACCOUNTS_FILE, LEVELS_FILE, ORGANIZATIONS_FILE, USERS_DIR
+from tools.data.sqlite.user import (
+    account_display_name,
+    ensure_user_sqlite_store,
+    load_accounts as _load_accounts,
+    load_levels as _load_levels,
+    load_organizations as _load_organizations,
+    save_accounts as _save_accounts,
+    save_levels as _save_levels,
+    save_organizations as _save_organizations,
+)
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
 levels_lock = threading.Lock()
@@ -49,72 +54,30 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 
 
 def load_accounts() -> list:
-    try:
-        if os.path.exists(ACCOUNTS_FILE):
-            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as file:
-                data = json.load(file)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
+    ensure_user_sqlite_store()
+    return _load_accounts()
 
 
 def save_accounts(accounts: list) -> None:
-    os.makedirs(os.path.dirname(ACCOUNTS_FILE), exist_ok=True)
-    with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as file:
-        json.dump(accounts, file, ensure_ascii=False, indent=2)
-    try:
-        from tools.data.sqlite.user import sync_user_sqlite_store
-        sync_user_sqlite_store()
-    except Exception:
-        pass
+    _save_accounts(accounts)
 
 
 def load_organizations() -> list:
-    try:
-        if os.path.exists(ORGANIZATIONS_FILE):
-            with open(ORGANIZATIONS_FILE, 'r', encoding='utf-8') as file:
-                data = json.load(file)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
+    ensure_user_sqlite_store()
+    return _load_organizations()
 
 
 def save_organizations(organizations: list) -> None:
-    os.makedirs(os.path.dirname(ORGANIZATIONS_FILE), exist_ok=True)
-    with open(ORGANIZATIONS_FILE, 'w', encoding='utf-8') as file:
-        json.dump(organizations, file, ensure_ascii=False, indent=2)
-    try:
-        from tools.data.sqlite.user import sync_user_sqlite_store
-        sync_user_sqlite_store()
-    except Exception:
-        pass
+    _save_organizations(organizations)
 
 
 def load_levels() -> list:
-    try:
-        if os.path.exists(LEVELS_FILE):
-            with open(LEVELS_FILE, 'r', encoding='utf-8') as file:
-                data = json.load(file)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
+    ensure_user_sqlite_store()
+    return _load_levels()
 
 
 def save_levels(levels: list) -> None:
-    os.makedirs(os.path.dirname(LEVELS_FILE), exist_ok=True)
-    with open(LEVELS_FILE, 'w', encoding='utf-8') as file:
-        json.dump(levels, file, ensure_ascii=False, indent=2)
-    try:
-        from tools.data.sqlite.user import sync_user_sqlite_store
-        sync_user_sqlite_store()
-    except Exception:
-        pass
+    _save_levels(levels)
 
 
 def slugify_org_id(name: str) -> str:
@@ -268,12 +231,6 @@ def is_level_admin_account(account: dict | None) -> bool:
 
 def is_any_admin_account(account: dict | None) -> bool:
     return bool(account and (account.get('role') in ADMIN_ROLES or is_super_admin_account(account)))
-
-
-def account_display_name(account: dict | None) -> str:
-    if not account:
-        return ''
-    return account.get('alias') or account.get('username') or ''
 
 
 def visible_accounts_for(username: str | None, include_self: bool = True) -> list:

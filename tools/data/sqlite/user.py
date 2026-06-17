@@ -1,26 +1,13 @@
-"""SQLite mirror for user-related JSON data.
+"""SQLite store for accounts, organizations, and levels."""
 
-This keeps sqlite-web pointed at actual SQLite files while the canonical
-storage remains the existing JSON files under ``DATA_DIR/users``.
-"""
 from __future__ import annotations
 
-import json
+import sqlite3
 import time
 from typing import Any
 
 import Settings
-from tools.data.accounts_store import ACCOUNTS_FILE, ORGANIZATIONS_FILE, LEVELS_FILE
 from tools.data.sqlite.db import connect_sqlite
-
-USER_SQLITE_PATH = Settings.CACHE_DB_PATH
-def _read_json(path: str) -> list[dict[str, Any]]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -65,35 +52,29 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def _replace_rows(conn: sqlite3.Connection, table: str, rows: list[dict[str, Any]], columns: list[str], key: str) -> None:
-    conn.execute(f"DELETE FROM {table}")
-    placeholders = ", ".join("?" for _ in columns)
-    insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
-    now = time.time()
-    payload = []
-    for row in rows:
-        payload.append(tuple(
-            1 if column == "is_admin" and row.get(column) else
-            row.get(column)
-            for column in columns
-        ) + (now,))
-    if not payload:
-        return
-    conn.executemany(insert_sql, payload)
+def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    return [dict(row) for row in rows]
 
 
-def sync_user_sqlite_store() -> str:
-    """Sync JSON user data into the SQLite mirror."""
-    accounts = _read_json(ACCOUNTS_FILE)
-    organizations = _read_json(ORGANIZATIONS_FILE)
-    levels = _read_json(LEVELS_FILE)
-
-    with connect_sqlite(Settings.CACHE_DB_PATH, foreign_keys=True) as conn:
+def load_accounts() -> list[dict[str, Any]]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
-        now = time.time()
+        rows = conn.execute(
+            """
+            SELECT username, alias, salt, hash, role, is_admin,
+                   organization_id, organization_name, level_id, parent_username, updated_at
+            FROM accounts
+            ORDER BY username
+            """
+        ).fetchall()
+    return _rows_to_dicts(rows)
+
+
+def save_accounts(accounts: list[dict[str, Any]]) -> None:
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
         conn.execute("DELETE FROM accounts")
-        conn.execute("DELETE FROM organizations")
-        conn.execute("DELETE FROM levels")
         conn.executemany(
             """
             INSERT INTO accounts (
@@ -119,6 +100,26 @@ def sync_user_sqlite_store() -> str:
                 if isinstance(row, dict)
             ],
         )
+
+
+def load_organizations() -> list[dict[str, Any]]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT id, name, description, updated_at
+            FROM organizations
+            ORDER BY id
+            """
+        ).fetchall()
+    return _rows_to_dicts(rows)
+
+
+def save_organizations(organizations: list[dict[str, Any]]) -> None:
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("DELETE FROM organizations")
         conn.executemany(
             """
             INSERT INTO organizations (id, name, description, updated_at)
@@ -135,6 +136,26 @@ def sync_user_sqlite_store() -> str:
                 if isinstance(row, dict)
             ],
         )
+
+
+def load_levels() -> list[dict[str, Any]]:
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT id, organization_id, name, parent_level_id, manager_username, updated_at
+            FROM levels
+            ORDER BY organization_id, id
+            """
+        ).fetchall()
+    return _rows_to_dicts(rows)
+
+
+def save_levels(levels: list[dict[str, Any]]) -> None:
+    now = time.time()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+        conn.execute("DELETE FROM levels")
         conn.executemany(
             """
             INSERT INTO levels (id, organization_id, name, parent_level_id, manager_username, updated_at)
@@ -153,9 +174,19 @@ def sync_user_sqlite_store() -> str:
                 if isinstance(row, dict)
             ],
         )
-    return str(Settings.CACHE_DB_PATH)
+
+
+def account_display_name(account: dict | None) -> str:
+    if not account:
+        return ""
+    return str(account.get("alias") or account.get("username") or "")
 
 
 def ensure_user_sqlite_store() -> str:
-    """Ensure the SQLite mirror exists and is up-to-date."""
-    return sync_user_sqlite_store()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        _ensure_schema(conn)
+    return str(Settings.CACHE_DB_PATH)
+
+
+def sync_user_sqlite_store() -> str:
+    return ensure_user_sqlite_store()

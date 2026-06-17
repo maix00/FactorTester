@@ -13,7 +13,7 @@ from tools.data.sqlite.factor_source_store import (
 
 from scripts.data_dir import DATA_DIR
 
-USERS_DIR = os.path.join(DATA_DIR, "users")
+WORKSPACE_ROOTS_DIR = os.path.join(DATA_DIR, "factor_workspaces")
 
 
 def _normalize_root(path: str | None) -> str | None:
@@ -30,7 +30,7 @@ def factor_source_root(username: str) -> str:
             return configured_root
     except Exception:
         pass
-    directory = os.path.join(USERS_DIR, username)
+    directory = os.path.join(WORKSPACE_ROOTS_DIR, username)
     os.makedirs(directory, exist_ok=True)
     return directory
 

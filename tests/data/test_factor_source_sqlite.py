@@ -25,7 +25,7 @@ def test_factor_source_sqlite_roundtrip(monkeypatch, tmp_path):
 
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
+    monkeypatch.setattr(factor_storage, "WORKSPACE_ROOTS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     factor_id = "DemoFactor"
@@ -95,7 +95,7 @@ def test_user_factor_load_does_not_import_local_directory(monkeypatch, tmp_path)
 
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
+    monkeypatch.setattr(factor_storage, "WORKSPACE_ROOTS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     factor_id = "LocalOnlyFactor"

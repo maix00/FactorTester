@@ -24,7 +24,7 @@ def test_factor_source_root_roundtrip_and_resolution(monkeypatch, tmp_path):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
     fallback_root = tmp_path / "fallback-user-root"
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_storage, "USERS_DIR", str(fallback_root))
+    monkeypatch.setattr(factor_storage, "WORKSPACE_ROOTS_DIR", str(fallback_root))
 
     username = "default$alice@1"
     custom_root = tmp_path / "alice-factor-root"

@@ -3,7 +3,7 @@
 
 目录结构：
   ../data/
-    users/
+    user_storage/
       <username>/                    ← user_data_dir() 返回
         params_templates/            ← 参数模板 JSON
           <FactorFamily>.json
@@ -27,11 +27,11 @@ import time
 
 
 from scripts.data_dir import DATA_DIR as _DATA_DIR
-USERS_DIR = os.path.join(_DATA_DIR, 'users')
+USER_STORAGE_DIR = os.path.join(_DATA_DIR, 'user_storage')
 
 
 def user_data_dir(username: str) -> str:
-    directory = os.path.join(USERS_DIR, username)
+    directory = os.path.join(USER_STORAGE_DIR, username)
     os.makedirs(directory, exist_ok=True)
     return directory
 
@@ -126,13 +126,13 @@ def migrate_templates_on_rename(old_name: str, new_name: str) -> int:
     Returns number of files touched.
     """
     touched = 0
-    if not os.path.isdir(USERS_DIR):
+    if not os.path.isdir(USER_STORAGE_DIR):
         return touched
 
-    for username in os.listdir(USERS_DIR):
+    for username in os.listdir(USER_STORAGE_DIR):
         if username.startswith('_') or username.startswith('.'):
             continue
-        user_dir = os.path.join(USERS_DIR, username)
+        user_dir = os.path.join(USER_STORAGE_DIR, username)
         if not os.path.isdir(user_dir):
             continue
 
@@ -185,10 +185,10 @@ def archive_user_dir(username: str) -> str | None:
 
     Returns archived directory path when moved, else None when source doesn't exist.
     """
-    src = os.path.join(USERS_DIR, username)
+    src = os.path.join(USER_STORAGE_DIR, username)
     if not os.path.isdir(src):
         return None
-    archive_root = os.path.join(USERS_DIR, '_archived')
+    archive_root = os.path.join(USER_STORAGE_DIR, '_archived')
     os.makedirs(archive_root, exist_ok=True)
     timestamp = time.strftime('%Y%m%d_%H%M%S')
     dst = os.path.join(archive_root, f'{username}__{timestamp}')
