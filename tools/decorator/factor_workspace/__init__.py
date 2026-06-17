@@ -25,7 +25,7 @@ def collect_factor_workspace_import_dependencies(tree, exported_names):
         tree,
         exported_names,
         sentinel_name="__factor_workspace__",
-        decorator_name="factor_workspace",
+        decorator_names={"factor_workspace"},
     )
 
 

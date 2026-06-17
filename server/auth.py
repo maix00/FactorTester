@@ -18,7 +18,7 @@ from tools.data.account_manage import (
     verify_password, hash_password,
     normalize_account, serialize_account_public,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
-    ROLE_SUPER_ADMIN, ROLE_USER,
+    ROLE_SUPER_ADMIN, ROLE_USER, ROLE_DEVELOPER,
     list_organizations_with_default, next_account_username, root_level_id_for_org,
 )
 from server.services.runtime_state import (
@@ -113,6 +113,7 @@ def login():
         'organization_id': acct.get('organization_id', DEFAULT_ORGANIZATION_ID),
         'organization_name': acct.get('organization_name', DEFAULT_ORGANIZATION_NAME),
         'is_admin': acct.get('role') == ROLE_SUPER_ADMIN,
+        'is_developer': acct.get('role') in {ROLE_SUPER_ADMIN, ROLE_DEVELOPER},
     })
 
 @auth_bp.route('/logout', methods=['POST'])
@@ -149,6 +150,7 @@ def api_me():
         'organization_id': (acct_public or {}).get('organization_id'),
         'organization_name': (acct_public or {}).get('organization_name'),
         'is_admin': bool((acct_public or {}).get('is_admin')),
+        'is_developer': bool((acct_public or {}).get('role') in {ROLE_SUPER_ADMIN, ROLE_DEVELOPER}),
         'keep_login': bool(session.get('keep_login')),
     })
 

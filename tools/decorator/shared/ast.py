@@ -53,10 +53,14 @@ def collect_argument_references(args: ast.arguments) -> set[str]:
 
 
 def has_decorator(node: ast.FunctionDef | ast.ClassDef, decorator_name: str) -> bool:
+    return has_any_decorator(node, {decorator_name})
+
+
+def has_any_decorator(node: ast.FunctionDef | ast.ClassDef, decorator_names: set[str]) -> bool:
     for decorator in node.decorator_list:
-        if isinstance(decorator, ast.Name) and decorator.id == decorator_name:
+        if isinstance(decorator, ast.Name) and decorator.id in decorator_names:
             return True
-        if isinstance(decorator, ast.Attribute) and decorator.attr == decorator_name:
+        if isinstance(decorator, ast.Attribute) and decorator.attr in decorator_names:
             return True
     return False
 
@@ -66,7 +70,7 @@ def collect_import_dependencies(
     exported_names: set[str] | None,
     *,
     sentinel_name: str,
-    decorator_name: str,
+    decorator_names: set[str],
 ) -> set[str]:
     needed: set[str] = set(exported_names or set())
 
@@ -86,13 +90,13 @@ def collect_import_dependencies(
                 needed |= collect_name_references(node.annotation)
                 needed |= collect_name_references(node.value)
         elif isinstance(node, ast.FunctionDef):
-            if is_exported(node.name) or has_decorator(node, decorator_name):
+            if is_exported(node.name) or has_any_decorator(node, decorator_names):
                 for decorator in node.decorator_list:
                     needed |= collect_name_references(decorator)
                 needed |= collect_name_references(node.returns)
                 needed |= collect_argument_references(node.args)
         elif isinstance(node, ast.ClassDef):
-            if is_exported(node.name) or has_decorator(node, decorator_name):
+            if is_exported(node.name) or has_any_decorator(node, decorator_names):
                 for decorator in node.decorator_list:
                     needed |= collect_name_references(decorator)
                 for base in node.bases:

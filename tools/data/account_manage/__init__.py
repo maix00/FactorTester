@@ -45,6 +45,7 @@ DEFAULT_ORGANIZATION_NAME = '默认机构'
 ROLE_SUPER_ADMIN = 'super_admin'
 ROLE_ORG_ADMIN = 'org_admin'
 ROLE_LEVEL_ADMIN = 'level_admin'
+ROLE_DEVELOPER = 'developer'
 ROLE_USER = 'user'
 ADMIN_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN}
 _last_template_ts = 0
@@ -244,6 +245,10 @@ def is_any_admin_account(account: dict | None) -> bool:
     return bool(account and (account.get('role') in ADMIN_ROLES or is_super_admin_account(account)))
 
 
+def is_developer_account(account: dict | None) -> bool:
+    return bool(account and (account.get('role') == ROLE_DEVELOPER or is_super_admin_account(account)))
+
+
 def visible_accounts_for(username: str | None, include_self: bool = True) -> list:
     if not username:
         return []
@@ -341,6 +346,7 @@ def serialize_account_public(account: dict | None, current_username: str | None 
         'alias': normalized.get('alias') or normalized.get('username', ''),
         'role': normalized.get('role') or ROLE_USER,
         'is_admin': normalized.get('role') == ROLE_SUPER_ADMIN,
+        'is_developer': normalized.get('role') in {ROLE_SUPER_ADMIN, ROLE_DEVELOPER},
         'organization_id': normalized.get('organization_id') or DEFAULT_ORGANIZATION_ID,
         'organization_name': normalized.get('organization_name') or DEFAULT_ORGANIZATION_NAME,
         'level_id': normalized.get('level_id') or '',
