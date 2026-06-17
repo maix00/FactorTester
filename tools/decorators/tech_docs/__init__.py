@@ -1,3 +1,9 @@
+"""tech_docs decorator family.
+
+Import `tech_docs` from `tools.decorators`; import helper utilities from
+this submodule so docs-related code keeps the tech_docs semantic path.
+"""
+
 from __future__ import annotations
 
 from typing import TypeVar

@@ -1,3 +1,9 @@
+"""factor_workspace decorator family.
+
+Import `factor_workspace` from `tools.decorators`; import helper utilities
+from this submodule so the semantic boundary stays explicit.
+"""
+
 from __future__ import annotations
 
 from typing import TypeVar

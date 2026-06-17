@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.decorators import (
+from tools.decorators.factor_workspace import (
     collect_factor_workspace_import_dependencies,
     extract_factor_workspace_exports,
 )

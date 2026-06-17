@@ -12,7 +12,7 @@ from typing import Any
 
 from tools.data.factor_workspace import storage as factor_workspace_storage
 from tools.data.tech_docs import scan_tool_files
-from tools.decorators import (
+from tools.decorators.factor_workspace import (
     collect_factor_workspace_import_dependencies,
     extract_factor_workspace_exports,
     has_factor_workspace_decorator,
