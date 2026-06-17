@@ -9,3 +9,7 @@ from tools.data.types.DataTime import DataTime, TimePrecision
 
 from tools.products import Product
 from tools.factors import Factor, FactorFamily
+
+__factor_workspace__ = (
+    "UniqueNameObject",
+)

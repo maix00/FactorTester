@@ -20,6 +20,7 @@ import uuid
 import pandas as pd
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
+from tools.decorator.factor_workspace import factor_workspace
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
+@factor_workspace
 class FactorFamily(UniqueNameObject, FactorExpr):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。

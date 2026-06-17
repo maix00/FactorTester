@@ -33,6 +33,7 @@ import threading
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
 from weakref import WeakValueDictionary
 
+from tools.decorator.factor_workspace import factor_workspace
 from tools import DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.FactorTester import FactorTester
 
+@factor_workspace
 class Factor(FactorExpr):
     """
     量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
@@ -84,6 +86,7 @@ class Factor(FactorExpr):
     _intermediate_alias_index: Dict[str, Tuple]
     family: Optional[FactorFamily] = None
 
+    @factor_workspace
     def clear(self):
         """清空所有计算结果。"""
         self._source_freq = None

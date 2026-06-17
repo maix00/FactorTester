@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from server.services import factor_workspace
+from tools.data.factor_workspace import pre as factor_workspace_pre
+from tools.data.factor_workspace import sync as factor_workspace_sync
 
 
 def _load_storage_module():
@@ -34,10 +36,11 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     stale_root.write_text("old\n", encoding="utf-8")
 
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(
-        factor_workspace,
+        factor_workspace_sync,
         "list_factor_sources",
         lambda source_kind: [
             {
@@ -55,10 +58,10 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
             }
         ],
     )
-    monkeypatch.setattr(factor_workspace, "scan_tool_files", lambda tools_dir, include_symbols=False: [
+    monkeypatch.setattr(factor_workspace_pre, "scan_tool_files", lambda tools_dir, include_symbols=False: [
         {"path": "base/User.py", "name": "base / User.py", "desc": "", "symbols": []}
     ])
-    monkeypatch.setattr(factor_workspace, "_ensure_git_workspace", lambda root, username: {
+    monkeypatch.setattr(factor_workspace_sync, "_ensure_git_workspace", lambda root, username: {
         "git_enabled": True,
         "git_repo_root": str(workspace_root),
         "git_current_branch": "main",
@@ -79,34 +82,31 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
     assert (workspace_root / "tools_index.json").exists()
     assert (workspace_root / "Settings.pyi").exists()
-    factor_family_stub = (workspace_root / "tools" / "factors" / "FactorFamily.pyi").read_text(encoding="utf-8")
-    parameters_stub = (workspace_root / "tools" / "factors" / "Parameters.pyi").read_text(encoding="utf-8")
-    factor_expr_wrapper_stub = (workspace_root / "tools" / "factors" / "FactorExpr.pyi").read_text(encoding="utf-8")
-    expr_pkg_stub = (workspace_root / "tools" / "factors" / "expr" / "__init__.pyi").read_text(encoding="utf-8")
+    assert "__factor_workspace__" in Path("tools/parameters/__init__.py").read_text(encoding="utf-8")
+    assert "__factor_workspace__" in Path("tools/factors/__init__.py").read_text(encoding="utf-8")
+    assert "__factor_workspace__" in Path("tools/factors/FactorExpr.py").read_text(encoding="utf-8")
+    assert "@factor_workspace" in Path("tools/factors/Factors.py").read_text(encoding="utf-8")
+    assert "@factor_workspace" in Path("tools/factors/FactorFamily.py").read_text(encoding="utf-8")
+    assert "@factor_workspace" in Path("tools/factors/Parameters.py").read_text(encoding="utf-8")
+    assert "@factor_workspace" in Path("tools/factors/expr/core.py").read_text(encoding="utf-8")
     tools_stub = (workspace_root / "tools" / "__init__.pyi").read_text(encoding="utf-8")
     parameters_pkg_stub = (workspace_root / "tools" / "parameters" / "__init__.pyi").read_text(encoding="utf-8")
     factors_pkg_stub = (workspace_root / "tools" / "factors" / "__init__.pyi").read_text(encoding="utf-8")
-    assert "class FactorFamily" in factor_family_stub
-    assert "def get_factor" in factor_family_stub
-    assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()
-    assert "ReturnFreqParam" in parameters_stub
-    assert "FactorFreqParam" in parameters_stub
-    assert "StartCalcPointParam" in parameters_stub
-    assert "# 因子系统专用参数模块" in parameters_stub
     assert "WindowParam" in parameters_pkg_stub
     assert "FactorTester" not in factors_pkg_stub
     assert "EvaluateContext" not in factors_pkg_stub
     assert "visual_groups" not in factors_pkg_stub
-    assert "CLOSE" in factor_expr_wrapper_stub
-    assert "SMALL_VAL" in factor_expr_wrapper_stub
-    assert "CLOSE" in expr_pkg_stub
-    assert "SMALL_VAL" in expr_pkg_stub
+    assert "WindowParam" in parameters_pkg_stub
+    assert "FactorExpr" in factors_pkg_stub
     assert "ProductDataView" in tools_stub
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "FactorTester.pyi").exists() is False
+    assert (workspace_root / "tools" / "factors" / "FactorRunResult.pyi").exists() is False
     assert (workspace_root / "tools" / "data" / "types" / "DataIndex.pyi").exists() is False
+    assert (workspace_root / "tools" / "data" / "views" / "ProductDataView.pyi").exists() is False
+    assert (workspace_root / "tools" / "factors" / "expr" / "visual_groups.pyi").exists() is False
     assert not (workspace_root / "tools" / "backtest").exists()
     assert result["git"]["git_enabled"] is True
     assert result["git"]["git_auto_sync_branch"] == "main"
@@ -114,6 +114,10 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     settings = json.loads((workspace_root / ".vscode" / "settings.json").read_text(encoding="utf-8"))
     assert settings["python.analysis.extraPaths"] == ["${workspaceFolder}"]
     assert settings["python.analysis.autoSearchPaths"] is True
+    assert settings["python.analysis.diagnosticSeverityOverrides"]["reportMissingModuleSource"] == "none"
+    assert not (workspace_root / "tools" / "factors" / "FactorExpr.py").exists()
+    assert not (workspace_root / "tools" / "parameters" / "WindowParam.py").exists()
+    assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()
 
 
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
@@ -123,7 +127,8 @@ def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, 
     (public_dir / "PublicFactor.py").write_text("class PublicFactor(FactorFamily):\n    pass\n", encoding="utf-8")
 
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(factor_storage, "load_public_factor_source", lambda factor_id: "class PublicFactor(FactorFamily):\n    pass\n# db version\n")
 
@@ -144,14 +149,15 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "main"], check=True, capture_output=True, text=True)
 
     factor_storage = _load_storage_module()
-    monkeypatch.setattr(factor_workspace, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_pre, "_storage", lambda: factor_storage)
+    monkeypatch.setattr(factor_workspace_sync, "_storage", lambda: factor_storage)
     monkeypatch.setattr(factor_storage, "factor_source_root", lambda username: str(workspace_root))
     monkeypatch.setattr(
-        factor_workspace,
+        factor_workspace_sync,
         "list_factor_sources",
         lambda source_kind: [],
     )
-    monkeypatch.setattr(factor_workspace, "scan_tool_files", lambda tools_dir, include_symbols=False: [])
+    monkeypatch.setattr(factor_workspace_pre, "scan_tool_files", lambda tools_dir, include_symbols=False: [])
 
     from server.services.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
     save_factor_source_workspace_settings(

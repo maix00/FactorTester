@@ -12,6 +12,7 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
+from tools.decorator.factor_workspace import factor_workspace
 from tools.data.types.DataColumn import DataColumn
 from tools.data.types.DataFreq import DataFreq
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
 
 # ── 求值上下文（统一 evaluate/_evaluate 签名） ──
+@factor_workspace
 class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
@@ -74,6 +76,7 @@ def _lazy():
     return _LAZY
 
 
+@factor_workspace
 class FactorExpr:
     """
     因子表达式抽象基类。

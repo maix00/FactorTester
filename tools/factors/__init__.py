@@ -7,3 +7,26 @@ from tools.factors.FactorExpr import (
     SignalAlign, TermStructureOp, expr_max, expr_min, term_spread, term_ratio,
     term_slope,
 )
+
+__factor_workspace__ = (
+    "FactorNextPeriodReturns",
+    "ReturnFreqParam",
+    "FactorFreqParam",
+    "StartCalcPointParam",
+    "ReverseParam",
+    "Factor",
+    "FactorFamily",
+    "FactorExpr",
+    "ConstExpr",
+    "ParamRef",
+    "OperandExpr",
+    "CompositeExpr",
+    "ShiftOp",
+    "SignalAlign",
+    "TermStructureOp",
+    "expr_max",
+    "expr_min",
+    "term_spread",
+    "term_ratio",
+    "term_slope",
+)
