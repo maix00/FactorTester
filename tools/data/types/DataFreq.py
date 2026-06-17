@@ -12,8 +12,7 @@ from re import findall
 from typing import Any, cast
 from weakref import WeakValueDictionary
 
-import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from tools.base.UniqueNameObject import UniqueNameObject
+from .base import UniqueNameObject
 
 # 标准时间单位→简短名称映射（pd.Timedelta.components 属性名 → DataFreq 名称组成单元）
 units = {'days': 'DAY', 'hours': 'HOUR', 'minutes': 'MIN', 'seconds': 'SECOND', 

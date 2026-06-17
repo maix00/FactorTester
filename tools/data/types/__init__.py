@@ -1,3 +1,4 @@
+from .base import UniqueNameObject
 from .DataColumn import DataColumn
 from .DataCurrency import (
     DataCurrency,
@@ -15,6 +16,7 @@ from .DataTime import DataTime, TimePrecision
 
 __all__ = [
     "DataColumn",
+    "UniqueNameObject",
     "DataCurrency",
     "CurrencyConversionContext",
     "default_fx_rate_provider",

@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
-from tools.base.UniqueNameObject import UniqueNameObject
+from tools.data.types.base import UniqueNameObject
 from tools import DataColumn, DataFreq
 from tools.data.account_manage import User
 from tools.data.types.DataTime import DataTime

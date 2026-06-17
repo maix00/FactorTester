@@ -16,7 +16,7 @@ import pandas as pd
 from typing import Any, Callable, List, Optional, cast
 from weakref import WeakKeyDictionary
 
-from tools.base.UniqueNameObject import UniqueNameObject
+from tools.data.types.base import UniqueNameObject
 
 
 # ═════════════════════════════════════════════════════════════════════════════

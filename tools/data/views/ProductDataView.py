@@ -26,7 +26,7 @@ from typing import List, Dict, Optional, Tuple, Any, cast
 import numpy as np
 import pandas as pd
 
-from tools.base.UniqueNameObject import UniqueNameObject
+from tools.data.types.base import UniqueNameObject
 from ..hub import DataHub
 from ..types.DataIndex import DataIndex, finest_index
 from ..types.DataFreq import DataFreq

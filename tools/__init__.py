@@ -1,4 +1,4 @@
-from tools.base.UniqueNameObject import UniqueNameObject
+from tools.data.types.base import UniqueNameObject
 from tools.data.providers.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.types.DataFreq import DataFreq
 from tools.data.types.DataColumn import DataColumn

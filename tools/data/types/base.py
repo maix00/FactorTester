@@ -1,14 +1,3 @@
-# =============================================================================
-# tools/base/UniqueNameObject.py
-# 别名去重基类
-#
-# 最小化抽象：同 name 同实例。无 search/structural_key/alias_index/delete。
-#
-# 使用：
-#   class MyClass(UniqueNameObject):
-#       def __init__(self, name=None, alias=None, **kwargs):
-#           super().__init__(name=name, alias=alias, **kwargs)
-# =============================================================================
 from __future__ import annotations
 
 import threading
