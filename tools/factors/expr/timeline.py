@@ -6,8 +6,8 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from tools.data.types.DataIndex import finest_index
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import finest_index
+from tools.data.types import DataFreq
 
 
 @dataclass(frozen=True)

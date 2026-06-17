@@ -27,7 +27,7 @@ from .visual_groups import (
 # 预定义常用列引用（在所有子模块加载后定义，避免循环导入）
 # ═════════════════════════════════════════════════════════════════════════════
 
-from tools.data.types.DataColumn import DataColumn
+from tools.data.types import DataColumn
 
 OPEN = ColumnRef(DataColumn.OPEN_ADJUSTED)
 HIGH = ColumnRef(DataColumn.HIGH_ADJUSTED)

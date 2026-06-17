@@ -26,10 +26,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
-from tools.data.types.base import UniqueNameObject
+from tools.data.types import UniqueNameObject
 from tools import DataColumn, DataFreq
 from tools.data.account_manage import User
-from tools.data.types.DataTime import DataTime
+from tools.data.types import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
 from Settings import get_all_products, logger_dir_path_default
@@ -67,13 +67,13 @@ def _align_ts(lhs: Any, rhs: Any) -> Any:
 
 def _align_ts_to_index(ts: Any, idx: pd.Index) -> pd.Timestamp:
     """将时间戳的时区规整到 DatetimeIndex，避免 tz-aware/naive 比较错误。"""
-    from tools.data.types.DataIndex import DataIndex
+    from tools.data.types import DataIndex
     return DataIndex(idx).tz_align(ts)
 
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     """从信号索引中提取时间戳层，返回 DatetimeIndex。"""
-    from tools.data.types.DataIndex import DataIndex
+    from tools.data.types import DataIndex
     return DataIndex(idx).signal_index
 
 class FactorTester(UniqueNameObject):

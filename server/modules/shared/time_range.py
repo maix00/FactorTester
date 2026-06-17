@@ -9,7 +9,7 @@ import uuid as _uuid
 import pandas as pd
 from flask import request, jsonify
 import Settings
-from tools.data.types.DataTime import DataTime
+from tools.data.types import DataTime
 from server.services.factor_registry import get_factor_family_instance
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock

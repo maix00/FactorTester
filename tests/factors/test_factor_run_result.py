@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.data.types.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorRunResult import FactorRunResult
 

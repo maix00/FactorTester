@@ -49,7 +49,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
         ],
     )
     monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [
-        {"path": "base/User.py", "name": "base / User.py", "desc": "", "symbols": []}
+        {"path": "types/base.py", "name": "types / base.py", "desc": "", "symbols": []}
     ])
     monkeypatch.setattr(factor_workspace_sync, "_ensure_git_workspace", lambda root, username: {
         "git_enabled": True,

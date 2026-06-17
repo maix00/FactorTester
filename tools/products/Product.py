@@ -11,10 +11,10 @@ Product 抽象基类 — 所有金融产品的统一接口。
 from typing import List, Optional, Any, TYPE_CHECKING, cast
 import pandas as pd
 
-from tools.data.types.base import UniqueNameObject
+from tools.data.types import UniqueNameObject
 from tools.data.views.ProductDataView import ProductDataView
-from tools.data.types.DataColumn import DataColumn
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 from tools.data import DataProviderProductTS as DataSource
 
 class Product(UniqueNameObject):

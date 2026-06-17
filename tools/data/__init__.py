@@ -9,8 +9,8 @@ from tools.data.providers.DataProvider import (
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.data.hub import DataHub
 from tools.data.views.ProductDataView import ProductDataView
-from tools.data.types.DataColumn import DataColumn
-from tools.data.types.DataCurrency import (
+from tools.data.types import DataColumn
+from tools.data.types import (
     DataCurrency,
     CurrencyConversionContext,
     default_fx_rate_provider,
@@ -19,10 +19,10 @@ from tools.data.types.DataCurrency import (
     resolve_product_currency,
     require_product_currency_vector,
 )
-from tools.data.types.DataFreq import DataFreq
-from tools.data.types.DataIndex import DataIndex
-from tools.data.types.DataMoneyMinorUnits import DataMoneyMinorUnits
-from tools.data.types.DataTime import DataTime, TimePrecision
+from tools.data.types import DataFreq
+from tools.data.types import DataIndex
+from tools.data.types import DataMoneyMinorUnits
+from tools.data.types import DataTime, TimePrecision
 
 __all__ = [
     "_DataProviderMeta",

@@ -33,7 +33,7 @@
 <!-- ═══════════ 数据列清单 ═══════════ -->
 <div class="doc-section">
     <h2>🔤 数据列 (DataColumn)</h2>
-    <p>定义在 <code>tools/data/DataColumn.py</code>，共 {{ dd.data_columns|length }} 个字段。</p>
+    <p>定义在 <code>tools/data/types/product_ts_data_col.py</code>，共 {{ dd.data_columns|length }} 个字段。</p>
     <table>
         <tr><th style="width:120px">枚举名</th><th style="width:60px">代号</th><th>中文说明</th></tr>
         {% for col in dd.data_columns %}
@@ -83,7 +83,7 @@
 <!-- ═══════════ 数据频率 ═══════════ -->
 <div class="doc-section">
     <h2>⏱ 数据频率 (DataFreq)</h2>
-    <p>定义在 <code>tools/data/DataFreq.py</code>，当前运行时已创建 {{ dd.frequency_types|length }} 种频率。</p>
+    <p>定义在 <code>tools/data/types/time_freq.py</code>，当前运行时已创建 {{ dd.frequency_types|length }} 种频率。</p>
     <table>
         <tr><th style="width:120px">标准名</th><th style="width:140px">Timedelta 值</th><th style="width:160px">完整别名</th></tr>
         {% for f in dd.frequency_types %}

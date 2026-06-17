@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.data.types.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors import FactorFamily
 from tools.factors.FactorExpr import ColumnRef, CompositeExpr
 

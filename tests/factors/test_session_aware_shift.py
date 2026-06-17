@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataFreq
 from tools.factors.FactorExpr import ConstExpr, ShiftOp, build_panel_timeline
 
 

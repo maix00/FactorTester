@@ -9,8 +9,8 @@ import pandas as pd
 from tools.factors import Factor
 from tools.factors.tests import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
-from tools.data.types.DataFreq import DataFreq
-from tools.data.types.DataIndex import finest_index
+from tools.data.types import DataFreq
+from tools.data.types import finest_index
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:

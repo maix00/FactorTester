@@ -35,7 +35,7 @@ from openpyxl.styles import Alignment, numbers
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.types.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorTester import FactorTester

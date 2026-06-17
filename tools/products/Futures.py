@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from tools.products.Product import Product
 from tools.data.hub import DataHub
-from tools.data.types.DataIndex import DataIndex
+from tools.data.types import DataIndex
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from tools.data.types.DataColumn import DataColumn
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 from tools.factors.FactorExpr import ColumnRef, EvaluateContext
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product

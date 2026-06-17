@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
 
-from tools.data.types.base import UniqueNameObject
+from tools.data.types import UniqueNameObject
 
 if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester

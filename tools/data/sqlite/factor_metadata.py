@@ -17,7 +17,7 @@ import Settings
 from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.data.sqlite.db import connect_sqlite
-from tools.data.sqlite.user import account_display_name, load_accounts
+from tools.data.account_manage import account_display_name, load_accounts
 from tools.factors import FactorFamily
 
 CATALOG_TABLE = "factor_family_catalog"

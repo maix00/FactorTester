@@ -7,7 +7,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from tools.data.types.DataIndex import finest_index
+from tools.data.types import finest_index
 
 
 def match_product_column(table: pd.DataFrame | None, product) -> object | None:

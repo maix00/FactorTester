@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataFreq
 from tools.factors.tests.single_factor_test import ic as ic_module
 
 

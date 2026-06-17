@@ -13,8 +13,8 @@ from typing import (
 )
 
 from tools.decorator.factor_workspace import factor_workspace
-from tools.data.types.DataColumn import DataColumn
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product

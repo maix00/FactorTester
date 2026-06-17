@@ -13,7 +13,7 @@ import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
-from tools.data.types.DataIndex import finest_index
+from tools.data.types import finest_index
 from tools.data import DataProviderProductTS as DataSource
 from tools.products.Futures import Futures
 from tools.products.product_utils import get_contract_desc, get_product_contracts
@@ -217,7 +217,7 @@ def get_price_data():
             if price_df.empty:
                 return jsonify({'success': False, 'error': '合约数据为空'}), 404
 
-            from tools.data.types.DataFreq import DataFreq
+            from tools.data.types import DataFreq
             try:
                 freq = DataFreq(freq_str)
             except Exception:
@@ -311,7 +311,7 @@ def get_price_data():
         supports_adjusted = _supports_adjusted_price(product)
         adjusted = bool(adjusted and supports_adjusted)
 
-        from tools.data.types.DataFreq import DataFreq
+        from tools.data.types import DataFreq
         candidate_source = None
         if data_source_alias:
             try:

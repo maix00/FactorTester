@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataFreq
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup

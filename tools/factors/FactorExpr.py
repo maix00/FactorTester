@@ -11,8 +11,8 @@
 # =============================================================================
 
 # Re-export DataColumn/DataFreq for backward compatibility
-from tools.data.types.DataColumn import DataColumn
-from tools.data.types.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 
 from tools.factors.expr import (
     # core
