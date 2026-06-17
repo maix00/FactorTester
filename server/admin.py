@@ -7,7 +7,7 @@ import secrets
 from typing import Any, cast
 from flask import Blueprint, request, jsonify, render_template
 
-from server.services.accounts import (
+from tools.data.account_manage import (
     accounts_lock, load_accounts, save_accounts,
     organizations_lock, load_organizations, save_organizations,
     normalize_accounts, normalize_organization, list_organizations_with_default,

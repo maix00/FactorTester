@@ -157,7 +157,7 @@
         <p>因子列表通过扫描 <code>Factors/</code> 目录中的 <code>.py</code> 文件中定义的类自动发现，按类别（Mm/Oi/Vl/Vp）分组显示。中文名通过类 docstring 的首行提取。</p>
 
         <h3>2.4 认证 — <code>server/auth.py</code></h3>
-        <p>基于 session 的认证。账号与机构层级由 <code>server/services/accounts.py</code> 管理；请求运行态由 <code>server/services/runtime_state.py</code> 管理，例如当前用户、页面级时间范围、参数 session 状态等。</p>
+        <p>基于 session 的认证。账号与机构层级由 <code>tools/data/account_manage/</code> 管理；请求运行态由 <code>server/services/runtime_state.py</code> 管理，例如当前用户、页面级时间范围、参数 session 状态等。</p>
 
         <h3>2.5 运行态状态 — <code>server/services/runtime_state.py</code></h3>
         <p>核心状态管理文件，提供：</p>

@@ -15,7 +15,7 @@ from flask import session
 from tools.factors.FactorFamily import FactorFamily as _FactorFamilyForSettingsInit  # noqa: F401
 import Settings as Settings
 import pandas as pd
-from server.services.accounts import accounts_lock, load_accounts
+from tools.data.account_manage import accounts_lock, load_accounts
 
 if TYPE_CHECKING:
     from tools.factors import FactorTester
@@ -212,7 +212,7 @@ def current_user_obj():
     username = current_user()
     if not username:
         return None
-    from tools.base.User import User
+    from tools.data.account_manage import User
     with accounts_lock:
         accounts = load_accounts()
     acct = next((a for a in accounts if a['username'] == username), None)

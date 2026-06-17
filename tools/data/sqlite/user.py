@@ -176,12 +176,6 @@ def save_levels(levels: list[dict[str, Any]]) -> None:
         )
 
 
-def account_display_name(account: dict | None) -> str:
-    if not account:
-        return ""
-    return str(account.get("alias") or account.get("username") or "")
-
-
 def ensure_user_sqlite_store() -> str:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)

@@ -1,20 +1,3 @@
-"""
-Account, organization, and hierarchy permission helpers.
-
-数据模型：
-  accounts / organizations / levels 均存于统一 sqlite 主库
-
-角色体系：
-  super_admin   — 超级管理员（全局权限）
-  org_admin     — 机构管理员（管理本机构用户）
-  level_admin   — 层级管理员（管理本层级及下属）
-  user          — 普通用户（默认角色）
-
-密码安全：
-  - PBKDF2-HMAC-SHA256 + 随机 salt + 200k 迭代
-  - 验证使用 hmac.compare_digest 防时序攻击
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -22,8 +5,8 @@ import hmac
 import re
 import threading
 
+from .user import User
 from tools.data.sqlite.user import (
-    account_display_name,
     ensure_user_sqlite_store,
     load_accounts as _load_accounts,
     load_levels as _load_levels,
@@ -32,6 +15,7 @@ from tools.data.sqlite.user import (
     save_levels as _save_levels,
     save_organizations as _save_organizations,
 )
+
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
 levels_lock = threading.Lock()
@@ -43,6 +27,12 @@ ROLE_ORG_ADMIN = 'org_admin'
 ROLE_LEVEL_ADMIN = 'level_admin'
 ROLE_USER = 'user'
 ADMIN_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN}
+
+
+def account_display_name(account: dict | None) -> str:
+    if not account:
+        return ""
+    return str(account.get('alias') or account.get('username') or '')
 
 
 def hash_password(password: str, salt: str) -> str:

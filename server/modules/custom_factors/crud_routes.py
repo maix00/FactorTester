@@ -13,7 +13,7 @@ from server.modules.custom_factors.source_helpers import (
     parse_class_meta,
     strip_factor_meta,
 )
-from server.services.accounts import (
+from tools.data.account_manage import (
     can_view_user_scope,
     get_account,
     is_super_admin_account,

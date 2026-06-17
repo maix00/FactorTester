@@ -9,7 +9,7 @@ import time
 
 from server.modules.custom_factors.source_helpers import strip_factor_meta
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.accounts import (
+from tools.data.account_manage import (
     account_display_name,
     visible_accounts_for,
 )

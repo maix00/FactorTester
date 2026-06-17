@@ -1,14 +1,7 @@
-# =============================================================================
-# tools/base/User.py
-# 用户类模块
-#
-# 用户是全局唯一对象。name 格式为 {username}@{serial}（如 '张三@1'），
-# 允许同名用户通过后缀序列号区分。name 不包含 uuid。
-# 通过 StorageBackend 实现跨进程协调（同一 name 在不同进程中共享存在性标记）。
-#
-# alias 取 @ 之前的原始用户名（如 '张三'），用于前端展示。
-# =============================================================================
-from typing import List, Optional, TYPE_CHECKING
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List
+
 from tools.base.UniqueNameObject import UniqueNameObject
 
 if TYPE_CHECKING:
@@ -23,13 +16,12 @@ class User(UniqueNameObject):
         name      (str)      : 全名，格式 {username}@{serial}，如 '张三@1'
         alias     (str)      : 原始用户名，如 '张三'（用于展示）
         serial    (int)      : 序列号，从 1 开始
-        is_admin (bool)      : 是否为管理员
+        is_admin  (bool)     : 是否为管理员
         testers   (list)     : 该用户创建的 FactorTester 列表
     """
 
     def __init__(self, name: str, is_admin: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            # name 格式: username@serial
             parts = name.rsplit('@', 1)
             if len(parts) == 2 and parts[1].isdigit():
                 alias = parts[0]
@@ -39,7 +31,7 @@ class User(UniqueNameObject):
                 self.serial = 1
             super().__init__(name=name, alias=alias, desc=f'用户 {alias}', *args, **kwargs)
             self.is_admin = is_admin
-            self._testers: 'List[FactorTester]' = []  # 弱引用列表，用户退出后可清理
+            self._testers: 'List[FactorTester]' = []
 
     @property
     def testers(self) -> 'List[FactorTester]':

@@ -21,7 +21,7 @@ from server.modules.custom_factors.param_config_store import (
     normalize_product_group,
     rename_scope,
 )
-from server.services.accounts import can_view_user_scope
+from tools.data.account_manage import can_view_user_scope
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user, get_session_params, get_user_file_lock

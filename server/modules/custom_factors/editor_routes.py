@@ -11,10 +11,10 @@ from server.modules.custom_factors.source_helpers import (
 )
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.accounts import can_view_user_scope
+from tools.data.account_manage import can_view_user_scope
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
-from server.services.accounts import get_account, is_super_admin_account
+from tools.data.account_manage import get_account, is_super_admin_account
 from server.services.factor_registry import get_factor_family_instance
 from server.services.factor_workspace import (
     build_factor_workspace,

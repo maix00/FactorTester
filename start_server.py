@@ -18,7 +18,7 @@ except Exception:
 from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
-from server.services.accounts import accounts_lock, load_accounts
+from tools.data.account_manage import accounts_lock, load_accounts
 from server.services.runtime_state import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
 

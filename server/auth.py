@@ -13,7 +13,7 @@ PUBLIC_ENDPOINTS: 不要求登录的端点集合，包含文档系统和静态�
 import re
 import secrets
 from flask import Blueprint, request, jsonify, render_template, session, redirect
-from server.services.accounts import (
+from tools.data.account_manage import (
     accounts_lock, load_accounts, save_accounts,
     verify_password, hash_password,
     normalize_account, serialize_account_public,
