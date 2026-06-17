@@ -16,6 +16,7 @@ import pandas as pd
 from typing import Any, Callable, List, Optional, cast
 from weakref import WeakKeyDictionary
 
+from tools.decorators import factor_workspace
 from tools.data.types import UniqueNameObject
 
 
@@ -23,6 +24,7 @@ from tools.data.types import UniqueNameObject
 # ValueSpace —— 不可变值空间
 # ═════════════════════════════════════════════════════════════════════════════
 
+@factor_workspace
 class ValueSpace:
     """
     值空间：定义合法值域、验证、标准化、展示。
@@ -108,6 +110,7 @@ def _format_timedelta(td: pd.Timedelta) -> str:
 # Parameter —— 持有 ValueSpace 的参数基类
 # ═════════════════════════════════════════════════════════════════════════════
 
+@factor_workspace
 class Parameter(UniqueNameObject):
     """
     参数对象：持有值空间和默认值，提供注册表存储不同对象的参数值。
@@ -216,6 +219,7 @@ class Parameter(UniqueNameObject):
 # 子类 —— 利用 ValueSpace 工厂方法的语法糖
 # ═════════════════════════════════════════════════════════════════════════════
 
+@factor_workspace
 class TypeParam(Parameter):
     """
     类型约束参数：只接受指定 Python 类型的值。
@@ -234,6 +238,7 @@ class TypeParam(Parameter):
         super().__init__(alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
+@factor_workspace
 class FactorParam(TypeParam):
     """
     因子表达式参数：接受 FactorExpr 或其子类实例（允许 None 作为默认值）。
@@ -305,6 +310,7 @@ class FactorParam(TypeParam):
         Parameter.__init__(self, alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
+@factor_workspace
 class FinRangeParam(Parameter):
     def __init__(self, alias: Optional[str] = None, value_space: Optional[List[Any]] = None, 
                  default_value: Any = None, *args, **kwargs):
@@ -326,6 +332,7 @@ class FinRangeParam(Parameter):
         self.value_space = value_space  # 保留原始列表，供 Category 等子类使用
 
 
+@factor_workspace
 class TimeDeltaParam(Parameter):
     """
     时间增量参数：接受可转换为 pd.Timedelta 的值，支持正/负/非负/非正约束。

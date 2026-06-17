@@ -1,5 +1,5 @@
 # =============================================================================
-# server/services/datadict_scan.py
+# tools/data/tech_docs/datadict_scan.py
 # 数据字典扫描器
 #
 # 自动扫描项目中的字段定义并生成结构化元数据，用于：
@@ -22,6 +22,7 @@ import inspect
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -160,8 +161,8 @@ def _extract_enum_comments(filepath: str, class_name: str) -> Dict[str, str]:
 def scan_data_columns_with_comments() -> List[DataColumnEntry]:
     """扫描 DataColumn 并补全中文注释。"""
     entries = scan_data_columns()
-    filepath = os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'data', 'product_ts_data_col.py')
-    filepath = os.path.normpath(filepath)
+    repo_root = Path(__file__).resolve().parents[3]
+    filepath = str(repo_root / 'tools' / 'data' / 'product_ts_data_col.py')
     comments = _extract_enum_comments(filepath, 'DataColumn')
     for entry in entries:
         if not entry.description:
@@ -172,8 +173,8 @@ def scan_data_columns_with_comments() -> List[DataColumnEntry]:
 def scan_factors() -> List[FactorEntry]:
     """扫描所有 FactorFamily 子类，提取因子元信息。"""
     from tools.factors.FactorFamily import FactorFamily
-    factors_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'Factors')
-    factors_dir = os.path.normpath(factors_dir)
+    repo_root = Path(__file__).resolve().parents[3]
+    factors_dir = str(repo_root / 'Factors')
 
     # 因子分组中文名映射
     category_names = {
@@ -261,8 +262,8 @@ def scan_settings() -> List[SettingEntry]:
     """扫描 Settings.py 中的顶层配置变量。"""
     import Settings
     entries = []
-    filepath = os.path.join(os.path.dirname(__file__), '..', '..', 'Settings.py')
-    filepath = os.path.normpath(filepath)
+    repo_root = Path(__file__).resolve().parents[3]
+    filepath = str(repo_root / 'Settings.py')
 
     # 从源码提取注释
     var_comments: Dict[str, str] = {}

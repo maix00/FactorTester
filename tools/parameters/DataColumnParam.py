@@ -1,8 +1,10 @@
 from typing import Optional, Any
 
+from tools.decorators import factor_workspace
 from tools import DataColumn
 from tools.parameters.Parameter import Parameter, ValueSpace
 
+@factor_workspace
 class DataColumnParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):

@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tools.decorator.tech_docs import tech_docs
+from tools.decorators import tech_docs
 from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product

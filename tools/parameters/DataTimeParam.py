@@ -8,12 +8,14 @@
 import pandas as pd
 from typing import Optional, Any, TYPE_CHECKING
 
+from tools.decorators import factor_workspace
 from tools.data.types import DataTime
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 if TYPE_CHECKING:
     from typing import Any
 
+@factor_workspace
 class DataTimeParam(Parameter):
     def __init__(self, alias: Optional[str] = None,
                  default_value: Optional[Any] = None, *args, **kwargs):

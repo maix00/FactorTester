@@ -222,11 +222,11 @@ def _render_stub_module(source: str, filename: str) -> str:
     for node in tree.body:
         if isinstance(node, ast.Assign):
             if any(isinstance(target, ast.Name) and target.id == "__factor_workspace__" for target in node.targets):
-                from tools.decorator.factor_workspace import extract_factor_workspace_exports
+                from tools.decorators.factor_workspace import extract_factor_workspace_exports
 
                 workspace_exports = extract_factor_workspace_exports(tree)
                 break
-    from tools.decorator.factor_workspace import collect_factor_workspace_import_dependencies, has_factor_workspace_decorator
+    from tools.decorators.factor_workspace import collect_factor_workspace_import_dependencies, has_factor_workspace_decorator
 
     needed_names = collect_factor_workspace_import_dependencies(tree, workspace_exports)
     is_package_init = filename == "__init__.py"

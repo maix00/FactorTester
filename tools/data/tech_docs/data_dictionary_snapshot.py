@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from typing import Any
 
 import Settings
-from tools.data import datadict_scan
+from tools.data.tech_docs import datadict_scan
 from tools.data.sqlite.db import connect_sqlite, replace_rows
 
 

@@ -5,7 +5,7 @@ from typing import Callable
 
 import Settings
 from tools.data.hub import DataHub
-from tools.data.sqlite import data_dictionary_snapshot as data_dictionary_sqlite
+from tools.data.tech_docs import data_dictionary_snapshot as data_dictionary_sqlite
 from tools.data.sqlite import data_source as data_source_sqlite
 from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
 from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite

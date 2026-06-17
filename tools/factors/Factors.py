@@ -33,8 +33,8 @@ import threading
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
 from weakref import WeakValueDictionary
 
-from tools.decorator.factor_workspace import factor_workspace
-from tools.decorator.tech_docs import tech_docs
+from tools.decorators import factor_workspace
+from tools.decorators import tech_docs
 from tools import DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline

@@ -12,7 +12,7 @@
 from enum import Enum
 from typing import Optional, Any
 
-from tools.decorator.factor_workspace import factor_workspace
+from tools.decorators import factor_workspace
 from tools import DataColumn
 from tools.parameters import Parameter, DataTimeParam, ValueSpace
 

@@ -24,7 +24,7 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
         lambda: calls.append("factor_metadata") or str(sqlite_path),
     )
     monkeypatch.setattr(
-        "tools.data.sqlite.data_dictionary_snapshot.ensure_data_dictionary_sqlite_store",
+        "tools.data.tech_docs.data_dictionary_snapshot.ensure_data_dictionary_sqlite_store",
         lambda: calls.append("data_dictionary") or str(sqlite_path),
     )
 
@@ -42,7 +42,7 @@ def test_unified_sqlite_bootstrap_calls_all_mirrors(monkeypatch, tmp_path):
 def test_unified_sqlite_load_data_dictionary_snapshot_proxies(monkeypatch):
     payload = {"generated_at": "x"}
     monkeypatch.setattr(
-        "tools.data.sqlite.data_dictionary_snapshot.load_data_dictionary_snapshot",
+        "tools.data.tech_docs.data_dictionary_snapshot.load_data_dictionary_snapshot",
         lambda: payload,
     )
     assert unified_sqlite.load_data_dictionary_snapshot() == payload

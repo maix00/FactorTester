@@ -3,8 +3,8 @@ from __future__ import annotations
 import sqlite3
 
 import Settings
-from tools.data import datadict_scan as data_dictionary_module
-from tools.data.sqlite import data_dictionary_snapshot as data_dictionary_sqlite
+from tools.data.tech_docs import datadict_scan as data_dictionary_module
+from tools.data.tech_docs import data_dictionary_snapshot as data_dictionary_sqlite
 
 
 def test_data_dictionary_sqlite_store_roundtrip(monkeypatch, tmp_path):

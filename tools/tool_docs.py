@@ -6,10 +6,13 @@ import ast
 import os
 from typing import Any
 
-from tools.decorator.tech_docs import extract_tech_docs_exports, has_tech_docs_decorator
+from tools.decorators.tech_docs import extract_tech_docs_exports, has_tech_docs_decorator
 
 VISIBILITY_ALL = "all"
 VISIBILITY_PUBLIC = "public"
+
+_SCAN_CACHE: dict[tuple[str, bool, bool, str], tuple[tuple[tuple[str, int], ...], list[dict[str, Any]]]] = {}
+_DETAIL_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any] | None]] = {}
 
 
 def extract_header_description(source: str) -> str:
@@ -123,12 +126,34 @@ def parse_tool_file(
     return item
 
 
+def _scan_state(tools_dir: str) -> tuple[tuple[str, int], ...]:
+    items: list[tuple[str, int]] = []
+    for root, dirs, filenames in os.walk(tools_dir):
+        dirs[:] = [d for d in sorted(dirs) if not d.startswith("__pycache__") and not d.startswith(".")]
+        for filename in sorted(filenames):
+            if not filename.endswith(".py") or filename == "__init__.py":
+                continue
+            path = os.path.join(root, filename)
+            rel_path = os.path.relpath(path, tools_dir)
+            try:
+                mtime_ns = os.stat(path).st_mtime_ns
+            except OSError:
+                mtime_ns = -1
+            items.append((rel_path, mtime_ns))
+    return tuple(items)
+
+
 def scan_tool_files(
     tools_dir: str,
     include_code: bool = False,
     include_symbols: bool = False,
     visibility: str = VISIBILITY_ALL,
 ) -> list[dict[str, Any]]:
+    cache_key = (os.path.realpath(tools_dir), include_code, include_symbols, visibility)
+    state = _scan_state(tools_dir)
+    cached = _SCAN_CACHE.get(cache_key)
+    if cached is not None and cached[0] == state:
+        return [dict(item) for item in cached[1]]
     files = []
     for root, dirs, filenames in os.walk(tools_dir):
         dirs[:] = [d for d in sorted(dirs) if not d.startswith("__pycache__") and not d.startswith(".")]
@@ -144,6 +169,7 @@ def scan_tool_files(
                 if item is not None:
                     files.append(item)
     files.sort(key=lambda item: item["path"])
+    _SCAN_CACHE[cache_key] = (state, [dict(item) for item in files])
     return files
 
 
@@ -175,6 +201,16 @@ def _format_signature(node: ast.FunctionDef) -> str:
 
 
 def build_tool_doc_detail(filepath: str, tools_dir: str, visibility: str = VISIBILITY_ALL) -> dict[str, Any] | None:
+    real_path = os.path.realpath(filepath)
+    try:
+        mtime_ns = os.stat(real_path).st_mtime_ns
+    except OSError:
+        return None
+    cache_key = (real_path, visibility)
+    cached = _DETAIL_CACHE.get(cache_key)
+    if cached is not None and cached[0] == mtime_ns:
+        cached_value = cached[1]
+        return dict(cached_value) if cached_value is not None else None
     with open(filepath, "r", encoding="utf-8") as file:
         source = file.read()
     lines = source.split("\n")
@@ -246,10 +282,13 @@ def build_tool_doc_detail(filepath: str, tools_dir: str, visibility: str = VISIB
                 }
             )
     if visibility == VISIBILITY_PUBLIC and not chunks:
+        _DETAIL_CACHE[cache_key] = (mtime_ns, None)
         return None
-    return {
+    result = {
         "path": rel_path,
         "description": extract_header_description(source),
         "chunks": chunks,
         "show_code": visibility != VISIBILITY_PUBLIC,
     }
+    _DETAIL_CACHE[cache_key] = (mtime_ns, result)
+    return dict(result)

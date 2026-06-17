@@ -87,7 +87,7 @@ def docs_factor_editor():
 @core_bp.route('/docs/data-dictionary', methods=['GET'])
 def docs_data_dictionary():
     """数据字典 — 全量字段清单（SOE 合规审计用）。"""
-    from tools.data.datadict_scan import build_data_dictionary, data_dictionary_to_dict
+    from tools.data.tech_docs.datadict_scan import build_data_dictionary, data_dictionary_to_dict
     from tools.data.sqlite.bootstrap import ensure_unified_sqlite_store, load_data_dictionary_snapshot
 
     ensure_unified_sqlite_store()

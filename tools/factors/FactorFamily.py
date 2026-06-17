@@ -20,7 +20,7 @@ import uuid
 import pandas as pd
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
-from tools.decorator.factor_workspace import factor_workspace
+from tools.decorators import factor_workspace
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (

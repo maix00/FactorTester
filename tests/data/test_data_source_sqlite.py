@@ -7,7 +7,7 @@ import pandas as pd
 
 import Settings
 from tools.data.sqlite import data_source as data_source_sqlite
-from tools.data.datadict_scan import DataSourceEntry
+from tools.data.tech_docs.datadict_scan import DataSourceEntry
 from tools.data import DataProviderProductTS as DataSource
 from tools.data import _DataMultipleProviderMeta as DataSourceMeta
 

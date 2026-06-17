@@ -12,7 +12,7 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.decorator.factor_workspace import factor_workspace
+from tools.decorators import factor_workspace
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
 

@@ -1,8 +1,10 @@
 from typing import Any, Optional
 
+from tools.decorators import factor_workspace
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 
+@factor_workspace
 class WindowParam(Parameter):
     """窗口参数：支持正整数或正 timedelta。"""
 
