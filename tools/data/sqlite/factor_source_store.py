@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sqlite3
 import time
 from typing import Any
@@ -10,6 +11,79 @@ import Settings
 from tools.data.sqlite.db import connect_sqlite
 
 SOURCE_TABLE = "factor_family_sources"
+
+_IMPORT_MODULE_BY_SYMBOL: dict[str, str] = {
+    "DataColumn": "tools.data.types",
+    "DataCurrency": "tools.data.types",
+    "DataFreq": "tools.data.types",
+    "DataIndex": "tools.data.types",
+    "DataMoneyMinorUnits": "tools.data.types",
+    "DataTime": "tools.data.types",
+    "TimePrecision": "tools.data.types",
+    "UniqueNameObject": "tools.data.types",
+    "CurrencyConversionContext": "tools.data.types.currency",
+    "default_fx_rate_provider": "tools.data.types.currency",
+    "normalize_currency": "tools.data.types.currency",
+    "normalize_optional_currency": "tools.data.types.currency",
+    "resolve_product_currency": "tools.data.types.currency",
+    "require_product_currency_vector": "tools.data.types.currency",
+    "ProductDataView": "tools.data.views",
+    "DataProvider": "tools.data.providers",
+    "DataProviderSync": "tools.data.providers",
+    "_DataProviderMeta": "tools.data.providers",
+    "_DataMultipleProviderMeta": "tools.data.providers",
+    "DataProviderProductTS": "tools.data.providers",
+    "PathResolver": "tools.data.providers.DistributedComponents",
+    "LocalPathResolver": "tools.data.providers.DistributedComponents",
+    "Factor": "tools.factors",
+    "FactorFamily": "tools.factors",
+}
+
+
+def _split_import_line(line: str) -> list[str]:
+    try:
+        node = ast.parse(line).body[0]
+    except Exception:
+        return [line]
+    if not isinstance(node, ast.ImportFrom) or node.module is None:
+        return [line]
+    grouped: dict[tuple[str, int], list[ast.alias]] = {}
+    original_aliases = list(node.names)
+    changed = False
+    for alias in original_aliases:
+        imported_name = alias.name
+        target_module = _IMPORT_MODULE_BY_SYMBOL.get(imported_name, node.module)
+        if target_module != node.module:
+            changed = True
+        key = (target_module, node.level)
+        grouped.setdefault(key, []).append(alias)
+    if not changed:
+        return [line]
+    rendered: list[str] = []
+    for (module, level), aliases in grouped.items():
+        rendered.append(
+            ast.unparse(
+                ast.ImportFrom(module=module, names=aliases, level=level)
+            )
+        )
+    return rendered
+
+
+def normalize_factor_source_code(source_code: str) -> str:
+    trailing_newline = source_code.endswith("\n")
+    lines: list[str] = []
+    for raw_line in source_code.splitlines():
+        stripped = raw_line.lstrip()
+        if stripped.startswith("from ") and " import " in stripped:
+            indent = raw_line[: len(raw_line) - len(stripped)]
+            rewritten = _split_import_line(stripped)
+            lines.extend(indent + item for item in rewritten)
+        else:
+            lines.append(raw_line)
+    normalized = "\n".join(lines)
+    if trailing_newline and normalized:
+        normalized += "\n"
+    return normalized
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -49,7 +123,8 @@ def _load_source(source_kind: str, owner_username: str, factor_id: str) -> str |
             if row is None:
                 return None
             source_code = str(row["source_code"] or "")
-            return source_code or None
+            normalized = normalize_factor_source_code(source_code)
+            return normalized or None
     except Exception:
         return None
 
@@ -73,7 +148,7 @@ def get_factor_source_record(source_kind: str, owner_username: str, factor_id: s
                 "owner_username": row["owner_username"],
                 "factor_id": row["factor_id"],
                 "factor_name": row["factor_name"],
-                "source_code": row["source_code"],
+                "source_code": normalize_factor_source_code(str(row["source_code"] or "")),
                 "updated_at": float(row["updated_at"] or 0.0),
             }
     except Exception:
@@ -91,6 +166,7 @@ def upsert_factor_source(
     factor_name: str,
     source_code: str,
 ) -> str:
+    normalized_source_code = normalize_factor_source_code(source_code or "")
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
@@ -108,7 +184,7 @@ def upsert_factor_source(
                 owner_username or "",
                 factor_id,
                 factor_name or factor_id,
-                source_code or "",
+                normalized_source_code,
                 time.time(),
             ),
         )
@@ -169,7 +245,7 @@ def rename_factor_source(
                 owner_username or "",
                 new_factor_id,
                 new_factor_name or new_factor_id,
-                row["source_code"],
+                normalize_factor_source_code(str(row["source_code"] or "")),
                 time.time(),
             ),
         )
@@ -194,9 +270,8 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
             "owner_username": row["owner_username"],
             "factor_id": row["factor_id"],
             "factor_name": row["factor_name"],
-            "source_code": row["source_code"],
+            "source_code": normalize_factor_source_code(str(row["source_code"] or "")),
             "updated_at": row["updated_at"],
         }
         for row in rows
     ]
-

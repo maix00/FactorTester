@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from tools.data.sqlite.factor_source_store import normalize_factor_source_code
 from tools.data.sqlite.factor_source_settings import load_factor_source_root
 from tools.data.sqlite.factor_source_store import (
     delete_factor_source as delete_factor_source_row,
@@ -50,6 +51,7 @@ def load_factor_source(username: str, factor_id: str) -> str | None:
 
 
 def save_factor_source(username: str, factor_id: str, source_code: str) -> None:
+    source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row("custom", username, factor_id, factor_id, source_code)
     path = factor_path(username, factor_id)
     with open(path, "w", encoding="utf-8") as file:
@@ -61,6 +63,7 @@ def public_factor_path(factor_id: str) -> str:
 
 
 def save_public_factor_source(factor_id: str, source_code: str) -> None:
+    source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row("public", "", factor_id, factor_id, source_code)
     path = public_factor_path(factor_id)
     with open(path, "w", encoding="utf-8") as file:
@@ -115,5 +118,6 @@ def load_public_factor_source(factor_id: str) -> str | None:
     with open(path, "r", encoding="utf-8") as file:
         source = file.read()
     if source:
+        source = normalize_factor_source_code(source)
         upsert_factor_source_row("public", "", factor_id, factor_id, source)
     return source

@@ -88,6 +88,54 @@ def test_factor_source_sqlite_roundtrip(monkeypatch, tmp_path):
         assert row["n"] == 0
 
 
+def test_factor_source_sqlite_normalizes_legacy_import_paths(monkeypatch, tmp_path):
+    sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", sqlite_path)
+
+    fallback_root = tmp_path / "fallback-user-root"
+    factor_storage = _load_storage_module()
+    monkeypatch.setattr(factor_storage, "WORKSPACE_ROOTS_DIR", str(fallback_root))
+
+    username = "default$alice@1"
+    factor_id = "LegacyImportsFactor"
+    source_code = (
+        "from tools import DataFreq\n"
+        "from tools.data import DataProviderProductTS\n"
+        "from tools.data.types import normalize_currency, require_product_currency_vector\n"
+        "from tools.factors import FactorFamily\n"
+        "\n"
+        "class LegacyImportsFactor(FactorFamily):\n"
+        "    pass\n"
+    )
+
+    factor_storage.save_factor_source(username, factor_id, source_code)
+    normalized = factor_storage.load_factor_source(username, factor_id)
+    assert normalized is not None
+    assert "from tools.data.types import DataFreq" in normalized
+    assert "from tools.data.providers import DataProviderProductTS" in normalized
+    assert "from tools.data.types.currency import normalize_currency, require_product_currency_vector" in normalized
+    assert "from tools import DataFreq" not in normalized
+    assert "from tools.data import DataProviderProductTS" not in normalized
+    assert "from tools.data.types import normalize_currency" not in normalized
+
+    mirror_path = fallback_root / username / "custom_factors" / f"{factor_id}.py"
+    assert mirror_path.read_text(encoding="utf-8") == normalized
+
+    with sqlite3.connect(sqlite_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT source_code
+            FROM factor_family_sources
+            WHERE source_kind = 'custom' AND owner_username = ? AND factor_id = ?
+            """,
+            (username, factor_id),
+        ).fetchone()
+        assert row is not None
+        assert "from tools.data.providers import DataProviderProductTS" in row["source_code"]
+
+
 def test_user_factor_load_does_not_import_local_directory(monkeypatch, tmp_path):
     sqlite_path = tmp_path / "cache" / "localdata" / "unifieddata.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DIR", sqlite_path.parent)
