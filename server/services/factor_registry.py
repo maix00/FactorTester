@@ -280,3 +280,18 @@ def set_page_factor(page_uuid: str, factor_alias: str, factor: 'Factor') -> None
     """将 Factor 写入 page 级缓存。"""
     with _page_cache_lock:
         page_factors.setdefault(page_uuid, {})[factor_alias] = factor
+
+
+def remove_page_factor(page_uuid: str, factor_alias: str) -> 'Factor | None':
+    """从 page 级缓存移除并清理 Factor（释放中间数据 + 强引用）。"""
+    factor = None
+    with _page_cache_lock:
+        pf = page_factors.get(page_uuid, {})
+        factor = pf.pop(factor_alias, None)
+    if factor is not None:
+        try:
+            factor.clear()
+            factor.delete()
+        except Exception:
+            pass
+    return factor
