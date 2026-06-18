@@ -173,9 +173,9 @@ def test_close_page_unregisters_page_resources(app):
         method="POST",
         json={"page_uuid": "page-a", "factor_family_alias": "Mm"},
     ):
-        response, status = page_lifecycle_routes.close_page()
+        response = page_lifecycle_routes.close_page()
 
-    assert status == 200
+    assert response.status_code == 200
     assert response.get_json()["success"] is True
     assert "page-a" not in page_families or "Mm" not in page_families.get("page-a", {})
     assert "page-a" not in page_factors or "Mm|A:1" not in page_factors.get("page-a", {})
@@ -229,7 +229,7 @@ def test_debug_page_state_includes_module_sections(app):
         with app.test_request_context("/api/debug/page_state?page_uuid=page-z"):
             from flask import session
             session["username"] = "alice@1"
-            response, status = page_lifecycle_routes.debug_page_state()
+            response = page_lifecycle_routes.debug_page_state()
     finally:
         monkeypatch.undo()
         runtime_state.page_states.pop("page-z", None)
@@ -237,11 +237,17 @@ def test_debug_page_state_includes_module_sections(app):
         page_families.pop("page-z", None)
 
     payload = response.get_json()
-    assert status == 200
+    assert response.status_code == 200
+    assert response.content_type == "application/json; charset=utf-8"
     assert any(section.get("title") == "单因子测试" for section in payload.get("debug_sections", []))
     assert payload["factor_count"] == payload["factor_family_count"]
     assert payload["factor_count"] == 1
     assert payload["factor_aliases"] == ["Mm|A:1"]
+    module_section = next(section for section in payload["debug_sections"] if section.get("title") == "单因子测试")
+    labels = {item.get("label") for item in module_section.get("items", [])}
+    assert "page_kind" not in labels
+    assert "factor_family_alias" not in labels
+    assert "factor_count" not in labels
     assert "单因子测试" in response.get_data(as_text=True)
 
 

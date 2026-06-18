@@ -254,21 +254,10 @@ def _single_factor_debug_provider(page_uuid: str):
         'sections': [{
             'title': '单因子测试',
             'items': [
-                {'label': 'page_kind', 'value': getattr(page_state, 'page_kind', '') if page_state else ''},
-                {'label': 'factor_family_alias', 'value': factor_family_alias},
                 {'label': 'session_params_count', 'value': len(session_params)},
                 {'label': 'session_params', 'value': param_rows},
                 {'label': 'rendered_factor_count', 'value': len(rendered_factors)},
                 {'label': 'rendered_factor_aliases', 'value': rendered_factor_aliases},
-                {'label': 'tester_count', 'value': len(testers)},
-                {'label': 'tester_aliases', 'value': ', '.join(getattr(t, 'alias', '') for t in testers) if testers else ''},
-                {'label': 'time_range', 'value': (
-                    f"{time_entry[0]} -> {time_entry[1]}" if time_entry else ''
-                )},
-                {'label': 'factor_family_count', 'value': len(family_aliases)},
-                {'label': 'factor_family_aliases', 'value': ', '.join(family_aliases)},
-                {'label': 'factor_count', 'value': len(factor_aliases)},
-                {'label': 'factor_aliases', 'value': ', '.join(factor_aliases)},
             ],
         }],
         'probe': {
