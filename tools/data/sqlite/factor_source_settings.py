@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 
-import Settings
+import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
 

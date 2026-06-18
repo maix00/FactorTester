@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-import Settings
+import settings as Settings
 from tools.data.hub import DataHub
 from tools.data.sqlite import data_source as data_source_sqlite
 from tools.data.sqlite import factor_metadata as factor_metadata_sqlite

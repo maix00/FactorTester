@@ -13,7 +13,7 @@ import tempfile
 import time
 from typing import Any
 
-import Settings
+import settings as Settings
 from tools.data.factor_workspace.storage import load_public_factor_source
 from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.data.sqlite.db import connect_sqlite

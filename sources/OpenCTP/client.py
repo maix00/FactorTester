@@ -24,7 +24,7 @@ from urllib.request import urlopen
 
 import pandas as pd
 
-import Settings
+import settings as Settings
 
 
 BASE_URL = "http://dict.openctp.cn"

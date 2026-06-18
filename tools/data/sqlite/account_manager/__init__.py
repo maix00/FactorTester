@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import Settings
+import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
 from .user import load_accounts, save_accounts, ensure_user_schema

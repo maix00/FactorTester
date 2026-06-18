@@ -35,7 +35,7 @@ from tools.data.factor_workspace.storage import load_factor_source, load_public_
 if TYPE_CHECKING:
     from tools.factors.Factors import Factor
 
-import Settings
+import settings as Settings
 
 # ── 页级缓存（由 page_uuid 持有，替代全局强引用） ──
 # page_families: {page_uuid: {module_name: FactorFamily}}

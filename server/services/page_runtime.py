@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-import Settings as Settings
+import settings as Settings
 
 if TYPE_CHECKING:
     from tools.factors import FactorTester

@@ -7,7 +7,7 @@ import sqlite3
 import time
 from typing import Any
 
-import Settings
+import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
 
