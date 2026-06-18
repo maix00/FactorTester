@@ -127,6 +127,21 @@ def _decorator_to_source(decorator: ast.expr) -> str | None:
     return None
 
 
+def _is_factor_workspace_flag(node: ast.expr) -> bool:
+    return isinstance(node, ast.Name) and node.id == "FACTOR_WORKSPACE"
+
+
+def _collect_factor_workspace_header_imports(tree: ast.Module) -> list[ast.stmt]:
+    imports: list[ast.stmt] = []
+    for node in tree.body:
+        if not isinstance(node, ast.If) or not _is_factor_workspace_flag(node.test):
+            continue
+        for child in node.body:
+            if isinstance(child, (ast.Import, ast.ImportFrom)):
+                imports.append(child)
+    return imports
+
+
 def _comment_block_before(lines: list[str], lineno: int) -> list[str]:
     block: list[str] = []
     idx = lineno - 2
@@ -208,7 +223,7 @@ def _collect_instance_attrs(class_node: ast.ClassDef) -> dict[str, str]:
     return attrs
 
 
-def _render_stub_module(source: str, filename: str) -> str:
+def _render_stub_module(source: str, filename: str, *, workspace_header_import_names: set[str] | None = None) -> str:
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -224,6 +239,7 @@ def _render_stub_module(source: str, filename: str) -> str:
     source_lines = source.splitlines()
     workspace_exports = None
     needed_names: set[str] = set()
+    workspace_header_import_names = workspace_header_import_names or set()
 
     # Collect decorator-driven exports from the source file itself.
     for node in tree.body:
@@ -233,7 +249,8 @@ def _render_stub_module(source: str, filename: str) -> str:
                 break
 
     needed_names = collect_factor_workspace_import_dependencies(tree, workspace_exports)
-    is_package_init = filename == "__init__.py"
+    header_import_nodes = _collect_factor_workspace_header_imports(tree)
+    header_import_node_ids = {id(node) for node in header_import_nodes}
 
     def _import_alias_name(alias: ast.alias) -> str:
         return alias.asname or alias.name.rsplit(".", 1)[-1]
@@ -251,12 +268,24 @@ def _render_stub_module(source: str, filename: str) -> str:
         return ast.unparse(new_node)
 
     for node in tree.body:
+        if id(node) in header_import_node_ids:
+            comment_block = _comment_block_before(source_lines, getattr(node, "lineno", 1))
+            _append_comment_block(lines, comment_block)
+            if isinstance(node, ast.Import):
+                lines.append(ast.unparse(node))
+            elif isinstance(node, ast.ImportFrom):
+                lines.append(ast.unparse(node))
+            continue
         comment_block = _comment_block_before(source_lines, getattr(node, "lineno", 1))
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "__future__":
                 continue
             if isinstance(node, ast.Import):
-                aliases = [alias for alias in node.names if _import_alias_name(alias) in needed_names]
+                aliases = [
+                    alias
+                    for alias in node.names
+                    if _import_alias_name(alias) in needed_names or _import_alias_name(alias) in workspace_header_import_names
+                ]
                 if not aliases:
                     continue
                 node = ast.Import(names=aliases)
@@ -337,6 +366,13 @@ def _render_stub_module(source: str, filename: str) -> str:
                 class_lines.append("...")
             lines.extend(f"    {line}" for line in class_lines)
         elif isinstance(node, ast.If):
+            if _is_factor_workspace_flag(node.test):
+                for child in node.body:
+                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                        child_comment_block = _comment_block_before(source_lines, getattr(child, "lineno", 1))
+                        _append_comment_block(lines, child_comment_block)
+                        lines.append(ast.unparse(child))
+                continue
             continue
 
     lines.append("")
@@ -432,7 +468,11 @@ def _sync_tools_sdk(root: str) -> bool:
         dest_path = os.path.join(workspace_root, dest_rel_path)
         with open(source_path, "r", encoding="utf-8") as file:
             source_code = file.read()
-        stub_code = _render_stub_module(source_code, rel_path)
+        stub_code = _render_stub_module(
+            source_code,
+            rel_path,
+            workspace_header_import_names=set(spec.factor_workspace_import_names),
+        )
         if _write_text_if_changed(dest_path, stub_code):
             touched = True
 

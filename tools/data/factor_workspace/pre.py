@@ -10,6 +10,7 @@ from pathlib import Path
 from tools.decorators.factor_workspace import (
     collect_factor_workspace_import_dependencies,
     extract_factor_workspace_exports,
+    has_factor_workspace_decorator,
 )
 
 
@@ -19,6 +20,8 @@ class WorkspaceSourceSpec:
     relative_path: str
     module_name: str
     is_package_init: bool
+    factor_workspace_import_names: tuple[str, ...]
+    workspace_decorated_names: tuple[str, ...]
     workspace_exports: tuple[str, ...] | None
     dependency_names: tuple[str, ...]
 
@@ -49,6 +52,19 @@ def _collect_source_spec(source_path: str, relative_path: str) -> WorkspaceSourc
         tree = ast.parse(source_code)
     except Exception:
         return None
+    workspace_import_names: set[str] = set()
+    decorated_names = []
+    for node in tree.body:
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "FACTOR_WORKSPACE":
+            for child in node.body:
+                if isinstance(child, ast.Import):
+                    for alias in child.names:
+                        workspace_import_names.add(alias.asname or alias.name.rsplit(".", 1)[-1])
+                elif isinstance(child, ast.ImportFrom):
+                    for alias in child.names:
+                        workspace_import_names.add(alias.asname or alias.name.rsplit(".", 1)[-1])
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and has_factor_workspace_decorator(node):
+            decorated_names.append(node.name)
     exports = extract_factor_workspace_exports(tree)
     dependencies = collect_factor_workspace_import_dependencies(tree, exports)
     return WorkspaceSourceSpec(
@@ -56,6 +72,8 @@ def _collect_source_spec(source_path: str, relative_path: str) -> WorkspaceSourc
         relative_path=relative_path,
         module_name=_module_name_from_relative_path(relative_path),
         is_package_init=relative_path.endswith("__init__.py"),
+        factor_workspace_import_names=tuple(sorted(workspace_import_names)),
+        workspace_decorated_names=tuple(sorted(decorated_names)),
         workspace_exports=tuple(sorted(exports)) if exports is not None else None,
         dependency_names=tuple(sorted(dependencies)),
     )

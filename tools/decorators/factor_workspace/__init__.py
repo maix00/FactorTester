@@ -1,11 +1,17 @@
-"""factor_workspace decorator family.
+"""Workspace visibility rules for factor editor code.
 
-Import `factor_workspace` from `tools.decorators`; import helper utilities
-from this submodule so the semantic boundary stays explicit.
+Only objects marked with `@factor_workspace` should be emitted into the user
+workspace. `__factor_workspace__` is reserved for singleton values that cannot
+carry a decorator directly, such as shared parameter instances or constant
+objects that must still be visible to factor authors. Modules may also set
+`FACTOR_WORKSPACE = True` and place header imports under `if FACTOR_WORKSPACE:`
+to explicitly mark imports that must be preserved in the workspace view.
+
 """
 
 from __future__ import annotations
 
+import ast
 from typing import TypeVar
 
 from ..shared.ast import (
@@ -23,6 +29,7 @@ def factor_workspace(obj: T) -> T:
 
 
 def extract_factor_workspace_exports(tree):
+    """Return singleton names explicitly declared for workspace exposure."""
     return extract_export_names(tree, "__factor_workspace__")
 
 
@@ -39,9 +46,14 @@ def has_factor_workspace_decorator(node):
     return has_decorator(node, "factor_workspace")
 
 
+def has_factor_workspace_import_guard(node: ast.If) -> bool:
+    return isinstance(node.test, ast.Name) and node.test.id == "FACTOR_WORKSPACE"
+
+
 __all__ = [
     "collect_factor_workspace_import_dependencies",
     "extract_factor_workspace_exports",
     "factor_workspace",
+    "has_factor_workspace_import_guard",
     "has_factor_workspace_decorator",
 ]

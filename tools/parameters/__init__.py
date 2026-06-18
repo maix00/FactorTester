@@ -1,9 +1,12 @@
-from tools.parameters.Parameter import Parameter, TypeParam, FinRangeParam, TimeDeltaParam, FactorParam, ValueSpace
-from tools.parameters.DataColumnParam import DataColumnParam
-from tools.parameters.DataTimeParam import DataTimeParam
-from tools.parameters.WindowParam import WindowParam
+FACTOR_WORKSPACE = True
 
-__factor_workspace__ = (
+if FACTOR_WORKSPACE:
+    from tools.parameters.Parameter import Parameter, TypeParam, FinRangeParam, TimeDeltaParam, FactorParam, ValueSpace
+    from tools.parameters.DataColumnParam import DataColumnParam
+    from tools.parameters.DataTimeParam import DataTimeParam
+    from tools.parameters.WindowParam import WindowParam
+
+__all__ = [
     "Parameter",
     "TypeParam",
     "FinRangeParam",
@@ -13,4 +16,4 @@ __factor_workspace__ = (
     "DataColumnParam",
     "DataTimeParam",
     "WindowParam",
-)
+]

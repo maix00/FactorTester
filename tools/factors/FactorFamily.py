@@ -24,11 +24,17 @@ from tools.decorators import factor_workspace
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
-    FactorExpr, DataColumn, DataFreq,
-    ColumnRef, ConstExpr, ParamRef,
-    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    FactorExpr,
+    ColumnRef,
+    ConstExpr,
+    ParamRef,
+    RollingOp,
+    ShiftOp,
+    CrossSectionalOp,
+    CompositeExpr,
     OperandExpr,
 )
+from tools.data.types import DataColumn, DataFreq
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools.data.types import UniqueNameObject
 from tools.data.views import ProductDataView

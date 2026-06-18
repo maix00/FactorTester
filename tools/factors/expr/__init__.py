@@ -3,87 +3,53 @@
 # 因子表达式系统 — 统一导出
 # =============================================================================
 
-from .core import FactorExpr, EvaluateContext
-from .timeline import PanelTimeline, build_panel_timeline, compact_observed, scatter_observed
-from .operands import OperandExpr
-from .leaf import ColumnRef, ParamRef, ConstExpr, _to_expr
-from .rolling import RollingExpr, RollingOp, _rolling_argmaxmin, _mask_outside_trunc, _resolve_windows
-from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
-from .cross_sectional import CrossSectionalOp
-from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
-from .conditional import WhereOp
-from .term_structure import TermStructureOp, term_spread, term_ratio, term_slope
-from .signal_align import SignalAlign, signal_align
-from .visual_groups import (
-    VISUAL_OPERATOR_GROUPS,
-    VISUAL_COMPOSITE_KEY,
-    VISUAL_OPERATOR_CATEGORY,
-    get_visual_operator_groups,
-    get_visual_composite_key,
-    get_visual_operator_category,
-)
+FACTOR_WORKSPACE = True
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 预定义常用列引用（在所有子模块加载后定义，避免循环导入）
-# ═════════════════════════════════════════════════════════════════════════════
+if FACTOR_WORKSPACE:
+    from .core import FactorExpr, EvaluateContext
+    from .timeline import PanelTimeline, build_panel_timeline, compact_observed, scatter_observed
+    from .operands import OperandExpr
+    from .leaf import ColumnRef, ParamRef, ConstExpr, _to_expr
+    from .rolling import RollingExpr, RollingOp, _rolling_argmaxmin, _mask_outside_trunc, _resolve_windows
+    from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
+    from .cross_sectional import CrossSectionalOp
+    from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
+    from .conditional import WhereOp
+    from .term_structure import TermStructureOp, term_spread, term_ratio, term_slope
+    from .signal_align import SignalAlign, signal_align
+    from .visual_groups import (
+        VISUAL_OPERATOR_GROUPS,
+        VISUAL_COMPOSITE_KEY,
+        VISUAL_OPERATOR_CATEGORY,
+        get_visual_operator_groups,
+        get_visual_composite_key,
+        get_visual_operator_category,
+    )
 
-from tools.data.types import DataColumn
+    # ═════════════════════════════════════════════════════════════════════════
+    # 预定义常用列引用（在所有子模块加载后定义，避免循环导入）
+    # ═════════════════════════════════════════════════════════════════════════
 
-OPEN = ColumnRef(DataColumn.OPEN_ADJUSTED)
-HIGH = ColumnRef(DataColumn.HIGH_ADJUSTED)
-LOW = ColumnRef(DataColumn.LOW_ADJUSTED)
-CLOSE = ColumnRef(DataColumn.CLOSE_ADJUSTED)
-VOLUME = ColumnRef(DataColumn.VOLUME)
-TURNOVER = ColumnRef(DataColumn.TURNOVER)
-OPEN_INTEREST = ColumnRef(DataColumn.OPEN_INTEREST)
-VWAP = ColumnRef(DataColumn.VWAP)
-SETTLE = ColumnRef(DataColumn.SETTLEMENT_PRICE)
+    from tools.data.types import DataColumn
 
-OPEN_RAW = ColumnRef(DataColumn.OPEN)
-HIGH_RAW = ColumnRef(DataColumn.HIGH)
-LOW_RAW = ColumnRef(DataColumn.LOW)
-CLOSE_RAW = ColumnRef(DataColumn.CLOSE)
+    OPEN = ColumnRef(DataColumn.OPEN_ADJUSTED)
+    HIGH = ColumnRef(DataColumn.HIGH_ADJUSTED)
+    LOW = ColumnRef(DataColumn.LOW_ADJUSTED)
+    CLOSE = ColumnRef(DataColumn.CLOSE_ADJUSTED)
+    VOLUME = ColumnRef(DataColumn.VOLUME)
+    TURNOVER = ColumnRef(DataColumn.TURNOVER)
+    OPEN_INTEREST = ColumnRef(DataColumn.OPEN_INTEREST)
+    VWAP = ColumnRef(DataColumn.VWAP)
+    SETTLE = ColumnRef(DataColumn.SETTLEMENT_PRICE)
 
-SMALL_VAL = ConstExpr(1e-10)
+    OPEN_RAW = ColumnRef(DataColumn.OPEN)
+    HIGH_RAW = ColumnRef(DataColumn.HIGH)
+    LOW_RAW = ColumnRef(DataColumn.LOW)
+    CLOSE_RAW = ColumnRef(DataColumn.CLOSE)
+
+    SMALL_VAL = ConstExpr(1e-10)
 
 __factor_workspace__ = (
-    "FactorExpr",
-    "EvaluateContext",
-    "PanelTimeline",
-    "build_panel_timeline",
-    "compact_observed",
-    "scatter_observed",
-    "OperandExpr",
-    "ColumnRef",
-    "ParamRef",
-    "ConstExpr",
-    "_to_expr",
-    "RollingExpr",
-    "RollingOp",
-    "_rolling_argmaxmin",
-    "_mask_outside_trunc",
-    "_resolve_windows",
-    "ShiftOp",
-    "_is_zero_shift_period",
-    "_strip_latex_time_subscript",
-    "CrossSectionalOp",
-    "CompositeExpr",
-    "_reduce_biop",
-    "expr_max",
-    "expr_min",
-    "WhereOp",
-    "TermStructureOp",
-    "term_spread",
-    "term_ratio",
-    "term_slope",
-    "SignalAlign",
-    "signal_align",
-    "VISUAL_OPERATOR_GROUPS",
-    "VISUAL_COMPOSITE_KEY",
-    "VISUAL_OPERATOR_CATEGORY",
-    "get_visual_operator_groups",
-    "get_visual_composite_key",
-    "get_visual_operator_category",
     "OPEN",
     "HIGH",
     "LOW",
