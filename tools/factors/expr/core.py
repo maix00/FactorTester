@@ -100,6 +100,7 @@ class FactorExpr:
     _intermediate_name: 'str | None' = None
     _intermediate_factor: Optional[FactorExpr] = None
 
+    @factor_workspace
     def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
         """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
 
