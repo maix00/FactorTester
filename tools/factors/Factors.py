@@ -28,14 +28,11 @@
 # =============================================================================
 import numpy as np
 import pandas as pd
-import uuid
-import threading
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
-from weakref import WeakValueDictionary
 
 from tools.decorators import factor_workspace
 from tools.decorators import tech_docs
-from tools.data.types import DataFreq
+from tools.data.types import DataFreq, UniqueNameObject
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult
@@ -46,7 +43,7 @@ if TYPE_CHECKING:
 
 @tech_docs
 @factor_workspace
-class Factor(FactorExpr):
+class Factor(UniqueNameObject, FactorExpr):
     """
     量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
 
@@ -67,16 +64,9 @@ class Factor(FactorExpr):
         _source_freq   (DataFreq)    : 数据源频率（从 family 继承）
     """
 
-    # 内联去重缓存（替代 UniqueObject 的 L1+L2+L3）
-    _instances: Dict[Tuple, 'Factor'] = {}
-    _instances_lock = threading.Lock()
-    _alias_index: Dict[Tuple, WeakValueDictionary] = {}
-    _alias_index_lock = threading.Lock()
-
     # 运行时动态属性（calc 后设置）
     name: str
-    alias: Optional[str] = None
-    _key_2d: Tuple
+    alias: str
     _expr: FactorExpr
     _func_expr: FactorExpr
     _source_expr: FactorExpr
@@ -88,8 +78,6 @@ class Factor(FactorExpr):
     _intermediate_alias_index: Dict[str, Tuple]
     family: Optional[FactorFamily] = None
 
-    @factor_workspace
-    @factor_workspace
     def clear(self):
         """清空所有计算结果。"""
         self._source_freq = None
@@ -143,39 +131,14 @@ class Factor(FactorExpr):
         core_alias = alias or cls.__name__
         user_prefix = cls._get_user_prefix(family)
         if user_prefix:
-            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+            name = f"{user_prefix}:{core_alias}"
         else:
-            name = f"{core_alias}:{uuid.uuid4().hex}"
+            name = core_alias
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
-        search = kwargs.pop('search', True)
 
-        # --- structural_key（L3）---
-        sk = expr._structural_key()
-
-        # --- search 模式（L2）：按 alias + structural_key 查找已有实例 ---
-        if search and alias is not None:
-            with cls._alias_index_lock:
-                if (alias, sk) in cls._alias_index:
-                    for inst in cls._alias_index[(alias, sk)].values():
-                        if inst.__class__ is cls:
-                            return inst
-
-        # --- 去重（L1）：按 (name, sk) 返回已有实例 ---
-        key_2d = (name, sk)
-        with cls._instances_lock:
-            if key_2d in cls._instances:
-                return cls._instances[key_2d]
-            instance = super().__new__(cls)
-            cls._instances[key_2d] = instance
-
-        instance.name = name
-        instance.alias = alias
-        instance._key_2d = key_2d
-
-        # alias 索引
-        with cls._alias_index_lock:
-            cls._alias_index.setdefault((alias, sk), WeakValueDictionary())[key_2d] = instance
+        # 去重由 UniqueNameObject.__new__ 按 name 完成
+        instance = UniqueNameObject.__new__(cls, name=name, alias=alias)
 
         if not hasattr(instance, '_initialized'):
             instance._expr = expr
@@ -187,31 +150,9 @@ class Factor(FactorExpr):
             super(FactorExpr, instance).__init__()
         return instance
     
-    def _structural_key(self) -> Tuple:
-        return self._expr._structural_key()
-    
-    def _structural_eq(self, other) -> bool:
-        """桥接 UniqueObject._structural_eq 和 FactorExpr._structural_eq。"""
-        if self is other:
-            return True
-        from tools.factors.FactorExpr import FactorExpr as FE
-        if isinstance(other, Factor):
-            return self._expr._structural_eq(other._expr)
-        if isinstance(other, FE):
-            return self._expr._structural_eq(other)
-        return False
-
-    # 显式覆盖 __eq__/__hash__，避免 FactorExpr.__eq__（返回 CompositeExpr）干扰 dict key 协议
-    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
-        if type(self) is not type(other):
-            return False
-        return self._structural_eq(other)
-
-    def __hash__(self) -> int:
-        sk = self._structural_key()
-        if sk is not None:
-            return hash((self.name, sk))
-        return hash(self.name)
+    # __eq__/__hash__ 继承自 UniqueNameObject（按 name 比较/哈希）。
+    # 显式覆盖是为了阻断 FactorExpr.__eq__（返回 CompositeExpr 会破坏 dict key 协议）。
+    # UniqueNameObject 已提供正确行为，无需额外 bridge。
 
     def __getattr__(self, item):
         # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
@@ -221,7 +162,6 @@ class Factor(FactorExpr):
             raise AttributeError(item)
         return getattr(self._expr, item)
 
-    @factor_workspace
     def evaluate(self, products: Sequence['Product']|set['Product'], 
                  freq: Optional[DataFreq] = None, *args, **kwargs) -> pd.DataFrame:
         """
@@ -425,7 +365,6 @@ class Factor(FactorExpr):
         return result
     
     @property
-    @property
     @factor_workspace
     def freq(self) -> DataFreq:
         if self._freq is not None:
@@ -445,7 +384,6 @@ class Factor(FactorExpr):
         raise ValueError(f"{self}: 因子频率未能推断")
     
     @property
-    @property
     @factor_workspace
     def source_table(self) -> pd.DataFrame:
         tester = self._get_active_tester()
@@ -457,7 +395,6 @@ class Factor(FactorExpr):
             return self._source_data
         return pd.DataFrame()
 
-    @property
     @property
     @factor_workspace
     def table(self) -> pd.DataFrame:
@@ -471,12 +408,10 @@ class Factor(FactorExpr):
         return pd.DataFrame()
 
     @table.setter
-    @table.setter
     @factor_workspace
     def table(self, value: pd.DataFrame):
         self._data = value
 
-    @property
     @property
     @factor_workspace
     def products(self) -> Set['Product']:
@@ -486,7 +421,6 @@ class Factor(FactorExpr):
             return set()
         return {col for col in st.columns if isinstance(col, Product)}
 
-    @property
     @property
     @factor_workspace
     def expr(self) -> 'FactorExpr':

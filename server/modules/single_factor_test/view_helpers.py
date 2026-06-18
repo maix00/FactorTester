@@ -142,9 +142,9 @@ def build_group_html(
     return group_html
 
 
-def get_factor_main_section_html(factor_family_alias):
+def get_factor_main_section_html(factor_family_alias, page_uuid=None):
     try:
-        factor_family = get_factor_family_instance(factor_family_alias)
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         math_expr = getattr(factor_family, 'math_expr', '')
         chinese_name = getattr(factor_family, 'desc', '') or getattr(factor_family, 'chinese_name', '') or ''
         description = getattr(factor_family, 'description', '') or ''

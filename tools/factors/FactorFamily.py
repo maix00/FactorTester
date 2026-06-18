@@ -386,11 +386,12 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                 for key, value in normalized_kwargs.items():
                     current_params[key] = self.params_dict[key]._value_space.rectify(value)
 
-            factor_alias = self.get_alias(**current_params)
-
             # 提取元参数
             signal_freq = current_params.get('$F', '1d')
             is_reversed: bool = current_params.get('$Rev', False)
+
+            # 构建 factor 别名（用于 Factor 命名和参数注册）
+            factor_alias = self.get_alias(**current_params)
 
             # 构建 param_values（排除已提取的元参数）
             param_values = {
@@ -419,6 +420,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                 continue
 
             factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+
             for key, value in current_params.items():
                 self.params_dict[key].register(factor, value)
 
@@ -430,6 +432,10 @@ class FactorFamily(UniqueNameObject, FactorExpr):
 
         self.factors = factors
         return factors
+
+    def get_factor_by_alias(self, alias: str):
+        """按别名精确查找因子（O(n) 遍历 self.factors）。"""
+        return next((f for f in self.factors if f.alias == alias), None)
     
     @property
     @factor_workspace

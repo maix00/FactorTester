@@ -189,6 +189,7 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
     params.set('factor', factorId || '');
     params.set('type', _sftCurrentFactorType);
     if (_sftCurrentOwner) params.set('owner_username', _sftCurrentOwner);
+    if (window._pageUuid) params.set('page_uuid', window._pageUuid);
 
     try {
         const res = await fetch('/single_factor_test/api/content?' + params.toString());
@@ -218,6 +219,7 @@ window.reloadSingleFactorContent = async function(callback) {
     params.set('factor', _sftCurrentFactorId || '');
     params.set('type', _sftCurrentFactorType || 'public');
     if (_sftCurrentOwner) params.set('owner_username', _sftCurrentOwner);
+    if (window._pageUuid) params.set('page_uuid', window._pageUuid);
     const res = await fetch('/single_factor_test/api/content?' + params.toString());
     const data = await res.json();
     if (data.success) {

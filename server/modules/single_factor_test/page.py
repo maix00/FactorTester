@@ -105,7 +105,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
     }
 
 
-def _render_single_factor_content(selected_name: str, factor_type: str = '', owner_username: str = '') -> str:
+def _render_single_factor_content(selected_name: str, factor_type: str = '', owner_username: str = '', page_uuid: str = '') -> str:
     username = current_user()
     factor_type = factor_type or 'public'
     if not selected_name:
@@ -118,7 +118,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
         if not can_view_user_scope(username, owner_username):
             return '<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无权查看该用户因子</div></div>'
         try:
-            ff = get_factor_family_instance(selected_name, username=owner_username)
+            ff = get_factor_family_instance(selected_name, username=owner_username, page_uuid=page_uuid)
             if ff is None:
                 return f'''<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无法加载自定义因子 "{selected_name}"</div></div>'''
             math_expr = getattr(ff, 'math_expr', '')
@@ -160,7 +160,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
     if selected_name not in factor_names:
         return f'<div class="editor-placeholder">因子 "{selected_name}" 未找到</div>'
     try:
-        return get_factor_main_section_html(selected_name)
+        return get_factor_main_section_html(selected_name, page_uuid=page_uuid)
     except Exception as e:
         traceback.print_exc()
         return f'''
@@ -204,5 +204,6 @@ def single_factor_content_api():
     selected_name = request.args.get('factor', '')
     factor_type = request.args.get('type', '') or 'public'
     owner_username = request.args.get('owner_username', '')
-    html = _render_single_factor_content(selected_name, factor_type, owner_username)
+    page_uuid = request.args.get('page_uuid', '')
+    html = _render_single_factor_content(selected_name, factor_type, owner_username, page_uuid)
     return jsonify({'success': True, 'html': html})

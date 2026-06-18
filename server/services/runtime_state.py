@@ -101,7 +101,28 @@ def set_runtime_time(page_uuid: str, start, end, start_calc=None):
             keys_to_remove = list(page_time_store.keys())[:len(page_time_store) // 2]
             for key in keys_to_remove:
                 page_time_store.pop(key, None)
+                # 同时清理 page 级别的 FactorFamily/Factor 缓存
+                _evict_page(key)
         page_time_store[page_uuid] = (start, end, start_calc)
+
+
+def register_page(page_uuid: str) -> None:
+    """注册新页面，初始化其 FactorFamily/Factor 缓存。"""
+    from server.services.factor_registry import register_page as _reg_page
+    _reg_page(page_uuid)
+
+
+def unregister_page(page_uuid: str) -> None:
+    """注销页面，释放其持有的资源。"""
+    from server.services.factor_registry import unregister_page as _unreg_page
+    _unreg_page(page_uuid)
+    with page_time_store_lock:
+        page_time_store.pop(page_uuid, None)
+
+
+def _evict_page(page_uuid: str) -> None:
+    """内部清理：淘汰 page 时释放资源。"""
+    unregister_page(page_uuid)
 
 
 params_store: dict = {}
