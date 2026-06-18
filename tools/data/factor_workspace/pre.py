@@ -46,6 +46,37 @@ def _module_name_from_relative_path(relative_path: str) -> str:
     return path
 
 
+def _is_workspace_relevant_path(relative_path: str) -> bool:
+    if relative_path == "Settings.py":
+        return True
+    if relative_path in {"tools/__init__.py", "tools/data/__init__.py"}:
+        return True
+    if relative_path.startswith("tools/factors/tests/"):
+        return False
+    if relative_path.startswith("tools/backtest/"):
+        return False
+    if relative_path.startswith("tools/data/sqlite/"):
+        return False
+    if relative_path.startswith("tools/data/cache/"):
+        return False
+    if relative_path.startswith("tools/data/account_manage/"):
+        return False
+    if relative_path.startswith("tools/data/factor_workspace/"):
+        return False
+    if relative_path.startswith("tools/data/tech_docs/"):
+        return False
+    allowed_prefixes = (
+        "tools/decorators/",
+        "tools/factors/",
+        "tools/parameters/",
+        "tools/products/",
+        "tools/data/types/",
+        "tools/data/views/",
+        "tools/data/providers/",
+    )
+    return any(relative_path.startswith(prefix) for prefix in allowed_prefixes)
+
+
 def _collect_source_spec(source_path: str, relative_path: str) -> WorkspaceSourceSpec | None:
     try:
         source_code = Path(source_path).read_text(encoding="utf-8")
@@ -87,6 +118,8 @@ def collect_workspace_architecture(source_root: str | None = None) -> list[Works
         if not path.exists():
             continue
         if path.is_file():
+            if not _is_workspace_relevant_path(relative_root):
+                continue
             spec = _collect_source_spec(str(path), relative_root)
             if spec is not None:
                 specs.append(spec)
@@ -99,6 +132,8 @@ def collect_workspace_architecture(source_root: str | None = None) -> list[Works
                     continue
                 source_file = os.path.join(current_root, filename)
                 relative_path = os.path.join(relative_root, filename) if rel_dir == "." else os.path.join(relative_root, rel_dir, filename)
+                if not _is_workspace_relevant_path(relative_path):
+                    continue
                 spec = _collect_source_spec(source_file, relative_path)
                 if spec is not None:
                     specs.append(spec)

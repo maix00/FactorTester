@@ -50,6 +50,13 @@ def _ensure_workspace_layout(root: str) -> None:
     Path(_workspace_tools_dir(root)).mkdir(parents=True, exist_ok=True)
     Path(os.path.join(root, ".factor_workspace")).mkdir(parents=True, exist_ok=True)
     Path(os.path.join(root, ".vscode")).mkdir(parents=True, exist_ok=True)
+    _write_text_if_changed(
+        os.path.join(root, ".gitignore"),
+        "\n".join([
+            ".factor_workspace/",
+            "",
+        ]),
+    )
 
 
 def _write_text_if_changed(path: str, content: str) -> bool:

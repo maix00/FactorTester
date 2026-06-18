@@ -114,8 +114,9 @@ def collect_import_dependencies(
                     elif isinstance(child, ast.Assign):
                         needed |= collect_name_references(child.value)
                     elif isinstance(child, ast.FunctionDef):
-                        needed |= collect_name_references(child.returns)
-                        needed |= collect_argument_references(child.args)
-                        for decorator in child.decorator_list:
-                            needed |= collect_name_references(decorator)
+                        if has_any_decorator(child, decorator_names):
+                            needed |= collect_name_references(child.returns)
+                            needed |= collect_argument_references(child.args)
+                            for decorator in child.decorator_list:
+                                needed |= collect_name_references(decorator)
     return needed

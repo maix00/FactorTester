@@ -70,6 +70,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (custom_dir / "FreshFactor.py").read_text(encoding="utf-8") == "class FreshFactor(FactorFamily):\n    pass\n"
     assert (public_dir / "PublicFactor.py").read_text(encoding="utf-8") == "class PublicFactor(FactorFamily):\n    pass\n"
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
+    assert ".factor_workspace/" in (workspace_root / ".gitignore").read_text(encoding="utf-8")
     assert (workspace_root / "tools_index.json").exists()
     assert (workspace_root / "Settings.pyi").exists()
     assert "FACTOR_WORKSPACE = True" in Path("tools/parameters/__init__.py").read_text(encoding="utf-8")
@@ -95,6 +96,7 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
+    assert not (workspace_root / "tools" / "backtest").exists()
     assert result["git"]["git_enabled"] is True
     assert result["git"]["git_auto_sync_branch"] == "upload"
     assert result["git"]["git_force_sync_branch"] == "download"
