@@ -252,6 +252,16 @@ def _single_factor_debug_provider(page_uuid: str):
     rendered_factor_aliases = [getattr(f, 'alias', '') for f in rendered_factors]
     return {
         'sections': [{
+            'title': '通用',
+            'items': [
+                {'label': 'page_uuid', 'value': page_uuid},
+                {'label': 'session_id', 'value': get_session_id()},
+                {'label': 'current_user', 'value': current_user() or ''},
+                {'label': 'owner', 'value': runtime_state.page_owners.get(page_uuid, '') or ''},
+                {'label': 'page_kind', 'value': getattr(page_state, 'page_kind', '') if page_state else ''},
+                {'label': 'factor_family_alias', 'value': factor_family_alias},
+            ],
+        }, {
             'title': '单因子测试',
             'items': [
                 {'label': 'session_params_count', 'value': len(session_params)},
@@ -260,7 +270,7 @@ def _single_factor_debug_provider(page_uuid: str):
                 {'label': 'rendered_factor_aliases', 'value': rendered_factor_aliases},
             ],
         }],
-        'probe': {
+        'summary': {
             'factor_family_count': len(family_aliases),
             'factor_family_aliases': family_aliases,
             'factor_count': len(rendered_factor_aliases),
