@@ -97,6 +97,8 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
     assert not (workspace_root / "tools" / "backtest").exists()
+    assert not (workspace_root / "tools" / "factors" / "FactorTester.pyi").exists()
+    assert not (workspace_root / "tools" / "factors" / "tests").exists()
     assert result["git"]["git_enabled"] is True
     assert result["git"]["git_auto_sync_branch"] == "upload"
     assert result["git"]["git_force_sync_branch"] == "download"
