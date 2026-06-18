@@ -561,7 +561,7 @@ def run_ic_test():
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=session_params if session_params else None,
+            params_list=session_params,
             page_uuid=str(data.get('page_uuid') or ''),
         )
 
@@ -609,7 +609,7 @@ def run_ic_test_stream():
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=session_params if session_params else None,
+            params_list=session_params,
             page_uuid=str(data.get('page_uuid') or ''),
         )
     except Exception as e:

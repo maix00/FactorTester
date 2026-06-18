@@ -153,7 +153,7 @@ def get_factor_main_section_html(factor_family_alias, page_uuid=None):
         param_aliases = [param.alias for param in params]
         session_params = get_session_params(factor_family_alias, factor_family)
         factors = factor_family.get_factors(
-            params_list=session_params if session_params else None,
+            params_list=session_params,
             page_uuid=page_uuid,
         )
         start_date, end_date, start_time, end_time = get_default_test_time_strings()

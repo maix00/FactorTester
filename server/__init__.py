@@ -36,6 +36,7 @@ def create_app() -> Flask:
         secret_key = os.urandom(24)
     app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
+    app.json.ensure_ascii = False
 
     # ── 注册 Blueprint ──
     from server.auth import auth_bp

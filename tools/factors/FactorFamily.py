@@ -376,7 +376,10 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             self._check_in_space(**normalized_kwargs)
 
         if params_list is not None:
-            _pl = params_list
+            _pl = list(params_list)
+            if len(_pl) == 0:
+                self.factors = []
+                return []
         elif normalized_kwargs:
             _pl = [{
                 p.alias: normalized_kwargs[p.alias] if p.alias in normalized_kwargs else p.default_value

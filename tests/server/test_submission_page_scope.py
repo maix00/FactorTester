@@ -33,6 +33,7 @@ class _Tester:
 def app():
     app = Flask(__name__)
     app.secret_key = "test-secret"
+    app.json.ensure_ascii = False
     return app
 
 
@@ -183,21 +184,40 @@ def test_debug_page_state_reports_page_scope(app, monkeypatch):
 
 
 def test_debug_page_state_includes_module_sections(app):
+    class _FakeFactor:
+        alias = "Mm|A:1"
+
+    class _FakeFamily:
+        def get_factors(self, *, params_list=None, page_uuid=None):
+            return [_FakeFactor()]
+
     runtime_state.page_states["page-z"] = {"page_kind": "single_factor_test", "factor_family_alias": "Mm"}
+    runtime_state.page_time_store["page-z"] = ("start", "end", "calc")
+    from server.services.factor_registry import page_families
+    page_families["page-z"] = {"Mm": _FakeFamily()}
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(page_routes, "get_session_params", lambda *args, **kwargs: [{"A": 1}])
     try:
         with app.test_request_context("/api/debug/page_state?page_uuid=page-z"):
             from flask import session
             session["username"] = "alice@1"
             response, status = page_lifecycle_routes.debug_page_state()
     finally:
+        monkeypatch.undo()
         runtime_state.page_states.pop("page-z", None)
+        runtime_state.page_time_store.pop("page-z", None)
+        page_families.pop("page-z", None)
 
     payload = response.get_json()
     assert status == 200
     assert any(section.get("title") == "单因子测试" for section in payload.get("debug_sections", []))
+    assert payload["factor_count"] == payload["factor_family_count"]
+    assert payload["factor_count"] == 1
+    assert payload["factor_aliases"] == ["Mm|A:1"]
+    assert "单因子测试" in response.get_data(as_text=True)
 
 
-def test_factor_main_section_uses_defaults_when_session_params_empty(app, monkeypatch):
+def test_factor_main_section_does_not_build_defaults_when_session_params_empty(app, monkeypatch):
     captured = {}
 
     class _FakeFamily:
@@ -219,4 +239,4 @@ def test_factor_main_section_uses_defaults_when_session_params_empty(app, monkey
         ctx = view_helpers.get_factor_main_section_html("Mm", page_uuid="page-x")
 
     assert ctx["factor_family_alias"] == "Mm"
-    assert captured == {"params_list": None, "page_uuid": "page-x"}
+    assert captured == {"params_list": [], "page_uuid": "page-x"}

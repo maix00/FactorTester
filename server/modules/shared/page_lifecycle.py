@@ -34,12 +34,15 @@ def _normalize_debug_sections(payload: dict[str, Any] | list[dict[str, Any]] | N
     if isinstance(payload, list):
         return [section for section in payload if isinstance(section, dict)]
     if isinstance(payload, dict):
+        sections = payload.get('sections')
+        if isinstance(sections, list):
+            return [section for section in sections if isinstance(section, dict)]
         return [{
             'title': str(payload.get('title') or '模块调试'),
             'items': payload.get('items') if isinstance(payload.get('items'), list) else [
                 {'label': str(key), 'value': value}
                 for key, value in payload.items()
-                if key != 'title'
+                if key not in {'title', 'items', 'sections', 'probe'}
             ],
         }]
     return []
@@ -77,7 +80,13 @@ def debug_page_state():
 
     page_kind = getattr(page_state, 'page_kind', '') if page_state is not None else ''
     provider = _page_debug_providers.get(str(page_kind).strip())
-    module_sections = _normalize_debug_sections(provider(page_uuid) if provider else None)
+    provider_payload = provider(page_uuid) if provider else None
+    module_sections = _normalize_debug_sections(provider_payload)
+    probe = provider_payload.get('probe') if isinstance(provider_payload, dict) else {}
+    probe_factor_family_aliases = probe.get('factor_family_aliases') if isinstance(probe, dict) else None
+    probe_factor_aliases = probe.get('factor_aliases') if isinstance(probe, dict) else None
+    probe_factor_count = probe.get('factor_count') if isinstance(probe, dict) else None
+    probe_factor_family_count = probe.get('factor_family_count') if isinstance(probe, dict) else None
     common_section = {
         'title': '通用',
         'items': [
@@ -106,10 +115,10 @@ def debug_page_state():
             'end': str(time_entry[1]) if time_entry else '',
             'start_calc': str(time_entry[2]) if time_entry and len(time_entry) > 2 else '',
         },
-        'factor_family_count': len(page_families_keys),
-        'factor_family_aliases': page_families_keys,
-        'factor_count': len(page_factors_keys),
-        'factor_aliases': page_factors_keys,
+        'factor_family_count': int(probe_factor_family_count) if probe_factor_family_count is not None else len(page_families_keys),
+        'factor_family_aliases': list(probe_factor_family_aliases) if isinstance(probe_factor_family_aliases, list) else page_families_keys,
+        'factor_count': int(probe_factor_count) if probe_factor_count is not None else len(page_factors_keys),
+        'factor_aliases': list(probe_factor_aliases) if isinstance(probe_factor_aliases, list) else page_factors_keys,
         'debug_sections': [common_section, *module_sections],
     }
     return api_ok(payload)

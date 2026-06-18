@@ -50,8 +50,7 @@ def _ensure_tester_factors_for_group(
 
     factor_family = get_factor_family_instance(str(factor_family_alias), username=username)
     if params_list is None:
-        session_params = get_session_params(str(factor_family_alias), factor_family)
-        params_list = session_params if session_params else None
+        params_list = get_session_params(str(factor_family_alias), factor_family)
     factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
     existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
     for factor in factors:
