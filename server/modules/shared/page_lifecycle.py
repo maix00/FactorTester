@@ -9,9 +9,8 @@ from flask import request
 
 from server.services.api_response import api_ok, route_guard
 import server.services.page_runtime as page_runtime
-from server.services.factor_registry import page_families, page_factors
+from server.services.factor_registry import clear_page_factor_family, page_families, page_factors
 from server.services.session_runtime import current_user, get_session_id
-from server.services.page_runtime import unregister_page
 
 from . import shared_bp
 
@@ -51,12 +50,13 @@ def _normalize_debug_sections(payload: dict[str, Any] | list[dict[str, Any]] | N
 @shared_bp.route('/close_page', methods=['POST'])
 @route_guard
 def close_page():
-    """Release all runtime objects associated with a page tab."""
+    """Clear the current page's active factor-family cache."""
     data = request.get_json(silent=True) or {}
     page_uuid = str(data.get('page_uuid', '')).strip()
-    if page_uuid:
-        unregister_page(page_uuid)
-    return api_ok({'page_uuid': page_uuid})
+    factor_family_alias = str(data.get('factor_family_alias', '')).strip()
+    if page_uuid and factor_family_alias:
+        clear_page_factor_family(page_uuid, factor_family_alias)
+    return api_ok({'page_uuid': page_uuid, 'factor_family_alias': factor_family_alias})
 
 
 @shared_bp.route('/api/debug/page_state')

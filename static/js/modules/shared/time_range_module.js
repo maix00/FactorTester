@@ -24,9 +24,10 @@
     function sendPageCleanup() {
         if (_pageCleanupSent) return;
         var pageUuid = window._pageUuid || '';
+        var factorFamilyAlias = window._sftCurrentFactorId || '';
         if (!pageUuid) return;
         _pageCleanupSent = true;
-        var payload = JSON.stringify({ page_uuid: pageUuid });
+        var payload = JSON.stringify({ page_uuid: pageUuid, factor_family_alias: factorFamilyAlias });
         try {
             if (navigator.sendBeacon) {
                 var blob = new Blob([payload], { type: 'application/json' });

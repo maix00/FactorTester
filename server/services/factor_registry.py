@@ -77,6 +77,41 @@ def unregister_page(page_uuid: str) -> None:
     # FactorFamily 实例随 dict 回收自然释放（无其他强引用）
 
 
+def clear_page_factor_family(page_uuid: str, factor_family_alias: str) -> None:
+    """清理某个 page_uuid 下指定因子家族的缓存。"""
+    page_uuid = str(page_uuid).strip()
+    factor_family_alias = str(factor_family_alias).strip()
+    if not page_uuid or not factor_family_alias:
+        return
+    with _page_cache_lock:
+        families = page_families.get(page_uuid, {})
+        family = families.pop(factor_family_alias, None)
+        if not families:
+            page_families.pop(page_uuid, None)
+        factors = page_factors.get(page_uuid, {})
+        removed = [
+            alias
+            for alias, factor in list(factors.items())
+            if getattr(getattr(factor, 'family', None), 'alias', None) == factor_family_alias
+        ]
+        removed_factors = [factors.pop(alias, None) for alias in removed]
+        if not factors:
+            page_factors.pop(page_uuid, None)
+    for factor in removed_factors:
+        if factor is None:
+            continue
+        try:
+            factor.clear()
+            factor.delete()
+        except Exception:
+            pass
+    if family is not None:
+        try:
+            del family
+        except Exception:
+            pass
+
+
 def _build_factor_from_source(module_name: str, source_code: str) -> FactorFamily | None:
     if not source_code:
         return None

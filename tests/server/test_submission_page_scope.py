@@ -144,21 +144,49 @@ def test_single_factor_page_shows_runtime_ids_for_developer(app, monkeypatch):
     assert captured["page_uuid"] == "page-dev"
 
 
-def test_close_page_unregisters_page_resources(app, monkeypatch):
-    called = []
+def test_close_page_unregisters_page_resources(app):
+    from server.services.factor_registry import page_families, page_factors
 
-    monkeypatch.setattr(runtime_state, "unregister_page", lambda page_uuid: called.append(page_uuid))
+    class _FakeFamily:
+        alias = "Mm"
+
+    class _FakeFactor:
+        def __init__(self):
+            self.family = _FakeFamily()
+            self.cleared = False
+            self.deleted = False
+
+        def clear(self):
+            self.cleared = True
+
+        def delete(self):
+            self.deleted = True
+
+    fake_factor = _FakeFactor()
+    page_families["page-a"] = {"Mm": _FakeFamily()}
+    page_factors["page-a"] = {"Mm|A:1": fake_factor}
+    runtime_state.page_owners["page-a"] = "alice@1"
+    runtime_state.page_states["page-a"] = {"page_kind": "single_factor_test"}
 
     with app.test_request_context(
         "/close_page",
         method="POST",
-        json={"page_uuid": "page-a"},
+        json={"page_uuid": "page-a", "factor_family_alias": "Mm"},
     ):
         response, status = page_lifecycle_routes.close_page()
 
     assert status == 200
     assert response.get_json()["success"] is True
-    assert called == ["page-a"]
+    assert "page-a" not in page_families or "Mm" not in page_families.get("page-a", {})
+    assert "page-a" not in page_factors or "Mm|A:1" not in page_factors.get("page-a", {})
+    assert fake_factor.cleared is True
+    assert fake_factor.deleted is True
+    assert runtime_state.page_owners.get("page-a") == "alice@1"
+    assert runtime_state.page_states.get("page-a", {}).get("page_kind") == "single_factor_test"
+    page_families.pop("page-a", None)
+    page_factors.pop("page-a", None)
+    runtime_state.page_owners.pop("page-a", None)
+    runtime_state.page_states.pop("page-a", None)
 
 
 def test_debug_page_state_reports_page_scope(app, monkeypatch):

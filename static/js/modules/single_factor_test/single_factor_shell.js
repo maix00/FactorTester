@@ -168,9 +168,19 @@ function renderSingleFactorFamilyList() {
 }
 
 async function selectSingleFactorFamily(factorId, factorType, ownerUsername, options = {}) {
+    const prevFactorId = _sftCurrentFactorId || '';
     _sftCurrentFactorId = factorId || '';
     _sftCurrentFactorType = factorType || 'public';
     _sftCurrentOwner = ownerUsername || '';
+    if (prevFactorId && prevFactorId !== _sftCurrentFactorId && window._pageUuid) {
+        try {
+            await fetch('/close_page', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ page_uuid: window._pageUuid, factor_family_alias: prevFactorId }),
+            });
+        } catch (e) {}
+    }
     renderSingleFactorFamilyList();
 
     const body = document.getElementById('editor-body');
