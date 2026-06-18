@@ -39,11 +39,3 @@ def collect_tech_docs_import_dependencies(tree, exported_names):
 
 def has_tech_docs_decorator(node):
     return has_any_decorator(node, _PUBLIC_DECORATORS)
-
-
-__all__ = [
-    "collect_tech_docs_import_dependencies",
-    "extract_tech_docs_exports",
-    "has_tech_docs_decorator",
-    "tech_docs",
-]
