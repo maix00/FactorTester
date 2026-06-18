@@ -87,12 +87,15 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     tools_stub = (workspace_root / "tools" / "__init__.pyi").read_text(encoding="utf-8")
     parameters_pkg_stub = (workspace_root / "tools" / "parameters" / "__init__.pyi").read_text(encoding="utf-8")
     factors_pkg_stub = (workspace_root / "tools" / "factors" / "__init__.pyi").read_text(encoding="utf-8")
+    expr_pkg_stub = (workspace_root / "tools" / "factors" / "expr" / "__init__.pyi").read_text(encoding="utf-8")
     assert "WindowParam" in parameters_pkg_stub
     assert "FactorTester" not in factors_pkg_stub
     assert "EvaluateContext" not in factors_pkg_stub
     assert "visual_groups" not in factors_pkg_stub
     assert "WindowParam" in parameters_pkg_stub
     assert "FactorExpr" in factors_pkg_stub
+    assert "EvaluateContext" not in expr_pkg_stub
+    assert "as_intermediate" not in expr_pkg_stub
     assert "ProductDataView" not in tools_stub
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()

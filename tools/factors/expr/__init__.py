@@ -6,7 +6,7 @@
 FACTOR_WORKSPACE = True
 
 if FACTOR_WORKSPACE:
-    from .core import FactorExpr, EvaluateContext
+    from .core import FactorExpr
     from .timeline import PanelTimeline, build_panel_timeline, compact_observed, scatter_observed
     from .operands import OperandExpr
     from .leaf import ColumnRef, ParamRef, ConstExpr, _to_expr

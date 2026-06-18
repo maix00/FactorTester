@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
 
 # ── 求值上下文（统一 evaluate/_evaluate 签名） ──
-@factor_workspace
 class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
@@ -101,7 +100,6 @@ class FactorExpr:
     _intermediate_name: 'str | None' = None
     _intermediate_factor: Optional[FactorExpr] = None
 
-    @factor_workspace
     def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
         """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
 
@@ -152,12 +150,10 @@ class FactorExpr:
 
     # ── 子类必须实现的接口 ──
 
-    @factor_workspace
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
         return self
 
-    @factor_workspace
     def evaluate(self, *args, ctx: Optional['EvaluateContext'] = None, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。
 
@@ -194,7 +190,6 @@ class FactorExpr:
         raise NotImplementedError
 
     @property
-    @factor_workspace
     def op_name(self) -> str:
         """表达式操作名，用于生成别名和 LaTeX。"""
         raise NotImplementedError
@@ -228,7 +223,6 @@ class FactorExpr:
 
         yield from visit(self)
 
-    @factor_workspace
     def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
 
@@ -337,14 +331,12 @@ class FactorExpr:
         return '\n'.join(lines)
 
     @property
-    @factor_workspace
     def is_leaf_ref(self) -> bool:
         """是否作为依赖追踪中的叶子引用节点。"""
         ops = getattr(self, '_operands', ())
         return len(list(ops)) == 0
 
     @property
-    @factor_workspace
     def dependencies(self) -> Set['FactorExpr']:
         """返回此节点依赖的叶子表达式集合（不含自身与 ConstExpr）。"""
         deps = {
@@ -355,7 +347,6 @@ class FactorExpr:
         return deps
 
     @property
-    @factor_workspace
     def param_deps(self) -> Set['Parameter']:
         """返回此节点依赖的参数集合。"""
         params: Set['Parameter'] = set()
@@ -364,7 +355,6 @@ class FactorExpr:
         return params
 
     @property
-    @factor_workspace
     def ordered_param_deps(self) -> List['Parameter']:
         params = list(self.param_deps)
         params.sort(key=lambda p: (type(p).__name__, p.alias))
@@ -394,13 +384,11 @@ class FactorExpr:
         return result
 
     @property
-    @factor_workspace
     def column_refs(self) -> Set['ColumnRef']:
         """收集表达式树中的所有 ColumnRef 叶子节点。"""
         return self.get_ref_types(_lazy()['ColumnRef'])
 
     @property
-    @factor_workspace
     def const_refs(self) -> Set['ConstExpr']:
         """收集表达式树中的所有 ConstExpr 叶子节点"""
         return self.get_ref_types(_lazy()['ConstExpr'])
