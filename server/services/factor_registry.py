@@ -134,6 +134,9 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
             if ff is not None:
                 with _custom_factor_cache_lock:
                     _custom_factor_cache[(username, module_name)] = ff
+                if page_uuid:
+                    with _page_cache_lock:
+                        page_families.setdefault(page_uuid, {})[module_name] = ff
                 return ff
             raise ImportError(f"Cannot load factor '{module_name}': not found in public sources or database for user '{username}'")
         raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' and no active user session")

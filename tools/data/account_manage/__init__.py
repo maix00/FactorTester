@@ -193,11 +193,12 @@ def normalize_account(account: dict) -> dict:
     normalized.setdefault('organization_name', DEFAULT_ORGANIZATION_NAME)
     normalized.setdefault('parent_username', '')
     normalized.setdefault('level_id', '')
-    if normalized.get('is_admin'):
+    if normalized.get('is_admin') and not normalized.get('role'):
         normalized.setdefault('role', ROLE_SUPER_ADMIN)
     else:
         normalized.setdefault('role', ROLE_USER)
-    normalized['is_admin'] = normalized.get('role') == ROLE_SUPER_ADMIN
+    normalized['is_admin'] = bool(normalized.get('is_admin') or normalized.get('role') == ROLE_SUPER_ADMIN)
+    normalized['is_developer'] = bool(normalized.get('is_developer') or normalized.get('role') == ROLE_DEVELOPER)
     return normalized
 
 
@@ -246,7 +247,8 @@ def is_any_admin_account(account: dict | None) -> bool:
 
 
 def is_developer_account(account: dict | None) -> bool:
-    return bool(account and (account.get('role') == ROLE_DEVELOPER or is_super_admin_account(account)))
+    normalized = normalize_account(account or {})
+    return bool(normalized.get('is_developer'))
 
 
 def visible_accounts_for(username: str | None, include_self: bool = True) -> list:
@@ -345,8 +347,8 @@ def serialize_account_public(account: dict | None, current_username: str | None 
         'username': normalized.get('username', ''),
         'alias': normalized.get('alias') or normalized.get('username', ''),
         'role': normalized.get('role') or ROLE_USER,
-        'is_admin': normalized.get('role') == ROLE_SUPER_ADMIN,
-        'is_developer': normalized.get('role') in {ROLE_SUPER_ADMIN, ROLE_DEVELOPER},
+        'is_admin': bool(normalized.get('is_admin')),
+        'is_developer': bool(normalized.get('is_developer')),
         'organization_id': normalized.get('organization_id') or DEFAULT_ORGANIZATION_ID,
         'organization_name': normalized.get('organization_name') or DEFAULT_ORGANIZATION_NAME,
         'level_id': normalized.get('level_id') or '',

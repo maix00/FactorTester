@@ -21,7 +21,8 @@ from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
 from server.services.factor_registry import get_factor_family_instance
-from server.services.runtime_state import get_factor_tester, get_session_params
+from server.services.page_runtime import get_factor_tester
+from server.services.session_runtime import get_session_params
 from server.services.sse_progress import SSEProgressEmitter
 
 
@@ -558,8 +559,10 @@ def run_ic_test():
         tester = get_factor_tester(data.get('submission_id', ''), caller='run_ic_test')
         factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
+        session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=get_session_params(data.get('factor_family_alias', ''), factor_family)
+            params_list=session_params if session_params else None,
+            page_uuid=str(data.get('page_uuid') or ''),
         )
 
         tester.sync_signal_index = None
@@ -604,8 +607,10 @@ def run_ic_test_stream():
         tester = get_factor_tester(str(data.get('submission_id', '')), caller='run_ic_test_stream')
         factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
+        session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=get_session_params(str(data.get('factor_family_alias', '')), factor_family)
+            params_list=session_params if session_params else None,
+            page_uuid=str(data.get('page_uuid') or ''),
         )
     except Exception as e:
         def _early_err():

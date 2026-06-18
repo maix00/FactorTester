@@ -214,8 +214,8 @@ class FactorGroupTester:
         tester_by_id: dict[str, tuple[FactorTester, list[_FactorGroupTestGroup]]] = {}
         for group in flat_groups:
             try:
-                from server.services import runtime_state
-                tester = runtime_state.get_factor_tester(group.tester_id, caller='from_flat_groups')
+                from server.services import page_runtime
+                tester = page_runtime.get_factor_tester(group.tester_id, caller='from_flat_groups')
             except Exception:
                 # tester_id may be a raw tester object in some contexts
                 continue

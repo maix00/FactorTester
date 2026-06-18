@@ -9,7 +9,7 @@ from server.modules.templates.common import build_factor_rows, load_template_lis
 from tools.data.account_manage import account_display_name, can_view_user_scope, visible_accounts_for
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
-from server.services.runtime_state import get_session_params, get_user_file_lock, require_user, save_session_params
+from server.services.session_runtime import get_session_params, get_user_file_lock, require_user, save_session_params
 
 
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['GET'])

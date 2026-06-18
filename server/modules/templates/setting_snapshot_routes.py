@@ -8,7 +8,7 @@ from server.modules.templates.snapshot_product_groups import refresh_template_pr
 from server.modules.templates.summary import build_snapshot_summary
 from server.modules.products.product_group_store import load_product_groups
 from server.services.http_auth import login_required
-from server.services.runtime_state import get_user_file_lock, require_user
+from server.services.session_runtime import get_user_file_lock, require_user
 
 
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['GET'])

@@ -25,7 +25,7 @@ from tools.data.account_manage import (
     delete_user_template_data,
 )
 from server.services.http_auth import login_required
-from server.services.runtime_state import require_user
+from server.services.session_runtime import require_user
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 

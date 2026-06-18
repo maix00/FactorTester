@@ -20,6 +20,7 @@ def ensure_user_schema(conn: sqlite3.Connection) -> None:
             hash TEXT,
             role TEXT,
             is_admin INTEGER,
+            is_developer INTEGER,
             organization_id TEXT,
             organization_name TEXT,
             level_id TEXT,
@@ -28,6 +29,9 @@ def ensure_user_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+    if "is_developer" not in columns:
+        conn.execute("ALTER TABLE accounts ADD COLUMN is_developer INTEGER DEFAULT 0")
 
 
 def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -39,7 +43,7 @@ def load_accounts() -> list[dict[str, Any]]:
         ensure_user_schema(conn)
         rows = conn.execute(
             """
-            SELECT username, alias, salt, hash, role, is_admin,
+            SELECT username, alias, salt, hash, role, is_admin, is_developer,
                    organization_id, organization_name, level_id, parent_username, updated_at
             FROM accounts
             ORDER BY username
@@ -56,9 +60,9 @@ def save_accounts(accounts: list[dict[str, Any]]) -> None:
         conn.executemany(
             """
             INSERT INTO accounts (
-                username, alias, salt, hash, role, is_admin,
+                username, alias, salt, hash, role, is_admin, is_developer,
                 organization_id, organization_name, level_id, parent_username, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -68,6 +72,7 @@ def save_accounts(accounts: list[dict[str, Any]]) -> None:
                     row.get("hash"),
                     row.get("role"),
                     1 if row.get("is_admin") else 0,
+                    1 if row.get("is_developer") else 0,
                     row.get("organization_id"),
                     row.get("organization_name"),
                     row.get("level_id"),

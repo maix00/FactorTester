@@ -21,7 +21,8 @@ from tools.factors.tests.single_factor_test.group.monotonicity import build_grou
 from tools.products.AdjustableTermStructure import resolve_term_structure_product
 from tools.products.Product import Product
 from . import sft_bp
-import server.services.runtime_state as runtime_state
+import server.services.page_runtime as runtime_state
+from server.services.session_runtime import current_user, get_session_params
 from server.modules.shared.price_data_helpers import to_epoch_ms
 from server.services.factor_registry import get_factor_family_instance
 
@@ -35,6 +36,7 @@ def _ensure_tester_factors_for_group(
     *,
     params_list: list | None = None,
     username: str | None = None,
+    page_uuid: str | None = None,
 ) -> None:
     """Ensure direct group runs can resolve factors even when IC has not run."""
     missing_aliases = [
@@ -48,8 +50,9 @@ def _ensure_tester_factors_for_group(
 
     factor_family = get_factor_family_instance(str(factor_family_alias), username=username)
     if params_list is None:
-        params_list = runtime_state.get_session_params(str(factor_family_alias), factor_family)
-    factors = factor_family.get_factors(params_list=params_list)
+        session_params = get_session_params(str(factor_family_alias), factor_family)
+        params_list = session_params if session_params else None
+    factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
     existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
     for factor in factors:
         alias = getattr(factor, 'alias', '')
@@ -1455,6 +1458,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             factor_family_alias,
             params_list=group_factor_params_list,
             username=group_owner_username,
+            page_uuid=page_uuid,
         )
         for factor_alias in factor_aliases:
             factor = tester.resolve_factor(str(factor_alias))
@@ -2050,11 +2054,11 @@ def run_group_test_stream():
         try:
             factor_family = get_factor_family_instance(
                 factor_family_alias,
-                username=runtime_state.current_user(),
+                username=current_user(),
             )
             data = dict(data)
-            data['_group_owner_username'] = runtime_state.current_user()
-            data['_group_factor_params_list'] = runtime_state.get_session_params(
+            data['_group_owner_username'] = current_user()
+            data['_group_factor_params_list'] = get_session_params(
                 factor_family_alias,
                 factor_family,
             )

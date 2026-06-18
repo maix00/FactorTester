@@ -2,19 +2,17 @@
 Shared time-range routes:
   GET  /api/default_time_range
   POST /set_time_range
-
 set_time_range 直接构造 DataTime，全链路使用 DataTime。
 """
-import uuid as _uuid
 import pandas as pd
 from flask import request, jsonify
 import Settings
 from tools.data.types import DataTime
 from server.services.factor_registry import get_factor_family_instance
-import server.services.runtime_state as runtime_state
-from server.services.runtime_state import factor_testers_lock
+import server.services.page_runtime as page_runtime
+from server.services.session_runtime import current_user
 from . import shared_bp
-from server.services.api_response import api_ok, route_guard
+from server.services.api_response import api_fail, api_ok, route_guard
 
 
 @shared_bp.route('/api/default_time_range')
@@ -47,14 +45,15 @@ def get_default_time_range():
 def set_time_range():
     """设置当前页面 tab 的时间范围，绑定到 page_uuid。
 
-    前端首次调用时不传 page_uuid → 后端生成并返回；
-    后续同一 tab 调用时传回已有的 page_uuid → 覆盖更新。
-    与 page_uuid 关联的 FactorTester 也会同步更新时间。
+    page_uuid 由页面打开时生成并随后续请求传回；
+    这里不再负责生成 page_uuid，只负责更新其运行时状态。
     """
     data = request.get_json()
     factor_family_alias = data['factor_family_alias']
-    get_factor_family_instance(factor_family_alias)  # validates alias
-    page_uuid = data.get('page_uuid', '').strip() or str(_uuid.uuid4())
+    page_uuid = str(data.get('page_uuid', '')).strip()
+    if not page_uuid:
+        return api_fail('缺少 page_uuid，请先打开页面并生成页面上下文', 400)
+    get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)  # validates alias & warms page cache
     start_date      = data['start_date']
     start_time      = data['start_time']
     end_date        = data['end_date']
@@ -70,16 +69,16 @@ def set_time_range():
         end_dt   = DataTime(ts=pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone))
 
     # 写入 page_uuid 对应的时间
-    runtime_state.set_runtime_time(page_uuid, start_dt, end_dt)
+    page_runtime.set_runtime_time(page_uuid, start_dt, end_dt)
+    page_runtime.register_page(page_uuid, owner=current_user(), factor_family_alias=factor_family_alias)
 
     # 更新与当前 page_uuid 绑定的 tester
     from tools.factors.FactorTester import FactorTester
     tester_count = 0
-    with factor_testers_lock:
-        for tester in runtime_state.factor_testers:
-            if isinstance(tester, FactorTester) and getattr(tester, '_page_uuid', None) == page_uuid:
-                tester.update_time_range(start_dt, end_dt)
-                tester_count += 1
+    for tester in page_runtime.iter_factor_testers(page_uuid):
+        if isinstance(tester, FactorTester):
+            tester.update_time_range(start_dt, end_dt)
+            tester_count += 1
 
     return api_ok({
         'show_next': start_date <= end_date,

@@ -211,12 +211,6 @@ class FactorTester(UniqueNameObject):
         self.factors.clear()
         self.products = set()
         self.all_products = set()
-        # 从 user 的 tester 列表移除
-        if self.user is not None:
-            try:
-                self.user.remove_tester(self)
-            except Exception:
-                pass
         # 关闭 logger handler
         for handler in list(self.logger.handlers):
             handler.close()

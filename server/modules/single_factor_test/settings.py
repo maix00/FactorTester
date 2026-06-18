@@ -15,7 +15,7 @@ from tools.data.account_manage import (
     save_user_templates,
     new_template_id,
 )
-from server.services.runtime_state import require_user
+from server.services.session_runtime import require_user
 from . import sft_bp
 
 _log = logging.getLogger(__name__)

@@ -11,6 +11,7 @@ from tools.data.account_manage import (
     account_display_name,
     can_view_user_scope,
     get_account,
+    is_developer_account,
 )
 from server.services.factor_registry import (
     factor_group_key,
@@ -18,7 +19,9 @@ from server.services.factor_registry import (
     get_factor_family_instance,
     get_factor_groups,
 )
-from server.services.runtime_state import current_user, get_session_params
+import server.services.page_runtime as runtime_state
+from server.services.session_runtime import current_user, get_session_id, get_session_params
+from server.modules.shared.page_lifecycle import register_page_debug_provider
 from server.modules.single_factor_test.view_helpers import (
     get_default_test_time_strings,
     get_factor_main_section_html,
@@ -132,7 +135,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
             param_metas = [serialize_param_meta(p) for p in params]
             param_aliases = [p.alias for p in params]
             session_params = get_session_params(display_alias, ff)
-            factors = ff.get_factors(params_list=session_params)
+            factors = ff.get_factors(params_list=session_params if session_params else None, page_uuid=page_uuid)
             start_date, end_date, start_time, end_time = get_default_test_time_strings()
             return render_template(
                 'factor_main.html',
@@ -181,6 +184,9 @@ def single_factor_page():
     factor_type = request.args.get('type', '')
     include_subordinates = request.args.get('include_subordinates') == '1'
     owner_username = request.args.get('owner_username', '')
+    page_uuid = runtime_state.create_page_uuid()
+    runtime_state.register_page(page_uuid, owner=current_user(), page_kind='single_factor_test', factor_family_alias=selected_name)
+    show_runtime_ids = is_developer_account(get_account(current_user()))
     return render_template(
         'single_factor_test.html',
         search_query=search_query,
@@ -188,6 +194,9 @@ def single_factor_page():
         initial_factor=selected_name,
         initial_factor_type=factor_type or 'public',
         initial_owner_username=owner_username,
+        page_uuid=page_uuid,
+        session_id=get_session_id(),
+        show_runtime_ids=show_runtime_ids,
     )
 
 
@@ -207,3 +216,36 @@ def single_factor_content_api():
     page_uuid = request.args.get('page_uuid', '')
     html = _render_single_factor_content(selected_name, factor_type, owner_username, page_uuid)
     return jsonify({'success': True, 'html': html})
+
+
+def _single_factor_debug_provider(page_uuid: str):
+    page_state = runtime_state.get_page_state(page_uuid)
+    with runtime_state.factor_testers_lock:
+        testers = list(runtime_state.page_factor_testers.get(page_uuid, []))
+    with runtime_state.page_time_store_lock:
+        time_entry = runtime_state.page_time_store.get(page_uuid)
+    from server.services.factor_registry import page_families, page_factors
+
+    with runtime_state.factor_testers_lock:
+        family_aliases = list((page_families.get(page_uuid, {}) or {}).keys())
+        factor_aliases = list((page_factors.get(page_uuid, {}) or {}).keys())
+
+    return [{
+        'title': '单因子测试',
+        'items': [
+            {'label': 'page_kind', 'value': getattr(page_state, 'page_kind', '') if page_state else ''},
+            {'label': 'factor_family_alias', 'value': getattr(page_state, 'factor_family_alias', '') if page_state else ''},
+            {'label': 'tester_count', 'value': len(testers)},
+            {'label': 'tester_aliases', 'value': ', '.join(getattr(t, 'alias', '') for t in testers) if testers else ''},
+            {'label': 'time_range', 'value': (
+                f"{time_entry[0]} -> {time_entry[1]}" if time_entry else ''
+            )},
+            {'label': 'factor_family_count', 'value': len(family_aliases)},
+            {'label': 'factor_family_aliases', 'value': ', '.join(family_aliases)},
+            {'label': 'factor_count', 'value': len(factor_aliases)},
+            {'label': 'factor_aliases', 'value': ', '.join(factor_aliases)},
+        ],
+    }]
+
+
+register_page_debug_provider('single_factor_test', _single_factor_debug_provider)

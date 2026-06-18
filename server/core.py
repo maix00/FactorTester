@@ -9,6 +9,7 @@ Core Blueprint — 应用入口和页面路由。
 """
 
 from flask import Blueprint, jsonify, redirect, render_template, request
+from server.services.session_runtime import current_user
 
 core_bp = Blueprint('core', __name__)
 
@@ -128,7 +129,7 @@ def docs_tools():
     """工具类代码概览页——带目录导览，点击进入单个文件。"""
     import os
     from tools.data.tech_docs import scan_tool_files
-    from server.services.runtime_state import current_user
+    from server.services.session_runtime import current_user
     from tools.data.account_manage import get_account, is_developer_account
 
     tools_dir = os.path.join(os.getcwd(), 'tools')
@@ -142,7 +143,7 @@ def docs_tool_detail(rel_path):
     """工具类文件详情页。普通用户只看白名单对象，开发人员可看全部。"""
     import os
     from flask import abort
-    from server.services.runtime_state import current_user
+    from server.services.session_runtime import current_user
     from tools.data.account_manage import get_account, is_developer_account
     from tools.data.tech_docs import build_tool_doc_detail
 

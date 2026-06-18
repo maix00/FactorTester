@@ -19,7 +19,7 @@ from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
 from tools.data.account_manage import accounts_lock, load_accounts
-from server.services.runtime_state import current_user
+from server.services.session_runtime import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
 
 app = create_app()

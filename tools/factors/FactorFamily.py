@@ -345,7 +345,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         return factors[0]
 
     @factor_workspace
-    def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
+    def get_factors(
+        self,
+        return_freq: Optional[Any] = None,
+        params_list: Optional[list] = None,
+        page_uuid: Optional[str] = None,
+        **kwargs,
+    ) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
@@ -420,6 +426,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                 continue
 
             factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+
+            if page_uuid:
+                try:
+                    from server.services.factor_registry import set_page_factor
+                    set_page_factor(str(page_uuid), factor_alias, factor)
+                except Exception:
+                    pass
 
             for key, value in current_params.items():
                 self.params_dict[key].register(factor, value)

@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import jsonify, redirect, request
 
-from server.services.runtime_state import current_user
+from server.services.session_runtime import current_user
 
 
 def login_required(func):

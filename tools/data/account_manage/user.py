@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from tools.data.types import UniqueNameObject
 
@@ -31,24 +31,18 @@ class User(UniqueNameObject):
                 self.serial = 1
             super().__init__(name=name, alias=alias, desc=f'用户 {alias}', *args, **kwargs)
             self.is_admin = is_admin
-            self._testers: 'List[FactorTester]' = []
 
     @property
-    def testers(self) -> 'List[FactorTester]':
-        return [t for t in self._testers if t is not None]
+    def testers(self) -> list['FactorTester']:
+        return []
 
     def add_tester(self, tester: 'FactorTester') -> None:
-        if tester not in self._testers:
-            self._testers.append(tester)
+        del tester
 
     def remove_tester(self, tester: 'FactorTester') -> None:
-        self._testers = [t for t in self._testers if t is not None and t is not tester]
+        del tester
 
     def cleanup_testers(self) -> None:
-        """退出登录时清理该用户的所有 FactorTester。"""
-        for tester in self.testers:
-            try:
-                tester.delete()
-            except Exception:
-                pass
-        self._testers.clear()
+        """退出登录时清理该用户的所有页面与测试器资源。"""
+        from server.services.page_runtime import cleanup_user_pages
+        cleanup_user_pages(self)

@@ -25,7 +25,7 @@ from server.services.factor_registry import (
     invalidate_factor_family_cache,
 )
 from server.services.http_auth import login_required
-from server.services.runtime_state import current_user
+from server.services.session_runtime import current_user
 from tools.data.factor_workspace.storage import (
     delete_factor_source,
     load_factor_source,

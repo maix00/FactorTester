@@ -21,15 +21,14 @@ from tools.data.account_manage import (
     ROLE_SUPER_ADMIN, ROLE_USER, ROLE_DEVELOPER,
     list_organizations_with_default, next_account_username, root_level_id_for_org,
 )
-from server.services.runtime_state import (
+from server.services.session_runtime import (
     check_session_idle,
     cleanup_session_resource,
     current_user,
     current_user_obj,
-    factor_testers,
-    factor_testers_lock,
     touch_session_activity,
 )
+from server.services.page_runtime import cleanup_user_pages
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -60,9 +59,7 @@ def _check_login():
             # 超时：清理该用户的 tester，清除 session
             user = current_user_obj()
             if user is not None:
-                user.cleanup_testers()
-                with factor_testers_lock:
-                    factor_testers[:] = [t for t in factor_testers if t.user is not user or t not in user._testers]
+                cleanup_user_pages(user)
             cleanup_session_resource(session.get('_sid', ''))
             session.clear()
             if request.is_json or request.method != 'GET':
@@ -112,8 +109,8 @@ def login():
         'role': acct.get('role', ROLE_USER),
         'organization_id': acct.get('organization_id', DEFAULT_ORGANIZATION_ID),
         'organization_name': acct.get('organization_name', DEFAULT_ORGANIZATION_NAME),
-        'is_admin': acct.get('role') == ROLE_SUPER_ADMIN,
-        'is_developer': acct.get('role') in {ROLE_SUPER_ADMIN, ROLE_DEVELOPER},
+        'is_admin': bool(acct.get('is_admin') or acct.get('role') == ROLE_SUPER_ADMIN),
+        'is_developer': bool(acct.get('is_developer') or acct.get('role') == ROLE_DEVELOPER),
     })
 
 @auth_bp.route('/logout', methods=['POST'])
@@ -121,10 +118,7 @@ def logout():
     # 退出前清理该用户的 FactorTester
     user = current_user_obj()
     if user is not None:
-        user.cleanup_testers()
-        # 从全局列表中移除已被清理的 tester
-        with factor_testers_lock:
-            factor_testers[:] = [t for t in factor_testers if t.user is not user or t not in user._testers]
+        cleanup_user_pages(user)
     # 清理 session 资源记录
     cleanup_session_resource(session.get('_sid', ''))
     session.clear()
