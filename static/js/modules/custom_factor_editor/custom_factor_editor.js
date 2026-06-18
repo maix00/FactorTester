@@ -61,42 +61,15 @@ async function loadFactorSourceRoot() {
     }
 }
 
-function _factorWorkspaceGitRepoRootInput() {
-    return document.getElementById('factor-workspace-git-repo-root');
-}
-
-function _factorWorkspaceGitAutoBranchInput() {
-    return document.getElementById('factor-workspace-auto-branch');
-}
-
-function _factorWorkspaceGitForceBranchInput() {
-    return document.getElementById('factor-workspace-force-branch');
-}
-
-function _factorWorkspaceGitStatus() {
+function _factorWorkspaceGitStatusElement() {
     return document.getElementById('factor-workspace-git-status');
 }
 
-function _factorWorkspaceBranchOptions() {
-    return document.getElementById('factor-workspace-branch-options');
-}
-
 function _setFactorWorkspaceGitStatus(message, kind) {
-    var el = _factorWorkspaceGitStatus();
+    var el = _factorWorkspaceGitStatusElement();
     if (!el) return;
     el.textContent = message || '';
     el.style.color = kind === 'error' ? '#b42318' : (kind === 'success' ? '#067647' : '#667085');
-}
-
-function _renderFactorWorkspaceBranchOptions(branches) {
-    var datalist = _factorWorkspaceBranchOptions();
-    if (!datalist) return;
-    datalist.innerHTML = '';
-    (branches || []).forEach(branch => {
-        var option = document.createElement('option');
-        option.value = branch;
-        datalist.appendChild(option);
-    });
 }
 
 async function loadFactorWorkspaceGitSettings() {
@@ -107,50 +80,16 @@ async function loadFactorWorkspaceGitSettings() {
             _setFactorWorkspaceGitStatus(data.error || '读取 Git 配置失败', 'error');
             return;
         }
-        var repoRootInput = _factorWorkspaceGitRepoRootInput();
-        var autoBranchInput = _factorWorkspaceGitAutoBranchInput();
-        var forceBranchInput = _factorWorkspaceGitForceBranchInput();
-        if (repoRootInput) repoRootInput.value = data.git_repo_root || '';
-        if (autoBranchInput) autoBranchInput.value = data.git_auto_sync_branch || '';
-        if (forceBranchInput) forceBranchInput.value = data.git_force_sync_branch || '';
-        _renderFactorWorkspaceBranchOptions(data.git_branches || []);
         if (data.git_enabled) {
             _setFactorWorkspaceGitStatus(
-                `Git: ${data.git_repo_root || '当前工作区'} · 当前 ${data.git_current_branch || '—'} · 自动 ${data.git_auto_sync_branch || '—'} · 强制 ${data.git_force_sync_branch || '—'}`,
+                `Git 已启用 · 当前分支 ${data.git_current_branch || '—'} · 自动上传分支 ${data.git_auto_sync_branch || 'upload'} · 下载同步分支 ${data.git_force_sync_branch || 'download'}`,
                 'success'
             );
         } else {
-            _setFactorWorkspaceGitStatus('未检测到可用 Git，仍可正常使用工作区', 'neutral');
+            _setFactorWorkspaceGitStatus('未检测到可用 Git：只能使用建立、从数据库同步到工作区、上传本地工作区这些手动按钮', 'neutral');
         }
     } catch (err) {
         _setFactorWorkspaceGitStatus('读取 Git 配置失败: ' + (err && err.message ? err.message : err), 'error');
-    }
-}
-
-async function saveFactorWorkspaceGitSettings() {
-    var repoRootInput = _factorWorkspaceGitRepoRootInput();
-    var autoBranchInput = _factorWorkspaceGitAutoBranchInput();
-    var forceBranchInput = _factorWorkspaceGitForceBranchInput();
-    try {
-        const res = await fetch('/custom-factors/api/workspace/git-settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                git_enabled: true,
-                git_repo_root: repoRootInput ? (repoRootInput.value || '').trim() : '',
-                auto_sync_branch: autoBranchInput ? (autoBranchInput.value || '').trim() : '',
-                force_sync_branch: forceBranchInput ? (forceBranchInput.value || '').trim() : '',
-            })
-        });
-        const data = await res.json();
-        if (!data.success) {
-            _setFactorWorkspaceGitStatus(data.error || '保存 Git 配置失败', 'error');
-            return;
-        }
-        await loadFactorWorkspaceGitSettings();
-        _setFactorWorkspaceGitStatus('已保存 Git 配置', 'success');
-    } catch (err) {
-        _setFactorWorkspaceGitStatus('保存 Git 配置失败: ' + (err && err.message ? err.message : err), 'error');
     }
 }
 
@@ -224,33 +163,27 @@ async function syncFactorWorkspace() {
     }
 }
 
-
-let _factorWorkspaceAutoPushTimer = null;
-let _factorWorkspaceAutoPushInFlight = false;
-
-function startFactorWorkspaceAutoPush() {
-    if (_factorWorkspaceAutoPushTimer) return;
-    _factorWorkspaceAutoPushTimer = setInterval(() => {
-        if (_factorWorkspaceAutoPushInFlight) return;
-        const overlay = document.getElementById('factor-workspace-overlay');
-        if (!overlay || !overlay.classList.contains('open')) return;
-        _factorWorkspaceAutoPushInFlight = true;
-        fetch('/custom-factors/api/workspace/push', {
+async function uploadFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在上传本地工作区到数据库...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ branch_mode: 'auto' })
-        }).catch(() => null).finally(() => {
-            _factorWorkspaceAutoPushInFlight = false;
         });
-    }, 8000);
-}
-
-function stopFactorWorkspaceAutoPush() {
-    if (_factorWorkspaceAutoPushTimer) {
-        clearInterval(_factorWorkspaceAutoPushTimer);
-        _factorWorkspaceAutoPushTimer = null;
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '上传本地工作区失败', 'error');
+            return;
+        }
+        await loadFactorWorkspaceGitSettings();
+        _setFactorSourceRootStatus(
+            `已上传本地工作区，更新自定义因子 ${data.updated_custom_count || 0} 个，公共因子 ${data.updated_public_count || 0} 个`,
+            'success'
+        );
+    } catch (err) {
+        _setFactorSourceRootStatus('上传本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
     }
-    _factorWorkspaceAutoPushInFlight = false;
 }
 
 let _isAdmin = false;

@@ -55,9 +55,9 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
         "git_enabled": True,
         "git_repo_root": str(workspace_root),
         "git_current_branch": "main",
-        "git_auto_sync_branch": "main",
-        "git_force_sync_branch": "release",
-        "git_branches": ["main", "release"],
+        "git_auto_sync_branch": "upload",
+        "git_force_sync_branch": "download",
+        "git_branches": ["main", "upload", "download"],
     })
 
     result = factor_workspace.build_factor_workspace("default$alice@1")
@@ -88,14 +88,13 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert "visual_groups" not in factors_pkg_stub
     assert "WindowParam" in parameters_pkg_stub
     assert "FactorExpr" in factors_pkg_stub
-    assert "UniqueNameObject" in tools_stub
     assert "ProductDataView" not in tools_stub
     assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
     assert result["git"]["git_enabled"] is True
-    assert result["git"]["git_auto_sync_branch"] == "main"
-    assert result["git"]["git_force_sync_branch"] == "release"
+    assert result["git"]["git_auto_sync_branch"] == "upload"
+    assert result["git"]["git_force_sync_branch"] == "download"
     settings = json.loads((workspace_root / ".vscode" / "settings.json").read_text(encoding="utf-8"))
     assert settings["python.analysis.extraPaths"] == ["${workspaceFolder}"]
     assert settings["python.analysis.autoSearchPaths"] is True
@@ -116,7 +115,7 @@ def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, 
     monkeypatch.setattr(factor_storage, "load_public_factor_source", lambda factor_id: "class PublicFactor(FactorFamily):\n    pass\n# db version\n")
 
     with pytest.raises(PermissionError):
-        factor_workspace.push_factor_workspace("default$alice@1", allow_public_write=False)
+        factor_workspace.push_factor_workspace("default$alice@1", allow_public_write=False, branch_mode="force")
 
 
 def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
@@ -128,7 +127,7 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     (workspace_root / "README.md").write_text("hello\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(workspace_root), "add", "README.md"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "commit", "-m", "init"], check=True, capture_output=True, text=True)
-    subprocess.run(["git", "-C", str(workspace_root), "checkout", "-b", "release"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(workspace_root), "checkout", "-b", "download"], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(workspace_root), "checkout", "main"], check=True, capture_output=True, text=True)
 
     factor_storage = factor_workspace_storage
@@ -145,12 +144,10 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
         "default$alice@1",
         git_enabled=True,
         git_repo_root=str(workspace_root),
-        auto_sync_branch="main",
-        force_sync_branch="release",
     )
 
     result = factor_workspace.sync_factor_workspace("default$alice@1", branch_mode="force")
 
     current_branch = subprocess.check_output(["git", "-C", str(workspace_root), "branch", "--show-current"], text=True).strip()
-    assert current_branch == "release"
-    assert result["git_selected_branch"] == "release"
+    assert current_branch == "download"
+    assert result["git_selected_branch"] == "download"

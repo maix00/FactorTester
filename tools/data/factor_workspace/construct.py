@@ -18,6 +18,8 @@ from tools.decorators.factor_workspace import (
     has_factor_workspace_decorator,
 )
 
+from .git import get_factor_workspace_git_state, materialize_factor_workspace_branches
+
 from .pre import WorkspaceSourceSpec, collect_workspace_architecture
 
 
@@ -355,10 +357,33 @@ def _clear_workspace_generated(root: str) -> list[str]:
             continue
         path = os.path.join(root, name)
         if os.path.isdir(path) and not os.path.islink(path):
-            shutil.rmtree(path)
+            shutil.rmtree(path, ignore_errors=True)
+            if os.path.exists(path):
+                # 有些目录可能因为并发写入或文件句柄占用而暂时删不净，
+                # 这里做一次兜底清理，避免把建工作区整条链路卡死。
+                for current_root, dirs, filenames in os.walk(path, topdown=False):
+                    for filename in filenames:
+                        file_path = os.path.join(current_root, filename)
+                        try:
+                            os.remove(file_path)
+                        except FileNotFoundError:
+                            pass
+                    for dirname in dirs:
+                        dir_path = os.path.join(current_root, dirname)
+                        try:
+                            os.rmdir(dir_path)
+                        except OSError:
+                            pass
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    pass
             removed.append(path)
         elif os.path.exists(path):
-            os.remove(path)
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
             removed.append(path)
     return removed
 
@@ -382,11 +407,14 @@ def _remove_missing_files(directory: str, expected_names: set[str]) -> list[str]
 def _sync_tools_index(root: str) -> bool:
     tools_dir = os.path.join(os.getcwd(), "tools")
     tool_files = scan_tool_files(tools_dir, include_symbols=True)
+    serializable_files: list[dict[str, Any]] = []
+    for item in tool_files:
+        serializable_files.append({key: value for key, value in item.items() if key != "tree"})
     payload = {
         "workspace_root": root,
         "tools_dir": tools_dir,
         "generated_at": time.time(),
-        "files": tool_files,
+        "files": serializable_files,
     }
     return _write_json(os.path.join(root, "tools_index.json"), payload)
 
@@ -474,7 +502,7 @@ def _sync_vscode_settings(root: str) -> bool:
 def build_factor_workspace(username: str) -> dict[str, Any]:
     from .sync import sync_database_to_workspace
 
-    result = sync_database_to_workspace(username, branch_mode="force", clear_existing=True)
+    result = sync_database_to_workspace(username, branch_mode="auto", clear_existing=True)
     git_info = result.get("git") or {}
     if git_info.get("git_enabled"):
         root = result.get("workspace_root") or _workspace_root(username)
@@ -482,5 +510,9 @@ def build_factor_workspace(username: str) -> dict[str, Any]:
 
         commit_sha = _git_commit_all(str(root), "chore: rebuild factor workspace")
         if commit_sha:
+            created_branches = materialize_factor_workspace_branches(str(root), username)
             result["git_commit_sha"] = commit_sha
+            if created_branches:
+                result["git_created_branches"] = created_branches
+            result["git"] = git_info = get_factor_workspace_git_state(username)
     return result

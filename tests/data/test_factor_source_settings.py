@@ -55,12 +55,10 @@ def test_factor_source_workspace_git_settings_roundtrip(monkeypatch, tmp_path):
         username,
         git_enabled=True,
         git_repo_root="/tmp/workspace",
-        auto_sync_branch="main",
-        force_sync_branch="release",
     )
     settings = factor_source_workspace_settings_sqlite.load_factor_source_workspace_settings(username)
     assert settings is not None
     assert settings["git_enabled"] is True
     assert settings["git_repo_root"] == "/tmp/workspace"
-    assert settings["auto_sync_branch"] == "main"
-    assert settings["force_sync_branch"] == "release"
+    assert settings["auto_sync_branch"] == "upload"
+    assert settings["force_sync_branch"] == "download"

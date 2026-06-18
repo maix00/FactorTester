@@ -229,14 +229,10 @@ def api_workspace_git_settings():
     from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
     git_enabled = bool(data.get('git_enabled'))
     git_repo_root = (data.get('git_repo_root') or '').strip()
-    auto_sync_branch = (data.get('auto_sync_branch') or '').strip()
-    force_sync_branch = (data.get('force_sync_branch') or '').strip()
     save_factor_source_workspace_settings(
         username,
         git_enabled=git_enabled,
         git_repo_root=git_repo_root,
-        auto_sync_branch=auto_sync_branch,
-        force_sync_branch=force_sync_branch,
     )
     return jsonify({'success': True, **get_factor_workspace_git_state(username)})
 

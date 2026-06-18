@@ -37,6 +37,15 @@ _IMPORT_MODULE_BY_SYMBOL: dict[str, str] = {
     "LocalPathResolver": "tools.data.providers.DistributedComponents",
     "Factor": "tools.factors",
     "FactorFamily": "tools.factors",
+    "Parameter": "tools.parameters",
+    "TypeParam": "tools.parameters",
+    "FinRangeParam": "tools.parameters",
+    "TimeDeltaParam": "tools.parameters",
+    "FactorParam": "tools.parameters",
+    "ValueSpace": "tools.parameters",
+    "DataColumnParam": "tools.parameters",
+    "DataTimeParam": "tools.parameters",
+    "WindowParam": "tools.parameters",
 }
 
 

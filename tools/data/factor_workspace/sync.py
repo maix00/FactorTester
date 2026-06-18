@@ -7,7 +7,13 @@ from typing import Any
 
 from tools.data.sqlite.factor_source_store import list_factor_sources
 
-from .git import _apply_workspace_git_branch, _ensure_git_workspace
+from .git import (
+    _apply_workspace_git_branch,
+    _ensure_git_workspace,
+    _git_commit_all,
+    get_factor_workspace_autosync_branch,
+    get_factor_workspace_current_branch,
+)
 from . import storage as factor_workspace_storage
 from .construct import (
     _clear_workspace_generated,
@@ -105,7 +111,13 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
 
 
 def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str, Any]:
-    return sync_database_to_workspace(username, branch_mode=branch_mode)
+    result = sync_database_to_workspace(username, branch_mode=branch_mode)
+    if branch_mode == "force":
+        root = str(result.get("workspace_root") or _workspace_root(username))
+        commit_sha = _git_commit_all(root, "chore: sync database to workspace")
+        if commit_sha:
+            result["git_commit_sha"] = commit_sha
+    return result
 
 
 def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict[str, Any]:
@@ -156,6 +168,17 @@ def push_factor_workspace(username: str, allow_public_write: bool = False, branc
     root = _workspace_root(username)
     _ensure_workspace_layout(root)
     _ensure_git_workspace(root, username)
+    current_branch = get_factor_workspace_current_branch(root)
+    auto_branch = get_factor_workspace_autosync_branch(username)
+    if branch_mode == "auto" and auto_branch and current_branch != auto_branch:
+        return {
+            "workspace_root": root,
+            "git_selected_branch": current_branch,
+            "skipped": True,
+            "skip_reason": f"当前分支 {current_branch} 不是自动同步分支 {auto_branch}",
+            "updated_custom_count": 0,
+            "updated_public_count": 0,
+        }
     selected_branch = _apply_workspace_git_branch(root, username, branch_mode)
 
     public_dir = _workspace_public_dir(root)

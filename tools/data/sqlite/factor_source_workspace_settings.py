@@ -10,6 +10,8 @@ import Settings
 from tools.data.sqlite.db import connect_sqlite
 
 TABLE_NAME = "factor_source_workspace_settings"
+FIXED_UPLOAD_BRANCH = "upload"
+FIXED_DOWNLOAD_BRANCH = "download"
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -53,8 +55,8 @@ def load_factor_source_workspace_settings(username: str) -> dict[str, Any] | Non
                 "username": row["username"],
                 "git_enabled": bool(row["git_enabled"]),
                 "git_repo_root": str(row["git_repo_root"] or ""),
-                "auto_sync_branch": str(row["auto_sync_branch"] or ""),
-                "force_sync_branch": str(row["force_sync_branch"] or ""),
+                "auto_sync_branch": str(row["auto_sync_branch"] or "") or FIXED_UPLOAD_BRANCH,
+                "force_sync_branch": str(row["force_sync_branch"] or "") or FIXED_DOWNLOAD_BRANCH,
                 "updated_at": float(row["updated_at"] or 0.0),
             }
     except Exception:
@@ -66,8 +68,6 @@ def save_factor_source_workspace_settings(
     *,
     git_enabled: bool,
     git_repo_root: str | None,
-    auto_sync_branch: str | None,
-    force_sync_branch: str | None,
 ) -> str:
     if not username:
         return str(Settings.CACHE_DB_PATH)
@@ -89,10 +89,9 @@ def save_factor_source_workspace_settings(
                 username,
                 1 if git_enabled else 0,
                 str(git_repo_root or "").strip(),
-                str(auto_sync_branch or "").strip(),
-                str(force_sync_branch or "").strip(),
+                FIXED_UPLOAD_BRANCH,
+                FIXED_DOWNLOAD_BRANCH,
                 time.time(),
             ),
         )
     return str(Settings.CACHE_DB_PATH)
-
