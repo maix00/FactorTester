@@ -6,7 +6,7 @@ set_time_range 直接构造 DataTime，全链路使用 DataTime。
 """
 import pandas as pd
 from flask import request, jsonify
-import Settings
+import settings as Settings
 from tools.data.types import DataTime
 from server.services.factor_registry import get_factor_family_instance
 import server.services.page_runtime as page_runtime

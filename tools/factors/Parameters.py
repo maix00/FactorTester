@@ -19,7 +19,7 @@ if FACTOR_WORKSPACE:
     from tools.data.types import DataColumn
     from tools.parameters import Parameter, DataTimeParam, ValueSpace
 
-from Settings import default_test_start_date
+from settings import default_test_start_date
 
 def _to_rev_bool(value: Any) -> bool:
     """将多种输入规范化为是否反转：True/1/-1 表示反转，False/0 表示不反转。"""

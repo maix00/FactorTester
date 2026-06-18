@@ -259,11 +259,11 @@ def _extract_factor_params(cls: type) -> List[ParamEntry]:
 
 
 def scan_settings() -> List[SettingEntry]:
-    """扫描 Settings.py 中的顶层配置变量。"""
-    import Settings
+    """扫描 settings.py 中的顶层配置变量。"""
+    import settings as Settings
     entries = []
     repo_root = Path(__file__).resolve().parents[3]
-    filepath = str(repo_root / 'Settings.py')
+    filepath = str(repo_root / 'settings.py')
 
     # 从源码提取注释
     var_comments: Dict[str, str] = {}

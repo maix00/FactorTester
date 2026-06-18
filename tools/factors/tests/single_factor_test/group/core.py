@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from Settings import factor_info_path
+from settings import factor_info_path
 from tools.data.types import DataColumn
 from tools.data.types.currency import CurrencyConversionContext, normalize_currency, require_product_currency_vector
 from tools.data.types import DataFreq

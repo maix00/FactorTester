@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pandas as pd
 
-from Settings import get_all_products, get_cat_tree
+from settings import get_all_products, get_cat_tree
 from sources.LocalCNFutures import MINK_PRODUCT_DIR
 from sources.LocalCNFutures.CNFutures import (
     CNFuturesContract,

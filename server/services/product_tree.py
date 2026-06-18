@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, List, cast
 from tools.products.Futures import FuturesContract
-import Settings as Settings
+import settings as Settings
 
 
 def convert_to_fancytree(tree_dict, checkbox_default=True):

@@ -227,4 +227,7 @@ pyrightconfig.json
 
 # FactorTester — agent workspace (git worktree per agent, mutually isolated)
 .workspace/
+
+# Local settings (gitignored, controls data_dir etc.)
+.settings
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,visualstudiocode
