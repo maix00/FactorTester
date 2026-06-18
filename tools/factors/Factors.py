@@ -154,6 +154,10 @@ class Factor(UniqueNameObject, FactorExpr):
     # 显式覆盖是为了阻断 FactorExpr.__eq__（返回 CompositeExpr 会破坏 dict key 协议）。
     # UniqueNameObject 已提供正确行为，无需额外 bridge。
 
+    def _structural_key(self) -> tuple:
+        """代理到内部已解析表达式树的结构键（IC 测试需要）。"""
+        return self._expr._structural_key()
+
     def __getattr__(self, item):
         # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
         # __eq__/__hash__ 不可代理 — FactorExpr.__eq__ 返回 CompositeExpr 破坏 dict key 协议
