@@ -119,7 +119,12 @@ def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
 
     assert ctx["page_uuid"] == "page-new"
     assert ctx["initial_factor"] == ""
-    assert captured == {"page_uuid": "page-new", "owner": "alice@1"}
+    assert captured == {
+        "page_uuid": "page-new",
+        "owner": "alice@1",
+        "page_kind": "single_factor_test",
+        "factor_family_alias": "",
+    }
 
 
 def test_single_factor_page_shows_runtime_ids_for_developer(app, monkeypatch):
@@ -190,65 +195,96 @@ def test_close_page_unregisters_page_resources(app):
 
 
 def test_debug_page_state_reports_page_scope(app, monkeypatch):
-    tester = _Tester("a1", "page-a")
-    runtime_state.page_factor_testers["page-a"] = [tester]
     runtime_state.page_owners["page-a"] = "alice@1"
-    runtime_state.page_time_store["page-a"] = ("start", "end", "calc")
+    runtime_state.page_states["page-a"] = {"page_kind": "single_factor_test"}
 
     with app.test_request_context("/api/debug/page_state?page_uuid=page-a"):
         from flask import session
         session["username"] = "alice@1"
-        response, status = page_lifecycle_routes.debug_page_state()
+        session["_sid"] = "session-a"
+        response = page_lifecycle_routes.debug_page_state()
 
     payload = response.get_json()
-    assert status == 200
+    assert response.status_code == 200
     assert payload["success"] is True
     assert payload["page_uuid"] == "page-a"
-    assert payload["tester_count"] == 1
-    assert payload["owner"] == "alice@1"
     assert payload["found"] is True
-    assert isinstance(payload.get("debug_sections"), list)
-    assert payload["debug_sections"][0]["title"] == "通用"
+    assert set(payload) == {"success", "page_uuid", "found", "debug_sections"}
+    identity = next(section for section in payload["debug_sections"] if section["title"] == "页面标识")
+    assert identity["items"] == [
+        {"label": "page_uuid", "value": "page-a"},
+        {"label": "session_id", "value": "session-a"},
+    ]
+
+    runtime_state.page_owners.pop("page-a", None)
+    runtime_state.page_states.pop("page-a", None)
 
 
-def test_debug_page_state_includes_module_sections(app):
+def test_debug_page_state_reads_single_factor_registry_without_building_factors(app):
     class _FakeFactor:
         alias = "Mm|A:1"
 
     class _FakeFamily:
         def get_factors(self, *, params_list=None, page_uuid=None):
-            return [_FakeFactor()]
+            raise AssertionError("debug probing must not construct factors")
 
     runtime_state.page_states["page-z"] = {"page_kind": "single_factor_test", "factor_family_alias": "Mm"}
     runtime_state.page_time_store["page-z"] = ("start", "end", "calc")
     from server.services.factor_registry import page_families
+    from server.services.factor_registry import page_factors
     page_families["page-z"] = {"Mm": _FakeFamily()}
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(page_routes, "get_session_params", lambda *args, **kwargs: [{"A": 1}])
+    page_factors["page-z"] = {"Mm|A:1": _FakeFactor()}
     try:
         with app.test_request_context("/api/debug/page_state?page_uuid=page-z"):
             from flask import session
             session["username"] = "alice@1"
             response = page_lifecycle_routes.debug_page_state()
     finally:
-        monkeypatch.undo()
         runtime_state.page_states.pop("page-z", None)
         runtime_state.page_time_store.pop("page-z", None)
         page_families.pop("page-z", None)
+        page_factors.pop("page-z", None)
 
     payload = response.get_json()
     assert response.status_code == 200
     assert response.content_type == "application/json; charset=utf-8"
-    assert any(section.get("title") == "单因子测试" for section in payload.get("debug_sections", []))
-    assert payload["factor_count"] == payload["factor_family_count"]
-    assert payload["factor_count"] == 1
-    assert payload["factor_aliases"] == ["Mm|A:1"]
-    module_section = next(section for section in payload["debug_sections"] if section.get("title") == "单因子测试")
-    labels = {item.get("label") for item in module_section.get("items", [])}
-    assert "page_kind" not in labels
-    assert "factor_family_alias" not in labels
-    assert "factor_count" not in labels
+    module_section = next(section for section in payload["debug_sections"] if section["title"] == "单因子测试对象")
+    items = {item["label"]: item["value"] for item in module_section["items"]}
+    assert items == {
+        "page_uuid": "page-z",
+        "factor_family_count": 1,
+        "factor_family_aliases": ["Mm"],
+        "factor_count": 1,
+        "factor_aliases": ["Mm|A:1"],
+    }
     assert "单因子测试" in response.get_data(as_text=True)
+
+
+def test_page_debug_registration_replaces_same_section_and_filters_page_kind(monkeypatch):
+    from server.services import page_state_debug
+
+    monkeypatch.setattr(page_state_debug, "_global_providers", {})
+    monkeypatch.setattr(page_state_debug, "_page_kind_providers", {})
+    def first(page_uuid):
+        return [{"label": "page_uuid", "value": page_uuid}, {"label": "version", "value": 1}]
+
+    def second(page_uuid):
+        return [{"label": "page_uuid", "value": page_uuid}, {"label": "version", "value": 2}]
+
+    def other(page_uuid):
+        return [{"label": "page_uuid", "value": page_uuid}]
+
+    page_state_debug.register_page_debug_section("single_factor_test", "factor_registry", "旧标题", first)
+    page_state_debug.register_page_debug_section("single_factor_test", "factor_registry", "新标题", second)
+    page_state_debug.register_page_debug_section("multi_factor_test", "multi_registry", "多因子测试", other)
+
+    assert page_state_debug._collect_sections("page-a", "single_factor_test") == [{
+        "title": "新标题",
+        "items": [
+            {"label": "page_uuid", "value": "page-a"},
+            {"label": "version", "value": 2},
+        ],
+    }]
 
 
 def test_factor_main_section_does_not_build_defaults_when_session_params_empty(app, monkeypatch):

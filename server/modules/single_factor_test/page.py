@@ -21,7 +21,6 @@ from server.services.factor_registry import (
 )
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, get_session_id, get_session_params
-from server.modules.shared.page_lifecycle import register_page_debug_provider
 from server.modules.single_factor_test.view_helpers import (
     get_default_test_time_strings,
     get_factor_main_section_html,
@@ -216,67 +215,3 @@ def single_factor_content_api():
     page_uuid = request.args.get('page_uuid', '')
     html = _render_single_factor_content(selected_name, factor_type, owner_username, page_uuid)
     return jsonify({'success': True, 'html': html})
-
-
-def _single_factor_debug_provider(page_uuid: str):
-    page_state = runtime_state.get_page_state(page_uuid)
-    with runtime_state.factor_testers_lock:
-        testers = list(runtime_state.page_factor_testers.get(page_uuid, []))
-    with runtime_state.page_time_store_lock:
-        time_entry = runtime_state.page_time_store.get(page_uuid)
-    from server.services.factor_registry import page_families, page_factors
-    factor_family_alias = getattr(page_state, 'factor_family_alias', '') if page_state else ''
-    session_params = []
-    rendered_factors = []
-    family_aliases = []
-    factor_aliases = []
-    if factor_family_alias:
-        page_family_map = page_families.get(page_uuid, {}) or {}
-        factor_family = page_family_map.get(factor_family_alias)
-        if factor_family is not None:
-            session_params = get_session_params(factor_family_alias, factor_family)
-            if session_params:
-                rendered_factors = factor_family.get_factors(params_list=session_params, page_uuid=page_uuid)
-        else:
-            rendered_factors = []
-
-    with runtime_state.factor_testers_lock:
-        family_aliases = list((page_families.get(page_uuid, {}) or {}).keys())
-        factor_aliases = list((page_factors.get(page_uuid, {}) or {}).keys())
-
-    param_rows = []
-    for idx, row in enumerate(session_params):
-        parts = [f"{key}={value}" for key, value in row.items()]
-        param_rows.append(f"组合{idx + 1}: " + (", ".join(parts) if parts else "空"))
-
-    rendered_factor_aliases = [getattr(f, 'alias', '') for f in rendered_factors]
-    return {
-        'sections': [{
-            'title': '通用',
-            'items': [
-                {'label': 'page_uuid', 'value': page_uuid},
-                {'label': 'session_id', 'value': get_session_id()},
-                {'label': 'current_user', 'value': current_user() or ''},
-                {'label': 'owner', 'value': runtime_state.page_owners.get(page_uuid, '') or ''},
-                {'label': 'page_kind', 'value': getattr(page_state, 'page_kind', '') if page_state else ''},
-                {'label': 'factor_family_alias', 'value': factor_family_alias},
-            ],
-        }, {
-            'title': '单因子测试',
-            'items': [
-                {'label': 'session_params_count', 'value': len(session_params)},
-                {'label': 'session_params', 'value': param_rows},
-                {'label': 'rendered_factor_count', 'value': len(rendered_factors)},
-                {'label': 'rendered_factor_aliases', 'value': rendered_factor_aliases},
-            ],
-        }],
-        'summary': {
-            'factor_family_count': len(family_aliases),
-            'factor_family_aliases': family_aliases,
-            'factor_count': len(rendered_factor_aliases),
-            'factor_aliases': rendered_factor_aliases,
-        },
-    }
-
-
-register_page_debug_provider('single_factor_test', _single_factor_debug_provider)

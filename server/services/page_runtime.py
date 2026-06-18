@@ -268,3 +268,21 @@ def cleanup_user_testers(user: Any) -> None:
 
 def _evict_page(page_uuid: str) -> None:
     unregister_page(page_uuid)
+
+
+def _page_identity_debug_items(page_uuid: str) -> list[dict[str, Any]]:
+    from server.services.session_runtime import get_session_id
+
+    return [
+        {'label': 'page_uuid', 'value': page_uuid},
+        {'label': 'session_id', 'value': get_session_id()},
+    ]
+
+
+from server.services.page_state_debug import register_global_debug_section
+
+register_global_debug_section(
+    'page_identity',
+    '页面标识',
+    _page_identity_debug_items,
+)

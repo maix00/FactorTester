@@ -327,3 +327,26 @@ def remove_page_factor(page_uuid: str, factor_alias: str) -> 'Factor | None':
         except Exception:
             pass
     return factor
+
+
+def _single_factor_debug_items(page_uuid: str) -> list[dict[str, object]]:
+    with _page_cache_lock:
+        family_aliases = list(page_families.get(page_uuid, {}))
+        factor_aliases = list(page_factors.get(page_uuid, {}))
+    return [
+        {'label': 'page_uuid', 'value': page_uuid},
+        {'label': 'factor_family_count', 'value': len(family_aliases)},
+        {'label': 'factor_family_aliases', 'value': family_aliases},
+        {'label': 'factor_count', 'value': len(factor_aliases)},
+        {'label': 'factor_aliases', 'value': factor_aliases},
+    ]
+
+
+from server.services.page_state_debug import register_page_debug_section
+
+register_page_debug_section(
+    'single_factor_test',
+    'factor_registry',
+    '单因子测试对象',
+    _single_factor_debug_items,
+)
