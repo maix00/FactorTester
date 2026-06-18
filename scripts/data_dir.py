@@ -5,7 +5,7 @@
 - 向上查找包含 .workspace/ 子目录的祖先目录，那就是 Codes/（feat 根）。
 - 无论从 feat 还是子 worktree（.workspace/fix/...）调用，最终都定位到 Codes/。
 - data/ 目录 = Codes/../data/（即与 Codes/ 平级的 data/）。
-- 若未找到 .workspace/ 标记，回退到环境变量 FT_DATA_DIR，再回退到相对于本文件的路径。
+- 若未找到 .workspace/ 标记，回退到相对于本文件的路径。
 """
 import os as _os
 import json as _json
@@ -53,9 +53,8 @@ def get_data_dir() -> str:
 
     优先级：
     1. .settings 文件中的 data_dir（向上查找）
-    2. 环境变量 FT_DATA_DIR
-    3. 向上查找 .workspace/ 目录，data = <feat_root>/../data/
-    4. 相对于本文件的 ../../data/（即 Codes/../data/）
+    2. 向上查找 .workspace/ 目录，data = <feat_root>/../data/
+    3. 相对于本文件的 ../../data/（即 Codes/../data/）
     """
     # 优先级 1：.settings 文件
     settings = _load_settings(_os.path.dirname(__file__))
@@ -64,17 +63,12 @@ def get_data_dir() -> str:
         if candidate:
             return _os.path.abspath(candidate)
 
-    # 优先级 2：环境变量
-    env_dir = _os.environ.get('FT_DATA_DIR')
-    if env_dir:
-        return env_dir
-
-    # 优先级 3：feat root 检测
+    # 优先级 2：feat root 检测
     root = _find_feat_root(_os.path.dirname(__file__))
     if root is not None:
         return _os.path.normpath(_os.path.join(root, '..', 'data'))
 
-    # 优先级 4：最终回退
+    # 优先级 3：最终回退
     return _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'data'))
 
 
@@ -87,7 +81,7 @@ def _get_cache_db_dir() -> str:
 
     优先级：
     1. .settings 文件中的 sqlite_dir（向上查找）
-    2. 默认 DATA_DIR/cache/localdata（与 fix/issue-110 的 CACHE_DIR 一致）
+    2. 默认 DATA_DIR/cache/localdata
     """
     settings = _load_settings(_os.path.dirname(__file__))
     if settings and 'sqlite_dir' in settings:
@@ -95,6 +89,7 @@ def _get_cache_db_dir() -> str:
         if candidate:
             return _os.path.abspath(candidate)
 
+    # 默认路径
     return _os.path.join(DATA_DIR, 'cache', 'localdata')
 
 
