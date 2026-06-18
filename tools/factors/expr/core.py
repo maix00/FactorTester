@@ -194,7 +194,6 @@ class FactorExpr:
         raise NotImplementedError
 
     @property
-    @property
     @factor_workspace
     def op_name(self) -> str:
         """表达式操作名，用于生成别名和 LaTeX。"""

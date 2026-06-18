@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 from pathlib import Path
@@ -158,3 +159,31 @@ def test_factor_workspace_sync_can_checkout_force_branch(monkeypatch, tmp_path):
     current_branch = subprocess.check_output(["git", "-C", str(workspace_root), "branch", "--show-current"], text=True).strip()
     assert current_branch == "download"
     assert result["git_selected_branch"] == "download"
+
+
+def test_factor_workspace_exports_only_singletons():
+    source_paths = [
+        Path("tools/factors/Parameters.py"),
+        Path("tools/factors/expr/__init__.py"),
+    ]
+    for path in source_paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        singleton_names: set[str] = set()
+        class_names: set[str] = set()
+        function_names: set[str] = set()
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                class_names.add(node.name)
+            elif isinstance(node, ast.FunctionDef):
+                function_names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                if any(isinstance(target, ast.Name) and target.id == "__factor_workspace__" for target in node.targets):
+                    value = node.value
+                    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+                        for item in value.elts:
+                            assert isinstance(item, ast.Constant)
+                            assert isinstance(item.value, str)
+                            singleton_names.add(item.value)
+        assert singleton_names
+        assert singleton_names.isdisjoint(class_names)
+        assert singleton_names.isdisjoint(function_names)
