@@ -18,7 +18,6 @@ from tools.parameters import Parameter, DataTimeParam, ValueSpace
 
 from Settings import default_test_start_date
 
-@factor_workspace
 def _to_rev_bool(value: Any) -> bool:
     """将多种输入规范化为是否反转：True/1/-1 表示反转，False/0 表示不反转。"""
     if isinstance(value, bool):
@@ -37,7 +36,6 @@ def _to_rev_bool(value: Any) -> bool:
             return False
     raise ValueError(f"Invalid reverse flag: {value}")
 
-@factor_workspace
 def get_reverse_param(alias: Optional[str] = '$Rev', desc: Optional[str] = None) -> Parameter:
     """创建因子反转参数：1/True/-1 表示反转，0/False 表示不反转。"""
     space = ValueSpace(
@@ -53,7 +51,6 @@ def get_reverse_param(alias: Optional[str] = '$Rev', desc: Optional[str] = None)
     )
     return param
 
-@factor_workspace
 def _safe_is_rev(value: Any) -> bool:
     try:
         _to_rev_bool(value)
@@ -61,7 +58,6 @@ def _safe_is_rev(value: Any) -> bool:
     except Exception:
         return False
 
-@factor_workspace
 def get_return_freq_param(alias: Optional[str] = '$RF', desc: Optional[str] = None) -> Parameter:
     """
     创建收益率计算频率参数。
@@ -79,7 +75,6 @@ def get_return_freq_param(alias: Optional[str] = '$RF', desc: Optional[str] = No
         desc=desc or '收益率计算频率，支持任意正时长（如 1d、5d、30min）',
     )
 
-@factor_workspace
 def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = None) -> Parameter:
     """
     创建因子信号频率参数。
@@ -96,7 +91,6 @@ def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = Non
         desc=desc or '因子信号频率，支持任意正时长（如 30min、1d、5d）',
     )
 
-@factor_workspace
 def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DataTimeParam:
     """
     创建计算起始点参数（DataTimeParam，返回 DataTime）。

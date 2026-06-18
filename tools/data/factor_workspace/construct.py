@@ -255,10 +255,6 @@ def _render_stub_module(source: str, filename: str) -> str:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "__future__":
                 continue
-            if is_package_init:
-                _append_comment_block(lines, comment_block)
-                lines.append(ast.unparse(node))
-                continue
             if isinstance(node, ast.Import):
                 aliases = [alias for alias in node.names if _import_alias_name(alias) in needed_names]
                 if not aliases:
