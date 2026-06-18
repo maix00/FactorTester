@@ -1,10 +1,10 @@
 # =============================================================================
-# Settings.py
+# settings.py
 # 全局配置文件
 #
 # 定义系统级常量与工厂函数：
 #   - 因子测试的默认日期区间
-#   - 数据目录、日志目录路径
+#   - 数据目录、日志目录路径、SQLite 数据库路径
 #   - 按成交量筛选品种的默认比例
 #   - 交易时段默认时间
 #   - get_cat_tree()  : 构建品种分类树（板块 × 夜盘时段）
@@ -30,7 +30,7 @@ default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
 # data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
-from scripts.data_dir import DATA_DIR
+from scripts.data_dir import DATA_DIR, CACHE_DB_DIR, CACHE_DB_PATH
 
 # 日志文件存储目录
 logger_dir_path_default = os.path.join(DATA_DIR, 'factor_tester_log')

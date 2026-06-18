@@ -13,7 +13,7 @@ import uuid
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily as _FactorFamilyForSettingsInit  # noqa: F401
-import Settings as Settings
+import settings as Settings
 import pandas as pd
 from server.services.accounts import accounts_lock, load_accounts
 

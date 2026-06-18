@@ -7,7 +7,7 @@ import html
 import pandas as pd
 from flask import render_template
 
-import Settings as Settings
+import settings as Settings
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.factor_registry import factor_group_key, get_factor_family_instance
 from server.services.runtime_state import get_session_params

@@ -193,7 +193,7 @@ def _compute_ic_groups(
         result = run_ic_for_factor(tester, param_payloads[key], factor_list)
         return key, result
 
-    import Settings
+    import settings
     total_groups = len(param_items)
     use_parallel = (
         getattr(Settings, 'IC_PARALLEL', True)

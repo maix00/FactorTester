@@ -30,7 +30,7 @@ from tools import UniqueObject, DataColumn, DataFreq
 from tools.base.User import User
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
-from Settings import get_all_products, logger_dir_path_default
+from settings import get_all_products, logger_dir_path_default
 
 if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester

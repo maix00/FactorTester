@@ -6,7 +6,7 @@ Shared time-range routes:
 import uuid as _uuid
 import pandas as pd
 from flask import request, jsonify
-import Settings
+import settings
 from server.services.factor_registry import get_factor_family_instance
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock

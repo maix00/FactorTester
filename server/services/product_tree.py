@@ -7,7 +7,7 @@ from typing import List, cast
 
 from tools.base.UniqueObject import UniqueObject
 from tools.products.Futures import FuturesContract
-import Settings as Settings
+import settings as Settings
 
 
 def convert_to_fancytree(tree_dict, checkbox_default=True):

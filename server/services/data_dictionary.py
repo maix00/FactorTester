@@ -258,10 +258,10 @@ def _extract_factor_params(cls: type) -> List[ParamEntry]:
 
 
 def scan_settings() -> List[SettingEntry]:
-    """扫描 Settings.py 中的顶层配置变量。"""
-    import Settings
+    """扫描 settings.py 中的顶层配置变量。"""
+    import settings
     entries = []
-    filepath = os.path.join(os.path.dirname(__file__), '..', '..', 'Settings.py')
+    filepath = os.path.join(os.path.dirname(__file__), '..', '..', 'settings.py')
     filepath = os.path.normpath(filepath)
 
     # 从源码提取注释

@@ -15,7 +15,7 @@ from typing import Optional, Any
 from tools import DataColumn
 from tools.parameters import Parameter, DateOrTimeParam, ValueSpace
 
-from Settings import default_test_start_date
+from settings import default_test_start_date
 
 def _to_rev_bool(value: Any) -> bool:
     """将多种输入规范化为是否反转：True/1/-1 表示反转，False/0 表示不反转。"""

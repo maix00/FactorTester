@@ -33,7 +33,7 @@ from tools import UniqueObject, DataMeta
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 
-from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
+from settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
 if TYPE_CHECKING:
     from tools.products.Product import Product

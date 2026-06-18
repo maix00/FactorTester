@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from Settings import factor_info_path
+from settings import factor_info_path
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 from tools.factors import Factor
