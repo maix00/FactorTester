@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 @factor_workspace
 class DataTimeParam(Parameter):
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None,
                  default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
@@ -57,10 +58,12 @@ class DataTimeParam(Parameter):
         dt = self._rectify_value(value, **kwargs)
         return str(dt.ts) if dt.ts is not None else str(dt)
 
+    @factor_workspace
     def is_date(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'day'
 
+    @factor_workspace
     def is_time(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'exact'

@@ -89,6 +89,7 @@ class Factor(FactorExpr):
     family: Optional[FactorFamily] = None
 
     @factor_workspace
+    @factor_workspace
     def clear(self):
         """清空所有计算结果。"""
         self._source_freq = None
@@ -134,6 +135,7 @@ class Factor(FactorExpr):
             pass
         return '$COMMON'
 
+    @factor_workspace
     def __new__(cls, expr: FactorExpr, alias: Optional[str] = None, 
                 family: Optional[FactorFamily] = None, *args, **kwargs):
         if expr.param_deps:
@@ -219,6 +221,7 @@ class Factor(FactorExpr):
             raise AttributeError(item)
         return getattr(self._expr, item)
 
+    @factor_workspace
     def evaluate(self, products: Sequence['Product']|set['Product'], 
                  freq: Optional[DataFreq] = None, *args, **kwargs) -> pd.DataFrame:
         """
@@ -398,6 +401,7 @@ class Factor(FactorExpr):
                 # 使 get_intermediate() 在有 tester 时也能查到 intermediate 数据
                 self._intermediate_factor_data[sk] = cache[sk]
     
+    @factor_workspace
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """
         获取中间因子数据（原始未对齐 DataFrame）。
@@ -421,6 +425,8 @@ class Factor(FactorExpr):
         return result
     
     @property
+    @property
+    @factor_workspace
     def freq(self) -> DataFreq:
         if self._freq is not None:
             return self._freq
@@ -439,6 +445,8 @@ class Factor(FactorExpr):
         raise ValueError(f"{self}: 因子频率未能推断")
     
     @property
+    @property
+    @factor_workspace
     def source_table(self) -> pd.DataFrame:
         tester = self._get_active_tester()
         if tester is not None:
@@ -450,6 +458,8 @@ class Factor(FactorExpr):
         return pd.DataFrame()
 
     @property
+    @property
+    @factor_workspace
     def table(self) -> pd.DataFrame:
         tester = self._get_active_tester()
         if tester is not None:
@@ -461,10 +471,14 @@ class Factor(FactorExpr):
         return pd.DataFrame()
 
     @table.setter
+    @table.setter
+    @factor_workspace
     def table(self, value: pd.DataFrame):
         self._data = value
 
     @property
+    @property
+    @factor_workspace
     def products(self) -> Set['Product']:
         """参与计算的 Product 集合，从 source_table 的列名提取。"""
         st = self.source_table
@@ -473,6 +487,8 @@ class Factor(FactorExpr):
         return {col for col in st.columns if isinstance(col, Product)}
 
     @property
+    @property
+    @factor_workspace
     def expr(self) -> 'FactorExpr':
         return self._expr
 

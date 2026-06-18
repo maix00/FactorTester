@@ -101,6 +101,7 @@ class FactorExpr:
     _intermediate_name: 'str | None' = None
     _intermediate_factor: Optional[FactorExpr] = None
 
+    @factor_workspace
     def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
         """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
 
@@ -151,10 +152,12 @@ class FactorExpr:
 
     # ── 子类必须实现的接口 ──
 
+    @factor_workspace
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
         return self
 
+    @factor_workspace
     def evaluate(self, *args, ctx: Optional['EvaluateContext'] = None, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。
 
@@ -191,6 +194,8 @@ class FactorExpr:
         raise NotImplementedError
 
     @property
+    @property
+    @factor_workspace
     def op_name(self) -> str:
         """表达式操作名，用于生成别名和 LaTeX。"""
         raise NotImplementedError
@@ -224,6 +229,7 @@ class FactorExpr:
 
         yield from visit(self)
 
+    @factor_workspace
     def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
 
@@ -332,12 +338,14 @@ class FactorExpr:
         return '\n'.join(lines)
 
     @property
+    @factor_workspace
     def is_leaf_ref(self) -> bool:
         """是否作为依赖追踪中的叶子引用节点。"""
         ops = getattr(self, '_operands', ())
         return len(list(ops)) == 0
 
     @property
+    @factor_workspace
     def dependencies(self) -> Set['FactorExpr']:
         """返回此节点依赖的叶子表达式集合（不含自身与 ConstExpr）。"""
         deps = {
@@ -348,6 +356,7 @@ class FactorExpr:
         return deps
 
     @property
+    @factor_workspace
     def param_deps(self) -> Set['Parameter']:
         """返回此节点依赖的参数集合。"""
         params: Set['Parameter'] = set()
@@ -356,6 +365,7 @@ class FactorExpr:
         return params
 
     @property
+    @factor_workspace
     def ordered_param_deps(self) -> List['Parameter']:
         params = list(self.param_deps)
         params.sort(key=lambda p: (type(p).__name__, p.alias))
@@ -385,95 +395,122 @@ class FactorExpr:
         return result
 
     @property
+    @factor_workspace
     def column_refs(self) -> Set['ColumnRef']:
         """收集表达式树中的所有 ColumnRef 叶子节点。"""
         return self.get_ref_types(_lazy()['ColumnRef'])
 
     @property
+    @factor_workspace
     def const_refs(self) -> Set['ConstExpr']:
         """收集表达式树中的所有 ConstExpr 叶子节点"""
         return self.get_ref_types(_lazy()['ConstExpr'])
 
     # ── 运算符重载：自动构建 CompositeExpr ──
 
+    @factor_workspace
     def __add__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('add', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __radd__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('add', _lazy()['_to_expr'](other), self)
 
+    @factor_workspace
     def __sub__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('sub', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __rsub__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('sub', _lazy()['_to_expr'](other), self)
 
+    @factor_workspace
     def __mul__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('mul', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __rmul__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('mul', _lazy()['_to_expr'](other), self)
 
+    @factor_workspace
     def __truediv__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('div', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __rtruediv__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('div', _lazy()['_to_expr'](other), self)
 
+    @factor_workspace
     def __neg__(self) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('neg', self)
 
+    @factor_workspace
     def __pos__(self) -> 'FactorExpr':
         return self
 
+    @factor_workspace
     def __abs__(self) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('abs', self)
 
+    @factor_workspace
     def __gt__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('gt', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __lt__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('lt', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __ge__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('ge', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __le__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('le', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __eq__(self, other: Any) -> 'FactorExpr':  # type: ignore[override]
         return _lazy()['CompositeExpr']('eq', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __ne__(self, other: Any) -> 'FactorExpr':  # type: ignore[override]
         return _lazy()['CompositeExpr']('ne', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __and__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('and', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __or__(self, other: Any) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('or', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def __invert__(self) -> 'FactorExpr':
         return _lazy()['CompositeExpr']('not', self)
 
+    @factor_workspace
     def __pow__(self, other: Any) -> 'FactorExpr':
         """幂运算：self ** other。"""
         return _lazy()['CompositeExpr']('pow', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def max(self, other: Any) -> 'FactorExpr':
         """逐元素最大值：max(self, other)。"""
         return _lazy()['CompositeExpr']('bimax', self, _lazy()['_to_expr'](other))
 
+    @factor_workspace
     def min(self, other: Any) -> 'FactorExpr':
         """逐元素最小值：min(self, other)。"""
         return _lazy()['CompositeExpr']('bimin', self, _lazy()['_to_expr'](other))
 
     # ── 便利方法：时序算子 ──
 
+    @factor_workspace
     def rolling_mean(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动平均（简单平均）。"""
         return _lazy()['RollingOp']('rolling_mean', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingExpr':
         """创建滚动窗口，支持 .truncate() + .mean()/.argmax_raw() 等逐步构建。
 
@@ -482,84 +519,104 @@ class FactorExpr:
         """
         return _lazy()['RollingExpr'](self, _lazy()['_to_expr'](window))
 
+    @factor_workspace
     def rolling_std(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动标准差。"""
         return _lazy()['RollingOp']('rolling_std', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_var(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动方差。"""
         return _lazy()['RollingOp']('rolling_var', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_min(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动最小值。"""
         return _lazy()['RollingOp']('rolling_min', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_max(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动最大值。"""
         return _lazy()['RollingOp']('rolling_max', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_sum(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动求和。"""
         return _lazy()['RollingOp']('rolling_sum', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_ema(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期指数移动平均（EMA, span=window）。"""
         return _lazy()['RollingOp']('rolling_ema', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
         return _lazy()['RollingOp']('rolling_corr', _lazy()['_to_expr'](window), self, other)
 
+    @factor_workspace
     def rolling_skew(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动偏度。"""
         return _lazy()['RollingOp']('rolling_skew', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_argmax(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmax', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def rolling_argmin(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最小值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmin', _lazy()['_to_expr'](window), self)
 
+    @factor_workspace
     def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter', 'FactorExpr'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
         return _lazy()['ShiftOp']('shift', periods, self)
 
+    @factor_workspace
     def delta(self, period: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'FactorExpr':
         """N 期变化量：self - self.shift(N)。"""
         return self - self.shift(period)
 
+    @factor_workspace
     def log(self) -> 'FactorExpr':
         """自然对数。"""
         return _lazy()['CompositeExpr']('log', self)
 
+    @factor_workspace
     def sign(self) -> 'FactorExpr':
         """符号函数：+1, -1, 0。"""
         return _lazy()['CompositeExpr']('sign', self)
 
+    @factor_workspace
     def abs(self) -> 'FactorExpr':
         """绝对值。"""
         return _lazy()['CompositeExpr']('abs', self)
 
+    @factor_workspace
     def sqrt(self) -> 'FactorExpr':
         """平方根。"""
         return _lazy()['CompositeExpr']('sqrt', self)
 
+    @factor_workspace
     def neg(self) -> 'FactorExpr':
         """取负。"""
         return _lazy()['CompositeExpr']('neg', self)
 
     # ── 便利方法：横截面算子 ──
 
+    @factor_workspace
     def cs_zscore(self) -> 'CrossSectionalOp':
         """横截面 z-score 标准化（逐时间点）。"""
         return _lazy()['CrossSectionalOp']('cs_zscore', self)
 
+    @factor_workspace
     def cs_rank(self) -> 'CrossSectionalOp':
         """横截面排名（从小到大，0~1 归一化）。"""
         return _lazy()['CrossSectionalOp']('cs_rank', self)
 
+    @factor_workspace
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
         return _lazy()['CrossSectionalOp']('cs_spearman', self, other)

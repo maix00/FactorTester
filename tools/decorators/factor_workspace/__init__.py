@@ -11,12 +11,12 @@ to explicitly mark imports that must be preserved in the workspace view.
 
 from __future__ import annotations
 
-import ast
 from typing import TypeVar
 
 from ..shared.ast import (
     collect_import_dependencies,
     extract_export_names,
+    has_import_guard,
     has_decorator,
 )
 
@@ -46,8 +46,8 @@ def has_factor_workspace_decorator(node):
     return has_decorator(node, "factor_workspace")
 
 
-def has_factor_workspace_import_guard(node: ast.If) -> bool:
-    return isinstance(node.test, ast.Name) and node.test.id == "FACTOR_WORKSPACE"
+def has_factor_workspace_import_guard(node):
+    return has_import_guard(node, "FACTOR_WORKSPACE")
 
 
 __all__ = [

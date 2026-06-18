@@ -92,6 +92,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
     _has_natural_neg: bool = False
     _instance_signal_freq: str = '1d'
 
+    @factor_workspace
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
                  desc: Optional[str] = None,
@@ -227,6 +228,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                 return prefix
         return None
 
+    @factor_workspace
     def set_default_params(self):
         """用各参数默认值初始化 _params_list（仅一组默认参数组合）。
         
@@ -258,6 +260,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             normalized[key] = value
         return normalized
 
+    @factor_workspace
     def change_param_default_value(self, **kwargs):
         """修改指定参数的默认值（同时校验值域）。"""
         kwargs = self._normalize_param_kwargs(**kwargs)
@@ -265,6 +268,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         for key, value in kwargs.items():
             self.params_dict[key].default_value = value
 
+    @factor_workspace
     def clear_params(self):
         """清空参数组合列表，使 get_factors 不生成任何 Factor。"""
         self._params_list = []
@@ -276,6 +280,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             if kwargs[key] not in self.params_dict[key]:
                 raise ValueError(f"{kwargs[key]} is not in the value space of {key}")
 
+    @factor_workspace
     def add_params(self, **kwargs):
         """
         向 _params_list 追加一组参数组合（已存在则忽略）。
@@ -288,6 +293,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
+    @factor_workspace
     def del_params(self, **kwargs):
         """从 _params_list 中删除与 kwargs 匹配的参数组合。"""
         kwargs = self._normalize_param_kwargs(**kwargs)
@@ -295,10 +301,12 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         del_params = {p.alias: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         self._params_list = [params for params in self._params_list if params != del_params]
 
+    @factor_workspace
     def set_all_params(self):
         """【子类可选重写】批量设置常用参数组合，不实现时返回 NotImplementedError。"""
         return NotImplementedError("请在子类中实现 `set_all_params` 方法")
 
+    @factor_workspace
     def get_alias(self, **params) -> str:
         """
         根据参数值生成 Factor 的完整别名。
@@ -329,12 +337,14 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
+    @factor_workspace
     def get_factor(self, **kwargs) -> Factor:
         """根据 kwargs 中的参数值生成一个 Factor 实例（kwargs 形式同 add_params）。"""
         factors = self.get_factors(**kwargs)
         assert factors, "get_factors 返回了空列表，无法生成 Factor 实例"
         return factors[0]
 
+    @factor_workspace
     def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
@@ -422,11 +432,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         return factors
     
     @property
+    @factor_workspace
     def expr(self) -> FactorExpr:
         """返回因子表达式树。"""
         return self._expr  # type: ignore[return-value]
 
     @staticmethod
+    @factor_workspace
     def resolve(expr: FactorExpr, param_values: dict | None = None, **kwargs) -> FactorExpr:
         """
         递归解析表达式树中的参数引用

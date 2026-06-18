@@ -6,6 +6,7 @@ from tools.parameters.Parameter import Parameter, ValueSpace
 
 @factor_workspace
 class DataColumnParam(Parameter):
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
@@ -32,6 +33,7 @@ class DataColumnParam(Parameter):
             *args, **kwargs
         )
 
+    @factor_workspace
     def col(self, col: Any):
         from tools.data.types import DataColumn
         col = DataColumn(col)

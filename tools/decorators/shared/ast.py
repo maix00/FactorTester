@@ -65,6 +65,10 @@ def has_any_decorator(node: ast.FunctionDef | ast.ClassDef, decorator_names: set
     return False
 
 
+def has_import_guard(node: ast.If, guard_name: str) -> bool:
+    return isinstance(node.test, ast.Name) and node.test.id == guard_name
+
+
 def collect_import_dependencies(
     tree: ast.Module,
     exported_names: set[str] | None,
