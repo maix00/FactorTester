@@ -235,12 +235,6 @@ def get_chinese_names(factors_dir=None) -> dict[str, str]:
     return _chinese_names_cache
 
 
-# 保留 _load_chinese_names 兼容旧调用（但不实例化 FactorFamily）
-def _load_chinese_names(factors_dir):
-    """[兼容] 返回中文名映射，委托给 SQLite 加载。"""
-    return get_chinese_names()
-
-
 def factor_group_key(name: str) -> str:
     group = ""
     upper_count = 0
