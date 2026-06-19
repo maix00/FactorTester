@@ -1253,17 +1253,19 @@
     var _loaded = false;
 
     function _loadAllScripts() {
-        // 并行加载全部脚本，串行等待 onload（保证执行顺序）
+        // 并行 fetch 所有脚本内容，然后按顺序拼成一个 inline script 执行
+        // 既保证并行下载速度，又保证 DOM 顺序执行
         return Promise.all(urls.map(function(src) {
-            return new Promise(function(resolve) {
-                var s = document.createElement('script');
-                s.src = src;
-                s.onload = function() { resolve(); };
-                s.onerror = function() { resolve(); };  // 错误不阻塞后续
-                document.body.appendChild(s);
+            return fetch(src).then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
+                return r.text();
             });
-        })).then(function() {
-            console.log('[GT lazy] all ' + urls.length + ' scripts loaded');
+        })).then(function(contents) {
+            var combined = contents.join('\n');
+            var s = document.createElement('script');
+            s.textContent = combined;
+            document.body.appendChild(s);
+            console.log('[GT lazy] all ' + urls.length + ' scripts loaded and executed');
         });
     }
 
