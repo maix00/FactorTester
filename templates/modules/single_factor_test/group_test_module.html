@@ -1258,22 +1258,20 @@
         s.onload = s.onerror = loadNext;
         document.body.appendChild(s);
     }
-    // Intercept the section-header click: first click = load deferred scripts, subsequent clicks = toggle
     var originalHandler = sectionHeader.onclick;
     sectionHeader.onclick = null;
     sectionHeader.addEventListener('click', function firstClick(e) {
-        if (loaded) return; // already loaded, let the original handler toggle
+        if (loaded) return;
         loaded = true;
+        e.stopImmediatePropagation();  // 阻止 app.js 的 toggle handler 也在首次点击时触发
         sectionHeader.removeEventListener('click', firstClick);
         sectionHeader.style.cursor = 'progress';
         console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
-        // After all scripts load, re-trigger the click to execute toggle logic
         var origLoadNext = loadNext;
         loadNext = function() {
             origLoadNext();
             if (idx >= urls.length) {
                 sectionHeader.style.cursor = '';
-                // Re-trigger click to expand section (app.js now has its handler bound)
                 setTimeout(function() { sectionHeader.click(); }, 50);
             }
         };
