@@ -223,6 +223,14 @@ class Factor(UniqueNameObject, FactorExpr):
                         freqs = set(p.list_available_freqs())
                         if not freqs:
                             continue
+                        # 剔除自身频率无法整除 desired_freq 的产品（如只有 DAY1 的退市品种）
+                        if desired_freq:
+                            has_compatible = any(
+                                all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)
+                                for af in freqs
+                            )
+                            if not has_compatible:
+                                continue
                         valid_products.append(p)
                         if available_freqs_set is None:
                             available_freqs_set = freqs
@@ -235,7 +243,11 @@ class Factor(UniqueNameObject, FactorExpr):
                     if not available_freqs:
                         raise ValueError(f"{self}: 产品数据没有公共可用频率，无法确定数据频率")
                     if desired_freq:
-                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), available_freqs[-1])
+                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), None)
+                        if freq is None:
+                            desired_freq_str = ', '.join(sorted({d.name for d in desired_freq}))
+                            available_freq_str = ', '.join(sorted({af.name for af in available_freqs}))
+                            raise ValueError(f"{self}: 期望频率 {{{desired_freq_str}}} 与产品可用频率 {{{available_freq_str}}} 不兼容，无法确定数据频率")
                     else:
                         freq = available_freqs[-1]
                 else:

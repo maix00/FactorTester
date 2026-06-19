@@ -4,12 +4,23 @@
 """
 
 import os
+import sys
 import json
+import platform
+from collections import defaultdict
 import concurrent.futures
+from pathlib import Path
 from turtle import left
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+
+# 直接运行时将项目根加入 sys.path，确保 scripts 等顶层包可导入
+if __package__ in (None, ""):
+    _root = Path(__file__).resolve().parents[2]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+
 from scripts.data_dir import DATA_DIR
 
 CONTRACT_MAPPING_PATH = os.path.join(DATA_DIR, 'wind_mapping.parquet')
@@ -24,6 +35,8 @@ MAIN_DAYK_FOLDER = os.path.join(DATA_DIR, 'main_dayk') + '/'        # 日线主�
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
 BACKWARD_BASE_DATE_COL = 'BACKWARD_BASE_DATE'
+
+_IS_WINDOWS = platform.system() == 'Windows'
 
 
 def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_rebuild: bool = True):
@@ -66,7 +79,8 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
     print(f"Preprocessing {len(files_to_process)} / {len(raw_files)} minute parquet files...")
 
     def _write_uid_group(uid: str, group: pd.DataFrame) -> None:
-        out_path = os.path.join(minute_product_dir, f"{uid}.parquet")
+        safe_uid = uid.replace('|', '_')  # Windows 禁止 | 在文件名中
+        out_path = os.path.join(minute_product_dir, f"{safe_uid}.parquet")
         group = group.drop_duplicates(subset='trade_timestamp').sort_values('trade_timestamp')
         if os.path.exists(out_path):
             existing = pd.read_parquet(out_path)
@@ -102,6 +116,127 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
     gc.collect()
     print("\nMinute data preprocessing completed.")
 
+
+def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
+                                   force_rebuild: bool = True,
+                                   flush_threshold: int = 200_000):
+    """流式预处理分钟数据 — 专为 Windows 优化。
+
+    单遍顺序扫描原始文件，每个 uid 用内存缓冲区累积，
+    缓冲区满才 flush 到磁盘，避免频繁小文件读-改-写。
+
+    force_rebuild=True 时清空并全量重建；False 时按原始 parquet 的
+    size/mtime 增量处理新增或变化的分片。
+    """
+    import shutil
+
+    if not os.path.isdir(minute_raw_dir):
+        raise FileNotFoundError(f"原始分钟数据目录不存在: {minute_raw_dir}")
+    raw_files = sorted(
+        os.path.join(minute_raw_dir, f)
+        for f in os.listdir(minute_raw_dir) if f.endswith('.parquet')
+    )
+    if not raw_files:
+        raise ValueError(f"原始分钟数据目录没有 parquet 文件: {minute_raw_dir}")
+
+    if force_rebuild and os.path.exists(minute_product_dir):
+        shutil.rmtree(minute_product_dir)
+    os.makedirs(minute_product_dir, exist_ok=True)
+
+    # 增量模式：加载已有 manifest，对比文件签名
+    manifest_path = os.path.join(minute_product_dir, _MINUTE_PREPROCESS_MANIFEST)
+    manifest = {} if force_rebuild else (
+        json.load(open(manifest_path, encoding='utf-8')) if os.path.exists(manifest_path) else {}
+    )
+    files_to_process = []
+    for path in raw_files:
+        stat = os.stat(path)
+        sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+        key = os.path.basename(path)
+        if not force_rebuild and manifest.get(key) == sig:
+            continue
+        files_to_process.append((path, key, sig))
+
+    if not files_to_process:
+        print("Minute product data is up to date. Skipping preprocessing.")
+        return
+
+    print(f"Processing {len(files_to_process)} / {len(raw_files)} files (stream mode)...")
+
+    # ── 每个 uid 的缓冲区 ──
+    buffer: dict[str, list[pd.DataFrame]] = defaultdict(list)
+    _buf_sizes: dict[str, int] = defaultdict(int)
+
+    def _flush(uid: str) -> None:
+        """将缓冲区数据写入磁盘，同一 uid 只写 1 次（无需读回）。"""
+        safe_uid = uid.replace('|', '_')
+        out_path = os.path.join(minute_product_dir, f"{safe_uid}.parquet")
+        combined = pd.concat(buffer[uid], ignore_index=True)
+        combined = combined.drop_duplicates(subset='trade_timestamp') \
+                           .sort_values('trade_timestamp')
+
+        # 增量模式下，已有文件需要合并去重
+        if not force_rebuild and os.path.exists(out_path):
+            existing = pd.read_parquet(out_path)
+            combined = pd.concat([existing, combined], ignore_index=True) \
+                          .drop_duplicates(subset='trade_timestamp', keep='last') \
+                          .sort_values('trade_timestamp')
+
+        combined.to_parquet(out_path, index=False)
+        buffer[uid].clear()
+        _buf_sizes[uid] = 0
+
+    def _read_and_group(path: str) -> tuple[str, dict, dict[str, pd.DataFrame]]:
+        """读取一个 parquet 文件，返回 (key, sig, {uid: group_df})。"""
+        stat = os.stat(path)
+        sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+        key = os.path.basename(path)
+        df = pd.read_parquet(path)
+        if df.empty:
+            return key, sig, {}
+        required = {'unique_instrument_id', 'trade_timestamp'}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"{path} 缺少必要列: {sorted(missing)}")
+        groups = {}
+        for uid, group in df.groupby('unique_instrument_id', sort=False):
+            groups[str(uid)] = group
+        return key, sig, groups
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            fut_to_info = {executor.submit(_read_and_group, p): (p, k, s)
+                           for p, k, s in files_to_process}
+            with tqdm(total=len(files_to_process), desc="Processing") as pbar:
+                for future in concurrent.futures.as_completed(fut_to_info):
+                    path, key, sig = fut_to_info[future]
+                    try:
+                        _, _, groups = future.result()
+                    except Exception:
+                        # 如果 read 失败，退回到单线程重试
+                        _, _, groups = _read_and_group(path)
+
+                    for uid_str, group in groups.items():
+                        buffer[uid_str].append(group)
+                        _buf_sizes[uid_str] += len(group)
+                        if _buf_sizes[uid_str] >= flush_threshold:
+                            _flush(uid_str)
+
+                    manifest[key] = sig
+                    with open(manifest_path, 'w', encoding='utf-8') as f:
+                        json.dump(manifest, f, ensure_ascii=False, indent=2)
+                    pbar.update(1)
+    finally:
+        # 确保所有缓冲区刷入磁盘
+        for uid in list(buffer.keys()):
+            if buffer[uid]:
+                _flush(uid)
+
+    import gc
+    gc.collect()
+    print("\nMinute data preprocessing completed (stream mode).")
+
+
 def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CONTRACT_MAPPING_PATH, 
                                   dayk_path: str = DAYK_PATH,
                                   minute_data_dir: str = MINUTE_DATA_DIR, 
@@ -117,11 +252,18 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     使用分钟数据索引，按需加载分钟数据。
     """
     # ========== 1. 处理分钟索引 ==========
-    preprocess_minute_data(
-        minute_data_dir,
-        minute_data_preprocessed_dir,
-        force_rebuild=bool(rebuild_minute_product),
-    )
+    if _IS_WINDOWS:
+        preprocess_minute_data_stream(
+            minute_data_dir,
+            minute_data_preprocessed_dir,
+            force_rebuild=bool(rebuild_minute_product),
+        )
+    else:
+        preprocess_minute_data(
+            minute_data_dir,
+            minute_data_preprocessed_dir,
+            force_rebuild=bool(rebuild_minute_product),
+        )
 
     # ========== 2. 加载已有 roller_info ==========
     existing = pd.DataFrame(columns=['PRODUCT', 'CONTRACT', 'STARTDATE', 'ENDDATE', 'PREV_CLOSE', 'END_CLOSE', BACKWARD_BASE_DATE_COL, 'FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO'])
@@ -183,7 +325,8 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             return np.nan, np.nan, pd.DataFrame(), None, pd.DataFrame()
 
         def load_contract_data_mink(uid: str, start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:
-            file_path = os.path.join(minute_data_preprocessed_dir, f"{uid}.parquet")
+            safe_uid = uid.replace('|', '_')  # 对齐 preprocess_minute_data_stream 的文件名（Windows 禁止 |）
+            file_path = os.path.join(minute_data_preprocessed_dir, f"{safe_uid}.parquet")
             if not os.path.exists(file_path):
                 return pd.DataFrame(columns=['trading_day', 'close_price', 'trade_time'])
             lookback_start = start_date - pd.Timedelta(days=60)

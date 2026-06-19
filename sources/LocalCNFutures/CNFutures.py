@@ -289,8 +289,8 @@ def get_all_futures_contract() -> List[Product]:
         key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_min, f"{object.alias}.{data_type}")),
-        get_object_path=lambda object: os.path.join(data_dir_min, f"{object.alias}.{data_type}"),
+            os.path.isfile(os.path.join(data_dir_min, f"{object.alias.replace('|', '_')}.{data_type}")),
+        get_object_path=lambda object: os.path.join(data_dir_min, f"{object.alias.replace('|', '_')}.{data_type}"),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
@@ -300,12 +300,15 @@ def get_all_futures_contract() -> List[Product]:
     for file_path in os.listdir(data_dir_min):
         if file_path.endswith('.' + data_type):
             code = file_path.split('.')[0]
-            contract = CNFuturesContract(name=code)
+            # 文件名用了 _ 代替 |（Windows 不允许 | 在文件名中），恢复为真实 uid
+            raw_name = code.replace('_', '|')
+            contract = CNFuturesContract(name=raw_name)
             contract_list.append(contract)
     return contract_list
 
 def get_object_path(object: Product, folder: str):
-    path = os.path.join(folder, f"{object.alias}.{data_type}")
+    safe_alias = object.alias.replace('|', '_')
+    path = os.path.join(folder, f"{safe_alias}.{data_type}")
     
     if not isinstance(object, CNFutures) or not os.path.isfile(path):
         return ''

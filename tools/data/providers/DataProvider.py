@@ -93,6 +93,9 @@ class DataProvider(ABC, metaclass=_DataProviderMeta):
         self.key = key
         self.label = label
 
+    def __repr__(self):
+        return self.label
+
     @classmethod
     def ensure_schema(cls, conn) -> None:
         """默认空实现 — 无表的数据源可沿用此默认值。"""

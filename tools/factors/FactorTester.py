@@ -11,6 +11,7 @@
 #   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
 # =============================================================================
 import os
+import re
 import uuid
 import logging
 import threading
@@ -147,7 +148,9 @@ class FactorTester(UniqueNameObject):
                 if logger_file:
                     if not os.path.exists(logger_dir_path):
                         os.makedirs(logger_dir_path)
-                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{self.name}_{datetime.now().strftime('%Y%m%d')}.log")
+                    # Windows 文件名不允许 <>:"/\|?*，替换为下划线
+                    _safe_log_name = re.sub(r'[<>:"/\\|?*]', '_', self.name)
+                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{_safe_log_name}_{datetime.now().strftime('%Y%m%d')}.log")
                     file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
                     file_handler.setFormatter(formatter)
                     self.logger.addHandler(file_handler)
