@@ -1242,33 +1242,63 @@
 ]'></div>
 <script>
 (function() {
-    if (window._gtScriptsLoaded) return;
-    var sectionHeader = document.getElementById('gt-section-header');
-    if (!sectionHeader) return;
-    var listEl = document.getElementById('gt-lazy-script-list');
-    if (!listEl) { console.warn('[GT lazy] script list not found'); return; }
     var urls = [];
-    try { urls = JSON.parse(listEl.getAttribute('data-urls') || '[]'); } catch(e) { console.warn('[GT lazy] bad JSON', e); return; }
-    if (!urls.length) return;
-    var idx = 0, loaded = false;
-    function loadNext() {
-        if (idx >= urls.length) { console.log('[GT lazy] all ' + urls.length + ' scripts loaded'); return; }
-        var s = document.createElement('script');
-        s.src = urls[idx++];
-        s.onload = s.onerror = loadNext;
-        document.body.appendChild(s);
+    var listEl = document.getElementById('gt-lazy-script-list');
+    if (listEl) {
+        try { urls = JSON.parse(listEl.getAttribute('data-urls') || '[]'); } catch(e) { console.warn('[GT lazy] bad JSON', e); }
     }
-    // Simply listen for the first click to start loading deferred scripts.
-    // app.js's toggle handler also fires on this click, so the section opens immediately.
-    // Scripts load asynchronously in the background without blocking the UI.
-    sectionHeader.addEventListener('click', function once() {
-        if (loaded) return;
-        loaded = true;
-        window._gtScriptsLoaded = true;
-        sectionHeader.removeEventListener('click', once);
-        sectionHeader.style.cursor = '';
-        console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
-        loadNext();
-    });
+    if (!urls.length) return;
+
+    var _loadPromise = null;
+    var _loaded = false;
+
+    function _loadAllScripts() {
+        return new Promise(function(resolve) {
+            var idx = 0;
+            function loadNext() {
+                if (idx >= urls.length) {
+                    console.log('[GT lazy] all ' + urls.length + ' scripts loaded');
+                    resolve();
+                    return;
+                }
+                var s = document.createElement('script');
+                s.src = urls[idx++];
+                s.onload = s.onerror = loadNext;
+                document.body.appendChild(s);
+            }
+            loadNext();
+        });
+    }
+
+    // 外部可调用：触发懒加载并等待完成（模板应用、summary 展开等场景）
+    window._loadGTDeferredScripts = function() {
+        if (_loaded) return Promise.resolve();
+        if (_loadPromise) return _loadPromise;
+        _loadPromise = _loadAllScripts().then(function() {
+            _loaded = true;
+            // 注册 GT snapshot 适配器 + 初始化依赖模块
+            if (typeof _ensureGroupTestAdapters === 'function') _ensureGroupTestAdapters();
+            if (window.GroupTest && typeof window.GroupTest.initDeferred === 'function') {
+                window.GroupTest.initDeferred();
+            }
+        });
+        return _loadPromise;
+    };
+
+    // 用户点击 ▼ 展开时触发懒加载 + 展开
+    var sectionHeader = document.getElementById('gt-section-header');
+    if (sectionHeader) {
+        sectionHeader.addEventListener('click', function once() {
+            if (_loaded) return;
+            sectionHeader.removeEventListener('click', once);
+            sectionHeader.style.cursor = 'progress';
+            console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
+            // 禁止默认的 onclick（如果有）
+            sectionHeader.onclick = null;
+            window._loadGTDeferredScripts().then(function() {
+                sectionHeader.style.cursor = '';
+            });
+        });
+    }
 })();
 </script>

@@ -111,16 +111,30 @@
         });
     }
 
-    function init() {
+    function initEssential() {
+        // ── Phase 1: runs immediately with 8 essential inline scripts ──
         call(dates().bindDateValidation, function(){})();
         call(dates().bindTimePrecisionSwitch, function(){})();
         if (GT.localSettings && typeof GT.localSettings.initTabs === 'function') {
             GT.localSettings.initTabs();
         }
 
+        // Section starts collapsed; toggle is bound after deferred scripts load
+        var layerTabs = document.getElementById('gt-layer-tabs');
+        var sectionToggle = document.getElementById('gt-section-toggle');
+        if (layerTabs && sectionToggle) {
+            layerTabs.classList.add('gt-collapsed');
+            sectionToggle.style.transform = 'rotate(-90deg)';
+        }
+    }
+
+    function initDeferred() {
+        // ── Phase 2: runs after all 40 deferred scripts are loaded ──
+        if (GT._deferredInitDone) return;
+        GT._deferredInitDone = true;
+
         if (GT.fee && typeof GT.fee.bind === 'function') GT.fee.bind();
 
-        // Bridge: global_template_module.js snapshots use these globals
         window._getFeeModifications = function() {
             if (GT.fee && typeof GT.fee.getModifications === 'function') return GT.fee.getModifications();
             return {};
@@ -175,18 +189,23 @@
             GT.tabs.mountTab('list');
         }
 
+        // Bind section toggle (only after everything is ready)
         var sectionHeader = document.getElementById('gt-section-header');
         var sectionToggle = document.getElementById('gt-section-toggle');
         var layerTabs = document.getElementById('gt-layer-tabs');
         if (sectionHeader && layerTabs && sectionToggle) {
             sectionHeader.removeAttribute('onclick');
-            sectionHeader.addEventListener('click', function() {
+            sectionHeader._toggleHandler = function() {
                 var collapsed = layerTabs.classList.toggle('gt-collapsed');
                 sectionToggle.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
                 if (!collapsed) layerTabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
-            layerTabs.classList.add('gt-collapsed');
-            sectionToggle.style.transform = 'rotate(-90deg)';
+            };
+            sectionHeader.addEventListener('click', sectionHeader._toggleHandler);
+
+            // Expand section now that everything is ready
+            layerTabs.classList.remove('gt-collapsed');
+            sectionToggle.style.transform = 'rotate(0deg)';
+            setTimeout(function() { layerTabs.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
         }
 
         var panelContainer = document.getElementById('gt-panel-container');
@@ -201,11 +220,12 @@
         bindSubmissionBus();
     }
 
-    GT.init = init;
+    GT.initEssential = initEssential;
+    GT.initDeferred = initDeferred;
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', initEssential);
     } else {
-        init();
+        initEssential();
     }
 })();

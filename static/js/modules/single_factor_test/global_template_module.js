@@ -563,9 +563,19 @@
 
     // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
     var _gtAdaptersRegistered = false;
-    function _ensureGroupTestAdapters() {
+    async function _ensureGroupTestAdapters() {
         if (_gtAdaptersRegistered) return;
+
+        // If GT modules aren't ready yet, trigger lazy load and wait
         var GT = window.GroupTest;
+        if (!GT || !GT.groupSettings || !GT.localSettings) {
+            if (typeof window._loadGTDeferredScripts === 'function') {
+                console.log('[global_template] waiting for GT deferred scripts...');
+                await window._loadGTDeferredScripts();
+                GT = window.GroupTest;  // re-read after load
+            }
+        }
+        if (_gtAdaptersRegistered) return;  // lazy loader already called us
 
         // 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射)
         if (GT && GT.groupSettings && GT.groupSettings.settings) {
@@ -624,9 +634,12 @@
         _gtAdaptersRegistered = true;
     }
 
+    // 暴露给全局，供 lazy loader 在脚本加载完成后调用
+    window._ensureGroupTestAdapters = _ensureGroupTestAdapters;
+
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
-        _ensureGroupTestAdapters();
+        await _ensureGroupTestAdapters();
         _commitGroupConfigDirty();
         return await SnapshotRegistry.collectAll();
     }
@@ -635,7 +648,7 @@
     // tplId: 因子家族设置模板 ID
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
-        _ensureGroupTestAdapters();
+        await _ensureGroupTestAdapters();
 
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId };
@@ -859,7 +872,7 @@
                             detail.innerHTML = '<div style="font-size:11px;color:#888;padding:4px 0;">加载中...</div>';
                             try {
                                 var template = await fetchTemplateDetail(header.getAttribute('data-tpl-id'));
-                                _ensureGroupTestAdapters();
+                                await _ensureGroupTestAdapters();
                             var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
                                 detail.innerHTML = summaryHtml || '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
                                 detail.setAttribute('data-loaded', 'true');
