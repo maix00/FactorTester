@@ -1185,56 +1185,86 @@
     }
 </style>
 
-<script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
-<!-- GroupTest modular scripts (load order matters) -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
-<!-- Datamodel layer — unified in core/group-settings.js -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
-<!-- addGroupBatch registry (UI list grouping) / productCoverageBatch progress (backend batch) (refs #110) -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/add-group-batch.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-group-batch.js') }}"></script>
-<!-- Panel layer — UI components by category -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/shared/money_display.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/charts/group_returns.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
+<!-- GroupTest scripts: lazy-loaded on first "分组测试" section title click -->
+<script type="application/json" id="gt-lazy-script-list">
+[
+    "{{ url_for('static', filename='js/modules/shared/date_utils.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/add-group-batch.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-group-batch.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/money_display.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/charts/group_returns.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"
+]
+</script>
+<script>
+(function() {
+    if (window._gtScriptsLoaded) return;
+    var sectionTitle = document.querySelector('#group_test_module .section-title');
+    if (!sectionTitle) return;
+    var listEl = document.getElementById('gt-lazy-script-list');
+    if (!listEl) return;
+    var urls = [];
+    try { urls = JSON.parse(listEl.textContent || '[]'); } catch(e) { return; }
+    if (!urls.length) return;
+    var idx = 0, loaded = false;
+    function loadNext() {
+        if (idx >= urls.length) { console.log('[GT lazy] all ' + urls.length + ' scripts loaded'); return; }
+        var s = document.createElement('script');
+        s.src = urls[idx++];
+        s.onload = s.onerror = loadNext;
+        document.body.appendChild(s);
+    }
+    sectionTitle.addEventListener('click', function() {
+        if (loaded) return;
+        loaded = true;
+        sectionTitle.style.cursor = 'progress';
+        console.log('[GT lazy] loading ' + urls.length + ' scripts...');
+        setTimeout(loadNext, 10);
+    });
+    sectionTitle.style.cursor = 'pointer';
+    sectionTitle.title = '点击加载分组测试（43个脚本按需加载）';
+})();
+</script>
