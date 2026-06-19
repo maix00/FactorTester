@@ -1186,8 +1186,8 @@
 </style>
 
 <!-- GroupTest scripts: lazy-loaded on first "分组测试" section title click -->
-<script type="application/json" id="gt-lazy-script-list">
-[
+<!-- data-urls stored in div (not script) to survive executeScriptsIn which removes all script tags -->
+<div style="display:none" id="gt-lazy-script-list" data-urls='[
     "{{ url_for('static', filename='js/modules/shared/date_utils.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}",
@@ -1237,17 +1237,16 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"
-]
-</script>
+]'></div>
 <script>
 (function() {
     if (window._gtScriptsLoaded) return;
     var sectionTitle = document.querySelector('#group_test_module .section-title');
     if (!sectionTitle) return;
     var listEl = document.getElementById('gt-lazy-script-list');
-    if (!listEl) return;
+    if (!listEl) { console.warn('[GT lazy] script list not found'); return; }
     var urls = [];
-    try { urls = JSON.parse(listEl.textContent || '[]'); } catch(e) { return; }
+    try { urls = JSON.parse(listEl.getAttribute('data-urls') || '[]'); } catch(e) { console.warn('[GT lazy] bad JSON', e); return; }
     if (!urls.length) return;
     var idx = 0, loaded = false;
     function loadNext() {
@@ -1265,6 +1264,6 @@
         setTimeout(loadNext, 10);
     });
     sectionTitle.style.cursor = 'pointer';
-    sectionTitle.title = '点击加载分组测试（43个脚本按需加载）';
+    sectionTitle.title = '点击加载分组测试（' + urls.length + '个脚本按需加载）';
 })();
 </script>
