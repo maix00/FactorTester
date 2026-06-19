@@ -17,4 +17,5 @@ dependencies:
       - scipy==1.16.3
       - sqlite-web==0.7.2
       - statsmodels==0.14.6
+      - orjson==3.11.9
       - playwright==1.60.0
