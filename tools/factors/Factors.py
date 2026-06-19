@@ -197,7 +197,7 @@ class Factor(UniqueNameObject, FactorExpr):
 
         # 数据源频率 —— 外部指定 > 显式配置 > 自动推断
         if freq is not None:
-            freq = freq
+            freq = DataFreq(freq)
         else:
             freq_name = (
                 getattr(self.family, '_source_freq', None)

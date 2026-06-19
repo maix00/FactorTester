@@ -92,6 +92,18 @@ def test_declared_source_frequency_overrides_daily_window_and_signal():
     assert factor._source_freq == DataFreq.MIN1
 
 
+def test_explicit_source_frequency_normalizes_string_input():
+    factor = _DeclaredMinuteSourceDailySignal().get_factor(
+        SourceFrequencyWindow="1D",
+        **{"$F": "1D", "$Rev": "0"},
+    )
+
+    result = factor.evaluate([_Product()], freq="MIN1")
+
+    assert factor._source_freq is DataFreq.MIN1
+    assert not result.empty
+
+
 def test_declared_source_frequency_skips_products_without_that_source():
     factor = _DeclaredMinuteSourceDailySignal().get_factor(
         SourceFrequencyWindow="1D",
