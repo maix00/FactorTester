@@ -14,6 +14,7 @@
  * - summarize(): 接收快照数据，返回摘要字符串（或字符串数组，多行展示）
  */
 (function() {
+    console.log('[TplModule] IIFE start, FF_ALIAS=', window.factorFamilyAlias);
     const FF_ALIAS = window.factorFamilyAlias || '';
     const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
     var _templateListRequest = null;
@@ -813,11 +814,17 @@
     }
 
     async function _loadTemplateListOnce() {
+        console.log('[TplModule] _loadTemplateListOnce called, FF_ALIAS=', FF_ALIAS, 'API=', TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
         const listEl = document.getElementById('global-tpl-list');
+        console.log('[TplModule] listEl found:', !!listEl);
         if (!listEl) return;
         try {
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
+            const url = TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS);
+            console.log('[TplModule] fetching:', url);
+            const resp = await fetch(url);
+            console.log('[TplModule] fetch response status:', resp.status);
             const data = await resp.json();
+            console.log('[TplModule] response data:', data);
             if (!data.success || !data.templates || data.templates.length === 0) {
                 listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px;">暂无已保存的模板</div>';
                 return;
@@ -996,6 +1003,9 @@
 
     // ── 初始化 ────────────────────────────────────────────────────────────
     function initGlobalTemplateModule() {
+        console.log('[TplModule] initGlobalTemplateModule called');
+        const drawer = document.getElementById('global-tpl-drawer');
+        console.log('[TplModule] drawer found:', !!drawer);
         const saveBtn = document.getElementById('global-tpl-save-btn');
         if (saveBtn) saveBtn.onclick = saveTemplate;
 
@@ -1003,7 +1013,9 @@
         const drawer = document.getElementById('global-tpl-drawer');
         if (drawer) {
             const observer = new MutationObserver(() => {
+                console.log('[TplModule] MutationObserver fired, drawer has open:', drawer.classList.contains('open'));
                 if (drawer.classList.contains('open')) {
+                    console.log('[TplModule] calling loadTemplateList');
                     loadTemplateList();
                 }
             });
