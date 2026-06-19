@@ -13,17 +13,31 @@ from __future__ import annotations
 #   - get_all_products(): 获取全量品种对象列表
 # =============================================================================
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 import pandas as pd
+
+# ── 平台感知的默认线程数 ──
+# macOS: GIL 争抢轻（Accelerate 在执行 BLAS 时自动放 GIL），可用较多线程。
+# Windows/Linux: GIL 争抢重，线程过多反而互相踩踏，cap 更低。
+def _default_max_workers(cpu_bound: bool = True) -> int:
+    cpu = os.cpu_count() or 4
+    if sys.platform == 'darwin':
+        return min(cpu, 10 if cpu_bound else 12)
+    else:
+        return min(max(cpu // 2, 2), 4 if cpu_bound else 6)
 
 # 按成交量 top-k 筛选时保留的品种比例（0~1）
 sift_volume_ratio = 0.8
 
 # IC 测试是否并行计算（默认 True，可设为 False 降级排错）
 IC_PARALLEL: bool = True
-# IC 并行计算的最大线程数
-IC_PARALLEL_MAX_WORKERS: int = 8
+# IC 并行计算的最大线程数（CPU 密集型，平台自适应）
+IC_PARALLEL_MAX_WORKERS: int = _default_max_workers(cpu_bound=True)
+
+# waitress 生产模式线程数（I/O 密集型，可略高于 CPU workers）
+WAITRESS_THREADS: int = _default_max_workers(cpu_bound=False)
 
 # IC 测试的默认日期区间（带时区）
 default_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
