@@ -1004,13 +1004,12 @@
     // ── 初始化 ────────────────────────────────────────────────────────────
     function initGlobalTemplateModule() {
         console.log('[TplModule] initGlobalTemplateModule called');
-        const drawer = document.getElementById('global-tpl-drawer');
-        console.log('[TplModule] drawer found:', !!drawer);
         const saveBtn = document.getElementById('global-tpl-save-btn');
         if (saveBtn) saveBtn.onclick = saveTemplate;
 
         // 抽屉打开时加载模板列表
         const drawer = document.getElementById('global-tpl-drawer');
+        console.log('[TplModule] drawer found:', !!drawer);
         if (drawer) {
             const observer = new MutationObserver(() => {
                 console.log('[TplModule] MutationObserver fired, drawer has open:', drawer.classList.contains('open'));
