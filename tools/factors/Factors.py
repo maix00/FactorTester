@@ -253,9 +253,27 @@ class Factor(UniqueNameObject, FactorExpr):
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 
-        products = [product for product in products if freq in set(product.list_available_freqs())]
+        requested_products = list(products)
+        freq_name = freq.name
+        products = [
+            product
+            for product in requested_products
+            if any(getattr(available, 'name', str(available)) == freq_name
+                   for available in product.list_available_freqs())
+        ]
         if not products:
-            raise ValueError(f"{self}: 没有产品提供数据频率 {freq}，无法计算因子值")
+            available_sample = {
+                str(getattr(product, 'name', product)): [
+                    f"{getattr(available, 'name', str(available))}<{type(available).__module__}.{type(available).__name__}>"
+                    for available in product.list_available_freqs()
+                ]
+                for product in requested_products[:5]
+            }
+            raise ValueError(
+                f"{self}: 没有产品提供数据频率 {freq_name}，无法计算因子值；"
+                f"requested_type={type(freq).__module__}.{type(freq).__name__}, "
+                f"available_sample={available_sample}"
+            )
         self._source_freq = freq
 
         # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
