@@ -25,7 +25,7 @@
 """
 from __future__ import annotations
 
-import json as _json
+import orjson
 import queue
 import threading
 from typing import Any, Dict, List, Optional
@@ -86,7 +86,7 @@ class SSEProgressEmitter:
 
     @staticmethod
     def _event(name: str, payload: Dict[str, Any]) -> str:
-        return f"event: {name}\ndata: {_json.dumps(payload, default=str)}\n\n"
+        return f"event: {name}\ndata: {orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY).decode()}\n\n"
 
     def _generate(self):
         while True:

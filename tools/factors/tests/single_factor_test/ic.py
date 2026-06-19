@@ -25,6 +25,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
     s = ic_series.dropna()
     ac1 = None
     half_life = None
+    acf_vals = None
     if len(s) > 2:
         from statsmodels.tsa.stattools import acf
         try:
@@ -43,6 +44,9 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         except Exception:
             pass
 
+    # 把完整的 acf 数组也缓存起来，避免 _build_ic_response 重复计算
+    acf_vals_list = acf_vals.tolist() if acf_vals is not None else None
+
     return pd.Series({
         "mean": mean,
         "std": std,
@@ -52,6 +56,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         "min": min_ic,
         "ac1": ac1,
         "half_life": half_life,
+        "acf_vals": acf_vals_list,
     })
 
 

@@ -8,6 +8,8 @@ import threading
 import traceback
 from typing import Any, Dict, List, Tuple, cast
 
+import orjson
+
 import numpy as np
 import pandas as pd
 from flask import Response, jsonify, request
@@ -336,6 +338,17 @@ def _build_ic_response(
                     })
             ic_decay_results[factor.alias] = decay_list
 
+    # ── products 列表 — 所有因子共享，提到循环外只构建一次 ──
+    final_products = resolved_products if resolved_products else all_products
+    shared_products: List[dict] = []
+    for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
+        p_name = str(getattr(p, 'name', p))
+        p_desc = str(getattr(p, 'desc', p_name))
+        shared_products.append({
+            'name': p_name, 'desc': p_desc,
+            'is_term_contract': _is_term_contract_product(p),
+        })
+
     response: dict = {
         'success': True,
         'paths_hash': paths_hash,
@@ -358,58 +371,59 @@ def _build_ic_response(
         vals = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
                 for v in ic_s.values.tolist()]
 
-        # autocorr
+        # autocorr — 优先复用 ic_stats() 已算好的 acf_vals，避免重复调用 statsmodels
         autocorr = None
         if len(ic_s) > 2:
             try:
-                from statsmodels.tsa.stattools import acf
-                nlags = min(20, max(1, len(ic_s) // 2 - 1))
-                acf_vals = acf(ic_s.values, nlags=nlags, fft=False)
-                autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals[1:], start=1)]
+                cached_stats = tester.results[factor].ic_stats if factor in tester.results else None
+                acf_vals_list = cached_stats.get('acf_vals') if isinstance(cached_stats, pd.Series) else None
+                if acf_vals_list is not None and isinstance(acf_vals_list, list):
+                    autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals_list[1:], start=1)]
+                else:
+                    # 回退路径（旧缓存没有 acf_vals 时）
+                    s_vals = np.asarray(ic_s.values, dtype=float)
+                    s_centered = s_vals - s_vals.mean()
+                    denom = np.dot(s_centered, s_centered)
+                    nlags = min(20, max(1, len(s_vals) // 2 - 1))
+                    if denom > 0:
+                        acf_arr = [1.0]
+                        for lag in range(1, nlags + 1):
+                            num = np.dot(s_centered[lag:], s_centered[:-lag])
+                            acf_arr.append(float(num / denom))
+                        autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_arr[1:], start=1)]
             except Exception:
                 autocorr = None
 
-        # rolling_ic
+        # rolling_ic — pandas 向量化替代 Python for 循环
         rolling_ic = None
         if isinstance(rolling_window, (int, float)) and rolling_window > 1:
             win = int(rolling_window)
             s_vals = np.asarray(ic_s.values, dtype=float)
             if len(s_vals) >= win:
-                r_mean, r_ir, r_dates = [], [], []
-                for i in range(win - 1, len(s_vals)):
-                    win_slice = np.asarray(s_vals[i - win + 1:i + 1], dtype=float)
-                    m = float(np.mean(win_slice))
-                    std_win = float(np.std(win_slice, ddof=1))
-                    rr = (m / std_win) if std_win != 0 else None
-                    r_mean.append(_safe_round(m))
-                    r_ir.append(_safe_round(rr))
-                    ts_i = signal_ts[i]
-                    if hasattr(ts_i, 'strftime'):
-                        r_dates.append(
-                            ts_i.strftime('%Y-%m-%d') if is_daily
-                            else int(cast(np.int64, ts_i.value) // 10**6)
-                        )
-                    else:
-                        r_dates.append(str(ts_i))
-                rolling_ic = {'window': win, 'dates': r_dates, 'mean': r_mean, 'ir': r_ir}
-
-        # products
-        products = []
-        final_products = resolved_products if resolved_products else all_products
-        for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
-            p_name = str(getattr(p, 'name', p))
-            p_desc = str(getattr(p, 'desc', p_name))
-            products.append({
-                'name': p_name, 'desc': p_desc,
-                'is_term_contract': _is_term_contract_product(p),
-            })
+                s = pd.Series(s_vals)
+                r_mean = s.rolling(win, min_periods=win).mean().iloc[win - 1:].to_numpy(dtype=float)
+                r_std = s.rolling(win, min_periods=win).std(ddof=1).iloc[win - 1:].to_numpy(dtype=float)
+                r_ir = np.full_like(r_mean, np.nan)
+                valid_mask = r_std > 0
+                r_ir[valid_mask] = r_mean[valid_mask] / r_std[valid_mask]
+                ts_win = signal_ts[win - 1:]
+                if is_daily:
+                    r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win]
+                else:
+                    r_dates = cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
+                rolling_ic = {
+                    'window': win,
+                    'dates': r_dates,
+                    'mean': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_mean],
+                    'ir': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_ir],
+                }
 
         factor_data: Dict[str, Any] = {
             'name': factor.name,
             'alias': factor.alias,
             'ic_series': {'dates': dates, 'values': vals},
             'autocorr': autocorr,
-            'products': products,
+            'products': shared_products,
         }
 
         # multi-lag
@@ -582,7 +596,7 @@ def run_ic_test():
             tester, factors, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
         )
-        return jsonify(response)
+        return Response(orjson.dumps(response, option=orjson.OPT_SERIALIZE_NUMPY), mimetype='application/json')
 
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
