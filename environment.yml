@@ -1,4 +1,8 @@
 name: GTHT
+
+# ═══════════════════════════════════════════════════════════════════════
+# 跨平台依赖（macOS / Windows）
+# ═══════════════════════════════════════════════════════════════════════
 dependencies:
   - python=3.14.0
   - sqlite=3.51.0
@@ -8,14 +12,38 @@ dependencies:
       - duckdb==1.5.3
       - waitress==3.0.2
       - pandas==3.0.2
-      - numpy==2.3.4
       - matplotlib==3.10.7
       - pyarrow==22.0.0
       - openpyxl==3.1.5
       - tqdm==4.67.1
       - pytest==9.0.3
-      - scipy==1.16.3
+      - scipy==1.16.3            # macOS: 链接 Accelerate；Windows: 参见下方 MKL 说明
       - sqlite-web==0.7.2
       - statsmodels==0.14.6
       - orjson==3.11.9
       - playwright==1.60.0
+
+  # ── numpy ──
+  # macOS: pip 版 numpy (2.3.4) 自动链接 Apple Accelerate，性能最优。
+  # Windows: pip 版默认 OpenBLAS，矩阵运算比 Accelerate 慢 3-5x。
+  #          创建环境后运行下方 MKL 切换命令。
+  - pip:
+      - numpy==2.3.4
+
+# ═══════════════════════════════════════════════════════════════════════
+# Windows 专属 MKL 加速（macOS 请忽略此段 — Accelerate 已是最优）
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Windows 上 pip 安装的 numpy 默认使用 OpenBLAS，矩阵运算比 macOS 自带
+# 的 Apple Accelerate 慢 3-5x。切换为 Intel MKL 可大幅缩小此差距
+# （尤其是在 _apply_spearman、cs_zscore 等密集 BLAS 调用中）。
+#
+# 创建 conda 环境后，在 Windows 终端执行：
+#
+#   conda install -n GTHT -c conda-forge "blas=*=*mkl" numpy==2.3.4 scipy==1.16.3
+#
+# 这会用 conda-forge 的 MKL 版 numpy/scipy 覆盖 pip 版本。
+# numpy 重新链接到 Intel MKL 而非 OpenBLAS。
+#
+# 验证（输出应包含 mkl_rt，而非 openblas）：
+#   conda run -n GTHT python -c "import numpy as np; np.show_config()"
