@@ -4,11 +4,17 @@
 #
 # 用途: 排除 Codes（项目根）、DATA_DIR（parquet 数据）和 Conda 安装目录，
 #       减少 Defender 实时扫描对 .parquet 文件读取和 .pyd C 扩展加载的影响。
+#       已存在的排除路径会自动跳过，可安全重复运行。
 #
-# 路径来源: DATA_DIR 由 scripts/data_dir.py 动态解析（优先 .settings → feat root → 回退）。
+# 路径来源: FEAT_ROOT 和 DATA_DIR 由 scripts/data_dir.py 动态解析。
 #
-# 用法: 以管理员身份运行 PowerShell，cd 到项目目录后执行:
-#   powershell -ExecutionPolicy Bypass -File scripts\windows_defender_exclusion.ps1
+# ▶ 人类运行方式（任选一种）:
+#   方式 A — 右键开始菜单 → "终端(管理员)"，然后:
+#     cd C:\Users\22805\Documents\GTHT\FactorTester
+#     powershell -ExecutionPolicy Bypass -File scripts\windows_defender_exclusion.ps1
+#
+#   方式 B — 在 VS Code 终端里:
+#     Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile', '-File', 'scripts\windows_defender_exclusion.ps1'
 # ═══════════════════════════════════════════════════════════════════════
 
 $ErrorActionPreference = "Stop"
@@ -75,16 +81,24 @@ $exclusions = @(
 )
 
 Write-Host ""
+# 读取当前已排除路径，用于去重
+$existing = @((Get-MpPreference).ExclusionPath | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
+
 foreach ($path in $exclusions) {
-    if (Test-Path $path) {
-        try {
-            Add-MpPreference -ExclusionPath $path -ErrorAction Stop
-            Write-Host "[OK] 已添加排除: $path" -ForegroundColor Green
-        } catch {
-            Write-Host "[WARN] 添加失败: $path — $_" -ForegroundColor Yellow
-        }
-    } else {
+    if (-not (Test-Path $path)) {
         Write-Host "[SKIP] 路径不存在: $path" -ForegroundColor DarkGray
+        continue
+    }
+    $normalized = [System.IO.Path]::GetFullPath($path)
+    if ($normalized -in $existing) {
+        Write-Host "[SKIP] 已存在: $path" -ForegroundColor DarkGray
+        continue
+    }
+    try {
+        Add-MpPreference -ExclusionPath $path -ErrorAction Stop
+        Write-Host "[OK] 已添加排除: $path" -ForegroundColor Green
+    } catch {
+        Write-Host "[WARN] 添加失败: $path — $_" -ForegroundColor Yellow
     }
 }
 
