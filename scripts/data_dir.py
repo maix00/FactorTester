@@ -72,8 +72,22 @@ def get_data_dir() -> str:
     return _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'data'))
 
 
+def get_feat_root() -> str:
+    """返回 Codes/（feat 根）绝对路径。
+
+    优先级：
+    1. 向上查找 .workspace/fix/ 标记目录（worktree 下也能正确找到 feat 根）
+    2. 相对于本文件的 ../（即 scripts/ 的父目录）
+    """
+    root = _find_feat_root(_os.path.dirname(__file__))
+    if root is not None:
+        return root
+    return _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..'))
+
+
 # 模块级常量，方便直接 import
 DATA_DIR = get_data_dir()
+FEAT_ROOT = get_feat_root()
 
 
 def _get_cache_db_dir() -> str:

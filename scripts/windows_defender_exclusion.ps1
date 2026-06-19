@@ -24,28 +24,38 @@ Write-Host "══════════════════════�
 Write-Host "  Windows Defender 排除路径配置" -ForegroundColor Cyan
 Write-Host "══════════════════════════════════════════════" -ForegroundColor Cyan
 
-# ── 1. 项目根目录 (Codes/) ──
-# 脚本位于 <Codes>/scripts/，故 Codes = 脚本所在目录的上一级
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$CodesDir = Split-Path -Parent $ScriptDir
-Write-Host "[INFO] Codes (项目根): $CodesDir"
-
-# ── 2. DATA_DIR ──
-# 通过 data_dir.py 解析（兼容 .settings 配置和 worktree 隔离）
-Write-Host "[INFO] 解析 DATA_DIR ..."
-$PyCmd = @"
+# ── 1. 项目根 (Codes/) 和 DATA_DIR ──
+# 全部由 data_dir.py 解析：FEAT_ROOT 向上查找 .workspace/fix/ 标记，
+# 即使脚本在子 worktree 中运行也能正确定位到 Codes/ feat 根。
+Write-Host "[INFO] 解析 Codes 根和 DATA_DIR (via data_dir.py) ..."
+# conda run 在多层嵌套（Start-Process → conda run → python -c）时无法处理
+# 含换行符的 -c 参数，改用临时 .py 文件解决。
+$TempPy = Join-Path $env:TEMP "defender_resolve_paths.py"
+$ScriptPath = $MyInvocation.MyCommand.Path
+@"
 import sys, os
-sys.path.insert(0, os.path.normpath(r"$CodesDir"))
-from scripts.data_dir import DATA_DIR
+script = os.path.normpath(r"$ScriptPath")
+sys.path.insert(0, os.path.dirname(os.path.dirname(script)))
+from scripts.data_dir import FEAT_ROOT, DATA_DIR
+print(FEAT_ROOT)
 print(DATA_DIR)
-"@
-$DataDir = conda run -n GTHT python -c $PyCmd 2>$null
-if (-not $DataDir -or $LASTEXITCODE -ne 0) {
-    Write-Host "[WARN] 无法通过 data_dir.py 解析 DATA_DIR，尝试回退路径" -ForegroundColor Yellow
-    $DataDir = Join-Path $CodesDir "..\data"
+"@ | Out-File -FilePath $TempPy -Encoding UTF8
+
+$PyOut = conda run -n GTHT python "$TempPy" 2>&1
+Remove-Item $TempPy -ErrorAction SilentlyContinue
+
+if ($LASTEXITCODE -ne 0 -or -not $PyOut) {
+    Write-Host "[ERROR] 无法运行 data_dir.py: $PyOut" -ForegroundColor Red
+    Write-Host "[ERROR] 请确认 GTHT 环境已配置" -ForegroundColor Red
+    exit 1
 }
-$DataDir = [System.IO.Path]::GetFullPath($DataDir)
+$lines = $PyOut -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+$CodesDir = $lines[0]
+$DataDir = $lines[1]
+Write-Host "[INFO] Codes (feat 根): $CodesDir"
 Write-Host "[INFO] DATA_DIR: $DataDir"
+# 确保 DATA_DIR 是绝对路径
+$DataDir = [System.IO.Path]::GetFullPath($DataDir)
 
 # ── 3. Conda 安装目录 ──
 # 通过 conda info --base 获取
