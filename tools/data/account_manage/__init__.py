@@ -15,6 +15,8 @@ from tools.data.sqlite.account_manager import (
     delete_user_template_collection,
     ensure_account_manager_sqlite_store,
     iter_user_template_collections,
+    list_user_template_metadata as _list_user_template_metadata,
+    load_user_template as _load_user_template,
     ensure_scope_exists as _ensure_scope_exists,
     list_all_aliases_across_scopes as _list_all_aliases_across_scopes,
     list_param_config_aliases as _list_param_config_aliases,
@@ -410,6 +412,33 @@ def load_user_templates(
 ) -> list:
     ensure_account_manager_sqlite_store()
     return _load_user_templates(username, kind, ff_alias=ff_alias, scope_key=scope_key)
+
+
+def list_user_template_metadata(
+    username: str,
+    kind: str,
+    ff_alias: str | None = None,
+    scope_key: str | None = None,
+) -> list:
+    ensure_account_manager_sqlite_store()
+    return _list_user_template_metadata(username, kind, ff_alias=ff_alias, scope_key=scope_key)
+
+
+def load_user_template(
+    username: str,
+    kind: str,
+    template_id: str,
+    ff_alias: str | None = None,
+    scope_key: str | None = None,
+) -> dict | None:
+    ensure_account_manager_sqlite_store()
+    return _load_user_template(
+        username,
+        kind,
+        template_id,
+        ff_alias=ff_alias,
+        scope_key=scope_key,
+    )
 
 
 def save_user_templates(

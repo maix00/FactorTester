@@ -37,6 +37,8 @@ from .user_template import (
     delete_user_template_collections,
     delete_user_template_collection,
     iter_user_template_collections,
+    list_user_template_metadata,
+    load_user_template,
     load_user_templates,
     save_user_template_payload,
     save_user_templates,
