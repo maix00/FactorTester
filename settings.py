@@ -19,12 +19,12 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 # ── 平台感知的默认线程数 ──
-# macOS: GIL 争抢轻（Accelerate 在执行 BLAS 时自动放 GIL），可用较多线程。
+# macOS: 保持 merge 前经过实际使用验证的 8 worker 上限。
 # Windows/Linux: GIL 争抢重，线程过多反而互相踩踏，cap 更低。
 def _default_max_workers(cpu_bound: bool = True) -> int:
     cpu = os.cpu_count() or 4
     if sys.platform == 'darwin':
-        return min(cpu, 10 if cpu_bound else 12)
+        return min(cpu, 8 if cpu_bound else 12)
     else:
         return min(max(cpu // 2, 2), 4 if cpu_bound else 6)
 

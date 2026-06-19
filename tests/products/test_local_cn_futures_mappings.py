@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 from sources.LocalCNFutures import CNFutures as cn_futures_module
 
 
@@ -60,3 +62,17 @@ def test_local_cn_futures_contract_to_product_requires_wind_mapping(monkeypatch)
 
     assert cn_futures_module.CNFutures.get_contract_parent('CFFEX|F|IF|2605') is None
     assert cn_futures_module.CNFutures.get_contracts_for_product(product.alias) == ['CFFEX|F|IF|2605']
+
+
+def test_main_product_data_source_survives_cn_futures_module_reload():
+    from tools.data.types import DataFreq
+
+    product = next(
+        item
+        for item in cn_futures_module.CNFUTURES
+        if DataFreq.MIN1 in item.list_available_freqs()
+    )
+
+    importlib.reload(cn_futures_module)
+
+    assert DataFreq.MIN1 in product.list_available_freqs()

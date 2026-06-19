@@ -173,6 +173,8 @@ class CNFuturesContract(FuturesContract):
 class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
 
+    _is_cn_futures_main_product = True
+
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
                  data_path: Optional[str] = None,
@@ -310,7 +312,9 @@ def get_object_path(object: Product, folder: str):
     safe_alias = object.alias.replace('|', '_')
     path = os.path.join(folder, f"{safe_alias}.{data_type}")
     
-    if not isinstance(object, CNFutures) or not os.path.isfile(path):
+    # Module reload creates a new CNFutures class while live testers may still
+    # hold products from the previous class. Use a stable capability marker.
+    if not getattr(object, '_is_cn_futures_main_product', False) or not os.path.isfile(path):
         return ''
     else:
         import pyarrow.parquet as pq
