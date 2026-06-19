@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import Settings
+import settings as Settings
 from server import create_app
 from tools.data.sqlite import user as account_store
 from tools.data.sqlite import data_source as data_source_sqlite

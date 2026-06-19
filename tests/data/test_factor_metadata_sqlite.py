@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-import Settings
+import settings as Settings
 from tools.data.sqlite import factor_metadata as factor_metadata_sqlite
 from tools.data.sqlite import factor_source_store
 

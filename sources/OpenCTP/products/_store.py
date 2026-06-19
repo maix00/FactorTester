@@ -15,7 +15,7 @@ import sqlite3
 from datetime import date
 from typing import Any
 
-import Settings
+import settings as Settings
 from tools.data.hub import DataHub
 
 logger = logging.getLogger(__name__)

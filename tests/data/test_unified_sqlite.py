@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import Settings
+import settings as Settings
 from tools.data.sqlite import bootstrap as unified_sqlite
 
 

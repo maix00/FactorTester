@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-import Settings
+import settings as Settings
 from tools.data.hub import DataHub
 
 logger = logging.getLogger(__name__)

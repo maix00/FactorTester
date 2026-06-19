@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-import Settings
+import settings as Settings
 from tools.data.sqlite import factor_source_store
 
 

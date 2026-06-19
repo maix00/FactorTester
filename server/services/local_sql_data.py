@@ -20,7 +20,7 @@ def _hub() -> DataHub:
 # ── 初始化：注册统一本地数据 store ───────────────────────────────
 
 def _sqlite_store_path() -> str:
-    import Settings
+    import settings as Settings
     return str(Settings.CACHE_DB_PATH)
 
 

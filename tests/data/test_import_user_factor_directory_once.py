@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-import Settings
+import settings as Settings
 from scripts.import_user_factor_directory_once import import_user_factor_directory_once
 
 

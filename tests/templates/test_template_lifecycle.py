@@ -9,7 +9,7 @@ import copy
 
 import pytest
 
-import Settings
+import settings as Settings
 from server.modules.templates.common import (
     SINGLE_FACTOR_SETTING_TEMPLATE_KIND,
     load_template_list,

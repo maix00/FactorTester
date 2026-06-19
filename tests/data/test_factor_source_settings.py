@@ -4,7 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 
-import Settings
+import settings as Settings
 from tools.data.sqlite import factor_source_settings as factor_source_settings_sqlite
 from tools.data.sqlite import factor_source_workspace_settings as factor_source_workspace_settings_sqlite
 

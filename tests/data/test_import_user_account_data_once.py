@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-import Settings
+import settings as Settings
 from scripts.import_user_account_data_once import (
     import_user_account_data_once,
     verify_user_account_data_import,

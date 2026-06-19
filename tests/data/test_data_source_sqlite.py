@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-import Settings
+import settings as Settings
 from tools.data.sqlite import data_source as data_source_sqlite
 from tools.data.tech_docs.datadict_scan import DataSourceEntry
 from tools.data.providers import DataProviderProductTS as DataSource

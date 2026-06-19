@@ -216,7 +216,7 @@ class DataHub:
         """确保 source_visits 表存在于统一本地 SQLite 中。"""
         # 如果统一本地 SQLite store 尚未注册，自动注册
         if "openctp" not in self._sqlite_stores:
-            import Settings
+            import settings as Settings
             self.register_store("openctp", Settings.CACHE_DB_PATH)
         with self._connect_sqlite("openctp") as conn:
             conn.execute(

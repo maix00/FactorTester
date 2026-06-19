@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import Settings
+import settings as Settings
 from server.services import local_sql_data
 
 

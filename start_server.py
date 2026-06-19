@@ -21,7 +21,7 @@ from server import create_app
 from tools.data.account_manage import accounts_lock, load_accounts
 from server.services.session_runtime import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
-import settings
+import settings as Settings
 
 app = create_app()
 
@@ -33,7 +33,7 @@ app = create_app()
 # 需要监控的项目模块前缀（改这些模块时自动 reload）
 _WATCH_PREFIXES = ('Factors.', 'tools.', 'server.', 'sources.')
 # 精确匹配的模块名（不以 '.' 为前缀的顶层模块）
-_WATCH_EXACT = {'Settings'}
+_WATCH_EXACT = {'settings'}
 
 # 不 reload 的模块（有复杂全局状态，reload 会出问题）
 _SKIP_RELOAD = {
@@ -168,7 +168,7 @@ def run_flask_server(port=8000, directory='.'):
         print("开发模式 (Flask debug=True, 热重载已启用)")
         app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
     else:
-        wt = settings.WAITRESS_THREADS
+        wt = Settings.WAITRESS_THREADS
         print(f"生产模式 (waitress, threads={wt}, platform={sys.platform})")
         # 启动热插拔文件监控
         _start_hot_reload_watcher(interval=3.0)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-import Settings
+import settings as Settings
 from scripts.import_user_templates_once import import_user_templates_once
 from tools.data.account_manage import load_user_templates
 
