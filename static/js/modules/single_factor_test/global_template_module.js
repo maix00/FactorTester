@@ -561,72 +561,72 @@
         }
     });
 
-    // ── 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
-    (function() {
+    // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
+    var _gtAdaptersRegistered = false;
+    function _ensureGroupTestAdapters() {
+        if (_gtAdaptersRegistered) return;
         var GT = window.GroupTest;
-        if (!GT || !GT.groupSettings || !GT.groupSettings.settings) {
-            console.warn('[global_template] GroupTest groupSettings snapshot adapter is not available');
-            return;
-        }
-        var base = GT.groupSettings.settings;
-        SnapshotRegistry.register({
-            key: base.key,
-            order: base.order,
-            label: base.label,
-            icon: base.icon,
-            collect: base.collect,
-            apply: function(gs, ctx) {
-                var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
-                var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
-                if (working && working.groups) {
-                    var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
-                    var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
-                    working.groups.forEach(function(g) {
-                        if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
-                            g.testerId = oldToNew[String(g.testerId)];
-                        } else if (g.testerId && fallbackNewId) {
-                            g.testerId = fallbackNewId;
-                        }
-                    });
-                }
-                var applyResult = base.apply(working);
-                if (applyResult.errors && applyResult.errors.length > 0) {
-                    console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
-                }
-                if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
-                    GT.tabs.mountTab('list');
-                }
-            },
-            summarize: base.summarize,
-        });
-    })();
 
-    // ── 7. local_settings (order=50, GroupTest 本地 UI 状态) ──
-    (function() {
-        var GT = window.GroupTest;
-        var LS = GT && GT.localSettings;
-        if (!LS) {
-            console.warn('[global_template] GroupTest localSettings snapshot adapter is not available');
-            return;
+        // 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射)
+        if (GT && GT.groupSettings && GT.groupSettings.settings) {
+            var base = GT.groupSettings.settings;
+            SnapshotRegistry.register({
+                key: base.key,
+                order: base.order,
+                label: base.label,
+                icon: base.icon,
+                collect: base.collect,
+                apply: function(gs, ctx) {
+                    var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
+                    var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
+                    if (working && working.groups) {
+                        var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
+                        var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
+                        working.groups.forEach(function(g) {
+                            if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
+                                g.testerId = oldToNew[String(g.testerId)];
+                            } else if (g.testerId && fallbackNewId) {
+                                g.testerId = fallbackNewId;
+                            }
+                        });
+                    }
+                    var applyResult = base.apply(working);
+                    if (applyResult.errors && applyResult.errors.length > 0) {
+                        console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
+                    }
+                    if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
+                        GT.tabs.mountTab('list');
+                    }
+                },
+                summarize: base.summarize,
+            });
         }
-        SnapshotRegistry.register({
-            key: LS.key,
-            order: LS.order,
-            label: LS.label,
-            icon: LS.icon,
-            collect: LS.collect,
-            apply: function(localSettings) {
-                var result = LS.apply(_deepClone(localSettings) || {});
-                if (result.errors && result.errors.length > 0) {
-                    console.warn('[global_template] local_settings apply warnings:', result.errors);
-                }
-            },
-            summarize: LS.summarize,
-        });
-    })();
+
+        // 7. local_settings (order=50, GroupTest 本地 UI 状态)
+        var LS = GT && GT.localSettings;
+        if (LS) {
+            SnapshotRegistry.register({
+                key: LS.key,
+                order: LS.order,
+                label: LS.label,
+                icon: LS.icon,
+                collect: LS.collect,
+                apply: function(localSettings) {
+                    var result = LS.apply(_deepClone(localSettings) || {});
+                    if (result.errors && result.errors.length > 0) {
+                        console.warn('[global_template] local_settings apply warnings:', result.errors);
+                    }
+                },
+                summarize: LS.summarize,
+            });
+        }
+
+        _gtAdaptersRegistered = true;
+    }
 
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
+        _ensureGroupTestAdapters();
         _commitGroupConfigDirty();
         return await SnapshotRegistry.collectAll();
     }
@@ -635,6 +635,7 @@
     // tplId: 因子家族设置模板 ID
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
+        _ensureGroupTestAdapters();
 
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId };
@@ -858,7 +859,8 @@
                             detail.innerHTML = '<div style="font-size:11px;color:#888;padding:4px 0;">加载中...</div>';
                             try {
                                 var template = await fetchTemplateDetail(header.getAttribute('data-tpl-id'));
-                                var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
+                                _ensureGroupTestAdapters();
+                            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
                                 detail.innerHTML = summaryHtml || '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
                                 detail.setAttribute('data-loaded', 'true');
                             } catch (err) {

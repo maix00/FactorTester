@@ -1185,18 +1185,21 @@
     }
 </style>
 
-<!-- GroupTest scripts: lazy-loaded on first "分组测试" section title click -->
+<!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
+<script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
+
+<!-- GroupTest deferred scripts: lazy-loaded when user expands "分组组合设置" section (clicks ▼) -->
 <!-- data-urls stored in div (not script) to survive executeScriptsIn which removes all script tags -->
 <div style="display:none" id="gt-lazy-script-list" data-urls='[
-    "{{ url_for('static', filename='js/modules/shared/date_utils.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/add-group-batch.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-group-batch.js') }}",
@@ -1235,14 +1238,13 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}"
 ]'></div>
 <script>
 (function() {
     if (window._gtScriptsLoaded) return;
-    var sectionTitle = document.querySelector('#group_test_module .section-title');
-    if (!sectionTitle) return;
+    var sectionHeader = document.getElementById('gt-section-header');
+    if (!sectionHeader) return;
     var listEl = document.getElementById('gt-lazy-script-list');
     if (!listEl) { console.warn('[GT lazy] script list not found'); return; }
     var urls = [];
@@ -1256,14 +1258,26 @@
         s.onload = s.onerror = loadNext;
         document.body.appendChild(s);
     }
-    sectionTitle.addEventListener('click', function() {
-        if (loaded) return;
+    // Intercept the section-header click: first click = load deferred scripts, subsequent clicks = toggle
+    var originalHandler = sectionHeader.onclick;
+    sectionHeader.onclick = null;
+    sectionHeader.addEventListener('click', function firstClick(e) {
+        if (loaded) return; // already loaded, let the original handler toggle
         loaded = true;
-        sectionTitle.style.cursor = 'progress';
-        console.log('[GT lazy] loading ' + urls.length + ' scripts...');
+        sectionHeader.removeEventListener('click', firstClick);
+        sectionHeader.style.cursor = 'progress';
+        console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
+        // After all scripts load, re-trigger the click to execute toggle logic
+        var origLoadNext = loadNext;
+        loadNext = function() {
+            origLoadNext();
+            if (idx >= urls.length) {
+                sectionHeader.style.cursor = '';
+                // Re-trigger click to expand section (app.js now has its handler bound)
+                setTimeout(function() { sectionHeader.click(); }, 50);
+            }
+        };
         setTimeout(loadNext, 10);
-    });
-    sectionTitle.style.cursor = 'pointer';
-    sectionTitle.title = '点击加载分组测试（' + urls.length + '个脚本按需加载）';
+    }, { once: false });
 })();
 </script>
