@@ -165,8 +165,16 @@ def run_flask_server(port=8000, directory='.'):
 
     # 开发模式：使用 Flask 内置服务器 + 热重载
     if os.environ.get('FLASK_DEBUG') == '1':
-        print("开发模式 (Flask debug=True, 热重载已启用)")
-        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+        print("开发模式 (VS Code debugger, Flask 热重载已启用)")
+        # debugpy owns exception handling; Werkzeug's debugger otherwise pauses
+        # on normal WSGI iterator shutdown (GeneratorExit) when a client leaves.
+        app.run(
+            host='0.0.0.0',
+            port=port,
+            debug=True,
+            use_reloader=True,
+            use_debugger=False,
+        )
     else:
         wt = settings.WAITRESS_THREADS
         print(f"生产模式 (waitress, threads={wt}, platform={sys.platform})")

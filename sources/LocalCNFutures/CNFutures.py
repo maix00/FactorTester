@@ -280,6 +280,19 @@ class CNFutures(Futures):
 
 from tools.products.Product import Product
 
+
+def _contract_data_path(folder: str, alias: str) -> str:
+    """Resolve both Windows-safe and legacy contract parquet filenames."""
+    safe_path = os.path.join(folder, f"{alias.replace('|', '_')}.{data_type}")
+    if os.path.isfile(safe_path):
+        return safe_path
+
+    legacy_path = os.path.join(folder, f"{alias}.{data_type}")
+    if os.path.isfile(legacy_path):
+        return legacy_path
+    return safe_path
+
+
 def get_all_futures_contract() -> List[Product]:
     """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
 
@@ -290,9 +303,10 @@ def get_all_futures_contract() -> List[Product]:
     futures_contract_ds_min1 = DataProviderProductTS(
         key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
-        if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_min, f"{object.alias.replace('|', '_')}.{data_type}")),
-        get_object_path=lambda object: os.path.join(data_dir_min, f"{object.alias.replace('|', '_')}.{data_type}"),
+        if_object_is_in_source=lambda object: os.path.isfile(
+            _contract_data_path(data_dir_min, object.alias)
+        ),
+        get_object_path=lambda object: _contract_data_path(data_dir_min, object.alias),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
@@ -302,8 +316,8 @@ def get_all_futures_contract() -> List[Product]:
     for file_path in os.listdir(data_dir_min):
         if file_path.endswith('.' + data_type):
             code = file_path.split('.')[0]
-            # 文件名用了 _ 代替 |（Windows 不允许 | 在文件名中），恢复为真实 uid
-            raw_name = code.replace('_', '|')
+            # New datasets use Windows-safe names; legacy macOS datasets retain pipes.
+            raw_name = code if '|' in code else code.replace('_', '|')
             contract = CNFuturesContract(name=raw_name)
             contract_list.append(contract)
     return contract_list
