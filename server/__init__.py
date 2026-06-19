@@ -38,6 +38,10 @@ def create_app() -> Flask:
     app.permanent_session_lifetime = timedelta(days=30)
     app.json.ensure_ascii = False
 
+    # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
+    from tools.data.account_manage import ensure_account_manager_sqlite_store
+    ensure_account_manager_sqlite_store()
+
     # ── 注册 Blueprint ──
     from server.auth import auth_bp
     from server.core import core_bp
