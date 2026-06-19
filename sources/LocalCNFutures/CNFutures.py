@@ -5,8 +5,9 @@ from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures.product_catalog import load_product_catalog
 
-_data = pd.read_csv(os.path.join(DATA_DIR, 'sectors.csv'))
+_data = load_product_catalog()
 data_dir_min = os.path.join(DATA_DIR, 'main_mink')
 data_path_day = os.path.join(DATA_DIR, 'main_series_adjusted.parquet')
 data_dir_day = os.path.join(DATA_DIR, 'main_dayk')
@@ -93,10 +94,16 @@ def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str
         return None
     if name not in name_code_version_dict:
         name_code_version_dict[name] = {
-            (str(row[code_col_name]), str(row[version_col_name])): str(row[name])
+            (str(row[code_col_name]), str(row[version_col_name])): (
+                None if pd.isna(row[name]) else str(row[name])
+            )
             for _, row in _data.iterrows()
         }
     return name_code_version_dict[name].get((code, version))
+
+
+def _text_or_default(value: Any, default: str) -> str:
+    return default if value is None or pd.isna(value) or not str(value).strip() else str(value)
 
 
 def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
@@ -209,7 +216,7 @@ class CNFutures(Futures):
     def desc_to_code(cls, desc: str, extra_map: Dict[str, str] | None = None) -> str:
         """根据合约标的（中文名）返回品种代码。
 
-        数据源：sectors.csv 的「合约标的」→「品种代码」。
+        数据源：SQLite 规范品种视图中的「合约标的」→「品种代码」。
         首次调用会构建缓存映射。
         可传入 extra_map 补充 sectors.csv 覆盖不到的别名（如国信页面用名）。
         未找到时返回原字符串。
@@ -217,8 +224,8 @@ class CNFutures(Futures):
         if cls._DESC_TO_CODE is None:
             cls._DESC_TO_CODE = {}
             for _, row in _data.iterrows():
-                variety = str(row[variety_col_name]).strip()
-                code = str(row[code_col_name]).strip()
+                variety = _text_or_default(row[variety_col_name], "").strip()
+                code = _text_or_default(row[code_col_name], "").strip()
                 if variety and code:
                     cls._DESC_TO_CODE[variety] = code
         desc_str = str(desc)
@@ -238,8 +245,8 @@ class CNFutures(Futures):
         if cls._PRODUCTS_BY_EXCHANGE is None:
             result: Dict[str, List[str]] = {}
             for _, row in _data.iterrows():
-                exch_raw = str(row.get(exchange_code_col_name, "")).strip()
-                variety = str(row.get(variety_col_name, "")).strip()
+                exch_raw = _text_or_default(row.get(exchange_code_col_name), "").strip()
+                variety = _text_or_default(row.get(variety_col_name), "").strip()
                 if not exch_raw or not variety:
                     continue
                 exch_map = {
@@ -364,6 +371,28 @@ def get_object_path(object: Product, folder: str):
             return ''
         return path
 
+
+def _product_names_from_catalog(catalog: pd.DataFrame) -> List[str]:
+    keyed = catalog.copy()
+    keyed['_KEY'] = (
+        keyed[code_col_name].astype(str)
+        + '|'
+        + keyed[exchange_code_col_name].astype(str)
+    )
+    version_count = keyed.groupby('_KEY')[version_col_name].nunique(dropna=True).to_dict()
+
+    names = []
+    for _, row in keyed.iterrows():
+        base_name = str(row['_product_name'])
+        version = row[version_col_name]
+        key = str(row['_KEY'])
+        if pd.isna(version) or version_count.get(key, 0) <= 1:
+            names.append(base_name)
+        else:
+            names.append(f"{base_name}@{version}")
+    return names
+
+
 def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
@@ -386,34 +415,22 @@ def get_all_futures() -> List[CNFutures]:
         data_cols_mapping=datacolumn_map_reversed,
     )
 
-    # 先统计同一 code+exchange 下版本数，单版本则省略 @version。
-    _tmp = _data.copy()
-    _tmp['_KEY'] = _tmp[code_col_name].astype(str) + '|' + _tmp[exchange_code_col_name].astype(str)
-    version_count = _tmp.groupby('_KEY')[version_col_name].nunique(dropna=True).to_dict()
-
-    cnfutures_list = []
-    for _, row in _data.iterrows():
-        code = str(row[code_col_name])
-        exchange_raw = str(row[exchange_code_col_name])
-        exchange = exchange_map.get(exchange_raw, exchange_raw)
-        version = str(row[version_col_name])
-        key = f"{code}|{exchange_raw}"
-        if version_count.get(key, 0) <= 1:
-            name = f"{code}.{exchange}"
-        else:
-            name = f"{code}.{exchange}@{version}"
-        cnfutures_list.append(CNFutures(name))
-
-    return cnfutures_list
+    return [CNFutures(name) for name in _product_names_from_catalog(_data)]
 
 CNFUTURES = get_all_futures()
 CNFUTURES_CATEGORY_SECTOR = {}
 CNFUTURES_CATEGORY_DAYNIGHT = {}
 for product in CNFUTURES:
-    CNFUTURES_CATEGORY_SECTOR[product] = get_by_code_and_version(product.code, product.version, category_col_name)
+    CNFUTURES_CATEGORY_SECTOR[product] = _text_or_default(
+        get_by_code_and_version(product.code, product.version, category_col_name),
+        "未分类",
+    )
     day_time = get_by_code_and_version(product.code, product.version, day_time_col_name)
     night_time = get_by_code_and_version(product.code, product.version, night_time_col_name)
-    CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_time},{night_time}"
+    if day_time is None and night_time is None:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = "未知"
+    else:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_time},{night_time}"
 
 from tools.products.categories.Category import Category
 

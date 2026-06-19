@@ -8,17 +8,27 @@ from sources.LocalCNFutures import CNFutures as cn_futures_module
 def _defined_cn_futures_products():
     products = []
     seen_names = set()
-    for _, row in cn_futures_module._data.iterrows():
-        code = str(row[cn_futures_module.code_col_name])
-        exchange_raw = str(row[cn_futures_module.exchange_code_col_name])
-        exchange_short = cn_futures_module.exchange_map.get(exchange_raw, exchange_raw)
-        version = str(row[cn_futures_module.version_col_name])
-        name = f'{code}.{exchange_short}@{version}'
+    for name in cn_futures_module._product_names_from_catalog(cn_futures_module._data):
         if name in seen_names:
             continue
         seen_names.add(name)
         products.append(cn_futures_module.CNFutures(name))
     return products
+
+
+def test_catalog_product_without_metadata_uses_discovered_name():
+    import pandas as pd
+
+    catalog = pd.DataFrame([
+        {
+            '_product_name': 'BZ.DCE',
+            cn_futures_module.code_col_name: 'BZ',
+            cn_futures_module.exchange_code_col_name: 'DCE',
+            cn_futures_module.version_col_name: None,
+        }
+    ])
+
+    assert cn_futures_module._product_names_from_catalog(catalog) == ['BZ.DCE']
 
 
 def test_all_defined_local_cn_futures_products_register_by_name_and_alias():
