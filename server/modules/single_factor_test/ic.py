@@ -297,6 +297,8 @@ def _build_ic_response(
         f.alias: (tester.results[f].ic_stats if f in tester.results else pd.Series(dtype=float))
         for f in factors
     })
+    # 排除内部传递的 acf_vals（仅用于前端 autocorr 复用，不展示在 stats 表）
+    ic_stats_all = ic_stats_all.drop(index='acf_vals', errors='ignore')
     columns = ic_stats_all.columns.tolist()
     rows = ic_stats_all.to_dict(orient='records')
     indices = ic_stats_all.index.tolist()
