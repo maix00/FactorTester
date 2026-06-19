@@ -1260,11 +1260,13 @@
     }
     var originalHandler = sectionHeader.onclick;
     sectionHeader.onclick = null;
+    // capture=true: 在 app.js 的 bubble handler 之前拦截首次点击
     sectionHeader.addEventListener('click', function firstClick(e) {
         if (loaded) return;
         loaded = true;
-        e.stopImmediatePropagation();  // 阻止 app.js 的 toggle handler 也在首次点击时触发
-        sectionHeader.removeEventListener('click', firstClick);
+        e.stopImmediatePropagation();  // 阻止同一 phase 内的后续 handler
+        e.stopPropagation();           // 阻止 bubble phase 的 app.js toggle handler
+        sectionHeader.removeEventListener('click', firstClick, true);
         sectionHeader.style.cursor = 'progress';
         console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
         var origLoadNext = loadNext;
@@ -1276,6 +1278,6 @@
             }
         };
         setTimeout(loadNext, 10);
-    }, { once: false });
+    }, true);  // capture phase: 在 app.js 的 bubble handler 之前拦截
 })();
 </script>

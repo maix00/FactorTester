@@ -129,7 +129,7 @@
             if (GT.fee && typeof GT.fee.applyModifications === 'function') GT.fee.applyModifications(mods);
         };
 
-        if (GT.results.snapshot && typeof GT.results.snapshot.bindSnapshotDrawerEvents === 'function') {
+        if (GT.results && GT.results.snapshot && typeof GT.results.snapshot.bindSnapshotDrawerEvents === 'function') {
             GT.results.snapshot.bindSnapshotDrawerEvents();
         }
 
