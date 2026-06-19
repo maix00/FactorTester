@@ -1258,26 +1258,17 @@
         s.onload = s.onerror = loadNext;
         document.body.appendChild(s);
     }
-    var originalHandler = sectionHeader.onclick;
-    sectionHeader.onclick = null;
-    // capture=true: 在 app.js 的 bubble handler 之前拦截首次点击
-    sectionHeader.addEventListener('click', function firstClick(e) {
+    // Simply listen for the first click to start loading deferred scripts.
+    // app.js's toggle handler also fires on this click, so the section opens immediately.
+    // Scripts load asynchronously in the background without blocking the UI.
+    sectionHeader.addEventListener('click', function once() {
         if (loaded) return;
         loaded = true;
-        e.stopImmediatePropagation();  // 阻止同一 phase 内的后续 handler
-        e.stopPropagation();           // 阻止 bubble phase 的 app.js toggle handler
-        sectionHeader.removeEventListener('click', firstClick, true);
-        sectionHeader.style.cursor = 'progress';
+        window._gtScriptsLoaded = true;
+        sectionHeader.removeEventListener('click', once);
+        sectionHeader.style.cursor = '';
         console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
-        var origLoadNext = loadNext;
-        loadNext = function() {
-            origLoadNext();
-            if (idx >= urls.length) {
-                sectionHeader.style.cursor = '';
-                setTimeout(function() { sectionHeader.click(); }, 50);
-            }
-        };
-        setTimeout(loadNext, 10);
-    }, true);  // capture phase: 在 app.js 的 bubble handler 之前拦截
+        loadNext();
+    });
 })();
 </script>
