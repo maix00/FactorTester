@@ -1253,20 +1253,17 @@
     var _loaded = false;
 
     function _loadAllScripts() {
-        return new Promise(function(resolve) {
-            var idx = 0;
-            function loadNext() {
-                if (idx >= urls.length) {
-                    console.log('[GT lazy] all ' + urls.length + ' scripts loaded');
-                    resolve();
-                    return;
-                }
+        // 并行加载全部脚本，串行等待 onload（保证执行顺序）
+        return Promise.all(urls.map(function(src) {
+            return new Promise(function(resolve) {
                 var s = document.createElement('script');
-                s.src = urls[idx++];
-                s.onload = s.onerror = loadNext;
+                s.src = src;
+                s.onload = function() { resolve(); };
+                s.onerror = function() { resolve(); };  // 错误不阻塞后续
                 document.body.appendChild(s);
-            }
-            loadNext();
+            });
+        })).then(function() {
+            console.log('[GT lazy] all ' + urls.length + ' scripts loaded');
         });
     }
 
