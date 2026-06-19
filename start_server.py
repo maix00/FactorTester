@@ -21,7 +21,7 @@ from server import create_app
 from tools.data.account_manage import accounts_lock, load_accounts
 from server.services.session_runtime import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
-import settings as Settings
+import settings
 
 app = create_app()
 
@@ -168,7 +168,7 @@ def run_flask_server(port=8000, directory='.'):
         print("开发模式 (Flask debug=True, 热重载已启用)")
         app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
     else:
-        wt = Settings.WAITRESS_THREADS
+        wt = settings.WAITRESS_THREADS
         print(f"生产模式 (waitress, threads={wt}, platform={sys.platform})")
         # 启动热插拔文件监控
         _start_hot_reload_watcher(interval=3.0)
