@@ -1008,6 +1008,10 @@
                 }
             });
             observer.observe(drawer, { attributes: true, attributeFilter: ['class'] });
+            // 如果绑定 observer 时抽屉已处于打开状态（脚本加载慢，用户先点了），立即加载
+            if (drawer.classList.contains('open')) {
+                loadTemplateList();
+            }
         }
     }
 
