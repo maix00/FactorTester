@@ -58,6 +58,8 @@ class EventEnvelope:
 class ProcessedEvent:
     event: EventEnvelope
     subscriber_count: int
+    succeeded: bool = True
+    error_type: str | None = None
 
 
 EventHandler = Callable[
@@ -69,6 +71,10 @@ class EventSource(Protocol):
     def start(self, runtime: "EventRuntime") -> None: ...
 
     def after_event(self, event: EventEnvelope, runtime: "EventRuntime") -> None: ...
+
+
+class EventObserver(Protocol):
+    def on_event(self, record: ProcessedEvent) -> None: ...
 
 
 class EventRuntime:
@@ -83,6 +89,7 @@ class EventRuntime:
         self._subscribers: dict[EventTopic, list[EventHandler]] = defaultdict(list)
         self._sources: list[EventSource] = []
         self._finalizers: list[Callable[["EventRuntime"], None]] = []
+        self._observers: list[EventObserver] = []
         self._sequence = itertools.count()
         self._current: EventEnvelope | None = None
         self._started = False
@@ -110,6 +117,11 @@ class EventRuntime:
         if self._started:
             raise RuntimeError("finalizers are immutable after the run starts")
         self._finalizers.append(finalizer)
+
+    def add_observer(self, observer: EventObserver) -> None:
+        if self._started:
+            raise RuntimeError("observers are immutable after the run starts")
+        self._observers.append(observer)
 
     def publish(self, draft: EventDraft) -> EventEnvelope:
         timestamp = pd.Timestamp(draft.timestamp)
@@ -153,9 +165,19 @@ class EventRuntime:
 
                 self._current = event
                 handlers = tuple(self._subscribers.get(event.topic, ()))
-                for handler in handlers:
-                    self._publish_handler_result(handler(event, self))
-                self.journal.append(ProcessedEvent(event, len(handlers)))
+                try:
+                    for handler in handlers:
+                        self._publish_handler_result(handler(event, self))
+                except Exception as exc:
+                    record = ProcessedEvent(
+                        event,
+                        len(handlers),
+                        succeeded=False,
+                        error_type=type(exc).__name__,
+                    )
+                    self._record(record)
+                    raise
+                self._record(ProcessedEvent(event, len(handlers)))
                 for source in self._sources:
                     source.after_event(event, self)
             for finalizer in self._finalizers:
@@ -173,6 +195,11 @@ class EventRuntime:
             return
         for draft in result:
             self.publish(draft)
+
+    def _record(self, record: ProcessedEvent) -> None:
+        self.journal.append(record)
+        for observer in self._observers:
+            observer.on_event(record)
 
 
 class ReplayEventSource:
