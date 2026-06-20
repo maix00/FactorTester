@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from scripts.data_dir import DATA_DIR
+from scripts.data_dir import DATA_DIR, get_feat_root
 from tools.data.artifacts.storage import artifact_root
 
 
@@ -84,7 +84,8 @@ def _verify(source: Path, destination: Path) -> dict[str, object]:
 
 def _write_source_setting(target: Path) -> Path:
     # Shared by sibling feat/master worktrees and every nested issue worktree.
-    settings_path = Path(DATA_DIR).resolve().parent / ".settings"
+    # .settings lives at feat parent, not DATA_DIR parent.
+    settings_path = Path(get_feat_root()).resolve().parent / ".settings"
     payload: dict = {}
     if settings_path.is_file():
         payload = json.loads(settings_path.read_text(encoding="utf-8"))

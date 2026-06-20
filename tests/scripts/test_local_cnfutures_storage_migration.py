@@ -38,6 +38,7 @@ def test_migration_copies_verifies_activates_and_archives_old_curve(monkeypatch,
     (source / "cn_futures_term_structure.parquet").write_bytes(b"invalid-curve")
     monkeypatch.setattr(migrate_storage, "artifact_root", lambda provider: artifact_dir)
     monkeypatch.setattr(migrate_storage, "DATA_DIR", str(source))
+    monkeypatch.setattr(migrate_storage, "get_feat_root", lambda: str(tmp_path / "FactorTester"))
 
     result = migrate_storage.migrate(
         source_root=source,

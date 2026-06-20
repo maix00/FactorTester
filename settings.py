@@ -48,14 +48,13 @@ default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
 # data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
-from scripts.data_dir import DATA_DIR, CACHE_DB_DIR, CACHE_DB_PATH
+from scripts.data_dir import DATA_DIR, CACHE_DB_PATH
 
 if TYPE_CHECKING:
     from tools.products.categories.Category import CategoryTree
 
-# 统一主库 sqlite 路径（所有镜像库合并到一个文件）
-CACHE_DIR = Path(DATA_DIR) / 'cache' / 'localdata'
-CACHE_DB_PATH = CACHE_DIR / 'unifieddata.sqlite'
+# ── SQLite 数据库路径（由 data_dir.py 从 .settings 统一解析）──
+CACHE_DIR = Path(CACHE_DB_PATH).parent
 
 # 日志文件存储目录
 logger_dir_path_default = os.path.join(DATA_DIR, 'factor_tester_log')
