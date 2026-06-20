@@ -36,16 +36,26 @@ def create_app() -> Flask:
         secret_key = os.urandom(24)
     app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
+    app.json.ensure_ascii = False
+
+    # ── 启动时一次性建好所有 SQLite schema（避免每个 API 请求重复检查） ──
+    from tools.data.account_manage import ensure_account_manager_sqlite_store
+    ensure_account_manager_sqlite_store()
 
     # ── 注册 Blueprint ──
     from server.auth import auth_bp
     from server.core import core_bp
     from server.modules.templates import templates_bp
     from server.modules.shared import shared_bp
+    from server.modules.shared import register_routes as register_shared_routes
     from server.modules.single_factor_test import sft_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import cf_bp
+    from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
+
+    register_shared_routes()
+    register_custom_factor_routes()
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)

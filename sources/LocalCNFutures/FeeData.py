@@ -2,7 +2,7 @@
 中国期货手续费率数据管理模块。
 
 数据来源：http://openctp.cn/fees.html （每日实时）
-本地存储：DATA_DIR/cache/openctp/openctp.sqlite
+本地存储：DATA_DIR/cache/localdata/unifieddata.sqlite
          表 openctp_cnfutures_contract_specs
 
 字段说明（从 openctp 表格提取）：
@@ -35,10 +35,10 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR
 
 # 本地存储目录（相对于项目根目录，即 Codes/）
-_DATA_DIR = Path(DATA_DIR) / 'fees'
+_DATA_DIR = Path(SOURCE_DATA_DIR) / 'fees'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'
@@ -97,9 +97,38 @@ _OPTIONAL_NUMERIC_COLS = [
 _CONTRACT_ROW_DROP_COLS: list[str] = []
 _VARIETY_ROW_DROP_COLS = ['volume', 'open_interest']
 
+_OPENCTP_TO_LOCAL_COLUMNS = {
+    'ExchangeID': 'exchange',
+    'ProductID': 'variety_code',
+    'InstrumentID': 'contract_code',
+    'InstrumentName': 'contract_name',
+    'VolumeMultiple': 'multiplier',
+    'PriceTick': 'min_tick',
+    'OpenRatioByMoney': 'open_ratio',
+    'OpenRatioByVolume': 'open_fixed',
+    'CloseRatioByMoney': 'close_ratio',
+    'CloseRatioByVolume': 'close_fixed',
+    'CloseTodayRatioByMoney': 'closetoday_ratio',
+    'CloseTodayRatioByVolume': 'closetoday_fixed',
+    'LongMarginRatioByMoney': 'long_margin_ratio',
+    'LongMarginRatioByVolume': 'long_margin_fixed',
+    'ShortMarginRatioByMoney': 'short_margin_ratio',
+    'ShortMarginRatioByVolume': 'short_margin_fixed',
+}
+
 
 def _with_optional_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    for source, target in _OPENCTP_TO_LOCAL_COLUMNS.items():
+        if target not in df.columns and source in df.columns:
+            df[target] = df[source]
+    if 'contract_key' not in df.columns:
+        key_source = next(
+            (name for name in ('NormalizedInstrumentID', 'contract_code', 'InstrumentID') if name in df.columns),
+            None,
+        )
+        if key_source is not None:
+            df['contract_key'] = df[key_source].map(_normalise_contract_code)
     for col in _OPTIONAL_NUMERIC_COLS:
         if col not in df.columns:
             df[col] = 0.0
@@ -179,6 +208,7 @@ def _parse_contract_rows(df: pd.DataFrame) -> pd.DataFrame:
     df['contract_code'] = df['contract_code'].astype(str).str.strip()
     df['contract_name'] = df['contract_name'].astype(str).str.strip()
     df['contract_key'] = df['contract_code'].map(_normalise_contract_code)
+    df['NormalizedInstrumentID'] = df['contract_key']
 
     # 去掉无效行
     df = df.dropna(subset=['variety_code', 'open_ratio'])

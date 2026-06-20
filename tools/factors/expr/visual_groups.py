@@ -12,13 +12,13 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data.DataSource import DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.providers import DataProviderProductTS as DataSource
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -217,4 +217,3 @@ def get_visual_operator_category(visual_key: str, default: str = 'arithBinary') 
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1: 因子表达式基类
 # ═════════════════════════════════════════════════════════════════════════════
-

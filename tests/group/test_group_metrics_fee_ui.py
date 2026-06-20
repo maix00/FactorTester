@@ -84,9 +84,9 @@ def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
         group_gross_returns_np=np.array([[0.001], [0.002]]),
         trade_notional_ratio_np=np.array([[1.0], [0.5]]),
         fee_costs_np=np.array([[0.0003], [0.0001]]),
-        open_ratio_vec=np.array([0.0001, 0.0002]),
-        close_ratio_vec=np.array([0.0003, 0.0004]),
-        close_today_ratio_vec=np.array([0.0005, 0.0006]),
+        open_ratio_mat=np.array([0.0001, 0.0002]),
+        close_ratio_mat=np.array([0.0003, 0.0004]),
+        close_today_ratio_mat=np.array([0.0005, 0.0006]),
     )
 
     first_product = detail['entry_frequency'][0]['product']

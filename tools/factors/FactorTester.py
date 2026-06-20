@@ -11,6 +11,7 @@
 #   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
 # =============================================================================
 import os
+import re
 import uuid
 import logging
 import threading
@@ -23,21 +24,23 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from tools.decorators import tech_docs
 from tools.factors import Factor, FactorFamily
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
-from tools import UniqueObject, DataColumn, DataFreq
-from tools.base.User import User
-from tools.data.DataTime import DataTime
+from tools.data.types import UniqueNameObject
+from tools.data.types import DataColumn, DataFreq
+from tools.data.account_manage import User
+from tools.data.types import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
-from Settings import get_all_products, logger_dir_path_default
+from settings import get_all_products, logger_dir_path_default
 
 if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester
 
 # ── 运行时上下文：活跃 FactorTester 与用户前缀 ──
-# 由 FactorTester / FactorFamily.test() 设置，Factor / DataMeta 读取
+# 由 FactorTester / FactorFamily.test() 设置，Factor / ProductDataView 读取
 _active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
 _active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
 
@@ -66,16 +69,17 @@ def _align_ts(lhs: Any, rhs: Any) -> Any:
 
 def _align_ts_to_index(ts: Any, idx: pd.Index) -> pd.Timestamp:
     """将时间戳的时区规整到 DatetimeIndex，避免 tz-aware/naive 比较错误。"""
-    from tools.data.DataIndex import DataIndex
+    from tools.data.types import DataIndex
     return DataIndex(idx).tz_align(ts)
 
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     """从信号索引中提取时间戳层，返回 DatetimeIndex。"""
-    from tools.data.DataIndex import DataIndex
+    from tools.data.types import DataIndex
     return DataIndex(idx).signal_index
 
-class FactorTester(UniqueObject):
+@tech_docs
+class FactorTester(UniqueNameObject):
     """
     因子测试器。
 
@@ -92,11 +96,9 @@ class FactorTester(UniqueObject):
 
     def __new__(cls, alias: Optional[str] = None, *args, user=None, **kwargs):
         core_alias = alias if alias else cls.__name__
-        # 将 user name 嵌入 alias，避免不同用户的同名 tester 冲突
         if user is not None:
             user_name = getattr(user, 'alias', str(user))
             core_alias = f"{user_name}:{core_alias}"
-        # 显式构造 name = FactorTester:{user_prefix}:{core_alias}:{uuid}
         name = f"{cls.__name__}:{core_alias}:{uuid.uuid4().hex}"
         kwargs.pop('name', None)
         instance = super().__new__(cls, name=name, alias=core_alias, **kwargs)
@@ -146,7 +148,9 @@ class FactorTester(UniqueObject):
                 if logger_file:
                     if not os.path.exists(logger_dir_path):
                         os.makedirs(logger_dir_path)
-                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{self.name}_{datetime.now().strftime('%Y%m%d')}.log")
+                    # Windows 文件名不允许 <>:"/\|?*，替换为下划线
+                    _safe_log_name = re.sub(r'[<>:"/\\|?*]', '_', self.name)
+                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{_safe_log_name}_{datetime.now().strftime('%Y%m%d')}.log")
                     file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
                     file_handler.setFormatter(formatter)
                     self.logger.addHandler(file_handler)
@@ -210,12 +214,6 @@ class FactorTester(UniqueObject):
         self.factors.clear()
         self.products = set()
         self.all_products = set()
-        # 从 user 的 tester 列表移除
-        if self.user is not None:
-            try:
-                self.user.remove_tester(self)
-            except Exception:
-                pass
         # 关闭 logger handler
         for handler in list(self.logger.handlers):
             handler.close()

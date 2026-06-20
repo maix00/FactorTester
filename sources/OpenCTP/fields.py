@@ -11,48 +11,41 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from .client import fetch_instruments, instruments_to_contract_specs, normalise_instrument_code
+from .client import fetch_instruments, _clean_instrument_rows, normalise_instrument_code
 
 
 FIELD_ALIASES: dict[str, str] = {
-    "point_value": "multiplier",
-    "volume_multiple": "multiplier",
-    "price_tick": "min_tick",
-    "min_limit_order_volume": "min_trade_quantity",
-    "max_limit_order_volume": "max_trade_quantity",
-    "open_fee_ratio": "open_ratio",
-    "open_rate": "open_ratio",
-    "open_fee_fixed": "open_fixed",
-    "close_fee_ratio": "close_ratio",
-    "close_rate": "close_ratio",
-    "close_fee_fixed": "close_fixed",
-    "close_today_fee_ratio": "closetoday_ratio",
-    "close_today_rate": "closetoday_ratio",
-    "close_today_fee_fixed": "closetoday_fixed",
-    "close_yesterday_fee_ratio": "close_ratio",
-    "close_yesterday_rate": "close_ratio",
-    "close_yesterday_fee_fixed": "close_fixed",
-}
-
-ONLINE_FIELD_TO_LOCAL: dict[str, str] = {
+    "point_value": "VolumeMultiple",
+    "volume_multiple": "VolumeMultiple",
     "multiplier": "VolumeMultiple",
+    "price_tick": "PriceTick",
     "min_tick": "PriceTick",
+    "min_limit_order_volume": "MinLimitOrderVolume",
     "min_trade_quantity": "MinLimitOrderVolume",
+    "max_limit_order_volume": "MaxLimitOrderVolume",
     "max_trade_quantity": "MaxLimitOrderVolume",
     "long_margin_ratio": "LongMarginRatioByMoney",
     "long_margin_fixed": "LongMarginRatioByVolume",
     "short_margin_ratio": "ShortMarginRatioByMoney",
     "short_margin_fixed": "ShortMarginRatioByVolume",
+    "open_fee_ratio": "OpenRatioByMoney",
+    "open_rate": "OpenRatioByMoney",
     "open_ratio": "OpenRatioByMoney",
+    "open_fee_fixed": "OpenRatioByVolume",
     "open_fixed": "OpenRatioByVolume",
+    "close_fee_ratio": "CloseRatioByMoney",
+    "close_rate": "CloseRatioByMoney",
     "close_ratio": "CloseRatioByMoney",
+    "close_fee_fixed": "CloseRatioByVolume",
     "close_fixed": "CloseRatioByVolume",
+    "close_today_fee_ratio": "CloseTodayRatioByMoney",
+    "close_today_rate": "CloseTodayRatioByMoney",
     "closetoday_ratio": "CloseTodayRatioByMoney",
+    "close_today_fee_fixed": "CloseTodayRatioByVolume",
     "closetoday_fixed": "CloseTodayRatioByVolume",
-    "product_class": "ProductClass",
-    "open_date": "OpenDate",
-    "expire_date": "ExpireDate",
-    "delivery_date": "DeliveryDate",
+    "close_yesterday_fee_ratio": "CloseRatioByMoney",
+    "close_yesterday_rate": "CloseRatioByMoney",
+    "close_yesterday_fee_fixed": "CloseRatioByVolume",
 }
 
 
@@ -128,13 +121,13 @@ def local_snapshot_field(product: Any, field: str) -> Any:
 @lru_cache(maxsize=2048)
 def _online_contract_specs(instrument_code: str) -> pd.DataFrame:
     rows = fetch_instruments(instruments=instrument_code)
-    return instruments_to_contract_specs(rows)
+    return _clean_instrument_rows(rows)
 
 
 @lru_cache(maxsize=512)
 def _online_product_specs(product_code: str, markets: str | None = None) -> pd.DataFrame:
     rows = fetch_instruments(types="futures", products=product_code, markets=markets)
-    return instruments_to_contract_specs(rows)
+    return _clean_instrument_rows(rows)
 
 
 def online_instrument_field(product: Any, field: str, *, markets: str | None = None) -> Any:
@@ -254,6 +247,48 @@ def get_products_fields(
         get_product_fields(product, ordered_fields, markets=markets)
         for product in ordered_products
     ]
+
+
+def get_products_specs_over_date_range(
+    products: list[Any] | tuple[Any, ...],
+    trading_days: pd.DatetimeIndex | list,
+    fields: list[str] | tuple[str, ...] | set[str],
+    *,
+    markets: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Resolve contract specs for multiple products across a date range.
+
+    Returns a dict mapping each field name to a ``(T, P)`` DataFrame
+    indexed by trading_day (rows) and variety_code (columns).
+    """
+    from .client import read_cnfutures_contract_specs_over_date_range
+
+    ordered_products = list(products)
+    ordered_fields = [canonical_field(f) for f in fields]
+
+    variety_codes = [str(getattr(p, "variety_code", _product_code(p))).upper() for p in ordered_products]
+    product_to_vc = {p: vc for p, vc in zip(ordered_products, variety_codes)}
+
+    df = read_cnfutures_contract_specs_over_date_range(
+        trading_days=trading_days,
+        variety_codes=variety_codes,
+    )
+
+    result: dict[str, pd.DataFrame] = {}
+    for field in ordered_fields:
+        if field not in df.columns:
+            continue
+        mat = df[field].unstack(level="variety_code")
+        # Reorder columns to match input product order
+        existing = [vc for vc in variety_codes if vc in mat.columns]
+        mat = mat.reindex(columns=existing)
+        # Fill per-column (product) forward and backward
+        mat = mat.ffill().bfill()
+        # Cast to float64 numpy-safe
+        mat = mat.astype(float)
+        result[field] = mat
+
+    return result
 
 
 def make_field_getter(field: str) -> Callable[[Any], Any]:

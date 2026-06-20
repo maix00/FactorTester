@@ -60,19 +60,43 @@
                 </span>
             </div>
         </div>
-        <div data-local-settings-tab-panel="initialCapital" style="display:none;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div data-local-settings-tab-panel="initialCapital" style="display:none;flex-direction:column;gap:10px;">
             <span style="font-weight:600;font-size:13px;color:#1f2937;">💵 初始金额</span>
-            <div class="group-setting-row" style="margin-bottom:0;">
-                <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
-                <input
-                    type="number"
-                    id="group_initial_capital"
-                    placeholder="100000000"
-                    min="0"
-                    step="1000"
-                    value="100000000"
-                    style="width:140px;text-align:right;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                >
+            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <div class="group-setting-row" style="margin-bottom:0;">
+                    <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
+                    <input
+                        type="number"
+                        id="group_initial_capital"
+                        placeholder="100000000"
+                        min="0"
+                        step="1000"
+                        value="100000000"
+                        style="width:140px;text-align:right;padding:6px;border:1px solid #ddd;border-radius:4px;"
+                    >
+                </div>
+                <div class="group-setting-row" style="margin-bottom:0;">
+                    <label for="group_base_currency" style="margin-bottom:0;white-space:nowrap;">基础货币：</label>
+                    <input
+                        type="text"
+                        id="group_base_currency"
+                        placeholder="CNY"
+                        value="CNY"
+                        style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;"
+                    >
+                </div>
+                <div class="group-setting-row" style="margin-bottom:0;">
+                    <label for="group_currency_conversion_fee_rate" style="margin-bottom:0;white-space:nowrap;">换汇佣金率：</label>
+                    <input
+                        type="number"
+                        id="group_currency_conversion_fee_rate"
+                        placeholder="0"
+                        min="0"
+                        step="0.000001"
+                        value="0"
+                        style="width:120px;padding:6px;border:1px solid #ddd;border-radius:4px;"
+                    >
+                </div>
             </div>
             <span style="font-size:11px;color:#888;">用于交易簿回测的开仓资金；图表仍显示归一化净值</span>
         </div>
@@ -110,7 +134,6 @@
         <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
             <span id="group_test_status" style="font-size:12px;color:#888;"></span>
-            <button id="load_default_groups_btn" class="btn btn-outline-secondary btn-sm" style="display:none;">加载默认分组</button>
             <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
         </div>
     </div>
@@ -119,9 +142,9 @@
     <div class="group-test-layer" id="gt-layer-tabs" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
 
         <!-- 2b-i. 统一 Tab 栏 + 操作按钮 -->
-        <div id="gt-tab-bar" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
-            <div id="gt-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
-            <div id="gt-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
+        <div id="gt-tab-bar" style="display:flex;flex-wrap:wrap;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
+            <div id="gt-tab-btns" style="display:flex;flex-wrap:wrap;gap:6px;flex:1 1 360px;min-width:0;"></div>
+            <div id="gt-tab-actions" style="display:flex;flex-wrap:wrap;gap:6px;flex:0 1 auto;justify-content:flex-end;"></div>
         </div>
 
         <!-- 2b-ii. Panel 渲染容器（由 JS 动态填充） -->
@@ -139,6 +162,7 @@
                 <span id="gt-strategy-status" style="font-size:12px;color:#888;"></span>
             </div>
         </div>
+        <div id="gt-strategy-notice" style="display:none;padding:10px 12px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;background:#fffaf0;color:#92400e;font-size:12px;line-height:1.6;"></div>
         <div id="gt-strategy-table-wrap" style="overflow-x:auto;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 8px 8px;max-height:300px;overflow-y:auto;">
             <table id="gt-strategy-table" style="width:100%;border-collapse:collapse;font-size:12px;">
                 <thead id="gt-strategy-head"></thead>
@@ -487,17 +511,18 @@
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
             <div style="display:flex;align-items:center;gap:8px;">
-                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="上一个时点">◀ 前一个</button>
-                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="下一个时点">后一个 ▶</button>
+                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一时刻">◀ 前一时刻</button>
+                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一时刻">后一时刻 ▶</button>
+                <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一个持仓发生变化的时刻">◀ 前一变化</button>
+                <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一个持仓发生变化的时刻">后一变化 ▶</button>
                 <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
-            <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <div id="snapshot_matrix_toggle"></div>
+                <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
+            </div>
         </div>
         <div id="snapshot_flow_stats" class="snapshot-flow-stats"></div>
-        <div id="snapshot-tabs" class="snapshot-tabs" style="display:none;">
-            <button id="snapshot-tab-basic" class="snapshot-tab active">仓位矩阵</button>
-            <button id="snapshot-tab-ls" class="snapshot-tab">多空(LS)</button>
-        </div>
         <div id="group-snapshot-drawer-body">
             <div class="drawer-inner-container" id="snapshot_body"></div>
         </div>
@@ -838,6 +863,8 @@
         font-size: 12px;
         color: #475467;
         transition: all 0.12s;
+        white-space: nowrap;
+        flex: 0 0 auto;
     }
     #group_test_module .gt-tab:hover {
         border-color: #9cc7f2;
@@ -892,6 +919,10 @@
         font-size: 12px;
         table-layout: fixed;
     }
+    #group_test_module .snapshot-matrix-scroll {
+        width: 100%;
+        overflow: auto;
+    }
     #group_test_module .snapshot-matrix-table th {
         position: sticky;
         top: 0;
@@ -907,10 +938,11 @@
     #group_test_module .snapshot-matrix-table td {
         padding: 4px 8px;
         border-bottom: 1px solid #edf0f4;
-        white-space: nowrap;
+        white-space: normal;
         overflow: hidden;
         text-overflow: ellipsis;
         vertical-align: middle;
+        word-break: break-word;
     }
     #group_test_module .snapshot-prod-name-cell {
         font-weight: 500;
@@ -930,6 +962,10 @@
         color: #1a7d36;
         background: #e6f7ed;
     }
+    #group_test_module .snapshot-cell-increasing {
+        color: #1a7d36;
+        background: #f0fdf4;
+    }
     #group_test_module .snapshot-cell-entering .snapshot-product-name {
         color: #1a7d36;
         font-weight: 500;
@@ -937,6 +973,10 @@
     #group_test_module .snapshot-cell-exiting {
         color: #b91c1c;
         background: #fef2f2;
+    }
+    #group_test_module .snapshot-cell-decreasing {
+        color: #b91c1c;
+        background: #fff5f5;
     }
     #group_test_module .snapshot-cell-absent {
         color: #c8cdd3;
@@ -950,6 +990,16 @@
     }
     #group_test_module .snapshot-cell-exiting::before {
         content: '- ';
+        color: #b91c1c;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-cell-increasing::before {
+        content: '↑ ';
+        color: #1a7d36;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-cell-decreasing::before {
+        content: '↓ ';
         color: #b91c1c;
         font-weight: 600;
     }
@@ -979,40 +1029,79 @@
         color: #aaa;
         font-size: 10px;
     }
-    /* ── Snapshot tabs (refs #100) ── */
-    #group_test_module .snapshot-tabs {
-        display: flex;
-        gap: 0;
-        padding: 6px 12px 0;
-        background: #f9fafb;
-        border-bottom: 1px solid #e5e7eb;
-    }
-    #group_test_module .snapshot-tab {
-        padding: 6px 16px;
-        border: 1px solid #d0d5dd;
-        border-bottom: none;
-        border-radius: 6px 6px 0 0;
-        background: #f0f2f5;
-        cursor: pointer;
-        font-size: 13px;
+    #group_test_module .snapshot-product-source,
+    #group_test_module .snapshot-cell-meta {
         color: #667085;
-        transition: all 0.12s;
-        margin-right: -1px;
+        font-size: 11px;
     }
-    #group_test_module .snapshot-tab:hover {
-        background: #e5ebf0;
-        color: #475467;
+    #group_test_module .snapshot-cell-meta {
+        margin-top: 2px;
+        line-height: 1.35;
     }
-    #group_test_module .snapshot-tab.active {
+    #group_test_module .snapshot-summary-amounts {
+        margin-top: 2px;
+        color: #344054;
+        font-size: 11px;
+        line-height: 1.35;
+    }
+    #group_test_module .snapshot-summary-fees {
+        margin-top: 2px;
+        color: #667085;
+        font-size: 11px;
+        line-height: 1.35;
+    }
+    #group_test_module .snapshot-cell-delta {
+        margin-top: 2px;
+        font-size: 11px;
+        line-height: 1.35;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-status-label {
+        display: inline-block;
+        margin-bottom: 3px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(255,255,255,0.72);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+    #group_test_module .snapshot-delta-increase {
+        color: #15803d;
+    }
+    #group_test_module .snapshot-delta-decrease {
+        color: #b91c1c;
+    }
+    #group_test_module .snapshot-delta-flat {
+        color: #667085;
+        font-weight: 500;
+    }
+    #group_test_module .snapshot-cell-empty {
+        color: #98a2b3;
+    }
+    #group_test_module .snapshot-matrix-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
         background: #fff;
+    }
+    #group_test_module .snapshot-matrix-switch-btn {
+        border: 0;
+        background: transparent;
+        color: #475467;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-matrix-switch-btn.active {
+        background: #e7f1ff;
         color: #0f4c81;
         font-weight: 600;
-        border-color: #d0d5dd;
-    }
-    #group_test_module .snapshot-tab.inactive {
-        background: #f0f2f5;
-        color: #667085;
-        font-weight: 400;
     }
     #group_test_module .snapshot-batch-section {
         margin-bottom: 20px;
@@ -1027,6 +1116,20 @@
         font-size: 13px;
         padding: 8px 14px;
         border-bottom: 1px solid #dae2ec;
+    }
+    #group_test_module .snapshot-semantics-note {
+        padding: 7px 14px;
+        color: #667085;
+        font-size: 12px;
+        line-height: 1.45;
+        background: #fbfcfd;
+        border-bottom: 1px solid #eef2f7;
+    }
+    #group_test_module .snapshot-col-count-label {
+        margin-top: 1px;
+        font-size: 10px;
+        line-height: 1.2;
+        color: #98a2b3;
     }
     #group_test_module .snapshot-ls-section {
         border-color: #c7d2e0;
@@ -1049,57 +1152,152 @@
         background: #f9fafb;
         border-bottom: 1px solid #e5e7eb;
     }
+    #group_test_module #group-snapshot-drawer-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #fff;
+    }
+    #group_test_module .snapshot-nav-btn,
+    #group_test_module .snapshot-close-btn {
+        border: 1px solid #d0d5dd;
+        background: #fff;
+        color: #344054;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-close-btn {
+        background: #fff5f5;
+        border-color: #fecaca;
+        color: #b42318;
+    }
+    #group_test_module .snapshot-title {
+        font-size: 14px;
+        color: #101828;
+        white-space: nowrap;
+    }
 </style>
 
+<!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
-<!-- GroupTest modular scripts (load order matters) -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/dates.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
-<!-- Datamodel layer — unified in core/group-settings.js -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
-<!-- groupAddBatch registry (refs #100) -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/batches.js') }}"></script>
-<!-- Panel layer — UI components by category -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/meta.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/charts/group_returns.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
+
+<!-- GroupTest deferred scripts: lazy-loaded when user expands "分组组合设置" section (clicks ▼) -->
+<!-- data-urls stored in div (not script) to survive executeScriptsIn which removes all script tags -->
+<div style="display:none" id="gt-lazy-script-list" data-urls='[
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/add-group-batch.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-group-batch.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/money_display.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/charts/group_returns.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}"
+]'></div>
+<script>
+(function() {
+    var urls = [];
+    var listEl = document.getElementById('gt-lazy-script-list');
+    if (listEl) {
+        try { urls = JSON.parse(listEl.getAttribute('data-urls') || '[]'); } catch(e) { console.warn('[GT lazy] bad JSON', e); }
+    }
+    if (!urls.length) return;
+
+    var _loadPromise = null;
+    var _loaded = false;
+
+    function _loadAllScripts() {
+        // 并行 fetch 所有脚本内容，然后按顺序拼成一个 inline script 执行
+        // 既保证并行下载速度，又保证 DOM 顺序执行
+        return Promise.all(urls.map(function(src) {
+            return fetch(src).then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
+                return r.text();
+            });
+        })).then(function(contents) {
+            var combined = contents.join('\n');
+            var s = document.createElement('script');
+            s.textContent = combined;
+            document.body.appendChild(s);
+            console.log('[GT lazy] all ' + urls.length + ' scripts loaded and executed');
+        });
+    }
+
+    // 外部可调用：触发懒加载并等待完成（模板应用、summary 展开等场景）
+    window._loadGTDeferredScripts = function() {
+        if (_loaded) return Promise.resolve();
+        if (_loadPromise) return _loadPromise;
+        _loadPromise = _loadAllScripts().then(function() {
+            _loaded = true;
+            // 注册 GT snapshot 适配器 + 初始化依赖模块
+            if (typeof window._ensureGroupTestAdapters === 'function') window._ensureGroupTestAdapters();
+            if (window.GroupTest && typeof window.GroupTest.initDeferred === 'function') {
+                window.GroupTest.initDeferred();
+            }
+        });
+        return _loadPromise;
+    };
+
+    // 用户点击 ▼ 展开时触发懒加载 + 展开
+    var sectionHeader = document.getElementById('gt-section-header');
+    if (sectionHeader) {
+        sectionHeader.addEventListener('click', function once() {
+            if (_loaded) return;
+            sectionHeader.removeEventListener('click', once);
+            sectionHeader.style.cursor = 'progress';
+            console.log('[GT lazy] loading ' + urls.length + ' deferred scripts...');
+            // 禁止默认的 onclick（如果有）
+            sectionHeader.onclick = null;
+            window._loadGTDeferredScripts().then(function() {
+                sectionHeader.style.cursor = '';
+            });
+        });
+    }
+})();
+</script>

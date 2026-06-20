@@ -6,18 +6,16 @@
 from __future__ import annotations
 
 import copy
-import os
-import tempfile
 
 import pytest
 
+import settings as Settings
 from server.modules.templates.common import (
     SINGLE_FACTOR_SETTING_TEMPLATE_KIND,
     load_template_list,
     new_template_id,
     save_template_list,
 )
-from server.services.user_storage import user_template_path
 from server.modules.templates.summary import build_snapshot_summary
 
 
@@ -133,25 +131,18 @@ def test_snapshot_summary_reads_new_group_settings_shape():
 
 @pytest.fixture
 def tmp_storage(monkeypatch):
-    """重定向 user_template_path 到临时目录，避免污染真实用户数据。"""
-    tmpdir = tempfile.mkdtemp(prefix="template_test_")
+    """Use an isolated SQLite database for template storage."""
+    sqlite_path = monkeypatch.context()
+    with sqlite_path as m:
+        import tempfile
+        from pathlib import Path
 
-    def _fake_path(username, kind, ff_alias, scope_key=None):
-        if scope_key:
-            directory = os.path.join(tmpdir, f'{kind}_templates', scope_key)
-        else:
-            directory = os.path.join(tmpdir, f'{kind}_templates')
-        os.makedirs(directory, exist_ok=True)
-        return os.path.join(directory, f'{kind}_templates.json')
-
-    monkeypatch.setattr(
-        "server.services.user_storage.user_template_path", _fake_path
-    )
-
-    yield tmpdir
-
-    import shutil
-    shutil.rmtree(tmpdir, ignore_errors=True)
+        tmpdir = tempfile.TemporaryDirectory(prefix="template_test_")
+        db_path = Path(tmpdir.name) / "unifieddata.sqlite"
+        m.setattr(Settings, "CACHE_DIR", db_path.parent)
+        m.setattr(Settings, "CACHE_DB_PATH", db_path)
+        yield tmpdir.name
+        tmpdir.cleanup()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -160,7 +151,7 @@ def tmp_storage(monkeypatch):
 
 
 class TestTemplateStorageLifecycle:
-    """直接测试 user_storage 层的模板 JSON 读写（不经过 Flask 路由）。"""
+    """直接测试模板存储层的读写（不经过 Flask 路由）。"""
 
     USER = "testuser"
     SCOPE = "MmRet"

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence, Union
 
-import server.services.runtime_state as runtime_state
+import server.services.page_runtime as runtime_state
 from server.modules.products.product_path_selection import resolve_selection_products
-from server.services.runtime_state import factor_testers_lock
 from server.services.product_tree import tree
 
 
@@ -99,15 +98,12 @@ def resolve_products_from_paths(raw_paths: list[str]):
 
 def valid_testers(page_uuid=None):
     """Return active testers that still hold products (via paths or direct products)."""
-    with factor_testers_lock:
-        testers = [
-            t for t in runtime_state.factor_testers
-            if (getattr(t, 'selected_paths', None) and len(t.selected_paths) > 0)
-            or (t.products and len(t.products) > 0)
-        ]
-        if page_uuid:
-            testers = [t for t in testers if getattr(t, '_page_uuid', None) == page_uuid]
-        return testers
+    testers = runtime_state.iter_factor_testers(page_uuid)
+    return [
+        t for t in testers
+        if (getattr(t, 'selected_paths', None) and len(t.selected_paths) > 0)
+        or (t.products and len(t.products) > 0)
+    ]
 
 
 def submissions_payload(page_uuid=None):

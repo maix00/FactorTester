@@ -101,6 +101,7 @@
             if (role === 'super_admin') scopeText = '超级管理员：可见全部机构、全部层级、全部用户。';
             else if (role === 'org_admin') scopeText = '机构管理员：可见并管理本机构全部层级与用户。';
             else if (role === 'level_admin') scopeText = '层级管理员：可见并管理自己层级子树中的用户与层级。';
+            else if (role === 'developer') scopeText = '开发人员：无管理权限，可查看完整技术文档对象。';
             else scopeText = '普通用户：可见同机构同层级平级用户。';
             document.getElementById('scope-hint').textContent = scopeText;
         }
@@ -168,6 +169,7 @@
             } else if (type === 'user' && node.can_manage) {
                 actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'org_admin\')">设机构管理员</button>';
                 actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'level_admin\')">设层级管理员</button>';
+                actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'developer\')">设开发人员</button>';
                 actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'user\')">设普通用户</button>';
                 actions += '<button class="secondary" onclick="moveUserLevel(\'' + escAttr(node.username || '') + '\')">移动所属层级</button>';
                 actions += '<button class="danger" onclick="deleteUserNode(\'' + escAttr(node.username || '') + '\', \'' + escAttr(node.alias || node.username || '') + '\')">删除用户</button>';

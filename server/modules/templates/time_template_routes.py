@@ -5,7 +5,7 @@ from flask import jsonify, request
 from server.modules.templates import templates_bp
 from server.modules.templates.common import load_template_list, new_template_id, save_template_list
 from server.services.http_auth import login_required
-from server.services.runtime_state import get_user_file_lock, require_user
+from server.services.session_runtime import get_user_file_lock, require_user
 
 
 @templates_bp.route('/api/time_templates', methods=['GET'])

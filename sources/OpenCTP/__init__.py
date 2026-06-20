@@ -10,7 +10,7 @@ from .client import (
     frame_instruments,
     frame_prices,
     frame_times,
-    instruments_to_contract_specs,
+    _clean_instrument_rows,
     list_sqlite_tables,
     read_sqlite_table,
 )
@@ -43,7 +43,7 @@ __all__ = [
     "frame_instruments",
     "frame_prices",
     "frame_times",
-    "instruments_to_contract_specs",
+    "_clean_instrument_rows",
     "list_sqlite_tables",
     "read_sqlite_table",
     "canonical_field",

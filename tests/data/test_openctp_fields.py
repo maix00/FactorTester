@@ -7,7 +7,7 @@ from server.modules.shared import price_services
 from sources.LocalCNFutures import FeeData
 from sources.OpenCTP import client as openctp_client
 from sources.OpenCTP import fields as openctp_fields
-from sources.OpenCTP.client import instruments_to_contract_specs
+from sources.OpenCTP.client import _clean_instrument_rows
 from tools.products.Futures import Futures, FuturesContract
 
 
@@ -37,8 +37,8 @@ def _instrument_row(**overrides):
     return row
 
 
-def test_instruments_to_contract_specs_maps_openctp_fields():
-    specs = instruments_to_contract_specs([_instrument_row()])
+def test_clean_instrument_rows_maps_openctp_fields():
+    specs = _clean_instrument_rows([_instrument_row()])
 
     row = specs.iloc[0]
     assert row["exchange"] == "CFFEX"
@@ -47,7 +47,7 @@ def test_instruments_to_contract_specs_maps_openctp_fields():
     assert row["multiplier"] == 300
     assert row["min_tick"] == 0.2
     assert row["min_trade_quantity"] == 1
-    assert row["contract_key"] == "IF2606"
+    assert row["NormalizedInstrumentID"] == "IF2606"
 
 
 def test_product_trading_spec_field_prefers_local_product_value(monkeypatch):
@@ -101,7 +101,7 @@ def test_public_fields_fill_missing_local_snapshot_from_product_resolver(monkeyp
 
 def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_path):
     monkeypatch.setattr(openctp_client, "CACHE_DIR", tmp_path / "openctp")
-    monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "openctp" / "openctp.sqlite")
+    monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "localdata" / "unifieddata.sqlite")
     calls = []
 
     class _Response:
@@ -125,7 +125,7 @@ def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_pat
 
     assert first == second == [{"InstrumentID": "IF2606"}]
     assert len(calls) == 1
-    with sqlite3.connect(tmp_path / "openctp" / "openctp.sqlite") as conn:
+    with sqlite3.connect(tmp_path / "localdata" / "unifieddata.sqlite") as conn:
         count = conn.execute("SELECT count(*) FROM openctp_responses").fetchone()[0]
         spec = conn.execute(
             "SELECT instrument_id, product_id, open_ratio, open_fixed FROM openctp_cnfutures_contract_specs"

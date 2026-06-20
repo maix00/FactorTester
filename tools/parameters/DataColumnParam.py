@@ -1,9 +1,12 @@
 from typing import Optional, Any
 
-from tools import DataColumn
+from tools.decorators import factor_workspace
+from tools.data.types import DataColumn
 from tools.parameters.Parameter import Parameter, ValueSpace
 
+@factor_workspace
 class DataColumnParam(Parameter):
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
@@ -30,14 +33,15 @@ class DataColumnParam(Parameter):
             *args, **kwargs
         )
 
+    @factor_workspace
     def col(self, col: Any):
-        from tools import DataColumn
+        from tools.data.types import DataColumn
         col = DataColumn(col)
         return self.get_value_alias(col)
 
 
 def _is_valid_datacolumn(value: Any) -> bool:
-    from tools import DataColumn
+    from tools.data.types import DataColumn
     try:
         DataColumn(value)
         return True

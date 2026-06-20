@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import pandas as pd
+from types import SimpleNamespace
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 from tools.factors import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.parameters import WindowParam
@@ -69,6 +70,14 @@ class _DailyOnlyProduct(_Product):
         return [DataFreq.DAY1]
 
 
+class _PreviousReloadProduct(_Product):
+    def list_available_freqs(self):
+        return [
+            SimpleNamespace(name="MIN1", value=pd.Timedelta("1min")),
+            SimpleNamespace(name="DAY1", value=pd.Timedelta("1D")),
+        ]
+
+
 def test_source_frequency_is_fine_enough_for_signal_alignment():
     factor = _DailyWindowMinuteSignal().get_factor(
         SourceFrequencyWindow="1D",
@@ -90,6 +99,29 @@ def test_declared_source_frequency_overrides_daily_window_and_signal():
     factor.evaluate([_Product()])
 
     assert factor._source_freq == DataFreq.MIN1
+
+
+def test_explicit_source_frequency_normalizes_string_input():
+    factor = _DeclaredMinuteSourceDailySignal().get_factor(
+        SourceFrequencyWindow="1D",
+        **{"$F": "1D", "$Rev": "0"},
+    )
+
+    result = factor.evaluate([_Product()], freq="MIN1")
+
+    assert factor._source_freq is DataFreq.MIN1
+    assert not result.empty
+
+
+def test_explicit_source_frequency_accepts_product_frequency_from_previous_reload():
+    factor = _DeclaredMinuteSourceDailySignal().get_factor(
+        SourceFrequencyWindow="1D",
+        **{"$F": "1D", "$Rev": "0"},
+    )
+
+    result = factor.evaluate([_PreviousReloadProduct()], freq="MIN1")
+
+    assert not result.empty
 
 
 def test_declared_source_frequency_skips_products_without_that_source():

@@ -111,16 +111,13 @@
         // list 模式按钮（非交互式 focus 场景，click 即可）
         var addGroupBtn = document.getElementById('gt-action-add-group');
         if (addGroupBtn) addGroupBtn.addEventListener('click', function() { _enterAddMode('group'); });
-        var addDerivedBtn = document.getElementById('gt-action-add-derived');
-        if (addDerivedBtn) addDerivedBtn.addEventListener('click', function() { _enterAddMode('derived'); });
+
         var addLSBtn = document.getElementById('gt-action-add-ls');
         if (addLSBtn) addLSBtn.addEventListener('click', function() { _enterAddMode('ls'); });
 
         // 取消按钮 — mousedown 后直接退出，无需等 blur 刷新
         var cancelBtn = document.getElementById('gt-action-cancel');
         if (cancelBtn) cancelBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitAddMode(); });
-        var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
-        if (cancelEditBtn) cancelEditBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitEditMode(); });
 
         // 提交/保存 — mousedown 先 blur 聚焦输入框，等 blur 回调执行后再提交
         var submitBtn = document.getElementById('gt-action-submit');
@@ -163,13 +160,17 @@
         if (!bar) return;
         var html = '';
         var d = M.getAddDraft();
+        function iconButton(id, title, innerHtml, cls, extraStyle) {
+            return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + innerHtml + '</button>';
+        }
 
         if (M.isMode('add')) {
             // 泛型提交按钮
             var meta = M.getActiveFlowMeta();
             var submitLabel = (meta && meta.submitLabel) || '提交';
-            html += '<button id="gt-action-submit" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">' + submitLabel + '</button>';
-            html += ' <button id="gt-action-cancel" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消新建</button>';
+            var submitTitle = (meta && meta.submitTitle) || String(submitLabel).replace(/<[^>]+>/g, '') || '提交';
+            html += iconButton('gt-action-submit', submitTitle, submitLabel, 'btn-primary', '');
+            html += ' ' + iconButton('gt-action-cancel', '取消新建', '<i class="fas fa-times"></i>', 'btn-outline-secondary', '');
 
         } else if (M.isMode('edit')) {
             // 动态 edit actions（仅非 config tab 时显示 standalone=false 的按钮）
@@ -179,15 +180,13 @@
                 var act = actions[i];
                 if (isConfigTab && !act.standalone) continue;
                 var cls = act.buttonClass || 'btn-primary';
-                html += '<button id="gt-action-edit-' + act.name + '" class="btn btn-sm ' + cls + '" style="padding:4px 12px;font-size:12px;">' + act.label + '</button>';
+                html += iconButton('gt-action-edit-' + act.name, act.title || act.label || act.name, act.label, cls, act.style || '');
             }
-            html += '<button id="gt-action-save" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存修改</button>';
-            html += ' <button id="gt-action-cancel-edit" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消编辑</button>';
+            html += ' ' + iconButton('gt-action-save', '保存修改', '<i class="fas fa-save"></i>', 'btn-primary', '');
 
         } else {
-            // list 模式 — 固定显示「新增基础组」+「新增子组」
-            html += '<button id="gt-action-add-group" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增分组</button>';
-            html += ' <button id="gt-action-add-derived" class="btn btn-outline-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增子组</button>';
+            // list 模式 — 固定显示「新增分组」
+            html += iconButton('gt-action-add-group', '新增分组', '<i class="fas fa-plus"></i>', 'btn-primary', '');
         }
 
         bar.innerHTML = html;
@@ -358,7 +357,7 @@
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
         if (P.config && P.config.fee) {
             registerPanel({
-                name: 'fee', label: '💰 手续费与平今', containerId: 'config-fee',
+                name: 'fee', label: '手续费', containerId: 'config-fee',
                 category: TAB_CATEGORY.CONFIG, panel: P.config.fee
             });
         }
@@ -404,6 +403,81 @@
         renderTabActions: _renderTabActions,
         _selectedEditIds: function() { return M.getEditIds(); },
     };
+
+    // ═══════════════════════════════════════════════════════════════
+    // 通用编辑操作（删除 / 复制）
+    // ═══════════════════════════════════════════════════════════════
+
+    // ── 批量删除 ──
+    M.registerEditAction({
+        name: 'delete',
+        label: '<span style="color:#d40000;font-weight:700;font-size:16px;line-height:1;">&times;</span>',
+        title: '删除',
+        priority: 50,
+        condition: function(ctx) { return ctx.count > 0; },
+        buttonClass: 'btn-outline-danger',
+        style: 'background:#fff5f5;border-color:#f3b0b0;color:#d40000;',
+        action: function(ctx, helpers) {
+            var ids = ctx.ids;
+            if (ids.length === 0) return;
+            try {
+                for (var i = 0; i < ids.length; i++) {
+                    GT.groupSettings.groups.remove(ids[i]);
+                }
+            } catch (err) { alert('删除失败: ' + err.message); }
+            helpers.exitEdit();
+        }
+    });
+
+    // ── 复制（派生组） ──
+    M.registerEditAction({
+        name: 'clone',
+        label: '<i class="fas fa-copy"></i>',
+        title: '复制为派生组',
+        priority: 40,
+        condition: function(ctx) { return ctx.count > 0; },
+        action: function(ctx, helpers) {
+            var groups = GT.groupSettings.groups;
+            var ids = ctx.ids;
+            var created = [];
+            for (var i = 0; i < ids.length; i++) {
+                var src = groups.get(ids[i]);
+                if (!src) continue;
+                var parent = src.parentId ? groups.get(src.parentId) : src;
+                if (!parent) continue;
+                var clone = {
+                    name: '',
+                    parentId: src.id,
+                    splitCount: src.splitCount || (parent && parent.splitCount) || 1,
+                    groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
+                    productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
+                };
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
+                 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
+                    if (src[key] !== undefined && src[key] !== null) {
+                        clone[key] = (typeof src[key] === 'object') ? JSON.parse(JSON.stringify(src[key])) : src[key];
+                    }
+                });
+                try {
+                    var newId = groups.add(clone);
+                    created.push(newId);
+                } catch (err) {
+                    alert('复制失败: ' + (err && err.message || err));
+                    break;
+                }
+            }
+            if (created.length > 0) {
+                // 选中新创建的派生组
+                var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+                if (sel) {
+                    sel.clear();
+                    for (var j = 0; j < created.length; j++) { sel.add(created[j]); }
+                }
+                if (GT.events && GT.events.emit) GT.events.emit('derivedGraphChanged');
+            }
+            helpers.exitEdit();
+        }
+    });
 
     GT.log('registry/tabs loaded');
 })();

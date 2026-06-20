@@ -6,7 +6,7 @@ from typing import cast
 from server.modules.custom_factors.param_config_service import build_param_factor_overview
 from server.modules.shared.param_config import normalize_param_row
 from server.services.factor_registry import get_factor_family_instance
-from server.services.runtime_state import current_user
+from server.services.session_runtime import current_user
 from tools.factors.factor_param_resolution import register_factor_param_resolver
 
 

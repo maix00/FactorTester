@@ -1,5 +1,7 @@
 """Routes supporting custom-factor source validation and visual editor metadata."""
 
+import os
+
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
@@ -7,13 +9,20 @@ from server.modules.custom_factors.source_helpers import (
     assemble_factor_source,
     strip_factor_meta,
 )
-from server.modules.custom_factors.storage import load_factor_source
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.accounts import can_view_user_scope
+from tools.data.account_manage import can_view_user_scope
 from server.services.http_auth import login_required
-from server.services.runtime_state import current_user
+from server.services.session_runtime import current_user
+from tools.data.account_manage import get_account, is_super_admin_account
 from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_workspace import (
+    build_factor_workspace,
+    get_factor_workspace_git_state,
+    push_factor_workspace,
+    sync_factor_workspace,
+)
+from tools.data.factor_workspace.storage import factor_source_root, load_factor_source
 
 
 @cf_bp.route('/api/validate', methods=['POST'])
@@ -142,6 +151,92 @@ def api_visual_operators():
         'success': True,
         'groups': get_visual_operator_groups(),
     })
+
+
+@cf_bp.route('/api/source-root', methods=['GET', 'POST'])
+@login_required
+def api_source_root():
+    username = current_user()
+    if request.method == 'GET':
+        from tools.data.sqlite.factor_source_settings import load_factor_source_root
+        configured_root = load_factor_source_root(username) or ''
+        return jsonify({
+            'success': True,
+            'source_root': configured_root,
+            'resolved_root': factor_source_root(username),
+        })
+
+    data = request.get_json(silent=True) or {}
+    source_root = (data.get('source_root') or '').strip()
+    if source_root:
+        source_root = os.path.abspath(os.path.expanduser(source_root))
+
+    from tools.data.sqlite.factor_source_settings import save_factor_source_root
+    save_factor_source_root(username, source_root)
+    return jsonify({
+        'success': True,
+        'source_root': source_root,
+        'resolved_root': factor_source_root(username),
+    })
+
+
+@cf_bp.route('/api/workspace/build', methods=['POST'])
+@login_required
+def api_build_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    result = build_factor_workspace(username)
+    return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/sync', methods=['POST'])
+@login_required
+def api_sync_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    data = request.get_json(silent=True) or {}
+    branch_mode = (data.get('branch_mode') or 'force').strip()
+    result = sync_factor_workspace(username, branch_mode=branch_mode)
+    return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/push', methods=['POST'])
+@login_required
+def api_push_workspace():
+    username = current_user()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    data = request.get_json(silent=True) or {}
+    branch_mode = (data.get('branch_mode') or 'auto').strip()
+    result = push_factor_workspace(
+        username,
+        allow_public_write=is_super_admin_account(get_account(username)),
+        branch_mode=branch_mode,
+    )
+    return jsonify({'success': True, **result})
+
+
+@cf_bp.route('/api/workspace/git-settings', methods=['GET', 'POST'])
+@login_required
+def api_workspace_git_settings():
+    username = current_user()
+    if request.method == 'GET':
+        return jsonify({'success': True, **get_factor_workspace_git_state(username)})
+
+    data = request.get_json(silent=True) or {}
+    from tools.data.sqlite.factor_source_workspace_settings import save_factor_source_workspace_settings
+    git_enabled = bool(data.get('git_enabled'))
+    git_repo_root = (data.get('git_repo_root') or '').strip()
+    save_factor_source_workspace_settings(
+        username,
+        git_enabled=git_enabled,
+        git_repo_root=git_repo_root,
+    )
+    return jsonify({'success': True, **get_factor_workspace_git_state(username)})
+
+
 
 
 @cf_bp.route('/api/params/preset', methods=['GET'])

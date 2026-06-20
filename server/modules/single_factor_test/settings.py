@@ -6,17 +6,16 @@ GroupTest settings snapshot persistence endpoints.
 /list_group_settings  — list all saved snapshots for a factor family
 /delete_group_settings — delete a saved snapshot
 
-Storage: ../data/users/<username>/group_settings/<factor_alias>.json
-Uses server.services.user_storage for per-user file persistence.
+Storage: unified SQLite account-template collections.
 """
 import logging, traceback
 from flask import request, jsonify
-from server.services.user_storage import (
+from tools.data.account_manage import (
     load_user_templates,
     save_user_templates,
     new_template_id,
 )
-from server.services.runtime_state import require_user
+from server.services.session_runtime import require_user
 from . import sft_bp
 
 _log = logging.getLogger(__name__)

@@ -20,6 +20,33 @@
     }
     window.rememberSingleFactorPageUuid = rememberPageUuid;
 
+    var _pageCleanupSent = false;
+    function sendPageCleanup() {
+        if (_pageCleanupSent) return;
+        var pageUuid = window._pageUuid || '';
+        var factorFamilyAlias = window._sftCurrentFactorId || '';
+        if (!pageUuid) return;
+        _pageCleanupSent = true;
+        var payload = JSON.stringify({ page_uuid: pageUuid, factor_family_alias: factorFamilyAlias });
+        try {
+            if (navigator.sendBeacon) {
+                var blob = new Blob([payload], { type: 'application/json' });
+                if (navigator.sendBeacon('/close_page', blob)) return;
+            }
+        } catch (e) {}
+        try {
+            fetch('/close_page', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true,
+            }).catch(function() {});
+        } catch (e) {}
+    }
+
+    window.addEventListener('pagehide', sendPageCleanup);
+    window.addEventListener('beforeunload', sendPageCleanup);
+
     // 等待 DateUtils 加载完成
     function waitForDateUtils(callback) {
         if (window.DateUtils) {

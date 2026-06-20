@@ -9,8 +9,8 @@ import pandas as pd
 from tools.factors import Factor
 from tools.factors.tests import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
-from tools.data.DataFreq import DataFreq
-from tools.data.DataIndex import finest_index
+from tools.data.types import DataFreq
+from tools.data.types import finest_index
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:
@@ -25,6 +25,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
     s = ic_series.dropna()
     ac1 = None
     half_life = None
+    acf_vals = None
     if len(s) > 2:
         from statsmodels.tsa.stattools import acf
         try:
@@ -43,6 +44,9 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         except Exception:
             pass
 
+    # 把完整的 acf 数组也缓存起来，避免 _build_ic_response 重复计算
+    acf_vals_list = acf_vals.tolist() if acf_vals is not None else None
+
     return pd.Series({
         "mean": mean,
         "std": std,
@@ -52,6 +56,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         "min": min_ic,
         "ac1": ac1,
         "half_life": half_life,
+        "acf_vals": acf_vals_list,
     })
 
 

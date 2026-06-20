@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tempfile
 import time
 
 from server.modules.custom_factors.source_helpers import strip_factor_meta
-from server.modules.custom_factors.storage import custom_factor_dir
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.accounts import (
+from tools.data.account_manage import (
     account_display_name,
     visible_accounts_for,
 )
 from server.services.factor_registry import get_factor_family_instance
+from tools.data.factor_workspace.storage import custom_factor_dir, load_factor_source, load_public_factor_source
+from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.factors import FactorFamily
 
 
@@ -24,37 +26,59 @@ def _factor_family_name(factor_cls: type, default: str = 'FactorFamily') -> str:
     return default
 
 
+def _load_factor_family_from_source(source_code: str, module_name: str) -> tuple[type | None, object | None]:
+    if not source_code:
+        return None, None
+    tmpdir = tempfile.mkdtemp(prefix='factor_catalog_')
+    tmpfile = os.path.join(tmpdir, f'{module_name}.py')
+    try:
+        with open(tmpfile, 'w', encoding='utf-8') as file:
+            file.write(source_code)
+        spec = importlib.util.spec_from_file_location(module_name, tmpfile)
+        if spec is None or spec.loader is None:
+            return None, None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        from tools.factors import FactorFamily
+        for attr_name in dir(module):
+            obj = getattr(module, attr_name)
+            if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
+                return obj, module
+        return None, module
+    except Exception:
+        return None, None
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def list_custom_factors(username: str) -> list:
-    """List a user's custom FactorFamily files with loaded metadata."""
-    directory = custom_factor_dir(username)
+    """List a user's custom FactorFamily rows from the database."""
     factors = []
-    if not os.path.exists(directory):
-        return factors
-    for filename in sorted(os.listdir(directory), reverse=True):
-        if not filename.endswith('.py'):
+    rows = [row for row in list_factor_sources('custom') if row.get('owner_username') == username]
+
+    for row in rows:
+        factor_id = str(row.get('factor_id') or '')
+        source_code = str(row.get('source_code') or '')
+        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(row.get('updated_at') or time.time())))
+        factor_cls, module = _load_factor_family_from_source(source_code, f'_cf_{username}_{factor_id}')
+        if factor_cls is None:
+            factors.append({
+                'id': factor_id,
+                'name': factor_id,
+                'category': '自编',
+                'factor_family': 'FactorFamily',
+                'chinese_name': '',
+                'description': '',
+                'params': [],
+                'source_code': strip_factor_meta(source_code),
+                'is_public': False,
+                'updated_at': updated_at,
+                'load_error': True,
+            })
             continue
-        factor_id = os.path.splitext(filename)[0]
-        filepath = os.path.join(directory, filename)
-        mtime = os.path.getmtime(filepath)
-        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
 
         try:
-            module_name = f'_cf_{username}_{factor_id}'
-            spec = importlib.util.spec_from_file_location(module_name, filepath)
-            if spec is None or spec.loader is None:
-                continue
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            factor_cls = None
-            for attr_name in dir(module):
-                obj = getattr(module, attr_name)
-                if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
-                    factor_cls = obj
-                    break
-            if factor_cls is None:
-                continue
-
             ff = factor_cls()
             family = _factor_family_name(factor_cls)
             factors.append({
@@ -65,6 +89,7 @@ def list_custom_factors(username: str) -> list:
                 'chinese_name': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
+                'source_code': strip_factor_meta(source_code),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': False,
                 'updated_at': updated_at,
@@ -78,6 +103,7 @@ def list_custom_factors(username: str) -> list:
                 'chinese_name': '',
                 'description': '',
                 'params': [],
+                'source_code': strip_factor_meta(source_code),
                 'is_public': False,
                 'updated_at': updated_at,
                 'load_error': True,
@@ -106,19 +132,49 @@ def list_visible_custom_factors(username: str) -> list:
 
 def list_public_factors() -> list:
     """List public FactorFamily classes from the Factors directory."""
-    factors_dir = os.path.join(os.getcwd(), 'Factors')
     result = []
-    if not os.path.exists(factors_dir):
-        return result
-    for filename in sorted(os.listdir(factors_dir)):
-        if not filename.endswith('.py') or filename.startswith('__'):
+    rows = list_factor_sources('public')
+    if not rows:
+        factors_dir = os.path.join(os.getcwd(), 'Factors')
+        if os.path.exists(factors_dir):
+            for filename in sorted(os.listdir(factors_dir)):
+                if not filename.endswith('.py') or filename.startswith('__'):
+                    continue
+                name = os.path.splitext(filename)[0]
+                source_code = load_public_factor_source(name) or ''
+                if source_code:
+                    rows.append({
+                        'source_kind': 'public',
+                        'owner_username': '',
+                        'factor_id': name,
+                        'factor_name': name,
+                        'source_code': source_code,
+                        'updated_at': time.time(),
+                    })
+
+    for row in rows:
+        name = str(row.get('factor_id') or '')
+        source_code = str(row.get('source_code') or '')
+        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(row.get('updated_at') or time.time())))
+        factor_cls, _ = _load_factor_family_from_source(source_code, name)
+        if factor_cls is None:
+            result.append({
+                'id': name,
+                'name': name,
+                'category': '',
+                'factor_family': 'FactorFamily',
+                'chinese_name': '',
+                'description': '',
+                'params': [],
+                'source_code': strip_factor_meta(source_code),
+                'is_public': True,
+                'updated_at': updated_at,
+                'load_error': True,
+            })
             continue
-        name = os.path.splitext(filename)[0]
         try:
-            ff = get_factor_family_instance(name)
-            family = _factor_family_name(ff.__class__)
-            mtime = os.path.getmtime(os.path.join(factors_dir, filename))
-            updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+            ff = factor_cls()
+            family = _factor_family_name(factor_cls)
             result.append({
                 'id': name,
                 'name': name,
@@ -127,6 +183,7 @@ def list_public_factors() -> list:
                 'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
+                'source_code': strip_factor_meta(source_code),
                 'params': [serialize_param_meta(param) for param in ff.params],
                 'is_public': True,
                 'updated_at': updated_at,
@@ -140,8 +197,9 @@ def list_public_factors() -> list:
                 'chinese_name': '',
                 'description': '',
                 'params': [],
+                'source_code': strip_factor_meta(source_code),
                 'is_public': True,
-                'updated_at': '',
+                'updated_at': updated_at,
                 'load_error': True,
             })
     return result
@@ -150,13 +208,11 @@ def list_public_factors() -> list:
 def get_public_factor_detail(factor_name: str) -> dict | None:
     """Return public factor source and expression metadata."""
     try:
-        ff = get_factor_family_instance(factor_name)
-        source_path = os.path.join(os.getcwd(), 'Factors', f'{factor_name}.py')
-        source_code = ''
-        if os.path.exists(source_path):
-            with open(source_path, 'r', encoding='utf-8') as file:
-                source_code = file.read()
-
+        source_code = load_public_factor_source(factor_name) or ''
+        factor_cls, _ = _load_factor_family_from_source(source_code, factor_name)
+        if factor_cls is None:
+            return None
+        ff = factor_cls()
         tree_repr = ''
         try:
             if ff.expr is not None:

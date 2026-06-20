@@ -32,7 +32,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester

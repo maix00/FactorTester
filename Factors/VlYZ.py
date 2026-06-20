@@ -10,8 +10,9 @@
 # X = sqrt(sigma_o^2 + w * sigma_c^2 + (1-w) * sigma_rs^2)
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from typing import Any
 
-from tools import FactorFamily
+from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
 from tools.factors.FactorExpr import FactorExpr
 
@@ -82,7 +83,7 @@ class _DynamicWeight(FactorExpr):
     求值时从参数字典中取 N 的解析值计算 n 和 w，返回标量。
     """
     def __init__(self, window_param):
-        from tools.parameters.Parameter import Parameter
+        from tools.parameters import Parameter
         self._window_param = window_param
         self.window = window_param  # 兼容 RollingOp 的 window 属性
         self._cached_value = None
@@ -93,18 +94,18 @@ class _DynamicWeight(FactorExpr):
 
     @property
     def param_deps(self):
-        from tools.parameters.Parameter import Parameter
+        from tools.parameters import Parameter
         if isinstance(self._window_param, Parameter):
             return {self._window_param}
         return set()
 
     def _collect_params_ordered(self, seen, result):
-        from tools.parameters.Parameter import Parameter
+        from tools.parameters import Parameter
         if isinstance(self._window_param, Parameter) and self._window_param not in seen:
             seen.add(self._window_param)
             result.append(self._window_param)
 
-    def evaluate(self, products, freq, source=None, cache=None):
+    def evaluate(self, products, freq, source=None, cache=None) -> Any:
         if self._cached_value is not None:
             return self._cached_value
 
@@ -128,10 +129,12 @@ class _DynamicWeight(FactorExpr):
 
 
 def _resolve_bars_or_default(w, freq, default):
-    """将 Timedelta 转为 bar 数，失败返回 default。"""
+    """Return the day count used by the Yang-Zhang weight."""
     try:
-        from tools.factors.FactorExpr import _resolve_bars
-        return _resolve_bars(w, freq)
+        from tools.data.types import DataFreq
+        resolved = w.resolve() if hasattr(w, 'resolve') else w
+        days = DataFreq(resolved).days
+        return days if days > 0 else default
     except Exception:
         return default
 

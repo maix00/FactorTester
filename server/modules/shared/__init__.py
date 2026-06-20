@@ -2,4 +2,5 @@ from flask import Blueprint
 
 shared_bp = Blueprint('shared', __name__)
 
-from . import factor_param_resolver, params, time_range, submissions, factor_data, price_data  # noqa: E402, F401
+def register_routes() -> None:
+    from . import factor_param_resolver, params, time_range, submissions, factor_data, price_data, page_lifecycle  # noqa: F401

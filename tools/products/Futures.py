@@ -4,7 +4,7 @@
 提供 FuturesContract（具体合约）和 Futures（主办合约／主指数合约）两层结构。
 Futures 通过 roller_info 表维护「历史交易日 → 对应主办合约」的映射关系。
 
-roller_info 的闲置释放由 tools.base.IdleResourceManager 统一管理。
+roller_info 的闲置释放由 DataHub → IdleResourceManager 统一管理。
 """
 import pandas as pd
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
@@ -12,12 +12,14 @@ from datetime import datetime
 from tqdm import tqdm
 
 from tools.products.Product import Product
-from tools.base.IdleResourceManager import IdleResourceManager
-from tools.data.DataIndex import DataIndex
+from tools.data.hub import DataHub
+from tools.data.types import DataIndex
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,
     TermStructureStore,
+    register_term_structure_contract,
+    register_term_structure_product,
 )
 
 
@@ -29,7 +31,9 @@ class FuturesTermStructureStore(TermStructureStore):
 class FuturesContract(AdjustableContractMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
-        super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+        if not hasattr(self, '_initialized'):
+            super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+            register_term_structure_contract(self)
 
 
 class Futures(AdjustableProductMixin, Product):
@@ -58,28 +62,29 @@ class Futures(AdjustableProductMixin, Product):
             self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None
             self.contract_class = contract_class
+            register_term_structure_product(self)
 
     def _ensure_roller_info(self):
         """
         确保 self.roller_info 可用。
-        从 IdleResourceManager 的全局缓存中拿全量数据（按 path 去重），
+        从 DataHub 的全局缓存中拿全量数据（按 path 去重），
         筛出当前品种的切片赋给 self.roller_info。
         全局缓存释放后 self.roller_info 即为失效视图，下次调用会重新加载。
         """
-        manager = IdleResourceManager.get_instance()
+        hub = DataHub.get_instance()
         path = self.get_roller_info_path()
         if not path:
             raise ValueError(f"roller_info_path not set for {self.name}")
 
         # 先 touch（无论是否已有缓存，更新该 path 的 last_access）
-        manager.touch('roller_info', path)
+        hub.touch('roller_info', path)
 
         # 如果 self.roller_info 仍有效（底层缓存未被释放），直接返回
         if self.roller_info is not None:
             return
 
         # 从全局缓存加载全量 roller_info（多个品种共享同一个 path）
-        ri = manager.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
+        ri = hub.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
         assert ri is not None
         ri['STARTDATE'] = pd.to_datetime(ri['STARTDATE'])
         ri['ENDDATE'] = pd.to_datetime(ri['ENDDATE'])
@@ -250,13 +255,22 @@ class Futures(AdjustableProductMixin, Product):
         contracts = self.get_roller_contracts_from_trading_day(trading_day, n=int(n) + 1)
         return contracts[int(n)] if len(contracts) > int(n) else None
 
-    def get_term_structure_contracts_from_trading_day(self, trading_day: datetime | str, depth: int = 2) -> List[FuturesContract]:
-        """返回用于期限结构计算的合约链。
-
-        当前实现基于主力展期链，适合计算“当期主力 vs 后续主力”的近似期限结构；
-        若需要完整期限结构，应由数据源提供某日全部可交易合约与到期日排序。
-        """
+    def get_continuous_contracts_from_trading_day(self, trading_day: datetime | str, depth: int = 2) -> List[FuturesContract]:
+        """Return the current and subsequent contracts from the primary roll chain."""
         return self.get_roller_contracts_from_trading_day(trading_day, n=depth)
+
+    def get_term_structure_contracts_from_trading_day(
+        self,
+        trading_day: datetime | str,
+        depth: int = 2,
+        curve_variant: str = "listed_contracts",
+    ) -> List[FuturesContract]:
+        """Return the actual maturity-ranked curve, not the primary roll chain."""
+        return self.get_term_structure_contracts(
+            trading_day,
+            depth=depth,
+            curve_variant=curve_variant,
+        )
 
     def get_roller_info_path(self) -> str | None:
         """返回此品种对应的 roller_info 文件路径。子类可重写以支持按品种分流。"""

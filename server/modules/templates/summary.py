@@ -99,7 +99,7 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             for group in flat_groups[:8]:
                 label = group.get('shortAlias') or group.get('name') or group.get('id') or '未命名组'
                 group_index = group.get('groupIndex', '未设置')
-                group_count_value = group.get('groupCount', '未设置')
+                group_count_value = group.get('splitCount', '未设置')
                 factor_alias = group.get('factorAlias') or '因子未设置'
                 fee_mode_value = group.get('feeMode') or 'none'
                 fee_text = fee_labels.get(fee_mode_value, fee_mode_value)
@@ -121,30 +121,27 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             summary['group_test'] = group_parts
             return summary
 
-        legacy = group_settings.get('_legacy') or group_settings
-        group_count = group_settings.get('group_count', '')
-        if not group_count:
-            group_count = legacy.get('group_count', '')
+        group_count = group_settings.get('splitCount', '')
         if group_count:
             group_parts.append(f"分组数={group_count}")
-        fee_mode = group_settings.get('fee_mode', '') or legacy.get('fee_mode', '')
+        fee_mode = group_settings.get('fee_mode', '')
         if fee_mode and fee_mode != 'none':
             fee_labels = {'none': '无费率', 'percent': '百分比', 'fixed': '固定', 'uniform': '统一费率', 'per_product': '分品种费率', 'custom': '自定义费率'}
             group_parts.append(f"费率={fee_labels.get(fee_mode, fee_mode)}")
-            if group_settings.get('fee_rate') or legacy.get('fee_rate'):
-                group_parts.append(f"{group_settings.get('fee_rate') or legacy.get('fee_rate')}")
-        if group_settings.get('use_closetoday') or legacy.get('use_closetoday'):
+            if group_settings.get('fee_rate'):
+                group_parts.append(f"{group_settings.get('fee_rate')}")
+        if group_settings.get('use_closetoday'):
             group_parts.append('平今')
 
         group_start = '-'.join(filter(None, [
-            legacy.get('group_start_year', ''),
-            str(legacy.get('group_start_month', '')).zfill(2) if legacy.get('group_start_month') else '',
-            str(legacy.get('group_start_day', '')).zfill(2) if legacy.get('group_start_day') else '',
+            group_settings.get('group_start_year', ''),
+            str(group_settings.get('group_start_month', '')).zfill(2) if group_settings.get('group_start_month') else '',
+            str(group_settings.get('group_start_day', '')).zfill(2) if group_settings.get('group_start_day') else '',
         ]))
         group_end = '-'.join(filter(None, [
-            legacy.get('group_end_year', ''),
-            str(legacy.get('group_end_month', '')).zfill(2) if legacy.get('group_end_month') else '',
-            str(legacy.get('group_end_day', '')).zfill(2) if legacy.get('group_end_day') else '',
+            group_settings.get('group_end_year', ''),
+            str(group_settings.get('group_end_month', '')).zfill(2) if group_settings.get('group_end_month') else '',
+            str(group_settings.get('group_end_day', '')).zfill(2) if group_settings.get('group_end_day') else '',
         ]))
         if group_start and group_end:
             group_parts.append(f"{group_start} ~ {group_end}")

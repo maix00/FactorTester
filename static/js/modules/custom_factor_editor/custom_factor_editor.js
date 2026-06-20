@@ -21,7 +21,169 @@ let _editingSaveTarget = null; // {source:'custom'|'public', id:string, owner:st
 // ═══════════════════════════════════════════════════════════
 async function init() {
     await loadVisualOperatorRegistry();
+    await loadFactorSourceRoot();
+    await loadFactorWorkspaceGitSettings();
     await loadFactorFamilyList();
+}
+
+function _factorSourceRootInput() {
+    return document.getElementById('factor-source-root-input');
+}
+
+function _factorSourceRootStatus() {
+    return document.getElementById('factor-source-root-status');
+}
+
+function _setFactorSourceRootStatus(message, kind) {
+    var el = _factorSourceRootStatus();
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.color = kind === 'error' ? '#b42318' : (kind === 'success' ? '#067647' : '#667085');
+}
+
+async function loadFactorSourceRoot() {
+    var input = _factorSourceRootInput();
+    if (!input) return;
+    try {
+        const res = await fetch('/custom-factors/api/source-root');
+        const data = await res.json();
+        if (data.success) {
+            input.value = data.source_root || '';
+            _setFactorSourceRootStatus(
+                data.resolved_root ? ('当前生效目录: ' + data.resolved_root) : '使用默认用户目录',
+                'neutral'
+            );
+        } else {
+            _setFactorSourceRootStatus(data.error || '读取本地目录失败', 'error');
+        }
+    } catch (err) {
+        _setFactorSourceRootStatus('读取本地目录失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+function _factorWorkspaceGitStatusElement() {
+    return document.getElementById('factor-workspace-git-status');
+}
+
+function _setFactorWorkspaceGitStatus(message, kind) {
+    var el = _factorWorkspaceGitStatusElement();
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.color = kind === 'error' ? '#b42318' : (kind === 'success' ? '#067647' : '#667085');
+}
+
+async function loadFactorWorkspaceGitSettings() {
+    try {
+        const res = await fetch('/custom-factors/api/workspace/git-settings');
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorWorkspaceGitStatus(data.error || '读取 Git 配置失败', 'error');
+            return;
+        }
+        if (data.git_enabled) {
+            _setFactorWorkspaceGitStatus(
+                `Git 已启用 · 当前分支 ${data.git_current_branch || '—'} · 自动上传分支 ${data.git_auto_sync_branch || 'upload'} · 下载同步分支 ${data.git_force_sync_branch || 'download'}`,
+                'success'
+            );
+        } else {
+            _setFactorWorkspaceGitStatus('未检测到可用 Git：只能使用建立、从数据库同步到工作区、上传本地工作区这些手动按钮', 'neutral');
+        }
+    } catch (err) {
+        _setFactorWorkspaceGitStatus('读取 Git 配置失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function saveFactorSourceRoot() {
+    var input = _factorSourceRootInput();
+    if (!input) return;
+    var sourceRoot = (input.value || '').trim();
+    try {
+        const res = await fetch('/custom-factors/api/source-root', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_root: sourceRoot })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '保存本地目录失败', 'error');
+            return;
+        }
+        input.value = data.source_root || '';
+        _setFactorSourceRootStatus(
+            data.resolved_root ? ('已保存，当前生效目录: ' + data.resolved_root) : '已清空，使用默认用户目录',
+            'success'
+        );
+        await loadFactorFamilyList();
+    } catch (err) {
+        _setFactorSourceRootStatus('保存本地目录失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function buildFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在清空并建立本地工作区...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '建立本地工作区失败', 'error');
+            return;
+        }
+        await loadFactorWorkspaceGitSettings();
+        const commitSuffix = data.git_commit_sha ? `，已提交 ${data.git_commit_sha}` : '';
+        _setFactorSourceRootStatus(
+            `已建立工作区，公共因子 ${data.public_factor_count || 0} 个，自定义因子 ${data.custom_factor_count || 0} 个${commitSuffix}`,
+            'success'
+        );
+    } catch (err) {
+        _setFactorSourceRootStatus('建立本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function syncFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在从数据库同步到本地...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch_mode: 'force' })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '同步本地工作区失败', 'error');
+            return;
+        }
+        await loadFactorWorkspaceGitSettings();
+        _setFactorSourceRootStatus(`已同步到本地，自定义因子 ${data.custom_factor_count || 0} 个，公共因子 ${data.public_factor_count || 0} 个`, 'success');
+    } catch (err) {
+        _setFactorSourceRootStatus('同步本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
+    }
+}
+
+async function uploadFactorWorkspace() {
+    try {
+        _setFactorSourceRootStatus('正在上传本地工作区到数据库...', 'neutral');
+        const res = await fetch('/custom-factors/api/workspace/push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch_mode: 'auto' })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            _setFactorSourceRootStatus(data.error || '上传本地工作区失败', 'error');
+            return;
+        }
+        await loadFactorWorkspaceGitSettings();
+        _setFactorSourceRootStatus(
+            `已上传本地工作区，更新自定义因子 ${data.updated_custom_count || 0} 个，公共因子 ${data.updated_public_count || 0} 个`,
+            'success'
+        );
+    } catch (err) {
+        _setFactorSourceRootStatus('上传本地工作区失败: ' + (err && err.message ? err.message : err), 'error');
+    }
 }
 
 let _isAdmin = false;

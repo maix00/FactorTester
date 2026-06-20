@@ -2,7 +2,7 @@
 Product 抽象基类 — 所有金融产品的统一接口。
 
 核心职责：
-  - 为每个 DataFreq 自动创建 DataMeta 对象（如 product.MIN1 / product.DAY1）
+  - 为每个 DataFreq 自动创建 ProductDataView 对象（如 product.MIN1 / product.DAY1）
   - 封装数据可用性判断（list_available_freqs / list_available_datasources）
   - 在后台与 IdleResourceManager 协作，按需加载和回收 DataFrame
 
@@ -11,17 +11,17 @@ Product 抽象基类 — 所有金融产品的统一接口。
 from typing import List, Optional, Any, TYPE_CHECKING, cast
 import pandas as pd
 
-from tools.base.UniqueObject import UniqueObject
-from tools.data.DataMeta import DataMeta
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
-from tools.data.DataSource import DataSource
+from tools.data.types import UniqueNameObject
+from tools.data.views.ProductDataView import ProductDataView
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
+from tools.data.providers import DataProviderProductTS as DataSource
 
-class Product(UniqueObject):
+class Product(UniqueNameObject):
     """
     金融产品基类。
 
-    初始化时会为每个已知 DataFreq（全局实例）自动创建对应的 DataMeta，
+    初始化时会为每个已知 DataFreq（全局实例）自动创建对应的 ProductDataView，
     并设置为同名属性（如 product.MIN1、product.DAY1）。
 
     属性：
@@ -33,8 +33,8 @@ class Product(UniqueObject):
     """
     # 全局类属性标注（实际属性由具体子类提供）
     desc: str
-    MIN1: DataMeta   # 1 分钟数据
-    DAY1: DataMeta   # 1 日数据
+    MIN1: ProductDataView   # 1 分钟数据
+    DAY1: ProductDataView   # 1 日数据
 
     # 技术基类可覆写为 True，以在前端产品树中隐藏该层级。
     _is_hidden_product_tree_class: bool = False
@@ -69,9 +69,9 @@ class Product(UniqueObject):
             for field in self.TRADING_SPEC_FIELDS:
                 if field in kwargs and kwargs[field] is not None:
                     setattr(self, field, kwargs[field])
-            # 为每个已知频率创建 DataMeta 对象，设为对应属性
+            # 为每个已知频率创建 ProductDataView 对象，设为对应属性
             for freq in DataFreq:
-                setattr(self, freq.name, DataMeta(alias=f"{freq}", object=self, data_freq=freq, timezone=self.timezone))
+                setattr(self, freq.name, ProductDataView(alias=f"{freq}", object=self, data_freq=freq, timezone=self.timezone))
             if TYPE_CHECKING:
                 from tools.parameters import DataTimeParam
 
@@ -220,7 +220,13 @@ class Product(UniqueObject):
 
     def get_time_cols(self, data_freq: Optional[Any] = None) -> List[str]:
         data_freq = self.get_current_freq() if data_freq is None else DataFreq(data_freq)
-        return getattr(self, data_freq.name).get_current_source().time_cols_mapping.values()
+        meta = getattr(self, data_freq.name)
+        source = getattr(meta, 'current_source', None)
+        if source is None:
+            source = DataSource.select_for_product(self, data_freq)
+        if source is None:
+            return []
+        return list(source.time_cols_mapping.values())
     
     def get_slices(self, target_cols: Optional[Any] = None,
                    time_col: Optional[str] = None, time_range: Optional[Any] = None,
@@ -286,3 +292,10 @@ class Product(UniqueObject):
     def if_time_is_in_data(self, time: Any) -> bool:
         slice = self.get_slices(time_col=self.get_current_freq().name, time_range=time)
         return not slice.empty
+    def get_series_variants(self):
+        from tools.products.series import ProductSeriesRef
+
+        variants = [ProductSeriesRef(self, "primary_raw", "主序列 · 原始", self.name)]
+        if self.supports_adjusted_price():
+            variants.append(ProductSeriesRef(self, "primary_adjusted", "主序列 · 平滑复权", self.name, adjusted=True))
+        return variants

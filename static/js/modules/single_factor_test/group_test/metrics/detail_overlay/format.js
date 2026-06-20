@@ -42,7 +42,7 @@
     }
 
     function formatAdaptiveTime(timestamp, stepMs) {
-        return GT.core.dates.formatAdaptiveTime(timestamp, stepMs);
+        return GT.core.dateInputs.formatAdaptiveTime(timestamp, stepMs);
     }
 
     function formatCompactTime(timestamp) {

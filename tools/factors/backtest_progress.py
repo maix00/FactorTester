@@ -67,7 +67,7 @@ class BacktestProgressRegistry:
         if cb is not None:
             try:
                 cb(total, groups, phase, extra)
-            except Exception:
+            except Exception as e:
                 pass
 
     def emit_phase(self, phase: str, *, message: str = "",
@@ -76,7 +76,7 @@ class BacktestProgressRegistry:
         if cb is not None:
             try:
                 cb(phase, message, completed, total, extra)
-            except Exception:
+            except Exception as e:
                 pass
 
     def emit_result(self, data: Dict[str, Any]) -> None:

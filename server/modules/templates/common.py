@@ -1,7 +1,7 @@
 """Shared helpers for template routes."""
 
 from server.modules.shared.param_config import param_value_display
-from server.services.user_storage import load_user_templates, new_template_id, save_user_templates
+from tools.data.account_manage import load_user_templates, new_template_id, save_user_templates
 
 
 SINGLE_FACTOR_SETTING_TEMPLATE_KIND = 'global'

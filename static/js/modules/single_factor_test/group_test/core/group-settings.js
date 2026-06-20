@@ -141,9 +141,9 @@
         // ── Tester / factor scoping (root only; child inherit from parent chain) ──
         { key: 'testerId',    type: 'string',  default: '' },
         { key: 'factorAlias', type: 'string',  default: '' },
-        { key: 'groupCount',  type: 'number',  default: 5,
+        { key: 'splitCount',  type: 'number',  default: 5,
           validate: function(v) {
-              if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
+              if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'splitCount must be a positive integer (≥ 1)';
               return null;
           } },
         { key: 'groupIndex',  type: 'number',  default: 1,
@@ -232,6 +232,9 @@
     function _groupsValidate(config) {
         var errors = [];
         var hasParent = !!(config.parentId);
+        var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
+        var effectiveSplitCount = config.splitCount;
+        var effectiveGroupIndex = config.groupIndex;
 
         if (!config || typeof config !== 'object') {
             return { valid: false, errors: ['config must be an object'] };
@@ -242,8 +245,11 @@
         }
 
         if (hasParent) {
-            if (_groupFindIndex(config.parentId) === -1) {
+            if (!parentNode) {
                 errors.push('parentId references a non-existent group: ' + config.parentId);
+            } else {
+                if (effectiveSplitCount == null) effectiveSplitCount = parentNode.splitCount;
+                if (effectiveGroupIndex == null) effectiveGroupIndex = parentNode.groupIndex;
             }
         }
 
@@ -257,16 +263,16 @@
             }
         }
 
-        if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
-            errors.push('groupCount must be a positive integer (≥ 1)');
+        if (typeof effectiveSplitCount !== 'number' || effectiveSplitCount < 1 || Math.floor(effectiveSplitCount) !== effectiveSplitCount) {
+            errors.push('splitCount must be a positive integer (≥ 1)');
         }
 
-        if (config.groupIndex !== undefined && config.groupIndex !== null) {
-            if (typeof config.groupIndex !== 'number' || config.groupIndex < 1 || Math.floor(config.groupIndex) !== config.groupIndex) {
+        if (effectiveGroupIndex !== undefined && effectiveGroupIndex !== null) {
+            if (typeof effectiveGroupIndex !== 'number' || effectiveGroupIndex < 1 || Math.floor(effectiveGroupIndex) !== effectiveGroupIndex) {
                 errors.push('groupIndex must be a positive integer (≥ 1)');
             }
-            if (config.groupCount && config.groupIndex > config.groupCount) {
-                errors.push('groupIndex must not exceed groupCount');
+            if (effectiveSplitCount && effectiveGroupIndex > effectiveSplitCount) {
+                errors.push('groupIndex must not exceed splitCount');
             }
         }
 
@@ -338,11 +344,23 @@
     }
 
     function _fillGroupFromConfig(item, config, hasParent) {
+        var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
+        var inheritedKeys = hasParent ? {
+            testerId: true,
+            factorAlias: true,
+            splitCount: true,
+            groupIndex: true,
+            isAllGroups: true,
+            startDate: true,
+            endDate: true
+        } : {};
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id' || f.key === 'name') continue;
             if (config.hasOwnProperty(f.key)) {
                 item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
+            } else if (parentNode && inheritedKeys[f.key]) {
+                item[f.key] = (f.type === 'object') ? _deepCopy(parentNode[f.key]) : parentNode[f.key];
             } else {
                 item[f.key] = (f.type === 'object') ? _deepCopy(f.default) : f.default;
             }
@@ -384,7 +402,7 @@
         if (!result.valid) { throw new Error('Validation failed: ' + result.errors.join('; ')); }
 
         var needsRegen = false;
-        if (!_groupItems[idx].parentId && 'groupCount' in patch && patch.groupCount !== _groupItems[idx].groupCount) {
+        if (!_groupItems[idx].parentId && 'splitCount' in patch && patch.splitCount !== _groupItems[idx].splitCount) {
             needsRegen = true;
         }
 
@@ -501,12 +519,8 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Group utilities — batchKey, displayKey, serialize
+    // Group utilities — displayKey, serialize
     // ═══════════════════════════════════════════════════════════════
-
-    function _groupsBatchKey(testerId, factorAlias, groupCount) {
-        return String(testerId) + '|' + factorAlias + '|' + groupCount;
-    }
 
     function _groupsExtractLetter(shortAlias) {
         if (!shortAlias) return null;
@@ -575,7 +589,6 @@
         remove: _groupsRemove,
         list: _groupsList,
         validate: _groupsValidate,
-        batchKey: _groupsBatchKey,
         extractLetter: _groupsExtractLetter,
         displayKey: _groupsDisplayKey,
         effectiveProductNames: _groupsEffectiveProductNames,
@@ -879,7 +892,7 @@
         baseGroups.slice(0, 8).forEach(function(group) {
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
-            var countText = group.groupCount != null ? group.groupCount : '未设置';
+            var countText = group.splitCount != null ? group.splitCount : '未设置';
             var feeText = group.feeMode || api.getFieldDefault('feeMode');
             var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')

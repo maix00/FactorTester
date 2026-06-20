@@ -11,7 +11,7 @@ const id = GT.groupSettings.groups.add({
   name: 'B',
   testerId: 'tester-2',
   factorAlias: 'FactorB',
-  groupCount: 3,
+  splitCount: 3,
   feeMode: 'none',
   rebalanceMode: 'each_period',
 });

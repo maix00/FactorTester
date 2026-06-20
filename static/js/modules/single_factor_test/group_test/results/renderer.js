@@ -24,8 +24,11 @@
     var getLastGrossData = function() { var c = cache(); return c ? c.getLastGrossData() : null; };
     var getLastMetrics   = function() { var c = cache(); return c ? c.getLastMetrics() : null; };
     var _lastInitialCapital = 100000000;
+    var _lastBaseCurrency = 'CNY';
     function setLastInitialCapital(v) { if (typeof v === 'number' && v > 0) _lastInitialCapital = v; }
     function getLastInitialCapital() { return _lastInitialCapital; }
+    function setLastBaseCurrency(v) { _lastBaseCurrency = String(v || 'CNY').toUpperCase(); }
+    function getLastBaseCurrency() { return _lastBaseCurrency; }
 
 
     // ════════════════════════════════════════════════════════════════
@@ -36,10 +39,10 @@
      * 画分组累计收益图。
      */
     renderer.drawGroupChart = function(groups) {
-        console.log('[snapshot-debug] drawGroupChart called: groupsLen=', groups ? groups.length : 0);
         if (GT.results && GT.results.chart && GT.results.chart.groups && typeof GT.results.chart.groups.draw === 'function') {
             GT.results.chart.groups.draw(groups, {
                 initialCapital: getLastInitialCapital(),
+                baseCurrency: getLastBaseCurrency(),
                 onSnapshot: function(t) {
                     return GT.results.snapshot ? GT.results.snapshot.fetchGroupSnapshot(t) : null;
                 },
@@ -87,15 +90,33 @@
             n_groups: data.n_groups,
         });
 
+        // 0) 注入后端 metrics_meta（替换前端硬编码）
+        if (data.metrics_meta) {
+            console.log('[GroupTest] metrics_meta from backend:', Object.keys(data.metrics_meta.cn || {}).length, 'metrics');
+            GT.metrics = GT.metrics || {};
+            GT.metrics.meta = data.metrics_meta;
+        } else {
+            console.warn('[GroupTest] No metrics_meta in result data');
+        }
+
         // 1) 更新策略面板
         if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.update === 'function') {
-            GT.results.strategyPanel.update(data.multi_session_active, data.rebalance_mode, data.multi_session_entries);
+            GT.results.strategyPanel.update(
+                data.multi_session_active,
+                data.rebalance_mode,
+                data.multi_session_entries,
+                {
+                    capital_warning: data.capital_warning,
+                    capital_diagnostics: data.capital_diagnostics,
+                }
+            );
         }
 
         // 2) 持久化到 cache
         setLastGrossData(data.groups);
         setLastMetrics(data.metrics);
         setLastInitialCapital(data.initial_capital);
+        setLastBaseCurrency(data.base_currency);
 
         // 3) 画图 + 指标表
         renderer.drawGroupChart(data.groups);

@@ -24,12 +24,18 @@ from urllib.request import urlopen
 
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+import settings as Settings
 
 
 BASE_URL = "http://dict.openctp.cn"
-CACHE_DIR = Path(DATA_DIR) / "cache" / "openctp"
-CACHE_DB_PATH = CACHE_DIR / "openctp.sqlite"
+CACHE_DIR = Settings.CACHE_DIR
+CACHE_DB_PATH = Settings.CACHE_DB_PATH
+SRC_RESPONSES_TABLE = "src_openctp_responses"
+SOURCE_RESPONSES_VIEW = "source_responses"
+LEGACY_RESPONSES_VIEW = "openctp_responses"
+SRC_CONTRACT_SPECS_TABLE = "src_openctp_cnfutures_contract_specs"
+SOURCE_CONTRACT_SPECS_VIEW = "source_contract_specs"
+LEGACY_CONTRACT_SPECS_VIEW = "openctp_cnfutures_contract_specs"
 ENDPOINTS = {
     "markets": "/markets",
     "products": "/products",
@@ -54,13 +60,31 @@ def _cache_key(query: dict[str, str]) -> str:
     return urlencode(sorted(query.items()))
 
 
+def _object_type(conn: sqlite3.Connection, name: str) -> str | None:
+    row = conn.execute("SELECT type FROM sqlite_master WHERE name = ?", (name,)).fetchone()
+    return None if row is None else str(row["type"])
+
+
+def _migrate_legacy_table(conn: sqlite3.Connection, legacy_name: str, raw_name: str) -> None:
+    legacy_type = _object_type(conn, legacy_name)
+    raw_type = _object_type(conn, raw_name)
+    if legacy_type == "table" and raw_type is None:
+        conn.execute(f'ALTER TABLE "{legacy_name}" RENAME TO "{raw_name}"')
+
+
+def _ensure_view(conn: sqlite3.Connection, view_name: str, raw_name: str) -> None:
+    view_type = _object_type(conn, view_name)
+    if view_type is None:
+        conn.execute(f'CREATE VIEW "{view_name}" AS SELECT * FROM "{raw_name}"')
+
+
 def _connect_cache() -> sqlite3.Connection:
     CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CACHE_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS openctp_responses (
+        CREATE TABLE IF NOT EXISTS src_openctp_responses (
             endpoint TEXT NOT NULL,
             query_key TEXT NOT NULL,
             query_json TEXT NOT NULL,
@@ -73,59 +97,49 @@ def _connect_cache() -> sqlite3.Connection:
     )
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS openctp_cnfutures_contract_specs (
+        CREATE TABLE IF NOT EXISTS src_openctp_cnfutures_contract_specs (
             snapshot_date TEXT NOT NULL,
-            exchange TEXT,
-            product_id TEXT,
-            variety_name TEXT,
-            instrument_id TEXT NOT NULL,
-            instrument_name TEXT,
-            product_class TEXT,
-            multiplier REAL,
-            min_tick REAL,
-            min_trade_quantity REAL,
-            max_trade_quantity REAL,
-            long_margin_ratio REAL,
-            long_margin_fixed REAL,
-            short_margin_ratio REAL,
-            short_margin_fixed REAL,
-            open_ratio REAL,
-            open_fixed REAL,
-            close_ratio REAL,
-            close_fixed REAL,
-            closetoday_ratio REAL,
-            closetoday_fixed REAL,
-            price REAL,
-            volume REAL,
-            open_interest REAL,
-            open_total_fee REAL,
-            close_total_fee REAL,
-            closetoday_total_fee REAL,
-            delivery_year REAL,
-            delivery_month REAL,
-            open_date TEXT,
-            expire_date TEXT,
-            delivery_date TEXT,
-            underlying_instrument_id TEXT,
-            underlying_multiple REAL,
-            options_type TEXT,
-            strike_price REAL,
-            life_phase TEXT,
-            contract_key TEXT NOT NULL,
+            ExchangeID TEXT,
+            ProductID TEXT,
+            InstrumentID TEXT NOT NULL,
+            InstrumentName TEXT,
+            ProductClass TEXT,
+            VolumeMultiple REAL,
+            PriceTick REAL,
+            MinLimitOrderVolume REAL,
+            MaxLimitOrderVolume REAL,
+            LongMarginRatioByMoney REAL,
+            LongMarginRatioByVolume REAL,
+            ShortMarginRatioByMoney REAL,
+            ShortMarginRatioByVolume REAL,
+            OpenRatioByMoney REAL,
+            OpenRatioByVolume REAL,
+            CloseRatioByMoney REAL,
+            CloseRatioByVolume REAL,
+            CloseTodayRatioByMoney REAL,
+            CloseTodayRatioByVolume REAL,
+            DeliveryYear REAL,
+            DeliveryMonth REAL,
+            OpenDate TEXT,
+            ExpireDate TEXT,
+            DeliveryDate TEXT,
+            UnderlyingInstrID TEXT,
+            UnderlyingMultiple REAL,
+            OptionsType TEXT,
+            StrikePrice REAL,
+            InstLifePhase TEXT,
+            NormalizedInstrumentID TEXT NOT NULL,
             updated_at REAL NOT NULL,
-            PRIMARY KEY (snapshot_date, instrument_id)
+            PRIMARY KEY (snapshot_date, InstrumentID)
         )
         """
     )
-    _ensure_columns(conn, "openctp_cnfutures_contract_specs", {
-        "variety_name": "TEXT",
-        "price": "REAL",
-        "volume": "REAL",
-        "open_interest": "REAL",
-        "open_total_fee": "REAL",
-        "close_total_fee": "REAL",
-        "closetoday_total_fee": "REAL",
-    })
+    _migrate_legacy_table(conn, "openctp_responses", SRC_RESPONSES_TABLE)
+    _migrate_legacy_table(conn, "openctp_cnfutures_contract_specs", SRC_CONTRACT_SPECS_TABLE)
+    _ensure_view(conn, SOURCE_RESPONSES_VIEW, SRC_RESPONSES_TABLE)
+    _ensure_view(conn, LEGACY_RESPONSES_VIEW, SRC_RESPONSES_TABLE)
+    _ensure_view(conn, SOURCE_CONTRACT_SPECS_VIEW, SRC_CONTRACT_SPECS_TABLE)
+    _ensure_view(conn, LEGACY_CONTRACT_SPECS_VIEW, SRC_CONTRACT_SPECS_TABLE)
     return conn
 
 
@@ -151,7 +165,7 @@ def _read_cache(endpoint: str, query: dict[str, str]) -> list[dict[str, Any]] | 
     try:
         with _connect_cache() as conn:
             row = conn.execute(
-                "SELECT data_json FROM openctp_responses WHERE endpoint = ? AND query_key = ?",
+                f'SELECT data_json FROM "{SOURCE_RESPONSES_VIEW}" WHERE endpoint = ? AND query_key = ?',
                 (endpoint, _cache_key(query)),
             ).fetchone()
         if row is None:
@@ -167,7 +181,7 @@ def _write_cache(endpoint: str, query: dict[str, str], data: list[dict[str, Any]
         with _connect_cache() as conn:
             conn.execute(
                 """
-                INSERT INTO openctp_responses
+                INSERT INTO src_openctp_responses
                     (endpoint, query_key, query_json, url, data_json, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(endpoint, query_key) DO UPDATE SET
@@ -313,139 +327,122 @@ def normalise_instrument_code(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", text)
 
 
-def _none_if_na(value: Any) -> Any:
-    return None if pd.isna(value) else value
+def _row_value(row: pd.Series, *names: str) -> Any:
+    for name in names:
+        if name not in row.index:
+            continue
+        value = row.get(name)
+        if not pd.isna(value):
+            return value
+    return None
 
 
-def _contract_specs_count() -> int:
-    with _connect_cache() as conn:
-        row = conn.execute("SELECT COUNT(*) AS n FROM openctp_cnfutures_contract_specs").fetchone()
-    return int(row["n"])
-
-
-def _contract_specs_has_fee_snapshot_columns() -> bool:
-    with _connect_cache() as conn:
-        row = conn.execute(
-            """
-            SELECT COUNT(*) AS n
-            FROM openctp_cnfutures_contract_specs
-            WHERE variety_name IS NOT NULL
-               OR open_interest IS NOT NULL
-               OR open_total_fee IS NOT NULL
-            """
-        ).fetchone()
-    return int(row["n"]) > 0
-
-
-def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> None:
+def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> int:
     if specs.empty:
-        return
+        return 0
     now = time.time()
     columns = [
-        "snapshot_date", "exchange", "product_id", "variety_name", "instrument_id", "instrument_name",
-        "product_class", "multiplier", "min_tick", "min_trade_quantity", "max_trade_quantity",
-        "long_margin_ratio", "long_margin_fixed", "short_margin_ratio", "short_margin_fixed",
-        "open_ratio", "open_fixed", "close_ratio", "close_fixed", "closetoday_ratio",
-        "closetoday_fixed", "price", "volume", "open_interest", "open_total_fee",
-        "close_total_fee", "closetoday_total_fee", "delivery_year", "delivery_month", "open_date", "expire_date",
-        "delivery_date", "underlying_instrument_id", "underlying_multiple", "options_type",
-        "strike_price", "life_phase", "contract_key", "updated_at",
+        "snapshot_date", "ExchangeID", "ProductID", "InstrumentID", "InstrumentName",
+        "ProductClass", "VolumeMultiple", "PriceTick", "MinLimitOrderVolume", "MaxLimitOrderVolume",
+        "LongMarginRatioByMoney", "LongMarginRatioByVolume", "ShortMarginRatioByMoney", "ShortMarginRatioByVolume",
+        "OpenRatioByMoney", "OpenRatioByVolume", "CloseRatioByMoney", "CloseRatioByVolume", "CloseTodayRatioByMoney",
+        "CloseTodayRatioByVolume", "DeliveryYear", "DeliveryMonth", "OpenDate", "ExpireDate",
+        "DeliveryDate", "UnderlyingInstrID", "UnderlyingMultiple", "OptionsType",
+        "StrikePrice", "InstLifePhase", "NormalizedInstrumentID", "updated_at",
     ]
     insert_sql = f"""
-        INSERT INTO openctp_cnfutures_contract_specs ({', '.join(columns)})
+        INSERT INTO src_openctp_cnfutures_contract_specs ({', '.join(columns)})
         VALUES ({', '.join('?' for _ in columns)})
-        ON CONFLICT(snapshot_date, instrument_id) DO UPDATE SET
-            exchange = excluded.exchange,
-            product_id = excluded.product_id,
-            variety_name = excluded.variety_name,
-            instrument_name = excluded.instrument_name,
-            product_class = excluded.product_class,
-            multiplier = excluded.multiplier,
-            min_tick = excluded.min_tick,
-            min_trade_quantity = excluded.min_trade_quantity,
-            max_trade_quantity = excluded.max_trade_quantity,
-            long_margin_ratio = excluded.long_margin_ratio,
-            long_margin_fixed = excluded.long_margin_fixed,
-            short_margin_ratio = excluded.short_margin_ratio,
-            short_margin_fixed = excluded.short_margin_fixed,
-            open_ratio = excluded.open_ratio,
-            open_fixed = excluded.open_fixed,
-            close_ratio = excluded.close_ratio,
-            close_fixed = excluded.close_fixed,
-            closetoday_ratio = excluded.closetoday_ratio,
-            closetoday_fixed = excluded.closetoday_fixed,
-            price = excluded.price,
-            volume = excluded.volume,
-            open_interest = excluded.open_interest,
-            open_total_fee = excluded.open_total_fee,
-            close_total_fee = excluded.close_total_fee,
-            closetoday_total_fee = excluded.closetoday_total_fee,
-            delivery_year = excluded.delivery_year,
-            delivery_month = excluded.delivery_month,
-            open_date = excluded.open_date,
-            expire_date = excluded.expire_date,
-            delivery_date = excluded.delivery_date,
-            underlying_instrument_id = excluded.underlying_instrument_id,
-            underlying_multiple = excluded.underlying_multiple,
-            options_type = excluded.options_type,
-            strike_price = excluded.strike_price,
-            life_phase = excluded.life_phase,
-            contract_key = excluded.contract_key,
+        ON CONFLICT(snapshot_date, InstrumentID) DO UPDATE SET
+            ExchangeID = excluded.ExchangeID,
+            ProductID = excluded.ProductID,
+            InstrumentName = excluded.InstrumentName,
+            ProductClass = excluded.ProductClass,
+            VolumeMultiple = excluded.VolumeMultiple,
+            PriceTick = excluded.PriceTick,
+            MinLimitOrderVolume = excluded.MinLimitOrderVolume,
+            MaxLimitOrderVolume = excluded.MaxLimitOrderVolume,
+            LongMarginRatioByMoney = excluded.LongMarginRatioByMoney,
+            LongMarginRatioByVolume = excluded.LongMarginRatioByVolume,
+            ShortMarginRatioByMoney = excluded.ShortMarginRatioByMoney,
+            ShortMarginRatioByVolume = excluded.ShortMarginRatioByVolume,
+            OpenRatioByMoney = excluded.OpenRatioByMoney,
+            OpenRatioByVolume = excluded.OpenRatioByVolume,
+            CloseRatioByMoney = excluded.CloseRatioByMoney,
+            CloseRatioByVolume = excluded.CloseRatioByVolume,
+            CloseTodayRatioByMoney = excluded.CloseTodayRatioByMoney,
+            CloseTodayRatioByVolume = excluded.CloseTodayRatioByVolume,
+            DeliveryYear = excluded.DeliveryYear,
+            DeliveryMonth = excluded.DeliveryMonth,
+            OpenDate = excluded.OpenDate,
+            ExpireDate = excluded.ExpireDate,
+            DeliveryDate = excluded.DeliveryDate,
+            UnderlyingInstrID = excluded.UnderlyingInstrID,
+            UnderlyingMultiple = excluded.UnderlyingMultiple,
+            OptionsType = excluded.OptionsType,
+            StrikePrice = excluded.StrikePrice,
+            InstLifePhase = excluded.InstLifePhase,
+            NormalizedInstrumentID = excluded.NormalizedInstrumentID,
             updated_at = excluded.updated_at
     """
     values = []
+    seen_keys: set[tuple[str, str]] = set()
     for _, row in specs.iterrows():
-        row_snapshot_date = str(row.get("date") or snapshot_date or date.today().strftime("%Y%m%d"))
+        row_snapshot_date = str(_row_value(row, "date") or snapshot_date or date.today().strftime("%Y%m%d"))
+        instrument_id = normalise_instrument_code(
+            _row_value(row, "InstrumentID", "contract_code", "contract_key")
+        )
+        if not instrument_id:
+            continue
+        key = (row_snapshot_date, instrument_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         values.append((
             row_snapshot_date,
-            _none_if_na(row.get("exchange")),
-            _none_if_na(row.get("variety_code") or row.get("product_id")),
-            _none_if_na(row.get("variety_name")),
-            _none_if_na(row.get("contract_code") or row.get("instrument_id")),
-            _none_if_na(row.get("contract_name") or row.get("instrument_name")),
-            _none_if_na(row.get("product_class")),
-            _none_if_na(row.get("multiplier")),
-            _none_if_na(row.get("min_tick")),
-            _none_if_na(row.get("min_trade_quantity")),
-            _none_if_na(row.get("max_trade_quantity")),
-            _none_if_na(row.get("long_margin_ratio")),
-            _none_if_na(row.get("long_margin_fixed")),
-            _none_if_na(row.get("short_margin_ratio")),
-            _none_if_na(row.get("short_margin_fixed")),
-            _none_if_na(row.get("open_ratio")),
-            _none_if_na(row.get("open_fixed")),
-            _none_if_na(row.get("close_ratio")),
-            _none_if_na(row.get("close_fixed")),
-            _none_if_na(row.get("closetoday_ratio")),
-            _none_if_na(row.get("closetoday_fixed")),
-            _none_if_na(row.get("price")),
-            _none_if_na(row.get("volume")),
-            _none_if_na(row.get("open_interest")),
-            _none_if_na(row.get("open_total_fee")),
-            _none_if_na(row.get("close_total_fee")),
-            _none_if_na(row.get("closetoday_total_fee")),
-            _none_if_na(row.get("delivery_year")),
-            _none_if_na(row.get("delivery_month")),
-            _none_if_na(row.get("open_date")),
-            _none_if_na(row.get("expire_date")),
-            _none_if_na(row.get("delivery_date")),
-            _none_if_na(row.get("underlying_instrument_id")),
-            _none_if_na(row.get("underlying_multiple")),
-            _none_if_na(row.get("options_type")),
-            _none_if_na(row.get("strike_price")),
-            _none_if_na(row.get("life_phase")),
-            _none_if_na(row.get("contract_key")),
+            _row_value(row, "ExchangeID", "exchange"),
+            _row_value(row, "ProductID", "variety_code"),
+            instrument_id,
+            _row_value(row, "InstrumentName", "contract_name"),
+            _row_value(row, "ProductClass"),
+            _row_value(row, "VolumeMultiple", "multiplier"),
+            _row_value(row, "PriceTick", "min_tick"),
+            _row_value(row, "MinLimitOrderVolume"),
+            _row_value(row, "MaxLimitOrderVolume"),
+            _row_value(row, "LongMarginRatioByMoney", "long_margin_ratio"),
+            _row_value(row, "LongMarginRatioByVolume", "long_margin_fixed"),
+            _row_value(row, "ShortMarginRatioByMoney", "short_margin_ratio"),
+            _row_value(row, "ShortMarginRatioByVolume", "short_margin_fixed"),
+            _row_value(row, "OpenRatioByMoney", "open_ratio"),
+            _row_value(row, "OpenRatioByVolume", "open_fixed"),
+            _row_value(row, "CloseRatioByMoney", "close_ratio"),
+            _row_value(row, "CloseRatioByVolume", "close_fixed"),
+            _row_value(row, "CloseTodayRatioByMoney", "closetoday_ratio"),
+            _row_value(row, "CloseTodayRatioByVolume", "closetoday_fixed"),
+            _row_value(row, "DeliveryYear"),
+            _row_value(row, "DeliveryMonth"),
+            _row_value(row, "OpenDate"),
+            _row_value(row, "ExpireDate"),
+            _row_value(row, "DeliveryDate"),
+            _row_value(row, "UnderlyingInstrID"),
+            _row_value(row, "UnderlyingMultiple"),
+            _row_value(row, "OptionsType"),
+            _row_value(row, "StrikePrice"),
+            _row_value(row, "InstLifePhase"),
+            normalise_instrument_code(
+                _row_value(row, "NormalizedInstrumentID", "InstrumentID", "contract_code", "contract_key")
+            ),
             now,
         ))
-    try:
-        with _connect_cache() as conn:
-            conn.executemany(insert_sql, values)
-    except Exception:
-        pass
+    if not values:
+        return 0
+    with _connect_cache() as conn:
+        conn.executemany(insert_sql, values)
+    return len(values)
 
 
 def _write_contract_specs(rows: list[dict[str, Any]], *, snapshot_date: str | None = None) -> None:
-    specs = instruments_to_contract_specs(rows)
+    specs = _clean_instrument_rows(rows)
     _upsert_contract_specs(specs, snapshot_date=snapshot_date)
 
 
@@ -460,8 +457,6 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
     force: bool = False,
 ) -> int:
     """Import existing LocalCNFutures fee parquet snapshots into the SQLite typed table."""
-    if not force and _contract_specs_count() > 0 and _contract_specs_has_fee_snapshot_columns():
-        return 0
     try:
         from sources.LocalCNFutures import FeeData
     except Exception:
@@ -470,7 +465,7 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
     if source_dir is None:
         return 0
     paths = sorted(Path(source_dir).glob("fees_contracts_2*.parquet"))
-    imported = 0
+    frames: list[pd.DataFrame] = []
     for path in paths:
         try:
             df = pd.read_parquet(path)
@@ -482,57 +477,78 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
             match = re.fullmatch(r"fees_contracts_(\d{8})\.parquet", path.name)
             df = df.copy()
             df["date"] = match.group(1) if match else date.today().strftime("%Y%m%d")
-        _upsert_contract_specs(df)
-        imported += len(df)
-    return imported
+        frames.append(df)
+    if not frames:
+        return 0
+
+    specs = pd.concat(frames, ignore_index=True)
+    specs["_snapshot_key"] = specs["date"].astype(str)
+    instrument_source = next(
+        (name for name in ("NormalizedInstrumentID", "InstrumentID", "contract_code", "contract_key") if name in specs.columns),
+        None,
+    )
+    if instrument_source is None:
+        return 0
+    specs["_instrument_key"] = specs[instrument_source].map(normalise_instrument_code)
+    specs = specs[specs["_instrument_key"].str.len() > 0]
+    specs = specs.drop_duplicates(["_snapshot_key", "_instrument_key"], keep="first")
+
+    if not force:
+        with _connect_cache() as conn:
+            existing = {
+                (str(row["snapshot_date"]), normalise_instrument_code(row["InstrumentID"]))
+                for row in conn.execute(
+                    f'SELECT snapshot_date, InstrumentID FROM "{SRC_CONTRACT_SPECS_TABLE}"'
+                )
+            }
+        pending = [
+            (snapshot, instrument) not in existing
+            for snapshot, instrument in zip(specs["_snapshot_key"], specs["_instrument_key"])
+        ]
+        specs = specs.loc[pending]
+
+    return _upsert_contract_specs(specs.drop(columns=["_snapshot_key", "_instrument_key"]))
 
 
 def _contract_specs_sql_frame(where: str = "", params: tuple[Any, ...] = ()) -> pd.DataFrame:
     sql = """
         SELECT
             snapshot_date AS date,
-            exchange,
-            product_id AS variety_code,
-            variety_name,
-            instrument_id AS contract_code,
-            instrument_name AS contract_name,
-            product_class,
-            multiplier,
-            min_tick,
-            min_trade_quantity,
-            max_trade_quantity,
-            long_margin_ratio,
-            long_margin_fixed,
-            short_margin_ratio,
-            short_margin_fixed,
-            open_ratio,
-            open_fixed,
-            close_ratio,
-            close_fixed,
-            closetoday_ratio,
-            closetoday_fixed,
-            price,
-            volume,
-            open_interest,
-            open_total_fee,
-            close_total_fee,
-            closetoday_total_fee,
-            delivery_year,
-            delivery_month,
-            open_date,
-            expire_date,
-            delivery_date,
-            underlying_instrument_id,
-            underlying_multiple,
-            options_type,
-            strike_price,
-            life_phase,
-            contract_key
-        FROM openctp_cnfutures_contract_specs
+            ExchangeID,
+            ProductID,
+            InstrumentID,
+            InstrumentName,
+            ProductClass,
+            VolumeMultiple,
+            PriceTick,
+            MinLimitOrderVolume,
+            MaxLimitOrderVolume,
+            LongMarginRatioByMoney,
+            LongMarginRatioByVolume,
+            ShortMarginRatioByMoney,
+            ShortMarginRatioByVolume,
+            OpenRatioByMoney,
+            OpenRatioByVolume,
+            CloseRatioByMoney,
+            CloseRatioByVolume,
+            CloseTodayRatioByMoney,
+            CloseTodayRatioByVolume,
+            DeliveryYear,
+            DeliveryMonth,
+            OpenDate,
+            ExpireDate,
+            DeliveryDate,
+            UnderlyingInstrID,
+            UnderlyingMultiple,
+            OptionsType,
+            StrikePrice,
+            InstLifePhase,
+            NormalizedInstrumentID
+        FROM src_openctp_cnfutures_contract_specs
     """
     if where:
         sql += " WHERE " + where
-    sql += " ORDER BY product_id, instrument_id"
+    sql += " ORDER BY ProductID, InstrumentID"
     with _connect_cache() as conn:
         return pd.read_sql_query(sql, conn, params=params)
 
@@ -550,7 +566,7 @@ def read_cnfutures_contract_specs_for_date(
         rows = conn.execute(
             """
             SELECT DISTINCT snapshot_date
-            FROM openctp_cnfutures_contract_specs
+            FROM src_openctp_cnfutures_contract_specs
             WHERE snapshot_date <= ?
             ORDER BY snapshot_date DESC
             """,
@@ -560,7 +576,7 @@ def read_cnfutures_contract_specs_for_date(
         source = "historical_snapshot" if source_date == target else "historical_forward_fill"
         if source_date is None and allow_latest_fallback:
             latest = conn.execute(
-                "SELECT MAX(snapshot_date) AS snapshot_date FROM openctp_cnfutures_contract_specs"
+                f'SELECT MAX(snapshot_date) AS snapshot_date FROM "{SRC_CONTRACT_SPECS_TABLE}"'
             ).fetchone()
             source_date = str(latest["snapshot_date"]) if latest and latest["snapshot_date"] else None
             source = "latest_inferred"
@@ -573,6 +589,125 @@ def read_cnfutures_contract_specs_for_date(
     return df
 
 
+def read_cnfutures_contract_specs_over_date_range(
+    trading_days: list | pd.DatetimeIndex,
+    *,
+    variety_codes: list[str] | None = None,
+    fee_data_dir: str | Path | None = None,
+) -> pd.DataFrame:
+    """Read per-product contract specs aligned to a list of trading days.
+
+    Each trading_day is forward-filled from the nearest available snapshot:
+    for each date in *trading_days* we find the latest snapshot_date <= that date.
+    Returns a DataFrame indexed by ``(trading_day, ProductID)`` with one row per
+    (trading_day, product) combination.
+
+    Columns returned: VolumeMultiple, PriceTick, MinLimitOrderVolume,
+    LongMarginRatioByMoney, OpenRatioByMoney, OpenRatioByVolume,
+    CloseRatioByMoney, CloseRatioByVolume, CloseTodayRatioByMoney,
+    CloseTodayRatioByVolume.
+    """
+    sync_cnfutures_contract_specs_from_fee_parquet(data_dir=fee_data_dir)
+
+    if not isinstance(trading_days, pd.DatetimeIndex):
+        trading_days = pd.DatetimeIndex(trading_days)
+    trading_days = trading_days.sort_values()
+
+    date_strs = [d.strftime("%Y%m%d") for d in trading_days]
+
+    with _connect_cache() as conn:
+        # Get all distinct snapshot_dates
+        all_snapshots = sorted({
+            str(r["snapshot_date"])
+            for r in conn.execute(
+                f'SELECT DISTINCT snapshot_date FROM "{SRC_CONTRACT_SPECS_TABLE}" ORDER BY snapshot_date'
+            ).fetchall()
+        })
+
+    if not all_snapshots:
+        raise FileNotFoundError("未找到任何合约规格快照")
+
+    # Build mapping: each trading_day → nearest snapshot_date (forward-fill)
+    snap_map: dict[str, str] = {}
+    snap_idx = 0
+    for ds in date_strs:
+        # Advance snap_idx to the last snapshot <= ds
+        while snap_idx + 1 < len(all_snapshots) and all_snapshots[snap_idx + 1] <= ds:
+            snap_idx += 1
+        if all_snapshots[snap_idx] <= ds:
+            snap_map[ds] = all_snapshots[snap_idx]
+        else:
+            # No snapshot on or before this date — use the earliest available
+            snap_map[ds] = all_snapshots[0]
+
+    # Build unique snapshot_dates to query
+    unique_snaps = sorted(set(snap_map.values()))
+    placeholders = ",".join("?" for _ in unique_snaps)
+    where_clause = f"snapshot_date IN ({placeholders})"
+    params = tuple(unique_snaps)
+
+    if variety_codes:
+        vc_placeholders = ",".join("?" for _ in variety_codes)
+        where_clause += f" AND ProductID IN ({vc_placeholders})"
+        params = params + tuple(str(vc).upper() for vc in variety_codes)
+
+    df = _contract_specs_sql_frame(where_clause, params)
+    if df.empty:
+        return pd.DataFrame()
+
+    # For each ProductID, keep the first row to dedup
+    df = df.drop_duplicates(subset=["date", "ProductID"], keep="first")
+
+    # Remap snapshot_date → trading_day
+    reverse_map = {v: k for k, v in snap_map.items()}
+    df["trading_day"] = df["date"].map(reverse_map)
+    df["trading_day"] = pd.to_datetime(df["trading_day"], format="%Y%m%d")
+
+    # Build aligned rows: for each (trading_day, ProductID) pair
+    required_pairs = pd.DataFrame(
+        [(td, vc) for td in date_strs for vc in (variety_codes or df["ProductID"].unique())],
+        columns=["trading_day", "ProductID"],
+    )
+    required_pairs["trading_day"] = pd.to_datetime(required_pairs["trading_day"], format="%Y%m%d")
+    required_pairs["ProductID"] = required_pairs["ProductID"].astype(str).str.upper()
+
+    # Merge with actual data, forward-fill missing
+    spec_cols = [
+        "VolumeMultiple", "PriceTick", "MinLimitOrderVolume", "LongMarginRatioByMoney",
+        "OpenRatioByMoney", "OpenRatioByVolume", "CloseRatioByMoney", "CloseRatioByVolume",
+        "CloseTodayRatioByMoney", "CloseTodayRatioByVolume",
+    ]
+    aligned = required_pairs.merge(
+        df[["trading_day", "ProductID"] + spec_cols],
+        on=["trading_day", "ProductID"],
+        how="left",
+    )
+    # Forward-fill per ProductID
+    for col in spec_cols:
+        if col in aligned.columns:
+            aligned[col] = aligned.groupby("ProductID")[col].ffill()
+
+    # Fill remaining NaN with safe defaults
+    defaults = {
+        "VolumeMultiple": 1.0,
+        "PriceTick": 0.0,
+        "MinLimitOrderVolume": 1.0,
+        "LongMarginRatioByMoney": 1.0,
+        "OpenRatioByMoney": 0.0,
+        "OpenRatioByVolume": 0.0,
+        "CloseRatioByMoney": 0.0,
+        "CloseRatioByVolume": 0.0,
+        "CloseTodayRatioByMoney": 0.0,
+        "CloseTodayRatioByVolume": 0.0,
+    }
+    for col, default in defaults.items():
+        if col in aligned.columns:
+            aligned[col] = aligned[col].fillna(default)
+
+    aligned = aligned.set_index(["trading_day", "ProductID"]).sort_index()
+    return aligned
+
+
 def read_latest_cnfutures_product_specs(*, fee_data_dir: str | Path | None = None) -> pd.DataFrame:
     """Read latest product-level display specs from contract specs in SQLite."""
     df = read_cnfutures_contract_specs_for_date(
@@ -582,10 +717,8 @@ def read_latest_cnfutures_product_specs(*, fee_data_dir: str | Path | None = Non
     )
     if df.empty:
         return df
-    if "open_interest" in df.columns:
-        df = df.sort_values("open_interest", ascending=False, na_position="last")
-    df = df.drop_duplicates(subset=["variety_code"], keep="first").copy()
-    df = df.rename(columns={"contract_code": "representative_contract_code"})
+    df = df.drop_duplicates(subset=["ProductID"], keep="first").copy()
+    df = df.rename(columns={"InstrumentID": "representative_contract_code"})
     return df.reset_index(drop=True)
 
 
@@ -595,7 +728,7 @@ def list_sqlite_tables() -> list[dict[str, Any]]:
             """
             SELECT name
             FROM sqlite_master
-            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
             ORDER BY name
             """
         ).fetchall()
@@ -631,55 +764,29 @@ def read_sqlite_table(table_name: str, *, limit: int = 200, offset: int = 0) -> 
     }
 
 
-def instruments_to_contract_specs(rows: pd.DataFrame | list[dict[str, Any]]) -> pd.DataFrame:
-    """Convert OpenCTP instrument rows to local contract spec columns."""
+def _clean_instrument_rows(rows: pd.DataFrame | list[dict[str, Any]]) -> pd.DataFrame:
+    """Clean OpenCTP instrument rows: coerce numerics, strip IDs, add NormalizedInstrumentID."""
     df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame()
-
-    out = pd.DataFrame({
-        "exchange": df.get("ExchangeID"),
-        "contract_code": df.get("InstrumentID"),
-        "contract_name": df.get("InstrumentName"),
-        "variety_code": df.get("ProductID"),
-        "product_class": df.get("ProductClass"),
-        "multiplier": df.get("VolumeMultiple"),
-        "min_tick": df.get("PriceTick"),
-        "min_trade_quantity": df.get("MinLimitOrderVolume"),
-        "max_trade_quantity": df.get("MaxLimitOrderVolume"),
-        "long_margin_ratio": df.get("LongMarginRatioByMoney"),
-        "long_margin_fixed": df.get("LongMarginRatioByVolume"),
-        "short_margin_ratio": df.get("ShortMarginRatioByMoney"),
-        "short_margin_fixed": df.get("ShortMarginRatioByVolume"),
-        "open_ratio": df.get("OpenRatioByMoney"),
-        "open_fixed": df.get("OpenRatioByVolume"),
-        "close_ratio": df.get("CloseRatioByMoney"),
-        "close_fixed": df.get("CloseRatioByVolume"),
-        "closetoday_ratio": df.get("CloseTodayRatioByMoney"),
-        "closetoday_fixed": df.get("CloseTodayRatioByVolume"),
-        "delivery_year": df.get("DeliveryYear"),
-        "delivery_month": df.get("DeliveryMonth"),
-        "open_date": df.get("OpenDate"),
-        "expire_date": df.get("ExpireDate"),
-        "delivery_date": df.get("DeliveryDate"),
-        "underlying_instrument_id": df.get("UnderlyingInstrID"),
-        "underlying_multiple": df.get("UnderlyingMultiple"),
-        "options_type": df.get("OptionsType"),
-        "strike_price": df.get("StrikePrice"),
-        "life_phase": df.get("InstLifePhase"),
-    })
-    for col in [
-        "multiplier", "min_tick", "min_trade_quantity", "max_trade_quantity",
-        "long_margin_ratio", "long_margin_fixed", "short_margin_ratio", "short_margin_fixed",
-        "open_ratio", "open_fixed", "close_ratio", "close_fixed",
-        "closetoday_ratio", "closetoday_fixed", "underlying_multiple", "strike_price",
-    ]:
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-    out["contract_key"] = out["contract_code"].map(normalise_instrument_code)
-    out["variety_code"] = out["variety_code"].astype(str).str.strip().str.upper()
-    out["exchange"] = out["exchange"].astype(str).str.strip()
-    out["contract_code"] = out["contract_code"].astype(str).str.strip()
-    out["contract_name"] = out["contract_name"].astype(str).str.strip()
-    out = out[out["contract_key"].str.len() > 0]
-    return out.reset_index(drop=True)
+        return df
+    numeric_cols = [
+        "VolumeMultiple", "PriceTick", "MinLimitOrderVolume", "MaxLimitOrderVolume",
+        "LongMarginRatioByMoney", "LongMarginRatioByVolume",
+        "ShortMarginRatioByMoney", "ShortMarginRatioByVolume",
+        "OpenRatioByMoney", "OpenRatioByVolume",
+        "CloseRatioByMoney", "CloseRatioByVolume",
+        "CloseTodayRatioByMoney", "CloseTodayRatioByVolume",
+        "DeliveryYear", "DeliveryMonth",
+        "UnderlyingMultiple", "StrikePrice",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["NormalizedInstrumentID"] = df["InstrumentID"].map(normalise_instrument_code)
+    for col in ["ExchangeID", "InstrumentID", "InstrumentName", "ProductID"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+    if "ProductID" in df.columns:
+        df["ProductID"] = df["ProductID"].str.upper()
+    df = df[df["NormalizedInstrumentID"].str.len() > 0]
+    return df.reset_index(drop=True)

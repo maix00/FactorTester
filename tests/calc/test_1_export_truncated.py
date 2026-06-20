@@ -149,13 +149,13 @@ def validate_test_1_complete() -> tuple[bool, list[str]]:
 
 
 # ================================================
-# instrument_id 转换（对齐 GenerateMain.py 的 czc_patch_decade）
+# instrument_id 转换（对齐 LocalCNFutures scripts/generate_main.py）
 # ================================================
 
 def _czc_patch_decade(windcode: str, end_date: pd.Timestamp) -> str | None:
     """CZC 合约十年补丁：ZC401.CZC → ZC2401.CZC（根据 ENDDATE 推断年份）。
 
-    对齐 sources/LocalCNFutures/GenerateMain.py 的 czc_patch_decade。
+    对齐 sources/LocalCNFutures/scripts/generate_main.py 的 czc_patch_decade。
     """
     if pd.isna(end_date):
         return None
@@ -230,7 +230,7 @@ def _load_wind_mapping(prod: str, wind_exch: str,
     prod_wm['STARTDATE'] = prod_wm['STARTDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
     prod_wm['ENDDATE'] = prod_wm['ENDDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
 
-    # 转换 instrument_id，对齐 GenerateMain.py 的 czc_patch_decade + patched_to_uid 语义
+    # 转换 instrument_id，对齐 scripts/generate_main.py 的合约 UID 语义
     # - 非 CZC 合约: CU2507.SHF → cu2507
     # - CZC 合约 (三位年份，如 ZC401.CZC): 根据 ENDDATE 补齐四位年份 → zc2401
     prod_wm['FS_MAPPING_WINDCODE'] = prod_wm['FS_MAPPING_WINDCODE'].astype(str)

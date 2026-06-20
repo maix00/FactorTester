@@ -10,7 +10,7 @@ GT.groupSettings.groups.add({
   name: 'Select',
   testerId: 'tester-select',
   factorAlias: 'FactorSelect',
-  groupCount: 2,
+  splitCount: 2,
 });
 GT.groupSettings.groups.add({
   id: 'derived-select',

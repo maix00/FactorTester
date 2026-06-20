@@ -6,10 +6,10 @@ from flask import jsonify, request
 from server.modules.templates import templates_bp
 from server.services.api_response import api_ok, route_guard
 from server.modules.templates.common import build_factor_rows, load_template_list, new_template_id, save_template_list
-from server.services.accounts import account_display_name, can_view_user_scope, visible_accounts_for
+from tools.data.account_manage import account_display_name, can_view_user_scope, visible_accounts_for
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
-from server.services.runtime_state import get_session_params, get_user_file_lock, require_user, save_session_params
+from server.services.session_runtime import get_session_params, get_user_file_lock, require_user, save_session_params
 
 
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['GET'])

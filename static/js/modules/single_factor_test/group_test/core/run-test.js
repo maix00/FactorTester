@@ -5,7 +5,7 @@
  *   - 运行分组测试（单次/批量/全因子）
  *   - 加载默认分组
  *   - 派生组生成/删除
- *   - 工具函数：postGroupTest, postBatchGroupTest, clearResults
+ *   - 工具函数：postBatchGroupTest, clearResults
  *
  * 挂载到 GT.core.runTest。
  */
@@ -26,6 +26,60 @@
         return GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
             ? GT.localSettings.prepareRun()
             : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
+    }
+
+    async function resolveSubmissionIdForGroup(submissionId) {
+        var targetId = String(submissionId || '');
+        if (!targetId) return targetId;
+        try {
+            var subs = Array.isArray(window.submissions) ? window.submissions : [];
+            var pageUuid = encodeURIComponent(window._pageUuid || '');
+            var resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
+            var data = await resp.json();
+            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
+                return targetId;
+            }
+
+            for (var j = 0; j < data.submissions.length; j++) {
+                if (String(data.submissions[j].id) === targetId) return String(data.submissions[j].id);
+            }
+
+            var localSub = null;
+            for (var k = 0; k < subs.length; k++) {
+                if (String(subs[k].id) === targetId) {
+                    localSub = subs[k];
+                    break;
+                }
+            }
+            var rawLocalPaths = localSub && (localSub.paths || localSub.selected_paths);
+            var localPaths = Array.isArray(rawLocalPaths) ? rawLocalPaths.map(String) : [];
+            if (localPaths.length > 0) {
+                var pathSet = {};
+                localPaths.forEach(function(p) { pathSet[p] = true; });
+                for (var m = 0; m < data.submissions.length; m++) {
+                    var remotePaths = (data.submissions[m].selected_paths || []).map(String);
+                    if (remotePaths.length !== localPaths.length) continue;
+                    var same = true;
+                    for (var rp = 0; rp < remotePaths.length; rp++) {
+                        if (!pathSet[remotePaths[rp]]) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) {
+                        console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[m].id));
+                        return String(data.submissions[m].id);
+                    }
+                }
+            }
+            if (targetId.indexOf('tpl-') === 0 && data.submissions.length === 1) {
+                console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[0].id));
+                return String(data.submissions[0].id);
+            }
+        } catch (e) {
+            console.warn('resolveSubmissionIdForGroup failed:', e);
+        }
+        return targetId;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -106,279 +160,75 @@
         });
     };
 
-    /**
-     * 单次分组测试 POST
-     */
-    runTest.postGroupTest = function(payload) {
-        return fetch('/run_group_test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(function(res) { return res.json(); });
-    };
-
     // ════════════════════════════════════════════════════════════════
-    //  加载默认分组
-    // ════════════════════════════════════════════════════════════════
-
-    runTest.loadDefaultGroups = async function() {
-        var statusSpan = document.getElementById('group_test_status');
-        var runBtn = document.getElementById('run_group_test_btn');
-        var defaultBtn = document.getElementById('load_default_groups_btn');
-
-        var submissions = window.submissions || [];
-        var factorList = window.factorList || [];
-
-        if (!submissions.length) {
-            alert('暂无测试器，请先在产品类别筛选模块提交产品');
-            return;
-        }
-        if (!factorList.length) {
-            alert('暂无可用的因子列表，请先在 IC 测试模块运行 IC 测试');
-            return;
-        }
-
-        if (!GT.groupSettings.groups || !GT.groupSettings.lsConfigs) {
-            alert('数据模型未就绪，请刷新页面');
-            return;
-        }
-
-        var groups = GT.groupSettings.groups;
-        var lsConfigs = GT.groupSettings.lsConfigs;
-
-        var existingBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; });
-        var existingLS = lsConfigs.getAll() || [];
-
-        if (existingBase.length > 0 || existingLS.length > 0) {
-            var confirmMsg = '当前已有 ' + existingBase.length + ' 个基础组和 ' + existingLS.length + ' 个 LS 组。\n';
-            confirmMsg += '加载默认分组将清空所有现有分组，确定继续？';
-            if (!confirm(confirmMsg)) return;
-        }
-
-        (groups.getAll() || []).forEach(function(g) { groups.remove(g.id); });
-        (lsConfigs.getAll() || []).forEach(function(ls) { lsConfigs.remove(ls.id); });
-
-        if (defaultBtn) defaultBtn.disabled = true;
-        if (runBtn) runBtn.disabled = true;
-        if (statusSpan) {
-            statusSpan.innerHTML = '正在加载默认分组...';
-            statusSpan.style.color = '#0078d4';
-        }
-
-        var GROUPS_PER_FACTOR = 5;
-        var totalCreated = 0;
-        var batchLetterMap = {};
-        var nextLetterCode = 65;
-
-        try {
-            for (var si = 0; si < submissions.length; si++) {
-                var sub = submissions[si];
-                var testerId = String(sub.id);
-                for (var fi = 0; fi < factorList.length; fi++) {
-                    var factor = factorList[fi];
-                    var factorAlias = factor.alias || factor.name || '';
-
-                    var bk = GT.groupSettings.groups.batchKey(testerId, factorAlias, GROUPS_PER_FACTOR);
-                    var letter = batchLetterMap[bk];
-                    if (!letter) {
-                        letter = String.fromCharCode(nextLetterCode);
-                        nextLetterCode++;
-                        batchLetterMap[bk] = letter;
-                    }
-
-                    // groupAddBatch: ensure batch exists for this tester+factor combo (refs #100)
-                    var batchObj = GT.groupSettings.batch.ensure(testerId, factorAlias, GROUPS_PER_FACTOR);
-
-                    var createdIds = [];
-                    for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
-                        try {
-                            var id = groups.add({
-                                name: factorAlias + ' · G' + gi + ' (' + (sub.product_group || sub.label || testerId) + ')',
-                                testerId: testerId,
-                                factorAlias: factorAlias,
-                                groupCount: GROUPS_PER_FACTOR,
-                                groupIndex: gi,
-                                isAllGroups: false,
-                                shortAlias: letter + gi,
-                                feeMode: 'none',
-                                useCloseToday: false,
-                                rebalanceMode: 'each_period'
-                            });
-                            createdIds.push({ id: id, index: gi });
-                        } catch (e) {
-                            console.error('创建分组失败 (' + factorAlias + ' G' + gi + '):', e);
-                        }
-                    }
-
-                    if (createdIds.length >= 5) {
-                        var longItem = createdIds[0];
-                        var shortItem = createdIds[4];
-                        try {
-                            lsConfigs.add({
-                                name: factorAlias + ' · 多空',
-                                longGroupId: longItem.id,
-                                shortGroupId: shortItem.id
-                            });
-                        } catch (e) {
-                            console.error('创建 LS 组失败 (' + factorAlias + '):', e);
-                        }
-                    }
-
-                    totalCreated++;
-                    if (statusSpan) {
-                        statusSpan.innerHTML = '加载中... ' + totalCreated + ' 个因子分组';
-                    }
-                }
-            }
-
-            if (statusSpan) {
-                var totalBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; }).length;
-                var totalLS = (lsConfigs.getAll() || []).length;
-                statusSpan.innerHTML = '✓ 已加载 ' + totalBase + ' 个基础组 + ' + totalLS + ' 个 LS 组';
-                statusSpan.style.color = '#28a745';
-            }
-
-            if (GT.tabs && GT.tabs.mountTab) {
-                GT.tabs.mountTab('list');
-            }
-        } catch (e) {
-            console.error('加载默认分组失败:', e);
-            if (statusSpan) {
-                statusSpan.innerHTML = '✗ 加载失败: ' + (e.message || '未知错误');
-                statusSpan.style.color = '#d40000';
-            }
-        } finally {
-            if (defaultBtn) defaultBtn.disabled = false;
-            if (runBtn) runBtn.disabled = false;
-        }
-    };
-
-    // ════════════════════════════════════════════════════════════════
-    //  运行分组测试（批量）
+    //  运行分组测试
     // ════════════════════════════════════════════════════════════════
 
     runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
-        var defaultBtn = document.getElementById('load_default_groups_btn');
 
         var REG = window.GT_CONFIG_REGISTRY;
         if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
             REG.commitDirty();
         }
 
-        // ── 0. 没有分组则自动加载默认分组 ──
+        // ── 0. 检查是否有分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
         var nonDerived = allBase.filter(function(g) { return !g.parentId; });
         if (nonDerived.length === 0) {
             if (statusSpan) {
-                statusSpan.innerHTML = '⏳ 无现有分组，正在加载默认分组...';
-                statusSpan.style.color = '#0078d4';
+                statusSpan.innerHTML = '✗ 未定义分组，请先在「分组组合设置」中添加分组';
+                statusSpan.style.color = '#d40000';
             }
-            await runTest.loadDefaultGroups();
-            allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
-            nonDerived = allBase.filter(function(g) { return !g.parentId; });
-            if (nonDerived.length === 0) {
-                if (statusSpan) {
-                    statusSpan.innerHTML = '✗ 无法加载默认分组';
-                    statusSpan.style.color = '#d40000';
-                }
-                return;
-            }
+            return;
         }
 
-        // ── 1. 按 batchKey 分组 ──
-        var batchKeyFn = GT.groupSettings.groups.batchKey;
-        var batchMap = {};
-        for (var i = 0; i < nonDerived.length; i++) {
-            var g = nonDerived[i];
-            var bk = batchKeyFn(g.testerId, g.factorAlias, g.groupCount);
-            if (!batchMap[bk]) {
-                batchMap[bk] = {
-                    key: bk,
-                    testerId: g.testerId,
-                    factorAlias: g.factorAlias,
-                    groupCount: g.groupCount,
-                    groups: []
-                };
+        // ── 1. 扁平化：收集所有 group + 构建 group_id → groupIndex 映射 ──
+        var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
+        function _resolvedGroupForRun(group) {
+            var out = Object.assign({}, group || {});
+            if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
+                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
+                    var resolved = GT.groupSettings.groups.resolveRootField(out, key);
+                    if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
+                });
             }
-            batchMap[bk].groups.push(g);
+            return out;
         }
-        var batches = [];
-        var bkKeys = Object.keys(batchMap);
-        bkKeys.sort(function(a, b) {
-            var sa = (batchMap[a].groups[0].shortAlias || '');
-            var sb = (batchMap[b].groups[0].shortAlias || '');
-            if (sa < sb) return -1;
-            if (sa > sb) return 1;
-            return 0;
-        });
-        for (var k = 0; k < bkKeys.length; k++) { batches.push(batchMap[bkKeys[k]]); }
+        var runGroups = allStoredGroups.map(_resolvedGroupForRun);
+        // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
+        var groupIdToIndex = {};
+        for (var ai = 0; ai < runGroups.length; ai++) {
+            var ag = runGroups[ai];
+            if (!ag || !ag.id) continue;
+            var idx = Number(ag.groupIndex || (ag.parentId ? 0 : (ai + 1)));
+            groupIdToIndex[ag.id] = idx > 0 ? idx : ai + 1;
+        }
 
-        // ── 2. 收集 LS configs ──
+        // ── 2. 构建 LS configs（用 groupIndex-1 作为 group 引用） ──
         var allLS = (GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.getAll()) || [];
-        for (var bi = 0; bi < batches.length; bi++) {
-            var b = batches[bi];
-            b.groupIdToIndex = {};
-            var groupsByIndex = {};
-            for (var gi = 0; gi < b.groups.length; gi++) {
-                var originalIndex = Number(b.groups[gi].groupIndex || (gi + 1));
-                if (!groupsByIndex[originalIndex]) groupsByIndex[originalIndex] = [];
-                groupsByIndex[originalIndex].push(b.groups[gi]);
-            }
-            var expandedIndex = 1;
-            for (var baseIdx = 1; baseIdx <= Number(b.groupCount || b.groups.length || 0); baseIdx++) {
-                var variantsAtIndex = groupsByIndex[baseIdx] || [];
-                for (var vi = 0; vi < variantsAtIndex.length; vi++) {
-                    b.groupIdToIndex[variantsAtIndex[vi].id] = expandedIndex;
-                    expandedIndex += 1;
-                }
-            }
-            // 子组（有 parentId）：分配 expandedIndex，不改动字段名
-            var allGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
-            for (var ai = 0; ai < allGroups.length; ai++) {
-                var ag = allGroups[ai];
-                if (!ag || !ag.parentId) continue;
-                b.groupIdToIndex[ag.id] = expandedIndex;
-                expandedIndex += 1;
-            }
-            b.lsPayloads = [];
-        }
-        var crossBatchLS = [];
-
+        var flatLSConfigs = [];
         for (var li = 0; li < allLS.length; li++) {
             var ls = allLS[li];
-            var longBatch = null, shortBatch = null;
-            for (var bj = 0; bj < batches.length; bj++) {
-                if (batches[bj].groupIdToIndex[ls.longGroupId] !== undefined) longBatch = batches[bj];
-                if (batches[bj].groupIdToIndex[ls.shortGroupId] !== undefined) shortBatch = batches[bj];
-            }
-            if (!longBatch || !shortBatch) {
+            var longIdx = groupIdToIndex[ls.longGroupId];
+            var shortIdx = groupIdToIndex[ls.shortGroupId];
+            if (longIdx === undefined || shortIdx === undefined) {
                 console.warn('[runGroupTest] LS config ' + ls.id + ' references unknown group(s): long=' + ls.longGroupId + ' short=' + ls.shortGroupId);
                 continue;
             }
-            if (longBatch === shortBatch) {
-                var longIdx = longBatch.groupIdToIndex[ls.longGroupId];
-                var shortIdx = shortBatch.groupIdToIndex[ls.shortGroupId];
-                var sameBatchName = GT.panels.actions ? GT.panels.actions.lsDisplayName(ls) : (ls.name || 'Long-Short');
-                longBatch.lsPayloads.push({
-                    name: sameBatchName,
-                    key: sameBatchName,
-                    long: [{ group: longIdx - 1, weight: 1.0 }],
-                    short: [{ group: shortIdx - 1, weight: 1.0 }]
-                });
-            } else {
-                crossBatchLS.push(ls);
-            }
+            var lsName = GT.panels.actions ? GT.panels.actions.lsDisplayName(ls) : (ls.name || 'Long-Short');
+            flatLSConfigs.push({
+                name: lsName,
+                key: lsName,
+                long: [{ group: longIdx - 1, weight: 1.0 }],
+                short: [{ group: shortIdx - 1, weight: 1.0 }]
+            });
         }
 
-        // ── 3. 构建批量 payload ──
+        // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
-        var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
-
-        var firstGroup = batches[0] && batches[0].groups[0];
-        var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode')) : GT.groupSettings.getFieldDefault('rebalanceMode');
         var localRun = prepareLocalRun();
         if (localRun.errors && localRun.errors.length) {
             if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
@@ -386,150 +236,91 @@
             return;
         }
 
-        // ── 费率聚合 ──
-        var fee = 0;
-        var fee_modifications = [];
-        var hasPerProduct = false;
-        if (GT.groupSettings.groups) {
-            var allFeeGroups = GT.groupSettings.groups.getAll() || [];
-            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
-                var fg = allFeeGroups[fgi];
-                if (fg.parentId) continue;
-                if (fg.feeMode === 'per_product') hasPerProduct = true;
-                if (fg.feeMode === 'uniform' && fee === 0) {
-                    fee = fg.feeRate != null ? fg.feeRate : 0.0025;
-                }
-            }
-        }
-        if (hasPerProduct && GT.fee) {
-            try {
-                // 仍然需要确保费率数据加载（_resolve_group_trade_specs 会从产品数据库取值）
-                await GT.fee.ensureFeeData();
-                fee_modifications = GT.fee.getModifications ? GT.fee.getModifications() : [];
-            } catch (err) {
-                console.error('[runBatch] ensureFeeData failed:', err);
-            }
-        }
-        var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
         if (statusSpan) {
-            statusSpan.innerHTML = '分组测试运行中...（共 ' + totalBatches + ' 批次）';
+            statusSpan.innerHTML = '分组测试运行中...';
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 构建 batch payloads：直接传 groupSettings 的原样数据 ──
-        var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
-        var batchPayloads = [];
-        for (var bi = 0; bi < batches.length; bi++) {
-            var batch = batches[bi];
-            // 收集本 batch 涉及的所有 group id
-            var batchGroupIds = {};
-            for (var gi = 0; gi < batch.groups.length; gi++) {
-                if (batch.groups[gi] && batch.groups[gi].id) batchGroupIds[batch.groups[gi].id] = true;
-            }
-            // 筛选组：通过 parentId 找到指向本 batch 中某个 group 的筛选组
-            for (var si = 0; si < allStoredGroups.length; si++) {
-                var sg = allStoredGroups[si];
-                if (sg && sg.parentId && batchGroupIds[sg.parentId]) {
-                    batchGroupIds[sg.id] = true;
-                }
-            }
-            // 从存储中取出本 batch 涉及的所有 group（保持添加顺序）
-            var groupList = [];
-            for (var ai = 0; ai < allStoredGroups.length; ai++) {
-                if (batchGroupIds[allStoredGroups[ai].id]) groupList.push(allStoredGroups[ai]);
-            }
-            batchPayloads.push({
-                submission_id: batch.testerId,
-                factor_alias: batch.factorAlias,
-                n_groups: batch.groupCount,
-                groups: groupList.length > 0 ? groupList : null,
-                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
-            });
-        }
-
-        // ── 跨 batch LS ──
-        var crossBatchLSPayloads = [];
-        for (var ci = 0; ci < crossBatchLS.length; ci++) {
-            var cbLS = crossBatchLS[ci];
-            var cblLongBatch = null, cblShortBatch = null;
-            for (var bj = 0; bj < batches.length; bj++) {
-                if (batches[bj].groupIdToIndex[cbLS.longGroupId] !== undefined) cblLongBatch = batches[bj];
-                if (batches[bj].groupIdToIndex[cbLS.shortGroupId] !== undefined) cblShortBatch = batches[bj];
-            }
-            if (!cblLongBatch || !cblShortBatch) continue;
-
-            var cblLongIdx = cblLongBatch.groupIdToIndex[cbLS.longGroupId] - 1;
-            var cblShortIdx = cblShortBatch.groupIdToIndex[cbLS.shortGroupId] - 1;
-            var crossBatchName = GT.panels.actions ? GT.panels.actions.lsDisplayName(cbLS) : (cbLS.name || 'Long-Short');
-
-            crossBatchLSPayloads.push({
-                name: crossBatchName,
-                key: crossBatchName,
-                long: {
-                    submission_id: cblLongBatch.testerId,
-                    factor_alias: cblLongBatch.factorAlias,
-                    n_groups: cblLongBatch.groupCount,
-                    group: cblLongIdx
-                },
-                short: {
-                    submission_id: cblShortBatch.testerId,
-                    factor_alias: cblShortBatch.factorAlias,
-                    n_groups: cblShortBatch.groupCount,
-                    group: cblShortIdx
-                }
-            });
-        }
-
-        var bulkPayload = {
-            batches: batchPayloads,
-            cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
-            fee: fee,
-            fee_modifications: fee_modifications,
-            use_closetoday: use_closetoday,
-            rebalance_mode: rebalance_mode
-        };
-        Object.assign(bulkPayload, localRun.payload || {});
+        // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
+        var bulkPayload = Object.assign({}, localRun.payload, {
+            groups: runGroups,
+            flatCount: runGroups.length,
+            ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
+            page_uuid: window._pageUuid || '',
+            factor_family_alias: window.factorFamilyAlias || ''
+        });
 
         try {
-            // ── 确定性进度条 ──
-            var progressBarId = 'gt-batch-progress';
-            var progressBar = document.getElementById(progressBarId);
-            if (!progressBar) {
-                progressBar = document.createElement('div');
-                progressBar.id = progressBarId;
-                progressBar.className = 'gt-progress-container';
-                progressBar.innerHTML =
-                    '<div class="gt-progress-bar" style="background:#e0e0e0;border-radius:6px;height:12px;overflow:hidden;margin-bottom:4px;">' +
-                    '<div id="' + progressBarId + '-fill" class="gt-progress-fill" style="width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:6px;"></div>' +
-                    '</div>' +
-                    '<span id="' + progressBarId + '-text" class="gt-progress-text" style="font-size:13px;color:#666;">准备中...</span>';
+            // ── 多行并行进度条 ──
+            var progressContainerId = 'gt-batch-progress';
+            var progressContainer = document.getElementById(progressContainerId);
+            if (!progressContainer) {
+                progressContainer = document.createElement('div');
+                progressContainer.id = progressContainerId;
+                progressContainer.className = 'gt-progress-container';
+                progressContainer.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:8px;background:#f9f9f9;border-radius:8px;border:1px solid #e0e0e0;';
                 var chartContainer = document.getElementById('group_chart_container');
                 var insertParent = chartContainer ? chartContainer.parentNode : (runBtn ? runBtn.parentNode : document.body);
                 var insertBefore = chartContainer || (runBtn ? runBtn.nextSibling : null);
-                insertParent.insertBefore(progressBar, insertBefore);
+                insertParent.insertBefore(progressContainer, insertBefore);
             }
+            progressContainer.innerHTML = '';
+
+            var pendingGlobalProgress = [];
+
+            var batchMgr = GT.groupSettings.runGroupBatch.createManager({
+                progressContainer: progressContainer,
+            });
+
+            markProgressRowsDone = function(done, message) {
+                batchMgr.markAllDone(done, message);
+            };
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                var fill = document.getElementById(progressBarId + '-fill');
-                var text = document.getElementById(progressBarId + '-text');
                 if (event === 'start') {
-                    if (fill) fill.style.width = '0%';
-                    if (text) text.textContent = '0/' + (payload.total || 1) + ' 批次';
-                } else if (event === 'progress') {
-                    var pct = payload.total > 0 ? (payload.completed / payload.total * 100) : 0;
-                    if (fill) fill.style.width = pct + '%';
-                    if (text) {
-                        var phaseLabel = '';
-                        if (payload.phase === 'batch') {
-                            phaseLabel = '批次 ';
-                        } else if (payload.phase === 'membership') {
-                            phaseLabel = '隶属度 ';
-                        } else if (payload.phase === 'trade_data') {
-                            phaseLabel = '交易数据 ';
-                        } else if (payload.phase === 'simulate') {
-                            phaseLabel = '模拟 ';
+                    var newTotal = payload.product_coverage_batch_total || payload.total || 1;
+                    batchMgr.syncRows(newTotal);
+                    // 后端告知的 phases：[{key, label, sub_steps?}, ...]
+                    if (payload.phases && payload.phases.length) {
+                        var phaseKeys = [];
+                        var labelMap = {};
+                        var subStepLabelMap = {};
+                        for (var pi = 0; pi < payload.phases.length; pi++) {
+                            var pitem = payload.phases[pi];
+                            if (pitem.key) {
+                                phaseKeys.push(pitem.key);
+                                if (pitem.label) labelMap[pitem.key] = pitem.label;
+                                if (pitem.sub_steps) subStepLabelMap[pitem.key] = pitem.sub_steps;
+                            }
                         }
-                        text.textContent = phaseLabel + (payload.completed || 0) + '/' + (payload.total || 1);
+                        batchMgr.registerPhases(phaseKeys);
+                        batchMgr.setPhaseLabels(labelMap);
+                        batchMgr.setSubStepLabels(subStepLabelMap);
+                    }
+                    // 回放缓存的无 batch_index 全局进度
+                    if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
+                        var pending = pendingGlobalProgress;
+                        pendingGlobalProgress = [];
+                        for (var p = 0; p < pending.length; p++) {
+                            batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message, pending[p].sub_step);
+                        }
+                    }
+                } else if (event === 'progress') {
+                    var bi = payload.product_coverage_batch_index;
+                    var _hasRows = batchMgr.getIndices().length > 0;
+                    var _willPending = (!_hasRows && (bi === undefined || bi < 0));
+                    if (bi !== undefined && bi >= 0) {
+                        batchMgr.updateRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
+                    } else if (!_hasRows) {
+                        pendingGlobalProgress.push({
+                            phase: payload.phase,
+                            completed: payload.completed || 0,
+                            total: payload.total || 0,
+                            message: payload.message,
+                            sub_step: payload.sub_step
+                        });
+                    } else {
+                        batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
                 }
             });
@@ -538,6 +329,7 @@
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
                     ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
                     : data.error;
+                markProgressRowsDone(false, errorText || '分组测试失败');
                 if (statusSpan) {
                     statusSpan.innerHTML = '✗ 分组测试失败: ' + errorText;
                     statusSpan.style.color = '#d40000';
@@ -548,11 +340,13 @@
                 return;
             }
 
-            // 标记所有 batch 为 done
-            for (var bi = 0; bi < batches.length; bi++) {
-                var btch = batches[bi];
-                if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
+            // 标记所有 group 为 done
+            var doneGroups = allStoredGroups || [];
+            for (var bi = 0; bi < doneGroups.length; bi++) {
+                var btch = doneGroups[bi];
+                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
+            markProgressRowsDone(true, '分组测试完成');
 
             // 渲染结果
             if (GT.results && GT.results.renderer && GT.results.renderer.applyGroupTestResult) {
@@ -561,21 +355,17 @@
 
             if (statusSpan) {
                 var doneMsg = '✓ ' + data.simulation_count + ' 组模拟完成';
-                if (data.cross_batch_ls_count) {
-                    doneMsg += '（含 ' + data.cross_batch_ls_count + ' 跨 Batch LS）';
-                }
                 statusSpan.innerHTML = doneMsg;
                 statusSpan.style.color = '#28a745';
             }
         } catch (e) {
             console.error('[runGroupTest] error:', e);
+            markProgressRowsDone(false, e.message || '未知错误');
             if (statusSpan) {
                 statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
                 statusSpan.style.color = '#d40000';
             }
         } finally {
-            var _pb = document.getElementById('gt-batch-progress');
-            if (_pb) _pb.remove();
             if (runBtn) {
                 runBtn.disabled = false;
                 runBtn.style.display = '';

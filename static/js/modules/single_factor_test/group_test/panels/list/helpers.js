@@ -193,52 +193,52 @@
         return parentAlias + ':' + num;
     }
 
-    /** Get batchKey from group settings */
-    function batchKey(testerId, factorAlias, groupCount) {
-        return GT.groupSettings.groups.batchKey(testerId, factorAlias, groupCount);
+    /** Get addGroupBatchKey from addGroupBatch registry */
+    function addGroupBatchKey(testerId, factorAlias, splitCount) {
+        return GT.groupSettings.addGroupBatch.key(testerId, factorAlias, splitCount);
     }
 
-    /** Group base items into batches */
-    var _batchMap = {};
-    function buildBatches(items) {
-        _batchMap = {};
+    /** Group base items into addGroupBatches (UI list display groups) */
+    var _addGroupBatchMap = {};
+    function buildAddGroupBatches(items) {
+        _addGroupBatchMap = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             if (item.parentId) continue;
-            var key = batchKey(item.testerId, item.factorAlias, item.groupCount);
-            if (!_batchMap[key]) {
-                _batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
+            var key = addGroupBatchKey(item.testerId, item.factorAlias, item.splitCount);
+            if (!_addGroupBatchMap[key]) {
+                _addGroupBatchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, splitCount: item.splitCount, items: [] };
             }
-            _batchMap[key].items.push(item);
+            _addGroupBatchMap[key].items.push(item);
         }
-        var keys = Object.keys(_batchMap);
+        var keys = Object.keys(_addGroupBatchMap);
         keys.sort(function(a, b) {
-            var aliasA = _batchMap[a].items[0].shortAlias || '';
-            var aliasB = _batchMap[b].items[0].shortAlias || '';
+            var aliasA = _addGroupBatchMap[a].items[0].shortAlias || '';
+            var aliasB = _addGroupBatchMap[b].items[0].shortAlias || '';
             if (aliasA < aliasB) return -1;
             if (aliasA > aliasB) return 1;
             return 0;
         });
         var result = [];
-        for (var k = 0; k < keys.length; k++) { result.push(_batchMap[keys[k]]); }
+        for (var k = 0; k < keys.length; k++) { result.push(_addGroupBatchMap[keys[k]]); }
         return result;
     }
 
-    function getBatchMap() { return _batchMap; }
+    function getAddGroupBatchMap() { return _addGroupBatchMap; }
 
-    function batchGroupIds(batchKeyVal) {
+    function addGroupBatchGroupIds(addGroupBatchKeyVal) {
         var items = GT.groupSettings.groups.getAll();
         var ids = [];
         for (var i = 0; i < items.length; i++) {
             if (items[i].parentId) continue;
-            if (batchKey(items[i].testerId, items[i].factorAlias, items[i].groupCount) === batchKeyVal) {
+            if (addGroupBatchKey(items[i].testerId, items[i].factorAlias, items[i].splitCount) === addGroupBatchKeyVal) {
                 ids.push(items[i].id);
             }
         }
         return ids;
     }
 
-    function batchCommon(batch, field) {
+    function addGroupBatchCommon(batch, field) {
         if (batch.items.length === 0) return null;
         var val = batch.items[0][field];
         for (var i = 1; i < batch.items.length; i++) { if (batch.items[i][field] !== val) return null; }
@@ -345,11 +345,11 @@
         rebalanceLabel: rebalanceLabel,
         closeTodayLabel: closeTodayLabel,
         deriveShortAlias: deriveShortAlias,
-        batchKey: batchKey,
-        buildBatches: buildBatches,
-        getBatchMap: getBatchMap,
-        batchGroupIds: batchGroupIds,
-        batchCommon: batchCommon,
+        addGroupBatchKey: addGroupBatchKey,
+        buildAddGroupBatches: buildAddGroupBatches,
+        getAddGroupBatchMap: getAddGroupBatchMap,
+        addGroupBatchGroupIds: addGroupBatchGroupIds,
+        addGroupBatchCommon: addGroupBatchCommon,
         deriveOverrideChips: deriveOverrideChips,
         renderAllChipsForGroup: renderAllChipsForGroup,
         lsTesterLabel: lsTesterLabel,

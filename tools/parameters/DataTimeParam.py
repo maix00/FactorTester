@@ -8,13 +8,16 @@
 import pandas as pd
 from typing import Optional, Any, TYPE_CHECKING
 
-from tools.data.DataTime import DataTime
+from tools.decorators import factor_workspace
+from tools.data.types import DataTime
 from tools.parameters.Parameter import Parameter, ValueSpace
 
 if TYPE_CHECKING:
-    from tools.base.UniqueObject import UniqueObject
+    from typing import Any
 
+@factor_workspace
 class DataTimeParam(Parameter):
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None,
                  default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
@@ -55,15 +58,17 @@ class DataTimeParam(Parameter):
         dt = self._rectify_value(value, **kwargs)
         return str(dt.ts) if dt.ts is not None else str(dt)
 
-    def is_date(self, object: 'Optional[UniqueObject]' = None, value: Optional[Any] = None, **kwargs) -> bool:
+    @factor_workspace
+    def is_date(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'day'
 
-    def is_time(self, object: 'Optional[UniqueObject]' = None, value: Optional[Any] = None, **kwargs) -> bool:
+    @factor_workspace
+    def is_time(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
         return dt is not None and dt.precision == 'exact'
 
-    def _resolve(self, object: 'Optional[UniqueObject]', value: Optional[Any], **kwargs) -> Optional[DataTime]:
+    def _resolve(self, object: 'Optional[Any]', value: Optional[Any], **kwargs) -> Optional[DataTime]:
         if object is not None:
             return self.get_value(object)
         if value is not None:

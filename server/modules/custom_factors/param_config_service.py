@@ -17,7 +17,7 @@ from server.modules.custom_factors.param_config_store import (
 )
 from server.modules.products.product_group_store import load_product_groups
 from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
-from server.services.accounts import (
+from tools.data.account_manage import (
     account_display_name,
     get_account,
     visible_accounts_for,

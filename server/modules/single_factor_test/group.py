@@ -4,19 +4,73 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
+from tools.data.types.currency import normalize_currency, require_product_currency_vector
+from tools.data.types.currency_units import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
+from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
-from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
+from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
+from tools.factors.tests.single_factor_test.group.detail import (
+    build_group_detail,
+    _build_product_fee_rates,
+    _display_with_fee as _display_product_with_fee,
+)
+from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
+from tools.products.AdjustableTermStructure import resolve_term_structure_product
+from tools.products.Product import Product
 from . import sft_bp
-import server.services.runtime_state as runtime_state
+import server.services.page_runtime as runtime_state
+from server.services.session_runtime import current_user, get_session_params
 from server.modules.shared.price_data_helpers import to_epoch_ms
+from server.services.factor_registry import get_factor_family_instance
 
 _log = logging.getLogger(__name__)
 
 
+def _ensure_tester_factors_for_group(
+    tester: Any,
+    factor_aliases: list[str],
+    factor_family_alias: str | None,
+    *,
+    params_list: list | None = None,
+    username: str | None = None,
+    page_uuid: str | None = None,
+) -> None:
+    """Ensure direct group runs can resolve factors even when IC has not run."""
+    missing_aliases = [
+        str(alias) for alias in factor_aliases
+        if alias and tester.resolve_factor(str(alias)) is None
+    ]
+    if not missing_aliases:
+        return
+    if not factor_family_alias:
+        return
+
+    factor_family = get_factor_family_instance(str(factor_family_alias), username=username)
+    if params_list is None:
+        params_list = get_session_params(str(factor_family_alias), factor_family)
+    factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
+    existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
+    for factor in factors:
+        alias = getattr(factor, 'alias', '')
+        if not alias:
+            continue
+        if alias in existing_by_alias:
+            tester.factors[existing_by_alias[alias]] = factor
+        else:
+            tester.factors.append(factor)
+            existing_by_alias[alias] = len(tester.factors) - 1
+
+
 def _progress(message: str) -> None:
     print(f"[GroupTest] {message}", flush=True)
+
+
+def _get_metrics_meta() -> dict:
+    """Return the single-source metrics metadata for frontend rendering."""
+    return GROUP_TEST_METRICS_META
 
 
 def _safe_float(v):
@@ -47,29 +101,828 @@ def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
     return float(value)
 
 
+def _parse_currency_code(raw: Any, default: str = "CNY") -> str:
+    return normalize_currency(raw, default)
+
+
+def _parse_nonnegative_rate(raw: Any, default: float = 0.0) -> float:
+    value = _safe_float(default if raw in (None, '') else raw)
+    if value is None or value < 0:
+        raise ValueError(f'换汇佣金率必须是非负数，收到: {raw!r}')
+    return float(value)
+
+
+def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
+    """Parse legacy group-test fee payload into engine inputs.
+
+    ``fee`` is provided in percent units by the UI, while the engine expects a
+    ratio. Per-variety modifications are cleaned into FeeModification objects.
+    """
+    from tools.products.transactions.fees import clean_modifications
+
+    raw_fee = data.get('fee', 0)
+    fee_value = _safe_float(raw_fee)
+    fee_uniform = 0.0 if fee_value is None else float(fee_value) / 100.0
+    raw_modifications = data.get('fee_modifications') or data.get('feeModifications') or []
+    if not isinstance(raw_modifications, list):
+        raw_modifications = []
+    fee_modifications = clean_modifications(raw_modifications)
+    use_closetoday = bool(data.get('use_closetoday') or data.get('useCloseToday'))
+    return fee_uniform, fee_modifications, use_closetoday
+
+
+def _product_fee_rates_by_name(group_result: Any) -> dict[str, dict[str, float]]:
+    """Build per-product fee rows from a group result."""
+    if group_result is None:
+        return {}
+    return _build_product_fee_rates(
+        getattr(group_result, 'valid_cols', None),
+        getattr(group_result, 'open_ratio_mat', None),
+        getattr(group_result, 'close_ratio_mat', None),
+        getattr(group_result, 'close_today_ratio_mat', None),
+    )
+
+
+def _registered_product(product_name: str):
+    if not product_name:
+        return None
+    return resolve_term_structure_product(product_name)
+
+
+def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]] | None = None, *, collapsed_from: str | None = None) -> dict[str, Any]:
+    fee_rates = fee_rates or {}
+    raw_name = getattr(product_ref, 'name', str(product_ref) if product_ref is not None else '')
+    product = product_ref if isinstance(product_ref, Product) else _registered_product(raw_name) if product_ref else None
+    name = getattr(product, 'name', None) if product is not None else raw_name
+    display = _display_product_with_fee(product if product is not None else name, fee_rates)
+    if collapsed_from and collapsed_from != name:
+        display['source_name'] = collapsed_from
+    return display
+
+
+def _cn_futures_contract_parent(product_ref: Any):
+    contract_uid = getattr(product_ref, 'name', None) or str(product_ref)
+    if not contract_uid:
+        return None
+    try:
+        from sources.LocalCNFutures.CNFutures import CNFutures
+        return CNFutures.get_contract_parent(str(contract_uid))
+    except Exception:
+        return None
+
+
+def _snapshot_actual_quantity(
+    position_row: Any,
+    amount_row: Any | None,
+    product_idx: int,
+    eps: float = 1e-12,
+) -> tuple[float, float]:
+    """Read quantity and amount directly from simulate's pre-computed arrays.
+
+    NEVER recompute amount from price — amount comes from hold_amounts_np
+    (= position_notional in simulate, already using the correct open_price).
+    """
+    qty = 0.0
+    amt = 0.0
+    if position_row is not None and product_idx < len(position_row):
+        qty_value = _safe_float(position_row[product_idx])
+        qty = 0.0 if qty_value is None else qty_value
+    if amount_row is not None and product_idx < len(amount_row):
+        amt_value = _safe_float(amount_row[product_idx])
+        amt = 0.0 if amt_value is None else amt_value
+    if abs(qty) <= eps:
+        qty = 0.0
+    if abs(amt) <= eps:
+        amt = 0.0
+    return qty, amt
+
+
+def _money_minor_units_to_major_value(value: Any) -> float | None:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    return float(minor_units_to_major(numeric))
+
+
+def _money_minor_units_row_to_major(row: Any | None) -> Any | None:
+    if row is None:
+        return None
+    return minor_units_to_major(row)
+
+
+def _format_money_2(value: Any) -> str:
+    numeric = _safe_float(value)
+    if numeric is None:
+        numeric = 0.0
+    return f"{float(numeric):,.2f}"
+
+
+def _format_money_with_currency(value: Any, currency: str) -> str:
+    return f"{normalize_currency(currency)} {_format_money_2(value)}"
+
+
+
+
+
+def _snapshot_group_label(group_idx: int, group_names: Any) -> str:
+    if isinstance(group_names, dict):
+        for key in (group_idx, str(group_idx)):
+            if key in group_names and group_names[key]:
+                return str(group_names[key])
+    return f'Group {group_idx + 1}'
+
+
+def _snapshot_display_timezone(group_result: Any, valid_cols: list[Any] | None = None) -> str:
+    index_list = list(getattr(group_result, 'index_list', []) or [])
+    for idx_entry in index_list:
+        ts = _signal_time(idx_entry)
+        if isinstance(ts, pd.Timestamp) and ts.tzinfo is not None:
+            return str(ts.tz)
+    for product_ref in valid_cols or list(getattr(group_result, 'valid_cols', []) or []):
+        product = product_ref if isinstance(product_ref, Product) else _registered_product(str(product_ref))
+        timezone = getattr(product, 'timezone', None) if product is not None else None
+        if timezone:
+            return str(timezone)
+    return 'Asia/Shanghai'
+
+
+def _build_snapshot_matrix(
+    *,
+    matrix_key: str,
+    matrix_label: str,
+    group_result: Any,
+    valid_cols: list[Any],
+    fee_rates_by_name: dict[str, dict[str, float]],
+    t_idx: int | None,
+    prev_t_idx: int | None,
+    capital_diagnostics: dict[str, Any] | None = None,
+    group_names: Any = None,
+    collapse_term_structure: bool = False,
+) -> dict[str, Any]:
+    positions = getattr(group_result, 'position_quantities_np', None)
+    amounts = getattr(group_result, 'hold_amounts_np', None)
+    target_before_floor = getattr(group_result, 'target_amounts_before_floor_np', None)
+    prev_end_amounts = getattr(group_result, 'prev_end_amounts_np', None)
+    # Per-lot cost arrays from simulate — exactly the values used inside simulate
+    # (NEVER recompute from input params; these come directly from the trading book)
+    one_lot_margin_np = getattr(group_result, 'one_lot_margin_np', None)
+    one_lot_fee_np = getattr(group_result, 'one_lot_fee_np', None)
+    memberships = getattr(group_result, 'membership_np', None)
+    total_equity_np = getattr(group_result, 'total_equity_np', None)
+    cash_np = getattr(group_result, 'cash_np', None)
+    pre_rebalance_total_equity_np = getattr(group_result, 'pre_rebalance_total_equity_np', None)
+    post_rebalance_total_equity_np = getattr(group_result, 'post_rebalance_total_equity_np', None)
+    pre_rebalance_cash_np = getattr(group_result, 'pre_rebalance_cash_np', None)
+    post_rebalance_cash_np = getattr(group_result, 'post_rebalance_cash_np', None)
+    buy_fee_amount_np = getattr(group_result, 'buy_fee_amount_np', None)
+    sell_fee_amount_np = getattr(group_result, 'sell_fee_amount_np', None)
+    liquidity_capacity_np = getattr(group_result, 'liquidity_capacity_np', None)
+    liquidity_modes = getattr(group_result, 'liquidity_modes', None) or []
+    liquidity_percents = getattr(group_result, 'liquidity_percents', None) or []
+    base_currency = str(getattr(group_result, 'base_currency', None) or 'CNY').upper()
+    product_currency_vec = require_product_currency_vector(
+        list(valid_cols or []),
+        explicit=getattr(group_result, 'product_currency_vec', None),
+        default=None,
+    )
+    if positions is None and amounts is None:
+        return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
+
+    current_products = list(valid_cols or [])
+    row_order: list[str] = []
+    row_meta: dict[str, dict[str, Any]] = {}
+    per_group: list[dict[str, dict[str, Any]]] = []
+
+    def _product_name(product_ref: Any) -> str:
+        return getattr(product_ref, 'name', str(product_ref))
+
+    def _resolved_product(product_ref: Any):
+        if collapse_term_structure:
+            resolved = None
+            try:
+                resolved = getattr(product_ref, 'parent_product', None)
+                if callable(resolved):
+                    resolved = resolved()
+            except Exception:
+                resolved = None
+            if resolved is None:
+                resolved = resolve_term_structure_product(product_ref)
+            if resolved is None:
+                resolved = _cn_futures_contract_parent(product_ref)
+            if resolved is not None:
+                return resolved
+        return product_ref
+
+    def _row_key(raw_product: Any) -> str:
+        resolved = _resolved_product(raw_product)
+        return _product_name(resolved if resolved is not None else raw_product)
+
+    def _row_display(product_ref: Any, sources: list[str]) -> dict[str, Any]:
+        display = _snapshot_product_display(product_ref, fee_rates_by_name, collapsed_from=sources[0] if sources else None)
+        if collapse_term_structure and len(sources) > 1:
+            display['source_names'] = sources
+        return display
+
+    product_rows = []
+    raw_name_to_p_idx: dict[str, int] = {}
+    for p_idx, raw_product in enumerate(current_products):
+        raw_name = _product_name(raw_product)
+        resolved_product = _resolved_product(raw_product) if collapse_term_structure else raw_product
+        row_key = _product_name(resolved_product if resolved_product is not None else raw_product)
+        product_rows.append({
+            'raw_product': raw_product,
+            'raw_name': raw_name,
+            'resolved_product': resolved_product,
+            'row_key': row_key,
+            'p_idx': p_idx,
+        })
+        raw_name_to_p_idx[raw_name] = p_idx
+
+    def _group_index_map(index: int) -> tuple[Any, Any, Any, Any, Any, Any]:
+        cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
+        cur_amt = _money_minor_units_row_to_major(amounts[t_idx, index]) if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
+        prev_pos = positions[prev_t_idx, index] if positions is not None and prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
+        prev_amt = (
+            _money_minor_units_row_to_major(prev_end_amounts[t_idx, index])
+            if prev_end_amounts is not None and t_idx is not None and t_idx < prev_end_amounts.shape[0]
+            else _money_minor_units_row_to_major(amounts[prev_t_idx, index]) if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0]
+            else None
+        )
+        cur_mem = memberships[t_idx, index] if memberships is not None and t_idx is not None and t_idx < memberships.shape[0] else None
+        prev_mem = memberships[prev_t_idx, index] if memberships is not None and prev_t_idx is not None and prev_t_idx < memberships.shape[0] else None
+        return (cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem)
+
+    diagnostics_by_group: dict[int, dict[str, Any]] = {}
+    if isinstance(capital_diagnostics, dict):
+        for item in capital_diagnostics.get('blocked_groups', []) or []:
+            try:
+                diagnostics_by_group[int(item.get('group_index'))] = item
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+    group_count = 0
+    for matrix in (positions, amounts, memberships):
+        if matrix is not None and getattr(matrix, 'ndim', 0) >= 2:
+            group_count = int(matrix.shape[1])
+            break
+
+    for g_idx in range(group_count):
+        cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem = _group_index_map(g_idx)
+        group_rows: dict[str, dict[str, Any]] = {}
+        for p_idx, product_row in enumerate(product_rows):
+            raw_product = product_row['raw_product']
+            raw_name = product_row['raw_name']
+            row_key = product_row['row_key']
+            resolved_product = product_row['resolved_product']
+            product_currency = str(product_currency_vec[p_idx]).upper()
+            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
+            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
+            if row_key not in group_rows:
+                group_rows[row_key] = {
+                    'name': row_key,
+                    'source_names': [raw_name],
+                    'current_qty': 0.0,
+                    'current_amount': 0.0,
+                    'prev_qty': 0.0,
+                    'prev_amount': 0.0,
+                    'current_membership': False,
+                    'prev_membership': False,
+                    'target_budget_amount': 0.0,
+                    'planned_qty': 0.0,
+                    'planned_amount': 0.0,
+                    'one_lot_margin': 0.0,
+                    'one_lot_fee': 0.0,
+                    'currency': product_currency,
+                    'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
+                }
+                if row_key not in row_order:
+                    row_order.append(row_key)
+                    row_meta[row_key] = group_rows[row_key]['display']
+            else:
+                if raw_name not in group_rows[row_key]['source_names']:
+                    group_rows[row_key]['source_names'].append(raw_name)
+                    group_rows[row_key]['display'] = _row_display(resolved_product if resolved_product is not None else raw_product, group_rows[row_key]['source_names'])
+                    row_meta[row_key] = group_rows[row_key]['display']
+            group_rows[row_key]['current_qty'] += cur_qty
+            group_rows[row_key]['current_amount'] += cur_amount
+            group_rows[row_key]['prev_qty'] += prev_qty
+            group_rows[row_key]['prev_amount'] += prev_amount
+            if cur_mem is not None and p_idx < len(cur_mem):
+                group_rows[row_key]['current_membership'] = bool(group_rows[row_key]['current_membership'] or bool(cur_mem[p_idx]))
+            if prev_mem is not None and p_idx < len(prev_mem):
+                group_rows[row_key]['prev_membership'] = bool(group_rows[row_key]['prev_membership'] or bool(prev_mem[p_idx]))
+            target_amount_value = None
+            if target_before_floor is not None and t_idx is not None and t_idx < target_before_floor.shape[0] and g_idx < target_before_floor.shape[1] and p_idx < target_before_floor.shape[2]:
+                target_amount_value = _money_minor_units_to_major_value(target_before_floor[t_idx, g_idx, p_idx])
+            if target_amount_value is not None:
+                group_rows[row_key]['target_budget_amount'] += float(target_amount_value)
+            # planned_qty/planned_amount come directly from simulate arrays, NOT recomputed:
+            # - position_quantities_np = desired_quantities (after full pipeline:
+            #   liquidity cap → floor → cash packing)
+            # - hold_amounts_np = position_notional (= desired_quantities × open_price contract value)
+            if positions is not None and t_idx is not None and t_idx < positions.shape[0] and g_idx < positions.shape[1] and p_idx < positions.shape[2]:
+                sim_planned_qty = _safe_float(positions[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['planned_qty'] += float(sim_planned_qty)
+            if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] and g_idx < amounts.shape[1] and p_idx < amounts.shape[2]:
+                sim_planned_amount = _money_minor_units_to_major_value(amounts[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['planned_amount'] += float(sim_planned_amount)
+            # one_lot_margin / one_lot_fee: read directly from simulate-computed arrays
+            # (same values used inside _pack_openable_quantities / _row_required_capital).
+            # Used for diagnostic display to show per-lot budget;
+            # NEVER used for planned_qty computation.
+            if one_lot_margin_np is not None and t_idx is not None and t_idx < one_lot_margin_np.shape[0] and g_idx < one_lot_margin_np.shape[1] and p_idx < one_lot_margin_np.shape[2]:
+                sim_one_lot_margin = _safe_float(one_lot_margin_np[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['one_lot_margin'] = max(group_rows[row_key]['one_lot_margin'], float(sim_one_lot_margin))
+            if one_lot_fee_np is not None and t_idx is not None and t_idx < one_lot_fee_np.shape[0] and g_idx < one_lot_fee_np.shape[1] and p_idx < one_lot_fee_np.shape[2]:
+                sim_one_lot_fee = _safe_float(one_lot_fee_np[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['one_lot_fee'] = max(group_rows[row_key]['one_lot_fee'], float(sim_one_lot_fee))
+        per_group.append(group_rows)
+
+    columns = []
+    for g_idx in range(len(per_group)):
+        current_active = 0
+        selected_count = 0
+        for row_key, row in per_group[g_idx].items():
+            if abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12:
+                current_active += 1
+            if bool(row.get('current_membership')):
+                selected_count += 1
+        label = _snapshot_group_label(g_idx, group_names)
+        columns.append({
+            'name': label,
+            'label': label,
+            'index': g_idx,
+            'count': selected_count,
+            'count_label': f'持仓品种数({selected_count})',
+        })
+
+    cells = []
+    summary_cells = []
+    summary_keys = []
+
+    def _matrix_value(matrix: Any, g_idx: int) -> float | None:
+        if matrix is None or t_idx is None or t_idx >= matrix.shape[0] or g_idx >= matrix.shape[1]:
+            return None
+        return _money_minor_units_to_major_value(matrix[t_idx, g_idx])
+
+    def _append_amount_row(
+        row_key: str,
+        display: dict[str, Any],
+        end_matrix: Any,
+        *,
+        pre_rebalance_matrix: Any | None = None,
+        post_rebalance_matrix: Any | None = None,
+        buy_fee_matrix: Any | None = None,
+        sell_fee_matrix: Any | None = None,
+    ) -> None:
+        if end_matrix is None or t_idx is None or t_idx >= end_matrix.shape[0]:
+            return
+        amount_cells = []
+        for g_idx in range(len(per_group)):
+            end_amount = _matrix_value(end_matrix, g_idx)
+            pre_rebalance_amount = _matrix_value(pre_rebalance_matrix, g_idx)
+            post_rebalance_amount = _matrix_value(post_rebalance_matrix, g_idx)
+            if prev_t_idx is not None and prev_t_idx < end_matrix.shape[0] and g_idx < end_matrix.shape[1]:
+                previous_end_amount = _money_minor_units_to_major_value(end_matrix[prev_t_idx, g_idx])
+                if pre_rebalance_amount is None:
+                    pre_rebalance_amount = previous_end_amount
+                if post_rebalance_amount is None:
+                    post_rebalance_amount = previous_end_amount
+            end_amount = 0.0 if end_amount is None else end_amount
+            pre_rebalance_amount = end_amount if pre_rebalance_amount is None else pre_rebalance_amount
+            post_rebalance_amount = pre_rebalance_amount if post_rebalance_amount is None else post_rebalance_amount
+            buy_fee_amount = _matrix_value(buy_fee_matrix, g_idx)
+            sell_fee_amount = _matrix_value(sell_fee_matrix, g_idx)
+            buy_fee_amount = 0.0 if buy_fee_amount is None else buy_fee_amount
+            sell_fee_amount = 0.0 if sell_fee_amount is None else sell_fee_amount
+            delta_amount = end_amount - post_rebalance_amount
+            if delta_amount > 1e-12:
+                status = 'increasing'
+                direction = 'increase'
+            elif delta_amount < -1e-12:
+                status = 'decreasing'
+                direction = 'decrease'
+            else:
+                status = 'holding'
+                direction = 'flat'
+            amount_cells.append({
+                'status': status,
+                'product': display,
+                'currency': base_currency,
+                'quantity': None,
+                'amount': round(float(end_amount), 2),
+                'pre_rebalance_amount': round(float(pre_rebalance_amount), 2),
+                'post_rebalance_amount': round(float(post_rebalance_amount), 2),
+                'end_amount': round(float(end_amount), 2),
+                'buy_fee_amount': round(float(buy_fee_amount), 2),
+                'sell_fee_amount': round(float(sell_fee_amount), 2),
+                'fee_amount': round(float(buy_fee_amount + sell_fee_amount), 2),
+                'previous_quantity': None,
+                'delta_quantity': None,
+                'delta_amount': round(float(delta_amount), 2),
+                'change_direction': direction,
+                'pending_exit': False,
+                'source_names': [],
+            })
+        row_meta[row_key] = display
+        summary_keys.append(row_key)
+        summary_cells.append(amount_cells)
+
+    _append_amount_row(
+        '__total_equity__',
+        {'name': '总资产'},
+        total_equity_np,
+        pre_rebalance_matrix=pre_rebalance_total_equity_np,
+        post_rebalance_matrix=post_rebalance_total_equity_np,
+        buy_fee_matrix=buy_fee_amount_np,
+        sell_fee_matrix=sell_fee_amount_np,
+    )
+    _append_amount_row(
+        '__cash__',
+        {'name': '现金'},
+        cash_np,
+        pre_rebalance_matrix=pre_rebalance_cash_np,
+        post_rebalance_matrix=post_rebalance_cash_np,
+        buy_fee_matrix=buy_fee_amount_np,
+        sell_fee_matrix=sell_fee_amount_np,
+    )
+
+    for row_key in row_order:
+        row_cells = []
+        row_display = row_meta.get(row_key) or _snapshot_product_display(row_key)
+        for g_idx in range(len(per_group)):
+            row = per_group[g_idx].get(row_key)
+            if not row:
+                row_cells.append({
+                    'status': 'absent',
+                    'product': None,
+                    'quantity': 0.0,
+                    'amount': 0.0,
+                    'pending_exit': False,
+                    'selected': False,
+                    'open_reason': None,
+                })
+                continue
+            cur_active = abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12
+            prev_active = abs(row['prev_qty']) > 1e-12 or abs(row['prev_amount']) > 1e-12
+            desired_now = bool(row['current_membership'])
+            desired_prev = bool(row['prev_membership'])
+            delta_qty = row['current_qty'] - row['prev_qty']
+            delta_amount = row['current_amount'] - row['prev_amount']
+            diag = diagnostics_by_group.get(g_idx)
+            open_reason = None
+            planned_qty = row.get('planned_qty') or 0.0
+            planned_amount = row.get('planned_amount') or 0.0
+            target_budget_amount = row.get('target_budget_amount') or 0.0
+            one_lot_margin = row.get('one_lot_margin') or 0.0
+            one_lot_fee = row.get('one_lot_fee') or 0.0
+            one_lot_required_cash = one_lot_margin + one_lot_fee
+            remaining_cash = None
+            if post_rebalance_cash_np is not None and t_idx is not None:
+                try:
+                    if 0 <= t_idx < post_rebalance_cash_np.shape[0] and 0 <= g_idx < post_rebalance_cash_np.shape[1]:
+                        remaining_cash = _money_minor_units_to_major_value(post_rebalance_cash_np[t_idx, g_idx])
+                except Exception:
+                    remaining_cash = None
+            if desired_now and not cur_active:
+                # selected but not opened — diagnose with per-lot budget + simulate data
+                reasons = []
+                if remaining_cash is not None:
+                    reasons.append(f"剩余现金 {_format_money_with_currency(remaining_cash, base_currency)}")
+                if one_lot_required_cash > 0:
+                    reasons.append(
+                        f"一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}"
+                        f"（保证金 {_format_money_with_currency(one_lot_margin, base_currency)}"
+                        f" + 手续费 {_format_money_with_currency(one_lot_fee, base_currency)}）"
+                    )
+                if target_budget_amount > 0:
+                    reasons.append(f"目标预算 {_format_money_with_currency(target_budget_amount, base_currency)}")
+                if planned_qty < 1e-12 and target_budget_amount > 0 and remaining_cash is not None:
+                    if remaining_cash >= target_budget_amount and one_lot_required_cash > target_budget_amount:
+                        reasons.append(
+                            f"目标预算 {_format_money_with_currency(target_budget_amount, base_currency)}"
+                            f" < 一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}，不足以开1手"
+                        )
+                    elif remaining_cash >= one_lot_required_cash:
+                        reasons.append(f"流动性限额限制：目标预算 {_format_money_with_currency(target_budget_amount, base_currency)} → floor后0手")
+                    else:
+                        reasons.append(
+                            f"剩余现金 {_format_money_with_currency(remaining_cash, base_currency)}"
+                            f" < 一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}，资金不足"
+                        )
+                open_reason = '；'.join(reasons) if reasons else '资金不足以开仓'
+
+            if desired_now and not cur_active:
+                status = 'selected'
+            elif cur_active and not prev_active:
+                status = 'entering'
+            elif prev_active and not cur_active:
+                status = 'exiting'
+            elif cur_active and not desired_now and (desired_prev or prev_active):
+                status = 'pending_exit'
+            elif cur_active and prev_active and delta_qty > 1e-12:
+                status = 'increasing'
+            elif cur_active and prev_active and delta_qty < -1e-12:
+                status = 'decreasing'
+            elif cur_active:
+                status = 'holding'
+            else:
+                status = 'absent'
+            if delta_qty > 1e-12 or delta_amount > 1e-12:
+                change_direction = 'increase'
+            elif delta_qty < -1e-12 or delta_amount < -1e-12:
+                change_direction = 'decrease'
+            else:
+                change_direction = 'flat'
+            # Compute per-product liquidity cap amount for this time step
+            liquidity_cap_amount = None
+            if liquidity_capacity_np is not None and liquidity_modes and liquidity_percents:
+                try:
+                    # Use the first source product's p_idx to look up liquidity cap
+                    source_names = row.get('source_names', [])
+                    first_name = source_names[0] if source_names else row_key
+                    first_p_idx = raw_name_to_p_idx.get(first_name)
+                    if (first_p_idx is not None
+                        and 0 <= g_idx < len(liquidity_modes)
+                        and liquidity_modes[g_idx] == 'percent'
+                        and t_idx is not None
+                        and 0 <= t_idx < liquidity_capacity_np.shape[0]
+                        and 0 <= g_idx < liquidity_capacity_np.shape[1]
+                        and 0 <= first_p_idx < liquidity_capacity_np.shape[2]):
+                        raw_cap = _safe_float(liquidity_capacity_np[t_idx, g_idx, first_p_idx])
+                        if raw_cap is not None and np.isfinite(raw_cap) and raw_cap > 0:
+                            liquidity_cap_amount = round(float(raw_cap), 2)
+                except Exception:
+                    pass
+
+            row_cells.append({
+                'status': status,
+                'product': row_display,
+                'currency': row['currency'],
+                'quantity': round(float(row['current_qty']), 6),
+                'amount': round(float(row['current_amount']), 2),
+                'previous_quantity': round(float(row['prev_qty']), 6),
+                'previous_amount': round(float(row['prev_amount']), 2),
+                'delta_quantity': round(float(delta_qty), 6),
+                'delta_amount': round(float(delta_amount), 2),
+                'change_direction': change_direction,
+                'pending_exit': status == 'pending_exit',
+                'selected': bool(desired_now and not cur_active),
+                'open_reason': open_reason,
+                'planned_qty': round(float(planned_qty), 6),
+                'planned_amount': round(float(planned_amount), 2),
+                'target_budget_amount': round(float(target_budget_amount), 2),
+                'one_lot_margin': round(float(one_lot_margin), 2),
+                'one_lot_fee': round(float(one_lot_fee), 2),
+                'one_lot_required_cash': round(float(one_lot_required_cash), 2),
+                'liquidity_cap_amount': liquidity_cap_amount,
+                'source_names': row.get('source_names', []),
+            })
+        cells.append(row_cells)
+
+    return {
+        'key': matrix_key,
+        'label': matrix_label,
+        'columns': columns,
+        'rows': [row_meta[k] for k in summary_keys] + [row_meta[k] for k in row_order],
+        'cells': summary_cells + cells,
+    }
+
+
+def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates_by_name: dict[str, dict[str, float]], t_idx: int | None, prev_t_idx: int | None, capital_diagnostics: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    group_names = getattr(group_result, 'group_names', None) or {}
+    return [
+        _build_snapshot_matrix(
+            matrix_key='raw',
+            matrix_label='全产品',
+            group_result=group_result,
+            valid_cols=valid_cols,
+            fee_rates_by_name=fee_rates_by_name,
+            t_idx=t_idx,
+            prev_t_idx=prev_t_idx,
+            capital_diagnostics=capital_diagnostics,
+            group_names=group_names,
+            collapse_term_structure=False,
+        ),
+        _build_snapshot_matrix(
+            matrix_key='collapsed',
+            matrix_label='期限折叠',
+            group_result=group_result,
+            valid_cols=valid_cols,
+            fee_rates_by_name=fee_rates_by_name,
+            t_idx=t_idx,
+            prev_t_idx=prev_t_idx,
+            capital_diagnostics=capital_diagnostics,
+            group_names=group_names,
+            collapse_term_structure=True,
+        ),
+    ]
+
+
+def _snapshot_change_indices(group_result: Any) -> list[int]:
+    positions = getattr(group_result, 'position_quantities_np', None)
+    memberships = getattr(group_result, 'membership_np', None)
+    source = positions if positions is not None else memberships
+    if source is None:
+        return []
+    try:
+        arr = np.asarray(source)
+        if arr.ndim != 3 or arr.shape[0] < 2:
+            return []
+        if arr.dtype == np.bool_:
+            changed = np.any(arr[1:] != arr[:-1], axis=(1, 2))
+        else:
+            arr = np.nan_to_num(np.asarray(arr, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+            changed = np.any(np.abs(arr[1:] - arr[:-1]) > 1e-12, axis=(1, 2))
+        return [idx + 1 for idx, value in enumerate(changed) if bool(value)]
+    except Exception:
+        return []
+
+
+def _latest_group_result(tester: Any):
+    """Return the latest available GroupRunResult from a tester."""
+    if tester is None:
+        return None
+
+    results = getattr(tester, 'results', None)
+    if not isinstance(results, dict) or not results:
+        return None
+
+    last_factor = getattr(tester, 'last_group_factor', None)
+    if last_factor is not None:
+        last_result = results.get(last_factor)
+        if last_result is not None and getattr(last_result, 'group_result', None) is not None:
+            return last_result.group_result
+
+    for _factor, result in reversed(list(results.items())):
+        group_result = getattr(result, 'group_result', None)
+        if group_result is not None:
+            return group_result
+
+    return None
+
+
 def _build_zero_position_warning(group_result: Any) -> str | None:
     """Explain when the first rebalance cannot open any position."""
+    diagnostics = _build_zero_position_diagnostics(group_result)
+    return diagnostics['warning'] if diagnostics else None
+
+
+def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None:
+    """Return a compact explanation when the first rebalance opens no positions."""
     if group_result is None:
         return None
     quantities = getattr(group_result, 'position_quantities_np', None)
     membership = getattr(group_result, 'membership_np', None)
+    prices = getattr(group_result, 'price_np', None)
+    point_values = getattr(group_result, 'point_value_vec', None)
+    lot_sizes = getattr(group_result, 'min_trade_quantity_vec', None)
+    open_ratios = getattr(group_result, 'open_ratio_vec', None)
+    open_fixed = getattr(group_result, 'open_fixed_vec', None)
+    margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
+    margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
     initial_capital = getattr(group_result, 'initial_capital', None)
-    if quantities is None or membership is None:
+    base_currency = normalize_currency(getattr(group_result, 'base_currency', None), 'CNY')
+    if quantities is None or membership is None or prices is None:
         return None
-    if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0:
+    if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0 or getattr(prices, 'size', 0) == 0:
         return None
+    initial_capital_value = _safe_float(initial_capital)
+    if initial_capital_value is None:
+        return None
+
+    def _coerce_1d(values: Any, length: int, default: float = 0.0, *, dtype=float) -> np.ndarray:
+        arr = np.asarray(values if values is not None else [], dtype=dtype).reshape(-1)
+        if arr.size == length:
+            return arr
+        out = np.full(length, default, dtype=dtype)
+        if arr.size > 0:
+            limit = min(arr.size, length)
+            out[:limit] = arr[:limit]
+        return out
+
     first_membership = np.asarray(membership[0], dtype=bool)
     first_quantities = np.asarray(quantities[0], dtype=float)
-    wants_position = first_membership.any(axis=1)
-    has_position = np.any(np.abs(first_quantities) > 1e-12, axis=1)
-    blocked = np.where(wants_position & (~has_position))[0]
-    if blocked.size == 0:
+    if first_membership.ndim != 2 or first_quantities.ndim != 2:
         return None
-    capital_text = f"{float(initial_capital):,.0f}" if isinstance(initial_capital, (int, float)) else "当前值"
-    return (
-        f"首期有 {int(blocked.size)} 个组未能开出任何仓位。"
-        f"这通常是初始金额 {capital_text} 仍不足以覆盖合约乘数、最小交易手数、手续费或保证金造成的。"
-    )
+
+    group_count, product_count = first_membership.shape
+    price_row = np.asarray(prices[0], dtype=float).reshape(-1)
+    if price_row.size != product_count:
+        price_row = _coerce_1d(price_row, product_count, default=np.nan)
+
+    point_values_row = _coerce_1d(point_values, product_count, default=1.0)
+    lot_sizes_row = _coerce_1d(lot_sizes, product_count, default=1.0)
+    open_ratio_row = _coerce_1d(open_ratios, product_count, default=0.0)
+    open_fixed_row = _coerce_1d(open_fixed, product_count, default=0.0)
+    margin_ratio_row = _coerce_1d(margin_ratios, product_count, default=1.0)
+    margin_flag_row = _coerce_1d(margin_flags, product_count, default=False, dtype=bool)
+    valid_cols = list(getattr(group_result, 'valid_cols', None) or [])
+    group_names = getattr(group_result, 'group_names', None) or {}
+
+    def _group_name(group_index: int) -> str:
+        raw = group_names.get(group_index, group_index)
+        try:
+            return str(raw)
+        except Exception:
+            return f'第{group_index + 1}组'
+
+    blocked_groups: list[dict[str, Any]] = []
+    for g_idx in range(group_count):
+        wants_position = first_membership[g_idx]
+        if not wants_position.any():
+            continue
+        has_position = np.any(np.abs(first_quantities[g_idx]) > 1e-12)
+        if has_position:
+            continue
+
+        active_products = np.where(wants_position)[0]
+        if active_products.size == 0:
+            continue
+        budget_per_product = initial_capital_value / float(active_products.size)
+        candidates: list[dict[str, Any]] = []
+        for p_idx in active_products:
+            price_value = _safe_float(price_row[p_idx]) if p_idx < price_row.size else None
+            point_value = _safe_float(point_values_row[p_idx]) if p_idx < point_values_row.size else None
+            lot_size = _safe_float(lot_sizes_row[p_idx]) if p_idx < lot_sizes_row.size else None
+            open_ratio = _safe_float(open_ratio_row[p_idx]) if p_idx < open_ratio_row.size else 0.0
+            open_fee_fixed = _safe_float(open_fixed_row[p_idx]) if p_idx < open_fixed_row.size else 0.0
+            margin_ratio = _safe_float(margin_ratio_row[p_idx]) if p_idx < margin_ratio_row.size else None
+            if price_value is None or point_value is None or lot_size is None:
+                continue
+            contract_value = price_value * point_value * lot_size
+            if not math.isfinite(contract_value) or contract_value <= 0:
+                continue
+            occupied = contract_value * (margin_ratio if bool(margin_flag_row[p_idx]) and margin_ratio is not None else 1.0)
+            fee = contract_value * float(open_ratio or 0.0) + lot_size * float(open_fee_fixed or 0.0)
+            required = occupied + fee
+            candidates.append({
+                'product_index': int(p_idx),
+                'product_name': valid_cols[p_idx] if p_idx < len(valid_cols) else f'#{p_idx}',
+                'required_capital': float(required),
+                'contract_value': float(contract_value),
+                'occupied_capital': float(occupied),
+                'fee_capital': float(fee),
+                'diagnostic_type': 'estimated',
+            })
+
+        if not candidates:
+            blocked_groups.append({
+                'group_index': int(g_idx),
+                'group_name': _group_name(g_idx),
+                'active_count': int(active_products.size),
+                'budget_per_product': float(budget_per_product),
+                'cheapest_product_name': None,
+                'cheapest_required_capital': None,
+                'cheapest_occupied_capital': None,
+                'cheapest_fee_capital': None,
+                'diagnostic_type': 'missing_trade_spec',
+            })
+            continue
+
+        cheapest = min(candidates, key=lambda item: item['required_capital'])
+        if budget_per_product + 1e-12 < cheapest['required_capital']:
+            blocked_groups.append({
+                'group_index': int(g_idx),
+                'group_name': _group_name(g_idx),
+                'active_count': int(active_products.size),
+                'budget_per_product': float(budget_per_product),
+                'cheapest_product_name': cheapest['product_name'],
+                'cheapest_required_capital': float(cheapest['required_capital']),
+                'cheapest_occupied_capital': float(cheapest['occupied_capital']),
+                'cheapest_fee_capital': float(cheapest['fee_capital']),
+                'diagnostic_type': 'capital_shortage',
+            })
+
+    if not blocked_groups:
+        return None
+
+    first = blocked_groups[0]
+    capital_text = _format_money_with_currency(initial_capital_value, base_currency)
+    budget_text = _format_money_with_currency(first['budget_per_product'], base_currency)
+    if first.get('diagnostic_type') == 'missing_trade_spec' or first.get('cheapest_required_capital') is None:
+        warning = (
+            f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text}，"
+            f"但当前结果里缺少完整的合约价值或费率字段，无法精确反推首手需求；"
+            f"从实际持仓看，目标仓位已经被压成 0。"
+            f"当前初始金额为 {capital_text}。"
+        )
+    else:
+        required_text = _format_money_with_currency(first['cheapest_required_capital'], base_currency)
+        warning = (
+            f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text}，"
+            f"但 {first['group_name']} 里最便宜的品种 {first['cheapest_product_name']} 的一手资金需求约 {required_text}，"
+            f"因此目标仓位在最小手数上被压成 0。"
+            f"当前初始金额为 {capital_text}。"
+        )
+    return {
+        'warning': warning,
+        'initial_capital': float(initial_capital_value),
+        'blocked_group_count': int(len(blocked_groups)),
+        'blocked_groups': blocked_groups,
+    }
 
 
 def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
@@ -125,51 +978,6 @@ def _returns_to_cumulative(returns: np.ndarray) -> np.ndarray:
     return np.cumprod(1.0 + safe)
 
 
-def _normalize_weighted_legs(raw_legs, default_group: int) -> list[dict]:
-    if not isinstance(raw_legs, list) or not raw_legs:
-        raw_legs = [{'group': default_group, 'weight': 0.5}]
-    legs = []
-    for item in raw_legs:
-        try:
-            group = int(item.get('group') or 0)
-            weight = float(item.get('weight') or 0)
-        except (AttributeError, TypeError, ValueError):
-            continue
-        if weight > 0:
-            legs.append({'group': group, 'weight': weight})
-    total = sum(x['weight'] for x in legs)
-    if total > 0:
-        for leg in legs:
-            leg['weight'] = leg['weight'] / total * 0.5
-    return legs
-
-
-def _parse_ls_config(data: dict, n_groups: int) -> dict:
-    raw = data.get('ls_config') or {}
-    if not isinstance(raw, dict):
-        raw = {}
-    return {
-        'name': str(raw.get('name') or 'Long-Short').strip() or 'Long-Short',
-        'long': _normalize_weighted_legs(raw.get('long'), 0),
-        'short': _normalize_weighted_legs(raw.get('short'), n_groups - 1),
-    }
-
-
-def _parse_ls_configs(data: dict, n_groups: int) -> list[dict]:
-    """解析 LS configs 数组。只解析前端明确传入的 ls_configs，不传则返回空列表。"""
-    raw_configs = data.get('ls_configs')
-    if isinstance(raw_configs, list) and raw_configs:
-        configs = []
-        for raw in raw_configs:
-            if not isinstance(raw, dict):
-                continue
-            parsed = _parse_ls_config({'ls_config': raw}, n_groups)
-            if parsed['long'] and parsed['short']:
-                configs.append(parsed)
-        return configs
-    return []
-
-
 def _unique_group_key(name: str, used: set[str]) -> str:
     """去重：如果 name 已存在，追加 #2, #3..."""
     key = name or 'LS'
@@ -191,180 +999,6 @@ def _normalize_group_names(group_names) -> dict[int, str]:
         except (TypeError, ValueError):
             continue
     return normalized
-
-
-def _parse_group_names_payload(group_names) -> dict[int, str]:
-    """Parse frontend group names into a plain group-index -> display-name mapping."""
-    if not isinstance(group_names, dict):
-        return {}
-    n_groups_name: dict[int, str] = {}
-    for key, value in group_names.items():
-        try:
-            g = int(key)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(value, list) and value:
-            first = value[0]
-            if isinstance(first, dict):
-                display_name = first.get('key') or first.get('shortAlias') or first.get('name') or f'group_{g}'
-                n_groups_name[g] = str(display_name)
-            else:
-                n_groups_name[g] = str(first)
-        else:
-            n_groups_name[g] = str(value)
-    return n_groups_name
-
-
-def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
-    """Parse flat frontend group payloads into group-name and config mappings."""
-    if not isinstance(groups_payload, list):
-        return {}, None
-    grouped: dict[int, list[dict]] = {}
-    names: dict[int, str] = {}
-    for item in groups_payload:
-        if not isinstance(item, dict):
-            continue
-        # 跳过有 parentId/parent_id 的条目（不在扁平化组中）
-        if item.get('parentId') or item.get('parent_id'):
-            continue
-        try:
-            g = int(item.get('group_index', item.get('groupIndex', 0)))
-        except (TypeError, ValueError):
-            continue
-        display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}'
-        config = {
-            'name': str(display_name),
-            'key': str(display_name),
-            'fee_modifications': item.get('fee_modifications') or item.get('feeModifications') or None,
-            'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
-            'fee_rate': item.get('fee_rate', item.get('feeRate')),
-            'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
-            'rebalance_mode': item.get('rebalance_mode') or item.get('rebalanceMode') or None,
-            'liquidity_mode': item.get('liquidity_mode') or item.get('liquidityMode') or None,
-            'liquidity_percent': item.get('liquidity_percent', item.get('liquidityPercent')),
-            'margin_mode': item.get('margin_mode') or item.get('marginMode') or None,
-        }
-        grouped.setdefault(g, []).append(config)
-        names.setdefault(g, str(display_name))
-    return names, grouped or None
-
-
-def _map_group_item(item: dict) -> dict:
-    """将前端 group payload item 映射为 _FactorGroupTestGroup 的可选字段。
-
-    前端字段名同时支持 camelCase 和 snake_case。
-    """
-    def _get(*keys):
-        for k in keys:
-            v = item.get(k)
-            if v is not None:
-                return v
-        return None
-
-    return {
-        'fee_modifications': _get('fee_modifications', 'feeModifications'),
-        'fee_mode': _get('fee_mode', 'feeMode'),
-        'fee_rate': _get('fee_rate', 'feeRate'),
-        'use_close_today': _get('use_close_today', 'useCloseToday'),
-        'rebalance_mode': _get('rebalance_mode', 'rebalanceMode'),
-        'liquidity_mode': _get('liquidity_mode', 'liquidityMode'),
-        'liquidity_percent': _get('liquidity_percent', 'liquidityPercent'),
-        'margin_mode': _get('margin_mode', 'marginMode'),
-    }
-
-
-def _product_list_from_group(item: dict) -> list[str] | None:
-    """从 group item 提取 product_list；None 表示不筛选（全量）。"""
-    pn = item.get('productNames')
-    if isinstance(pn, list) and pn:
-        return [str(n) for n in pn]
-    mask = item.get('productMask')
-    if isinstance(mask, dict):
-        return sorted([str(k) for k, v in mask.items() if v])
-    return None
-
-
-def _build_flat_groups_from_payload(
-    payload_entry: dict,
-    *,
-    entry_index: int = 0,
-) -> tuple[list, list[dict] | None]:
-    """将单个前端 submit entry 构建为 _FactorGroupTestGroup 列表。"""
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-
-    factor_alias = str(payload_entry.get('factor_alias') or '')
-    n_groups = int(payload_entry.get('n_groups', 5))
-    submission_id = str(payload_entry.get('submission_id') or '')
-    groups = payload_entry.get('groups')
-    group_names = payload_entry.get('group_names')
-
-    # 解析 group name map（用于 group 没有自己的 key/name 时 fallback）
-    if isinstance(groups, list) and groups:
-        n_groups_name, _ = _parse_groups_payload(groups)
-    else:
-        n_groups_name = _parse_group_names_payload(group_names)
-    if not n_groups_name:
-        n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
-
-    flat_groups: list = []
-
-    if isinstance(groups, list) and groups:
-        # 收集所有 valid group_index，用于校准 n_groups
-        group_indices: list[int] = []
-        pending: list[tuple] = []
-        for item in groups:
-            if not isinstance(item, dict):
-                continue
-            try:
-                gi = int(item.get('group_index', item.get('groupIndex', 0)))
-            except (TypeError, ValueError):
-                continue
-            group_indices.append(gi)
-            display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
-            extra = _map_group_item(item)
-            product_list = _product_list_from_group(item)  # None=全量, list=筛选
-            pending.append((gi, display_name, extra, product_list))
-
-        # 校准 n_groups：确保 membership 数组能容纳所有 group_index
-        if group_indices:
-            max_gi = max(group_indices)
-            n_groups = max(n_groups, max_gi + 1)
-
-        for gi, display_name, extra, product_list in pending:
-            flat_groups.append(_FactorGroupTestGroup(
-                tester_id=submission_id,
-                factor_alias=factor_alias,
-                n_groups=n_groups,
-                group_index=gi,
-                key=str(display_name),
-                name=str(display_name),
-                product_list=product_list,
-                **extra,
-            ))
-    else:
-        for gi in range(n_groups):
-            display_name = n_groups_name.get(gi, f'Group {gi + 1}')
-            flat_groups.append(_FactorGroupTestGroup(
-                tester_id=submission_id,
-                factor_alias=factor_alias,
-                n_groups=n_groups,
-                group_index=gi,
-                key=str(display_name),
-                name=str(display_name),
-            ))
-
-    # Parse LS configs
-    raw_ls = payload_entry.get('ls_configs')
-    ls_configs = None
-    if isinstance(raw_ls, list) and raw_ls:
-        ls_configs = []
-        for raw in raw_ls:
-            if isinstance(raw, dict):
-                parsed = _parse_ls_config({'ls_config': raw}, n_groups)
-                if parsed['long'] and parsed['short']:
-                    ls_configs.append(parsed)
-
-    return flat_groups, ls_configs
 
 
 def _group_display_key(group_idx: int, group_names=None) -> str:
@@ -446,11 +1080,12 @@ def _serialize_group_simulation_result(
 
     # 用模拟中实盘总权益（市值+现金），而非 cumsum(returns)
     _equity = group_result.total_equity_np if group_result is not None else None
-    equity_np = _equity if _equity is not None else np.zeros((len(timestamps), n_total))
+    equity_np = minor_units_to_major(_equity) if _equity is not None else np.zeros((len(timestamps), n_total))
     # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
     cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
     equity_np = np.where(equity_np <= 0, cap, equity_np)
-    capital_warning = _build_zero_position_warning(group_result)
+    capital_diagnostics = _build_zero_position_diagnostics(group_result)
+    capital_warning = capital_diagnostics['warning'] if capital_diagnostics else None
 
     # Build flat_group_info lookup: {group_index: info_dict}
     flat_info_by_idx: dict[int, dict] = {}
@@ -465,11 +1100,15 @@ def _serialize_group_simulation_result(
         f"simulation serialize groups start submission={submission_id} "
         f"factor={factor_alias} total_groups={n_total}"
     )
+    _core_emit_progress("serialize", f"开始序列化分组结果，共 {n_total} 组",
+                        completed=0, total=n_total)
     for g in range(n_total):
         _progress(
             f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
+        _core_emit_progress("serialize", f"序列化分组 {g+1}/{n_total}",
+                            completed=g + 1, total=n_total)
         vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
         fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
@@ -497,6 +1136,8 @@ def _serialize_group_simulation_result(
                 entry['_id'] = fi['id']
         groups_data.append(entry)
     _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
+    _core_emit_progress("serialize", f"分组结果序列化完成，共 {n_total} 组",
+                        completed=n_total, total=n_total)
 
     metrics: dict = {}
     if not report_df.empty:
@@ -540,14 +1181,52 @@ def _serialize_group_simulation_result(
                 f"submission={submission_id} factor={factor_alias} key={ls_key}"
             )
 
+    # DEBUG #110: validate groups key vs metrics key alignment
+    _debug_groups_keys = [g['key'] for g in groups_data]
+    _debug_metrics_keys = list(metrics.keys())
+    _debug_report_keys = []
+    if not report_df.empty:
+        for k in report_df.index:
+            _debug_report_keys.append(_metric_display_key(k, result_group_names))
+    # Detect mismatches: non-LS groups missing from metrics
+    _missing_from_metrics = []
+    for g_idx, gd in enumerate(groups_data):
+        gk = gd['key']
+        if not gd.get('is_ls') and gk not in metrics:
+            _missing_from_metrics.append(f"[{g_idx}] key='{gk}'")
+    if _missing_from_metrics:
+        print(f"[DEBUG #110] *** MISMATCH *** submission={submission_id} factor={factor_alias}")
+        print(f"[DEBUG #110]   groups keys: {_debug_groups_keys}")
+        print(f"[DEBUG #110]   metrics keys: {_debug_metrics_keys}")
+        print(f"[DEBUG #110]   report_df keys: {_debug_report_keys}")
+        print(f"[DEBUG #110]   result_group_names: {result_group_names}")
+        print(f"[DEBUG #110]   missing from metrics: {_missing_from_metrics}")
+    # Also check report_df key alignment with groups_data keys
+    _report_mismatches = []
+    for g_idx in range(min(len(groups_data), len(_debug_report_keys))):
+        gk = groups_data[g_idx]['key']
+        rk = _debug_report_keys[g_idx]
+        if gk != rk:
+            _report_mismatches.append(f"[{g_idx}] groups.key='{gk}' vs report_df.key='{rk}'")
+    if _report_mismatches:
+        print(f"[DEBUG #110] *** REPORT_DF MISMATCH *** {_report_mismatches}")
+    # Print summary even if no mismatches (for diagnosis)
+    print(f"[DEBUG #110] OK submission={submission_id} factor={factor_alias} n_total={n_total}")
+    print(f"[DEBUG #110]   groups_data keys: {_debug_groups_keys}")
+    print(f"[DEBUG #110]   report_df keys:  {_debug_report_keys}")
+    print(f"[DEBUG #110]   metrics keys:    {_debug_metrics_keys}")
+
     return {
         'success': True,
         'groups': groups_data,
         'metrics': metrics,
+        'metrics_meta': _get_metrics_meta(),
         'n_groups': n_total,
         'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
+        'base_currency': str(getattr(group_result, 'base_currency', None) or 'CNY').upper() if group_result is not None else 'CNY',
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
         'capital_warning': capital_warning,
+        'capital_diagnostics': capital_diagnostics,
         'rebalance_mode': rebalance_mode,
         'submission_id': submission_id,
         'factor_alias': factor_alias,
@@ -563,55 +1242,23 @@ def _serialize_group_simulation_result(
     }
 
 
-def _parse_group_fee_config(data, products: set | None = None):
-    """解析前端费率配置。
-
-    前端三种模式：
-    1. 不扣除费用 → fee=0
-    2. 统一费率   → fee>0
-    3. 按品种费率 → fee=0，fee_modifications 非空
-
-    返回 (fee_uniform, fee_modifications, use_closetoday)，
-    fee_modifications 为 list[FeeModification] 或空列表。
-    费率/费用覆盖在 _resolve_group_trade_specs 中由 fee_modifications 驱动。
-    """
-    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
-    use_closetoday = bool(data.get('use_closetoday', False))
-
-    # ── Read fee_modifications (per-group, from frontend) ──
-    fee_modifications_raw = data.get('fee_modifications')
-    if not isinstance(fee_modifications_raw, list) or not fee_modifications_raw:
-        return fee_uniform, [], use_closetoday
-
-    from tools.products.transactions.fees import (
-        clean_modifications, sort_modifications,
-    )
-    fee_modifications = sort_modifications(clean_modifications(fee_modifications_raw))
-    return fee_uniform, fee_modifications, use_closetoday
-
-
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
-    """批量并行运行多个分组测试提交条目，支持跨提交条目的 Long-Short。
+    """运行分组测试，接收扁平 groups + ls_configs + page_uuid。
     
     Request JSON:
     {
-        "batches": [
-            {"submission_id": "...", "factor_alias": "...", "n_groups": 5, "ls_configs": [...]},
-            ...
-        ],
-        "cross_batch_ls": [
-            {"name": "LS-A", "long": {"submission_id": "...", "factor_alias": "...", "group": 0},
-                          "short": {"submission_id": "...", "factor_alias": "...", "group": 4}},
-            ...
-        ],
-        "fee": 0.0001, "fee_modifications": [...], "use_closetoday": false,
+        "groups": [ {... group fields (name, groupIndex, factorAlias, testerId, feeMode, ...} ],
+        "ls_configs": [ {"name": "LS-1", "long": [...], "short": [...]}, ... ],
+        "page_uuid": "...",
         "start_date": "2024-01-01", "end_date": "2024-12-31",
-        "rebalance_mode": "buy_and_hold"
+        "initial_capital": 1000000,
     }
     
-    请求里的 `batches` / `cross_batch_ls` 仍保留原字段名；
-    后端内部按 submission entry / cross-entry LS 处理。
+    前端只传 groups + ls_configs + page_uuid。
+    factor_family_alias 从 page_uuid 对应的 page state 解析。
+    fee / rebalance / close-today 从 group 自身字段读取。
+    跨 tester LS 自动由 ls_configs legs 中不同 tester_id 的合并（build_overlap_batches）处理。
     """
     data = request.get_json(silent=True) or {}
     success, result = _run_group_test_core(data)
@@ -620,6 +1267,19 @@ def run_group_test():
     else:
         status = result.get('status', 500)
         return jsonify(result), status
+
+
+def _product_list_from_group_payload(group: dict) -> list[str] | None:
+    raw = group.get('productMask')
+    if raw is None:
+        raw = group.get('productList')
+    if isinstance(raw, dict):
+        selected = [str(name) for name, enabled in raw.items() if enabled]
+        return selected or None
+    if isinstance(raw, list):
+        selected = [str(name) for name in raw if name]
+        return selected or None
+    return None
 
 
 def _run_group_test_core(data: dict) -> tuple[bool, dict]:
@@ -631,83 +1291,188 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     - success=False：dict 包含 error 和 status 字段
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
+    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
 
-    submitted_entries = data.get('batches')
-    if not isinstance(submitted_entries, list) or not submitted_entries:
-        return False, {'success': False, 'error': 'batches 必须是非空数组', 'status': 400}
+    flat_groups_raw = data.get('groups')
+    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
+        return False, {'success': False, 'error': 'groups 必须是非空数组', 'status': 400}
+    flat_ls_configs = data.get('ls_configs') or []
+    if not isinstance(flat_ls_configs, list):
+        flat_ls_configs = []
 
     request_started = time.perf_counter()
-    cross_entry_ls_requests = data.get('cross_batch_ls') or []
     _progress(
-        f"group simulations request start entries={len(submitted_entries)} "
-        f"cross_entry_ls={len(cross_entry_ls_requests) if isinstance(cross_entry_ls_requests, list) else 0}"
+        f"group simulations request start groups={len(flat_groups_raw)} "
+        f"ls_configs={len(flat_ls_configs)}"
     )
 
-    rebalance_mode = 'buy_and_hold'  # per-group override resolved in _simulate_group_from_preloaded
+    rebalance_mode = 'buy_and_hold'
 
-    from tools.data.DataTime import DataTime
+    from tools.data.types import DataTime
 
-    # 精度统一：start/end 同精度
     precision = data.get("precision") or data.get("time_precision") or "exact"
     start_dt = DataTime.from_dict(data, precision=precision)
     end_data = dict(data)
-    # 将 start_xxx 映射为 end_xxx，from_dict 会取第一个有值的
     end_data["date"] = end_data.pop("end_date", end_data.pop("date", None))
     end_data["time"] = end_data.pop("end_time", end_data.pop("time", None))
     end_dt = DataTime.from_dict(end_data, precision=precision)
 
     try:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
+        base_currency = _parse_currency_code(data.get('base_currency'))
+        currency_conversion_fee_rate = _parse_nonnegative_rate(data.get('currency_conversion_fee_rate'), 0.0)
     except ValueError as e:
         return False, {'success': False, 'error': str(e), 'status': 400}
-    # 费率从第一个前端提交条目的 tester 解析
-    first_entry = submitted_entries[0]
-    try:
-        sub_id = first_entry.get('submission_id')
-        tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test')
-        fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
-    except Exception as e:
-        return False, {'success': False, 'error': f'费率解析失败: {e}', 'status': 400}
 
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
+    # ── Build _FactorGroupTestGroup from flat groups array ──
+    # Group by tester_id, then by factor_alias
+    tester_groups: dict[str, dict[str, list[dict]]] = {}  # tester_id → factor_alias → [group_dicts]
+    for g in flat_groups_raw:
+        if not isinstance(g, dict):
+            continue
+        tid = str(g.get('testerId', ''))
+        fa = str(g.get('factorAlias', ''))
+        if not tid or not fa:
+            continue
+        tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
 
-    # ── Build flat groups from all submitted entries ──
+    # Determine split count per (tester_id, factor_alias). Frontend payload
+    # uses camelCase ``splitCount``; backend internals use ``split_count``.
+    # means "the factor was split into N buckets"; it is distinct from the
+    # number of flat groups submitted in this request.
+    split_count_by_triple: dict[tuple, int] = {}
+    for tid, by_fa in tester_groups.items():
+        for fa, gs in by_fa.items():
+            split_count = None
+            missing = []
+            for g in gs:
+                raw_split_count = g.get('splitCount')
+                if raw_split_count is not None:
+                    split_count = max(split_count or 0, int(raw_split_count))
+                else:
+                    missing.append(g.get('name') or g.get('key') or g.get('groupIndex'))
+            if split_count is None:
+                raise ValueError(
+                    f"缺少 splitCount: tester_id={tid} factor_alias={fa} "
+                    f"groups={missing}"
+                )
+            split_count_by_triple[(tid, fa)] = split_count
+
+    # Build flat _FactorGroupTestGroup list
     all_flat_groups: list[_FactorGroupTestGroup] = []
-    sim_index_by_group: dict[int, int] = {}  # flat_group_position → simulation_index
+    sim_index_by_group: dict[int, int] = {}
     all_ls_configs_by_index: dict[int, list[dict] | None] = {}
-    # Also collect factor_aliases per submission for calendar building
     factor_aliases_by_submission: dict[str, list[str]] = {}
 
-    for idx, payload_entry in enumerate(submitted_entries):
-        if not isinstance(payload_entry, dict):
-            continue
-        submission_id = str(payload_entry.get('submission_id') or '')
-        flat_groups, ls_configs = _build_flat_groups_from_payload(
-            payload_entry, entry_index=idx,
-        )
-        offset = len(all_flat_groups)
-        for gi, _ in enumerate(flat_groups):
-            sim_index_by_group[offset + gi] = idx
-        all_flat_groups.extend(flat_groups)
-        all_ls_configs_by_index[idx] = ls_configs
-        factor_alias = str(payload_entry.get('factor_alias') or '')
-        if factor_alias:
-            factor_aliases_by_submission.setdefault(submission_id, [])
-            if factor_alias not in factor_aliases_by_submission[submission_id]:
-                factor_aliases_by_submission[submission_id].append(factor_alias)
+    sim_index = 0
+    for tid, by_fa in tester_groups.items():
+        for fa, gs in by_fa.items():
+            split_count = split_count_by_triple[(tid, fa)]
+            existing = factor_aliases_by_submission.get(tid) or []
+            if fa not in existing:
+                existing.append(fa)
+            factor_aliases_by_submission[tid] = existing
+            for g in gs:
+                # frontend groupIndex is 1-based → convert to 0-based
+                gi = int(g.get('groupIndex', 1)) - 1
+                if gi < 0 or gi >= split_count:
+                    raise ValueError(
+                        f"groupIndex out of range: {gi + 1} (1-based) not in [1, {split_count}], "
+                        f"tester_id={tid} factor_alias={fa}"
+                    )
+                name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
+                fg = _FactorGroupTestGroup(
+                    tester_id=tid,
+                    factor_alias=fa,
+                    n_groups=split_count,
+                    group_index=gi,
+                    key=name,
+                    name=name,
+                    product_list=_product_list_from_group_payload(g),
+                    fee_mode=g.get('feeMode'),
+                    fee_rate=g.get('feeRate'),
+                    fee_modifications=g.get('feeModifications'),
+                    use_close_today=bool(g.get('useCloseToday')),
+                    rebalance_mode=g.get('rebalanceMode'),
+                    liquidity_mode=g.get('liquidityMode'),
+                    liquidity_percent=g.get('liquidityPercent'),
+                    margin_mode=g.get('marginMode'),
+                )
+                offset = len(all_flat_groups)
+                sim_index_by_group[offset] = sim_index
+                all_flat_groups.append(fg)
+            all_ls_configs_by_index[sim_index] = flat_ls_configs if flat_ls_configs else None  # all LS configs visible to this spec
+            sim_index += 1
 
     if not all_flat_groups:
         return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
+    expected_flat_count = data.get('flatCount')
+    try:
+        expected_flat_count = int(expected_flat_count)
+    except (TypeError, ValueError):
+        expected_flat_count = len(flat_groups_raw)
+    if expected_flat_count != len(all_flat_groups):
+        return False, {
+            'success': False,
+            'error': (
+                f'前端传回 {expected_flat_count} 个扁平组，但后端只解析出 '
+                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少测试器/因子/组数继承字段。'
+            ),
+            'status': 400,
+        }
 
+    # ── Resolve factor_family_alias from page_uuid ──
+    page_uuid = str(data.get('page_uuid') or '')
+    factor_family_alias = ''
+    if page_uuid:
+        try:
+            page_state = runtime_state.get_page_state(page_uuid)
+            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
+        except Exception:
+            pass
+    # Allow override from request (same as SSE handler)
+    req_family = data.get('factor_family_alias')
+    if req_family:
+        factor_family_alias = str(req_family)
+
+    # ── Factor inputs & calendar ──
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
     requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
-    _progress(
-        f"calendar resolve start submissions={len(factor_aliases_by_submission)} "
-        f"mode={'auto' if auto_group_calendar_freq else 'manual'} "
-        f"requested={requested_group_calendar_freq if requested_group_calendar_freq is not None else 'auto'}"
-    )
+    group_factor_params_list = data.get('_group_factor_params_list')
+    if not isinstance(group_factor_params_list, list):
+        group_factor_params_list = None
+    group_owner_username = data.get('_group_owner_username')
+    group_owner_username = str(group_owner_username) if group_owner_username else None
 
-    # 构建跨所有 tester 的统一 calendar_index。
+    # Ensure testers and factors
+    tester0 = None
+    for submission_id, factor_aliases in factor_aliases_by_submission.items():
+        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_prepare_factors')
+        if tester0 is None:
+            tester0 = tester
+        _ensure_tester_factors_for_group(
+            tester,
+            factor_aliases,
+            factor_family_alias,
+            params_list=group_factor_params_list,
+            username=group_owner_username,
+            page_uuid=page_uuid,
+        )
+        for factor_alias in factor_aliases:
+            factor = tester.resolve_factor(str(factor_alias))
+            if factor is None:
+                return False, {
+                    'success': False,
+                    'error': f'未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。',
+                    'status': 400,
+                }
+            ensure_group_factor_inputs(
+                tester,
+                factor,
+                returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
+            )
+
     calendar_indices: list[pd.Index] = []
     all_factor_freqs: list[Any] = []
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
@@ -718,70 +1483,48 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             continue
         tester_factor_freqs = tester.collect_group_factor_freqs(factor_aliases)
         all_factor_freqs.extend(tester_factor_freqs)
-        _progress(
-            f"calendar factors submission={submission_id} "
-            f"factors={len(factor_aliases)} factor_freqs={[str(freq) for freq in tester_factor_freqs]}"
-        )
     try:
         effective_group_calendar_freq = FactorTester.resolve_group_calendar_freq_from_factor_freqs(
             all_factor_freqs,
             'auto' if auto_group_calendar_freq else requested_group_calendar_freq,
         )
     except ValueError as exc:
-        return False, {
-            'success': False,
-            'error': str(exc),
-            'status': 400,
-        }
+        return False, {'success': False, 'error': str(exc), 'status': 400}
     _progress(
         f"calendar resolve done effective_freq={effective_group_calendar_freq} "
         f"factor_freq_count={len(all_factor_freqs)}"
     )
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
         tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar_build')
-        _progress(
-            f"calendar build start submission={submission_id} "
-            f"factors={len(factor_aliases)} freq={effective_group_calendar_freq}"
-        )
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
             requested_calendar_freq=effective_group_calendar_freq,
         )
         if len(tester_calendar) > 0:
             calendar_indices.append(tester_calendar)
-            _progress(
-                f"calendar build submission={submission_id} "
-                f"points={len(tester_calendar)} factors={len(factor_aliases)} "
-                f"freq={effective_group_calendar_freq}"
-            )
-        else:
-            _progress(
-                f"calendar build submission={submission_id} empty "
-                f"factors={len(factor_aliases)} freq={effective_group_calendar_freq}"
-            )
-    global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices)
-    if len(global_calendar_index) > 0:
-        _progress(
-            f"calendar build global points={len(global_calendar_index)} "
-            f"submissions={len(calendar_indices)} freq={effective_group_calendar_freq} "
-            f"mode={'auto' if auto_group_calendar_freq else 'manual'}"
-        )
-    else:
-        _progress(
-            f"calendar build global empty submissions={len(calendar_indices)} "
-            f"freq={effective_group_calendar_freq}"
-        )
+    global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices) if tester0 else pd.Index([])
 
-    # 构建前端提交条目→索引映射（供 cross-entry LS 反查）
-    entry_index_by_key: dict[str, int] = {}
-    for i, payload_entry in enumerate(submitted_entries):
-        key = f"{payload_entry.get('submission_id','')}|{payload_entry.get('factor_alias','')}|{int(payload_entry.get('n_groups', 5))}"
-        entry_index_by_key[key] = i
+    # ── Fee: resolve per-spec from group fields ──
+    # Default: uniform fee=0, no closetoday
+    fee_uniform = 0.0
+    fee_modifications = None
+    use_closetoday = False
+    # Scan groups for fee config (first non-none uniform or per_product wins)
+    for g in flat_groups_raw:
+        fm = g.get('feeMode') or g.get('fee_mode')
+        if fm == 'uniform':
+            fee_uniform = float(g.get('feeRate', g.get('fee_rate', 0.0025)) or 0.0025)
+            break
+        elif fm == 'per_product':
+            fee_uniform = 0.0
+            fee_modifications = g.get('feeModifications') or g.get('fee_modifications') or None
+            break
+    for g in flat_groups_raw:
+        if g.get('useCloseToday') or g.get('use_closetoday'):
+            use_closetoday = True
+            break
 
-    submission_results: list[dict | None] = [None] * len(submitted_entries)
-    errors = []
-    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
-
+    # ── Run FactorGroupTester ──
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
     containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
     merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
@@ -803,6 +1546,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
         f"batches={group_tester.build_batch_labels()}"
     )
+    errors = []
     try:
         raw_results = group_tester.run(
             fee=fee_uniform,
@@ -810,6 +1554,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             use_closetoday=use_closetoday,
             initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
+            base_currency=base_currency,
+            currency_conversion_fee_rate=currency_conversion_fee_rate,
             start_dt=start_dt,
             end_dt=end_dt,
             calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
@@ -819,51 +1565,50 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         errors.append({'error': str(e)})
         raw_results = []
 
+    simulated_flat_count = sum(
+        len(item.get('flat_group_info') or [])
+        for item in raw_results
+        if isinstance(item, dict)
+    )
+    if simulated_flat_count != len(all_flat_groups):
+                    # Collect detailed error info to help diagnose the root cause
+                    error_details = []
+                    for err in errors:
+                        if isinstance(err, dict):
+                            error_details.append(err.get('error', str(err)))
+                        else:
+                            error_details.append(str(err))
+                    detail_msg = '; '.join(error_details) if error_details else '无详细错误信息'
+                    return False, {
+                        'success': False,
+                        'error': (
+                            f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
+                            f'进入 simulate 的分组为 {simulated_flat_count} 个。'
+                            f'详细错误：{detail_msg}'
+                        ),
+                    }
+    submission_results: list[dict | None] = [None] * sim_index
     for raw_result in raw_results:
         idx = int(raw_result.get('simulation_index', -1))
-        if idx < 0 or idx >= len(submitted_entries):
+        if idx < 0 or idx >= sim_index:
             continue
-        payload_entry = submitted_entries[idx]
-        # Collect flat_group_info for this simulation_index
-        si_groups = [
-            g for gi, g in enumerate(all_flat_groups)
-            if sim_index_by_group.get(gi) == idx
-        ]
-        # Build flat_group_info list matching the group order in the result
-        flat_info = [
-            {
-                'group_index': g.group_index,
-                'key': g.key,
-                'name': g.name,
-                'id': g._id,
-                'product_names': g.product_list,
-                'fee_mode': g.fee_mode,
-                'fee_rate': g.fee_rate,
-                'fee_modifications': g.fee_modifications,
-                'use_close_today': g.use_close_today,
-                'rebalance_mode': g.rebalance_mode,
-                'liquidity_mode': g.liquidity_mode,
-                'liquidity_percent': g.liquidity_percent,
-                'margin_mode': g.margin_mode,
-            }
-            for g in si_groups
-        ]
+        flat_info = raw_result.get('flat_group_info')
         serialized = _serialize_group_simulation_result(
             tester=raw_result['tester'],
             submission_id=str(raw_result.get('submission_id') or ''),
             factor_alias=str(raw_result.get('factor_alias') or ''),
             n_groups=int(raw_result.get('n_groups', 5)),
             ls_configs=raw_result.get('ls_configs'),
-            rebalance_mode=str(payload_entry.get('rebalance_mode') or rebalance_mode),
+            rebalance_mode=rebalance_mode,
             simulation_result=raw_result,
-            flat_group_info=flat_info if flat_info else None,
+            flat_group_info=flat_info if isinstance(flat_info, list) and flat_info else None,
         )
         serialized['submission_id'] = str(raw_result.get('submission_id') or '')
         serialized['factor_alias'] = str(raw_result.get('factor_alias') or '')
         serialized['n_groups_requested'] = int(raw_result.get('n_groups', 5))
         serialized['simulation_index'] = idx
         submission_results[idx] = serialized
-        _progress(f"group tester accepted index={idx + 1}/{len(submitted_entries)}")
+        _progress(f"group tester accepted index={idx + 1}/{sim_index}")
 
     valid_results = [r for r in submission_results if r is not None]
     _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")
@@ -877,103 +1622,14 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             'status': 500,
         }
 
-    # ── 阶段 2：跨 tester LS 计算 ──
-    def _find_raw(br_dict: dict | None) -> dict | None:
-        return br_dict.get('_raw') if br_dict else None
+    # ── Per-entry LS configs are already computed inside each simulation result. ──
+    # Future: if ls_configs legs span different specs (cross-tester LS),
+    # build_overlap_batches merges those specs into one product_coverage_batch,
+    # so the LS computation happens naturally inside FactorGroupTester.run().
 
+    # ── Merge results ──
     cross_ls_groups: list[dict] = []
     cross_ls_metrics: dict = {}
-
-    if cross_entry_ls_requests:
-        _progress(f"cross-entry LS start count={len(cross_entry_ls_requests)}")
-        for cb_idx, cb in enumerate(cross_entry_ls_requests, start=1):
-            if not isinstance(cb, dict):
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} invalid config")
-                continue
-            long_info: dict = cb.get('long') or {}
-            short_info: dict = cb.get('short') or {}
-            ls_name = str(cb.get('name') or 'Long-Short').strip() or 'Long-Short'
-            _progress(f"cross-entry LS compute {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
-
-            long_n_groups = int(long_info.get('n_groups', long_info.get('group_count', 5)) or 5)
-            short_n_groups = int(short_info.get('n_groups', short_info.get('group_count', 5)) or 5)
-            long_key = f"{long_info.get('submission_id','')}|{long_info.get('factor_alias','')}|{long_n_groups}"
-            short_key = f"{short_info.get('submission_id','')}|{short_info.get('factor_alias','')}|{short_n_groups}"
-            long_entry_idx = entry_index_by_key.get(long_key)
-            short_entry_idx = entry_index_by_key.get(short_key)
-
-            if long_entry_idx is None or short_entry_idx is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing source entry")
-                continue
-
-            long_br = submission_results[long_entry_idx]
-            short_br = submission_results[short_entry_idx]
-            if long_br is None or short_br is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} failed source entry")
-                continue
-            long_raw = _find_raw(long_br)
-            short_raw = _find_raw(short_br)
-            if long_raw is None or short_raw is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing raw arrays")
-                continue
-
-            long_group = int(long_info.get('group', 0))
-            short_group = int(short_info.get('group', 0))
-            long_n = long_br.get('n_groups_requested', 5)
-            short_n = short_br.get('n_groups_requested', 5)
-
-            # 跨提交条目 LS：从不同 simulation entry 的 gross_np / fee_np 拼成 (T, 2) 数组
-            gross_long = long_raw['gross_np'][:, long_group] if long_group < long_raw['gross_np'].shape[1] else np.zeros(long_raw['gross_np'].shape[0])
-            fee_long = long_raw['fee_np'][:, long_group] if long_group < long_raw['fee_np'].shape[1] else np.zeros(long_raw['fee_np'].shape[0])
-            gross_short = short_raw['gross_np'][:, short_group] if short_group < short_raw['gross_np'].shape[1] else np.zeros(short_raw['gross_np'].shape[0])
-            fee_short = short_raw['fee_np'][:, short_group] if short_group < short_raw['fee_np'].shape[1] else np.zeros(short_raw['fee_np'].shape[0])
-
-            # 对齐时间轴：取较短的
-            min_len = min(len(gross_long), len(gross_short))
-            gross_long = gross_long[:min_len]
-            fee_long = fee_long[:min_len]
-            gross_short = gross_short[:min_len]
-            fee_short = fee_short[:min_len]
-
-            # 拼成 (T, 2) 并调用 _compute_weighted_ls_returns
-            gross_combined = np.column_stack([gross_long, gross_short])
-            fee_combined = np.column_stack([fee_long, fee_short])
-
-            ls_config = {
-                'name': ls_name,
-                'long': [{'group': 0, 'weight': 1.0}],
-                'short': [{'group': 1, 'weight': 1.0}],
-            }
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_combined, fee_combined, ls_config, 2)
-
-            # 用第一个 source entry 的 report_df 和 idx_list 来计算 metrics（近似）
-            ref_raw = long_raw
-            ref_report = ref_raw['report_df']
-            ref_idx = ref_raw['idx_list']
-            timestamps = ref_raw['timestamps'][:min_len]
-            ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
-
-            ls_key = ls_name
-            cross_ls_groups.append({
-                'key': ls_key,
-                'name': ls_name,
-                'timestamps': timestamps,
-                'total_equity': ls_vals,
-                'gross_returns': _serialize_float_series(r_ls, default=0.0),
-                'fee_costs': [0.0] * len(r_ls),
-                'trade_notional_ratios': [0.0] * len(r_ls),
-                'is_ls': True,
-                'is_cross_batch': True,
-                'cross_ls_info': {
-                    'type': 'long_short',
-                    'long_batch': long_info,
-                    'short_batch': short_info,
-                },
-            })
-            cross_ls_metrics[ls_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
-            _progress(f"cross-entry LS done {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
-
-    # ── 阶段 3：合并结果 ──
     _progress(
         f"simulation merge start valid={len(valid_results)} "
         f"cross_ls={len(cross_ls_groups)}"
@@ -1041,20 +1697,36 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"group simulations request done groups={len(merged_groups)} metrics={len(merged_metrics)} "
         f"elapsed={time.perf_counter() - request_started:.2f}s"
     )
+    first_valid = valid_results[0] if valid_results else {}
+
+    # DEBUG #110: validate merged groups vs metrics key alignment
+    _merged_group_keys = [g.get('key') for g in merged_groups]
+    _merged_metric_keys = set(merged_metrics.keys())
+    _merged_missing = []
+    for g in merged_groups:
+        gk = g.get('key')
+        if not g.get('is_ls') and gk not in _merged_metric_keys:
+            _merged_missing.append(f"key='{gk}'")
+    if _merged_missing:
+        print(f"[DEBUG #110] MERGE MISMATCH: groups without metrics: {_merged_missing}")
+        print(f"[DEBUG #110]   merged_group_keys: {_merged_group_keys}")
+        print(f"[DEBUG #110]   merged_metric_keys: {sorted(_merged_metric_keys)}")
+
     return True, {
         'success': True,
         'groups': merged_groups,
         'metrics': merged_metrics,
+        'metrics_meta': _get_metrics_meta(),
         'n_groups': last_n_groups,
         'multi_session_active': last_multi_session,
         'multi_session_entries': multi_session_entries,
         'rebalance_mode': last_rebalance,
-        'submission_id': submitted_entries[0].get('submission_id', ''),
-        'factor_alias': submitted_entries[0].get('factor_alias', ''),
-        'tester_alias': valid_results[0].get('tester_alias', '?') if valid_results else '?',
-        'tester_product_count': valid_results[0].get('tester_product_count', 0) if valid_results else 0,
+        'submission_id': first_valid.get('submission_id', ''),
+        'factor_alias': first_valid.get('factor_alias', ''),
+        'tester_alias': first_valid.get('tester_alias', '?') if valid_results else '?',
+        'tester_product_count': first_valid.get('tester_product_count', 0),
         'simulation_count': len(valid_results),
-        'cross_batch_ls_count': len(cross_ls_groups),
+        'cross_entry_ls_count': len(cross_ls_groups),
         'errors': errors if errors else None,
     }
 
@@ -1086,29 +1758,22 @@ def get_group_snapshot():
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
 
         group_result = _latest_group_result(tester)
-        products_dict = group_result.get_products_by_group() if group_result is not None else None
         valid_cols_raw = group_result.valid_cols if group_result is not None else None
-        if not products_dict or not _safe_bool(valid_cols_raw):
+        index_list = list(getattr(group_result, 'index_list', []) or [])
+        if group_result is None or not _safe_bool(valid_cols_raw) or not index_list:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        valid_cols = valid_cols_raw
 
-        # 找到最接近的时刻
-        # products_dict: {group_idx: {index_entry: [product_names]}}
-        # index_entry 可能是 Timestamp 或 tuple
-        first_group = next(iter(products_dict.values()))
-        time_entries = list(first_group.keys())
-        if not time_entries:
-            return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
+        time_entries = index_list
 
         def _epoch_seconds(value):
             ts = _signal_time(value)
             if isinstance(ts, pd.Timestamp):
-                ts_no_tz_untyped = ts.tz_localize(None) if ts.tzinfo else ts
-                return float(pd.Timestamp(ts_no_tz_untyped).value // 10**9)
+                return float(to_epoch_ms(ts, display_timezone) / 1000.0)
             if hasattr(ts, 'timestamp'):
-                return float(pd.Timestamp(ts).value // 10**9)
+                return float(to_epoch_ms(pd.Timestamp(ts), display_timezone) / 1000.0)
             return float(ts)
 
+        display_timezone = _snapshot_display_timezone(group_result, list(valid_cols_raw or []))
         time_epochs = np.array([_epoch_seconds(idx_entry) for idx_entry in time_entries], dtype=float)
 
         # 前端传来的 UTC epoch 毫秒
@@ -1128,93 +1793,40 @@ def get_group_snapshot():
         # (ts_epoch, idx_entry) 对列表，供 all_timestamps_ms 构建和前/后导航使用
         all_times = list(zip(time_epochs, time_entries))
 
-        n_groups = len(products_dict)
         fee_rates_by_name = _product_fee_rates_by_name(group_result)
-
-        # ── 持仓金额数据 (refs #100) ──
+        positions = getattr(group_result, 'position_quantities_np', None)
         hold_np = getattr(group_result, 'hold_amounts_np', None)
+        capital_diagnostics = _build_zero_position_diagnostics(group_result)
         t_idx = None
-        assert group_result is not None, "group_result should not be None here"
-        if hold_np is not None and group_result.index_list:
+        if index_list:
             try:
-                t_idx = group_result.index_list.index(best_idx_entry)
-            except (ValueError, AttributeError):
+                t_idx = index_list.index(best_idx_entry)
+            except ValueError:
                 t_idx = None
+        prev_t_idx = None
+        if prev_entry is not None:
+            try:
+                prev_t_idx = index_list.index(prev_entry)
+            except ValueError:
+                prev_t_idx = None
 
-        # 构建 valid_cols → position 映射（hold_np 的 P 轴与 valid_cols 对齐）
-        valid_cols_list = group_result.valid_cols if group_result.valid_cols else []
-        col_to_pos = {col: i for i, col in enumerate(valid_cols_list)} if valid_cols_list else {}
+        valid_cols_list = list(group_result.valid_cols) if group_result.valid_cols else []
+        matrices = _build_snapshot_matrices(group_result, valid_cols_list, fee_rates_by_name, t_idx, prev_t_idx, capital_diagnostics)
 
-        groups_detail = []
-        for g in range(n_groups):
-            current_raw = products_dict[g].get(best_idx_entry, [])
-            current_display = [_display_product_with_fee(x, fee_rates_by_name) for x in current_raw]
-            # 按 name 排序
-            current_display.sort(key=lambda d: d['name'])
-
-            # ── 注入持仓金额 (refs #100) ──
-            g_amounts = None
-            if t_idx is not None and hold_np is not None and hold_np.shape[0] > t_idx:
-                # hold_np shape: (T, M, P)；M 可能 > n_groups（LS 扩展等）
-                if g < hold_np.shape[1]:
-                    g_amounts = hold_np[t_idx, g, :]  # (P,) — 该组每产品持仓金额
-                else:
-                    # fallback: 取 g 但可能 index error
-                    pass
-
-            total_amount = float(np.nansum(g_amounts)) if g_amounts is not None and current_raw else 0.0
-
-            # 注入 amount/weight/pending_exit 到每个产品
-            if g_amounts is not None and col_to_pos and total_amount > 0:
-                for d in current_display:
-                    pname = d.get('name', '')
-                    pos = col_to_pos.get(pname)
-                    if pos is not None and pos < len(g_amounts):
-                        amt = float(g_amounts[pos])
-                        d['amount'] = round(amt, 6)
-                        d['weight'] = round(amt / total_amount, 6) if total_amount > 0 else 0.0
-                        # pending_exit: 在 membership 中但 amount ≈ 0（低于组资产的万分之一）
-                        d['pending_exit'] = amt < total_amount * 0.0001
-            elif current_raw:
-                # 无金额数据时，amount 留空
-                for d in current_display:
-                    d['amount'] = None
-                    d['weight'] = None
-                    d['pending_exit'] = False
-
-            if prev_entry is not None:
-                prev_raw = products_dict[g].get(prev_entry, [])
-                prev_display = [_display_product_with_fee(x, fee_rates_by_name) for x in prev_raw]
-                prev_names = set(d['name'] for d in prev_display)
-                curr_names = set(d['name'] for d in current_display)
-
-                in_names = sorted(curr_names - prev_names)
-                out_names = sorted(prev_names - curr_names)
-
-                # 新进/退出：从 current_display / prev_display 中查找完整信息
-                _name_map = {d['name']: d for d in current_display}
-                _prev_name_map = {d['name']: d for d in prev_display}
-                products_in = [_name_map[n] for n in in_names]
-                products_out = [_prev_name_map[n] for n in out_names]
-
-                prev_count = len(prev_raw)
-                curr_count = len(current_raw)
-                avg_count = (prev_count + curr_count) / 2.0
-                changed = len(in_names) + len(out_names)
-                turnover_rate = round(changed / (2.0 * avg_count), 4) if avg_count > 0 else 0.0
-            else:
-                products_in = []
-                products_out = []
-                turnover_rate = 0.0
-
-            groups_detail.append({
-                'name': f'Group {g+1}',
-                'products': current_display,
-                'products_in': products_in,
-                'products_out': products_out,
-                'turnover_rate': turnover_rate,
-                'count': len(current_display),
-            })
+        # 统计当前真实持仓变动，作为顶部摘要
+        active_matrix = matrices[0] if matrices else {'columns': []}
+        total_changed = 0
+        total_prod_count = 0
+        for g_idx in range(len(active_matrix.get('columns', []))):
+            col = active_matrix['columns'][g_idx]
+            total_prod_count += int(col.get('count', 0) or 0)
+            if t_idx is not None and positions is not None and t_idx < positions.shape[0] and g_idx < positions.shape[1]:
+                cur_pos = positions[t_idx, g_idx]
+                prev_pos = positions[prev_t_idx, g_idx] if prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
+                current_active = int(np.sum(np.abs(cur_pos) > 1e-12))
+                prev_active = int(np.sum(np.abs(prev_pos) > 1e-12)) if prev_pos is not None else 0
+                total_changed += abs(current_active - prev_active)
+        avg_turnover = total_changed / max(total_prod_count, 1) * 100.0 if total_prod_count > 0 else 0.0
 
         # 所有时间点（epoch 毫秒），用于前/后导航
         all_timestamps_ms = sorted(set(
@@ -1223,6 +1835,19 @@ def get_group_snapshot():
         # 用最接近的 all_timestamps_ms 条目（而非前端传来的不精确 timestamp_ms）
         closest_ms = min(all_timestamps_ms, key=lambda x: abs(x - int(timestamp_ms)))
         current_index = all_timestamps_ms.index(closest_ms)
+        change_indices = _snapshot_change_indices(group_result)
+        change_timestamps_ms = [
+            int(time_epochs[idx] * 1000)
+            for idx in change_indices
+            if 0 <= idx < len(time_epochs)
+        ]
+        prev_change_ms = None
+        next_change_ms = None
+        for change_ms in change_timestamps_ms:
+            if change_ms < closest_ms:
+                prev_change_ms = change_ms
+            elif change_ms > closest_ms and next_change_ms is None:
+                next_change_ms = change_ms
 
         # ── 附加元信息供前端按 shortAlias 分层渲染 (refs #100) ──
         _raw_group_names = getattr(group_result, 'group_names', None) or {}
@@ -1235,12 +1860,26 @@ def get_group_snapshot():
 
         return jsonify({
             'success': True,
-            'groups': groups_detail,
+            'matrices': matrices,
+            'default_matrix_key': 'raw',
             'timestamp_ms': closest_ms,
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
+            'display_timezone': display_timezone,
+            'change_timestamps_ms': change_timestamps_ms,
+            'prev_change_timestamp_ms': prev_change_ms,
+            'next_change_timestamp_ms': next_change_ms,
+            'has_prev_change': prev_change_ms is not None,
+            'has_next_change': next_change_ms is not None,
             'group_names': snapshot_group_names,
+            'capital_warning': capital_diagnostics['warning'] if capital_diagnostics else None,
+            'capital_diagnostics': capital_diagnostics,
+            'summary': {
+                'avg_turnover': round(avg_turnover, 1),
+                'total_changed': int(total_changed),
+                'total_prod_count': int(total_prod_count),
+            },
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
@@ -1280,9 +1919,9 @@ def get_group_detail():
             group_index, products, returns_np, index_list, summary,
             product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
             group_result.fee_costs_np if group_result is not None else None,
-            group_result.open_ratio_vec if group_result is not None else None,
-            group_result.close_ratio_vec if group_result is not None else None,
-            group_result.close_today_ratio_vec if group_result is not None else None,
+            group_result.open_ratio_mat if group_result is not None else None,
+            group_result.close_ratio_mat if group_result is not None else None,
+            group_result.close_today_ratio_mat if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:
@@ -1390,12 +2029,43 @@ def run_group_test_stream():
     data = request.get_json(silent=True) or {}
 
     # ── 在主线程中完成 data 校验 ──
-    submitted_entries = data.get('batches')
-    if not isinstance(submitted_entries, list) or not submitted_entries:
+    flat_groups_raw = data.get('groups')
+    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         def _early_err():
-            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'batches 必须是非空数组'}, default=str)}\n\n"
+            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'groups 必须是非空数组'}, default=str)}\n\n"
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    # ── Resolve factor_family_alias from page_uuid ──
+    page_uuid = str(data.get('page_uuid') or '')
+    factor_family_alias = ''
+    if page_uuid:
+        try:
+            page_state = runtime_state.get_page_state(page_uuid)
+            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
+        except Exception:
+            pass
+    # Allow override from request
+    req_family = data.get('factor_family_alias')
+    if req_family:
+        factor_family_alias = str(req_family)
+    if factor_family_alias:
+        try:
+            factor_family = get_factor_family_instance(
+                factor_family_alias,
+                username=current_user(),
+            )
+            data = dict(data)
+            data['_group_owner_username'] = current_user()
+            data['_group_factor_params_list'] = get_session_params(
+                factor_family_alias,
+                factor_family,
+            )
+        except Exception as exc:
+            def _early_factor_err():
+                yield f"event: error\ndata: {_json.dumps({'success': False, 'error': f'准备分组测试因子参数失败: {exc}'}, default=str)}\n\n"
+            return Response(_early_factor_err(), mimetype='text/event-stream',
+                            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
     emitter = SSEProgressEmitter()
     registry = BacktestProgressRegistry()
@@ -1421,20 +2091,61 @@ def run_group_test_stream():
     def _compute_and_emit():
         try:
             # ── 将 registry 桥接到 core.py 的全局注册 ──
+            last_progress = {'completed': 0, 'total': 0}
+            last_progress_by_batch: dict[int, dict[str, int]] = {}
+
             def _progress_bridge(phase: str, message: str, extra: dict):
-                completed = extra.get('completed', 0)
-                total = extra.get('total', 0)
+                progress_extra = dict(extra)
+                completed = extra.get('completed')
+                total = extra.get('total', extra.get('total_batches'))
+                product_coverage_batch_index = extra.get('product_coverage_batch_index')
+                has_progress_count = completed is not None and total is not None
                 if phase == 'init':
+                    # init 阶段：发送 start 事件，携带 phases数据
+                    total_val = total or 0
+                    _phases = extra.get('phases', [])
+                    # 从 extra 中剥离已显式传递的 kwarg，避免与 emit_start 的显式参数冲突
+                    for k in ('total', 'groups', 'phase', 'phases'):
+                        progress_extra.pop(k, None)
                     registry.emit_start(
-                        total=total, groups=extra.get('total_groups', 0),
-                        phase='batch', **extra,
+                        total=total_val, groups=extra.get('total_groups', 0),
+                        phase='product_coverage_batch',
+                        phases=_phases,
+                        **progress_extra,
                     )
-                else:
+                elif has_progress_count:
+                    last_progress['completed'] = completed
+                    last_progress['total'] = total
+                    if product_coverage_batch_index is not None:
+                        last_progress_by_batch[int(product_coverage_batch_index)] = {
+                            'completed': completed,
+                            'total': total,
+                        }
+                    # 剥离已显式传递的参数，避免与 emit_phase 的 keyword 参数冲突
+                    for k in ('completed', 'total', 'phase'):
+                        progress_extra.pop(k, None)
+                    # 所有带进度计数的 phase 直接 emit（包括 factor_eval, returns_eval 等）
                     registry.emit_phase(
                         phase, message=message,
                         completed=completed, total=total,
-                        **extra,
+                        **progress_extra,
                     )
+                elif phase == 'info':
+                    # info 是信息性消息，转换为当前批次的 progress 事件
+                    batch_progress = None
+                    if product_coverage_batch_index is not None:
+                        batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
+                    progress = batch_progress or last_progress
+                    if progress['completed'] != 0 or progress['total'] != 0:
+                        completed = progress['completed']
+                        total = progress['total']
+                        for k in ('completed', 'total', 'phase'):
+                            progress_extra.pop(k, None)
+                        registry.emit_phase(
+                            phase, message=message,
+                            completed=completed, total=total,
+                            **progress_extra,
+                        )
 
             register_group_progress(_progress_bridge)
 

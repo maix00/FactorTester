@@ -16,18 +16,21 @@ import pandas as pd
 from typing import Any, Callable, List, Optional, cast
 from weakref import WeakKeyDictionary
 
-from tools import UniqueObject
+from tools.decorators import factor_workspace
+from tools.data.types import UniqueNameObject
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ValueSpace —— 不可变值空间
 # ═════════════════════════════════════════════════════════════════════════════
 
+@factor_workspace
 class ValueSpace:
     """
     值空间：定义合法值域、验证、标准化、展示。
     不可变对象，支持组合（并集、差集）。
     """
+    @factor_workspace
     def __init__(
         self,
         contains: Callable[[Any], bool],
@@ -41,12 +44,15 @@ class ValueSpace:
     def __contains__(self, value: Any) -> bool:
         return self._contains(value)
 
+    @factor_workspace
     def rectify(self, value: Any) -> Any:
         return self._rectify(value)
 
+    @factor_workspace
     def alias(self, value: Any) -> str:
         return self._alias(value)
 
+    @factor_workspace
     def union(self, other: 'ValueSpace') -> 'ValueSpace':
         """返回当前空间与 other 的并集"""
         return ValueSpace(
@@ -55,6 +61,7 @@ class ValueSpace:
             alias=lambda v: self.alias(v) if v in self else other.alias(v),
         )
 
+    @factor_workspace
     def difference(self, other: 'ValueSpace') -> 'ValueSpace':
         """返回当前空间减去 other 的值域"""
         return ValueSpace(
@@ -66,14 +73,17 @@ class ValueSpace:
     # ── 工厂方法 ──
 
     @classmethod
+    @factor_workspace
     def any_type(cls, typ: type | tuple[type, ...]) -> 'ValueSpace':
         return cls(contains=lambda v: isinstance(v, typ))
 
     @classmethod
+    @factor_workspace
     def finite(cls, values: List[Any]) -> 'ValueSpace':
         return cls(contains=lambda v: v in values)
 
     @classmethod
+    @factor_workspace
     def timedelta(cls, flag: Optional[str] = None) -> 'ValueSpace':
         """flag: 'pos'/'neg'/'nonneg'/'nonpos'/None"""
         def contains(v: Any) -> bool:
@@ -108,22 +118,25 @@ def _format_timedelta(td: pd.Timedelta) -> str:
 # Parameter —— 持有 ValueSpace 的参数基类
 # ═════════════════════════════════════════════════════════════════════════════
 
-class Parameter(UniqueObject):
+@factor_workspace
+class Parameter(UniqueNameObject):
     """
     参数对象：持有值空间和默认值，提供注册表存储不同对象的参数值。
 
     只做三件事：
       1. 持有 ValueSpace 和默认值
-      2. 提供 WeakKeyDictionary 注册表（键为 UniqueObject 实例）
-      3. 继承 UniqueObject 实现全局重用
+      2. 提供 WeakKeyDictionary 注册表（键为 Any 实例）
+      3. 继承 UniqueNameObject 实现全局重用
 
     属性（兼容旧 API）：
         rectify_value   → 代理到 self._value_space.rectify
         get_value_alias → 代理到 self._value_space.alias
     """
+    @factor_workspace
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         return super().__new__(cls, alias=alias)
 
+    @factor_workspace
     def __init__(
         self,
         alias: Optional[str] = None,
@@ -139,7 +152,7 @@ class Parameter(UniqueObject):
         self.default_value = value_space.rectify(default_value)
         if default_value not in value_space:
             raise ValueError(f"Default value {default_value} not in space")
-        # 注册表：WeakKeyDictionary，key 为 UniqueObject 实例
+        # 注册表：WeakKeyDictionary，key 为实例
         self._registry = WeakKeyDictionary()
 
         # 兼容旧 API：属性代理到 _value_space
@@ -147,35 +160,42 @@ class Parameter(UniqueObject):
         self.get_value_alias = value_space._alias
 
     # ── 值空间代理 ──
+    @factor_workspace
     def __contains__(self, value: Any) -> bool:
         return value in self._value_space
 
+    @factor_workspace
     def check_in_space(self, value: Any, error: bool = True) -> bool:
         ok = value in self._value_space
         if not ok and error:
             raise ValueError(f"{value} is not in the value space")
         return ok
 
+    @factor_workspace
     def change_default_value(self, value: Any) -> 'Parameter':
         self.check_in_space(value)
         self.default_value = self._value_space.rectify(value)
         return self
 
     # ── 注册表操作 ──
-    def register(self, obj: UniqueObject, value: Any, **kwargs) -> None:
+    @factor_workspace
+    def register(self, obj: Any, value: Any, **kwargs) -> None:
         self.check_in_space(value)
         self._registry[obj] = self._value_space.rectify(value)
 
-    def unregister(self, obj: UniqueObject) -> None:
+    @factor_workspace
+    def unregister(self, obj: Any) -> None:
         self._registry.pop(obj, None)
 
-    def get_value(self, obj: UniqueObject) -> Any:
+    @factor_workspace
+    def get_value(self, obj: Any) -> Any:
         return self._registry.get(obj, self.default_value)
 
     # ── 表达式树代理 ──
     # Parameter 实例可通过 .shift(N) / .rolling_mean(N) 等方法直接参与表达式构建，
     # 内部创建 ParamRef(self) 代理所有 FactorExpr 上的方法。
 
+    @factor_workspace
     def __getattr__(self, name: str):
         # 避免在 __init__ 期间提前触发 ParamRef 导入
         if name.startswith('_'):
@@ -186,11 +206,13 @@ class Parameter(UniqueObject):
     # ── 运算符代理 ──
     # Python 运算符不经过 __getattr__，需要显式代理到 ParamRef。
 
+    @factor_workspace
     def _ref(self):
         from tools.factors.FactorExpr import ParamRef
         return ParamRef(self)
 
     @staticmethod
+    @factor_workspace
     def _to_expr_arg(x):
         """若 x 是 Parameter，转成 ParamRef，否则原样返回。"""
         if isinstance(x, Parameter):
@@ -198,17 +220,29 @@ class Parameter(UniqueObject):
             return ParamRef(x)
         return x
 
+    @factor_workspace
     def __add__(self, other): return self._ref().__add__(self._to_expr_arg(other))
+    @factor_workspace
     def __radd__(self, other): return self._ref().__radd__(self._to_expr_arg(other))
+    @factor_workspace
     def __sub__(self, other): return self._ref().__sub__(self._to_expr_arg(other))
+    @factor_workspace
     def __rsub__(self, other): return self._ref().__rsub__(self._to_expr_arg(other))
+    @factor_workspace
     def __mul__(self, other): return self._ref().__mul__(self._to_expr_arg(other))
+    @factor_workspace
     def __rmul__(self, other): return self._ref().__rmul__(self._to_expr_arg(other))
+    @factor_workspace
     def __truediv__(self, other): return self._ref().__truediv__(self._to_expr_arg(other))
+    @factor_workspace
     def __rtruediv__(self, other): return self._ref().__rtruediv__(self._to_expr_arg(other))
+    @factor_workspace
     def __neg__(self): return self._ref().__neg__()
+    @factor_workspace
     def __pos__(self): return self._ref().__pos__()
+    @factor_workspace
     def __abs__(self): return self._ref().__abs__()
+    @factor_workspace
     def __invert__(self): return self._ref().__invert__()
 
 
@@ -216,6 +250,7 @@ class Parameter(UniqueObject):
 # 子类 —— 利用 ValueSpace 工厂方法的语法糖
 # ═════════════════════════════════════════════════════════════════════════════
 
+@factor_workspace
 class TypeParam(Parameter):
     """
     类型约束参数：只接受指定 Python 类型的值。
@@ -223,6 +258,7 @@ class TypeParam(Parameter):
     
     typ 可以是单个 type 或 type 的 tuple（表示多类型联合）。
     """
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Any = None, 
                  typ: Optional[type | tuple[type, ...]] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
@@ -234,6 +270,7 @@ class TypeParam(Parameter):
         super().__init__(alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
+@factor_workspace
 class FactorParam(TypeParam):
     """
     因子表达式参数：接受 FactorExpr 或其子类实例（允许 None 作为默认值）。
@@ -241,11 +278,12 @@ class FactorParam(TypeParam):
     等价于 TypeParam(..., typ=(FactorExpr, type(None)))，但自动导入 FactorExpr。
     示例：FactorParam('FE') — 接受任意 FactorExpr 或 None。
     """
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Any = None,
                  *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
-        from tools import DataColumn
+        from tools.data.types import DataColumn
         from tools.factors.FactorExpr import FactorExpr, ParamRef, ColumnRef
         from tools.parameters.DataColumnParam import DataColumnParam
 
@@ -305,7 +343,9 @@ class FactorParam(TypeParam):
         Parameter.__init__(self, alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
+@factor_workspace
 class FinRangeParam(Parameter):
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, value_space: Optional[List[Any]] = None, 
                  default_value: Any = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
@@ -326,11 +366,13 @@ class FinRangeParam(Parameter):
         self.value_space = value_space  # 保留原始列表，供 Category 等子类使用
 
 
+@factor_workspace
 class TimeDeltaParam(Parameter):
     """
     时间增量参数：接受可转换为 pd.Timedelta 的值，支持正/负/非负/非正约束。
     示例：TimeDeltaParam('RF', flag='pos', default_value='1d') 只接受正时长。
     """
+    @factor_workspace
     def __init__(self, alias: Optional[str] = None, flag: Optional[str] = None, 
                  default_value: Any = '1d', *args, **kwargs):
         if hasattr(self, '_initialized'):

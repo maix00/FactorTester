@@ -21,7 +21,7 @@ const baseId = GT.groupSettings.groups.add({
   name: 'A',
   testerId: 'tester-1',
   factorAlias: 'FactorA',
-  groupCount: 5,
+  splitCount: 5,
 });
 const parentId = GT.groupSettings.groups.add({
   id: 'derived-parent',
