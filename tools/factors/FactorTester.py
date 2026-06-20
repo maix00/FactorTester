@@ -10,15 +10,12 @@
 # 辅助函数：
 #   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
 # =============================================================================
-import os
-import re
 import uuid
 import logging
 import threading
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from datetime import datetime
 from weakref import WeakValueDictionary
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
@@ -34,7 +31,7 @@ from tools.data.account_manage import User
 from tools.data.types import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
-from settings import get_all_products, logger_dir_path_default
+from settings import get_all_products
 
 if TYPE_CHECKING:
     from tools.factors.FactorTester import FactorTester
@@ -112,9 +109,7 @@ class FactorTester(UniqueNameObject):
                  start_dt: Optional[DataTime] = None,
                  end_dt: Optional[DataTime] = None,
                  group_calendar_freq: Optional[Any] = None,
-                 user: Optional['User'] = None,
-                 logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
-                 logger_console: bool = False):
+                 user: Optional['User'] = None):
         """
         初始化 FactorTester。
 
@@ -124,9 +119,6 @@ class FactorTester(UniqueNameObject):
             start_dt       : 测试起始 DataTime
             end_dt         : 测试截止 DataTime
             user           : 创建此 tester 的 User 实例
-            logger_file    : 是否写日志到文件
-            logger_dir_path: 日志目录
-            logger_console : 是否同时输出到控制台
         """
         if not hasattr(self, '_initialized'):
             # 传入 name=self.name 防止 UniqueObject.__init__ 重新生成 name
@@ -134,26 +126,7 @@ class FactorTester(UniqueNameObject):
             super().__init__(name=self.name, alias=alias)
             self.user = user  # 创建者 User 实例（None 表示无归属）
 
-            # 初始化日志记录器
-            self.logger = logging.getLogger(self.__class__.__name__)
-            if not self.logger.handlers:
-                self.logger.setLevel(logging.INFO)
-                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-                if logger_console:
-                    console_handler = logging.StreamHandler()
-                    console_handler.setFormatter(formatter)
-                    self.logger.addHandler(console_handler)
-
-                if logger_file:
-                    if not os.path.exists(logger_dir_path):
-                        os.makedirs(logger_dir_path)
-                    # Windows 文件名不允许 <>:"/\|?*，替换为下划线
-                    _safe_log_name = re.sub(r'[<>:"/\\|?*]', '_', self.name)
-                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{_safe_log_name}_{datetime.now().strftime('%Y%m%d')}.log")
-                    file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
-                    file_handler.setFormatter(formatter)
-                    self.logger.addHandler(file_handler)
+            self.logger = logging.getLogger("factortester.factor_tester")
 
             self.products = set(products)       # 当前测试品种集（可经筛选减少）
             self.all_products = set(products)   # 原始全量品种集
@@ -177,7 +150,10 @@ class FactorTester(UniqueNameObject):
                 self.start_date = None
                 self.end_date = None
                 self.start_calc_point = None  # DataTime | None，计算起始点
-            self.logger.info(f"FactorTester initialized with {len(self.products)} products")
+            self.logger.info(
+                "factor_tester_initialized",
+                extra={"tester_alias": self.alias, "product_count": len(self.products)},
+            )
 
     def delete(self):
         """
@@ -188,7 +164,6 @@ class FactorTester(UniqueNameObject):
           - Factor 和其非$开头 Parameter 副本被从全局缓存中移除（delete）
           - self.products / self.all_products 被置空
           - 将 self 从所属 User 的 tester 列表中移除（如有）
-          - 关闭 logger handler 释放文件句柄
         """
         from tools.parameters.Parameter import Parameter
         # 清理所有关联 Factor 及其非$开头参数
@@ -214,12 +189,10 @@ class FactorTester(UniqueNameObject):
         self.factors.clear()
         self.products = set()
         self.all_products = set()
-        # 关闭 logger handler
-        for handler in list(self.logger.handlers):
-            handler.close()
-            self.logger.removeHandler(handler)
         try:
-            self.logger.info(f"FactorTester {self.alias} deleted")
+            self.logger.info(
+                "factor_tester_deleted", extra={"tester_alias": self.alias}
+            )
         except Exception:
             pass
 
