@@ -97,9 +97,38 @@ _OPTIONAL_NUMERIC_COLS = [
 _CONTRACT_ROW_DROP_COLS: list[str] = []
 _VARIETY_ROW_DROP_COLS = ['volume', 'open_interest']
 
+_OPENCTP_TO_LOCAL_COLUMNS = {
+    'ExchangeID': 'exchange',
+    'ProductID': 'variety_code',
+    'InstrumentID': 'contract_code',
+    'InstrumentName': 'contract_name',
+    'VolumeMultiple': 'multiplier',
+    'PriceTick': 'min_tick',
+    'OpenRatioByMoney': 'open_ratio',
+    'OpenRatioByVolume': 'open_fixed',
+    'CloseRatioByMoney': 'close_ratio',
+    'CloseRatioByVolume': 'close_fixed',
+    'CloseTodayRatioByMoney': 'closetoday_ratio',
+    'CloseTodayRatioByVolume': 'closetoday_fixed',
+    'LongMarginRatioByMoney': 'long_margin_ratio',
+    'LongMarginRatioByVolume': 'long_margin_fixed',
+    'ShortMarginRatioByMoney': 'short_margin_ratio',
+    'ShortMarginRatioByVolume': 'short_margin_fixed',
+}
+
 
 def _with_optional_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    for source, target in _OPENCTP_TO_LOCAL_COLUMNS.items():
+        if target not in df.columns and source in df.columns:
+            df[target] = df[source]
+    if 'contract_key' not in df.columns:
+        key_source = next(
+            (name for name in ('NormalizedInstrumentID', 'contract_code', 'InstrumentID') if name in df.columns),
+            None,
+        )
+        if key_source is not None:
+            df['contract_key'] = df[key_source].map(_normalise_contract_code)
     for col in _OPTIONAL_NUMERIC_COLS:
         if col not in df.columns:
             df[col] = 0.0
@@ -179,6 +208,7 @@ def _parse_contract_rows(df: pd.DataFrame) -> pd.DataFrame:
     df['contract_code'] = df['contract_code'].astype(str).str.strip()
     df['contract_name'] = df['contract_name'].astype(str).str.strip()
     df['contract_key'] = df['contract_code'].map(_normalise_contract_code)
+    df['NormalizedInstrumentID'] = df['contract_key']
 
     # 去掉无效行
     df = df.dropna(subset=['variety_code', 'open_ratio'])

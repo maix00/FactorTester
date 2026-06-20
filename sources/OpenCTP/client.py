@@ -327,24 +327,19 @@ def normalise_instrument_code(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", text)
 
 
-def _none_if_na(value: Any) -> Any:
-    return None if pd.isna(value) else value
+def _row_value(row: pd.Series, *names: str) -> Any:
+    for name in names:
+        if name not in row.index:
+            continue
+        value = row.get(name)
+        if not pd.isna(value):
+            return value
+    return None
 
 
-def _contract_specs_count() -> int:
-    with _connect_cache() as conn:
-        row = conn.execute(f'SELECT COUNT(*) AS n FROM "{SOURCE_CONTRACT_SPECS_VIEW}"').fetchone()
-    return int(row["n"])
-
-
-def _contract_specs_has_fee_snapshot_columns() -> bool:
-    """Return True if the SQLite table has at least one row (fee parquet already imported)."""
-    return _contract_specs_count() > 0
-
-
-def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> None:
+def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> int:
     if specs.empty:
-        return
+        return 0
     now = time.time()
     columns = [
         "snapshot_date", "ExchangeID", "ProductID", "InstrumentID", "InstrumentName",
@@ -391,47 +386,59 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
             updated_at = excluded.updated_at
     """
     values = []
+    seen_keys: set[tuple[str, str]] = set()
     for _, row in specs.iterrows():
-        row_snapshot_date = str(row.get("date") or snapshot_date or date.today().strftime("%Y%m%d"))
+        row_snapshot_date = str(_row_value(row, "date") or snapshot_date or date.today().strftime("%Y%m%d"))
+        instrument_id = normalise_instrument_code(
+            _row_value(row, "InstrumentID", "contract_code", "contract_key")
+        )
+        if not instrument_id:
+            continue
+        key = (row_snapshot_date, instrument_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         values.append((
             row_snapshot_date,
-            _none_if_na(row.get("ExchangeID")),
-            _none_if_na(row.get("ProductID") or row.get("variety_code")),
-            _none_if_na(row.get("InstrumentID") or row.get("contract_code")),
-            _none_if_na(row.get("InstrumentName") or row.get("contract_name")),
-            _none_if_na(row.get("ProductClass")),
-            _none_if_na(row.get("VolumeMultiple")),
-            _none_if_na(row.get("PriceTick")),
-            _none_if_na(row.get("MinLimitOrderVolume")),
-            _none_if_na(row.get("MaxLimitOrderVolume")),
-            _none_if_na(row.get("LongMarginRatioByMoney")),
-            _none_if_na(row.get("LongMarginRatioByVolume")),
-            _none_if_na(row.get("ShortMarginRatioByMoney")),
-            _none_if_na(row.get("ShortMarginRatioByVolume")),
-            _none_if_na(row.get("OpenRatioByMoney")),
-            _none_if_na(row.get("OpenRatioByVolume")),
-            _none_if_na(row.get("CloseRatioByMoney")),
-            _none_if_na(row.get("CloseRatioByVolume")),
-            _none_if_na(row.get("CloseTodayRatioByMoney")),
-            _none_if_na(row.get("CloseTodayRatioByVolume")),
-            _none_if_na(row.get("DeliveryYear")),
-            _none_if_na(row.get("DeliveryMonth")),
-            _none_if_na(row.get("OpenDate")),
-            _none_if_na(row.get("ExpireDate")),
-            _none_if_na(row.get("DeliveryDate")),
-            _none_if_na(row.get("UnderlyingInstrID")),
-            _none_if_na(row.get("UnderlyingMultiple")),
-            _none_if_na(row.get("OptionsType")),
-            _none_if_na(row.get("StrikePrice")),
-            _none_if_na(row.get("InstLifePhase")),
-            _none_if_na(row.get("NormalizedInstrumentID")),
+            _row_value(row, "ExchangeID", "exchange"),
+            _row_value(row, "ProductID", "variety_code"),
+            instrument_id,
+            _row_value(row, "InstrumentName", "contract_name"),
+            _row_value(row, "ProductClass"),
+            _row_value(row, "VolumeMultiple", "multiplier"),
+            _row_value(row, "PriceTick", "min_tick"),
+            _row_value(row, "MinLimitOrderVolume"),
+            _row_value(row, "MaxLimitOrderVolume"),
+            _row_value(row, "LongMarginRatioByMoney", "long_margin_ratio"),
+            _row_value(row, "LongMarginRatioByVolume", "long_margin_fixed"),
+            _row_value(row, "ShortMarginRatioByMoney", "short_margin_ratio"),
+            _row_value(row, "ShortMarginRatioByVolume", "short_margin_fixed"),
+            _row_value(row, "OpenRatioByMoney", "open_ratio"),
+            _row_value(row, "OpenRatioByVolume", "open_fixed"),
+            _row_value(row, "CloseRatioByMoney", "close_ratio"),
+            _row_value(row, "CloseRatioByVolume", "close_fixed"),
+            _row_value(row, "CloseTodayRatioByMoney", "closetoday_ratio"),
+            _row_value(row, "CloseTodayRatioByVolume", "closetoday_fixed"),
+            _row_value(row, "DeliveryYear"),
+            _row_value(row, "DeliveryMonth"),
+            _row_value(row, "OpenDate"),
+            _row_value(row, "ExpireDate"),
+            _row_value(row, "DeliveryDate"),
+            _row_value(row, "UnderlyingInstrID"),
+            _row_value(row, "UnderlyingMultiple"),
+            _row_value(row, "OptionsType"),
+            _row_value(row, "StrikePrice"),
+            _row_value(row, "InstLifePhase"),
+            normalise_instrument_code(
+                _row_value(row, "NormalizedInstrumentID", "InstrumentID", "contract_code", "contract_key")
+            ),
             now,
         ))
-    try:
-        with _connect_cache() as conn:
-            conn.executemany(insert_sql, values)
-    except Exception:
-        pass
+    if not values:
+        return 0
+    with _connect_cache() as conn:
+        conn.executemany(insert_sql, values)
+    return len(values)
 
 
 def _write_contract_specs(rows: list[dict[str, Any]], *, snapshot_date: str | None = None) -> None:
@@ -450,8 +457,6 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
     force: bool = False,
 ) -> int:
     """Import existing LocalCNFutures fee parquet snapshots into the SQLite typed table."""
-    if not force and _contract_specs_count() > 0 and _contract_specs_has_fee_snapshot_columns():
-        return 0
     try:
         from sources.LocalCNFutures import FeeData
     except Exception:
@@ -460,7 +465,7 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
     if source_dir is None:
         return 0
     paths = sorted(Path(source_dir).glob("fees_contracts_2*.parquet"))
-    imported = 0
+    frames: list[pd.DataFrame] = []
     for path in paths:
         try:
             df = pd.read_parquet(path)
@@ -472,9 +477,37 @@ def sync_cnfutures_contract_specs_from_fee_parquet(
             match = re.fullmatch(r"fees_contracts_(\d{8})\.parquet", path.name)
             df = df.copy()
             df["date"] = match.group(1) if match else date.today().strftime("%Y%m%d")
-        _upsert_contract_specs(df)
-        imported += len(df)
-    return imported
+        frames.append(df)
+    if not frames:
+        return 0
+
+    specs = pd.concat(frames, ignore_index=True)
+    specs["_snapshot_key"] = specs["date"].astype(str)
+    instrument_source = next(
+        (name for name in ("NormalizedInstrumentID", "InstrumentID", "contract_code", "contract_key") if name in specs.columns),
+        None,
+    )
+    if instrument_source is None:
+        return 0
+    specs["_instrument_key"] = specs[instrument_source].map(normalise_instrument_code)
+    specs = specs[specs["_instrument_key"].str.len() > 0]
+    specs = specs.drop_duplicates(["_snapshot_key", "_instrument_key"], keep="first")
+
+    if not force:
+        with _connect_cache() as conn:
+            existing = {
+                (str(row["snapshot_date"]), normalise_instrument_code(row["InstrumentID"]))
+                for row in conn.execute(
+                    f'SELECT snapshot_date, InstrumentID FROM "{SRC_CONTRACT_SPECS_TABLE}"'
+                )
+            }
+        pending = [
+            (snapshot, instrument) not in existing
+            for snapshot, instrument in zip(specs["_snapshot_key"], specs["_instrument_key"])
+        ]
+        specs = specs.loc[pending]
+
+    return _upsert_contract_specs(specs.drop(columns=["_snapshot_key", "_instrument_key"]))
 
 
 def _contract_specs_sql_frame(where: str = "", params: tuple[Any, ...] = ()) -> pd.DataFrame:
