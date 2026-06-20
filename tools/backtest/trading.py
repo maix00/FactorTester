@@ -41,10 +41,14 @@ class SignalStrategy:
 
     def __init__(
         self,
+        strategy_id: str,
         portfolio_id: str,
         instruments: tuple[str, ...],
         target_builder: Callable[[FactorSignal], np.ndarray],
     ) -> None:
+        if not strategy_id or not portfolio_id:
+            raise ValueError("strategy_id and portfolio_id must not be empty")
+        self.strategy_id = strategy_id
         self.portfolio_id = portfolio_id
         self.instruments = instruments
         self._target_builder = target_builder
@@ -57,6 +61,7 @@ class SignalStrategy:
             raise TypeError("factor.signal payload must be FactorSignal")
         intent = PortfolioIntent(
             timestamp=event.timestamp,
+            strategy_id=self.strategy_id,
             portfolio_id=self.portfolio_id,
             target_kind=TargetKind.QUANTITY,
             values=self._target_builder(signal),
@@ -269,11 +274,52 @@ class Ledger:
         self.realized_pnl_minor += delta.realized_pnl_minor
 
 
+class PositionSizer(Protocol):
+    def target_quantities(self, intent: PortfolioIntent, ledger: Ledger) -> np.ndarray: ...
+
+
+class EqualNotionalSizer:
+    """Convert target weights to lots without using margin as a weight signal."""
+
+    def __init__(
+        self,
+        market: MarketState,
+        point_values: Mapping[str, float],
+        lot_sizes: Mapping[str, float],
+        *,
+        minor_per_major: int = 100,
+    ) -> None:
+        self.market = market
+        self.point_values = dict(point_values)
+        self.lot_sizes = dict(lot_sizes)
+        self.minor_per_major = minor_per_major
+
+    def target_quantities(self, intent: PortfolioIntent, ledger: Ledger) -> np.ndarray:
+        if intent.target_kind != TargetKind.WEIGHT or intent.values.ndim != 1:
+            raise ValueError("EqualNotionalSizer requires one-dimensional target weights")
+        gross_weight = float(np.sum(np.abs(intent.values)))
+        if gross_weight > 1.0 + 1e-12:
+            raise ValueError("target weights exceed gross exposure 1; use an explicit leverage policy")
+        equity_major = ledger.equity_minor / self.minor_per_major
+        quantities = np.zeros_like(intent.values, dtype=float)
+        for index, (instrument, weight) in enumerate(
+            zip(intent.instruments, intent.values, strict=True)
+        ):
+            price = self.market.prices[instrument]
+            contract_notional = price * self.point_values[instrument]
+            lot_size = self.lot_sizes[instrument]
+            raw_quantity = abs(float(weight)) * equity_major / contract_notional
+            lots = np.floor(raw_quantity / lot_size + 1e-12)
+            quantities[index] = np.sign(weight) * lots * lot_size
+        return quantities
+
+
 class OrderManager:
     """Convert target quantities to delta orders from the authoritative ledger."""
 
-    def __init__(self, ledger: Ledger) -> None:
+    def __init__(self, ledger: Ledger, position_sizer: PositionSizer | None = None) -> None:
         self.ledger = ledger
+        self.position_sizer = position_sizer
         self._order_sequence = itertools.count()
 
     def on_portfolio_intent(
@@ -284,19 +330,24 @@ class OrderManager:
             raise TypeError("portfolio.intent payload must be PortfolioIntent")
         if intent.portfolio_id != self.ledger.portfolio_id:
             return []
-        if intent.target_kind != TargetKind.QUANTITY:
-            raise ValueError("OrderManager currently requires quantity targets")
         if intent.values.ndim != 1:
             raise ValueError("one OrderManager handles one portfolio")
+        if intent.target_kind == TargetKind.QUANTITY:
+            target_quantities = intent.values
+        else:
+            if self.position_sizer is None:
+                raise ValueError("weight intents require an explicit PositionSizer")
+            target_quantities = self.position_sizer.target_quantities(intent, self.ledger)
 
         drafts: list[EventDraft] = []
-        for instrument, target in zip(intent.instruments, intent.values, strict=True):
+        for instrument, target in zip(intent.instruments, target_quantities, strict=True):
             delta = float(target) - self.ledger.positions[instrument]
             if np.isclose(delta, 0.0):
                 continue
             side = OrderSide.BUY if delta > 0 else OrderSide.SELL
             order = Order(
                 order_id=f"{runtime.run_id}:{next(self._order_sequence)}",
+                strategy_id=intent.strategy_id,
                 portfolio_id=intent.portfolio_id,
                 timestamp=event.timestamp,
                 instrument=instrument,
@@ -331,6 +382,7 @@ class ImmediateBroker:
         fill = Fill(
             fill_id=f"{runtime.run_id}:fill:{next(self._fill_sequence)}",
             order_id=order.order_id,
+            strategy_id=order.strategy_id,
             portfolio_id=order.portfolio_id,
             timestamp=event.timestamp,
             instrument=order.instrument,

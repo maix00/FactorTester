@@ -23,6 +23,7 @@ def make_fill(
     return Fill(
         fill_id=fill_id,
         order_id=f"order-{fill_id}",
+        strategy_id="strategy-futures",
         portfolio_id="futures",
         timestamp=timestamp,
         instrument="A",

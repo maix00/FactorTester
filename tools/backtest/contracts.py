@@ -66,14 +66,15 @@ class PortfolioIntent:
     """Strategy output. Execution engines own order and fill generation."""
 
     timestamp: pd.Timestamp
+    strategy_id: str
     portfolio_id: str
     target_kind: TargetKind
     values: np.ndarray
     instruments: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.portfolio_id:
-            raise ValueError("portfolio_id must not be empty")
+        if not self.strategy_id or not self.portfolio_id:
+            raise ValueError("strategy_id and portfolio_id must not be empty")
         values = np.asarray(self.values, dtype=float)
         if values.ndim not in (1, 2) or values.shape[-1] != len(self.instruments):
             raise ValueError("intent values must end with the instrument axis")
@@ -90,6 +91,7 @@ class OrderSide(str, Enum):
 @dataclass(frozen=True, slots=True)
 class Order:
     order_id: str
+    strategy_id: str
     portfolio_id: str
     timestamp: pd.Timestamp
     instrument: str
@@ -99,6 +101,7 @@ class Order:
     def __post_init__(self) -> None:
         if (
             not self.order_id
+            or not self.strategy_id
             or not self.portfolio_id
             or not self.instrument
             or self.quantity <= 0
@@ -110,6 +113,7 @@ class Order:
 class Fill:
     fill_id: str
     order_id: str
+    strategy_id: str
     portfolio_id: str
     timestamp: pd.Timestamp
     instrument: str
