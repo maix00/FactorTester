@@ -1,11 +1,20 @@
 import pandas as pd
 import pytest
 
-from sources.LocalCNFutures.GenerateMain import (
+from sources.LocalCNFutures.scripts.generate_main import (
     BACKWARD_BASE_DATE_COL,
     generate_main_contract_series,
     preprocess_minute_data,
 )
+from sources.LocalCNFutures.contract_files import resolve_contract_parquet_path
+
+
+def test_generate_main_resolves_legacy_contract_file(tmp_path):
+    alias = "DCE|F|BZ|2603"
+    legacy_path = tmp_path / f"{alias}.parquet"
+    legacy_path.touch()
+
+    assert resolve_contract_parquet_path(tmp_path, alias) == legacy_path
 
 
 def _minute_frame(uid: str, start: str) -> pd.DataFrame:
@@ -36,7 +45,7 @@ def test_preprocess_minute_data_appends_changed_raw_files(tmp_path):
     _minute_frame(uid, "2026-01-05 09:01").to_parquet(raw_dir / "m202601.parquet", index=False)
     preprocess_minute_data(str(raw_dir), str(product_dir), force_rebuild=False)
 
-    out_path = product_dir / f"{uid}.parquet"
+    out_path = resolve_contract_parquet_path(product_dir, uid)
     first = pd.read_parquet(out_path)
     assert len(first) == 2
 

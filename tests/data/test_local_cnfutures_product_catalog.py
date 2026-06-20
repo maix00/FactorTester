@@ -7,6 +7,7 @@ from sources.LocalCNFutures.product_catalog import (
     DISCOVERED_TABLE,
     PRODUCTS_VIEW,
     SECTORS_TABLE,
+    OBSERVED_SESSIONS_TABLE,
     load_product_catalog,
     sync_product_catalog,
 )
@@ -23,7 +24,18 @@ SECTOR_COLUMNS = [
 def _build_data_dir(root: Path) -> None:
     (root / "main_mink").mkdir()
     (root / "main_dayk").mkdir()
-    (root / "main_mink" / "BZ.DCE.parquet").touch()
+    minute_rows = []
+    for day in pd.date_range("2026-01-05", periods=2, freq="B"):
+        for start, end in [("09:00", "10:15"), ("10:30", "11:30"), ("13:30", "15:00"), ("21:00", "23:00")]:
+            minute_rows.extend(
+                {"trade_time": ts, "trading_day": day}
+                for ts in pd.date_range(
+                    pd.Timestamp(f"{day.date()} {start}") + pd.Timedelta(minutes=1),
+                    pd.Timestamp(f"{day.date()} {end}"),
+                    freq="1min",
+                )
+            )
+    pd.DataFrame(minute_rows).to_parquet(root / "main_mink" / "BZ.DCE.parquet", index=False)
     (root / "main_dayk" / "BZ.DCE.parquet").touch()
     (root / "main_mink" / "A.DCE.parquet").touch()
     (root / "main_mink" / "A_S.DCE.parquet").touch()
@@ -51,6 +63,9 @@ def test_catalog_keeps_data_product_without_sector_metadata(tmp_path: Path):
     assert bz["_has_min1"] == 1
     assert bz["_has_day1"] == 1
     assert pd.isna(bz["类别"])
+    assert bz["日盘时间"] == "09:00-10:15, 10:30-11:30, 13:30-15:00"
+    assert bz["夜盘时间"] == "21:00-23:00"
+    assert bz["_session_source"] == "observed"
     assert "WIND_ONLY.DCE" not in set(catalog["_product_name"])
 
 
@@ -73,7 +88,11 @@ def test_catalog_sync_is_idempotent_and_sectors_are_stored(tmp_path: Path):
         products_count = conn.execute(
             f'SELECT COUNT(*) FROM "{PRODUCTS_VIEW}"'
         ).fetchone()[0]
+        observed_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{OBSERVED_SESSIONS_TABLE}"'
+        ).fetchone()[0]
 
     assert discovered_count == 2
     assert sectors_count == 1
     assert products_count == 2
+    assert observed_count == 1

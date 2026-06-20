@@ -9,11 +9,16 @@ import pandas as pd
 
 from scripts.data_dir import CACHE_DB_PATH, DATA_DIR
 from tools.data.sqlite.db import connect_sqlite, replace_dataframe
+from sources.LocalCNFutures.trading_sessions import (
+    infer_trading_sessions_from_parquet,
+    sessions_to_record,
+)
 
 
 DISCOVERED_TABLE = "src_local_cnfutures_discovered_products"
 SECTORS_TABLE = "src_local_cnfutures_sectors"
 PRODUCTS_VIEW = "local_cnfutures_products"
+OBSERVED_SESSIONS_TABLE = "src_local_cnfutures_observed_sessions"
 
 _EXCHANGE_TO_SECTOR_CODE = {
     "DCE": "DCE",
@@ -120,6 +125,82 @@ def _load_sectors(path: Path) -> pd.DataFrame:
     return frame.loc[:, list(_SECTOR_COLUMNS)]
 
 
+def _empty_observed_sessions() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "product_name",
+        "observed_day_sessions",
+        "observed_night_session",
+        "observed_days",
+        "source_mtime_ns",
+        "inferred_at",
+    ])
+
+
+def _load_observed_sessions(db_path: str | Path) -> pd.DataFrame:
+    with connect_sqlite(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (OBSERVED_SESSIONS_TABLE,),
+        ).fetchone()
+        if exists is None:
+            return _empty_observed_sessions()
+        return pd.read_sql_query(f'SELECT * FROM "{OBSERVED_SESSIONS_TABLE}"', conn)
+
+
+def infer_observed_sessions(
+    *,
+    data_dir: str | Path,
+    discovered: pd.DataFrame,
+    sectors: pd.DataFrame,
+    existing: pd.DataFrame | None = None,
+    product_names: set[str] | None = None,
+    force: bool = False,
+) -> pd.DataFrame:
+    """Infer sessions for missing-metadata products, or explicitly selected products."""
+    root = Path(data_dir)
+    records = {
+        str(row["product_name"]): dict(row)
+        for _, row in (existing if existing is not None else _empty_observed_sessions()).iterrows()
+    }
+    sector_identities = {
+        (str(row["品种代码"]).upper(), str(row["交易所代码"]).upper())
+        for _, row in sectors.iterrows()
+        if pd.notna(row["品种代码"]) and pd.notna(row["交易所代码"])
+    }
+
+    for _, product in discovered.iterrows():
+        name = str(product["product_name"])
+        explicitly_selected = product_names is not None and name in product_names
+        has_sector_metadata = (
+            str(product["product_code"]).upper(),
+            str(product["sector_exchange_code"]).upper(),
+        ) in sector_identities
+        if product_names is not None and not explicitly_selected:
+            continue
+        if product_names is None and has_sector_metadata:
+            continue
+
+        path = root / "main_mink" / f"{name}.parquet"
+        if not path.is_file():
+            continue
+        existing_record = records.get(name)
+        if (
+            not force
+            and existing_record is not None
+            and int(existing_record.get("source_mtime_ns") or 0) == path.stat().st_mtime_ns
+        ):
+            continue
+        try:
+            sessions = infer_trading_sessions_from_parquet(path, product_name=name)
+        except (OSError, ValueError):
+            continue
+        records[name] = sessions_to_record(sessions)
+
+    if not records:
+        return _empty_observed_sessions()
+    return pd.DataFrame(list(records.values()), columns=_empty_observed_sessions().columns)
+
+
 def _create_products_view(conn: sqlite3.Connection) -> None:
     conn.execute(f'DROP VIEW IF EXISTS "{PRODUCTS_VIEW}"')
     conn.execute(
@@ -130,6 +211,13 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
             d.has_min1 AS "_has_min1",
             d.has_day1 AS "_has_day1",
             d.has_wind_mapping AS "_has_wind_mapping",
+            o.observed_day_sessions AS "_observed_day_sessions",
+            o.observed_night_session AS "_observed_night_session",
+            CASE
+                WHEN s."品种代码" IS NOT NULL THEN 'sectors'
+                WHEN o.product_name IS NOT NULL THEN 'observed'
+                ELSE 'unknown'
+            END AS "_session_source",
             COALESCE(s."交易所", d.sector_exchange_code) AS "交易所",
             COALESCE(s."交易所代码", d.sector_exchange_code) AS "交易所代码",
             s."简称" AS "简称",
@@ -141,8 +229,8 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
             s."变动后代码" AS "变动后代码",
             s."代码注" AS "代码注",
             s."集合竞价" AS "集合竞价",
-            s."日盘时间" AS "日盘时间",
-            s."夜盘时间" AS "夜盘时间",
+            COALESCE(s."日盘时间", o.observed_day_sessions) AS "日盘时间",
+            COALESCE(s."夜盘时间", o.observed_night_session) AS "夜盘时间",
             s."合约乘数" AS "合约乘数",
             s."最小跳动" AS "最小跳动",
             s."标准合约上市日" AS "标准合约上市日",
@@ -153,6 +241,8 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
         LEFT JOIN "{SECTORS_TABLE}" AS s
           ON UPPER(TRIM(s."品种代码")) = d.product_code
          AND UPPER(TRIM(s."交易所代码")) = d.sector_exchange_code
+        LEFT JOIN "{OBSERVED_SESSIONS_TABLE}" AS o
+          ON o.product_name = d.product_name
         ORDER BY d.product_name, s."版本"
         '''
     )
@@ -167,9 +257,16 @@ def sync_product_catalog(
     root = Path(data_dir)
     discovered = discover_products(root)
     sectors = _load_sectors(root / "sectors.csv")
+    observed = infer_observed_sessions(
+        data_dir=root,
+        discovered=discovered,
+        sectors=sectors,
+        existing=_load_observed_sessions(db_path),
+    )
     with connect_sqlite(db_path) as conn:
         replace_dataframe(conn, DISCOVERED_TABLE, discovered)
         replace_dataframe(conn, SECTORS_TABLE, sectors)
+        replace_dataframe(conn, OBSERVED_SESSIONS_TABLE, observed)
         conn.execute(
             f'CREATE UNIQUE INDEX IF NOT EXISTS "idx_{DISCOVERED_TABLE}_name" '
             f'ON "{DISCOVERED_TABLE}" (product_name)'
@@ -178,8 +275,39 @@ def sync_product_catalog(
             f'CREATE INDEX IF NOT EXISTS "idx_{SECTORS_TABLE}_identity" '
             f'ON "{SECTORS_TABLE}" ("品种代码", "交易所代码")'
         )
+        conn.execute(
+            f'CREATE UNIQUE INDEX IF NOT EXISTS "idx_{OBSERVED_SESSIONS_TABLE}_name" '
+            f'ON "{OBSERVED_SESSIONS_TABLE}" (product_name)'
+        )
         _create_products_view(conn)
     return str(db_path)
+
+
+def sync_observed_trading_sessions(
+    *,
+    data_dir: str | Path = DATA_DIR,
+    db_path: str | Path = CACHE_DB_PATH,
+    product_names: set[str] | None = None,
+    force: bool = False,
+) -> pd.DataFrame:
+    """Explicitly refresh observed sessions and rebuild the canonical view."""
+    root = Path(data_dir)
+    discovered = discover_products(root)
+    sectors = _load_sectors(root / "sectors.csv")
+    observed = infer_observed_sessions(
+        data_dir=root,
+        discovered=discovered,
+        sectors=sectors,
+        existing=_load_observed_sessions(db_path),
+        product_names=product_names,
+        force=force,
+    )
+    with connect_sqlite(db_path) as conn:
+        replace_dataframe(conn, DISCOVERED_TABLE, discovered)
+        replace_dataframe(conn, SECTORS_TABLE, sectors)
+        replace_dataframe(conn, OBSERVED_SESSIONS_TABLE, observed)
+        _create_products_view(conn)
+    return observed
 
 
 def load_product_catalog(

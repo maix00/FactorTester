@@ -17,11 +17,12 @@ from tqdm import tqdm
 
 # 直接运行时将项目根加入 sys.path，确保 scripts 等顶层包可导入
 if __package__ in (None, ""):
-    _root = Path(__file__).resolve().parents[2]
+    _root = Path(__file__).resolve().parents[3]
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
 from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures.contract_files import portable_contract_filename, resolve_contract_parquet_path
 
 CONTRACT_MAPPING_PATH = os.path.join(DATA_DIR, 'wind_mapping.parquet')
 CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(DATA_DIR, 'wind_mapping_truncated.parquet')
@@ -79,8 +80,7 @@ def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_r
     print(f"Preprocessing {len(files_to_process)} / {len(raw_files)} minute parquet files...")
 
     def _write_uid_group(uid: str, group: pd.DataFrame) -> None:
-        safe_uid = uid.replace('|', '_')  # Windows 禁止 | 在文件名中
-        out_path = os.path.join(minute_product_dir, f"{safe_uid}.parquet")
+        out_path = os.path.join(minute_product_dir, portable_contract_filename(uid))
         group = group.drop_duplicates(subset='trade_timestamp').sort_values('trade_timestamp')
         if os.path.exists(out_path):
             existing = pd.read_parquet(out_path)
@@ -169,8 +169,7 @@ def preprocess_minute_data_stream(minute_raw_dir: str, minute_product_dir: str,
 
     def _flush(uid: str) -> None:
         """将缓冲区数据写入磁盘，同一 uid 只写 1 次（无需读回）。"""
-        safe_uid = uid.replace('|', '_')
-        out_path = os.path.join(minute_product_dir, f"{safe_uid}.parquet")
+        out_path = os.path.join(minute_product_dir, portable_contract_filename(uid))
         combined = pd.concat(buffer[uid], ignore_index=True)
         combined = combined.drop_duplicates(subset='trade_timestamp') \
                            .sort_values('trade_timestamp')
@@ -325,8 +324,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             return np.nan, np.nan, pd.DataFrame(), None, pd.DataFrame()
 
         def load_contract_data_mink(uid: str, start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:
-            safe_uid = uid.replace('|', '_')  # 对齐 preprocess_minute_data_stream 的文件名（Windows 禁止 |）
-            file_path = os.path.join(minute_data_preprocessed_dir, f"{safe_uid}.parquet")
+            file_path = str(resolve_contract_parquet_path(minute_data_preprocessed_dir, uid))
             if not os.path.exists(file_path):
                 return pd.DataFrame(columns=['trading_day', 'close_price', 'trade_time'])
             lookback_start = start_date - pd.Timedelta(days=60)

@@ -6,6 +6,7 @@ from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from scripts.data_dir import DATA_DIR
 from sources.LocalCNFutures.product_catalog import load_product_catalog
+from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
 
 _data = load_product_catalog()
 data_dir_min = os.path.join(DATA_DIR, 'main_mink')
@@ -290,14 +291,7 @@ from tools.products.Product import Product
 
 def _contract_data_path(folder: str, alias: str) -> str:
     """Resolve both Windows-safe and legacy contract parquet filenames."""
-    safe_path = os.path.join(folder, f"{alias.replace('|', '_')}.{data_type}")
-    if os.path.isfile(safe_path):
-        return safe_path
-
-    legacy_path = os.path.join(folder, f"{alias}.{data_type}")
-    if os.path.isfile(legacy_path):
-        return legacy_path
-    return safe_path
+    return str(resolve_contract_parquet_path(folder, alias))
 
 
 def get_all_futures_contract() -> List[Product]:
@@ -322,9 +316,7 @@ def get_all_futures_contract() -> List[Product]:
     contract_list = []
     for file_path in os.listdir(data_dir_min):
         if file_path.endswith('.' + data_type):
-            code = file_path.split('.')[0]
-            # New datasets use Windows-safe names; legacy macOS datasets retain pipes.
-            raw_name = code if '|' in code else code.replace('_', '|')
+            raw_name = contract_alias_from_path(file_path)
             contract = CNFuturesContract(name=raw_name)
             contract_list.append(contract)
     return contract_list
@@ -427,10 +419,20 @@ for product in CNFUTURES:
     )
     day_time = get_by_code_and_version(product.code, product.version, day_time_col_name)
     night_time = get_by_code_and_version(product.code, product.version, night_time_col_name)
-    if day_time is None and night_time is None:
+    if product.version is None:
+        catalog_rows = _data[_data['_product_name'].astype(str) == product.alias]
+        catalog_row = catalog_rows.iloc[0] if not catalog_rows.empty else None
+        if catalog_row is not None:
+            day_time = catalog_row.get(day_time_col_name)
+            night_time = catalog_row.get(night_time_col_name)
+    day_text = _text_or_default(day_time, "")
+    night_text = _text_or_default(night_time, "")
+    if not day_text and not night_text:
         CNFUTURES_CATEGORY_DAYNIGHT[product] = "未知"
+    elif night_text:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_text},{night_text}"
     else:
-        CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_time},{night_time}"
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = day_text
 
 from tools.products.categories.Category import Category
 
@@ -451,20 +453,20 @@ CNFuturesDayNightTimeCategory._whether_is_in_category = lambda catname, obj: cat
 CNFuturesDayNightTimeCategory.objs = CNFUTURES
 
 def get_value_alias_for_day_night_time_category(x: str) -> str:
-    """將日夜盘时段描述字符串转换为简短别名（如 '夜盘2'），用于分类显示。"""
-    if '15:15' in x:
-        return '日盘2'
-    if '09:30' in x:
-        return '日盘3'
+    """先按夜盘存在性分流，再细分日盘或夜盘时间段。"""
     if '23:00' in x:
         return '夜盘1'
     if '01:00' in x:
         return '夜盘2'
     if '02:30' in x:
         return '夜盘3'
-    if '21:00' not in x:
-        return '日盘'
-    return x
+    if '21:00' in x:
+        return x
+    if '15:15' in x:
+        return '日盘2'
+    if '09:30' in x:
+        return '日盘3'
+    return '日盘'
 CNFuturesDayNightTimeCategory.get_value_alias = get_value_alias_for_day_night_time_category
 
 CNFuturesSectorNightTimeCategory = CNFuturesSectorCategory * CNFuturesDayNightTimeCategory
