@@ -16,6 +16,7 @@ from tools.data.sqlite.factor_source_workspace_settings import (
     save_factor_source_workspace_settings,
 )
 from tools.data.factor_workspace import storage as factor_workspace_storage
+from scripts.data_dir import get_feat_root
 
 
 def _workspace_root(username: str) -> str:
@@ -123,7 +124,8 @@ def _install_git_autosync_hooks(root: str, username: str) -> list[str]:
     git_dir = _git_dir(root)
     if not git_dir:
         return []
-    code_repo_root = str(Path(__file__).resolve().parents[3])
+    # Hooks outlive issue worktrees, so they must target the stable feat root.
+    code_repo_root = get_feat_root()
     script_path = Path(code_repo_root) / "scripts" / "factor_workspace_autosync.py"
     if not script_path.exists():
         return []

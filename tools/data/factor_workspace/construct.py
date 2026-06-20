@@ -12,15 +12,9 @@ from typing import Any
 
 from tools.data.factor_workspace import storage as factor_workspace_storage
 from tools.data.tech_docs import scan_tool_files
-from tools.decorators.factor_workspace import (
-    collect_factor_workspace_import_dependencies,
-    extract_factor_workspace_exports,
-    has_factor_workspace_decorator,
-)
+from tools.decorators.factor_workspace import extract_factor_workspace_exports, has_factor_workspace_decorator
 
-from .git import get_factor_workspace_git_state, materialize_factor_workspace_branches
-
-from .pre import WorkspaceSourceSpec, collect_workspace_architecture
+from .sdk import AUTHOR_SDK_MODULES
 
 
 def _workspace_root(username: str) -> str:
@@ -134,6 +128,11 @@ def _decorator_to_source(decorator: ast.expr) -> str | None:
     return None
 
 
+def _is_authoring_marker(decorator: ast.expr) -> bool:
+    name = _decorator_to_source(decorator)
+    return name in {"factor_workspace", "tech_docs"}
+
+
 def _is_factor_workspace_flag(node: ast.expr) -> bool:
     return isinstance(node, ast.Name) and node.id == "FACTOR_WORKSPACE"
 
@@ -230,7 +229,7 @@ def _collect_instance_attrs(class_node: ast.ClassDef) -> dict[str, str]:
     return attrs
 
 
-def _render_stub_module(source: str, filename: str, *, workspace_header_import_names: set[str] | None = None) -> str:
+def _render_stub_module(source: str, filename: str, *, explicit_author_api: bool = False) -> str:
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -246,7 +245,6 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
     source_lines = source.splitlines()
     workspace_exports = None
     needed_names: set[str] = set()
-    workspace_header_import_names = workspace_header_import_names or set()
 
     # Collect decorator-driven exports from the source file itself.
     for node in tree.body:
@@ -255,7 +253,8 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
                 workspace_exports = extract_factor_workspace_exports(tree)
                 break
 
-    needed_names = collect_factor_workspace_import_dependencies(tree, workspace_exports)
+    if workspace_exports is not None:
+        needed_names.update(workspace_exports)
     header_import_nodes = _collect_factor_workspace_header_imports(tree)
     header_import_node_ids = {id(node) for node in header_import_nodes}
 
@@ -265,6 +264,8 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
     def _render_import_from(node: ast.ImportFrom) -> str | None:
         aliases = []
         for alias in node.names:
+            if alias.name in {"factor_workspace", "tech_docs"}:
+                continue
             local_name = _import_alias_name(alias)
             imported_name = alias.name.rsplit(".", 1)[-1]
             if local_name in needed_names or imported_name in needed_names:
@@ -276,12 +277,6 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
 
     for node in tree.body:
         if id(node) in header_import_node_ids:
-            comment_block = _comment_block_before(source_lines, getattr(node, "lineno", 1))
-            _append_comment_block(lines, comment_block)
-            if isinstance(node, ast.Import):
-                lines.append(ast.unparse(node))
-            elif isinstance(node, ast.ImportFrom):
-                lines.append(ast.unparse(node))
             continue
         comment_block = _comment_block_before(source_lines, getattr(node, "lineno", 1))
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -291,7 +286,7 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
                 aliases = [
                     alias
                     for alias in node.names
-                    if _import_alias_name(alias) in needed_names or _import_alias_name(alias) in workspace_header_import_names
+                    if _import_alias_name(alias) in needed_names
                 ]
                 if not aliases:
                     continue
@@ -323,9 +318,11 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
                 _append_comment_block(lines, comment_block)
                 lines.append(f"{node.target.id}: {_annotation_to_source(node.annotation)}")
         elif isinstance(node, ast.FunctionDef):
+            if explicit_author_api and not has_factor_workspace_decorator(node) and (workspace_exports is None or node.name not in workspace_exports):
+                continue
             if workspace_exports is not None and node.name not in workspace_exports and not has_factor_workspace_decorator(node):
                 continue
-            decorators = [_decorator_to_source(dec) for dec in node.decorator_list]
+            decorators = [_decorator_to_source(dec) for dec in node.decorator_list if not _is_authoring_marker(dec)]
             decorators = [item for item in decorators if item]
             _append_comment_block(lines, comment_block)
             for decorator in decorators:
@@ -334,6 +331,8 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
             return_annotation = "None" if node.name == "__init__" else (_annotation_to_source(node.returns) if node.returns is not None else "Any")
             lines.append(f"def {node.name}({signature}) -> {return_annotation}: ...")
         elif isinstance(node, ast.ClassDef):
+            if explicit_author_api and not has_factor_workspace_decorator(node) and (workspace_exports is None or node.name not in workspace_exports):
+                continue
             if workspace_exports is not None and node.name not in workspace_exports and not has_factor_workspace_decorator(node):
                 continue
             bases = []
@@ -345,6 +344,8 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
             base_expr = f"({', '.join(bases)})" if bases else ""
             _append_comment_block(lines, comment_block)
             for decorator in node.decorator_list:
+                if _is_authoring_marker(decorator):
+                    continue
                 decorator_source = _decorator_to_source(decorator)
                 if decorator_source:
                     lines.append(f"@{decorator_source}")
@@ -362,7 +363,7 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
                 elif isinstance(child, ast.FunctionDef):
                     if not has_factor_workspace_decorator(child):
                         continue
-                    decorators = [_decorator_to_source(dec) for dec in child.decorator_list]
+                    decorators = [_decorator_to_source(dec) for dec in child.decorator_list if not _is_authoring_marker(dec)]
                     decorators = [item for item in decorators if item]
                     for decorator in decorators:
                         class_lines.append(f"@{decorator}")
@@ -375,10 +376,27 @@ def _render_stub_module(source: str, filename: str, *, workspace_header_import_n
         elif isinstance(node, ast.If):
             if _is_factor_workspace_flag(node.test):
                 for child in node.body:
-                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                    rendered_import = None
+                    if isinstance(child, ast.ImportFrom):
+                        aliases = [
+                            alias for alias in child.names
+                            if alias.name not in {"factor_workspace", "tech_docs"}
+                        ]
+                        if aliases:
+                            rendered_import = ast.unparse(
+                                ast.ImportFrom(module=child.module, names=aliases, level=child.level)
+                            )
+                    elif isinstance(child, ast.Import):
+                        aliases = [
+                            alias for alias in child.names
+                            if _import_alias_name(alias) not in {"factor_workspace", "tech_docs"}
+                        ]
+                        if aliases:
+                            rendered_import = ast.unparse(ast.Import(names=aliases))
+                    if rendered_import:
                         child_comment_block = _comment_block_before(source_lines, getattr(child, "lineno", 1))
                         _append_comment_block(lines, child_comment_block)
-                        lines.append(ast.unparse(child))
+                        lines.append(rendered_import)
                 continue
             continue
 
@@ -459,37 +477,21 @@ def _sync_tools_index(root: str) -> bool:
 
 
 def _sync_tools_sdk(root: str) -> bool:
-    source_root = _source_tools_dir()
     workspace_root = _workspace_tools_dir(root)
     touched = False
     expected_files: set[str] = set()
 
-    for spec in collect_workspace_architecture():
-        if spec.relative_path == "Settings.py":
-            continue
-        source_path = spec.source_path
-        rel_path = spec.relative_path
-        workspace_rel_path = rel_path[len("tools/"):] if rel_path.startswith("tools/") else rel_path
-        dest_rel_path = workspace_rel_path[:-3] + ".pyi"
-        expected_files.add(os.path.join("tools", dest_rel_path))
-        dest_path = os.path.join(workspace_root, dest_rel_path)
-        with open(source_path, "r", encoding="utf-8") as file:
-            source_code = file.read()
-        stub_code = _render_stub_module(
-            source_code,
-            rel_path,
-            workspace_header_import_names=set(spec.factor_workspace_import_names),
-        )
+    repo_root = Path(__file__).resolve().parents[3]
+    for module in AUTHOR_SDK_MODULES:
+        expected_files.add(module.destination)
+        dest_path = os.path.join(root, module.destination)
+        if module.content is not None:
+            stub_code = module.content
+        else:
+            source_path = repo_root / str(module.source)
+            source_code = source_path.read_text(encoding="utf-8")
+            stub_code = _render_stub_module(source_code, str(module.source), explicit_author_api=True)
         if _write_text_if_changed(dest_path, stub_code):
-            touched = True
-
-    settings_source = Path(__file__).resolve().parents[3] / "Settings.py"
-    if settings_source.exists():
-        settings_dest = os.path.join(root, "Settings.pyi")
-        expected_files.add("Settings.pyi")
-        with open(settings_source, "r", encoding="utf-8") as file:
-            source_code = file.read()
-        if _write_text_if_changed(settings_dest, _render_stub_module(source_code, "Settings.py")):
             touched = True
 
     for current_root, dirs, filenames in os.walk(workspace_root):
@@ -544,18 +546,26 @@ def _sync_vscode_settings(root: str) -> bool:
 
 def build_factor_workspace(username: str) -> dict[str, Any]:
     from .sync import sync_database_to_workspace
+    from .repository import FactorWorkspaceRepository
 
     result = sync_database_to_workspace(username, branch_mode="auto", clear_existing=True)
     git_info = result.get("git") or {}
     if git_info.get("git_enabled"):
-        root = result.get("workspace_root") or _workspace_root(username)
-        from .git import _git_commit_all
-
-        commit_sha = _git_commit_all(str(root), "chore: rebuild factor workspace")
+        repository = FactorWorkspaceRepository(username)
+        commit_sha = repository.commit("chore: rebuild factor workspace")
         if commit_sha:
-            created_branches = materialize_factor_workspace_branches(str(root), username)
+            created_branches = repository.materialize_branches()
             result["git_commit_sha"] = commit_sha
             if created_branches:
                 result["git_created_branches"] = created_branches
-            result["git"] = git_info = get_factor_workspace_git_state(username)
+        result["git"] = repository.state()
+        result["git_selected_branch"] = result["git"].get("git_current_branch", "")
+        manifest_path = os.path.join(repository.root, ".factor_workspace", "manifest.json")
+        manifest = {}
+        if os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as file:
+                manifest = json.load(file)
+        manifest["git"] = result["git"]
+        manifest["git_selected_branch"] = result["git_selected_branch"]
+        _write_json(manifest_path, manifest)
     return result
