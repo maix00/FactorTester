@@ -194,6 +194,10 @@ def get_price_data():
     product_name = data.get('product_name')
     contract_uid = data.get('contract_uid')
     adjusted = data.get('adjusted', False)
+    series_variant = str(
+        data.get('series_variant')
+        or ('primary_adjusted' if adjusted else 'primary_raw')
+    )
     freq_str = data.get('freq', 'DAY1')
     data_source_alias = data.get('data_source')
     start_date = data.get('start_date')
@@ -308,6 +312,18 @@ def get_price_data():
 
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
+        series_refs = {
+            ref.variant: ref
+            for ref in getattr(product, "get_series_variants", lambda: [])()
+        }
+        series_ref = series_refs.get(series_variant)
+        if series_ref is None:
+            return jsonify({'success': False, 'error': f'品种不支持序列: {series_variant}'}), 400
+        adjusted = bool(series_ref.adjusted)
+        if series_ref.backing_product_name != product_name:
+            backing = type(product)(series_ref.backing_product_name)
+            backing.desc = getattr(product, 'desc', product_name)
+            product = backing
         supports_adjusted = _supports_adjusted_price(product)
         adjusted = bool(adjusted and supports_adjusted)
 
@@ -453,6 +469,7 @@ def get_price_data():
             'product_type': 'futures' if isinstance(product, Futures) else 'product',
             'is_term_contract': False,
             'adjusted': adjusted,
+            'series_variant': series_variant,
             'supports_adjusted': supports_adjusted,
             'supports_term_structure': supports_term_structure,
             'freq': freq.name if hasattr(freq, 'name') else str(freq),

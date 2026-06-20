@@ -292,3 +292,10 @@ class Product(UniqueNameObject):
     def if_time_is_in_data(self, time: Any) -> bool:
         slice = self.get_slices(time_col=self.get_current_freq().name, time_range=time)
         return not slice.empty
+    def get_series_variants(self):
+        from tools.products.series import ProductSeriesRef
+
+        variants = [ProductSeriesRef(self, "primary_raw", "主序列 · 原始", self.name)]
+        if self.supports_adjusted_price():
+            variants.append(ProductSeriesRef(self, "primary_adjusted", "主序列 · 平滑复权", self.name, adjusted=True))
+        return variants

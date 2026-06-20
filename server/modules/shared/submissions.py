@@ -115,6 +115,7 @@ def get_products():
     # 叶节点 checkbox 默认 True，可通过 ?checkbox=false 关闭
     leaf_checkbox = request.args.get('checkbox', 'true').lower() != 'false'
     include_volume_stats = request.args.get('include_volume_stats', 'false').lower() == 'true'
+    include_series_variants = request.args.get('series_variants', 'false').lower() == 'true'
     from server.modules.shared.price_services import cached_product_tree
     search_tree = cached_product_tree().tree
     node_path = original_path[:-10] if original_path.endswith('/_products') else original_path
@@ -143,6 +144,27 @@ def get_products():
             'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
             'fields':       product_public_fields(prod),
         }
+        if include_series_variants and not is_contract:
+            variants = list(getattr(prod, "get_series_variants", lambda: [])())
+            node_data.update({
+                'folder': True,
+                'children': [
+                    {
+                        'title': ref.label,
+                        'key': f"{original_path}/{prod_id}/_series/{ref.variant}",
+                        'checkbox': False,
+                        'folder': False,
+                        'lazy': False,
+                        'extraClasses': 'product-node series-variant-node',
+                        'desc': ref.label,
+                        'product_name': prod_name,
+                        'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
+                        'series_variant': ref.variant,
+                        'adjusted': ref.adjusted,
+                    }
+                    for ref in variants
+                ],
+            })
         if is_contract:
             node_data['product_type'] = 'contract'
             node_data['contract_uid'] = prod_name
