@@ -589,21 +589,31 @@
                 apply: function(gs, ctx) {
                     var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
                     var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
+                    var remappedCount = 0;
+                    var unmappedCount = 0;
                     if (working && working.groups) {
                         var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
                         var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
                         working.groups.forEach(function(g) {
                             if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
                                 g.testerId = oldToNew[String(g.testerId)];
+                                remappedCount++;
                             } else if (g.testerId && fallbackNewId) {
                                 g.testerId = fallbackNewId;
+                                remappedCount++;
+                            } else if (g.testerId) {
+                                unmappedCount++;
                             }
                         });
+                        if (unmappedCount > 0) {
+                            console.warn('[global_template] group_settings: ' + unmappedCount + ' groups have unmapped testerId (oldToNew keys: ' + Object.keys(oldToNew).length + ', fallback: ' + (fallbackNewId || 'none') + ')');
+                        }
                     }
                     var applyResult = base.apply(working);
                     if (applyResult.errors && applyResult.errors.length > 0) {
                         console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                     }
+                    console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups, ' + remappedCount + ' remapped');
                     if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
                         GT.tabs.mountTab('list');
                     }
@@ -702,10 +712,14 @@
         if (subsEntry) {
             applyResult = await subsEntry.apply(subs, ctx);
         }
-        if (applyResult && applyResult.oldToNewTesterId) {
+        if (applyResult && applyResult.oldToNewTesterId && Object.keys(applyResult.oldToNewTesterId).length > 0) {
             ctx.oldToNewTesterId = applyResult.oldToNewTesterId;
             return;
         }
+
+        // apply 返回了空的 oldToNewTesterId 映射（submissions 重建可能失败），
+        // 回到兜底逻辑按位置/product_group 匹配
+        console.warn('[global_template] submissions apply returned empty oldToNewTesterId, falling back to position/label matching');
 
         // 构建 oldTesterId → newTesterId 映射
         // 优先按数组位置，兜底按 product_group/label 匹配

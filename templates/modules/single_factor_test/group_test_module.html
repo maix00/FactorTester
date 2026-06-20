@@ -1276,7 +1276,7 @@
         _loadPromise = _loadAllScripts().then(function() {
             _loaded = true;
             // 注册 GT snapshot 适配器 + 初始化依赖模块
-            if (typeof _ensureGroupTestAdapters === 'function') _ensureGroupTestAdapters();
+            if (typeof window._ensureGroupTestAdapters === 'function') window._ensureGroupTestAdapters();
             if (window.GroupTest && typeof window.GroupTest.initDeferred === 'function') {
                 window.GroupTest.initDeferred();
             }
