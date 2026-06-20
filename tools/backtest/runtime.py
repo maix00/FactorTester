@@ -18,6 +18,8 @@ class EventTopic(str, Enum):
     MARKET_SLICE_CLOSED = "market.slice_closed"
     FACTOR_SIGNAL = "factor.signal"
     PORTFOLIO_INTENT = "portfolio.intent"
+    PORTFOLIO_APPROVED = "portfolio.approved"
+    PORTFOLIO_REJECTED = "portfolio.rejected"
     ORDER_SUBMITTED = "order.submitted"
     ORDER_ACCEPTED = "order.accepted"
     ORDER_REJECTED = "order.rejected"
