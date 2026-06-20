@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -64,8 +65,22 @@ class SignalStrategy:
         return EventDraft(EventTopic.PORTFOLIO_INTENT, event.timestamp, intent)
 
 
+@dataclass(frozen=True, slots=True)
+class AccountingDelta:
+    cash_minor: int = 0
+    margin_minor: int = 0
+    realized_pnl_minor: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementPrices:
+    prices: Mapping[str, float]
+
+
 class FillAccounting(Protocol):
-    def cash_delta_minor(self, fill: Fill) -> int: ...
+    def process_fill(self, fill: Fill) -> AccountingDelta: ...
+
+    def process_settlement(self, settlement: SettlementPrices) -> AccountingDelta: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +90,7 @@ class CashAccounting:
     minor_per_major: int = 100
     point_values: Mapping[str, float] | None = None
 
-    def cash_delta_minor(self, fill: Fill) -> int:
+    def process_fill(self, fill: Fill) -> AccountingDelta:
         point_value = 1.0
         if self.point_values is not None:
             point_value = self.point_values[fill.instrument]
@@ -83,8 +98,127 @@ class CashAccounting:
             fill.quantity * fill.price * point_value * self.minor_per_major
         )
         if fill.side == OrderSide.BUY:
-            return -notional_minor - fill.fee_minor
-        return notional_minor - fill.fee_minor
+            return AccountingDelta(cash_minor=-notional_minor - fill.fee_minor)
+        return AccountingDelta(cash_minor=notional_minor - fill.fee_minor)
+
+    def process_settlement(self, settlement: SettlementPrices) -> AccountingDelta:
+        return AccountingDelta()
+
+
+@dataclass(frozen=True, slots=True)
+class FuturesContractSpec:
+    point_value: float
+    margin_ratio: float
+    lot_size: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.point_value <= 0 or not 0 < self.margin_ratio <= 1 or self.lot_size <= 0:
+            raise ValueError("invalid futures contract specification")
+
+
+class FuturesLotBook:
+    """FIFO lots marked in base-currency minor units per contract."""
+
+    def __init__(self) -> None:
+        self._lots: deque[list[float | int]] = deque()
+
+    @property
+    def quantity(self) -> float:
+        return sum(float(lot[0]) for lot in self._lots)
+
+    def open(self, quantity: float, mark_minor: int) -> None:
+        if quantity <= 0 or mark_minor <= 0:
+            raise ValueError("lot quantity and mark must be positive")
+        self._lots.append([float(quantity), int(mark_minor)])
+
+    def close(self, quantity: float, mark_minor: int, margin_ratio: float) -> tuple[int, int]:
+        if quantity <= 0 or quantity > self.quantity + 1e-12:
+            raise ValueError("cannot close more futures quantity than is open")
+        remaining = float(quantity)
+        realized = 0
+        released_margin = 0
+        while remaining > 1e-12:
+            lot_quantity = float(self._lots[0][0])
+            lot_mark = int(self._lots[0][1])
+            taken = min(lot_quantity, remaining)
+            realized += round(taken * (mark_minor - lot_mark))
+            released_margin += round(taken * lot_mark * margin_ratio)
+            lot_quantity -= taken
+            remaining -= taken
+            if lot_quantity <= 1e-12:
+                self._lots.popleft()
+            else:
+                self._lots[0][0] = lot_quantity
+        return realized, released_margin
+
+    def settle(self, mark_minor: int, margin_ratio: float) -> tuple[int, int]:
+        pnl = 0
+        margin_delta = 0
+        for lot in self._lots:
+            quantity = float(lot[0])
+            old_mark = int(lot[1])
+            pnl += round(quantity * (mark_minor - old_mark))
+            margin_delta += round(quantity * (mark_minor - old_mark) * margin_ratio)
+            lot[1] = mark_minor
+        return pnl, margin_delta
+
+
+class FuturesAccounting:
+    """FIFO futures accounting with margin release and daily settlement."""
+
+    def __init__(
+        self,
+        specs: Mapping[str, FuturesContractSpec],
+        *,
+        minor_per_major: int = 100,
+    ) -> None:
+        self.specs = dict(specs)
+        self.minor_per_major = minor_per_major
+        self.books = {instrument: FuturesLotBook() for instrument in specs}
+
+    def process_fill(self, fill: Fill) -> AccountingDelta:
+        spec = self.specs[fill.instrument]
+        self._require_lot_size(fill.quantity, spec.lot_size)
+        mark_minor = round(fill.price * spec.point_value * self.minor_per_major)
+        book = self.books[fill.instrument]
+        if fill.side == OrderSide.BUY:
+            margin = round(fill.quantity * mark_minor * spec.margin_ratio)
+            book.open(fill.quantity, mark_minor)
+            return AccountingDelta(
+                cash_minor=-margin - fill.fee_minor,
+                margin_minor=margin,
+            )
+        realized, released_margin = book.close(
+            fill.quantity, mark_minor, spec.margin_ratio
+        )
+        return AccountingDelta(
+            cash_minor=released_margin + realized - fill.fee_minor,
+            margin_minor=-released_margin,
+            realized_pnl_minor=realized,
+        )
+
+    def process_settlement(self, settlement: SettlementPrices) -> AccountingDelta:
+        pnl = 0
+        margin_delta = 0
+        for instrument, price in settlement.prices.items():
+            spec = self.specs[instrument]
+            mark_minor = round(price * spec.point_value * self.minor_per_major)
+            instrument_pnl, instrument_margin_delta = self.books[instrument].settle(
+                mark_minor, spec.margin_ratio
+            )
+            pnl += instrument_pnl
+            margin_delta += instrument_margin_delta
+        return AccountingDelta(
+            cash_minor=pnl - margin_delta,
+            margin_minor=margin_delta,
+            realized_pnl_minor=pnl,
+        )
+
+    @staticmethod
+    def _require_lot_size(quantity: float, lot_size: float) -> None:
+        lots = quantity / lot_size
+        if not np.isclose(lots, round(lots)):
+            raise ValueError(f"quantity {quantity} is not a multiple of lot size {lot_size}")
 
 
 class Ledger:
@@ -101,6 +235,8 @@ class Ledger:
             raise ValueError("initial cash must be non-negative")
         self.portfolio_id = portfolio_id
         self.cash_minor = initial_cash_minor
+        self.margin_minor = 0
+        self.realized_pnl_minor = 0
         self.positions = {instrument: 0.0 for instrument in instruments}
         self.accounting = accounting
         self.fills: list[Fill] = []
@@ -112,9 +248,25 @@ class Ledger:
         if fill.portfolio_id != self.portfolio_id:
             return
         sign = 1.0 if fill.side == OrderSide.BUY else -1.0
+        delta = self.accounting.process_fill(fill)
         self.positions[fill.instrument] += sign * fill.quantity
-        self.cash_minor += self.accounting.cash_delta_minor(fill)
+        self.cash_minor += delta.cash_minor
+        self.margin_minor += delta.margin_minor
+        self.realized_pnl_minor += delta.realized_pnl_minor
         self.fills.append(fill)
+
+    @property
+    def equity_minor(self) -> int:
+        return self.cash_minor + self.margin_minor
+
+    def on_settlement(self, event: EventEnvelope, runtime: EventRuntime) -> None:
+        settlement = event.payload
+        if not isinstance(settlement, SettlementPrices):
+            raise TypeError("account.settlement payload must be SettlementPrices")
+        delta = self.accounting.process_settlement(settlement)
+        self.cash_minor += delta.cash_minor
+        self.margin_minor += delta.margin_minor
+        self.realized_pnl_minor += delta.realized_pnl_minor
 
 
 class OrderManager:
