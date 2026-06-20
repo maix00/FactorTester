@@ -1,4 +1,4 @@
-# ADR 014: Explicit Factor Author SDK and Repository Boundary
+# ADR 015: Explicit Factor Author SDK and Repository Boundary
 
 ## Status
 
