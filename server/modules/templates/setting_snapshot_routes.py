@@ -5,10 +5,10 @@ from flask import jsonify, request
 from server.modules.templates import templates_bp
 from server.modules.templates.common import SINGLE_FACTOR_SETTING_TEMPLATE_KIND, load_template_list, new_template_id, save_template_list
 from server.modules.templates.snapshot_product_groups import refresh_template_product_group_paths
-from server.modules.templates.summary import build_snapshot_summary
 from server.modules.products.product_group_store import load_product_groups
 from server.services.http_auth import login_required
-from server.services.runtime_state import get_user_file_lock, require_user
+from server.services.session_runtime import get_user_file_lock, require_user
+from tools.data.account_manage import list_user_template_metadata, load_user_template
 
 
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['GET'])
@@ -16,19 +16,23 @@ from server.services.runtime_state import get_user_file_lock, require_user
 def list_single_factor_setting_templates(factor_family_alias):
     username = require_user()
     with get_user_file_lock(username):
-        templates = load_template_list(username, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
-    result = []
-    for template in templates:
-        snapshot = template.get('snapshot', {})
-        result.append({
-            'id': template['id'],
-            'name': template['name'],
-            'ff_alias': template.get('ff_alias', ''),
-            'factor_family_alias': factor_family_alias,
-            'snapshot': snapshot,
-            'summary': build_snapshot_summary(snapshot),
-        })
-    return jsonify({'success': True, 'templates': result})
+        templates = list_user_template_metadata(
+            username,
+            SINGLE_FACTOR_SETTING_TEMPLATE_KIND,
+            scope_key=factor_family_alias,
+        )
+    return jsonify({
+        'success': True,
+        'templates': [
+            {
+                'id': template['id'],
+                'name': template['name'],
+                'ff_alias': template.get('ff_alias', ''),
+                'factor_family_alias': factor_family_alias,
+            }
+            for template in templates
+        ],
+    })
 
 
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['POST'])
@@ -61,8 +65,12 @@ def save_single_factor_setting_template(factor_family_alias):
 def get_single_factor_setting_template(factor_family_alias, tpl_id):
     username = require_user()
     with get_user_file_lock(username):
-        templates = load_template_list(username, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
-    template = next((t for t in templates if t['id'] == tpl_id), None)
+        template = load_user_template(
+            username,
+            SINGLE_FACTOR_SETTING_TEMPLATE_KIND,
+            tpl_id,
+            scope_key=factor_family_alias,
+        )
     if not template:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
     template = refresh_template_product_group_paths(template, load_product_groups(username))

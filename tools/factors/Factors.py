@@ -28,10 +28,11 @@
 # =============================================================================
 import numpy as np
 import pandas as pd
-import uuid
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
 
-from tools import UniqueObject, DataFreq
+from tools.decorators import factor_workspace
+from tools.decorators import tech_docs
+from tools.data.types import DataFreq, UniqueNameObject
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult
@@ -40,12 +41,14 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.FactorTester import FactorTester
 
-class Factor(UniqueObject, FactorExpr):
+@tech_docs
+@factor_workspace
+class Factor(UniqueNameObject, FactorExpr):
     """
     量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
 
     继承 FactorExpr → 是一个表达式节点，可参与表达式组合（+, -, cs_rank 等）。
-    继承 UniqueObject → 同一 alias 全局唯一实例。
+    内联去重 → 同 (alias, structural_key) 全局唯一实例（search 模式）。
 
     属性：
         _resolved_expr (FactorExpr)  : 已解析的纯表达式树（无 ParamRef）
@@ -62,6 +65,8 @@ class Factor(UniqueObject, FactorExpr):
     """
 
     # 运行时动态属性（calc 后设置）
+    name: str
+    alias: str
     _expr: FactorExpr
     _func_expr: FactorExpr
     _source_expr: FactorExpr
@@ -118,6 +123,7 @@ class Factor(UniqueObject, FactorExpr):
             pass
         return '$COMMON'
 
+    @factor_workspace
     def __new__(cls, expr: FactorExpr, alias: Optional[str] = None, 
                 family: Optional[FactorFamily] = None, *args, **kwargs):
         if expr.param_deps:
@@ -125,10 +131,15 @@ class Factor(UniqueObject, FactorExpr):
         core_alias = alias or cls.__name__
         user_prefix = cls._get_user_prefix(family)
         if user_prefix:
-            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+            name = f"{user_prefix}:{core_alias}"
         else:
-            name = f"{core_alias}:{uuid.uuid4().hex}"
-        instance = UniqueObject.__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', core_alias), search=kwargs.pop('search', True), **kwargs)
+            name = core_alias
+        name = kwargs.pop('name', name)
+        alias = kwargs.pop('alias', core_alias)
+
+        # 去重由 UniqueNameObject.__new__ 按 name 完成
+        instance = UniqueNameObject.__new__(cls, name=name, alias=alias)
+
         if not hasattr(instance, '_initialized'):
             instance._expr = expr
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
@@ -136,34 +147,16 @@ class Factor(UniqueObject, FactorExpr):
             instance.family = family
             instance._intermediate_factor_data = {}
             instance._intermediate_alias_index = {}
-            super().__init__(instance, _local_only=False)
+            super(FactorExpr, instance).__init__()
         return instance
     
-    def _structural_key(self) -> Tuple:
+    # __eq__/__hash__ 继承自 UniqueNameObject（按 name 比较/哈希）。
+    # 显式覆盖是为了阻断 FactorExpr.__eq__（返回 CompositeExpr 会破坏 dict key 协议）。
+    # UniqueNameObject 已提供正确行为，无需额外 bridge。
+
+    def _structural_key(self) -> tuple:
+        """代理到内部已解析表达式树的结构键（IC 测试需要）。"""
         return self._expr._structural_key()
-    
-    def _structural_eq(self, other) -> bool:
-        """桥接 UniqueObject._structural_eq 和 FactorExpr._structural_eq。"""
-        if self is other:
-            return True
-        from tools.factors.FactorExpr import FactorExpr as FE
-        if isinstance(other, Factor):
-            return self._expr._structural_eq(other._expr)
-        if isinstance(other, FE):
-            return self._expr._structural_eq(other)
-        return False
-
-    # 显式覆盖 __eq__/__hash__，避免 FactorExpr.__eq__（返回 CompositeExpr）干扰 dict key 协议
-    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
-        if type(self) is not type(other):
-            return False
-        return self._structural_eq(other)
-
-    def __hash__(self) -> int:
-        sk = self._structural_key()
-        if sk is not None:
-            return hash((self.name, sk))
-        return hash(self.name)
 
     def __getattr__(self, item):
         # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
@@ -204,7 +197,7 @@ class Factor(UniqueObject, FactorExpr):
 
         # 数据源频率 —— 外部指定 > 显式配置 > 自动推断
         if freq is not None:
-            freq = freq
+            freq = DataFreq(freq)
         else:
             freq_name = (
                 getattr(self.family, '_source_freq', None)
@@ -230,6 +223,14 @@ class Factor(UniqueObject, FactorExpr):
                         freqs = set(p.list_available_freqs())
                         if not freqs:
                             continue
+                        # 剔除自身频率无法整除 desired_freq 的产品（如只有 DAY1 的退市品种）
+                        if desired_freq:
+                            has_compatible = any(
+                                all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)
+                                for af in freqs
+                            )
+                            if not has_compatible:
+                                continue
                         valid_products.append(p)
                         if available_freqs_set is None:
                             available_freqs_set = freqs
@@ -242,15 +243,37 @@ class Factor(UniqueObject, FactorExpr):
                     if not available_freqs:
                         raise ValueError(f"{self}: 产品数据没有公共可用频率，无法确定数据频率")
                     if desired_freq:
-                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), available_freqs[-1])
+                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), None)
+                        if freq is None:
+                            desired_freq_str = ', '.join(sorted({d.name for d in desired_freq}))
+                            available_freq_str = ', '.join(sorted({af.name for af in available_freqs}))
+                            raise ValueError(f"{self}: 期望频率 {{{desired_freq_str}}} 与产品可用频率 {{{available_freq_str}}} 不兼容，无法确定数据频率")
                     else:
                         freq = available_freqs[-1]
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 
-        products = [product for product in products if freq in set(product.list_available_freqs())]
+        requested_products = list(products)
+        freq_name = freq.name
+        products = [
+            product
+            for product in requested_products
+            if any(getattr(available, 'name', str(available)) == freq_name
+                   for available in product.list_available_freqs())
+        ]
         if not products:
-            raise ValueError(f"{self}: 没有产品提供数据频率 {freq}，无法计算因子值")
+            available_sample = {
+                str(getattr(product, 'name', product)): [
+                    f"{getattr(available, 'name', str(available))}<{type(available).__module__}.{type(available).__name__}>"
+                    for available in product.list_available_freqs()
+                ]
+                for product in requested_products[:5]
+            }
+            raise ValueError(
+                f"{self}: 没有产品提供数据频率 {freq_name}，无法计算因子值；"
+                f"requested_type={type(freq).__module__}.{type(freq).__name__}, "
+                f"available_sample={available_sample}"
+            )
         self._source_freq = freq
 
         # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
@@ -258,14 +281,14 @@ class Factor(UniqueObject, FactorExpr):
         start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
 
         # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.data.DataMeta import DataMeta
+        from tools.data.views.ProductDataView import ProductDataView
 
         preloaded: dict = {}
         column_refs = self._expr.column_refs
         columns = list(cr.column.name for cr in column_refs)
         if columns:
             for p in products:
-                dm: DataMeta = getattr(p, freq.name)
+                dm: ProductDataView = getattr(p, freq.name)
                 data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
@@ -352,6 +375,7 @@ class Factor(UniqueObject, FactorExpr):
                 # 使 get_intermediate() 在有 tester 时也能查到 intermediate 数据
                 self._intermediate_factor_data[sk] = cache[sk]
     
+    @factor_workspace
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """
         获取中间因子数据（原始未对齐 DataFrame）。
@@ -375,6 +399,7 @@ class Factor(UniqueObject, FactorExpr):
         return result
     
     @property
+    @factor_workspace
     def freq(self) -> DataFreq:
         if self._freq is not None:
             return self._freq
@@ -393,6 +418,7 @@ class Factor(UniqueObject, FactorExpr):
         raise ValueError(f"{self}: 因子频率未能推断")
     
     @property
+    @factor_workspace
     def source_table(self) -> pd.DataFrame:
         tester = self._get_active_tester()
         if tester is not None:
@@ -404,6 +430,7 @@ class Factor(UniqueObject, FactorExpr):
         return pd.DataFrame()
 
     @property
+    @factor_workspace
     def table(self) -> pd.DataFrame:
         tester = self._get_active_tester()
         if tester is not None:
@@ -415,10 +442,12 @@ class Factor(UniqueObject, FactorExpr):
         return pd.DataFrame()
 
     @table.setter
+    @factor_workspace
     def table(self, value: pd.DataFrame):
         self._data = value
 
     @property
+    @factor_workspace
     def products(self) -> Set['Product']:
         """参与计算的 Product 集合，从 source_table 的列名提取。"""
         st = self.source_table
@@ -427,6 +456,7 @@ class Factor(UniqueObject, FactorExpr):
         return {col for col in st.columns if isinstance(col, Product)}
 
     @property
+    @factor_workspace
     def expr(self) -> 'FactorExpr':
         return self._expr
 

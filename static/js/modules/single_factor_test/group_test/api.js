@@ -25,7 +25,6 @@
 
     GT.api = {
         postJson: postJson,
-        runGroupTest: function(payload) { return postJson('/run_group_test', payload); },
         getGroupDetail: function(payload) { return postJson('/get_group_detail', payload); },
         createDerivedGroup: function(payload) { return postJson('/create_derived_group', payload); },
         createDerivedGroupsBatch: function(payload) { return postJson('/create_derived_groups_batch', payload); },

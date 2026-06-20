@@ -6,9 +6,11 @@ from typing import Any, Dict, List, Tuple, cast
 import numpy as np
 import pandas as pd
 
-from tools.factors import CrossSectionIC, Factor
+from tools.factors import Factor
+from tools.factors.tests import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataFreq
+from tools.data.types import finest_index
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:
@@ -23,6 +25,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
     s = ic_series.dropna()
     ac1 = None
     half_life = None
+    acf_vals = None
     if len(s) > 2:
         from statsmodels.tsa.stattools import acf
         try:
@@ -41,6 +44,9 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         except Exception:
             pass
 
+    # 把完整的 acf 数组也缓存起来，避免 _build_ic_response 重复计算
+    acf_vals_list = acf_vals.tolist() if acf_vals is not None else None
+
     return pd.Series({
         "mean": mean,
         "std": std,
@@ -50,6 +56,7 @@ def ic_stats(ic_series: pd.Series) -> pd.Series:
         "min": min_ic,
         "ac1": ac1,
         "half_life": half_life,
+        "acf_vals": acf_vals_list,
     })
 
 
@@ -76,11 +83,11 @@ def run_ic_for_factor(
             ic_series = cast(pd.Series, pd.Series(ic_series))
 
         if tester.start_date is not None and len(ic_series) > 0:
-            idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
+            idx_ts = finest_index(ic_series.index)
             ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
             ic_series = cast(pd.Series, ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)])
         if tester.end_date is not None and len(ic_series) > 0:
-            idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
+            idx_ts = finest_index(ic_series.index)
             ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
             ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
 

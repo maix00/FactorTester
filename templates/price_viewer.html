@@ -394,7 +394,7 @@
                 }
                 data.result = {
                     url: '/get_products',
-                    data: { path: node.key, checkbox: 'false' }
+                    data: { path: node.key, checkbox: 'false', series_variants: 'true' }
                 };
             },
             renderNode: function(event, data) {
@@ -442,6 +442,7 @@
         if (!info.name) info.name = name;
 
         currentProduct = info;
+        currentAdjusted = !!info.adjusted;
 
         // 更新标题
         var code = info.code || (info.name ? info.name.split('.')[0] : name);
@@ -496,6 +497,7 @@
         var body = {
             product_name: currentProduct.name || currentProduct.code,
             adjusted: currentAdjusted,
+            series_variant: currentProduct.series_variant || 'primary_raw',
             freq: document.getElementById('pv-freq').value,
             data_source: document.getElementById('pv-data-source').value || null,
             start_date: document.getElementById('pv-start-date').value || null,

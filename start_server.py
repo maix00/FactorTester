@@ -18,9 +18,10 @@ except Exception:
 from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
-from server.services.accounts import accounts_lock, load_accounts
-from server.services.runtime_state import current_user
-from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.account_manage import accounts_lock, load_accounts
+from server.services.session_runtime import current_user
+from tools.data.cache.IdleResourceManager import IdleResourceManager
+import settings
 
 app = create_app()
 
@@ -32,13 +33,13 @@ app = create_app()
 # 需要监控的项目模块前缀（改这些模块时自动 reload）
 _WATCH_PREFIXES = ('Factors.', 'tools.', 'server.', 'sources.')
 # 精确匹配的模块名（不以 '.' 为前缀的顶层模块）
-_WATCH_EXACT = {'Settings'}
+_WATCH_EXACT = {'settings'}
 
 # 不 reload 的模块（有复杂全局状态，reload 会出问题）
 _SKIP_RELOAD = {
     'start_server',          # 自己
-    'tools.base.UniqueObject',
-    'tools.base.IdleResourceManager',
+    'tools.data.types.base',
+    'tools.data.cache.IdleResourceManager',
 }
 # 前缀匹配 — 整个子树都不参与热重载（单元测试勿 reload）
 _SKIP_RELOAD_PREFIXES = ('tests.',)
@@ -162,19 +163,37 @@ def run_flask_server(port=8000, directory='.'):
     IdleResourceManager.get_instance().start(idle_timeout=10, scan_interval=5)
     print("IdleResourceManager started.")
 
+    debug_reloader_child = os.environ.get("FLASK_DEBUG") != "1" or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if os.environ.get("DERIVED_ARTIFACT_AUTO_ENSURE", "1") == "1" and debug_reloader_child:
+        from sources import load_all_sources
+        from tools.data.artifacts import start_background_ensure
+
+        load_all_sources()
+        start_background_ensure()
+        print("Derived artifact ensure started in background.")
+
     # 开发模式：使用 Flask 内置服务器 + 热重载
     if os.environ.get('FLASK_DEBUG') == '1':
-        print("开发模式 (Flask debug=True, 热重载已启用)")
-        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+        print("开发模式 (VS Code debugger, Flask 热重载已启用)")
+        # debugpy owns exception handling; Werkzeug's debugger otherwise pauses
+        # on normal WSGI iterator shutdown (GeneratorExit) when a client leaves.
+        app.run(
+            host='0.0.0.0',
+            port=port,
+            debug=True,
+            use_reloader=True,
+            use_debugger=False,
+        )
     else:
-        print(f"生产模式 (waitress, threads=8)")
+        wt = settings.WAITRESS_THREADS
+        print(f"生产模式 (waitress, threads={wt}, platform={sys.platform})")
         # 启动热插拔文件监控
         _start_hot_reload_watcher(interval=3.0)
         def open_browser():
             time.sleep(1)
             webbrowser.open(url)
         threading.Thread(target=open_browser, daemon=True).start()
-        serve(app, host='0.0.0.0', port=port, threads=8)
+        serve(app, host='0.0.0.0', port=port, threads=wt)
     print("服务器已关闭。")
 
 

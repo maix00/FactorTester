@@ -15,8 +15,9 @@ from typing import Any, cast
 from server.services.product_tree import (
     find_node_by_path, get_minimal_paths,
 )
-import server.services.runtime_state as runtime_state
-from server.services.runtime_state import factor_testers_lock
+import server.services.page_runtime as runtime_state
+from server.services.page_runtime import factor_testers_lock
+from server.services.session_runtime import current_user_obj
 from . import shared_bp
 from .submission_helpers import resolve_products_from_paths, submissions_payload
 from .submission_ids import make_submission_id
@@ -30,6 +31,13 @@ def _request_page_uuid(data: dict | None = None) -> str | None:
     return str(raw).strip() or None
 
 
+def _require_page_uuid(data: dict | None = None):
+    page_uuid = _request_page_uuid(data)
+    if not page_uuid:
+        return None, api_fail('缺少 page_uuid，请先打开页面并生成页面上下文')
+    return page_uuid, None
+
+
 def _matches_page(tester: Any, page_uuid: str | None) -> bool:
     return page_uuid is None or getattr(tester, '_page_uuid', None) == page_uuid
 
@@ -37,10 +45,10 @@ def _matches_page(tester: Any, page_uuid: str | None) -> bool:
 def _find_submission(id_time: str, page_uuid: str | None):
     return next(
         (
-            tester for tester in runtime_state.factor_testers
+            tester for tester in runtime_state.iter_factor_testers(page_uuid)
             if runtime_state.alias_matches_submission_id(
                 getattr(tester, 'alias', ''), id_time, allow_suffix=True
-            ) and _matches_page(tester, page_uuid)
+            )
         ),
         None,
     )
@@ -49,7 +57,7 @@ def _find_submission(id_time: str, page_uuid: str | None):
 def _trailing_year_volume_stats(product):
     """Return daily-volume liquidity summaries relative to the latest data date."""
     import pandas as pd
-    from tools.data.DataColumn import DataColumn
+    from tools.data.types import DataColumn
 
     empty_result = {
         'latest_volume': None,
@@ -93,7 +101,9 @@ def _trailing_year_volume_stats(product):
 @route_guard
 def list_submissions():
     """返回当前全部有效的 FactorTester 列表（前端同步用）。"""
-    page_uuid = _request_page_uuid()
+    page_uuid, err = _require_page_uuid()
+    if err is not None:
+        return err
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -105,6 +115,7 @@ def get_products():
     # 叶节点 checkbox 默认 True，可通过 ?checkbox=false 关闭
     leaf_checkbox = request.args.get('checkbox', 'true').lower() != 'false'
     include_volume_stats = request.args.get('include_volume_stats', 'false').lower() == 'true'
+    include_series_variants = request.args.get('series_variants', 'false').lower() == 'true'
     from server.modules.shared.price_services import cached_product_tree
     search_tree = cached_product_tree().tree
     node_path = original_path[:-10] if original_path.endswith('/_products') else original_path
@@ -133,6 +144,27 @@ def get_products():
             'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
             'fields':       product_public_fields(prod),
         }
+        if include_series_variants and not is_contract:
+            variants = list(getattr(prod, "get_series_variants", lambda: [])())
+            node_data.update({
+                'folder': True,
+                'children': [
+                    {
+                        'title': ref.label,
+                        'key': f"{original_path}/{prod_id}/_series/{ref.variant}",
+                        'checkbox': False,
+                        'folder': False,
+                        'lazy': False,
+                        'extraClasses': 'product-node series-variant-node',
+                        'desc': ref.label,
+                        'product_name': prod_name,
+                        'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
+                        'series_variant': ref.variant,
+                        'adjusted': ref.adjusted,
+                    }
+                    for ref in variants
+                ],
+            })
         if is_contract:
             node_data['product_type'] = 'contract'
             node_data['contract_uid'] = prod_name
@@ -151,9 +183,11 @@ def get_products():
 @route_guard
 def submit_selected_products():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     selected_paths = data.get('selected_paths', [])
     id_time = make_submission_id(data.get('id_time'))
-    page_uuid = _request_page_uuid(data)
     group_name = data.get('group_name', '').strip() or None
     assert selected_paths, "未选择任何产品路径"
     selected_paths, selected_products = resolve_products_from_paths(selected_paths)
@@ -164,17 +198,14 @@ def submit_selected_products():
     if time_entry is None:
         return api_fail('请先在时间范围设置模块中设置起止时间')
     _start, _end, _start_calc = time_entry
-    user = runtime_state.current_user_obj()
-    factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
+    user = current_user_obj()
+    factor_tester = FactorTester(products=selected_products, alias=id_time, start_dt=_start, end_dt=_end, user=user)
     factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
     if group_name:
         factor_tester.product_group = group_name
     if page_uuid:
         cast(Any, factor_tester)._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
-    if user is not None:
-        user.add_tester(factor_tester)
-    with factor_testers_lock:
-        runtime_state.factor_testers.append(factor_tester)
+    runtime_state.register_factor_tester(factor_tester, page_uuid=page_uuid)
     return api_ok({
         'count':               len(selected_products),
         'count_paths':         len(selected_paths),
@@ -191,28 +222,19 @@ def submit_selected_products():
 @route_guard
 def reorder_submissions():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     new_order = data.get('new_order', [])
-    page_uuid = _request_page_uuid(data)
-    with factor_testers_lock:
-        scoped_testers = [
-            tester for tester in runtime_state.factor_testers
-            if _matches_page(tester, page_uuid)
-        ]
-        alias_to_tester = {}
-        for t in scoped_testers:
-            core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
-            alias_to_tester[core_id] = t
-        ordered = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
-        if len(ordered) != len(scoped_testers) or {id(t) for t in ordered} != {id(t) for t in scoped_testers}:
-            return api_fail(f'排序失败: 期望{len(scoped_testers)}条，实际匹配{len(ordered)}条')
-        if page_uuid is None:
-            runtime_state.factor_testers[:] = ordered
-        else:
-            ordered_iter = iter(ordered)
-            runtime_state.factor_testers[:] = [
-                next(ordered_iter) if _matches_page(tester, page_uuid) else tester
-                for tester in runtime_state.factor_testers
-            ]
+    scoped_testers = runtime_state.iter_factor_testers(page_uuid)
+    alias_to_tester = {}
+    for t in scoped_testers:
+        core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+        alias_to_tester[core_id] = t
+    ordered = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
+    if len(ordered) != len(scoped_testers) or {id(t) for t in ordered} != {id(t) for t in scoped_testers}:
+        return api_fail(f'排序失败: 期望{len(scoped_testers)}条，实际匹配{len(ordered)}条')
+    runtime_state.replace_page_factor_testers(page_uuid, ordered)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -220,8 +242,10 @@ def reorder_submissions():
 @route_guard
 def update_submission_paths():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
-    page_uuid = _request_page_uuid(data)
     assert id_time is not None, "Missing id_time"
     selected_paths = data.get('selected_paths', [])
     new_name = (data.get('new_name') or '').strip()
@@ -241,8 +265,10 @@ def update_submission_paths():
 @route_guard
 def rename_submission():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
-    page_uuid = _request_page_uuid(data)
     assert id_time is not None, "Missing id_time"
     new_name = (data.get('new_name') or '').strip()
     assert new_name, "新名称不能为空"
@@ -257,19 +283,14 @@ def rename_submission():
 @route_guard
 def delete_submission():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
-    page_uuid = _request_page_uuid(data)
     assert id_time is not None, "Missing id_time"
-    with factor_testers_lock:
-        n = len(runtime_state.factor_testers)
-        tester = _find_submission(id_time, page_uuid)
-        assert tester is not None, "Submission not found"
-        tester.delete()
-        runtime_state.factor_testers[:] = [
-            t for t in runtime_state.factor_testers
-            if t is not tester
-        ]
-        assert len(runtime_state.factor_testers) == n - 1, "No submission deleted"
+    tester = _find_submission(id_time, page_uuid)
+    assert tester is not None, "Submission not found"
+    runtime_state.remove_factor_tester(tester, delete=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -278,23 +299,13 @@ def delete_submission():
 def clear_all_submissions():
     """清除当前页面（page_uuid）关联的 tester。
 
-    接收 page_uuid，只清除 _page_uuid 匹配的 tester；
-    同时清除无 _page_uuid 的旧 tester（向后兼容）。
+    page_uuid 由页面在打开时提前生成并传回后端；这里仅清理该页。
     """
     data = request.get_json()
-    page_uuid = _request_page_uuid(data)
-    with factor_testers_lock:
-        for tester in runtime_state.factor_testers:
-            tester_puuid = getattr(tester, '_page_uuid', None)
-            if tester_puuid is None or tester_puuid == page_uuid:
-                try:
-                    tester.delete()
-                except Exception:
-                    pass
-        runtime_state.factor_testers[:] = [
-            t for t in runtime_state.factor_testers
-            if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
-        ]
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
+    runtime_state.clear_page_factor_testers(page_uuid, delete=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -302,8 +313,10 @@ def clear_all_submissions():
 @route_guard
 def delete_path_of_submission():
     data = request.get_json()
+    page_uuid, err = _require_page_uuid(data)
+    if err is not None:
+        return err
     id_time   = str(data.get('id_time')) if data.get('id_time') is not None else None
-    page_uuid = _request_page_uuid(data)
     assert id_time is not None, "Missing id_time"
     new_paths = data.get('new_paths')
     selected_paths, selected_products = resolve_products_from_paths(new_paths)

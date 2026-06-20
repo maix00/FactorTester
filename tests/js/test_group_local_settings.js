@@ -1,12 +1,13 @@
 const { assert, resetGroupTest, MockElement, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
-['group_start_year', 'group_start_month', 'group_start_day', 'group_end_year', 'group_end_month', 'group_end_day']
+['group_start_year', 'group_start_month', 'group_start_day', 'group_end_year', 'group_end_month', 'group_end_day', 'group_initial_capital']
   .forEach((id) => document.registerElement(id, new MockElement(id)));
 
 load('core/local-settings/index.js');
 load('core/dates.js');
 load('core/local-settings/dates.js');
+load('core/local-settings/initial-capital.js');
 
 document.getElementById('group_start_year').value = '2024';
 document.getElementById('group_start_month').value = '03';
@@ -14,11 +15,15 @@ document.getElementById('group_start_day').value = '05';
 document.getElementById('group_end_year').value = '2024';
 document.getElementById('group_end_month').value = '04';
 document.getElementById('group_end_day').value = '08';
+document.getElementById('group_initial_capital').value = '250000';
 
 const snapshot = GT.localSettings.collect();
 assert.deepStrictEqual(snapshot.dates, {
   startDate: '2024-03-05',
   endDate: '2024-04-08',
+});
+assert.deepStrictEqual(snapshot.initialCapital, {
+  initialCapital: 250000,
 });
 
 document.getElementById('group_start_year').value = '2026';
@@ -27,6 +32,7 @@ document.getElementById('group_start_day').value = '01';
 document.getElementById('group_end_year').value = '2026';
 document.getElementById('group_end_month').value = '01';
 document.getElementById('group_end_day').value = '02';
+document.getElementById('group_initial_capital').value = '1000';
 
 const result = GT.localSettings.apply(snapshot);
 assert.deepStrictEqual(result.errors, []);
@@ -36,11 +42,18 @@ assert.strictEqual(document.getElementById('group_start_day').value, '05');
 assert.strictEqual(document.getElementById('group_end_year').value, '2024');
 assert.strictEqual(document.getElementById('group_end_month').value, '04');
 assert.strictEqual(document.getElementById('group_end_day').value, '08');
+assert.strictEqual(document.getElementById('group_initial_capital').value, '250000');
 assert.ok(GT.localSettings.summarize(snapshot)[0].includes('2024-03-05'));
-assert.deepStrictEqual(GT.localSettings.getRunFields(), snapshot.dates);
+assert.ok(GT.localSettings.summarize(snapshot)[1].includes('250000'));
+assert.deepStrictEqual(GT.localSettings.getRunFields(), {
+  startDate: '2024-03-05',
+  endDate: '2024-04-08',
+  initialCapital: 250000,
+});
 assert.deepStrictEqual(GT.localSettings.prepareRun().payload, {
   start_date: '2024-03-05',
   end_date: '2024-04-08',
+  initial_capital: 250000,
 });
 assert.deepStrictEqual(GT.localSettings.prepareRun().errors, []);
 

@@ -6,9 +6,7 @@ Generate an Excel workbook that manually verifies CrossSectionIC.
 This uses the same factor and IC parameters as test_3b:
   factor: ColumnRef(DataColumn.OPEN_ADJUSTED)
   $F:     1min
-  SC:     DataColumn.OPEN_ADJUSTED
-  RF:     2min
-  S:      0
+  RE:     NextReturns(SC=OPEN_ADJUSTED, RF=2min, S=0)
   Lag:    0
 
 Workbook layout:
@@ -34,10 +32,11 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester
+from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 
 from tests.calc import (
@@ -174,11 +173,15 @@ def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: p
     tester = FactorTester(products=products, time_range=(start, end), logger_file=False)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
     factor.evaluate(products)
+    next_returns = NextReturns().get_factor(
+        SC=DataColumn.OPEN_ADJUSTED,
+        RF=f'{rf_minutes}min',
+        S=0,
+        **{'$F': '1min', '$Rev': '0'},
+    )
     params = {
         'FE': factor,
-        'SC': DataColumn.OPEN_ADJUSTED,
-        'RF': f'{rf_minutes}min',
-        'S': 0,
+        'RE': next_returns,
         'Lag': 0,
         '$F': '1min',
     }

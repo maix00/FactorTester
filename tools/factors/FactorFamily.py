@@ -20,20 +20,28 @@ import uuid
 import pandas as pd
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
+from tools.decorators import factor_workspace
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
-    FactorExpr, DataColumn, DataFreq,
-    ColumnRef, ConstExpr, ParamRef,
-    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    FactorExpr,
+    ColumnRef,
+    ConstExpr,
+    ParamRef,
+    RollingOp,
+    ShiftOp,
+    CrossSectionalOp,
+    CompositeExpr,
     OperandExpr,
 )
+from tools.data.types import DataColumn, DataFreq
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
-from tools import UniqueObject, DataMeta
+from tools.data.types import UniqueNameObject
+from tools.data.views import ProductDataView
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
 
-from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
+from settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
@@ -42,11 +50,12 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(UniqueObject, FactorExpr):
+@factor_workspace
+class FactorFamily(UniqueNameObject, FactorExpr):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
-    继承链：UniqueObject（全局唯一实例管理）+ FactorExpr（表达式树定义与求值）。
+    继承链：UniqueNameObject（别名去重）+ FactorExpr（表达式树定义与求值）。
 
     使用方式：
       1. 声明式（推荐）— 子类重写 factor_expr()，返回表达式树，params 自动从 ParamRef 节点收集
@@ -83,6 +92,7 @@ class FactorFamily(UniqueObject, FactorExpr):
     _has_natural_neg: bool = False
     _instance_signal_freq: str = '1d'
 
+    @factor_workspace
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
                  desc: Optional[str] = None,
@@ -106,7 +116,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             name = f"{core_alias}:{uuid.uuid4().hex}"
         name = kwargs.pop('name', name)
         alias = kwargs.pop('alias', core_alias)
-        instance = UniqueObject.__new__(cls, name=name, alias=alias, **kwargs)
+        instance = UniqueNameObject.__new__(cls, name=name, alias=alias, **kwargs)
         
         if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
@@ -218,6 +228,7 @@ class FactorFamily(UniqueObject, FactorExpr):
                 return prefix
         return None
 
+    @factor_workspace
     def set_default_params(self):
         """用各参数默认值初始化 _params_list（仅一组默认参数组合）。
         
@@ -249,6 +260,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             normalized[key] = value
         return normalized
 
+    @factor_workspace
     def change_param_default_value(self, **kwargs):
         """修改指定参数的默认值（同时校验值域）。"""
         kwargs = self._normalize_param_kwargs(**kwargs)
@@ -256,6 +268,7 @@ class FactorFamily(UniqueObject, FactorExpr):
         for key, value in kwargs.items():
             self.params_dict[key].default_value = value
 
+    @factor_workspace
     def clear_params(self):
         """清空参数组合列表，使 get_factors 不生成任何 Factor。"""
         self._params_list = []
@@ -267,6 +280,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             if kwargs[key] not in self.params_dict[key]:
                 raise ValueError(f"{kwargs[key]} is not in the value space of {key}")
 
+    @factor_workspace
     def add_params(self, **kwargs):
         """
         向 _params_list 追加一组参数组合（已存在则忽略）。
@@ -279,6 +293,7 @@ class FactorFamily(UniqueObject, FactorExpr):
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
+    @factor_workspace
     def del_params(self, **kwargs):
         """从 _params_list 中删除与 kwargs 匹配的参数组合。"""
         kwargs = self._normalize_param_kwargs(**kwargs)
@@ -286,10 +301,12 @@ class FactorFamily(UniqueObject, FactorExpr):
         del_params = {p.alias: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         self._params_list = [params for params in self._params_list if params != del_params]
 
+    @factor_workspace
     def set_all_params(self):
         """【子类可选重写】批量设置常用参数组合，不实现时返回 NotImplementedError。"""
         return NotImplementedError("请在子类中实现 `set_all_params` 方法")
 
+    @factor_workspace
     def get_alias(self, **params) -> str:
         """
         根据参数值生成 Factor 的完整别名。
@@ -320,13 +337,21 @@ class FactorFamily(UniqueObject, FactorExpr):
         params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
+    @factor_workspace
     def get_factor(self, **kwargs) -> Factor:
         """根据 kwargs 中的参数值生成一个 Factor 实例（kwargs 形式同 add_params）。"""
         factors = self.get_factors(**kwargs)
         assert factors, "get_factors 返回了空列表，无法生成 Factor 实例"
         return factors[0]
 
-    def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
+    @factor_workspace
+    def get_factors(
+        self,
+        return_freq: Optional[Any] = None,
+        params_list: Optional[list] = None,
+        page_uuid: Optional[str] = None,
+        **kwargs,
+    ) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
@@ -351,7 +376,10 @@ class FactorFamily(UniqueObject, FactorExpr):
             self._check_in_space(**normalized_kwargs)
 
         if params_list is not None:
-            _pl = params_list
+            _pl = list(params_list)
+            if len(_pl) == 0:
+                self.factors = []
+                return []
         elif normalized_kwargs:
             _pl = [{
                 p.alias: normalized_kwargs[p.alias] if p.alias in normalized_kwargs else p.default_value
@@ -367,11 +395,12 @@ class FactorFamily(UniqueObject, FactorExpr):
                 for key, value in normalized_kwargs.items():
                     current_params[key] = self.params_dict[key]._value_space.rectify(value)
 
-            factor_alias = self.get_alias(**current_params)
-
             # 提取元参数
             signal_freq = current_params.get('$F', '1d')
             is_reversed: bool = current_params.get('$Rev', False)
+
+            # 构建 factor 别名（用于 Factor 命名和参数注册）
+            factor_alias = self.get_alias(**current_params)
 
             # 构建 param_values（排除已提取的元参数）
             param_values = {
@@ -400,6 +429,14 @@ class FactorFamily(UniqueObject, FactorExpr):
                 continue
 
             factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+
+            if page_uuid:
+                try:
+                    from server.services.factor_registry import set_page_factor
+                    set_page_factor(str(page_uuid), factor_alias, factor)
+                except Exception:
+                    pass
+
             for key, value in current_params.items():
                 self.params_dict[key].register(factor, value)
 
@@ -411,69 +448,22 @@ class FactorFamily(UniqueObject, FactorExpr):
 
         self.factors = factors
         return factors
+
+    def get_factor_by_alias(self, alias: str):
+        """按别名精确查找因子（O(n) 遍历 self.factors）。"""
+        return next((f for f in self.factors if f.alias == alias), None)
     
     @property
+    @factor_workspace
     def expr(self) -> FactorExpr:
         """返回因子表达式树。"""
         return self._expr  # type: ignore[return-value]
 
     @staticmethod
+    @factor_workspace
     def resolve(expr: FactorExpr, param_values: dict | None = None, **kwargs) -> FactorExpr:
         """
         递归解析表达式树中的参数引用
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
         return expr.resolve(param_values=param_values, **kwargs)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# CrossSectionIC —— 统一截面 IC 因子族
-# ═════════════════════════════════════════════════════════════════════════════
-
-class CrossSectionIC(FactorFamily):
-    """
-    截面 IC 因子族：接受一个因子表达式 FE，内部构建收益率表达式 RE，
-    通过 factor_expr() 声明式地计算截面 Spearman 秩相关系数。
-
-    参数：
-        FE  : 被分析因子表达式 (FactorExpr)，不含 SignalAlign（由调用方剥离）
-        SC  : 收益率价格列 (DataColumn)，默认 CLOSE_ADJUSTED
-              OPEN/OPEN_ADJUSTED → basepoint='first'，Lag=1（下一期开盘收益）
-              CLOSE/CLOSE_ADJUSTED → basepoint='last'，Lag=0（同期收益）
-        RF  : 收益率计算窗口 (WindowParam)，默认 '1d'
-        S   : 收益率 shift 偏移 (TypeParam)，默认自动根据 SC 决定
-        Lag : 额外 IC 对齐滞后倍数 (TypeParam, int)，默认 0
-        F   : 信号频率（复用 FactorFreqParam）
-
-    FE 和 RE 子表达式自动标记为 _is_intermediate，evaluate 后
-    中间数据可通过 Factor.get_intermediate(name) 获取。
-    """
-
-    @staticmethod
-    def factor_expr():
-        """
-        FE.cs_spearman(RE.shift(-Lag * RF))
-
-        FE — 被分析因子（纯因子逻辑，不含 SignalAlign）
-        RE — 收益率表达式，内建：(SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-        """
-        from tools.parameters import FactorParam, DataColumnParam, WindowParam, TypeParam
-        from tools.data.DataColumn import DataColumn
-
-        FE = FactorParam('FE')
-        SC = DataColumnParam('SC', default_value=DataColumn.CLOSE_ADJUSTED)
-        RF = WindowParam('RF')
-        # S: 收益率 shift 偏移
-        #   OPEN   → S = 0 → .shift(-RF) → 下一期开盘
-        #   CLOSE  → S = 1 → .shift(0)    → 同期
-        S = TypeParam('S', default_value=1, typ=int)
-        Lag = TypeParam('Lag', default_value=0, typ=int)
-        # RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-        # OPEN 时 S=0，RE 位于 first 位置，需额外 shift(1) 挪到 last 位置与 FE 对齐
-        RE = (SC.delta(RF) / SC.shift(RF)).shift(-RF).shift(S - 1)
-
-        # 标记 FE 和 RE 为中间因子，evaluate 后通过 Factor.get_intermediate() 获取
-        FE = FE.as_intermediate('FE')
-        RE = RE.as_intermediate('RE')
-
-        return FE.cs_spearman(RE.shift(-Lag * RF))

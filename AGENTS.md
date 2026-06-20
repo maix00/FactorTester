@@ -44,7 +44,11 @@
    - 每个 Issue 必须用自己的 worktree，路径固定：
      - 分支：`fix/issue-N-<slug>`
      - worktree：`~/Codes/.workspace/fix/issue-N-<slug>/`
-   - **若该 worktree 目录已存在**，说明已经有另一个 agent 在做这个 Issue：你必须停止并告知人类重新分配。
+   - Issue 评论中的最新生命周期状态是互斥依据：存在未被 `Done-by:` 或明确释放终止的 `Claimed-by:`，说明已有 agent 正在处理，必须停止并告知人类。
+   - **若该 worktree 目录已存在**，先检查 Issue 状态，不得直接删除或重复创建：
+     - 仍处于 Claim 状态：停止并告知人类。
+     - 已有 `Done-by:` 且人类明确要求继续该 Issue：复用原 branch/worktree。
+     - 已有 `Done-by:` 但当前任务不是继续该 Issue：不要进入或修改该 worktree。
 6. **确认当前 `~/Codes` 在 `feat`**
    ```bash
    cd ~/Codes
@@ -119,11 +123,11 @@ git checkout feat
 # 2) 合并分支到 feat（用 --no-ff 保留分支拓扑）
 git merge --no-ff fix/issue-N-<slug>
 
-# 3) 删除分支 + worktree（避免占坑影响并行）
-git branch -d fix/issue-N-<slug>
-git worktree remove .workspace/fix/issue-N-<slug>
-rm -rf .workspace/fix/issue-N-<slug>
+# 3) 默认保留 fix 分支和 worktree，便于回归、补丁和同一 Issue 继续迭代
+git status -sb
 ```
+
+> **合并与清理是两个独立动作。** 合并后默认保留 branch/worktree；只有人类明确说“清理/删除 worktree（及分支）”时，agent 才能执行清理。保留的已完成 worktree 不表示仍被认领，认领状态以 Issue 中最新的 `Claimed-by:` / `Done-by:` 为准。
 
 #### B) 合入 `master` + push（由人类决定）
 
@@ -329,17 +333,16 @@ git commit -m "<type>: <描述> (refs #<N>)"
 # 2. 在 Issue 下留 Done-by comment，等待人类指示 merge
 ```
 
-> ⛔ Agent **不得**自行执行以下操作。必须等待人类明确同意：
+> ⛔ Agent **不得**自行执行以下操作。merge 与清理分别需要人类明确同意：
 > ```bash
-> # 以下操作需要人类同意后执行：
+> # 人类明确同意 merge 后可执行：
 > cd ~/Codes
 > git checkout feat
 > git merge --no-ff fix/issue-<N>-<描述>   # --no-ff 保留分支拓扑
-> git branch -d fix/issue-<N>-<描述>
 >
-> # 删除 worktree（在主目录执行）
+> # 以下清理操作默认不执行；仅在人类另行明确要求清理时执行：
 > git worktree remove .workspace/fix/issue-<N>-<描述>
-> rm -rf .workspace/fix/issue-<N>-<描述>
+> git branch -d fix/issue-<N>-<描述>
 > ```
 
 #### 关键规则
@@ -421,11 +424,9 @@ git commit -m "<type>: <描述> (refs #<号码>)"
 cd ~/Codes
 git checkout feat
 git merge --no-ff fix/issue-<号码>-<简短描述>   # --no-ff 保留分支拓扑
-git branch -d fix/issue-<号码>-<简短描述>
 
-# 删除 worktree（避免占坑）
-git worktree remove .workspace/fix/issue-<号码>-<简短描述>
-rm -rf .workspace/fix/issue-<号码>-<简短描述>
+# 默认保留 fix 分支和 worktree；清理需要人类另行明确授权
+git status -sb
 ```
 
 全部 Issue 完成后，`feat → master`（⛔ 必须人类同意）：

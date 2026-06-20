@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, cast
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 
 TERM_PRODUCT_COL = 'PRODUCT'
@@ -27,6 +28,7 @@ TERM_MATURITY_COL = 'MATURITY_DATE'
 TERM_DAYS_TO_MATURITY_COL = 'DAYS_TO_MATURITY'
 TERM_RANK_COL = 'TERM_RANK'
 TERM_IS_MAIN_COL = 'IS_MAIN'
+TERM_IS_SECONDARY_COL = 'IS_SECONDARY'
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,20 @@ class AdjustableContractMixin:
     def is_term_contract(self) -> bool:
         return True
 
+    def get_parent_product(self, term_structure_paths: Optional[list[str]] = None):
+        """Return the parent Futures product for this contract-like object, if resolvable."""
+        if getattr(self, '_parent_product_loaded', False):
+            return getattr(self, '_parent_product_cache', None)
+        parent = resolve_term_structure_product(self, term_structure_paths=term_structure_paths)
+        setattr(self, '_parent_product_cache', parent)
+        setattr(self, '_parent_product_loaded', True)
+        return parent
+
+    @property
+    def parent_product(self):
+        """Lazy parent Futures product resolved from the term-structure registry."""
+        return self.get_parent_product()
+
 
 class AdjustableProductMixin:
     """Base mixin for products that support adjustment/term-structure style helpers."""
@@ -95,22 +111,32 @@ class AdjustableProductMixin:
     def supports_term_structure(self) -> bool:
         return True
 
-    def get_term_structure_path(self) -> Optional[str]:
+    def get_term_structure_path(self, curve_variant: str = "listed_contracts") -> Optional[str]:
         return getattr(self, 'term_structure_path', None)
 
-    def get_term_structure_store(self) -> TermStructureStore:
-        path = self.get_term_structure_path()
+    def get_term_structure_store(self, curve_variant: str = "listed_contracts") -> TermStructureStore:
+        path = self.get_term_structure_path(curve_variant)
         if not path:
             raise ValueError(f"term_structure_path not set for {getattr(self, 'name', type(self).__name__)}")
         return TermStructureStore(path)
 
-    def get_term_structure(self, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
+    def get_term_structure(
+        self,
+        trading_day: Any,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> pd.DataFrame:
         """Return contracts for this product/date ordered by maturity."""
-        return self.get_term_structure_store().contract_pool(getattr(self, 'name'), trading_day, depth=depth)
+        return self.get_term_structure_store(curve_variant).contract_pool(getattr(self, 'name'), trading_day, depth=depth)
 
-    def get_term_structure_contracts(self, trading_day: Any, depth: Optional[int] = None) -> List[Any]:
+    def get_term_structure_contracts(
+        self,
+        trading_day: Any,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> List[Any]:
         """Return contract objects for this product/date ordered by maturity."""
-        df = self.get_term_structure(trading_day, depth=depth)
+        df = self.get_term_structure(trading_day, depth=depth, curve_variant=curve_variant)
         if df.empty:
             return []
         contract_cls = getattr(self, 'contract_class')
@@ -155,25 +181,32 @@ class AdjustableProductMixin:
         req_start: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(start_date)).normalize() if start_date else None
         req_end: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize() if end_date else None
 
-        contracts = []
-        for uid, row in grouped.iterrows():
-            t_min: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['min'])))
-            t_max: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['max'])))
+        min_days = pd.to_datetime(grouped['min']).dt.normalize()
+        max_days = pd.to_datetime(grouped['max']).dt.normalize()
+        mask = pd.Series(True, index=grouped.index)
+        if req_start is not None:
+            mask &= max_days >= req_start
+        if req_end is not None:
+            mask &= min_days <= req_end
+        filtered = grouped.loc[mask].copy()
+        filtered['min'] = pd.to_datetime(filtered['min'])
+        filtered['max'] = pd.to_datetime(filtered['max'])
 
-            if req_start is not None and cast(pd.Timestamp, t_max.normalize()) < req_start:
-                continue
-            if req_end is not None and cast(pd.Timestamp, t_min.normalize()) > req_end:
-                continue
-
-            uid_str = str(uid)
-            contracts.append({
-                'contract': str(row['first']),
-                'uid': uid_str,
-                'start': t_min.strftime('%Y-%m-%d'),
-                'end': t_max.strftime('%Y-%m-%d'),
-                'start_ts': int(t_min.timestamp() * 1000),
-                'end_ts': int(t_max.timestamp() * 1000),
-            })
+        contracts = [
+            {
+                'contract': str(row.first),
+                'uid': str(row.Index),
+                'start': row.min.strftime('%Y-%m-%d'),
+                'end': row.max.strftime('%Y-%m-%d'),
+                'start_ts': int(row.min.timestamp() * 1000),
+                'end_ts': int(row.max.timestamp() * 1000),
+            }
+            for row in tqdm(
+                filtered.itertuples(index=True),
+                total=len(filtered),
+                desc=f"Build contract list {getattr(self, 'name', 'product')}",
+            )
+        ]
 
         return contracts
 
@@ -326,6 +359,37 @@ class AdjustableProductMixin:
 
 # {path: {contract_uid: product_name}}
 _contract_product_cache: dict = {}
+_registered_term_products_by_name: dict[str, Any] = {}
+_registered_term_contracts_by_name: dict[str, Any] = {}
+_registered_term_paths: list[str] = []
+
+
+def invalidate_term_structure_path(path: str) -> None:
+    """Drop process-local indexes after an artifact is atomically replaced."""
+    _contract_product_cache.pop(str(path), None)
+
+
+def register_term_structure_product(product: Any) -> None:
+    """Register one term-structure product for fast contract -> product lookup."""
+    product_name = getattr(product, 'name', None)
+    if product_name:
+        _registered_term_products_by_name[str(product_name)] = product
+    getter = getattr(product, 'get_term_structure_path', None)
+    if not callable(getter):
+        return
+    try:
+        path = getter()
+    except Exception:
+        return
+    if path and path not in _registered_term_paths:
+        _registered_term_paths.append(path)
+
+
+def register_term_structure_contract(contract: Any) -> None:
+    """Register one term-structure contract for fast parent lookup."""
+    contract_name = getattr(contract, 'name', None)
+    if contract_name:
+        _registered_term_contracts_by_name[str(contract_name)] = contract
 
 
 def get_contract_product_map(path: str) -> dict:
@@ -341,12 +405,12 @@ def get_contract_product_map(path: str) -> dict:
             _contract_product_cache[path] = {}
         else:
             # 去重：每个 contract_uid 只保留第一个 product
-            mapping = {}
-            for _, row in df[[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL]].iterrows():
-                uid = str(row[TERM_CONTRACT_UID_COL])
-                if uid not in mapping:
-                    mapping[uid] = str(row[TERM_PRODUCT_COL])
-            _contract_product_cache[path] = mapping
+            dedup = df[[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL]].dropna()
+            dedup = dedup.drop_duplicates(subset=[TERM_CONTRACT_UID_COL], keep='first')
+            _contract_product_cache[path] = {
+                str(uid): str(product)
+                for uid, product in zip(dedup[TERM_CONTRACT_UID_COL], dedup[TERM_PRODUCT_COL])
+            }
     return _contract_product_cache[path]
 
 
@@ -361,3 +425,52 @@ def lookup_contract_product(contract_uid: str, term_structure_paths: list) -> Op
         if contract_uid in mapping:
             return mapping[contract_uid]
     return None
+
+
+def _collect_term_structure_paths() -> list[str]:
+    return list(_registered_term_paths)
+
+
+def _get_registered_product(product_name: str):
+    if not product_name:
+        return None
+    return _registered_term_products_by_name.get(str(product_name))
+
+
+def _get_registered_contract(contract_name: str):
+    if not contract_name:
+        return None
+    return _registered_term_contracts_by_name.get(str(contract_name))
+
+
+def resolve_term_structure_product(contract_or_uid: Any, term_structure_paths: Optional[list[str]] = None):
+    """Resolve a contract-like object or uid to its parent Futures product instance."""
+    if contract_or_uid is None:
+        return None
+
+    contract_uid = getattr(contract_or_uid, 'name', None) or str(contract_or_uid)
+    if not contract_uid:
+        return None
+
+    candidate = contract_or_uid if not isinstance(contract_or_uid, str) else None
+    if candidate is None:
+        candidate = _get_registered_contract(contract_uid) or _get_registered_product(contract_uid)
+    if candidate is None:
+        return None
+    try:
+        if candidate is not None and not bool(getattr(candidate, 'is_term_contract', lambda: False)()):
+            return candidate
+    except Exception:
+        if candidate is not None:
+            return candidate
+
+    paths = list(term_structure_paths or [])
+    if not paths:
+        paths = _collect_term_structure_paths()
+    if not paths:
+        return None
+
+    product_name = lookup_contract_product(str(contract_uid), paths)
+    if not product_name:
+        return None
+    return _get_registered_product(product_name)

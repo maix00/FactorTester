@@ -75,9 +75,12 @@
     }
 
     function nodeTesterId(node) {
-        if (!node.baseGroupId || node.baseGroupId === '__batch__') return null;
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
-        return bg ? bg.testerId : null;
+        if (!node) return null;
+        if (node.parentId) {
+            return (GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) 
+                ? GT.groupSettings.groups.resolveRootField(node, 'testerId') : null;
+        }
+        return node.testerId || null;
     }
 
     function nodeProducts(node) {
@@ -95,25 +98,45 @@
     }
 
     /**
-     * Build a shallow display object for a derived node.
-     * Config fields are group fields; no global resolver is involved.
+     * Resolve group fields by walking parentId chain for null values.
+     * Traverses all own keys on the node and fills null/undefined from
+     * the nearest ancestor that has a non-null value, falling back to
+     * GT.groupSettings.getFieldDefault as a last resort.
      */
-    function synthGroupForDerivedNode(node) {
-        if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return null;
+    function synthGroupResolved(node) {
+        if (!node) return null;
         var GS = GT.groupSettings;
-        return {
-            id: node.id,
-            isDerived: true,
-            baseGroupId: node.baseGroupId,
-            feeMode: node.feeMode || GS.getFieldDefault('feeMode'),
-            feeRate: node.feeRate !== undefined ? node.feeRate : null,
-            feeMap: node.feeMap !== undefined ? node.feeMap : null,
-            feeSensitivity: node.feeSensitivity !== undefined ? node.feeSensitivity : 1,
-            useCloseToday: !!node.useCloseToday,
-            rebalanceMode: node.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-            liquidityMode: node.liquidityMode || GS.getFieldDefault('liquidityMode'),
-            liquidityPercent: node.liquidityPercent !== undefined && node.liquidityPercent !== null ? node.liquidityPercent : GS.getFieldDefault('liquidityPercent')
-        };
+        var groups = GS.groups;
+        var resolved = {};
+        var keys = Object.keys(node);
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            var v = node[k];
+            if (v != null) {
+                resolved[k] = v;
+                continue;
+            }
+            // walk parentId chain
+            var cur = node;
+            var visited = {};
+            var found = false;
+            while (cur && cur.parentId) {
+                if (visited[cur.id]) break;
+                visited[cur.id] = true;
+                var parent = groups && groups.get(cur.parentId);
+                if (!parent) break;
+                if (parent[k] != null) {
+                    resolved[k] = parent[k];
+                    found = true;
+                    break;
+                }
+                cur = parent;
+            }
+            if (!found) {
+                resolved[k] = GS.getFieldDefault(k);
+            }
+        }
+        return resolved;
     }
 
     function derivedFeeDisplay(node) {
@@ -148,15 +171,14 @@
     }
 
     function deriveShortAlias(node) {
-        if (!node || !node.baseGroupId) return node ? (node.name || '?') : '?';
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
-        var bgAlias = bg ? (bg.shortAlias || bg.label || bg.id) : node.baseGroupId;
-        // Find this node's index among siblings (same parentId, same baseGroupId)
+        if (!node) return '?';
+        if (!node.parentId) return node.shortAlias || node.name || node.id || '?';
+        // Find this node's index among siblings (same parentId)
         var allNodes = GT.groupSettings.groups && GT.groupSettings.groups.getAll();
-        if (!allNodes) return bgAlias + ':?';
+        if (!allNodes) return node.name || '?';
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
+            if (allNodes[i].parentId === node.parentId) {
                 siblings.push(allNodes[i]);
             }
         }
@@ -165,63 +187,58 @@
             if (siblings[j].id === node.id) { idx = j; break; }
         }
         var num = idx >= 0 ? (idx + 1) : '?';
-        // Build alias from parent chain: use parent's short alias as prefix if derived parent
-        if (node.parentId) {
-            var parentNode = GT.groupSettings.groups.get(node.parentId);
-            if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
-                var parentAlias = deriveShortAlias(parentNode);
-                return parentAlias + ':' + num;
-            }
-        }
-        return bgAlias + ':' + num;
+        // Build alias from parent chain
+        var parentNode = GT.groupSettings.groups.get(node.parentId);
+        var parentAlias = parentNode ? deriveShortAlias(parentNode) : (node.parentId || '?');
+        return parentAlias + ':' + num;
     }
 
-    /** Get batchKey from group settings */
-    function batchKey(testerId, factorAlias, groupCount) {
-        return GT.groupSettings.groups.batchKey(testerId, factorAlias, groupCount);
+    /** Get addGroupBatchKey from addGroupBatch registry */
+    function addGroupBatchKey(testerId, factorAlias, splitCount) {
+        return GT.groupSettings.addGroupBatch.key(testerId, factorAlias, splitCount);
     }
 
-    /** Group base items into batches */
-    var _batchMap = {};
-    function buildBatches(items) {
-        _batchMap = {};
+    /** Group base items into addGroupBatches (UI list display groups) */
+    var _addGroupBatchMap = {};
+    function buildAddGroupBatches(items) {
+        _addGroupBatchMap = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
-            if (item.isDerived) continue;
-            var key = batchKey(item.testerId, item.factorAlias, item.groupCount);
-            if (!_batchMap[key]) {
-                _batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
+            if (item.parentId) continue;
+            var key = addGroupBatchKey(item.testerId, item.factorAlias, item.splitCount);
+            if (!_addGroupBatchMap[key]) {
+                _addGroupBatchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, splitCount: item.splitCount, items: [] };
             }
-            _batchMap[key].items.push(item);
+            _addGroupBatchMap[key].items.push(item);
         }
-        var keys = Object.keys(_batchMap);
+        var keys = Object.keys(_addGroupBatchMap);
         keys.sort(function(a, b) {
-            var aliasA = _batchMap[a].items[0].shortAlias || '';
-            var aliasB = _batchMap[b].items[0].shortAlias || '';
+            var aliasA = _addGroupBatchMap[a].items[0].shortAlias || '';
+            var aliasB = _addGroupBatchMap[b].items[0].shortAlias || '';
             if (aliasA < aliasB) return -1;
             if (aliasA > aliasB) return 1;
             return 0;
         });
         var result = [];
-        for (var k = 0; k < keys.length; k++) { result.push(_batchMap[keys[k]]); }
+        for (var k = 0; k < keys.length; k++) { result.push(_addGroupBatchMap[keys[k]]); }
         return result;
     }
 
-    function getBatchMap() { return _batchMap; }
+    function getAddGroupBatchMap() { return _addGroupBatchMap; }
 
-    function batchGroupIds(batchKeyVal) {
+    function addGroupBatchGroupIds(addGroupBatchKeyVal) {
         var items = GT.groupSettings.groups.getAll();
         var ids = [];
         for (var i = 0; i < items.length; i++) {
-            if (items[i].isDerived) continue;
-            if (batchKey(items[i].testerId, items[i].factorAlias, items[i].groupCount) === batchKeyVal) {
+            if (items[i].parentId) continue;
+            if (addGroupBatchKey(items[i].testerId, items[i].factorAlias, items[i].splitCount) === addGroupBatchKeyVal) {
                 ids.push(items[i].id);
             }
         }
         return ids;
     }
 
-    function batchCommon(batch, field) {
+    function addGroupBatchCommon(batch, field) {
         if (batch.items.length === 0) return null;
         var val = batch.items[0][field];
         for (var i = 1; i < batch.items.length; i++) { if (batch.items[i][field] !== val) return null; }
@@ -229,29 +246,27 @@
     }
 
     /**
-     * Get config chips for a derived node using REG.getChips, diffed against base group.
-     * Only shows chips where the resolved value differs from the base group.
+     * Get config chips for a child node using REG.getChips, diffed against root.
+     * Only shows chips where the resolved value differs from the root.
      */
     function deriveOverrideChips(node) {
-        if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
+        if (!node || !node.parentId) return [];
+        // Walk parentId chain to root
+        var cur = node;
+        var visited = {};
+        while (cur && cur.parentId) {
+            if (visited[cur.id]) { cur = null; break; }
+            visited[cur.id] = true;
+            cur = GT.groupSettings.groups && GT.groupSettings.groups.get(cur.parentId);
+        }
+        var bg = cur;
         if (!bg) return [];
         if (!REG || typeof REG.getChips !== 'function') return [];
 
-        var derivedSynth = synthGroupForDerivedNode(node);
+        var derivedSynth = synthGroupResolved(node);
         if (!derivedSynth) return [];
 
-        var GS = GT.groupSettings;
-        var baseSynth = {
-            feeMode: bg.feeMode || GS.getFieldDefault('feeMode'),
-            feeRate: bg.feeRate,
-            feeMap: bg.feeMap,
-            feeSensitivity: bg.feeSensitivity,
-            useCloseToday: !!bg.useCloseToday,
-            rebalanceMode: bg.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-            liquidityMode: bg.liquidityMode || GS.getFieldDefault('liquidityMode'),
-            liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : GS.getFieldDefault('liquidityPercent')
-        };
+        var baseSynth = synthGroupResolved(bg);
 
         var baseChips = REG.getChips(baseSynth);
         var derivedChips = REG.getChips(derivedSynth);
@@ -282,7 +297,7 @@
             var chip = allChips[i];
             var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
             if (chip.onClick) {
-                var attr = g.isDerived
+                var attr = g.parentId
                     ? ('data-dgid="' + escapeHTML(g.id) + '"')
                     : ('data-gid="' + escapeHTML(g.id) + '"');
                 html += '<span class="unified-config-chip" ' + attr
@@ -299,10 +314,15 @@
     function lsTesterLabel(dgId) {
         if (!dgId) return '—';
         var dg = GT.groupSettings.groups && GT.groupSettings.groups.get(dgId);
-        if (!dg || !dg.baseGroupId) return '—';
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(dg.baseGroupId);
-        if (!bg || !bg.testerId) return '—';
-        return testerLabel(bg.testerId);
+        if (!dg) return '—';
+        // Walk parentId to root
+        var root = dg;
+        while (root && root.parentId) {
+            root = GT.groupSettings.groups.get(root.parentId);
+            if (!root) break;
+        }
+        if (!root || !root.testerId) return '—';
+        return testerLabel(root.testerId);
     }
 
     // -- 挂载 --
@@ -317,18 +337,19 @@
         getGroup: getGroup,
         nodeTesterId: nodeTesterId,
         nodeProducts: nodeProducts,
-        synthGroupForDerivedNode: synthGroupForDerivedNode,
+        synthGroupForChildNode: synthGroupResolved,
+        synthGroupForDerivedNode: synthGroupResolved,
         derivedFeeDisplay: derivedFeeDisplay,
         derivedRebalanceLabel: derivedRebalanceLabel,
         derivedCloseTodayLabel: derivedCloseTodayLabel,
         rebalanceLabel: rebalanceLabel,
         closeTodayLabel: closeTodayLabel,
         deriveShortAlias: deriveShortAlias,
-        batchKey: batchKey,
-        buildBatches: buildBatches,
-        getBatchMap: getBatchMap,
-        batchGroupIds: batchGroupIds,
-        batchCommon: batchCommon,
+        addGroupBatchKey: addGroupBatchKey,
+        buildAddGroupBatches: buildAddGroupBatches,
+        getAddGroupBatchMap: getAddGroupBatchMap,
+        addGroupBatchGroupIds: addGroupBatchGroupIds,
+        addGroupBatchCommon: addGroupBatchCommon,
         deriveOverrideChips: deriveOverrideChips,
         renderAllChipsForGroup: renderAllChipsForGroup,
         lsTesterLabel: lsTesterLabel,

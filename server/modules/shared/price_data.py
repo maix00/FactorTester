@@ -13,10 +13,11 @@ import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
-from tools.data.DataSource import DataSource
+from tools.data.types import finest_index
+from tools.data.providers import DataProviderProductTS as DataSource
 from tools.products.Futures import Futures
 from tools.products.product_utils import get_contract_desc, get_product_contracts
-from .price_data_helpers import format_price_row, to_utc_epoch
+from .price_data_helpers import format_price_row
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,
@@ -193,6 +194,10 @@ def get_price_data():
     product_name = data.get('product_name')
     contract_uid = data.get('contract_uid')
     adjusted = data.get('adjusted', False)
+    series_variant = str(
+        data.get('series_variant')
+        or ('primary_adjusted' if adjusted else 'primary_raw')
+    )
     freq_str = data.get('freq', 'DAY1')
     data_source_alias = data.get('data_source')
     start_date = data.get('start_date')
@@ -216,7 +221,7 @@ def get_price_data():
             if price_df.empty:
                 return jsonify({'success': False, 'error': '合约数据为空'}), 404
 
-            from tools.data.DataFreq import DataFreq
+            from tools.data.types import DataFreq
             try:
                 freq = DataFreq(freq_str)
             except Exception:
@@ -307,10 +312,22 @@ def get_price_data():
 
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
+        series_refs = {
+            ref.variant: ref
+            for ref in getattr(product, "get_series_variants", lambda: [])()
+        }
+        series_ref = series_refs.get(series_variant)
+        if series_ref is None:
+            return jsonify({'success': False, 'error': f'品种不支持序列: {series_variant}'}), 400
+        adjusted = bool(series_ref.adjusted)
+        if series_ref.backing_product_name != product_name:
+            backing = type(product)(series_ref.backing_product_name)
+            backing.desc = getattr(product, 'desc', product_name)
+            product = backing
         supports_adjusted = _supports_adjusted_price(product)
         adjusted = bool(adjusted and supports_adjusted)
 
-        from tools.data.DataFreq import DataFreq
+        from tools.data.types import DataFreq
         candidate_source = None
         if data_source_alias:
             try:
@@ -363,7 +380,7 @@ def get_price_data():
 
         # 还原索引
         if not isinstance(price_df.index, pd.DatetimeIndex):
-            price_df.index = pd.to_datetime(price_df.index.get_level_values(-1))
+            price_df.index = pd.to_datetime(finest_index(price_df.index))
 
         # 时区统一：日内数据统一到 product 时区，日频数据保持 naive
         # format_price_row 会将所有时间统一转为 UTC epoch，前端按浏览器本地时区渲染
@@ -452,6 +469,7 @@ def get_price_data():
             'product_type': 'futures' if isinstance(product, Futures) else 'product',
             'is_term_contract': False,
             'adjusted': adjusted,
+            'series_variant': series_variant,
             'supports_adjusted': supports_adjusted,
             'supports_term_structure': supports_term_structure,
             'freq': freq.name if hasattr(freq, 'name') else str(freq),

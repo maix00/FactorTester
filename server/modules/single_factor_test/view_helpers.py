@@ -7,10 +7,10 @@ import html
 import pandas as pd
 from flask import render_template
 
-import Settings as Settings
+import settings as Settings
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.factor_registry import factor_group_key, get_factor_family_instance
-from server.services.runtime_state import get_session_params
+from server.services.session_runtime import get_session_params
 
 
 def get_default_test_time_strings():
@@ -142,16 +142,20 @@ def build_group_html(
     return group_html
 
 
-def get_factor_main_section_html(factor_family_alias):
+def get_factor_main_section_html(factor_family_alias, page_uuid=None):
     try:
-        factor_family = get_factor_family_instance(factor_family_alias)
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         math_expr = getattr(factor_family, 'math_expr', '')
         chinese_name = getattr(factor_family, 'desc', '') or getattr(factor_family, 'chinese_name', '') or ''
         description = getattr(factor_family, 'description', '') or ''
         params = factor_family.params
         param_metas = [serialize_param_meta(param) for param in params]
         param_aliases = [param.alias for param in params]
-        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
+        session_params = get_session_params(factor_family_alias, factor_family)
+        factors = factor_family.get_factors(
+            params_list=session_params,
+            page_uuid=page_uuid,
+        )
         start_date, end_date, start_time, end_time = get_default_test_time_strings()
         return render_template(
             'factor_main.html',

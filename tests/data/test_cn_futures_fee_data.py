@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from sources.LocalCNFutures import FeeData
+from sources.OpenCTP import client as openctp_client
 
 
 def _raw_fee_table() -> pd.DataFrame:
@@ -15,11 +16,17 @@ def _raw_fee_table() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _isolate_fee_sql(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
+    monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'localdata')
+    monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', tmp_path / 'localdata' / 'unifieddata.sqlite')
+
+
 def test_parse_contract_rows_keeps_contract_level_margin_specs():
     rows = FeeData._parse_contract_rows(_raw_fee_table())
 
     assert rows['contract_code'].tolist() == ['A2605', 'A2609']
-    assert rows['contract_key'].tolist() == ['A2605', 'A2609']
+    assert rows['NormalizedInstrumentID'].tolist() == ['A2605', 'A2609']
     assert rows.loc[0, 'long_margin_ratio'] == 0.12
     assert rows.loc[0, 'short_margin_fixed'] == 1300
 
@@ -34,8 +41,7 @@ def test_parse_variety_rows_records_representative_contract_only_for_display():
 
 
 def test_main_contract_fee_lookup_uses_futures_roller_row(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
-    monkeypatch.setattr(FeeData, '_CONTRACT_LATEST_PATH', tmp_path / 'fees_contracts_latest.parquet')
+    _isolate_fee_sql(monkeypatch, tmp_path)
 
     rows = FeeData._parse_contract_rows(_raw_fee_table())
     rows['date'] = '20260602'
@@ -53,8 +59,7 @@ def test_main_contract_fee_lookup_uses_futures_roller_row(tmp_path: Path, monkey
 
 
 def test_contract_fee_snapshot_uses_asof_forward_fill(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
-    monkeypatch.setattr(FeeData, '_CONTRACT_LATEST_PATH', tmp_path / 'fees_contracts_latest.parquet')
+    _isolate_fee_sql(monkeypatch, tmp_path)
 
     rows = FeeData._parse_contract_rows(_raw_fee_table())
     old_rows = rows.copy()
@@ -75,16 +80,38 @@ def test_contract_fee_snapshot_uses_asof_forward_fill(tmp_path: Path, monkeypatc
 
 
 def test_contract_fee_snapshot_before_first_uses_latest_inferred(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
-    latest_path = tmp_path / 'fees_contracts_latest.parquet'
-    monkeypatch.setattr(FeeData, '_CONTRACT_LATEST_PATH', latest_path)
+    _isolate_fee_sql(monkeypatch, tmp_path)
 
     rows = FeeData._parse_contract_rows(_raw_fee_table())
     rows['date'] = '20260603'
-    rows.to_parquet(latest_path, index=False)
+    rows.to_parquet(tmp_path / 'fees_contracts_20260603.parquet', index=False)
 
     loaded = FeeData.load_contract_rows_for_date('2026-06-01')
 
     assert loaded.attrs['fee_source'] == 'latest_inferred'
     assert loaded.attrs['fee_source_date'] == '20260603'
     assert loaded.attrs['requested_fee_date'] == '20260601'
+
+
+def test_fee_parquet_import_adds_only_missing_contract_snapshot_keys(tmp_path: Path, monkeypatch):
+    _isolate_fee_sql(monkeypatch, tmp_path)
+
+    existing = FeeData._parse_contract_rows(_raw_fee_table().iloc[[0]])
+    existing['date'] = '20260603'
+    existing['open_ratio'] = 0.9
+    openctp_client.upsert_cnfutures_contract_specs(existing)
+
+    parquet_rows = FeeData._parse_contract_rows(_raw_fee_table())
+    parquet_rows['date'] = '20260603'
+    parquet_rows = pd.concat([parquet_rows, parquet_rows.iloc[[1]]], ignore_index=True)
+    parquet_rows.to_parquet(tmp_path / 'fees_contracts_20260603.parquet', index=False)
+
+    assert openctp_client.sync_cnfutures_contract_specs_from_fee_parquet(data_dir=tmp_path) == 1
+    assert openctp_client.sync_cnfutures_contract_specs_from_fee_parquet(data_dir=tmp_path) == 0
+
+    loaded = openctp_client.read_cnfutures_contract_specs_for_date(
+        '2026-06-03', fee_data_dir=tmp_path
+    )
+    assert len(loaded) == 2
+    assert loaded.loc[loaded['InstrumentID'] == 'A2605', 'OpenRatioByMoney'].iloc[0] == 0.9
+    assert loaded.loc[loaded['InstrumentID'] == 'A2609', 'OpenRatioByMoney'].iloc[0] == 0.0004

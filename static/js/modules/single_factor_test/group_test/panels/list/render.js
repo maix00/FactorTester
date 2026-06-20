@@ -138,7 +138,7 @@
         if (!isEdit) {
             html += '<label style="display:block;margin-bottom:12px;">';
             html += '<span style="display:block;font-size:13px;margin-bottom:4px;">基础组 <span style="color:red;">*</span></span>';
-            html += '<select id="dg-f-baseGroupId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
+            html += '<select id="dg-f-parentId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
             html += '<option value="">— 选择 —</option>';
             for (var i = 0; i < bgs.length; i++) {
                 html += '<option value="' + H.escapeHTML(bgs[i].id) + '">' + H.escapeHTML(bgs[i].label) + ' (' + H.escapeHTML(bgs[i].factorAlias) + ')</option>';
@@ -196,11 +196,10 @@
         var modal = H.$(_dgModalId);
         var editId = modal._editId;
         var parentId = modal._parentId;
-        var data = { name: H.$('dg-f-name').value.trim(), isDerived: true };
+        var data = { name: H.$('dg-f-name').value.trim(), parentId: parentId || null };
         if (!editId) {
-            data.baseGroupId = H.$('dg-f-baseGroupId').value;
-            if (!data.baseGroupId) { alert('请选择基础组'); return; }
-            data.parentId = parentId || null;
+            data.parentId = H.$('dg-f-parentId').value;
+            if (!data.parentId) { alert('请选择基础组'); return; }
         }
         var cbs = document.querySelectorAll('#dg-f-product-mask .dg-f-prod');
         var mask = {};
@@ -278,7 +277,7 @@
                 + '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span></div>'
                 + '<div style="padding:16px;text-align:center;color:#888;font-size:12px;">暂无分组组合</div>';
         }
-        var batches = H.buildBatches(items);
+        var batches = H.buildAddGroupBatches(items);
         var h = '';
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">';
         h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span>';
@@ -315,7 +314,7 @@
             }
             h += '<span style="font-weight:600;">' + H.escapeHTML(batch.factorAlias) + '</span>';
             h += '<span style="color:#555;">' + H.escapeHTML(testerLabel) + '</span>';
-            h += '<span style="color:#888;font-size:11px;">' + batch.groupCount + '组</span>';
+            h += '<span style="color:#888;font-size:11px;">' + batch.splitCount + '组</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
             h += '</div>';
@@ -371,34 +370,43 @@
         return h;
     }
 
-    function _renderDerivedTreeForBase(baseGroupId, expandedBatches) {
+    function _renderDerivedTreeForBase(rootGroupId, expandedBatches) {
         _ensureDeps();
         if (!GT.groupSettings.groups) return '';
         var allNodes = GT.groupSettings.groups.getAll();
         var myNodes = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === baseGroupId) {
+            if (allNodes[i].parentId === rootGroupId) {
                 myNodes.push(allNodes[i]);
             }
         }
         if (myNodes.length === 0) return '';
 
-        var treeRoots = GT.groupSettings.groups.getTree();
+        // Build tree nodes from flat list using parentId
         var treeById = {};
-        (function indexTree(nodes) {
-            for (var i = 0; i < nodes.length; i++) {
-                treeById[nodes[i].id] = nodes[i];
-                if (nodes[i].children && nodes[i].children.length > 0) indexTree(nodes[i].children);
+        for (var j = 0; j < myNodes.length; j++) {
+            var n = myNodes[j];
+            n.children = [];
+            treeById[n.id] = n;
+        }
+        // Link children (grandchildren, etc.) by walking parentId chain within myNodes
+        for (var j = 0; j < myNodes.length; j++) {
+            var n2 = myNodes[j];
+            var allFlat = GT.groupSettings.groups.getAll();
+            for (var ki = 0; ki < allFlat.length; ki++) {
+                if (allFlat[ki].parentId === n2.id) {
+                    var childId = allFlat[ki].id;
+                    if (treeById[childId]) {
+                        treeById[n2.id].children.push(treeById[childId]);
+                    }
+                }
             }
-        })(treeRoots);
-
-        var myIds = {};
-        for (var j = 0; j < myNodes.length; j++) { myIds[myNodes[j].id] = true; }
+        }
 
         var roots = [];
         for (var k = 0; k < myNodes.length; k++) {
             var pid = myNodes[k].parentId;
-            if (!pid || !myIds[pid]) {
+            if (!pid || pid === rootGroupId) {
                 var treeNode = treeById[myNodes[k].id];
                 if (treeNode) roots.push(treeNode);
             }
@@ -428,6 +436,12 @@
         var chips = H.deriveOverrideChips(node);
         var prodExpanded = REG && REG._expandedProducts && REG._expandedProducts[node.id] === true;
         var hasKids = node.children && node.children.length > 0;
+        var ownMask = node.productMask || {};
+        var ownMaskKeys = Object.keys(ownMask).filter(function(k) { return ownMask[k]; });
+        var parentProducts = node.parentId && GT.groupSettings.groups
+            ? H.nodeProducts(GT.groupSettings.groups.get(node.parentId))
+            : [];
+        var showProductChip = ownMaskKeys.length > 0 && (!parentProducts.length || products.length !== parentProducts.length);
 
         var nodeSelected = SEL && SEL.isSelected(node.id);
         var rowStyle = 'display:flex;align-items:center;flex-wrap:wrap;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;gap:2px 6px;';
@@ -457,12 +471,14 @@
             }
             h += '</span>';
         }
-        var tri = prodExpanded ? '▾' : '▸';
-        h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
+        if (showProductChip) {
+            var tri = prodExpanded ? '▾' : '▸';
+            h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
+        }
         h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
         h += '</div>';
 
-        if (prodExpanded && products.length > 0) {
+        if (showProductChip && prodExpanded && products.length > 0) {
             h += '<div class="unified-dg-product-list" style="margin-left:' + (indent + 34) + 'px;padding:4px 8px;border-left:2px solid #c7d2fe;font-size:11px;">';
             for (var pi = 0; pi < products.length; pi++) {
                 var pn = products[pi].name;

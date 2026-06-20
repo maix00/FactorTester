@@ -8,7 +8,7 @@
  *   - 注册机制：外部通过 registerAddFlow / registerEditAction 注入行为
  *
  * 设计原则：
- *   - modes 不硬编码任何具体 addFlow（如 base/derived/ls）
+ *   - modes 不硬编码任何具体 addFlow（如 group/derived/ls）
  *   - 所有具体行为通过注册回调注入
  *   - enterAdd(flow?) 如不传 flow，按注册 priority 降序匹配条件
  *
@@ -40,8 +40,13 @@
 
     function _resolvedConfigForDraft(group) {
         var base = null;
-        if (group && group.baseGroupId && GT.groupSettings.groups) {
-            base = GT.groupSettings.groups.get(group.baseGroupId);
+        if (group && group.parentId && GT.groupSettings.groups) {
+            // Walk parentId to root
+            base = group;
+            while (base && base.parentId) {
+                base = GT.groupSettings.groups.get(base.parentId);
+                if (!base) break;
+            }
         }
         var GS = GT.groupSettings;
         return {
@@ -106,7 +111,7 @@
      * 注册 addFlow
      *
      * @param {Object} def
-     *   - flow: string          — addFlow 名称（如 'base', 'derived', 'ls'）
+     *   - flow: string          — addFlow 名称（如 'group', 'derived', 'ls'）
      *   - priority: number      — 匹配优先级（越大越优先），默认 0
      *   - condition: function(ctx) — 返回 true 表示匹配。
      *       ctx = { editIds, editGroups, editCount, explicitFlow, activeDerivedId, activeBaseId }
@@ -157,8 +162,7 @@
         if (_panelMode !== 'edit') return [];
         var ctx = _buildEditContext();
         return _editActionRegistry.filter(function(def) {
-            if (typeof def.condition === 'function') return def.condition(ctx);
-            return true;
+            return typeof def.condition === 'function' ? def.condition(ctx) : true;
         });
     };
 

@@ -2,8 +2,8 @@
 中国期货手续费率数据管理模块。
 
 数据来源：http://openctp.cn/fees.html （每日实时）
-本地存储：../data/fees/fees_YYYYMMDD.parquet（按日期存档）
-         ../data/fees/fees_latest.parquet（最新一份，供快速读取）
+本地存储：DATA_DIR/cache/localdata/unifieddata.sqlite
+         表 openctp_cnfutures_contract_specs
 
 字段说明（从 openctp 表格提取）：
   contract_code : 合约代码（如 rb2610）
@@ -35,10 +35,10 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR
 
-# 本地存储目录
-_DATA_DIR = Path(DATA_DIR) / 'fees'
+# 本地存储目录（相对于项目根目录，即 Codes/）
+_DATA_DIR = Path(SOURCE_DATA_DIR) / 'fees'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'
@@ -49,7 +49,7 @@ _URL = 'http://openctp.cn/fees.html'
 # 开仓费率(7) 开仓/手(8)  平仓费率(9) 平仓/手(10)  平今费率(11) 平今/手(12)
 # 多保证金率(13) 多保证金/手(14) 空保证金率(15) 空保证金/手(16)
 # 现价(17) 最高(18) 最低(19) 成交量(20) 持仓量(21)
-# ...派生字段(22-)
+# 派生字段: 1手开仓费用(22) 1手平仓费用(23) 1手平今费用(24) ...
 _COL_INDICES = {
     'exchange':          0,
     'contract_code':     1,
@@ -68,8 +68,13 @@ _COL_INDICES = {
     'long_margin_fixed': 14,
     'short_margin_ratio': 15,
     'short_margin_fixed': 16,
+    'price':             17,   # 上日结算价
     'volume':            20,
     'open_interest':     21,
+    # OpenCTP 派生列（一手手续费 = price×multiplier×ratio + fixed）
+    'open_total_fee':    22,   # 1手开仓费用
+    'close_total_fee':   23,   # 1手平仓费用
+    'closetoday_total_fee': 24,  # 1手平今费用
 }
 
 _NUMERIC_COLS = [
@@ -79,7 +84,9 @@ _NUMERIC_COLS = [
     'closetoday_ratio', 'closetoday_fixed',
     'long_margin_ratio', 'long_margin_fixed',
     'short_margin_ratio', 'short_margin_fixed',
+    'price',
     'volume', 'open_interest',
+    'open_total_fee', 'close_total_fee', 'closetoday_total_fee',
 ]
 
 _OPTIONAL_NUMERIC_COLS = [
@@ -90,9 +97,38 @@ _OPTIONAL_NUMERIC_COLS = [
 _CONTRACT_ROW_DROP_COLS: list[str] = []
 _VARIETY_ROW_DROP_COLS = ['volume', 'open_interest']
 
+_OPENCTP_TO_LOCAL_COLUMNS = {
+    'ExchangeID': 'exchange',
+    'ProductID': 'variety_code',
+    'InstrumentID': 'contract_code',
+    'InstrumentName': 'contract_name',
+    'VolumeMultiple': 'multiplier',
+    'PriceTick': 'min_tick',
+    'OpenRatioByMoney': 'open_ratio',
+    'OpenRatioByVolume': 'open_fixed',
+    'CloseRatioByMoney': 'close_ratio',
+    'CloseRatioByVolume': 'close_fixed',
+    'CloseTodayRatioByMoney': 'closetoday_ratio',
+    'CloseTodayRatioByVolume': 'closetoday_fixed',
+    'LongMarginRatioByMoney': 'long_margin_ratio',
+    'LongMarginRatioByVolume': 'long_margin_fixed',
+    'ShortMarginRatioByMoney': 'short_margin_ratio',
+    'ShortMarginRatioByVolume': 'short_margin_fixed',
+}
+
 
 def _with_optional_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    for source, target in _OPENCTP_TO_LOCAL_COLUMNS.items():
+        if target not in df.columns and source in df.columns:
+            df[target] = df[source]
+    if 'contract_key' not in df.columns:
+        key_source = next(
+            (name for name in ('NormalizedInstrumentID', 'contract_code', 'InstrumentID') if name in df.columns),
+            None,
+        )
+        if key_source is not None:
+            df['contract_key'] = df[key_source].map(_normalise_contract_code)
     for col in _OPTIONAL_NUMERIC_COLS:
         if col not in df.columns:
             df[col] = 0.0
@@ -172,6 +208,7 @@ def _parse_contract_rows(df: pd.DataFrame) -> pd.DataFrame:
     df['contract_code'] = df['contract_code'].astype(str).str.strip()
     df['contract_name'] = df['contract_name'].astype(str).str.strip()
     df['contract_key'] = df['contract_code'].map(_normalise_contract_code)
+    df['NormalizedInstrumentID'] = df['contract_key']
 
     # 去掉无效行
     df = df.dropna(subset=['variety_code', 'open_ratio'])
@@ -215,49 +252,40 @@ def fetch_and_save(force: bool = False) -> pd.DataFrame:
     -------
     品种级费率 DataFrame
     """
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
     today_str = _date_str()
-    daily_path = _daily_path(today_str)
-    contract_daily_path = _contract_daily_path(today_str)
-
-    if not force and daily_path.exists():
-        cached = pd.read_parquet(daily_path)
-        if (
-            all(col in cached.columns for col in _OPTIONAL_NUMERIC_COLS)
-            and contract_daily_path.exists()
-        ):
-            return cached
+    if not force:
+        try:
+            existing = load_contract_rows_for_date(today_str, allow_latest_fallback=False)
+            if not existing.empty and existing.attrs.get('fee_source_date') == today_str:
+                return load_latest()
+        except Exception:
+            pass
 
     print(f'[FeeData] 从 {_URL} 获取手续费率数据...')
     try:
+        from sources.OpenCTP.client import upsert_cnfutures_contract_specs
         raw = _fetch_raw()
         contract_df = _parse_contract_rows(raw)
         contract_df['date'] = today_str
         df = _with_optional_columns(_parse_raw(raw))
         df['date'] = today_str
-        contract_df.to_parquet(contract_daily_path, index=False)
-        contract_df.to_parquet(_CONTRACT_LATEST_PATH, index=False)
-        df.to_parquet(daily_path, index=False)
-        df.to_parquet(_LATEST_PATH, index=False)
-        print(f'[FeeData] 已保存 {len(df)} 个品种费率 → {daily_path}')
+        upsert_cnfutures_contract_specs(contract_df)
+        print(f'[FeeData] 已保存 {len(contract_df)} 条合约费率 → openctp_cnfutures_contract_specs')
         return df
     except Exception as e:
         print(f'[FeeData] 获取失败: {e}')
-        # 降级：使用最新本地数据
-        return load_latest()
+        raise
 
 
 def load_latest() -> pd.DataFrame:
-    """读取最新本地数据；若无则尝试下载。"""
-    if _LATEST_PATH.exists():
-        return _with_optional_columns(pd.read_parquet(_LATEST_PATH))
-    # 尝试找已有的日期文件
-    files = sorted(_DATA_DIR.glob('fees_2*.parquet'), reverse=True)
-    if files:
-        df = pd.read_parquet(files[0])
-        df.to_parquet(_LATEST_PATH, index=False)
-        return _with_optional_columns(df)
-    # 完全没有本地数据 → 下载
+    """读取最新品种级展示数据；SQL 为空时尝试下载。"""
+    try:
+        from sources.OpenCTP.client import read_latest_cnfutures_product_specs
+        df = read_latest_cnfutures_product_specs(fee_data_dir=_DATA_DIR)
+        if not df.empty:
+            return _with_optional_columns(df)
+    except Exception:
+        pass
     return fetch_and_save(force=True)
 
 
@@ -273,22 +301,13 @@ def load_contract_rows_for_date(
     再静默使用最新快照推测历史费率，并在返回 DataFrame 的 ``attrs`` 中
     标记 ``fee_source='latest_inferred'``，供接口提示用户。
     """
-    target = _date_str(trading_day)
-    asof_path, source_date = _contract_asof_path(target)
-    if asof_path is not None and source_date is not None:
-        df = _with_optional_columns(pd.read_parquet(asof_path))
-        df.attrs['fee_source'] = 'historical_snapshot' if source_date == target else 'historical_forward_fill'
-        df.attrs['fee_source_date'] = source_date
-        df.attrs['requested_fee_date'] = target
-        return df
-    if allow_latest_fallback and _CONTRACT_LATEST_PATH.exists():
-        df = _with_optional_columns(pd.read_parquet(_CONTRACT_LATEST_PATH))
-        df.attrs['fee_source'] = 'latest_inferred'
-        df.attrs['requested_fee_date'] = target
-        if 'date' in df.columns and not df.empty:
-            df.attrs['fee_source_date'] = str(df['date'].iloc[0])
-        return df
-    raise FileNotFoundError(f"未找到 {target} 或更早的合约级费率快照")
+    from sources.OpenCTP.client import read_cnfutures_contract_specs_for_date
+    df = read_cnfutures_contract_specs_for_date(
+        trading_day,
+        allow_latest_fallback=allow_latest_fallback,
+        fee_data_dir=_DATA_DIR,
+    )
+    return _with_optional_columns(df)
 
 
 def get_contract_fee_row(
@@ -384,15 +403,18 @@ def ensure_today_data() -> bool:
     确保今日费率数据存在（服务启动 / 请求时调用）。
     返回 True 表示已有或成功获取，False 表示获取失败但有历史数据兜底。
     """
-    today_str = _date_str()
-    daily_path = _daily_path(today_str)
-    if daily_path.exists():
-        return True
     try:
+        today_str = _date_str()
+        df = load_contract_rows_for_date(today_str, allow_latest_fallback=False)
+        if not df.empty and df.attrs.get('fee_source_date') == today_str:
+            return True
         fetch_and_save()
         return True
     except Exception:
-        return _LATEST_PATH.exists() or any(_DATA_DIR.glob('fees_2*.parquet'))
+        try:
+            return not load_latest().empty
+        except Exception:
+            return False
 
 
 def get_table_for_display() -> list[dict]:
@@ -405,12 +427,6 @@ def get_table_for_display() -> list[dict]:
         closetoday_ratio, closetoday_fixed, date
     }
     """
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # 优先使用今日数据，否则用最新
-    today_str = _date_str()
-    daily_path = _daily_path(today_str)
-    if not daily_path.exists():
-        fetch_and_save()
     df = load_latest()
     df = _with_optional_columns(df)
     cols = ['variety_code', 'variety_name', 'exchange', 'multiplier', 'min_tick',

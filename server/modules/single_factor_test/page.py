@@ -7,10 +7,11 @@ import traceback
 
 from flask import jsonify, render_template, request
 
-from server.services.accounts import (
+from tools.data.account_manage import (
     account_display_name,
     can_view_user_scope,
     get_account,
+    is_developer_account,
 )
 from server.services.factor_registry import (
     factor_group_key,
@@ -18,7 +19,8 @@ from server.services.factor_registry import (
     get_factor_family_instance,
     get_factor_groups,
 )
-from server.services.runtime_state import current_user, get_session_params
+import server.services.page_runtime as runtime_state
+from server.services.session_runtime import current_user, get_session_id, get_session_params
 from server.modules.single_factor_test.view_helpers import (
     get_default_test_time_strings,
     get_factor_main_section_html,
@@ -105,7 +107,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
     }
 
 
-def _render_single_factor_content(selected_name: str, factor_type: str = '', owner_username: str = '') -> str:
+def _render_single_factor_content(selected_name: str, factor_type: str = '', owner_username: str = '', page_uuid: str = '') -> str:
     username = current_user()
     factor_type = factor_type or 'public'
     if not selected_name:
@@ -118,7 +120,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
         if not can_view_user_scope(username, owner_username):
             return '<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无权查看该用户因子</div></div>'
         try:
-            ff = get_factor_family_instance(selected_name, username=owner_username)
+            ff = get_factor_family_instance(selected_name, username=owner_username, page_uuid=page_uuid)
             if ff is None:
                 return f'''<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无法加载自定义因子 "{selected_name}"</div></div>'''
             math_expr = getattr(ff, 'math_expr', '')
@@ -132,7 +134,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
             param_metas = [serialize_param_meta(p) for p in params]
             param_aliases = [p.alias for p in params]
             session_params = get_session_params(display_alias, ff)
-            factors = ff.get_factors(params_list=session_params)
+            factors = ff.get_factors(params_list=session_params, page_uuid=page_uuid)
             start_date, end_date, start_time, end_time = get_default_test_time_strings()
             return render_template(
                 'factor_main.html',
@@ -160,7 +162,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
     if selected_name not in factor_names:
         return f'<div class="editor-placeholder">因子 "{selected_name}" 未找到</div>'
     try:
-        return get_factor_main_section_html(selected_name)
+        return get_factor_main_section_html(selected_name, page_uuid=page_uuid)
     except Exception as e:
         traceback.print_exc()
         return f'''
@@ -181,6 +183,9 @@ def single_factor_page():
     factor_type = request.args.get('type', '')
     include_subordinates = request.args.get('include_subordinates') == '1'
     owner_username = request.args.get('owner_username', '')
+    page_uuid = runtime_state.create_page_uuid()
+    runtime_state.register_page(page_uuid, owner=current_user(), page_kind='single_factor_test', factor_family_alias=selected_name)
+    show_runtime_ids = is_developer_account(get_account(current_user()))
     return render_template(
         'single_factor_test.html',
         search_query=search_query,
@@ -188,6 +193,9 @@ def single_factor_page():
         initial_factor=selected_name,
         initial_factor_type=factor_type or 'public',
         initial_owner_username=owner_username,
+        page_uuid=page_uuid,
+        session_id=get_session_id(),
+        show_runtime_ids=show_runtime_ids,
     )
 
 
@@ -204,5 +212,6 @@ def single_factor_content_api():
     selected_name = request.args.get('factor', '')
     factor_type = request.args.get('type', '') or 'public'
     owner_username = request.args.get('owner_username', '')
-    html = _render_single_factor_content(selected_name, factor_type, owner_username)
+    page_uuid = request.args.get('page_uuid', '')
+    html = _render_single_factor_content(selected_name, factor_type, owner_username, page_uuid)
     return jsonify({'success': True, 'html': html})

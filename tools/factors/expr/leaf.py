@@ -12,13 +12,13 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data.DataSource import DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.providers import DataProviderProductTS as DataSource
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -51,26 +51,19 @@ class ColumnRef(FactorExpr):
     def _select_source(self, product: 'Product', freq: DataFreq,
                        source: Optional['DataSource'] = None) -> Optional['DataSource']:
         """
-        为给定品种选择数据源。返回 None 表示无需指定（DataMeta 使用自己的加载逻辑）。
+        为给定品种选择数据源。返回 None 表示无需指定（ProductDataView 使用自己的加载逻辑）。
 
         - 若 source 已指定：校验该品种在此 source+freq 下是否有数据
         - 若未指定：遍历 DataSource 找到第一个可用且包含所需列的源
-        - 若无注册的数据源：返回 None，由 DataMeta 自行加载
+        - 若无注册的数据源：返回 None，由 ProductDataView 自行加载
         """
-        from tools.data.DataSource import DataSource as DS
+        from tools.data.providers import DataProviderProductTS as DataSource
 
-        if source is not None and source.freq == freq and product in source:
-            return source
-        
-        available_sources = getattr(product, freq.name).list_available_sources()
-        if available_sources:
-            return available_sources[0]
-        else:
-            return None
+        return DataSource.select_for_product(product, freq, source)
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
-        from tools.data.DataMeta import DataMeta
+        from tools.data.views.ProductDataView import ProductDataView
 
         products = ctx.products
         freq = ctx.freq
@@ -87,18 +80,18 @@ class ColumnRef(FactorExpr):
                     series_dict[p] = preloaded_df[self.column.name]
                     continue
                 if preloaded_df is not None:
-                    from tools.data.DataMeta import DataMeta
-                    raw_col = DataMeta._get_nonadjusted_col_name(self.column.name)
-                    if DataMeta._check_is_adjusted(self.column.name) and raw_col in preloaded_df.columns:
+                    from tools.data.views.ProductDataView import ProductDataView
+                    raw_col = ProductDataView._get_nonadjusted_col_name(self.column.name)
+                    if ProductDataView._check_is_adjusted(self.column.name) and raw_col in preloaded_df.columns:
                         series_dict[p] = preloaded_df[raw_col]
                         continue
 
-            dm: DataMeta = getattr(p, freq.name)
+            dm: ProductDataView = getattr(p, freq.name)
             if source is not None:
                 try:
                     ds = dm.set_current_source(source)
                 except ValueError as e:
-                    raise Warning(f"ColumnRef: source {source.alias} is not compatible with product {p.name} at freq {freq.name}") from e
+                    raise Warning(f"ColumnRef: source {source.key} is not compatible with product {p.name} at freq {freq.name}") from e
             if dm.next_available_source() is None:
                 continue  # 无可用数据源，跳过此品种
             col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA

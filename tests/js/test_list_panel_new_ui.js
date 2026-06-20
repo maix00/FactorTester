@@ -3,6 +3,7 @@ const { assert, MockElement, resetGroupTest, registerConfigFields, load } = requ
 const GT = resetGroupTest();
 load('panels/list/selection-state.js');
 load('core/group-settings.js');
+load('core/add-group-batch.js');
 registerConfigFields(GT);
 load('registry/group-settings.js');
 load('registry/chips.js');
@@ -32,7 +33,7 @@ GT.groupSettings.groups.add({
   name: 'List',
   testerId: 'tester-list',
   factorAlias: 'FactorList',
-  groupCount: 5,
+  splitCount: 5,
   groupIndex: 1,
   shortAlias: 'A',
   rebalanceMode: 'each_period',
@@ -40,8 +41,7 @@ GT.groupSettings.groups.add({
 GT.groupSettings.groups.add({
   id: 'derived-list',
   name: 'List:1',
-  isDerived: true,
-  baseGroupId: 'base-list',
+  parentId: 'base-list',
   productMask: { IF: true },
   rebalanceMode: 'each_period',
 });

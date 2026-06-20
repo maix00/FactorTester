@@ -7,7 +7,7 @@ import secrets
 from typing import Any, cast
 from flask import Blueprint, request, jsonify, render_template
 
-from server.services.accounts import (
+from tools.data.account_manage import (
     accounts_lock, load_accounts, save_accounts,
     organizations_lock, load_organizations, save_organizations,
     normalize_accounts, normalize_organization, list_organizations_with_default,
@@ -15,17 +15,17 @@ from server.services.accounts import (
     serialize_account_public, get_account,
     hash_password, verify_password,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
-    ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER,
+    ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_DEVELOPER, ROLE_USER,
     is_super_admin_account, is_org_admin_account, is_level_admin_account,
     can_manage_user_account, can_manage_organization,
     can_manage_level,
     next_account_username,
     levels_lock, load_levels, save_levels, normalize_levels,
     list_levels_with_roots, root_level_id_for_org,
+    delete_user_template_data,
 )
 from server.services.http_auth import login_required
-from server.services.runtime_state import require_user
-from server.services.user_storage import archive_user_dir
+from server.services.session_runtime import require_user
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -33,6 +33,7 @@ ROLE_LABELS = {
     ROLE_SUPER_ADMIN: '超级管理员',
     ROLE_ORG_ADMIN: '机构管理员',
     ROLE_LEVEL_ADMIN: '层级管理员',
+    ROLE_DEVELOPER: '开发人员',
     ROLE_USER: '普通用户',
 }
 
@@ -53,7 +54,7 @@ def _allowed_roles_for(manager: dict[str, Any] | None) -> set[str]:
     if manager is None:
         return set()
     if is_super_admin_account(manager):
-        return {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER}
+        return {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_DEVELOPER, ROLE_USER}
     if manager.get('role') == ROLE_ORG_ADMIN:
         return {ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER}
     if manager.get('role') == ROLE_LEVEL_ADMIN:
@@ -514,5 +515,5 @@ def api_delete_user(target_username):
             if acct.get('parent_username') == target_username:
                 acct['parent_username'] = ''
         save_accounts(accounts)
-    archived_path = archive_user_dir(target_username)
-    return jsonify({'success': True, 'archived_path': archived_path or ''})
+    deleted_templates = delete_user_template_data(target_username)
+    return jsonify({'success': True, 'deleted_template_collections': deleted_templates})

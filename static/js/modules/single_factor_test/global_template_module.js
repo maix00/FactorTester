@@ -16,6 +16,8 @@
 (function() {
     const FF_ALIAS = window.factorFamilyAlias || '';
     const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
+    var _templateListRequest = null;
+    var _templateDetailCache = {};
 
     // ═══════════════════════════════════════════════════════════════════════
     // Snapshot Registry — 统一管理所有可保存/恢复的配置模块
@@ -559,72 +561,95 @@
         }
     });
 
-    // ── 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
-    (function() {
-        var GT = window.GroupTest;
-        if (!GT || !GT.groupSettings || !GT.groupSettings.settings) {
-            console.warn('[global_template] GroupTest groupSettings snapshot adapter is not available');
-            return;
-        }
-        var base = GT.groupSettings.settings;
-        SnapshotRegistry.register({
-            key: base.key,
-            order: base.order,
-            label: base.label,
-            icon: base.icon,
-            collect: base.collect,
-            apply: function(gs, ctx) {
-                var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
-                var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
-                if (working && working.groups) {
-                    var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
-                    var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
-                    working.groups.forEach(function(g) {
-                        if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
-                            g.testerId = oldToNew[String(g.testerId)];
-                        } else if (g.testerId && fallbackNewId) {
-                            g.testerId = fallbackNewId;
-                        }
-                    });
-                }
-                var applyResult = base.apply(working);
-                if (applyResult.errors && applyResult.errors.length > 0) {
-                    console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
-                }
-                if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
-                    GT.tabs.mountTab('list');
-                }
-            },
-            summarize: base.summarize,
-        });
-    })();
+    // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
+    var _gtAdaptersRegistered = false;
+    async function _ensureGroupTestAdapters() {
+        if (_gtAdaptersRegistered) return;
 
-    // ── 7. local_settings (order=50, GroupTest 本地 UI 状态) ──
-    (function() {
+        // If GT modules aren't ready yet, trigger lazy load and wait
         var GT = window.GroupTest;
-        var LS = GT && GT.localSettings;
-        if (!LS) {
-            console.warn('[global_template] GroupTest localSettings snapshot adapter is not available');
-            return;
+        if (!GT || !GT.groupSettings || !GT.localSettings) {
+            if (typeof window._loadGTDeferredScripts === 'function') {
+                console.log('[global_template] waiting for GT deferred scripts...');
+                await window._loadGTDeferredScripts();
+                GT = window.GroupTest;  // re-read after load
+            }
         }
-        SnapshotRegistry.register({
-            key: LS.key,
-            order: LS.order,
-            label: LS.label,
-            icon: LS.icon,
-            collect: LS.collect,
-            apply: function(localSettings) {
-                var result = LS.apply(_deepClone(localSettings) || {});
-                if (result.errors && result.errors.length > 0) {
-                    console.warn('[global_template] local_settings apply warnings:', result.errors);
-                }
-            },
-            summarize: LS.summarize,
-        });
-    })();
+        if (_gtAdaptersRegistered) return;  // lazy loader already called us
+
+        // 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射)
+        if (GT && GT.groupSettings && GT.groupSettings.settings) {
+            var base = GT.groupSettings.settings;
+            SnapshotRegistry.register({
+                key: base.key,
+                order: base.order,
+                label: base.label,
+                icon: base.icon,
+                collect: base.collect,
+                apply: function(gs, ctx) {
+                    var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
+                    var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
+                    var remappedCount = 0;
+                    var unmappedCount = 0;
+                    if (working && working.groups) {
+                        var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
+                        var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
+                        working.groups.forEach(function(g) {
+                            if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
+                                g.testerId = oldToNew[String(g.testerId)];
+                                remappedCount++;
+                            } else if (g.testerId && fallbackNewId) {
+                                g.testerId = fallbackNewId;
+                                remappedCount++;
+                            } else if (g.testerId) {
+                                unmappedCount++;
+                            }
+                        });
+                        if (unmappedCount > 0) {
+                            console.warn('[global_template] group_settings: ' + unmappedCount + ' groups have unmapped testerId (oldToNew keys: ' + Object.keys(oldToNew).length + ', fallback: ' + (fallbackNewId || 'none') + ')');
+                        }
+                    }
+                    var applyResult = base.apply(working);
+                    if (applyResult.errors && applyResult.errors.length > 0) {
+                        console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
+                    }
+                    console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups, ' + remappedCount + ' remapped');
+                    if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
+                        GT.tabs.mountTab('list');
+                    }
+                },
+                summarize: base.summarize,
+            });
+        }
+
+        // 7. local_settings (order=50, GroupTest 本地 UI 状态)
+        var LS = GT && GT.localSettings;
+        if (LS) {
+            SnapshotRegistry.register({
+                key: LS.key,
+                order: LS.order,
+                label: LS.label,
+                icon: LS.icon,
+                collect: LS.collect,
+                apply: function(localSettings) {
+                    var result = LS.apply(_deepClone(localSettings) || {});
+                    if (result.errors && result.errors.length > 0) {
+                        console.warn('[global_template] local_settings apply warnings:', result.errors);
+                    }
+                },
+                summarize: LS.summarize,
+            });
+        }
+
+        _gtAdaptersRegistered = true;
+    }
+
+    // 暴露给全局，供 lazy loader 在脚本加载完成后调用
+    window._ensureGroupTestAdapters = _ensureGroupTestAdapters;
 
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
+        await _ensureGroupTestAdapters();
         _commitGroupConfigDirty();
         return await SnapshotRegistry.collectAll();
     }
@@ -633,6 +658,7 @@
     // tplId: 因子家族设置模板 ID
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
+        await _ensureGroupTestAdapters();
 
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId };
@@ -686,10 +712,14 @@
         if (subsEntry) {
             applyResult = await subsEntry.apply(subs, ctx);
         }
-        if (applyResult && applyResult.oldToNewTesterId) {
+        if (applyResult && applyResult.oldToNewTesterId && Object.keys(applyResult.oldToNewTesterId).length > 0) {
             ctx.oldToNewTesterId = applyResult.oldToNewTesterId;
             return;
         }
+
+        // apply 返回了空的 oldToNewTesterId 映射（submissions 重建可能失败），
+        // 回到兜底逻辑按位置/product_group 匹配
+        console.warn('[global_template] submissions apply returned empty oldToNewTesterId, falling back to position/label matching');
 
         // 构建 oldTesterId → newTesterId 映射
         // 优先按数组位置，兜底按 product_group/label 匹配
@@ -801,6 +831,16 @@
 
     // ── 加载模板列表 ──────────────────────────────────────────────────────
     async function loadTemplateList() {
+        if (_templateListRequest) return _templateListRequest;
+        _templateListRequest = _loadTemplateListOnce();
+        try {
+            return await _templateListRequest;
+        } finally {
+            _templateListRequest = null;
+        }
+    }
+
+    async function _loadTemplateListOnce() {
         const listEl = document.getElementById('global-tpl-list');
         if (!listEl) return;
         try {
@@ -813,48 +853,11 @@
             let html = '';
             data.templates.forEach(tpl => {
                 const tplId = tpl.id;
-                const summary = tpl.summary || {};
-
-                // 构建类似外部 summary-row 的摘要行
-                function buildSummaryRow(label, value, icon) {
-                    if (!value) return '';
-                    var valStr = '';
-                    if (Array.isArray(value)) {
-                        // 每个元素一行，多组参数时换行展示
-                        valStr = value.map(function(v) {
-                            return '<div style="font-size:11px;color:#555;padding:1px 0;">' + escapeHtml(v) + '</div>';
-                        }).join('');
-                    } else {
-                        valStr = '<span style="font-size:11px;color:#555;">' + escapeHtml(String(value)) + '</span>';
-                    }
-                    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;border-bottom:1px dotted #e5e7eb;">'
-                        + '<span style="font-size:12px;flex-shrink:0;min-width:18px;">' + (icon || '') + '</span>'
-                        + '<span style="font-size:12px;font-weight:500;color:#333;flex-shrink:0;min-width:70px;">' + escapeHtml(label) + '</span>'
-                        + '<span style="flex:1;min-width:0;">' + valStr + '</span>'
-                        + '</div>';
-                }
-
-                var summaryHtml = '';
-                // 优先从快照直接生成摘要（注册表驱动）
-                if (tpl.snapshot) {
-                    summaryHtml = SnapshotRegistry.summarizeAll(tpl.snapshot);
-                }
-                // 兼容旧格式：后端生成的 summary 字段
-                if (!summaryHtml && summary) {
-                    summaryHtml += buildSummaryRow('时间范围', summary.time_range, '📅');
-                    summaryHtml += buildSummaryRow('参数设置', summary.params, '⚙️');
-                    summaryHtml += buildSummaryRow('产品类别筛选', summary.products, '🌳');
-                    summaryHtml += buildSummaryRow('收益率频率', summary.return_freqs, '📈');
-                    summaryHtml += buildSummaryRow('分组测试', summary.group_test, '🧪');
-                }
-                if (!summaryHtml) {
-                    summaryHtml = '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
-                }
 
                 html += `
                 <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
                     <div class="tpl-row-header" data-tpl-id="${tplId}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;gap:8px;">
-                        <div style="flex:1;min-width:0;cursor:pointer;" onclick="event.stopPropagation(); this.parentElement.nextElementSibling.style.display = this.parentElement.nextElementSibling.style.display === 'none' ? 'block' : 'none'; var icon = this.parentElement.querySelector('.tpl-expand-icon'); icon.style.transform = icon.style.transform === 'rotate(180deg)' ? 'rotate(0deg)' : 'rotate(180deg)';">
+                        <div class="tpl-name-area" style="flex:1;min-width:0;cursor:pointer;">
                             <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
                             <div style="font-size:11px;color:#888;">${escapeHtml(tpl.ff_alias || '')}</div>
                         </div>
@@ -863,21 +866,34 @@
                         <button class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
                         <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
-                    <div class="tpl-row-detail" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
-                        ${summaryHtml}
+                    <div class="tpl-row-detail" data-loaded="false" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
+                        <div style="font-size:11px;color:#999;padding:4px 0;">展开后加载详情</div>
                     </div>
                 </div>`;
             });
             listEl.innerHTML = html;
             // 展开/收起：点击名称区域或展开图标
             listEl.querySelectorAll('.tpl-row-header').forEach(function(header) {
-                var nameArea = header.querySelector('div[style*="cursor:pointer"]');
+                var nameArea = header.querySelector('.tpl-name-area');
                 var expandIcon = header.querySelector('.tpl-expand-icon');
-                function toggleDetail() {
+                async function toggleDetail(e) {
+                    if (e) e.stopPropagation();
                     var detail = header.nextElementSibling;
                     if (detail.style.display === 'none') {
                         detail.style.display = 'block';
                         expandIcon.style.transform = 'rotate(180deg)';
+                        if (detail.getAttribute('data-loaded') !== 'true') {
+                            detail.innerHTML = '<div style="font-size:11px;color:#888;padding:4px 0;">加载中...</div>';
+                            try {
+                                var template = await fetchTemplateDetail(header.getAttribute('data-tpl-id'));
+                                await _ensureGroupTestAdapters();
+                            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
+                                detail.innerHTML = summaryHtml || '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
+                                detail.setAttribute('data-loaded', 'true');
+                            } catch (err) {
+                                detail.innerHTML = '<div style="font-size:11px;color:#d40000;padding:4px 0;">详情加载失败: ' + escapeHtml(err.message) + '</div>';
+                            }
+                        }
                     } else {
                         detail.style.display = 'none';
                         expandIcon.style.transform = 'rotate(0deg)';
@@ -912,6 +928,23 @@
         }
     }
 
+    function fetchTemplateDetail(tplId) {
+        if (_templateDetailCache[tplId]) return _templateDetailCache[tplId];
+        _templateDetailCache[tplId] = fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId)
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (!data.success || !data.template) {
+                    throw new Error(data.error || '模板不存在');
+                }
+                return data.template;
+            })
+            .catch(function(error) {
+                delete _templateDetailCache[tplId];
+                throw error;
+            });
+        return _templateDetailCache[tplId];
+    }
+
     // ── 覆盖已有模板 ──────────────────────────────────────────────────────
     async function overwriteTemplate(tplId, tplName) {
         if (!confirm('用当前设置覆盖模板「' + (tplName || tplId) + '」？')) return;
@@ -927,6 +960,7 @@
             });
             const data = await resp.json();
             if (data.success) {
+                delete _templateDetailCache[tplId];
                 statusEl.textContent = '✓ 已覆盖: ' + (tplName || tplId);
                 statusEl.style.color = '#28a745';
                 await loadTemplateList();
@@ -946,16 +980,9 @@
         statusEl.textContent = '加载中...';
         statusEl.style.color = '#0078d4';
         try {
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId);
-            const data = await resp.json();
-            if (!data.success) {
-                statusEl.textContent = '✗ 加载失败: ' + (data.error || '未知错误');
-                statusEl.style.color = '#d40000';
-                return;
-            }
-
-            await applySnapshot(data.template.snapshot, tplId);
-            statusEl.textContent = '✓ 已加载: ' + data.template.name;
+            const template = await fetchTemplateDetail(tplId);
+            await applySnapshot(template.snapshot, tplId);
+            statusEl.textContent = '✓ 已加载: ' + template.name;
             statusEl.style.color = '#28a745';
             // 关闭抽屉
             const drawer = document.getElementById('global-tpl-drawer');
@@ -976,6 +1003,7 @@
             const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
+                delete _templateDetailCache[tplId];
                 statusEl.textContent = '✓ 已删除';
                 statusEl.style.color = '#28a745';
                 await loadTemplateList();
@@ -1000,13 +1028,6 @@
         const saveBtn = document.getElementById('global-tpl-save-btn');
         if (saveBtn) saveBtn.onclick = saveTemplate;
 
-        const summaryRow = document.getElementById('global-tpl-summary-row');
-        if (summaryRow) {
-            summaryRow.addEventListener('click', function() {
-                setTimeout(loadTemplateList, 0);
-            });
-        }
-
         // 抽屉打开时加载模板列表
         const drawer = document.getElementById('global-tpl-drawer');
         if (drawer) {
@@ -1016,8 +1037,11 @@
                 }
             });
             observer.observe(drawer, { attributes: true, attributeFilter: ['class'] });
+            // 如果绑定 observer 时抽屉已处于打开状态（脚本加载慢，用户先点了），立即加载
+            if (drawer.classList.contains('open')) {
+                loadTemplateList();
+            }
         }
-        loadTemplateList();
     }
 
     if (document.readyState === 'loading') {

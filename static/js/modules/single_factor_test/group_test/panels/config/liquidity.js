@@ -145,7 +145,8 @@
     function getChips(group) {
         if (!group) return [];
         var mode = group.liquidityMode || GS.getFieldDefault('liquidityMode');
-        var html = mode === 'percent' ? ('💧 流动性:' + _formatPercent(group.liquidityPercent)) : '💧 无限流动性';
+        if (mode === 'infinite') return [];
+        var html = '💧 流动性:' + _formatPercent(group.liquidityPercent);
         return [{
             label: 'liquidity',
             html: html,

@@ -157,10 +157,6 @@
         return GT.groupSettings.groups.serializeFeeMap(feeMap);
     };
 
-    actions.serializeGroupVariant = function(group, fallbackName) {
-        return GT.groupSettings.groups.serializeVariant(group, fallbackName);
-    };
-
     actions.collectSelectedDerivedProducts = function() {
         var names = [];
         document.querySelectorAll('.derived-product-checkbox:checked').forEach(function(cb) {
@@ -171,7 +167,7 @@
     };
 
 
-    actions.findBaseGroupIdForResultGroup = function(groupIndex) {
+    actions.findRootGroupIdForResultGroup = function(groupIndex) {
         if (!GT.groupSettings.groups) return null;
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         var submissionId = sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
@@ -185,7 +181,7 @@
             : Number(groupIndex);
         var expectedIndex = baseGroupIndex + 1;
         var matches = all.filter(function(group) {
-            if (!group || group.isDerived) return false;
+            if (!group || group.parentId) return false;
             if (Number(group.groupIndex) !== expectedIndex) return false;
             if (submissionId && String(group.testerId) !== String(submissionId)) return false;
             if (factorAlias && String(group.factorAlias || '') !== String(factorAlias || '')) return false;
@@ -220,7 +216,7 @@
         var key = node ? actions.groupDisplayKey(node) : null;
         if (lastGrossData) {
             lastGrossData = lastGrossData.filter(function(group) {
-                return !(group && group.is_derived && group.derived && group.derived.id === id);
+                return !(group && group._id === id);
             });
             c.setLastGrossData(lastGrossData);
         }
@@ -236,8 +232,8 @@
             alert('请先勾选至少一个入组产品。');
             return;
         }
-        var baseGroupId = actions.findBaseGroupIdForResultGroup(groupIndex);
-        if (!baseGroupId) {
+        var rootGroupId = actions.findRootGroupIdForResultGroup(groupIndex);
+        if (!rootGroupId) {
             alert('未找到对应基础组，请先在左侧面板创建分组组合。');
             return;
         }
@@ -247,9 +243,7 @@
         try {
             newId = GT.groupSettings.groups.add({
                 name: '',
-                isDerived: true,
-                baseGroupId: baseGroupId,
-                parentId: null,
+                parentId: rootGroupId,
                 productMask: productMask
             });
         } catch (e) {
@@ -263,12 +257,12 @@
         var el = document.getElementById('group-derived-groups-panel');
         if (!el) return;
 
-        var baseGroupId = actions.findBaseGroupIdForResultGroup(groupIndex);
+        var rootGroupId = actions.findRootGroupIdForResultGroup(groupIndex);
         var derivedNodes = [];
-        if (baseGroupId && GT.groupSettings.groups) {
+        if (rootGroupId && GT.groupSettings.groups) {
             var allNodes = GT.groupSettings.groups.getAll();
             for (var i = 0; i < allNodes.length; i++) {
-                if (allNodes[i].isDerived && allNodes[i].baseGroupId === baseGroupId) {
+                if (allNodes[i].parentId === rootGroupId) {
                     derivedNodes.push(allNodes[i]);
                 }
             }
@@ -291,7 +285,7 @@
                 var node = derivedNodes[d];
                 var alias = actions.groupDisplayKey(node);
                 var products = actions.effectiveDerivedProductNames(node);
-                var generated = grossData.some(function(g) { return g && g.is_derived && g.derived && g.derived.id === node.id; });
+                var generated = grossData.some(function(g) { return g && g._id === node.id; });
 
                 html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(node.id) + '"'
                     + ' style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;">'
@@ -381,8 +375,8 @@
             alert('请先勾选至少一个入组产品。');
             return;
         }
-        var baseGroupId = actions.findBaseGroupIdForResultGroup(groupIndex);
-        if (!baseGroupId) {
+        var rootGroupId = actions.findRootGroupIdForResultGroup(groupIndex);
+        if (!rootGroupId) {
             alert('无法匹配当前结果对应的基础组，请从分组列表中选择基础组后新建派生组。');
             return;
         }
@@ -391,7 +385,7 @@
         var name = (input && input.value ? input.value.trim() : '') || defaultName;
         var draft = {
             addFlow: 'derived',
-            preselectedBaseGroupId: baseGroupId,
+            preselectedParentId: rootGroupId,
             preselectedProducts: productNames,
             name: name,
             defaultName: name,
