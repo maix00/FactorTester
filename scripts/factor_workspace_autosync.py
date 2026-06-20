@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -12,18 +11,6 @@ def _bootstrap_repo() -> None:
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-
-
-def _git_head(workspace_root: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", workspace_root, "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return ""
-    return (result.stdout or "").strip()
 
 
 def _autosync_marker_path(workspace_root: str) -> Path:
@@ -39,12 +26,7 @@ def main() -> int:
     _bootstrap_repo()
 
     from tools.data.account_manage import get_account, is_super_admin_account
-    from tools.data.factor_workspace.git import (
-        _git_checkout_branch,
-        get_factor_workspace_autosync_branch,
-        get_factor_workspace_current_branch,
-        get_factor_workspace_download_branch,
-    )
+    from tools.data.factor_workspace.repository import FactorWorkspaceRepository
     from tools.data.factor_workspace.sync import push_factor_workspace, sync_factor_workspace
 
     result = push_factor_workspace(
@@ -56,13 +38,12 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
 
-    upload_branch = get_factor_workspace_autosync_branch(args.username) or "upload"
-    download_branch = get_factor_workspace_download_branch(args.username) or "download"
     workspace_root = str(result.get("workspace_root") or "").strip()
     if not workspace_root:
         print(json.dumps({**result, "error": "未能解析工作区根目录"}, ensure_ascii=False, sort_keys=True))
         return 1
-    current_head = _git_head(workspace_root)
+    repository = FactorWorkspaceRepository(args.username)
+    current_head = repository.head()
     marker_path = _autosync_marker_path(workspace_root)
     if current_head and marker_path.exists():
         previous_head = marker_path.read_text(encoding="utf-8").strip()
@@ -78,33 +59,14 @@ def main() -> int:
         result["download_sync"] = sync_result
 
         workspace_root = str(sync_result.get("workspace_root") or workspace_root)
-        current_branch = get_factor_workspace_current_branch(workspace_root)
-        if current_branch != upload_branch:
-            _git_checkout_branch(workspace_root, upload_branch)
-
-        merge = subprocess.run(
-            ["git", "-C", workspace_root, "merge", "--no-ff", "--no-commit", "--no-edit", download_branch],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if merge.returncode == 0:
-            commit = subprocess.run(
-                ["git", "-C", workspace_root, "commit", "--no-verify", "-m", "chore: sync download snapshot"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            result["git_merge_commit_returncode"] = commit.returncode
-            if commit.returncode != 0:
-                if "nothing to commit" in (commit.stdout or "").lower():
-                    result["git_merge_commit_returncode"] = 0
-                else:
-                    result["git_merge_commit_stdout"] = commit.stdout
-                    result["git_merge_commit_stderr"] = commit.stderr
-                    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-                    return commit.returncode
-        final_head = _git_head(workspace_root)
+        merge_result = repository.merge_download_snapshot()
+        result.update(merge_result)
+        merge_returncode = int(merge_result["git_merge_returncode"])
+        commit_returncode = int(merge_result.get("git_merge_commit_returncode", 0))
+        if merge_returncode == 0 and commit_returncode != 0:
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return commit_returncode
+        final_head = repository.head()
         if final_head:
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text(final_head + "\n", encoding="utf-8")
@@ -114,12 +76,9 @@ def main() -> int:
         else:
             os.environ["FACTOR_WORKSPACE_SKIP_AUTOSYNC"] = previous_skip
 
-    result["git_merge_returncode"] = merge.returncode
-    if merge.returncode != 0:
-        result["git_merge_stdout"] = merge.stdout
-        result["git_merge_stderr"] = merge.stderr
+    if result["git_merge_returncode"] != 0:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-        return merge.returncode
+        return int(result["git_merge_returncode"])
 
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

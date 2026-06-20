@@ -7,13 +7,8 @@ from typing import Any
 
 from tools.data.sqlite.factor_source_store import list_factor_sources
 
-from .git import (
-    _apply_workspace_git_branch,
-    _ensure_git_workspace,
-    _git_commit_all,
-    get_factor_workspace_autosync_branch,
-    get_factor_workspace_current_branch,
-)
+from .git import get_factor_workspace_autosync_branch
+from .repository import FactorWorkspaceRepository
 from . import storage as factor_workspace_storage
 from .construct import (
     _clear_workspace_generated,
@@ -33,8 +28,9 @@ from .construct import (
 def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_existing: bool = False) -> dict[str, Any]:
     root = _workspace_root(username)
     _ensure_workspace_layout(root)
-    git_info = _ensure_git_workspace(root, username)
-    selected_branch = _apply_workspace_git_branch(root, username, branch_mode)
+    repository = FactorWorkspaceRepository(username)
+    git_info = repository.ensure()
+    selected_branch = repository.checkout(branch_mode)
 
     cleared_files: list[str] = []
     if clear_existing:
@@ -84,7 +80,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
         "username": username,
         "custom_factor_dir": factor_workspace_storage.custom_factor_dir(username),
         "public_factor_dir": _workspace_public_dir(root),
-        "git": git_info,
+        "git": repository.state() if git_info.get("git_enabled") else git_info,
         "git_selected_branch": selected_branch,
         "cleared_files": cleared_files,
         "custom_factor_count": custom_count,
@@ -98,7 +94,7 @@ def sync_database_to_workspace(username: str, branch_mode: str = "auto", clear_e
         "workspace_root": root,
         "custom_factor_count": custom_count,
         "public_factor_count": public_count,
-        "git": git_info,
+        "git": repository.state() if git_info.get("git_enabled") else git_info,
         "git_selected_branch": selected_branch,
         "cleared_files": cleared_files,
         "touched_files": touched_files,
@@ -114,7 +110,7 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
     result = sync_database_to_workspace(username, branch_mode=branch_mode)
     if branch_mode == "force":
         root = str(result.get("workspace_root") or _workspace_root(username))
-        commit_sha = _git_commit_all(root, "chore: sync database to workspace")
+        commit_sha = FactorWorkspaceRepository(username).commit("chore: sync database to workspace")
         if commit_sha:
             result["git_commit_sha"] = commit_sha
     return result
@@ -123,8 +119,9 @@ def sync_factor_workspace(username: str, branch_mode: str = "force") -> dict[str
 def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
     _ensure_workspace_layout(root)
-    _ensure_git_workspace(root, username)
-    selected_branch = _apply_workspace_git_branch(root, username, branch_mode)
+    repository = FactorWorkspaceRepository(username)
+    repository.ensure()
+    selected_branch = repository.checkout(branch_mode)
 
     custom_dir = _workspace_custom_dir(root)
     updated_custom = 0
@@ -167,8 +164,9 @@ def sync_workspace_to_database(username: str, branch_mode: str = "auto") -> dict
 def push_factor_workspace(username: str, allow_public_write: bool = False, branch_mode: str = "auto") -> dict[str, Any]:
     root = _workspace_root(username)
     _ensure_workspace_layout(root)
-    _ensure_git_workspace(root, username)
-    current_branch = get_factor_workspace_current_branch(root)
+    repository = FactorWorkspaceRepository(username)
+    repository.ensure()
+    current_branch = repository.current_branch()
     auto_branch = get_factor_workspace_autosync_branch(username)
     if branch_mode == "auto" and auto_branch and current_branch != auto_branch:
         return {
@@ -179,7 +177,7 @@ def push_factor_workspace(username: str, allow_public_write: bool = False, branc
             "updated_custom_count": 0,
             "updated_public_count": 0,
         }
-    selected_branch = _apply_workspace_git_branch(root, username, branch_mode)
+    selected_branch = repository.checkout(branch_mode)
 
     public_dir = _workspace_public_dir(root)
     changed_public_files: list[str] = []

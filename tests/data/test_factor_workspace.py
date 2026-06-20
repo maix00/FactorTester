@@ -9,9 +9,11 @@ import pytest
 
 from server.services import factor_workspace
 from tools.data.factor_workspace import construct as factor_workspace_construct
+from tools.data.factor_workspace import git as factor_workspace_git
 from tools.data.factor_workspace import storage as factor_workspace_storage
-from tools.data.factor_workspace import pre as factor_workspace_pre
 from tools.data.factor_workspace import sync as factor_workspace_sync
+from tools.data.factor_workspace.repository import FactorWorkspaceRepository
+from tools.data.factor_workspace.sdk import author_sdk_paths
 
 
 def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tmp_path):
@@ -52,14 +54,18 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     monkeypatch.setattr(factor_workspace_construct, "scan_tool_files", lambda tools_dir, include_symbols=False: [
         {"path": "types/base.py", "name": "types / base.py", "desc": "", "symbols": []}
     ])
-    monkeypatch.setattr(factor_workspace_sync, "_ensure_git_workspace", lambda root, username: {
+    git_state = {
         "git_enabled": True,
         "git_repo_root": str(workspace_root),
-        "git_current_branch": "main",
+        "git_current_branch": "upload",
         "git_auto_sync_branch": "upload",
         "git_force_sync_branch": "download",
         "git_branches": ["main", "upload", "download"],
-    })
+    }
+    monkeypatch.setattr(FactorWorkspaceRepository, "ensure", lambda self: git_state)
+    monkeypatch.setattr(FactorWorkspaceRepository, "checkout", lambda self, mode: "upload")
+    monkeypatch.setattr(FactorWorkspaceRepository, "commit", lambda self, message: None)
+    monkeypatch.setattr(FactorWorkspaceRepository, "state", lambda self: git_state)
 
     result = factor_workspace.build_factor_workspace("default$alice@1")
 
@@ -73,18 +79,6 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert (workspace_root / ".factor_workspace" / "manifest.json").exists()
     assert ".factor_workspace/" in (workspace_root / ".gitignore").read_text(encoding="utf-8")
     assert (workspace_root / "tools_index.json").exists()
-    assert (workspace_root / "Settings.pyi").exists()
-    assert "FACTOR_WORKSPACE = True" in Path("tools/parameters/__init__.py").read_text(encoding="utf-8")
-    assert "if FACTOR_WORKSPACE:" in Path("tools/parameters/__init__.py").read_text(encoding="utf-8")
-    assert "FACTOR_WORKSPACE = True" in Path("tools/factors/__init__.py").read_text(encoding="utf-8")
-    assert "if FACTOR_WORKSPACE:" in Path("tools/factors/__init__.py").read_text(encoding="utf-8")
-    assert "if FACTOR_WORKSPACE:" in Path("tools/factors/FactorExpr.py").read_text(encoding="utf-8")
-    assert "if FACTOR_WORKSPACE:" in Path("tools/factors/expr/__init__.py").read_text(encoding="utf-8")
-    assert "@factor_workspace" in Path("tools/factors/Factors.py").read_text(encoding="utf-8")
-    assert "@factor_workspace" in Path("tools/factors/FactorFamily.py").read_text(encoding="utf-8")
-    assert "@factor_workspace" in Path("tools/factors/Parameters.py").read_text(encoding="utf-8")
-    assert "@factor_workspace" in Path("tools/factors/expr/core.py").read_text(encoding="utf-8")
-    tools_stub = (workspace_root / "tools" / "__init__.pyi").read_text(encoding="utf-8")
     parameters_pkg_stub = (workspace_root / "tools" / "parameters" / "__init__.pyi").read_text(encoding="utf-8")
     factors_pkg_stub = (workspace_root / "tools" / "factors" / "__init__.pyi").read_text(encoding="utf-8")
     expr_pkg_stub = (workspace_root / "tools" / "factors" / "expr" / "__init__.pyi").read_text(encoding="utf-8")
@@ -96,8 +90,6 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert "FactorExpr" in factors_pkg_stub
     assert "EvaluateContext" not in expr_pkg_stub
     assert "as_intermediate" not in expr_pkg_stub
-    assert "ProductDataView" not in tools_stub
-    assert (workspace_root / "tools" / "factors" / "Parameters.py").exists() is False
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
     assert not (workspace_root / "tools" / "backtest").exists()
@@ -113,6 +105,8 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert not (workspace_root / "tools" / "factors" / "FactorExpr.py").exists()
     assert not (workspace_root / "tools" / "parameters" / "WindowParam.py").exists()
     assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()
+    manifest = json.loads((workspace_root / ".factor_workspace" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["git_selected_branch"] == "upload"
 
 
 def test_factor_workspace_push_blocks_public_changes_for_non_admin(monkeypatch, tmp_path):
@@ -190,3 +184,58 @@ def test_factor_workspace_exports_only_singletons():
         assert singleton_names
         assert singleton_names.isdisjoint(class_names)
         assert singleton_names.isdisjoint(function_names)
+
+
+def test_author_sdk_is_explicit_resolvable_and_excludes_runtime_internals(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    factor_workspace_construct._ensure_workspace_layout(str(workspace_root))
+    factor_workspace_construct._sync_tools_sdk(str(workspace_root))
+
+    generated = {
+        path.relative_to(workspace_root).as_posix()
+        for path in workspace_root.rglob("*.pyi")
+    }
+    assert generated == author_sdk_paths()
+
+    forbidden = (
+        "EvaluateContext",
+        "FactorTester",
+        "ProductDataView",
+        "DataProvider",
+        "@factor_workspace",
+        "@tech_docs",
+        "collect_factor_workspace",
+        "FACTOR_WORKSPACE",
+    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in workspace_root.rglob("*.pyi"))
+    for name in forbidden:
+        assert name not in combined
+    assert "def rolling_mean(" in combined
+    assert "def shift(" in combined
+
+    for stub_path in workspace_root.rglob("*.pyi"):
+        tree = ast.parse(stub_path.read_text(encoding="utf-8"), filename=str(stub_path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.module or not node.module.startswith("tools"):
+                continue
+            module_path = workspace_root / Path(*node.module.split("."))
+            assert module_path.with_suffix(".pyi").exists() or (module_path / "__init__.pyi").exists(), (
+                f"{stub_path.relative_to(workspace_root)} imports missing {node.module}"
+            )
+
+
+def test_workspace_hooks_target_stable_feat_root(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "factor-workspace"
+    stable_root = tmp_path / "Codes"
+    script_path = stable_root / "scripts" / "factor_workspace_autosync.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-b", "main", str(workspace_root)], check=True, capture_output=True, text=True)
+    monkeypatch.setattr(factor_workspace_git, "get_feat_root", lambda: str(stable_root))
+
+    installed = factor_workspace_git._install_git_autosync_hooks(str(workspace_root), "alice")
+
+    assert len(installed) == 2
+    hook = (workspace_root / ".git" / "hooks" / "post-commit").read_text(encoding="utf-8")
+    assert str(script_path) in hook
+    assert ".workspace/fix/" not in hook
