@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import heapq
 import itertools
-import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -81,6 +80,7 @@ class EventRuntime:
         self._queue: list[EventEnvelope] = []
         self._subscribers: dict[EventTopic, list[EventHandler]] = defaultdict(list)
         self._sources: list[EventSource] = []
+        self._finalizers: list[Callable[["EventRuntime"], None]] = []
         self._sequence = itertools.count()
         self._current: EventEnvelope | None = None
         self._started = False
@@ -104,15 +104,21 @@ class EventRuntime:
             raise RuntimeError("event sources are immutable after the run starts")
         self._sources.append(source)
 
+    def add_finalizer(self, finalizer: Callable[["EventRuntime"], None]) -> None:
+        if self._started:
+            raise RuntimeError("finalizers are immutable after the run starts")
+        self._finalizers.append(finalizer)
+
     def publish(self, draft: EventDraft) -> EventEnvelope:
         timestamp = pd.Timestamp(draft.timestamp)
         if self._current is not None and timestamp < self._current.timestamp:
             raise ValueError("an event cannot be published into the past")
+        sequence = next(self._sequence)
         envelope = EventEnvelope(
             timestamp=timestamp,
             priority=draft.priority,
-            sequence=next(self._sequence),
-            event_id=uuid.uuid4().hex,
+            sequence=sequence,
+            event_id=f"{self.run_id}:{sequence}",
             run_id=self.run_id,
             topic=draft.topic,
             payload=draft.payload,
@@ -150,6 +156,8 @@ class EventRuntime:
                 self.journal.append(ProcessedEvent(event, len(handlers)))
                 for source in self._sources:
                     source.after_event(event, self)
+            for finalizer in self._finalizers:
+                finalizer(self)
         finally:
             self._current = None
 
@@ -246,3 +254,8 @@ class MarketSliceBarrier:
         payload = MarketSlice(dict(self._prices))
         self._prices.clear()
         return EventDraft(EventTopic.MARKET_SLICE_CLOSED, event.timestamp, payload)
+
+    def finalize(self, runtime: EventRuntime) -> None:
+        if self._prices:
+            missing = sorted(self._products - self._prices.keys())
+            raise ValueError(f"incomplete final market slice; missing products: {missing}")

@@ -106,6 +106,7 @@ def test_market_slice_barrier_triggers_cross_sectional_event() -> None:
     runtime = EventRuntime("run-5")
     runtime.add_source(ReplayEventSource([timestamp, timestamp], prices))
     barrier = MarketSliceBarrier(["A", "B"])
+    runtime.add_finalizer(barrier.finalize)
     closed: list[MarketSlice] = []
     runtime.subscribe(EventTopic.MARKET_DATA, barrier.on_price)
     runtime.subscribe(
@@ -116,6 +117,18 @@ def test_market_slice_barrier_triggers_cross_sectional_event() -> None:
 
     assert len(closed) == 1
     assert set(closed[0].prices) == {"A", "B"}
+
+
+def test_incomplete_final_market_slice_fails() -> None:
+    timestamp = pd.Timestamp("2026-01-01 09:01")
+    runtime = EventRuntime("run-incomplete")
+    runtime.add_source(ReplayEventSource([timestamp], [ProductPrice("A", 10.0)]))
+    barrier = MarketSliceBarrier(["A", "B"])
+    runtime.subscribe(EventTopic.MARKET_DATA, barrier.on_price)
+    runtime.add_finalizer(barrier.finalize)
+
+    with pytest.raises(ValueError, match=r"missing products: \['B'\]"):
+        runtime.run()
 
 
 def test_runtime_is_single_use_and_subscriptions_freeze() -> None:
