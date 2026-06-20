@@ -395,3 +395,111 @@ class ImmediateBroker:
             EventDraft(EventTopic.ORDER_ACCEPTED, event.timestamp, order),
             EventDraft(EventTopic.FILL, event.timestamp, fill),
         ]
+
+
+@dataclass(slots=True)
+class _OpenOrder:
+    order: Order
+    remaining: float
+
+
+class VolumeParticipationBroker:
+    """Stateful partial-fill broker with a shared per-bar capacity budget."""
+
+    def __init__(
+        self,
+        portfolio_ids: set[str],
+        *,
+        participation_rate: float,
+        volume_field: str = "VOLUME",
+        fee_minor: Callable[[Order, float, float], int] | None = None,
+        fill_price: Callable[[Order, ProductPrice, float, float], float] | None = None,
+    ) -> None:
+        if not portfolio_ids or not 0 < participation_rate <= 1:
+            raise ValueError("broker requires portfolios and participation within (0, 1]")
+        self.portfolio_ids = frozenset(portfolio_ids)
+        self.participation_rate = participation_rate
+        self.volume_field = volume_field
+        self._fee_minor = fee_minor or (lambda order, price, quantity: 0)
+        self._fill_price = fill_price or (
+            lambda order, quote, quantity, share: quote.price
+        )
+        self._open_orders: dict[str, _OpenOrder] = {}
+        self._quotes: dict[str, ProductPrice] = {}
+        self._bar_capacity: dict[str, float] = {}
+        self._bar_timestamp: dict[str, object] = {}
+        self._fill_sequence = itertools.count()
+
+    @property
+    def open_order_count(self) -> int:
+        return len(self._open_orders)
+
+    def on_market_data(
+        self, event: EventEnvelope, runtime: EventRuntime
+    ) -> list[EventDraft]:
+        quote = event.payload
+        if not isinstance(quote, ProductPrice):
+            raise TypeError("market.data payload must be ProductPrice")
+        raw_volume = quote.fields.get(self.volume_field)
+        if raw_volume is None or not np.isfinite(raw_volume) or raw_volume < 0:
+            capacity = 0.0
+        else:
+            capacity = float(raw_volume) * self.participation_rate
+        self._quotes[quote.product] = quote
+        self._bar_capacity[quote.product] = capacity
+        self._bar_timestamp[quote.product] = event.timestamp
+        drafts: list[EventDraft] = []
+        for open_order in tuple(self._open_orders.values()):
+            if open_order.order.instrument == quote.product:
+                drafts.extend(self._fill(open_order, event.timestamp, runtime))
+        return drafts
+
+    def on_order_submitted(
+        self, event: EventEnvelope, runtime: EventRuntime
+    ) -> list[EventDraft] | None:
+        order = event.payload
+        if not isinstance(order, Order):
+            raise TypeError("order.submitted payload must be Order")
+        if order.portfolio_id not in self.portfolio_ids:
+            return None
+        if order.order_id in self._open_orders:
+            raise ValueError(f"duplicate order id: {order.order_id}")
+        open_order = _OpenOrder(order, order.quantity)
+        self._open_orders[order.order_id] = open_order
+        drafts = [EventDraft(EventTopic.ORDER_ACCEPTED, event.timestamp, order)]
+        if self._bar_timestamp.get(order.instrument) == event.timestamp:
+            drafts.extend(self._fill(open_order, event.timestamp, runtime))
+        return drafts
+
+    def _fill(
+        self,
+        open_order: _OpenOrder,
+        timestamp,
+        runtime: EventRuntime,
+    ) -> list[EventDraft]:
+        order = open_order.order
+        available = self._bar_capacity.get(order.instrument, 0.0)
+        quantity = min(open_order.remaining, available)
+        if quantity <= 1e-12:
+            return []
+        quote = self._quotes[order.instrument]
+        raw_volume = float(quote.fields[self.volume_field])
+        volume_share = quantity / raw_volume if raw_volume > 0 else 0.0
+        price = float(self._fill_price(order, quote, quantity, volume_share))
+        fill = Fill(
+            fill_id=f"{runtime.run_id}:fill:{next(self._fill_sequence)}",
+            order_id=order.order_id,
+            strategy_id=order.strategy_id,
+            portfolio_id=order.portfolio_id,
+            timestamp=timestamp,
+            instrument=order.instrument,
+            side=order.side,
+            quantity=quantity,
+            price=price,
+            fee_minor=self._fee_minor(order, price, quantity),
+        )
+        open_order.remaining -= quantity
+        self._bar_capacity[order.instrument] = available - quantity
+        if open_order.remaining <= 1e-12:
+            del self._open_orders[order.order_id]
+        return [EventDraft(EventTopic.FILL, timestamp, fill)]
