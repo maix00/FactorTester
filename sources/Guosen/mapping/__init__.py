@@ -1,0 +1,1 @@
+from .mapping_CNFutures import GUOSEN_PRODUCT_ALIAS

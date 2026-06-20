@@ -7,6 +7,8 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
+from tools.data.types import finest_index
+
 
 def match_product_column(table: pd.DataFrame | None, product) -> object | None:
     """Match product column in DataFrame where columns may be Product objects or names."""
@@ -66,7 +68,7 @@ def find_tester_product(tester, product_name: str):
 
 def clip_series_by_tester_range(series, tester):
     def _get_idx(s):
-        return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
+        return finest_index(s.index) if isinstance(s.index, pd.MultiIndex) else s.index
 
     def _loc(ts, idx):
         tz = getattr(idx, 'tz', None)
@@ -83,7 +85,7 @@ def clip_series_by_tester_range(series, tester):
 
 
 def series_to_frontend(series, is_daily: bool):
-    idx = series.index.get_level_values(-1) if isinstance(series.index, pd.MultiIndex) else series.index
+    idx = finest_index(series.index) if isinstance(series.index, pd.MultiIndex) else series.index
     if is_daily:
         dates_out = [ts.strftime('%Y-%m-%d') for ts in idx]
     else:

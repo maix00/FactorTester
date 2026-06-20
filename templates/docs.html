@@ -157,7 +157,7 @@
         <p>因子列表通过扫描 <code>Factors/</code> 目录中的 <code>.py</code> 文件中定义的类自动发现，按类别（Mm/Oi/Vl/Vp）分组显示。中文名通过类 docstring 的首行提取。</p>
 
         <h3>2.4 认证 — <code>server/auth.py</code></h3>
-        <p>基于 session 的认证。账号与机构层级由 <code>server/services/accounts.py</code> 管理；请求运行态由 <code>server/services/runtime_state.py</code> 管理，例如当前用户、页面级时间范围、参数 session 状态等。</p>
+        <p>基于 session 的认证。账号与机构层级由 <code>tools/data/account_manage/</code> 管理；请求运行态由 <code>server/services/runtime_state.py</code> 管理，例如当前用户、页面级时间范围、参数 session 状态等。</p>
 
         <h3>2.5 运行态状态 — <code>server/services/runtime_state.py</code></h3>
         <p>核心状态管理文件，提供：</p>
@@ -272,7 +272,6 @@
             <tr><td><code>/get_price_series</code></td><td>POST</td><td>获取价格序列（OHLC）</td></tr>
             <tr><td><code>/get_factor_distribution</code></td><td>POST</td><td>获取因子截面分布数据</td></tr>
             <tr><td><code>/run_ic_test</code></td><td>POST</td><td>运行 IC/RankIC 测试</td></tr>
-            <tr><td><code>/run_group_test</code></td><td>POST</td><td>运行分组回测</td></tr>
             <tr><td><code>/get_fee_table</code></td><td>POST</td><td>获取品种费率表（用于回测扣费）</td></tr>
         </table>
 
@@ -342,12 +341,12 @@
                 <td>数据容器。封装 Pandas DataFrame，透明代理 rolling/pct_change/shift 等操作，自动管理多级时间索引、复权计算、列名映射和品种对齐。</td>
             </tr>
             <tr>
-                <td><a href="/docs/tool/data/DataColumn.py"><code>DataColumn.py</code></a></td>
+                <td><a href="/docs/tool/data/product_ts_data_col.py"><code>product_ts_data_col.py</code></a></td>
                 <td><code>DataColumn</code></td>
                 <td>数据列定义。将 OHLCV 等语义字段与数据源中实际列名映射，支持复权列派生（如 OPEN_ADJUSTED）。</td>
             </tr>
             <tr>
-                <td><a href="/docs/tool/data/DataFreq.py"><code>DataFreq.py</code></a></td>
+                <td><a href="/docs/tool/data/time_freq.py"><code>time_freq.py</code></a></td>
                 <td><code>DataFreq</code></td>
                 <td>频率定义。封装日/分钟级 K 线频率，支持频率比较、对齐和转换。</td>
             </tr>

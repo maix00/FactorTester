@@ -10,13 +10,12 @@ GT.groupSettings.groups.add({
   name: 'Select',
   testerId: 'tester-select',
   factorAlias: 'FactorSelect',
-  groupCount: 2,
+  splitCount: 2,
 });
 GT.groupSettings.groups.add({
   id: 'derived-select',
   name: 'Select:1',
-  isDerived: true,
-  baseGroupId: 'base-select',
+  parentId: 'base-select',
 });
 
 let eventCount = 0;

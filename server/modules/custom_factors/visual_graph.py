@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.data.DataColumn import DataColumn
+from tools.data.types import DataColumn
 from tools.factors.FactorExpr import (
     ColumnRef,
     CompositeExpr,

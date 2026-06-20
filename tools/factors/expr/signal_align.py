@@ -12,13 +12,14 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import finest_index
+from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data.DataSource import DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.providers import DataProviderProductTS as DataSource
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -80,7 +81,7 @@ def signal_align(
         # Mark rows whose innermost timestamp matches the requested basepoint time.
         # NOTE: we deliberately produce a boolean Series (not a DataFrame) so the
         # downstream basepoint selection logic stays consistent.
-        last_level = data.index.get_level_values(-1)
+        last_level = finest_index(data.index)
         times = pd.DatetimeIndex(last_level)
         series = pd.Series(times.time == base_time)
     elif isinstance(bp, str):
@@ -127,18 +128,24 @@ def signal_align(
     signal_map = cast(pd.Series, idx_series.index.isin(signal_pos))
 
     # 构建新的索引
+    # 过滤掉旧的 _SIGNAL@ 层级 — 确保新索引中只有一个 _SIGNAL@ 列
     signal_name = f'_SIGNAL@{freq_dc.name}'
+    _SIGNAL_PREFIX = '_SIGNAL@'
     left_arrays = [
         data.index.get_level_values(index_names[i]).to_series().where(signal_map)
         for i in range(first_true_idx)
+        if not str(index_names[i]).startswith(_SIGNAL_PREFIX)
     ]
     signal_vals = idx_series.where(signal_map)
     right_arrays = [
         data.index.get_level_values(index_names[i]).to_series()
         for i in range(first_true_idx + 1, len(index_names))
+        if not str(index_names[i]).startswith(_SIGNAL_PREFIX)
     ]
-    left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]]
-    right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]]
+    left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]
+                  if not str(n).startswith(_SIGNAL_PREFIX)]
+    right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]
+                   if not str(n).startswith(_SIGNAL_PREFIX)]
     new_index = pd.MultiIndex.from_arrays(
         left_arrays + [signal_vals] + right_arrays,
         names=left_names + [signal_name] + right_names

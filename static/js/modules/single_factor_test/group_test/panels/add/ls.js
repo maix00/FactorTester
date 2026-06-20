@@ -30,22 +30,27 @@
     var COL_LONG  = { border: '3b82f6', bg: 'f0f7ff', text: '1e40af', chipBg: 'dbeafe', chipText: '1e3a8a' };
     var COL_SHORT = { border: '8b5cf6', bg: 'f5f3ff', text: '5b21b6', chipBg: 'ede9fe', chipText: '4c1d95' };
 
-    // ── Short alias for display (dynamic for derived, like list panel) ──
+    // ── Short alias for display (dynamic for children, like list panel) ──
     function _displayAlias(g) {
         if (!g) return '—';
-        if (!g.isDerived) return g.shortAlias || g.name || '—';
+        if (!g.parentId) return g.shortAlias || g.name || '—';
         return _deriveShortAlias(g);
     }
 
     /** Same logic as list panel's _deriveShortAlias */
     function _deriveShortAlias(node) {
-        if (!node || !node.baseGroupId) return node ? (node.shortAlias || node.name || '?') : '?';
-        var bg = _getGroup(node.baseGroupId);
-        var bgAlias = bg ? (bg.shortAlias || bg.name || bg.id) : node.baseGroupId;
+        if (!node || !node.parentId) return node ? (node.shortAlias || node.name || '?') : '?';
+        // Walk up to root
+        var root = node;
+        while (root && root.parentId) {
+            root = _getGroup(root.parentId);
+            if (!root) break;
+        }
+        var bgAlias = root ? (root.shortAlias || root.name || root.id) : (node.parentId || '?');
         var allNodes = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
+            if (allNodes[i].parentId === node.parentId) {
                 siblings.push(allNodes[i]);
             }
         }
@@ -56,7 +61,7 @@
         var num = idx >= 0 ? (idx + 1) : '?';
         if (node.parentId) {
             var parentNode = _getGroup(node.parentId);
-            if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
+            if (parentNode && parentNode.parentId === node.parentId) {
                 var parentAlias = _deriveShortAlias(parentNode);
                 return parentAlias + ':' + num;
             }
@@ -122,7 +127,7 @@
         html += '<div style="flex:1;min-width:200px;padding:14px;border:2px solid #' + col.border + ';border-radius:10px;background:#' + col.bg + ';">';
         html += '<div style="font-size:14px;font-weight:700;color:#' + col.text + ';margin-bottom:6px;text-align:center;">' + header + '</div>';
         html += '<div style="font-size:18px;font-weight:700;color:#111827;text-align:center;margin-bottom:10px;">' + name;
-        if (g && g.isDerived) html += ' <span style="font-size:11px;font-weight:400;color:#6b7280;">[派生]</span>';
+        if (g && g.parentId) html += ' <span style="font-size:11px;font-weight:400;color:#6b7280;">[子组]</span>';
         html += '</div>';
 
         // ── Config chips ──

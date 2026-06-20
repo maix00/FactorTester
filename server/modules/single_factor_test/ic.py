@@ -8,6 +8,8 @@ import threading
 import traceback
 from typing import Any, Dict, List, Tuple, cast
 
+import orjson
+
 import numpy as np
 import pandas as pd
 from flask import Response, jsonify, request
@@ -15,12 +17,14 @@ from flask import Response, jsonify, request
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 
 from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
 from server.services.factor_registry import get_factor_family_instance
-from server.services.runtime_state import get_factor_tester, get_session_params
+from server.services.page_runtime import get_factor_tester
+from server.services.session_runtime import get_session_params
 from server.services.sse_progress import SSEProgressEmitter
 
 
@@ -193,17 +197,17 @@ def _compute_ic_groups(
         result = run_ic_for_factor(tester, param_payloads[key], factor_list)
         return key, result
 
-    import Settings
+    import settings
     total_groups = len(param_items)
     use_parallel = (
-        getattr(Settings, 'IC_PARALLEL', True)
+        getattr(settings, 'IC_PARALLEL', True)
         and total_groups > 1
     )
 
     # ── node-level 进度统计 ──
     if emitter is not None:
         total_nodes = 0
-        from tools.factors import CrossSectionIC as _CSI
+        from tools.factors.tests import CrossSectionIC as _CSI
         for key, _ in param_items:
             fe_param = param_payloads[key].get('FE')
             if fe_param is not None and hasattr(fe_param, '_expr'):
@@ -218,7 +222,7 @@ def _compute_ic_groups(
         if use_parallel:
             token = _active_tester.get()
             max_workers = min(
-                getattr(Settings, 'IC_PARALLEL_MAX_WORKERS', 8),
+                getattr(settings, 'IC_PARALLEL_MAX_WORKERS', 8),
                 total_groups,
             )
 
@@ -293,6 +297,8 @@ def _build_ic_response(
         f.alias: (tester.results[f].ic_stats if f in tester.results else pd.Series(dtype=float))
         for f in factors
     })
+    # 排除内部传递的 acf_vals（仅用于前端 autocorr 复用，不展示在 stats 表）
+    ic_stats_all = ic_stats_all.drop(index='acf_vals', errors='ignore')
     columns = ic_stats_all.columns.tolist()
     rows = ic_stats_all.to_dict(orient='records')
     indices = ic_stats_all.index.tolist()
@@ -334,6 +340,17 @@ def _build_ic_response(
                     })
             ic_decay_results[factor.alias] = decay_list
 
+    # ── products 列表 — 所有因子共享，提到循环外只构建一次 ──
+    final_products = resolved_products if resolved_products else all_products
+    shared_products: List[dict] = []
+    for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
+        p_name = str(getattr(p, 'name', p))
+        p_desc = str(getattr(p, 'desc', p_name))
+        shared_products.append({
+            'name': p_name, 'desc': p_desc,
+            'is_term_contract': _is_term_contract_product(p),
+        })
+
     response: dict = {
         'success': True,
         'paths_hash': paths_hash,
@@ -356,58 +373,59 @@ def _build_ic_response(
         vals = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
                 for v in ic_s.values.tolist()]
 
-        # autocorr
+        # autocorr — 优先复用 ic_stats() 已算好的 acf_vals，避免重复调用 statsmodels
         autocorr = None
         if len(ic_s) > 2:
             try:
-                from statsmodels.tsa.stattools import acf
-                nlags = min(20, max(1, len(ic_s) // 2 - 1))
-                acf_vals = acf(ic_s.values, nlags=nlags, fft=False)
-                autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals[1:], start=1)]
+                cached_stats = tester.results[factor].ic_stats if factor in tester.results else None
+                acf_vals_list = cached_stats.get('acf_vals') if isinstance(cached_stats, pd.Series) else None
+                if acf_vals_list is not None and isinstance(acf_vals_list, list):
+                    autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals_list[1:], start=1)]
+                else:
+                    # 回退路径（旧缓存没有 acf_vals 时）
+                    s_vals = np.asarray(ic_s.values, dtype=float)
+                    s_centered = s_vals - s_vals.mean()
+                    denom = np.dot(s_centered, s_centered)
+                    nlags = min(20, max(1, len(s_vals) // 2 - 1))
+                    if denom > 0:
+                        acf_arr = [1.0]
+                        for lag in range(1, nlags + 1):
+                            num = np.dot(s_centered[lag:], s_centered[:-lag])
+                            acf_arr.append(float(num / denom))
+                        autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_arr[1:], start=1)]
             except Exception:
                 autocorr = None
 
-        # rolling_ic
+        # rolling_ic — pandas 向量化替代 Python for 循环
         rolling_ic = None
         if isinstance(rolling_window, (int, float)) and rolling_window > 1:
             win = int(rolling_window)
             s_vals = np.asarray(ic_s.values, dtype=float)
             if len(s_vals) >= win:
-                r_mean, r_ir, r_dates = [], [], []
-                for i in range(win - 1, len(s_vals)):
-                    win_slice = np.asarray(s_vals[i - win + 1:i + 1], dtype=float)
-                    m = float(np.mean(win_slice))
-                    std_win = float(np.std(win_slice, ddof=1))
-                    rr = (m / std_win) if std_win != 0 else None
-                    r_mean.append(_safe_round(m))
-                    r_ir.append(_safe_round(rr))
-                    ts_i = signal_ts[i]
-                    if hasattr(ts_i, 'strftime'):
-                        r_dates.append(
-                            ts_i.strftime('%Y-%m-%d') if is_daily
-                            else int(cast(np.int64, ts_i.value) // 10**6)
-                        )
-                    else:
-                        r_dates.append(str(ts_i))
-                rolling_ic = {'window': win, 'dates': r_dates, 'mean': r_mean, 'ir': r_ir}
-
-        # products
-        products = []
-        final_products = resolved_products if resolved_products else all_products
-        for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
-            p_name = str(getattr(p, 'name', p))
-            p_desc = str(getattr(p, 'desc', p_name))
-            products.append({
-                'name': p_name, 'desc': p_desc,
-                'is_term_contract': _is_term_contract_product(p),
-            })
+                s = pd.Series(s_vals)
+                r_mean = s.rolling(win, min_periods=win).mean().iloc[win - 1:].to_numpy(dtype=float)
+                r_std = s.rolling(win, min_periods=win).std(ddof=1).iloc[win - 1:].to_numpy(dtype=float)
+                r_ir = np.full_like(r_mean, np.nan)
+                valid_mask = r_std > 0
+                r_ir[valid_mask] = r_mean[valid_mask] / r_std[valid_mask]
+                ts_win = signal_ts[win - 1:]
+                if is_daily:
+                    r_dates = [ts.strftime('%Y-%m-%d') for ts in ts_win]
+                else:
+                    r_dates = cast('list[str | int]', (cast(np.ndarray, ts_win.view(np.int64)) // 10**6).tolist())
+                rolling_ic = {
+                    'window': win,
+                    'dates': r_dates,
+                    'mean': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_mean],
+                    'ir': [_safe_round(float(v)) if not np.isnan(v) else None for v in r_ir],
+                }
 
         factor_data: Dict[str, Any] = {
             'name': factor.name,
             'alias': factor.alias,
             'ic_series': {'dates': dates, 'values': vals},
             'autocorr': autocorr,
-            'products': products,
+            'products': shared_products,
         }
 
         # multi-lag
@@ -491,7 +509,7 @@ def _prepare_ic_compute(
 
     matched_factors: List[Factor] = []
     for item in factor_alias_return_freq:
-        f = next((x for x in all_factors if x.alias == item.get('alias')), None)
+        f = factor_family.get_factor_by_alias(item.get('alias', ''))
         if f is not None:
             matched_factors.append(f)
     if not matched_factors:
@@ -506,6 +524,7 @@ def _prepare_ic_compute(
 
     shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
+    next_returns_family = NextReturns()
     for factor in factors:
         effective_freq = factor.freq
         if effective_freq is None:
@@ -519,10 +538,16 @@ def _prepare_ic_compute(
                 lag_i,
             )
             if key not in ic_param_map:
+                returns_factor = next_returns_family.get_factor(
+                    SC=returns_col.value,
+                    RF=effective_freq.value,
+                    S=shift,
+                    **{'$F': effective_freq.value, '$Rev': '0'},
+                )
                 ic_param_map[key] = []
                 param_payloads[key] = {
-                    'FE': factor, 'SC': returns_col.value,
-                    'RF': effective_freq.value, 'S': shift,
+                    'FE': factor,
+                    'RE': returns_factor,
                     'Lag': lag_i, '$F': effective_freq.value,
                 }
             ic_param_map[key].append(factor)
@@ -548,10 +573,12 @@ def run_ic_test():
         (_, _, _, _, _, _, ic_lags, primary_ic_lag) = _parse_ic_params(data)
 
         tester = get_factor_tester(data.get('submission_id', ''), caller='run_ic_test')
-        factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'))
+        factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
+        session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=get_session_params(data.get('factor_family_alias', ''), factor_family)
+            params_list=session_params,
+            page_uuid=str(data.get('page_uuid') or ''),
         )
 
         tester.sync_signal_index = None
@@ -571,7 +598,7 @@ def run_ic_test():
             tester, factors, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
         )
-        return jsonify(response)
+        return Response(orjson.dumps(response, option=orjson.OPT_SERIALIZE_NUMPY), mimetype='application/json')
 
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -594,10 +621,12 @@ def run_ic_test_stream():
     # ── 在主线程中完成所有需要 context 的操作 ──
     try:
         tester = get_factor_tester(str(data.get('submission_id', '')), caller='run_ic_test_stream')
-        factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'))
+        factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
+        session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)
         all_factors = factor_family.get_factors(
-            params_list=get_session_params(str(data.get('factor_family_alias', '')), factor_family)
+            params_list=session_params,
+            page_uuid=str(data.get('page_uuid') or ''),
         )
     except Exception as e:
         def _early_err():

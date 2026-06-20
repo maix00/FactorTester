@@ -30,14 +30,14 @@ def build_group_detail(
     group_gross_returns_np: np.ndarray | None = None,
     trade_notional_ratio_np: np.ndarray | None = None,
     fee_costs_np: np.ndarray | None = None,
-    open_fee_vec: np.ndarray | None = None,
-    close_fee_vec: np.ndarray | None = None,
-    close_today_fee_vec: np.ndarray | None = None,
+    open_ratio_mat: np.ndarray | None = None,
+    close_ratio_mat: np.ndarray | None = None,
+    close_today_ratio_mat: np.ndarray | None = None,
 ) -> dict[str, Any]:
     returns = np.asarray(group_returns_np[:, group_index], dtype=float)
     clean_returns = returns[np.isfinite(returns)]
     group_products = products_by_group.get(group_index, {})
-    product_fee_rates = _build_product_fee_rates(valid_cols, open_fee_vec, close_fee_vec, close_today_fee_vec)
+    product_fee_rates = _build_product_fee_rates(valid_cols, open_ratio_mat, close_ratio_mat, close_today_ratio_mat)
     total_periods = max(len(index_list), 1)
 
     entry_counts = Counter()
@@ -565,21 +565,21 @@ def _build_tradability_analysis(
 
 def _build_product_fee_rates(
     valid_cols: list | None,
-    open_fee_vec: np.ndarray | None,
-    close_fee_vec: np.ndarray | None,
-    close_today_fee_vec: np.ndarray | None = None,
+    open_ratio_mat: np.ndarray | None,
+    close_ratio_mat: np.ndarray | None,
+    close_today_ratio_mat: np.ndarray | None = None,
 ) -> dict[str, dict[str, float]]:
     """返回 {产品名: {open, close, close_today, close_yesterday, total, _is_real_fee}}。
 
     如果回测中所有品种费率均为 0（用户未设置），则从全局费率表获取真实费率并标记 _is_real_fee。
     """
-    if not valid_cols or open_fee_vec is None or close_fee_vec is None:
+    if not valid_cols or open_ratio_mat is None or close_ratio_mat is None:
         return {}
-    open_rates = np.asarray(open_fee_vec, dtype=float)
-    close_rates = np.asarray(close_fee_vec, dtype=float)
+    open_rates = np.asarray(open_ratio_mat, dtype=float)
+    close_rates = np.asarray(close_ratio_mat, dtype=float)
     close_today_rates = (
-        np.asarray(close_today_fee_vec, dtype=float)
-        if close_today_fee_vec is not None else close_rates
+        np.asarray(close_today_ratio_mat, dtype=float)
+        if close_today_ratio_mat is not None else close_rates
     )
     if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
         return {}

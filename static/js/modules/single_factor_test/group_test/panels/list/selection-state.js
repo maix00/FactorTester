@@ -103,8 +103,16 @@
     function getFirstBaseGroup() {
         var group = getFirstGroup();
         if (!group) return null;
-        if (!group.isDerived) return group;
-        return _groupById(group.baseGroupId) || group;
+        if (!group.parentId) return group;
+        // Walk parentId chain to root
+        var cur = group;
+        var visited = {};
+        while (cur && cur.parentId) {
+            if (visited[cur.id]) return group; // cycle, return original
+            visited[cur.id] = true;
+            cur = _groupById(cur.parentId);
+        }
+        return cur || group;
     }
 
     function getFirstSubmissionId() {

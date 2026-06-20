@@ -14,6 +14,7 @@ from tools.products.Product import Product
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
     lookup_contract_product,
+    resolve_term_structure_product,
 )
 
 
@@ -33,9 +34,21 @@ def product_display_name(product: Any) -> Dict[str, str]:
 
     # 如果自身没有 desc，尝试从父品种获取
     if not desc:
-        contract_uid = getattr(product, 'name', str(product))
-        if contract_uid:
-            desc = get_contract_desc(contract_uid)
+        parent = None
+        try:
+            parent = getattr(product, 'parent_product', None)
+            if callable(parent):
+                parent = parent()
+        except Exception:
+            parent = None
+        if parent is None:
+            parent = resolve_term_structure_product(product)
+        if parent is not None:
+            desc = getattr(parent, 'desc', '') or ''
+        if not desc:
+            contract_uid = getattr(product, 'name', str(product))
+            if contract_uid:
+                desc = get_contract_desc(contract_uid)
 
     return {'name': name, 'desc': desc or name}
 

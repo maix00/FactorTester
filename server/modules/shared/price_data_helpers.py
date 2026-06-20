@@ -8,17 +8,24 @@ import numpy as np
 import pandas as pd
 
 
-def to_utc_epoch(ts: pd.Timestamp, timezone: str = 'Asia/Shanghai') -> int:
-    """将 pd.Timestamp 转为 UTC epoch（毫秒）。
-    
-    - naive ts → tz_localize(timezone) → tz_convert('UTC') → timestamp()
-    - aware ts  → tz_convert('UTC') → timestamp()
-    
-    前端 Highcharts (useUTC=true) 会根据浏览器本地时区自动渲染。
+def to_epoch_ms(
+    ts: pd.Timestamp,
+    timezone: str = 'Asia/Shanghai',
+    *,
+    use_utc: bool = False,
+) -> int:
+    """将 pd.Timestamp 转为 epoch 毫秒，统一入口。
+
+    - use_utc=True  → tz_localize(timezone) → tz_convert('UTC') → timestamp()
+                      （Highcharts useUTC=true）
+    - use_utc=False → tz_localize(timezone) → .timestamp()，不走 UTC 转换
+                      （Highcharts useUTC=false）
+    - aware ts → 不重复 localize，仅按 use_utc 决定是否转 UTC。
     """
     if ts.tz is None:
         ts = ts.tz_localize(timezone)
-    ts = ts.tz_convert('UTC')
+    if use_utc:
+        ts = ts.tz_convert('UTC')
     return int(ts.timestamp() * 1000)
 
 
@@ -34,7 +41,7 @@ def format_price_row(row, time_col: str, o_col: str, h_col: str, l_col: str, c_c
     ts: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(row[time_col]))
     entry: dict = {
         'time': ts.tz_localize(timezone).tz_convert('UTC').isoformat() if ts.tz is None else ts.tz_convert('UTC').isoformat(),
-        'timestamp': to_utc_epoch(ts, timezone),
+        'timestamp': to_epoch_ms(ts, timezone, use_utc=True),
         'open': row_value_as_float(row, o_col),
         'high': row_value_as_float(row, h_col),
         'low': row_value_as_float(row, l_col),

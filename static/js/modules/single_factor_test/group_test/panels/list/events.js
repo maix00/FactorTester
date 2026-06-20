@@ -55,9 +55,9 @@
 
     function bindEvents(container, state) {
         _ensureDeps();
-        // state = { fullRender, expandedBatches, lsSectionExpanded, getBatchMap }
+        // state = { fullRender, expandedBatches, lsSectionExpanded, getAddGroupBatchMap }
         var fullRender = state.fullRender;
-        var batchMapRef = state.getBatchMap || function() { return H.getBatchMap(); };
+        var batchMapRef = state.getAddGroupBatchMap || function() { return H.getAddGroupBatchMap(); };
 
         // ── LS section ──
 
@@ -106,10 +106,9 @@
         container.querySelectorAll('.unified-batch-del-btn').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var batchKey = this.getAttribute('data-batch-key');
-                var ids = H.batchGroupIds(batchKey);
+                var addGroupBatchKey = this.getAttribute('data-batch-key');
+                var ids = H.addGroupBatchGroupIds(addGroupBatchKey);
                 if (ids.length === 0) return;
-                if (!confirm('确定删除此批次（共 ' + ids.length + ' 组）？')) return;
                 try {
                     for (var i = 0; i < ids.length; i++) {
                         GT.groupSettings.groups.remove(ids[i]);
@@ -123,7 +122,6 @@
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var bgId = this.getAttribute('data-bg-id');
-                if (!confirm('确定删除此基础组？')) return;
                 try { GT.groupSettings.groups.remove(bgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
@@ -197,7 +195,6 @@
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var dgId = this.getAttribute('data-dg-id');
-                if (!confirm('确定删除此派生组及其所有子节点？')) return;
                 try { GT.groupSettings.groups.remove(dgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
@@ -260,9 +257,9 @@
             // Batch header row → toggle selection
             var batchHeader = e.target.closest('.unified-batch-header');
             if (batchHeader && !e.target.closest('button')) {
-                var batchKey = batchHeader.getAttribute('data-batch-key');
-                var batchMap = H.getBatchMap();
-                toggleBatchSelection(batchMap[batchKey]);
+                var addGroupBatchKey = batchHeader.getAttribute('data-batch-key');
+                var batchMap = H.getAddGroupBatchMap();
+                toggleBatchSelection(batchMap[addGroupBatchKey]);
             }
         };
     }

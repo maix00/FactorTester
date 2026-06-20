@@ -25,10 +25,10 @@
 """
 from __future__ import annotations
 
-import json as _json
+import orjson
 import queue
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from flask import Response, stream_with_context
 
@@ -45,8 +45,10 @@ class SSEProgressEmitter:
 
     # ── 事件发射（工具线程调用） ──
 
-    def emit_start(self, *, total: int, groups: int, phase: str = "init", **extra) -> None:
+    def emit_start(self, *, total: int, groups: int, phase: str = "init", phases: Optional[List[dict]] = None, **extra) -> None:
         payload: Dict[str, Any] = {"total": total, "groups": groups, "phase": phase}
+        if phases:
+            payload["phases"] = phases
         payload.update(extra)
         self._q.put(self._event("start", payload))
 
@@ -84,7 +86,7 @@ class SSEProgressEmitter:
 
     @staticmethod
     def _event(name: str, payload: Dict[str, Any]) -> str:
-        return f"event: {name}\ndata: {_json.dumps(payload, default=str)}\n\n"
+        return f"event: {name}\ndata: {orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY).decode()}\n\n"
 
     def _generate(self):
         while True:

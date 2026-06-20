@@ -1,15 +1,17 @@
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 import pandas as pd
 import os
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
-from tools import DataColumn
-from scripts.data_dir import DATA_DIR
+from tools.data.types import DataColumn
+from sources.LocalCNFutures import SOURCE_DATA_DIR
+from sources.LocalCNFutures.product_catalog import load_product_catalog
+from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
 
-_data = pd.read_csv(os.path.join(DATA_DIR, 'sectors.csv'))
-data_dir_min = os.path.join(DATA_DIR, 'main_mink')
-data_path_day = os.path.join(DATA_DIR, 'main_series_adjusted.parquet')
-data_dir_day = os.path.join(DATA_DIR, 'main_dayk')
+_data = load_product_catalog()
+data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
+data_path_day = os.path.join(SOURCE_DATA_DIR, 'main_series_adjusted.parquet')
+data_dir_day = os.path.join(SOURCE_DATA_DIR, 'main_dayk')
 data_type = 'parquet'
 
 file_list_min = [
@@ -73,6 +75,10 @@ highest_version_col_name = '最高版本'
 enddate_col_name = '标准合约终止交易日'
 
 name_code_version_dict = {}
+contract_mapping_path = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
+_CNFUTURES_BY_NAME: Dict[str, "CNFutures"] = {}
+_CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH: Dict[str, Dict[str, str]] = {}
+_CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH: Dict[str, Dict[str, List[str]]] = {}
 
 
 def _infer_unique_version(code: str, exchange_short: Optional[str] = None) -> Optional[str]:
@@ -89,18 +95,93 @@ def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str
         return None
     if name not in name_code_version_dict:
         name_code_version_dict[name] = {
-            (str(row[code_col_name]), str(row[version_col_name])): str(row[name])
+            (str(row[code_col_name]), str(row[version_col_name])): (
+                None if pd.isna(row[name]) else str(row[name])
+            )
             for _, row in _data.iterrows()
         }
     return name_code_version_dict[name].get((code, version))
+
+
+def _text_or_default(value: Any, default: str) -> str:
+    return default if value is None or pd.isna(value) or not str(value).strip() else str(value)
+
+
+def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
+    contract = row.get('CONTRACT')
+    if not isinstance(contract, str):
+        return None
+    if not contract.endswith('CZC'):
+        return contract
+    enddate = row.get('ENDDATE')
+    if pd.isna(enddate):
+        return None
+    digits = ''.join(filter(str.isdigit, contract))
+    if len(digits) == 4:
+        return contract
+    if len(digits) != 3:
+        return None
+
+    end_str = pd.Timestamp(enddate).strftime('%Y%m%d')
+    next_two = str(int(end_str[2:4]) + 1).zfill(2)
+    decade = end_str[2] if digits[0] == end_str[3] else (next_two[0] if digits[0] == next_two[-1] else None)
+    return contract.replace(digits, decade + digits) if decade else None
+
+
+def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
+    if not isinstance(contract, str) or '.' not in contract:
+        return None
+    product_month, exchange = contract.split('.')
+    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
+    reverse_exchange = {v: k for k, v in exchange_map.items()}
+    return f"{reverse_exchange.get(exchange, exchange)}|F|{product_month[:first_digit]}|{product_month[first_digit:]}"
+
+
+def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str], Dict[str, List[str]]]:
+    path = path or contract_mapping_path
+    if path not in _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH:
+        mapping = (
+            pd.read_parquet(path)
+            .rename(columns={'S_INFO_WINDCODE': 'PRODUCT', 'FS_MAPPING_WINDCODE': 'CONTRACT'})
+        )
+        mapping = mapping.dropna(subset=['PRODUCT', 'CONTRACT'])
+        mapping['CONTRACT_PATCHED'] = mapping.apply(_patch_czc_contract_decade, axis=1)
+        mapping['CONTRACT_UID'] = mapping['CONTRACT_PATCHED'].apply(_contract_to_uid)
+        mapping = mapping.dropna(subset=['CONTRACT_UID'])
+        mapping = mapping[['PRODUCT', 'CONTRACT_UID']].drop_duplicates()
+
+        contract_to_product = {
+            str(row.CONTRACT_UID): str(row.PRODUCT)
+            for row in mapping.itertuples(index=False)
+        }
+        product_to_contracts: Dict[str, List[str]] = {}
+        for contract_uid, product_name in contract_to_product.items():
+            product_to_contracts.setdefault(product_name, []).append(contract_uid)
+
+        _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH[path] = contract_to_product
+        _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH[path] = product_to_contracts
+    return (
+        _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH[path],
+        _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH[path],
+    )
 
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
 
+    def get_parent_product(self, term_structure_paths: Optional[list[str]] = None):
+        if getattr(self, '_parent_product_loaded', False):
+            return getattr(self, '_parent_product_cache', None)
+        parent = CNFutures.get_contract_parent(self.name)
+        setattr(self, '_parent_product_cache', parent)
+        setattr(self, '_parent_product_loaded', True)
+        return parent
+
 class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
+
+    _is_cn_futures_main_product = True
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
@@ -120,14 +201,86 @@ class CNFutures(Futures):
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
+        _CNFUTURES_BY_NAME[self.name] = self
+        _CNFUTURES_BY_NAME[self.alias] = self
+
+    @classmethod
+    def get_by_product_name(cls, product_name: str) -> Optional["CNFutures"]:
+        return _CNFUTURES_BY_NAME.get(str(product_name))
+
+    # ------------------------------------------------------------------
+    # 品种中文名 → 品种代码 反向映射
+    # ------------------------------------------------------------------
+    _DESC_TO_CODE: Dict[str, str] | None = None  # lazy loaded
+
+    @classmethod
+    def desc_to_code(cls, desc: str, extra_map: Dict[str, str] | None = None) -> str:
+        """根据合约标的（中文名）返回品种代码。
+
+        数据源：SQLite 规范品种视图中的「合约标的」→「品种代码」。
+        首次调用会构建缓存映射。
+        可传入 extra_map 补充 sectors.csv 覆盖不到的别名（如国信页面用名）。
+        未找到时返回原字符串。
+        """
+        if cls._DESC_TO_CODE is None:
+            cls._DESC_TO_CODE = {}
+            for _, row in _data.iterrows():
+                variety = _text_or_default(row[variety_col_name], "").strip()
+                code = _text_or_default(row[code_col_name], "").strip()
+                if variety and code:
+                    cls._DESC_TO_CODE[variety] = code
+        desc_str = str(desc)
+        # priority: extra_map > sectors.csv
+        if extra_map and desc_str in extra_map:
+            return extra_map[desc_str]
+        return cls._DESC_TO_CODE.get(desc_str, desc)
+
+    # ------------------------------------------------------------------
+    # 交易所 → 品种中文名列表（用于反向排除等场景）
+    # ------------------------------------------------------------------
+    _PRODUCTS_BY_EXCHANGE: Dict[str, List[str]] | None = None
+
+    @classmethod
+    def products_by_exchange(cls) -> Dict[str, List[str]]:
+        """返回 {交易所代码: [合约标的...]} 的映射。"""
+        if cls._PRODUCTS_BY_EXCHANGE is None:
+            result: Dict[str, List[str]] = {}
+            for _, row in _data.iterrows():
+                exch_raw = _text_or_default(row.get(exchange_code_col_name), "").strip()
+                variety = _text_or_default(row.get(variety_col_name), "").strip()
+                if not exch_raw or not variety:
+                    continue
+                exch_map = {
+                    "SHF": "SHFE", "CZC": "CZCE", "CFE": "CFFEX",
+                    "GFE": "GFEX", "DCE": "DCE", "INE": "INE",
+                }
+                exch_code = exch_map.get(exch_raw, exch_raw)
+                result.setdefault(exch_code, [])
+                if variety not in result[exch_code]:
+                    result[exch_code].append(variety)
+            cls._PRODUCTS_BY_EXCHANGE = result
+        return cls._PRODUCTS_BY_EXCHANGE
+
+    @classmethod
+    def get_contract_parent(cls, contract_uid: str, mapping_path: Optional[str] = None) -> Optional["CNFutures"]:
+        contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
+        product_name = contract_to_product.get(str(contract_uid))
+        return cls.get_by_product_name(product_name) if product_name else None
+
+    @classmethod
+    def get_contracts_for_product(cls, product_name: str, mapping_path: Optional[str] = None) -> List[str]:
+        _, product_to_contracts = _cn_futures_contract_maps(mapping_path)
+        return list(product_to_contracts.get(str(product_name), []))
 
     def get_roller_info_path(self) -> str:
         if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):
-            from scripts.data_dir import DATA_DIR
-            self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
+            from sources.LocalCNFutures import ROLLER_INFO_PATH
+            self._ROLLER_INFO_PATH_CACHED = ROLLER_INFO_PATH
         return self._ROLLER_INFO_PATH_CACHED
 
-    def get_term_structure_path(self) -> str:
+    def get_term_structure_path(self, curve_variant: str = "listed_contracts") -> str:
+        if curve_variant != "listed_contracts":
+            raise KeyError(f"Unsupported LocalCNFutures curve variant: {curve_variant}")
         if self.term_structure_path:
             return self.term_structure_path
         if not hasattr(self, '_TERM_STRUCTURE_PATH_CACHED'):
@@ -135,20 +288,44 @@ class CNFutures(Futures):
             self._TERM_STRUCTURE_PATH_CACHED = TERM_STRUCTURE_PATH
         return self._TERM_STRUCTURE_PATH_CACHED
 
+    def get_series_variants(self):
+        from tools.products.series import ProductSeriesRef
+
+        variants = list(super().get_series_variants())
+        secondary_name = self.alias.replace(".", "_S.", 1)
+        has_secondary = any(
+            os.path.isfile(os.path.join(folder, f"{secondary_name}.parquet"))
+            for folder in (data_dir_min, data_dir_day)
+        )
+        if has_secondary:
+            variants.extend([
+                ProductSeriesRef(self, "secondary_raw", "次主连 · 原始", secondary_name),
+                ProductSeriesRef(self, "secondary_adjusted", "次主连 · 平滑复权", secondary_name, adjusted=True),
+            ])
+        return variants
+
 from tools.products.Product import Product
+
+
+def _contract_data_path(folder: str, alias: str) -> str:
+    """Resolve both Windows-safe and legacy contract parquet filenames."""
+    return str(resolve_contract_parquet_path(folder, alias))
+
 
 def get_all_futures_contract() -> List[Product]:
     """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
 
-    data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
+    data_dir_min = os.path.join(SOURCE_DATA_DIR, 'data_mink_product')
 
-    from tools import DataSource, DataFreq
-    futures_contract_ds_min1 = DataSource(
-        alias = 'LocalCNFuturesContractMIN1',
+    from tools.data.types import DataFreq
+    from tools.data.providers import DataProviderProductTS
+    futures_contract_ds_min1 = DataProviderProductTS(
+        key = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
-        if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_min, f"{object.alias}.{data_type}")),
-        get_object_path=lambda object: os.path.join(data_dir_min, f"{object.alias}.{data_type}"),
+        if_object_is_in_source=lambda object: os.path.isfile(
+            _contract_data_path(data_dir_min, object.alias)
+        ),
+        get_object_path=lambda object: _contract_data_path(data_dir_min, object.alias),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
@@ -157,15 +334,18 @@ def get_all_futures_contract() -> List[Product]:
     contract_list = []
     for file_path in os.listdir(data_dir_min):
         if file_path.endswith('.' + data_type):
-            code = file_path.split('.')[0]
-            contract = CNFuturesContract(name=code)
+            raw_name = contract_alias_from_path(file_path)
+            contract = CNFuturesContract(name=raw_name)
             contract_list.append(contract)
     return contract_list
 
 def get_object_path(object: Product, folder: str):
-    path = os.path.join(folder, f"{object.alias}.{data_type}")
+    safe_alias = object.alias.replace('|', '_')
+    path = os.path.join(folder, f"{safe_alias}.{data_type}")
     
-    if not isinstance(object, CNFutures) or not os.path.isfile(path):
+    # Module reload creates a new CNFutures class while live testers may still
+    # hold products from the previous class. Use a stable capability marker.
+    if not getattr(object, '_is_cn_futures_main_product', False) or not os.path.isfile(path):
         return ''
     else:
         import pyarrow.parquet as pq
@@ -201,20 +381,43 @@ def get_object_path(object: Product, folder: str):
             return ''
         return path
 
+
+def _product_names_from_catalog(catalog: pd.DataFrame) -> List[str]:
+    keyed = catalog.copy()
+    keyed['_KEY'] = (
+        keyed[code_col_name].astype(str)
+        + '|'
+        + keyed[exchange_code_col_name].astype(str)
+    )
+    version_count = keyed.groupby('_KEY')[version_col_name].nunique(dropna=True).to_dict()
+
+    names = []
+    for _, row in keyed.iterrows():
+        base_name = str(row['_product_name'])
+        version = row[version_col_name]
+        key = str(row['_KEY'])
+        if pd.isna(version) or version_count.get(key, 0) <= 1:
+            names.append(base_name)
+        else:
+            names.append(f"{base_name}@{version}")
+    return names
+
+
 def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
-    from tools import DataSource, DataFreq
-    futures_ds_min1 = DataSource(
-        alias = 'LocalCNFuturesMIN1',
+    from tools.data.types import DataFreq
+    from tools.data.providers import DataProviderProductTS
+    futures_ds_min1 = DataProviderProductTS(
+        key = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
         get_object_path=lambda object: get_object_path(object, data_dir_min),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
     )
-    futures_ds_day1 = DataSource(
-        alias = 'LocalCNFuturesDAY1',
+    futures_ds_day1 = DataProviderProductTS(
+        key = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         get_object_path=lambda object: get_object_path(object, data_dir_day),
         timezone = 'Asia/Shanghai',
@@ -222,34 +425,32 @@ def get_all_futures() -> List[CNFutures]:
         data_cols_mapping=datacolumn_map_reversed,
     )
 
-    # 先统计同一 code+exchange 下版本数，单版本则省略 @version。
-    _tmp = _data.copy()
-    _tmp['_KEY'] = _tmp[code_col_name].astype(str) + '|' + _tmp[exchange_code_col_name].astype(str)
-    version_count = _tmp.groupby('_KEY')[version_col_name].nunique(dropna=True).to_dict()
-
-    cnfutures_list = []
-    for _, row in _data.iterrows():
-        code = str(row[code_col_name])
-        exchange_raw = str(row[exchange_code_col_name])
-        exchange = exchange_map.get(exchange_raw, exchange_raw)
-        version = str(row[version_col_name])
-        key = f"{code}|{exchange_raw}"
-        if version_count.get(key, 0) <= 1:
-            name = f"{code}.{exchange}"
-        else:
-            name = f"{code}.{exchange}@{version}"
-        cnfutures_list.append(CNFutures(name))
-
-    return cnfutures_list
+    return [CNFutures(name) for name in _product_names_from_catalog(_data)]
 
 CNFUTURES = get_all_futures()
 CNFUTURES_CATEGORY_SECTOR = {}
 CNFUTURES_CATEGORY_DAYNIGHT = {}
 for product in CNFUTURES:
-    CNFUTURES_CATEGORY_SECTOR[product] = get_by_code_and_version(product.code, product.version, category_col_name)
+    CNFUTURES_CATEGORY_SECTOR[product] = _text_or_default(
+        get_by_code_and_version(product.code, product.version, category_col_name),
+        "未分类",
+    )
     day_time = get_by_code_and_version(product.code, product.version, day_time_col_name)
     night_time = get_by_code_and_version(product.code, product.version, night_time_col_name)
-    CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_time},{night_time}"
+    if product.version is None:
+        catalog_rows = _data[_data['_product_name'].astype(str) == product.alias]
+        catalog_row = catalog_rows.iloc[0] if not catalog_rows.empty else None
+        if catalog_row is not None:
+            day_time = catalog_row.get(day_time_col_name)
+            night_time = catalog_row.get(night_time_col_name)
+    day_text = _text_or_default(day_time, "")
+    night_text = _text_or_default(night_time, "")
+    if not day_text and not night_text:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = "未知"
+    elif night_text:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_text},{night_text}"
+    else:
+        CNFUTURES_CATEGORY_DAYNIGHT[product] = day_text
 
 from tools.products.categories.Category import Category
 
@@ -270,20 +471,20 @@ CNFuturesDayNightTimeCategory._whether_is_in_category = lambda catname, obj: cat
 CNFuturesDayNightTimeCategory.objs = CNFUTURES
 
 def get_value_alias_for_day_night_time_category(x: str) -> str:
-    """將日夜盘时段描述字符串转换为简短别名（如 '夜盘2'），用于分类显示。"""
-    if '15:15' in x:
-        return '日盘2'
-    if '09:30' in x:
-        return '日盘3'
+    """先按夜盘存在性分流，再细分日盘或夜盘时间段。"""
     if '23:00' in x:
         return '夜盘1'
     if '01:00' in x:
         return '夜盘2'
     if '02:30' in x:
         return '夜盘3'
-    if '21:00' not in x:
-        return '日盘'
-    return x
+    if '21:00' in x:
+        return x
+    if '15:15' in x:
+        return '日盘2'
+    if '09:30' in x:
+        return '日盘3'
+    return '日盘'
 CNFuturesDayNightTimeCategory.get_value_alias = get_value_alias_for_day_night_time_category
 
 CNFuturesSectorNightTimeCategory = CNFuturesSectorCategory * CNFuturesDayNightTimeCategory

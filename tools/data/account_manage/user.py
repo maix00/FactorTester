@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from tools.data.types import UniqueNameObject
+
+if TYPE_CHECKING:
+    from tools.factors.FactorTester import FactorTester
+
+
+class User(UniqueNameObject):
+    """
+    系统用户。
+
+    属性：
+        name      (str)      : 全名，格式 {username}@{serial}，如 '张三@1'
+        alias     (str)      : 原始用户名，如 '张三'（用于展示）
+        serial    (int)      : 序列号，从 1 开始
+        is_admin  (bool)     : 是否为管理员
+        testers   (list)     : 该用户创建的 FactorTester 列表
+    """
+
+    def __init__(self, name: str, is_admin: bool = False, *args, **kwargs):
+        if not hasattr(self, '_initialized'):
+            parts = name.rsplit('@', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                alias = parts[0]
+                self.serial = int(parts[1])
+            else:
+                alias = name
+                self.serial = 1
+            super().__init__(name=name, alias=alias, desc=f'用户 {alias}', *args, **kwargs)
+            self.is_admin = is_admin
+
+    @property
+    def testers(self) -> list['FactorTester']:
+        return []
+
+    def add_tester(self, tester: 'FactorTester') -> None:
+        del tester
+
+    def remove_tester(self, tester: 'FactorTester') -> None:
+        del tester
+
+    def cleanup_testers(self) -> None:
+        """退出登录时清理该用户的所有页面与测试器资源。"""
+        from server.services.page_runtime import cleanup_user_pages
+        cleanup_user_pages(self)

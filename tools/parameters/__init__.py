@@ -1,4 +1,7 @@
-from tools.parameters.Parameter import Parameter, TypeParam, FinRangeParam, TimeDeltaParam, FactorParam, ValueSpace
-from tools.parameters.DataColumnParam import DataColumnParam
-from tools.parameters.DateOrTimeParam import DateOrTimeParam
-from tools.parameters.WindowParam import WindowParam
+FACTOR_WORKSPACE = True
+
+if FACTOR_WORKSPACE:
+    from tools.parameters.Parameter import Parameter, TypeParam, FinRangeParam, TimeDeltaParam, FactorParam, ValueSpace
+    from tools.parameters.DataColumnParam import DataColumnParam
+    from tools.parameters.DataTimeParam import DataTimeParam
+    from tools.parameters.WindowParam import WindowParam

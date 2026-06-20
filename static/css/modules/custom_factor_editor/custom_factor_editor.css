@@ -329,6 +329,31 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 .tag-custom { background: #fff8f0; color: #d47a00; }
 .tag-unknown { background: #f0f0f0; color: #888; }
 
+/* ── 因子工作区弹窗 ── */
+.factor-workspace-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+    z-index: 1010; align-items: center; justify-content: center;
+}
+.factor-workspace-overlay.open { display: flex; }
+.factor-workspace-panel {
+    width: min(760px, 92vw); max-height: 84vh; background: #fff; border-radius: 12px;
+    box-shadow: 0 18px 60px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column;
+    overflow: hidden;
+}
+.factor-workspace-header {
+    padding: 18px 22px; border-bottom: 1px solid #e2e8f0;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.factor-workspace-header h2 { font-size: 18px; margin: 0; }
+.factor-workspace-close {
+    background: none; border: none; font-size: 20px; cursor: pointer;
+    color: #94a3b8; padding: 4px 8px; border-radius: 4px;
+}
+.factor-workspace-close:hover { background: #f1f5f9; color: #334155; }
+.factor-workspace-body {
+    padding: 18px 22px 22px; overflow-y: auto;
+}
+
 /* ── 参数抽屉（右侧滑出） ── */
 .settings-drawer-overlay {
     position: fixed; top: 0; right: 0; width: 100vw; height: 100vh;

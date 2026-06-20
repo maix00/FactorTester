@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pandas as pd
 
-from Settings import get_all_products, get_cat_tree
+from settings import get_all_products, get_cat_tree
 from sources.LocalCNFutures import MINK_PRODUCT_DIR
 from sources.LocalCNFutures.CNFutures import (
     CNFuturesContract,
@@ -18,6 +18,7 @@ from sources.LocalCNFutures.CNFutures import (
     exchange_map,
     get_all_futures_contract,
 )
+from tools.data.providers import DataProviderProductTS as DataSource
 from tools.products.AdjustableTermStructure import AdjustableProductMixin
 from tools.products.Futures import (
     FuturesContract,
@@ -132,10 +133,9 @@ def available_sources_for_product(product, freq=None):
         sources = []
         freqs = [freq] if freq is not None else product.list_available_freqs()
         for data_freq in freqs:
-            meta = getattr(product, data_freq.name)
-            for source in meta.list_available_sources():
+            for source in DataSource.available_for_product(product, data_freq):
                 sources.append({
-                    'alias': source.alias,
+                    'alias': source.key,
                     'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),
                 })
         unique = {}
@@ -198,9 +198,11 @@ def _fee_fields_from_row(row: Any, source: str) -> dict[str, Any]:
     if row is None:
         return {}
 
-    def num(key: str, default: float = 0.0) -> float:
-        value = row.get(key, default)
-        return float(value) if pd.notna(value) else default
+    def num(key: str) -> float | None:
+        if key not in row:
+            return None
+        value = row.get(key)
+        return float(value) if pd.notna(value) else None
 
     return {
         'trading_spec_source': source,
@@ -216,8 +218,50 @@ def _fee_fields_from_row(row: Any, source: str) -> dict[str, Any]:
         'short_margin_ratio': num('short_margin_ratio'),
         'short_margin_fixed': num('short_margin_fixed'),
         'min_tick': num('min_tick'),
-        'point_value': num('multiplier', float(getattr(row, 'point_value', 1.0) or 1.0)),
+        'point_value': num('multiplier'),
+        'min_trade_quantity': num('min_trade_quantity'),
+        'max_trade_quantity': num('max_trade_quantity'),
     }
+
+
+def _fill_missing_trading_spec_fields(product: Any, fields: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing Product trading-spec fields one by one."""
+    mapping = {
+        'open_fee_ratio': 'open_ratio',
+        'open_fee_fixed': 'open_fixed',
+        'close_fee_ratio': 'close_ratio',
+        'close_fee_fixed': 'close_fixed',
+        'close_today_fee_ratio': 'closetoday_ratio',
+        'close_today_fee_fixed': 'closetoday_fixed',
+        'long_margin_ratio': 'long_margin_ratio',
+        'long_margin_fixed': 'long_margin_fixed',
+        'short_margin_ratio': 'short_margin_ratio',
+        'short_margin_fixed': 'short_margin_fixed',
+        'min_tick': 'min_tick',
+        'point_value': 'multiplier',
+        'min_trade_quantity': 'min_trade_quantity',
+        'max_trade_quantity': 'max_trade_quantity',
+    }
+    getter = getattr(product, 'get_trading_spec_field', None)
+    if not callable(getter):
+        return fields
+    filled = False
+    for public_key, product_field in mapping.items():
+        if fields.get(public_key) not in (None, ''):
+            continue
+        try:
+            value = getter(product_field)
+        except Exception:
+            value = None
+        if value not in (None, ''):
+            fields[public_key] = value
+            filled = True
+    if filled:
+        source = str(fields.get('trading_spec_source') or '').strip()
+        fields['trading_spec_source'] = (
+            f"{source}+openctp_fallback" if source else "openctp_fallback"
+        )
+    return fields
 
 
 def cn_futures_trading_spec_fields(product: Any) -> dict[str, Any]:
@@ -236,21 +280,24 @@ def cn_futures_trading_spec_fields(product: Any) -> dict[str, Any]:
         if isinstance(product, FuturesContract):
             contract_row = get_contract_fee_row(getattr(product, 'name', ''), allow_latest_fallback=True)
             if contract_row is not None:
-                return _fee_fields_from_row(contract_row, 'current_contract_snapshot')
+                return _fill_missing_trading_spec_fields(
+                    product,
+                    _fee_fields_from_row(contract_row, 'current_contract_snapshot'),
+                )
             variety = _contract_variety_code(product)
             source = 'current_variety_snapshot_fallback'
         else:
             variety = _future_variety_code(product)
             source = 'current_variety_snapshot'
         if not variety:
-            return {}
+            return _fill_missing_trading_spec_fields(product, {})
         df = load_latest()
         if df.empty or 'variety_code' not in df.columns:
             return {}
         match = df[df['variety_code'].astype(str).str.upper() == variety]
         if match.empty:
-            return {}
-        return _fee_fields_from_row(match.iloc[0], source)
+            return _fill_missing_trading_spec_fields(product, {})
+        return _fill_missing_trading_spec_fields(product, _fee_fields_from_row(match.iloc[0], source))
     except Exception:
         return {}
 

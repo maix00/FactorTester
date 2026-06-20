@@ -15,17 +15,18 @@ from pathlib import Path
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR as _LOCAL_CN_FUTURES_DIR
 
 # ============================================================
 # 数据源路径（只读）
 # ============================================================
 
 # 核心计算输入：test_0 / test_1 / test_2a 只能从这些源推导结果。
-WIND_MAPPING_PATH = Path(_ROOT_DATA_DIR) / 'wind_mapping.parquet'
-MIN_DATA_DIR = Path(_ROOT_DATA_DIR) / 'data_mink_product'
+WIND_MAPPING_PATH = Path(_LOCAL_CN_FUTURES_DIR) / 'wind_mapping.parquet'
+MIN_DATA_DIR = Path(_LOCAL_CN_FUTURES_DIR) / 'data_mink_product'
 
 # 对账输入：只允许 test_2b 用于校验 test_2a 的 MAIN 结果，不允许 test_2a 读取。
-MAIN_MINK_DIR = Path(_ROOT_DATA_DIR) / 'main_mink'
+MAIN_MINK_DIR = Path(_LOCAL_CN_FUTURES_DIR) / 'main_mink'
 
 # ============================================================
 # Test 输出路径

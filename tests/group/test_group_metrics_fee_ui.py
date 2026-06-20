@@ -40,32 +40,34 @@ def test_sectioned_group_metrics_keep_backend_percent_units():
 def test_group_fee_config_parses_uniform_and_closetoday_rates():
     from server.modules.single_factor_test.group import _parse_group_fee_config
 
-    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config({'fee': 0.03})
+    fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config({'fee': 0.03})
     assert fee_uniform == 0.0003
-    # 模式1/2：fee_map 为空时，不加载 FeeData，返回空字典
-    assert fee_map == {}
+    # 模式1/2：fee_modifications 为空时，返回空列表
+    assert fee_modifications == []
     assert use_closetoday is False
 
-    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config({
+    fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config({
         'fee': 0,
         'use_closetoday': True,
-        'fee_map': {
-            'rb': {
-                'open_ratio': 0.0001,
-                'close_ratio': 0.0002,
-                'closetoday_ratio': 0.0005,
+        'fee_modifications': [
+            {
+                'variety_code': 'RB',
+                'fields': {
+                    'open_ratio': 0.0001,
+                    'close_yesterday_ratio': 0.0002,
+                    'close_today_ratio': 0.0005,
+                },
             },
-        },
+        ],
     })
     assert fee_uniform == 0
     assert use_closetoday is True
-    # 模式3：前端传的 fee_map 只做字段名映射，不加载 FeeData 补全
-    assert fee_map == {'RB': {
-        'open': 0.0001,
-        'close': 0.0002,
-        'close_today': 0.0005,
-        'close_yesterday': 0.0002,
-    }}
+    # 模式3：fee_modifications 按品种传递
+    assert len(fee_modifications) == 1
+    assert fee_modifications[0].variety_code == 'RB'
+    assert fee_modifications[0].fields['open_ratio'] == 0.0001
+    assert fee_modifications[0].fields['close_yesterday_ratio'] == 0.0002
+    assert fee_modifications[0].fields['close_today_ratio'] == 0.0005
 
 
 def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
@@ -82,9 +84,9 @@ def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
         group_gross_returns_np=np.array([[0.001], [0.002]]),
         trade_notional_ratio_np=np.array([[1.0], [0.5]]),
         fee_costs_np=np.array([[0.0003], [0.0001]]),
-        open_fee_vec=np.array([0.0001, 0.0002]),
-        close_fee_vec=np.array([0.0003, 0.0004]),
-        close_today_fee_vec=np.array([0.0005, 0.0006]),
+        open_ratio_mat=np.array([0.0001, 0.0002]),
+        close_ratio_mat=np.array([0.0003, 0.0004]),
+        close_today_ratio_mat=np.array([0.0005, 0.0006]),
     )
 
     first_product = detail['entry_frequency'][0]['product']

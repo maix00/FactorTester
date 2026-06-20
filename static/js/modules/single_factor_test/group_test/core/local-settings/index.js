@@ -12,6 +12,7 @@
 
     var _entries = [];
     var _byKey = {};
+    var _activeTabKey = null;
 
     function _deepCopy(obj) {
         if (obj === undefined || obj === null) return obj;
@@ -32,9 +33,60 @@
         spec.order = typeof spec.order === 'number' ? spec.order : 100;
         spec.runFields = Array.isArray(spec.runFields) ? spec.runFields.slice() : [];
         spec.runPayload = Array.isArray(spec.runPayload) ? spec.runPayload.slice() : [];
+        spec.tabLabel = spec.tabLabel ? String(spec.tabLabel) : '';
         _entries.push(spec);
         _byKey[spec.key] = spec;
         _entries.sort(function(a, b) { return a.order - b.order; });
+    }
+
+    function getTabEntries() {
+        return _entries.filter(function(entry) { return !!entry.tabLabel; });
+    }
+
+    function activateTab(tabKey) {
+        var tabs = getTabEntries();
+        if (!tabs.length) return;
+        var nextKey = _byKey[tabKey] ? tabKey : tabs[0].key;
+        _activeTabKey = nextKey;
+
+        tabs.forEach(function(entry) {
+            var isActive = entry.key === nextKey;
+            var button = document.querySelector('[data-local-settings-tab-btn="' + entry.key + '"]');
+            var panel = document.querySelector('[data-local-settings-tab-panel="' + entry.key + '"]');
+            if (button) {
+                button.classList.toggle('active', isActive);
+                button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            }
+            if (panel) panel.style.display = isActive ? '' : 'none';
+        });
+    }
+
+    function initTabs() {
+        var tabBar = document.getElementById('gt-local-settings-tab-bar');
+        for (var i = 0; i < _entries.length; i++) {
+            if (typeof _entries[i].bind === 'function') {
+                try { _entries[i].bind(); }
+                catch (e) { console.warn('[GT local-settings] bind failed for ' + _entries[i].key, e); }
+            }
+        }
+        if (!tabBar) return;
+
+        var tabs = getTabEntries();
+        tabBar.innerHTML = '';
+        if (!tabs.length) return;
+
+        tabs.forEach(function(entry) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-sm btn-outline-secondary';
+            button.textContent = entry.tabLabel;
+            button.setAttribute('data-local-settings-tab-btn', entry.key);
+            button.setAttribute('aria-selected', 'false');
+            button.addEventListener('click', function() { activateTab(entry.key); });
+            tabBar.appendChild(button);
+        });
+
+        activateTab(_activeTabKey || tabs[0].key);
     }
 
     function collect() {
@@ -148,6 +200,8 @@
         getRunFields: getRunFields,
         getRunField: getRunField,
         prepareRun: prepareRun,
+        initTabs: initTabs,
+        activateTab: activateTab,
         _entries: _entries,
     };
 })();

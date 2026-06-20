@@ -174,7 +174,7 @@ def _needed_import_lines(source_code: str, import_lines: list[str]) -> list[str]
     if re.search(r'\bFactorFamily\b', source_code) and not _has_imported_symbol(import_lines, 'FactorFamily'):
         imports.append('from tools.factors import FactorFamily')
 
-    parameter_symbols = ['WindowParam', 'DataColumnParam', 'DateOrTimeParam']
+    parameter_symbols = ['WindowParam', 'DataColumnParam', 'DataTimeParam']
     missing_params = [
         symbol for symbol in parameter_symbols
         if re.search(rf'\b{symbol}\b', source_code) and not _has_imported_symbol(import_lines, symbol)

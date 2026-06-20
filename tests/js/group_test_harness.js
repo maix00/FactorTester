@@ -17,6 +17,7 @@ class MockElement {
       _values: {},
       add: (name) => { this.classList._values[name] = true; },
       remove: (name) => { delete this.classList._values[name]; },
+      contains: (name) => !!this.classList._values[name],
       toggle: (name) => {
         if (this.classList._values[name]) {
           delete this.classList._values[name];

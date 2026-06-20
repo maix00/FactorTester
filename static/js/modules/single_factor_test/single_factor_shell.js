@@ -168,9 +168,19 @@ function renderSingleFactorFamilyList() {
 }
 
 async function selectSingleFactorFamily(factorId, factorType, ownerUsername, options = {}) {
+    const prevFactorId = _sftCurrentFactorId || '';
     _sftCurrentFactorId = factorId || '';
     _sftCurrentFactorType = factorType || 'public';
     _sftCurrentOwner = ownerUsername || '';
+    if (prevFactorId && prevFactorId !== _sftCurrentFactorId && window._pageUuid) {
+        try {
+            await fetch('/close_page', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ page_uuid: window._pageUuid, factor_family_alias: prevFactorId }),
+            });
+        } catch (e) {}
+    }
     renderSingleFactorFamilyList();
 
     const body = document.getElementById('editor-body');
@@ -189,6 +199,7 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
     params.set('factor', factorId || '');
     params.set('type', _sftCurrentFactorType);
     if (_sftCurrentOwner) params.set('owner_username', _sftCurrentOwner);
+    if (window._pageUuid) params.set('page_uuid', window._pageUuid);
 
     try {
         const res = await fetch('/single_factor_test/api/content?' + params.toString());
@@ -218,6 +229,7 @@ window.reloadSingleFactorContent = async function(callback) {
     params.set('factor', _sftCurrentFactorId || '');
     params.set('type', _sftCurrentFactorType || 'public');
     if (_sftCurrentOwner) params.set('owner_username', _sftCurrentOwner);
+    if (window._pageUuid) params.set('page_uuid', window._pageUuid);
     const res = await fetch('/single_factor_test/api/content?' + params.toString());
     const data = await res.json();
     if (data.success) {

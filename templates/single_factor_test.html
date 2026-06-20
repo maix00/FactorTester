@@ -26,7 +26,8 @@
     <div class="app single-factor-app"
          data-initial-factor="{{ initial_factor }}"
          data-initial-factor-type="{{ initial_factor_type }}"
-         data-initial-owner-username="{{ initial_owner_username }}">
+         data-initial-owner-username="{{ initial_owner_username }}"
+         data-page-uuid="{{ page_uuid }}">
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
@@ -64,7 +65,19 @@
     </div>
 
     <div id="toast-container"></div>
+    {% if show_runtime_ids %}
+    <div style="position:fixed;left:12px;bottom:10px;z-index:900;font-size:11px;color:#98a2b3;opacity:0.75;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">
+        <div>page_uuid: <span id="page-uuid-label">{{ page_uuid }}</span></div>
+        <div>session_id: <span id="session-id-label">{{ session_id }}</span></div>
+    </div>
+    {% endif %}
 
+    <script>
+        window._pageUuid = {{ page_uuid|tojson }};
+        try {
+            sessionStorage.setItem('single_factor_test_page_uuid', window._pageUuid);
+        } catch (e) {}
+    </script>
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/collapsible_factor_list.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/single_factor_shell.js') }}"></script>

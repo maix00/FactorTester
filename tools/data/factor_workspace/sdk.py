@@ -1,0 +1,204 @@
+"""Explicit public SDK contract for factor authors.
+
+This module is the only place that decides which ``tools`` stubs enter a
+factor workspace. Runtime imports and implementation dependencies must not
+expand this list implicitly.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AuthorSdkModule:
+    destination: str
+    source: str | None = None
+    content: str | None = None
+    prelude: str = ""
+    footer: str = ""
+
+
+_HEADER = "from __future__ import annotations\nfrom typing import Any\n\n"
+
+
+AUTHOR_SDK_MODULES = (
+    AuthorSdkModule(
+        "pandas/__init__.pyi",
+        content=_HEADER
+        + "class DataFrame: ...\n"
+        + "class Series: ...\n"
+        + "class Timestamp:\n    def __new__(cls, value: Any = ...) -> Timestamp: ...\n"
+        + "class Timedelta:\n    def __new__(cls, value: Any = ...) -> Timedelta: ...\n",
+    ),
+    AuthorSdkModule(
+        "tools/__init__.pyi",
+        content=_HEADER.rstrip() + "\n",
+    ),
+    AuthorSdkModule("tools/data/__init__.pyi", content=_HEADER),
+    AuthorSdkModule(
+        "tools/data/types/__init__.pyi",
+        content=_HEADER
+        + "class DataColumn:\n"
+        + "    OPEN: DataColumn\n    HIGH: DataColumn\n    LOW: DataColumn\n    CLOSE: DataColumn\n"
+        + "    VOLUME: DataColumn\n    TURNOVER: DataColumn\n    OPEN_INTEREST: DataColumn\n"
+        + "    TWAP: DataColumn\n    VWAP: DataColumn\n    SETTLEMENT_PRICE: DataColumn\n"
+        + "    OPEN_ADJUSTED: DataColumn\n    HIGH_ADJUSTED: DataColumn\n"
+        + "    LOW_ADJUSTED: DataColumn\n    CLOSE_ADJUSTED: DataColumn\n\n"
+        + "class DataFreq:\n"
+        + "    value: Any\n    name: str\n    alias: str\n"
+        + "    MIN1: DataFreq\n    MIN5: DataFreq\n    MIN15: DataFreq\n    MIN30: DataFreq\n"
+        + "    HOUR1: DataFreq\n    DAY1: DataFreq\n"
+        + "    def __new__(cls, freq: Any) -> DataFreq: ...\n"
+        + "    @property\n    def days(self) -> int: ...\n"
+        + "    @property\n    def is_multiples_of_day(self) -> bool: ...\n\n"
+        + "class DataTime:\n"
+        + "    @classmethod\n    def parse(cls, value: Any = ..., *, precision: str = ..., tz: str | None = ...) -> DataTime: ...\n"
+        + "\nclass UniqueNameObject:\n"
+        + "    name: str\n    alias: str\n",
+    ),
+    AuthorSdkModule(
+        "tools/factors/__init__.pyi",
+        content=_HEADER
+        + "from tools.factors.FactorFamily import FactorFamily as FactorFamily\n"
+        + "from tools.factors.Factors import Factor as Factor\n"
+        + "from tools.factors.FactorExpr import (\n"
+        + "    FactorExpr as FactorExpr, ConstExpr as ConstExpr, ParamRef as ParamRef,\n"
+        + "    ColumnRef as ColumnRef, expr_max as expr_max, expr_min as expr_min,\n"
+        + "    term_spread as term_spread, term_ratio as term_ratio, term_slope as term_slope,\n"
+        + "    SMALL_VAL as SMALL_VAL,\n"
+        + ")\n"
+        + "from tools.factors.Parameters import (\n"
+        + "    FactorNextPeriodReturns as FactorNextPeriodReturns, ReturnFreqParam as ReturnFreqParam,\n"
+        + "    FactorFreqParam as FactorFreqParam, StartCalcPointParam as StartCalcPointParam,\n"
+        + "    ReverseParam as ReverseParam,\n"
+        + ")\n",
+    ),
+    AuthorSdkModule(
+        "tools/factors/FactorFamily.pyi",
+        source="tools/factors/FactorFamily.py",
+        prelude=(
+            "import threading\nimport pandas as pd\n"
+            "from typing import Callable, Dict, List, Optional\n"
+            "from tools.data.types import DataFreq, UniqueNameObject\n"
+            "from tools.factors.FactorExpr import FactorExpr\n"
+            "from tools.parameters import Parameter\n"
+            "Factor = Any\n"
+        ),
+    ),
+    AuthorSdkModule(
+        "tools/factors/Factors.pyi",
+        source="tools/factors/Factors.py",
+        prelude=(
+            "import pandas as pd\n"
+            "from typing import Dict, Optional, Set, Tuple, Union\n"
+            "from tools.data.types import DataFreq, UniqueNameObject\n"
+            "from tools.factors.FactorExpr import FactorExpr\n"
+            "FactorFamily = Any\n"
+            "Product = Any\n"
+        ),
+    ),
+    AuthorSdkModule(
+        "tools/factors/expr/__init__.pyi",
+        content=_HEADER + "from tools.factors.expr.core import FactorExpr as FactorExpr\n",
+    ),
+    AuthorSdkModule(
+        "tools/factors/expr/core.pyi",
+        source="tools/factors/expr/core.py",
+        prelude=(
+            "# pyright: reportIncompatibleMethodOverride=false\n"
+            "import pandas as pd\n"
+            "from typing import Optional, TypeAlias, Union\n"
+            "from tools.parameters import Parameter\n"
+        ),
+        footer=(
+            "class RollingExpr(FactorExpr):\n"
+            "    @property\n    def bars(self) -> FactorExpr: ...\n"
+            "    def truncate(self, start: Any, end: Any) -> RollingExpr: ...\n"
+            "    def mean(self) -> FactorExpr: ...\n"
+            "    def std(self) -> FactorExpr: ...\n"
+            "    def var(self) -> FactorExpr: ...\n"
+            "    def min(self) -> FactorExpr: ...\n"
+            "    def max(self) -> FactorExpr: ...\n"
+            "    def sum(self) -> FactorExpr: ...\n"
+            "    def ema(self) -> FactorExpr: ...\n"
+            "    def skew(self) -> FactorExpr: ...\n"
+            "    def argmax(self) -> FactorExpr: ...\n"
+            "    def argmin(self) -> FactorExpr: ...\n"
+            "    def argmax_raw(self) -> FactorExpr: ...\n"
+            "    def argmin_raw(self) -> FactorExpr: ...\n"
+            "    def corr(self, other: Any) -> FactorExpr: ...\n"
+            "    def cov(self, other: Any) -> FactorExpr: ...\n"
+            "RollingOp: TypeAlias = FactorExpr\n"
+            "ShiftOp: TypeAlias = FactorExpr\n"
+            "CrossSectionalOp: TypeAlias = FactorExpr\n"
+        ),
+    ),
+    AuthorSdkModule(
+        "tools/factors/FactorExpr.pyi",
+        content=_HEADER
+        + "from tools.data.types import DataColumn, DataFreq\n"
+        + "from tools.factors.expr.core import FactorExpr as FactorExpr\n\n"
+        + "class OperandExpr(FactorExpr): ...\n"
+        + "class ColumnRef(FactorExpr):\n    def __init__(self, column: DataColumn) -> None: ...\n"
+        + "class ParamRef(FactorExpr): ...\n"
+        + "class ConstExpr(FactorExpr):\n    def __init__(self, value: Any) -> None: ...\n"
+        + "class CompositeExpr(FactorExpr): ...\n"
+        + "class ShiftOp(FactorExpr): ...\n"
+        + "class CrossSectionalOp(FactorExpr): ...\n"
+        + "class TermStructureOp(FactorExpr): ...\n"
+        + "class SignalAlign(FactorExpr): ...\n\n"
+        + "def expr_max(*expressions: Any) -> FactorExpr: ...\n"
+        + "def expr_min(*expressions: Any) -> FactorExpr: ...\n"
+        + "def term_spread(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
+        + "def term_ratio(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
+        + "def term_slope(*args: Any, **kwargs: Any) -> FactorExpr: ...\n\n"
+        + "OPEN: ColumnRef\nHIGH: ColumnRef\nLOW: ColumnRef\nCLOSE: ColumnRef\n"
+        + "VOLUME: ColumnRef\nTURNOVER: ColumnRef\nOPEN_INTEREST: ColumnRef\n"
+        + "VWAP: ColumnRef\nSETTLE: ColumnRef\nOPEN_RAW: ColumnRef\nHIGH_RAW: ColumnRef\n"
+        + "LOW_RAW: ColumnRef\nCLOSE_RAW: ColumnRef\nSMALL_VAL: ConstExpr\n",
+    ),
+    AuthorSdkModule(
+        "tools/factors/Parameters.pyi",
+        source="tools/factors/Parameters.py",
+        prelude="from enum import Enum\n",
+    ),
+    AuthorSdkModule(
+        "tools/parameters/__init__.pyi",
+        content=_HEADER
+        + "from tools.parameters.Parameter import (\n"
+        + "    Parameter as Parameter, TypeParam as TypeParam, FinRangeParam as FinRangeParam,\n"
+        + "    TimeDeltaParam as TimeDeltaParam, FactorParam as FactorParam, ValueSpace as ValueSpace,\n"
+        + ")\n"
+        + "from tools.parameters.DataColumnParam import DataColumnParam as DataColumnParam\n"
+        + "from tools.parameters.DataTimeParam import DataTimeParam as DataTimeParam\n"
+        + "from tools.parameters.WindowParam import WindowParam as WindowParam\n",
+    ),
+    AuthorSdkModule(
+        "tools/parameters/Parameter.pyi",
+        source="tools/parameters/Parameter.py",
+        prelude=(
+            "from typing import Callable, List, Optional\n"
+            "from tools.data.types import UniqueNameObject\n"
+        ),
+    ),
+    AuthorSdkModule(
+        "tools/parameters/DataColumnParam.pyi",
+        source="tools/parameters/DataColumnParam.py",
+        prelude="from typing import Optional\nfrom tools.parameters.Parameter import Parameter\n",
+    ),
+    AuthorSdkModule(
+        "tools/parameters/DataTimeParam.pyi",
+        source="tools/parameters/DataTimeParam.py",
+        prelude="from typing import Optional\nfrom tools.parameters.Parameter import Parameter\n",
+    ),
+    AuthorSdkModule(
+        "tools/parameters/WindowParam.pyi",
+        source="tools/parameters/WindowParam.py",
+        prelude="from typing import Optional\nfrom tools.parameters.Parameter import Parameter\n",
+    ),
+)
+
+
+def author_sdk_paths() -> frozenset[str]:
+    return frozenset(module.destination for module in AUTHOR_SDK_MODULES)

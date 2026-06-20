@@ -4,18 +4,22 @@
 提供 FuturesContract（具体合约）和 Futures（主办合约／主指数合约）两层结构。
 Futures 通过 roller_info 表维护「历史交易日 → 对应主办合约」的映射关系。
 
-roller_info 的闲置释放由 tools.base.IdleResourceManager 统一管理。
+roller_info 的闲置释放由 DataHub → IdleResourceManager 统一管理。
 """
 import pandas as pd
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
 from datetime import datetime
+from tqdm import tqdm
 
 from tools.products.Product import Product
-from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.hub import DataHub
+from tools.data.types import DataIndex
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,
     TermStructureStore,
+    register_term_structure_contract,
+    register_term_structure_product,
 )
 
 
@@ -27,7 +31,9 @@ class FuturesTermStructureStore(TermStructureStore):
 class FuturesContract(AdjustableContractMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
-        super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+        if not hasattr(self, '_initialized'):
+            super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+            register_term_structure_contract(self)
 
 
 class Futures(AdjustableProductMixin, Product):
@@ -56,28 +62,29 @@ class Futures(AdjustableProductMixin, Product):
             self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None
             self.contract_class = contract_class
+            register_term_structure_product(self)
 
     def _ensure_roller_info(self):
         """
         确保 self.roller_info 可用。
-        从 IdleResourceManager 的全局缓存中拿全量数据（按 path 去重），
+        从 DataHub 的全局缓存中拿全量数据（按 path 去重），
         筛出当前品种的切片赋给 self.roller_info。
         全局缓存释放后 self.roller_info 即为失效视图，下次调用会重新加载。
         """
-        manager = IdleResourceManager.get_instance()
+        hub = DataHub.get_instance()
         path = self.get_roller_info_path()
         if not path:
             raise ValueError(f"roller_info_path not set for {self.name}")
 
         # 先 touch（无论是否已有缓存，更新该 path 的 last_access）
-        manager.touch('roller_info', path)
+        hub.touch('roller_info', path)
 
         # 如果 self.roller_info 仍有效（底层缓存未被释放），直接返回
         if self.roller_info is not None:
             return
 
         # 从全局缓存加载全量 roller_info（多个品种共享同一个 path）
-        ri = manager.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
+        ri = hub.load('roller_info', path, ttl=self._ROLLER_INFO_IDLE_TTL)
         assert ri is not None
         ri['STARTDATE'] = pd.to_datetime(ri['STARTDATE'])
         ri['ENDDATE'] = pd.to_datetime(ri['ENDDATE'])
@@ -85,6 +92,14 @@ class Futures(AdjustableProductMixin, Product):
         # 切片：只保留当前品种
         subset = cast(pd.DataFrame, ri[ri['PRODUCT'] == self.name]).sort_values(by=['STARTDATE'])
         self.roller_info = subset if not subset.empty else None
+
+    @staticmethod
+    def _normalize_roller_day(value: datetime | str | pd.Timestamp) -> pd.Timestamp:
+        """Normalize roller/trading-day comparisons onto tz-naive day precision."""
+        ts = cast(pd.Timestamp, pd.Timestamp(value))
+        if ts.tzinfo is not None:
+            ts = cast(pd.Timestamp, ts.tz_localize(None))
+        return cast(pd.Timestamp, ts.normalize())
 
     # ── 合约列表 ──────────────────────────────────────────────────────────
 
@@ -115,26 +130,31 @@ class Futures(AdjustableProductMixin, Product):
         contracts = []
         if self.roller_info is None:
             return contracts
-        for _, row in cast(pd.DataFrame, self.roller_info).iterrows():
-            s_val = row.get('STARTDATE')
-            e_val = row.get('ENDDATE')
-            s = cast('Optional[pd.Timestamp]', pd.Timestamp(s_val)) if s_val is not None and cast(bool, pd.notna(s_val)) else None
-            e = cast('Optional[pd.Timestamp]', pd.Timestamp(e_val)) if e_val is not None and cast(bool, pd.notna(e_val)) else None
+        rows = cast(pd.DataFrame, self.roller_info)[['CONTRACT_UID', 'CONTRACT', 'STARTDATE', 'ENDDATE']].copy()
+        rows['STARTDATE'] = pd.to_datetime(rows['STARTDATE'])
+        rows['ENDDATE'] = pd.to_datetime(rows['ENDDATE'])
+        rows['STARTDATE_NORM'] = rows['STARTDATE'].dt.normalize()
+        rows['ENDDATE_NORM'] = rows['ENDDATE'].dt.normalize()
+        if req_start is not None:
+            rows = rows[rows['ENDDATE_NORM'] >= req_start]
+        if req_end is not None:
+            rows = rows[rows['STARTDATE_NORM'] <= req_end]
 
-            if req_start is not None and e is not None and e.normalize() < req_start:
-                continue
-            if req_end is not None and s is not None and s.normalize() > req_end:
-                continue
-
-            uid = str(row['CONTRACT_UID'])
-            contracts.append({
-                'contract': str(row['CONTRACT']),
-                'uid': uid,
-                'start': s.strftime('%Y-%m-%d') if s is not None else None,
-                'end': e.strftime('%Y-%m-%d') if e is not None else None,
-                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
-                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
-            })
+        contracts = [
+            {
+                'contract': str(row.CONTRACT),
+                'uid': str(row.CONTRACT_UID),
+                'start': row.STARTDATE.strftime('%Y-%m-%d') if pd.notna(row.STARTDATE) else None,
+                'end': row.ENDDATE.strftime('%Y-%m-%d') if pd.notna(row.ENDDATE) else None,
+                'start_ts': int(row.STARTDATE.timestamp() * 1000) if pd.notna(row.STARTDATE) else None,
+                'end_ts': int(row.ENDDATE.timestamp() * 1000) if pd.notna(row.ENDDATE) else None,
+            }
+            for row in tqdm(
+                rows.itertuples(index=False),
+                total=len(rows),
+                desc=f"Roller contracts {self.name}",
+            )
+        ]
         return contracts
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
@@ -148,15 +168,19 @@ class Futures(AdjustableProductMixin, Product):
         if self.roller_info is None or self.roller_info.empty:
             return None
 
-        trading_day = pd.to_datetime(trading_day)
-        if trading_day < self.roller_info['STARTDATE'].iloc[0] or trading_day > self.roller_info['ENDDATE'].iloc[-1]:
+        trading_day = self._normalize_roller_day(trading_day)
+        start_days = DataIndex.normalized_days(self.roller_info['STARTDATE'])
+        end_days = DataIndex.normalized_days(self.roller_info['ENDDATE'])
+
+        if trading_day < start_days[0] or trading_day > end_days[-1]:
             return None
 
-        starts = self.roller_info['STARTDATE'].values
-        idx = starts.searchsorted(trading_day.to_datetime64(), side='right') - 1
+        starts = start_days.values
+        trading_day64 = pd.Timestamp(trading_day).to_datetime64()
+        idx = starts.searchsorted(trading_day64, side='right') - 1
         if idx < 0:
             return None
-        if self.roller_info['ENDDATE'].iloc[idx] >= trading_day:
+        if end_days[idx] >= trading_day:
             return self.roller_info.iloc[idx]
         return None
 
@@ -190,16 +214,15 @@ class Futures(AdjustableProductMixin, Product):
         self._ensure_roller_info()
         if self.roller_info is None or self.roller_info.empty:
             return iter(())
-        return (row for _, row in self.roller_info.iterrows())
+        return self.roller_info.itertuples(index=False)
 
     def list_roller_contracts(self) -> List[FuturesContract]:
         """返回 roller_info 中出现过的合约对象列表。"""
-        contracts = []
-        for row in self.iter_roller_contract_rows():
-            contract_id = str(row.get('CONTRACT_UID') or row.get('CONTRACT') or '')
-            if contract_id:
-                contracts.append(self.contract_class(contract_id))
-        return contracts
+        return [
+            self.contract_class(contract_id)
+            for row in self.iter_roller_contract_rows()
+            if (contract_id := str(getattr(row, 'CONTRACT_UID', '') or getattr(row, 'CONTRACT', '') or ''))
+        ]
 
     def get_roller_contracts_from_trading_day(self, trading_day: datetime | str, n: int = 1) -> List[FuturesContract]:
         """返回从某交易日所在主力段开始的后续 n 个主力合约。
@@ -220,26 +243,34 @@ class Futures(AdjustableProductMixin, Product):
             idx = loc
         else:
             idx = int(loc[0])
-        rows = self.roller_info.iloc[idx:idx + max(1, int(n))]
-        contracts = []
-        for _, r in rows.iterrows():
-            contract_id = str(r.get('CONTRACT_UID') or r.get('CONTRACT') or '')
-            if contract_id:
-                contracts.append(self.contract_class(contract_id))
-        return contracts
+        rows = self.roller_info.iloc[idx:idx + max(1, int(n))][['CONTRACT_UID', 'CONTRACT']]
+        return [
+            self.contract_class(str(r.CONTRACT_UID or r.CONTRACT))
+            for r in tqdm(rows.itertuples(index=False), total=len(rows), desc=f"Chain contracts {self.name}")
+            if str(r.CONTRACT_UID or r.CONTRACT)
+        ]
 
     def get_nth_roller_contract_from_trading_day(self, trading_day: datetime | str, n: int = 0) -> Optional[FuturesContract]:
         """返回交易日所在主力段之后第 n 个主力链合约，n=0 为当期主力。"""
         contracts = self.get_roller_contracts_from_trading_day(trading_day, n=int(n) + 1)
         return contracts[int(n)] if len(contracts) > int(n) else None
 
-    def get_term_structure_contracts_from_trading_day(self, trading_day: datetime | str, depth: int = 2) -> List[FuturesContract]:
-        """返回用于期限结构计算的合约链。
-
-        当前实现基于主力展期链，适合计算“当期主力 vs 后续主力”的近似期限结构；
-        若需要完整期限结构，应由数据源提供某日全部可交易合约与到期日排序。
-        """
+    def get_continuous_contracts_from_trading_day(self, trading_day: datetime | str, depth: int = 2) -> List[FuturesContract]:
+        """Return the current and subsequent contracts from the primary roll chain."""
         return self.get_roller_contracts_from_trading_day(trading_day, n=depth)
+
+    def get_term_structure_contracts_from_trading_day(
+        self,
+        trading_day: datetime | str,
+        depth: int = 2,
+        curve_variant: str = "listed_contracts",
+    ) -> List[FuturesContract]:
+        """Return the actual maturity-ranked curve, not the primary roll chain."""
+        return self.get_term_structure_contracts(
+            trading_day,
+            depth=depth,
+            curve_variant=curve_variant,
+        )
 
     def get_roller_info_path(self) -> str | None:
         """返回此品种对应的 roller_info 文件路径。子类可重写以支持按品种分流。"""

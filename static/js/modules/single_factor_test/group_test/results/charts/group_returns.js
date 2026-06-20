@@ -13,17 +13,6 @@
 
     var _groupChart = null;
 
-    function formatDateLabel(ts, isIntraday) {
-        var d = new Date(ts);
-        var datePart = d.getFullYear() + '-' +
-            String(d.getMonth() + 1).padStart(2, '0') + '-' +
-            String(d.getDate()).padStart(2, '0');
-        if (!isIntraday) return datePart;
-        return datePart + ' ' +
-            String(d.getHours()).padStart(2, '0') + ':' +
-            String(d.getMinutes()).padStart(2, '0');
-    }
-
     function gcd(a, b) {
         a = Math.abs(a);
         b = Math.abs(b);
@@ -87,24 +76,25 @@
         return groups.map(function(group) {
             var alias = group.key || group.name;
             var gts = group.timestamps || [];
-            var vals = group.cumulative_returns || [];
+            var vals = group.total_equity || [];
             var valMap = {};
 
             for (var k = 0; k < Math.min(gts.length, vals.length); k++) {
                 if (vals[k] !== null) valMap[gts[k]] = vals[k];
             }
 
+            // Data points: [timestamp_ms, value] — datetime xAxis
             var data = [];
             for (var ti = 0; ti < timeline.length; ti++) {
                 var ts = timeline[ti];
-                data.push([ti, Object.prototype.hasOwnProperty.call(valMap, ts) ? valMap[ts] : null]);
+                data.push([ts, Object.prototype.hasOwnProperty.call(valMap, ts) ? valMap[ts] : null]);
             }
 
             var opts = {
                 name: alias,
                 type: 'line',
                 data: data,
-                tooltip: { valueDecimals: 4 },
+                tooltip: { valueDecimals: 2 },
                 visible: true,
                 showInLegend: true,
                 connectNulls: true,
@@ -131,29 +121,24 @@
         var timeline = buildTimeline(groups);
         var isIntraday = timeline.length >= 2 && (timeline[1] - timeline[0]) < 86400000;
         var series = buildSeries(groups, timeline);
-        var labelEvery = Math.max(1, Math.floor(timeline.length / 12));
-
-        function labelAt(idx) {
-            return idx >= 0 && idx < timeline.length ? formatDateLabel(timeline[idx], isIntraday) : '';
+        var initialCapital = options.initialCapital || 100000000;
+        var baseCurrency = String(options.baseCurrency || 'CNY').toUpperCase();
+        function formatMoney(value) {
+            if (window.MoneyDisplay && window.MoneyDisplay.formatMajor) {
+                return window.MoneyDisplay.formatMajor(value, { currency: baseCurrency, decimals: 2 });
+            }
+            return Number(value).toFixed(2) + ' ' + baseCurrency;
         }
 
-        function openSnapshotAt(idx) {
-            console.log('[snapshot-debug] openSnapshotAt called: idx=', idx, 'timelineLen=', timeline.length, 'hasOnSnapshot=', typeof options.onSnapshot === 'function');
-            if (idx < 0 || idx >= timeline.length) return;
-            if (typeof options.onSnapshot === 'function') options.onSnapshot(timeline[idx]);
-            else console.warn('[snapshot-debug] options.onSnapshot is not a function!');
+        function openSnapshotAt(ts) {
+            if (typeof options.onSnapshot === 'function') options.onSnapshot(ts);
         }
 
         _groupChart = Highcharts.stockChart(container, {
             chart: {
                 zoomType: 'x',
-                events: {
-                    click: function(e) {
-                        openSnapshotAt(Math.round(e.xAxis[0].value));
-                    },
-                },
             },
-            title: { text: '分组累计收益（初始净值 = 1）' },
+            title: { text: '分组累计收益' },
             legend: {
                 enabled: true,
                 align: 'center',
@@ -162,13 +147,30 @@
                 itemStyle: { fontSize: '11px' },
             },
             xAxis: {
-                type: 'linear',
-                labels: {
-                    step: labelEvery,
-                    formatter: function() { return labelAt(Math.round(this.value)); },
-                },
+                type: 'datetime',
+                dateTimeLabelFormats: isIntraday
+                    ? { day: '%m-%d', week: '%m-%d', month: '%Y-%m' }
+                    : { day: '%Y-%m-%d', week: '%Y-%m-%d', month: '%Y-%m' },
             },
-            yAxis: { title: { text: '净值' }, crosshair: false },
+            yAxis: [{
+                title: { text: '总权益 (' + baseCurrency + ')' },
+                crosshair: false,
+                labels: {
+                    formatter: function() {
+                        return (this.value / 10000).toFixed(0) + '万';
+                    },
+                },
+            }, {
+                // Right axis: percentage return vs initial capital
+                title: { text: '累计收益率 (%)' },
+                opposite: true,
+                linkedTo: 0,
+                labels: {
+                    formatter: function() {
+                        return (((this.value / initialCapital) - 1) * 100).toFixed(2) + '%';
+                    },
+                },
+            }],
             plotOptions: {
                 series: {
                     cursor: 'pointer',
@@ -176,7 +178,7 @@
                     point: {
                         events: {
                             click: function() {
-                                openSnapshotAt(Math.round(this.x));
+                                openSnapshotAt(this.x);
                             },
                         },
                     },
@@ -184,17 +186,15 @@
             },
             tooltip: {
                 shared: true,
-                valueDecimals: 4,
                 useHTML: true,
                 formatter: function() {
-                    var idx = Math.round(this.x);
-                    var s = '<b>' + labelAt(idx) + '</b>';
+                    var ts = this.x;
+                    var dateStr = Highcharts.dateFormat('%Y-%m-%d %H:%M', ts);
+                    var s = '<b>' + dateStr + '</b>';
                     this.points.forEach(function(p) {
                         if (p.y === null || p.y === undefined) return;
-                        var decimals = p.series.tooltipOptions.valueDecimals;
-                        if (typeof decimals !== 'number') decimals = 4;
-                        var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
-                        s += '<br/>' + p.series.name + ': ' + val;
+                        var pct = (((p.y / initialCapital) - 1) * 100).toFixed(2);
+                        s += '<br/>' + p.series.name + ': ' + formatMoney(p.y) + ' &nbsp;(' + pct + '%)';
                     });
                     return s;
                 },

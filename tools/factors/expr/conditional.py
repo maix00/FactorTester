@@ -12,13 +12,13 @@ from typing import (
     Optional, Sequence, Set, Tuple, Union, cast
 )
 
-from tools.data.DataColumn import DataColumn
-from tools.data.DataFreq import DataFreq
+from tools.data.types import DataColumn
+from tools.data.types import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.data.DataSource import DataSource
-    from tools.data.DataMeta import DataMeta
+    from tools.data.providers import DataProviderProductTS as DataSource
+    from tools.data.views.ProductDataView import ProductDataView
     from tools.parameters.Parameter import Parameter
 
 
@@ -70,4 +70,3 @@ class WhereOp(OperandExpr):
 # ═════════════════════════════════════════════════════════════════════════════
 # 顶层便利函数：max / min 多元聚合
 # ═════════════════════════════════════════════════════════════════════════════
-
