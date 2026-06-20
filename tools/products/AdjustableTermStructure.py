@@ -28,6 +28,7 @@ TERM_MATURITY_COL = 'MATURITY_DATE'
 TERM_DAYS_TO_MATURITY_COL = 'DAYS_TO_MATURITY'
 TERM_RANK_COL = 'TERM_RANK'
 TERM_IS_MAIN_COL = 'IS_MAIN'
+TERM_IS_SECONDARY_COL = 'IS_SECONDARY'
 
 
 @dataclass(frozen=True)
@@ -110,22 +111,32 @@ class AdjustableProductMixin:
     def supports_term_structure(self) -> bool:
         return True
 
-    def get_term_structure_path(self) -> Optional[str]:
+    def get_term_structure_path(self, curve_variant: str = "listed_contracts") -> Optional[str]:
         return getattr(self, 'term_structure_path', None)
 
-    def get_term_structure_store(self) -> TermStructureStore:
-        path = self.get_term_structure_path()
+    def get_term_structure_store(self, curve_variant: str = "listed_contracts") -> TermStructureStore:
+        path = self.get_term_structure_path(curve_variant)
         if not path:
             raise ValueError(f"term_structure_path not set for {getattr(self, 'name', type(self).__name__)}")
         return TermStructureStore(path)
 
-    def get_term_structure(self, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
+    def get_term_structure(
+        self,
+        trading_day: Any,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> pd.DataFrame:
         """Return contracts for this product/date ordered by maturity."""
-        return self.get_term_structure_store().contract_pool(getattr(self, 'name'), trading_day, depth=depth)
+        return self.get_term_structure_store(curve_variant).contract_pool(getattr(self, 'name'), trading_day, depth=depth)
 
-    def get_term_structure_contracts(self, trading_day: Any, depth: Optional[int] = None) -> List[Any]:
+    def get_term_structure_contracts(
+        self,
+        trading_day: Any,
+        depth: Optional[int] = None,
+        curve_variant: str = "listed_contracts",
+    ) -> List[Any]:
         """Return contract objects for this product/date ordered by maturity."""
-        df = self.get_term_structure(trading_day, depth=depth)
+        df = self.get_term_structure(trading_day, depth=depth, curve_variant=curve_variant)
         if df.empty:
             return []
         contract_cls = getattr(self, 'contract_class')
@@ -351,6 +362,11 @@ _contract_product_cache: dict = {}
 _registered_term_products_by_name: dict[str, Any] = {}
 _registered_term_contracts_by_name: dict[str, Any] = {}
 _registered_term_paths: list[str] = []
+
+
+def invalidate_term_structure_path(path: str) -> None:
+    """Drop process-local indexes after an artifact is atomically replaced."""
+    _contract_product_cache.pop(str(path), None)
 
 
 def register_term_structure_product(product: Any) -> None:

@@ -8,7 +8,9 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.data_dir import CACHE_DB_PATH, DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR
 from tools.data.sqlite.db import connect_sqlite, replace_dataframe
+from tools.data.artifacts.coordinator import ARTIFACT_COVERAGE_TABLE, ensure_artifact_schema
 from sources.LocalCNFutures.trading_sessions import (
     infer_trading_sessions_from_parquet,
     sessions_to_record,
@@ -19,6 +21,8 @@ DISCOVERED_TABLE = "src_local_cnfutures_discovered_products"
 SECTORS_TABLE = "src_local_cnfutures_sectors"
 PRODUCTS_VIEW = "local_cnfutures_products"
 OBSERVED_SESSIONS_TABLE = "src_local_cnfutures_observed_sessions"
+_CONTINUOUS_ARTIFACT_KEY = "LocalCNFutures:continuous_contracts:primary_secondary"
+_TERM_STRUCTURE_ARTIFACT_KEY = "LocalCNFutures:term_structure:listed_contracts"
 
 _EXCHANGE_TO_SECTOR_CODE = {
     "DCE": "DCE",
@@ -211,6 +215,13 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
             d.has_min1 AS "_has_min1",
             d.has_day1 AS "_has_day1",
             d.has_wind_mapping AS "_has_wind_mapping",
+            CASE WHEN cp.product_name IS NULL THEN 0 ELSE 1 END AS "_has_primary_continuous",
+            CASE WHEN cs.product_name IS NULL THEN 0 ELSE 1 END AS "_has_secondary_continuous",
+            CASE WHEN tc.product_name IS NULL THEN 0 ELSE 1 END AS "_has_term_structure",
+            tc.start_value AS "_term_structure_start",
+            tc.end_value AS "_term_structure_end",
+            tc.row_count AS "_term_structure_rows",
+            tc.entity_count AS "_term_structure_contracts",
             o.observed_day_sessions AS "_observed_day_sessions",
             o.observed_night_session AS "_observed_night_session",
             CASE
@@ -243,6 +254,18 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
          AND UPPER(TRIM(s."交易所代码")) = d.sector_exchange_code
         LEFT JOIN "{OBSERVED_SESSIONS_TABLE}" AS o
           ON o.product_name = d.product_name
+        LEFT JOIN "{ARTIFACT_COVERAGE_TABLE}" AS cp
+          ON cp.artifact_key = '{_CONTINUOUS_ARTIFACT_KEY}'
+         AND cp.product_name = d.product_name
+         AND cp.variant = 'primary'
+        LEFT JOIN "{ARTIFACT_COVERAGE_TABLE}" AS cs
+          ON cs.artifact_key = '{_CONTINUOUS_ARTIFACT_KEY}'
+         AND cs.product_name = d.product_name
+         AND cs.variant = 'secondary'
+        LEFT JOIN "{ARTIFACT_COVERAGE_TABLE}" AS tc
+          ON tc.artifact_key = '{_TERM_STRUCTURE_ARTIFACT_KEY}'
+         AND tc.product_name = d.product_name
+         AND tc.variant = 'listed_contracts'
         ORDER BY d.product_name, s."版本"
         '''
     )
@@ -250,10 +273,11 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
 
 def sync_product_catalog(
     *,
-    data_dir: str | Path = DATA_DIR,
+    data_dir: str | Path = SOURCE_DATA_DIR,
     db_path: str | Path = CACHE_DB_PATH,
 ) -> str:
     """Replace source snapshots and rebuild the canonical product view."""
+    ensure_artifact_schema(db_path)
     root = Path(data_dir)
     discovered = discover_products(root)
     sectors = _load_sectors(root / "sectors.csv")
@@ -285,12 +309,13 @@ def sync_product_catalog(
 
 def sync_observed_trading_sessions(
     *,
-    data_dir: str | Path = DATA_DIR,
+    data_dir: str | Path = SOURCE_DATA_DIR,
     db_path: str | Path = CACHE_DB_PATH,
     product_names: set[str] | None = None,
     force: bool = False,
 ) -> pd.DataFrame:
     """Explicitly refresh observed sessions and rebuild the canonical view."""
+    ensure_artifact_schema(db_path)
     root = Path(data_dir)
     discovered = discover_products(root)
     sectors = _load_sectors(root / "sectors.csv")
@@ -312,7 +337,7 @@ def sync_observed_trading_sessions(
 
 def load_product_catalog(
     *,
-    data_dir: str | Path = DATA_DIR,
+    data_dir: str | Path = SOURCE_DATA_DIR,
     db_path: str | Path = CACHE_DB_PATH,
     sync: bool = True,
 ) -> pd.DataFrame:

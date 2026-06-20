@@ -79,6 +79,15 @@ DSL 核心。三层结构：
 
 `DataMeta.day_periods` 继续用于将日倍数与盘中余量解析为每个产品的窗口 bars。真实缺失 bar 与非交易位置在缺少计划时段数据契约时均视为未观测位置。完整决策见 ADR-007。
 
+### 派生市场数据产物 (Derived Market Artifact)
+
+主力展期、复权连续、次主连和期限结构由数据源注册为
+`(provider, artifact_name, variant)`。核心 coordinator 统一负责跨平台锁、
+staging 原子发布、依赖顺序、后台 ensure，以及 SQLite 状态/覆盖元数据；
+大型时序事实继续存 Parquet。`roller_info` 表达连续合约选择与复权，
+`term_structure:listed_contracts` 表达每日真实合约到期曲线，二者不可混用。
+数据源拥有独立 source/artifact storage root。完整决策见 ADR-016。
+
 ### 因子数据缓存
 
 去重层：相同表达式树（按 `structural_key`）产生相同结果 — 只算一次，全局复用。

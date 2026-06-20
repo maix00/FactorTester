@@ -21,18 +21,17 @@ if __package__ in (None, ""):
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures import ROLLER_INFO_PATH, SOURCE_DATA_DIR
 from sources.LocalCNFutures.contract_files import portable_contract_filename, resolve_contract_parquet_path
 
-CONTRACT_MAPPING_PATH = os.path.join(DATA_DIR, 'wind_mapping.parquet')
-CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(DATA_DIR, 'wind_mapping_truncated.parquet')
-DAYK_PATH = os.path.join(DATA_DIR, 'data_dayk.parquet')
-MINUTE_DATA_DIR = os.path.join(DATA_DIR, 'data_mink')               # 原始分钟分片数据目录
-MINUTE_DATA_PREPROCESSED_DIR = os.path.join(DATA_DIR, 'data_mink_product') # 预处理后按 uid 存储的分钟数据目录
-MINUTE_INDEX_PATH = os.path.join(DATA_DIR, 'minute_index.parquet')  # 索引文件保存路径
-MAIN_MINK_FOLDER = os.path.join(DATA_DIR, 'main_mink') + '/'        # 输出分钟主力序列文件夹
-ROLLER_INFO_PATH = os.path.join(DATA_DIR, 'roller_info.csv')        # 展期信息输出路径
-MAIN_DAYK_FOLDER = os.path.join(DATA_DIR, 'main_dayk') + '/'        # 日线主力序列输出文件
+CONTRACT_MAPPING_PATH = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
+CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(SOURCE_DATA_DIR, 'wind_mapping_truncated.parquet')
+DAYK_PATH = os.path.join(SOURCE_DATA_DIR, 'data_dayk.parquet')
+MINUTE_DATA_DIR = os.path.join(SOURCE_DATA_DIR, 'data_mink')
+MINUTE_DATA_PREPROCESSED_DIR = os.path.join(SOURCE_DATA_DIR, 'data_mink_product')
+MINUTE_INDEX_PATH = os.path.join(SOURCE_DATA_DIR, 'minute_index.parquet')
+MAIN_MINK_FOLDER = os.path.join(SOURCE_DATA_DIR, 'main_mink') + '/'
+MAIN_DAYK_FOLDER = os.path.join(SOURCE_DATA_DIR, 'main_dayk') + '/'
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
 BACKWARD_BASE_DATE_COL = 'BACKWARD_BASE_DATE'
