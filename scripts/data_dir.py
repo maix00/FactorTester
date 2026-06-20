@@ -31,6 +31,11 @@ def _load_settings(start_dir: str) -> dict | None:
         current = parent
 
 
+def load_runtime_settings() -> dict:
+    """Return repository runtime settings without exposing lookup details."""
+    return _load_settings(_os.path.dirname(__file__)) or {}
+
+
 def _find_feat_root(start_dir: str) -> str | None:
     """从 start_dir 向上查找包含 .workspace/fix/ 子目录的最近祖先目录（即 Codes/ feat 根）。
     

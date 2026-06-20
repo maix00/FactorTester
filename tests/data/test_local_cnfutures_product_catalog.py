@@ -11,6 +11,7 @@ from sources.LocalCNFutures.product_catalog import (
     load_product_catalog,
     sync_product_catalog,
 )
+from tools.data.artifacts.coordinator import ARTIFACT_COVERAGE_TABLE, ensure_artifact_schema
 
 
 SECTOR_COLUMNS = [
@@ -96,3 +97,30 @@ def test_catalog_sync_is_idempotent_and_sectors_are_stored(tmp_path: Path):
     assert sectors_count == 1
     assert products_count == 2
     assert observed_count == 1
+
+
+def test_catalog_exposes_continuous_and_curve_variants_from_artifact_coverage(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _build_data_dir(data_dir)
+    db_path = tmp_path / "catalog.sqlite"
+    ensure_artifact_schema(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            f'''INSERT INTO "{ARTIFACT_COVERAGE_TABLE}" (
+                artifact_key, product_name, variant, start_value, end_value, row_count, entity_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            [
+                ("LocalCNFutures:continuous_contracts:primary_secondary", "BZ.DCE", "primary", None, None, 3, 2),
+                ("LocalCNFutures:continuous_contracts:primary_secondary", "BZ.DCE", "secondary", None, None, 2, 2),
+                ("LocalCNFutures:term_structure:listed_contracts", "BZ.DCE", "listed_contracts", "2025-01-01", "2026-01-01", 20, 5),
+            ],
+        )
+
+    catalog = load_product_catalog(data_dir=data_dir, db_path=db_path)
+    bz = catalog[catalog["_product_name"] == "BZ.DCE"].iloc[0]
+
+    assert bz["_has_primary_continuous"] == 1
+    assert bz["_has_secondary_continuous"] == 1
+    assert bz["_has_term_structure"] == 1
+    assert bz["_term_structure_contracts"] == 5

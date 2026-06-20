@@ -35,10 +35,10 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR
 
 # 本地存储目录（相对于项目根目录，即 Codes/）
-_DATA_DIR = Path(DATA_DIR) / 'fees'
+_DATA_DIR = Path(SOURCE_DATA_DIR) / 'fees'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'

@@ -7,6 +7,7 @@ from typing import Iterable
 
 _SOURCE_MODULES: list[str] = [
     "sources.LocalCNFutures.CNFutures",
+    "sources.LocalCNFutures.artifacts",
 ]
 
 

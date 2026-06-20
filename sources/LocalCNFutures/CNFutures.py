@@ -4,14 +4,14 @@ import os
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
-from scripts.data_dir import DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR
 from sources.LocalCNFutures.product_catalog import load_product_catalog
 from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
 
 _data = load_product_catalog()
-data_dir_min = os.path.join(DATA_DIR, 'main_mink')
-data_path_day = os.path.join(DATA_DIR, 'main_series_adjusted.parquet')
-data_dir_day = os.path.join(DATA_DIR, 'main_dayk')
+data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
+data_path_day = os.path.join(SOURCE_DATA_DIR, 'main_series_adjusted.parquet')
+data_dir_day = os.path.join(SOURCE_DATA_DIR, 'main_dayk')
 data_type = 'parquet'
 
 file_list_min = [
@@ -75,7 +75,7 @@ highest_version_col_name = '最高版本'
 enddate_col_name = '标准合约终止交易日'
 
 name_code_version_dict = {}
-contract_mapping_path = os.path.join(DATA_DIR, 'wind_mapping.parquet')
+contract_mapping_path = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
 _CNFUTURES_BY_NAME: Dict[str, "CNFutures"] = {}
 _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH: Dict[str, Dict[str, str]] = {}
 _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH: Dict[str, Dict[str, List[str]]] = {}
@@ -274,11 +274,13 @@ class CNFutures(Futures):
 
     def get_roller_info_path(self) -> str:
         if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):
-            from scripts.data_dir import DATA_DIR
-            self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
+            from sources.LocalCNFutures import ROLLER_INFO_PATH
+            self._ROLLER_INFO_PATH_CACHED = ROLLER_INFO_PATH
         return self._ROLLER_INFO_PATH_CACHED
 
-    def get_term_structure_path(self) -> str:
+    def get_term_structure_path(self, curve_variant: str = "listed_contracts") -> str:
+        if curve_variant != "listed_contracts":
+            raise KeyError(f"Unsupported LocalCNFutures curve variant: {curve_variant}")
         if self.term_structure_path:
             return self.term_structure_path
         if not hasattr(self, '_TERM_STRUCTURE_PATH_CACHED'):
@@ -297,7 +299,7 @@ def _contract_data_path(folder: str, alias: str) -> str:
 def get_all_futures_contract() -> List[Product]:
     """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
 
-    data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
+    data_dir_min = os.path.join(SOURCE_DATA_DIR, 'data_mink_product')
 
     from tools.data.types import DataFreq
     from tools.data.providers import DataProviderProductTS
