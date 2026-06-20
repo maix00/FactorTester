@@ -31,6 +31,17 @@ def test_catalog_product_without_metadata_uses_discovered_name():
     assert cn_futures_module._product_names_from_catalog(catalog) == ['BZ.DCE']
 
 
+def test_day_night_category_uses_night_session_presence():
+    classify = cn_futures_module.get_value_alias_for_day_night_time_category
+
+    assert classify("09:00-10:15, 10:30-11:30, 13:30-15:00") == "日盘"
+    assert classify("09:00-11:30, 13:30-15:15") == "日盘2"
+    assert classify("09:30-11:30, 13:00-15:00") == "日盘3"
+    assert classify("09:00-15:00,21:00-23:00") == "夜盘1"
+    assert classify("09:00-15:00,21:00-01:00") == "夜盘2"
+    assert classify("09:00-15:00,21:00-02:30") == "夜盘3"
+
+
 def test_all_defined_local_cn_futures_products_register_by_name_and_alias():
     products = _defined_cn_futures_products()
 
