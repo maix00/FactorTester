@@ -288,6 +288,22 @@ class CNFutures(Futures):
             self._TERM_STRUCTURE_PATH_CACHED = TERM_STRUCTURE_PATH
         return self._TERM_STRUCTURE_PATH_CACHED
 
+    def get_series_variants(self):
+        from tools.products.series import ProductSeriesRef
+
+        variants = list(super().get_series_variants())
+        secondary_name = self.alias.replace(".", "_S.", 1)
+        has_secondary = any(
+            os.path.isfile(os.path.join(folder, f"{secondary_name}.parquet"))
+            for folder in (data_dir_min, data_dir_day)
+        )
+        if has_secondary:
+            variants.extend([
+                ProductSeriesRef(self, "secondary_raw", "次主连 · 原始", secondary_name),
+                ProductSeriesRef(self, "secondary_adjusted", "次主连 · 平滑复权", secondary_name, adjusted=True),
+            ])
+        return variants
+
 from tools.products.Product import Product
 
 
