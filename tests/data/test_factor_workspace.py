@@ -102,6 +102,16 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert settings["python.analysis.extraPaths"] == ["${workspaceFolder}"]
     assert settings["python.analysis.autoSearchPaths"] is True
     assert settings["python.analysis.diagnosticSeverityOverrides"]["reportMissingModuleSource"] == "none"
+    pyright_config = json.loads((workspace_root / "pyrightconfig.json").read_text(encoding="utf-8"))
+    assert pyright_config["include"] == ["custom_factors", "public_factors", "tools", "pandas"]
+    assert pyright_config["reportMissingModuleSource"] == "none"
+    assert "venv" not in pyright_config
+    assert "venvPath" not in pyright_config
+    assert "python.defaultInterpreterPath" not in settings
+    assert (workspace_root / "pandas" / "__init__.pyi").exists()
+    assert (workspace_root / "FACTOR_WORKSPACE.md").exists()
+    extensions = json.loads((workspace_root / ".vscode" / "extensions.json").read_text(encoding="utf-8"))
+    assert extensions["recommendations"] == ["ms-python.vscode-pylance"]
     assert not (workspace_root / "tools" / "factors" / "FactorExpr.py").exists()
     assert not (workspace_root / "tools" / "parameters" / "WindowParam.py").exists()
     assert not (workspace_root / "tools" / "factors" / "FactorFamily.py").exists()

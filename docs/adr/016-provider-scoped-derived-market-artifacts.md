@@ -26,11 +26,16 @@ contract curve.
 - `term_structure:listed_contracts` comes from observed contract DAY1 rows;
   continuous mappings only annotate `IS_MAIN` and `IS_SECONDARY`.
 - Product classification and data-series variants remain separate concerns.
-- Existing LocalCNFutures data moves through a verified, rerunnable migration;
-  the old term-structure file is archived and never activated as v2.
+- Canonical source files live under each provider's configured source root.
+  Canonical generated files live only under that provider's artifact root;
+  readers do not probe historical global paths or legacy filenames.
 
 ## Consequences
 
 Future futures, options, rates, or other curve-bearing sources can register
 builders without changing the coordinator. Large fact tables remain Parquet;
 SQLite contains lifecycle and coverage metadata only.
+
+The LocalCNFutures migration is complete. Migration utilities and read-time
+fallbacks are deliberately absent, so a misplaced artifact fails visibly
+instead of silently selecting stale data.

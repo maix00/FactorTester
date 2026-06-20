@@ -17,6 +17,10 @@
 #     Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile', '-File', 'scripts\windows_defender_exclusion.ps1'
 # ═══════════════════════════════════════════════════════════════════════
 
+param(
+    [string]$CondaEnv = $(if ($env:GTHT_CONDA_ENV) { $env:GTHT_CONDA_ENV } else { "GTHT" })
+)
+
 $ErrorActionPreference = "Stop"
 
 # 检查管理员权限
@@ -47,12 +51,12 @@ print(FEAT_ROOT)
 print(DATA_DIR)
 "@ | Out-File -FilePath $TempPy -Encoding UTF8
 
-$PyOut = conda run -n GTHT python "$TempPy" 2>&1
+$PyOut = conda run -n $CondaEnv python "$TempPy" 2>&1
 Remove-Item $TempPy -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -ne 0 -or -not $PyOut) {
     Write-Host "[ERROR] 无法运行 data_dir.py: $PyOut" -ForegroundColor Red
-    Write-Host "[ERROR] 请确认 GTHT 环境已配置" -ForegroundColor Red
+    Write-Host "[ERROR] 请确认 Conda 环境 $CondaEnv 已配置" -ForegroundColor Red
     exit 1
 }
 $lines = $PyOut -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }

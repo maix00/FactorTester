@@ -109,7 +109,14 @@ def test_fetch_table_adds_source_columns(monkeypatch):
 
 
 def test_store_roundtrip_reads_latest_source_metadata(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(_store, "CACHE_DB_PATH", tmp_path / "localdata" / "unifieddata.sqlite")
+    from tools.data.hub import SQLiteStore
+
+    db_path = tmp_path / "localdata" / "unifieddata.sqlite"
+    _store.DataHub.get_instance().register_sqlite_store(SQLiteStore(
+        key="openctp",
+        label="test",
+        path_getter=lambda: str(db_path),
+    ))
 
     df = pd.DataFrame(
         [

@@ -19,6 +19,7 @@ if FACTOR_WORKSPACE:
 
     from tools.factors.expr import (
         # core
+        EvaluateContext,
         FactorExpr,
         PanelTimeline,
         build_panel_timeline,
@@ -85,6 +86,7 @@ if FACTOR_WORKSPACE:
 __all__ = [
     "DataColumn",
     "DataFreq",
+    "EvaluateContext",
     "FactorExpr",
     "PanelTimeline",
     "build_panel_timeline",

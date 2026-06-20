@@ -9,12 +9,12 @@ from sources.LocalCNFutures.scripts.generate_main import (
 from sources.LocalCNFutures.contract_files import resolve_contract_parquet_path
 
 
-def test_generate_main_resolves_legacy_contract_file(tmp_path):
+def test_generate_main_resolves_canonical_contract_file(tmp_path):
     alias = "DCE|F|BZ|2603"
-    legacy_path = tmp_path / f"{alias}.parquet"
-    legacy_path.touch()
+    canonical_path = tmp_path / "DCE_F_BZ_2603.parquet"
+    canonical_path.touch()
 
-    assert resolve_contract_parquet_path(tmp_path, alias) == legacy_path
+    assert resolve_contract_parquet_path(tmp_path, alias) == canonical_path
 
 
 def _minute_frame(uid: str, start: str) -> pd.DataFrame:

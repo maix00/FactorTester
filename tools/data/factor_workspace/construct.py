@@ -491,6 +491,11 @@ def _sync_tools_sdk(root: str) -> bool:
             source_path = repo_root / str(module.source)
             source_code = source_path.read_text(encoding="utf-8")
             stub_code = _render_stub_module(source_code, str(module.source), explicit_author_api=True)
+            if module.prelude:
+                marker = "from typing import Any\n"
+                stub_code = stub_code.replace(marker, marker + module.prelude, 1)
+            if module.footer:
+                stub_code = stub_code.rstrip() + "\n\n" + module.footer
         if _write_text_if_changed(dest_path, stub_code):
             touched = True
 
@@ -513,7 +518,38 @@ def _sync_tools_sdk(root: str) -> bool:
                 touched = True
 
     touched |= _sync_vscode_settings(root)
+    touched |= _sync_pyright_config(root)
+    touched |= _sync_workspace_guide(root)
     return touched
+
+
+def _sync_pyright_config(root: str) -> bool:
+    return _write_json(
+        os.path.join(root, "pyrightconfig.json"),
+        {
+            "include": ["custom_factors", "public_factors", "tools", "pandas"],
+            "extraPaths": ["."],
+            "reportMissingModuleSource": "none",
+        },
+    )
+
+
+def _sync_workspace_guide(root: str) -> bool:
+    extensions_changed = _write_json(
+        os.path.join(root, ".vscode", "extensions.json"),
+        {"recommendations": ["ms-python.vscode-pylance"]},
+    )
+    guide_changed = _write_text_if_changed(
+        os.path.join(root, "FACTOR_WORKSPACE.md"),
+        "# Factor Workspace\n\n"
+        "Open this directory as the VS Code workspace and install the recommended "
+        "Pylance extension. Type checking and completion use the generated `.pyi` files; "
+        "no local GTHT conda environment is required.\n\n"
+        "Edit files under `custom_factors/`. Factor execution and data access happen on "
+        "the FactorTester server after synchronization. Generated SDK files under `tools/` "
+        "and `pandas/` should not be edited.\n",
+    )
+    return extensions_changed or guide_changed
 
 
 def _sync_vscode_settings(root: str) -> bool:
@@ -534,7 +570,7 @@ def _sync_vscode_settings(root: str) -> bool:
                 payload = loaded
         except Exception:
             payload = {}
-    changed = False
+    changed = payload.pop("python.defaultInterpreterPath", None) is not None
     for key, value in updates.items():
         if payload.get(key) != value:
             payload[key] = value

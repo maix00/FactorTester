@@ -5,7 +5,7 @@ name: GTHT
 # ═══════════════════════════════════════════════════════════════════════
 #
 # ▶ 跨平台创建/更新环境（一条命令即可）:
-#     python scripts/setup_gtht_env.py
+#     python scripts/setup_gtht_env.py [--name <unique-environment-name>]
 #
 #   脚本在 macOS 使用本文件中的 pip NumPy/SciPy（Apple Accelerate），
 #   在 Windows 创建后自动切换为 conda-forge MKL NumPy/SciPy。
@@ -38,3 +38,4 @@ dependencies:
       - statsmodels==0.14.6
       - orjson==3.11.9
       - playwright==1.60.0
+      - beautifulsoup4==4.15.0

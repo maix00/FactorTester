@@ -87,6 +87,8 @@ staging 原子发布、依赖顺序、后台 ensure，以及 SQLite 状态/覆�
 大型时序事实继续存 Parquet。`roller_info` 表达连续合约选择与复权，
 `term_structure:listed_contracts` 表达每日真实合约到期曲线，二者不可混用。
 数据源拥有独立 source/artifact storage root。完整决策见 ADR-016。
+LocalCNFutures 已完成迁移；运行时只读 provider-scoped canonical path，不再探测
+旧全局目录、旧文件名，也不保留一次性迁移脚本。
 
 ### 因子数据缓存
 
