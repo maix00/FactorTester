@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
-import numpy as np
 import pandas as pd
 
 from .runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic, MarketSlice
@@ -63,7 +62,11 @@ class IncrementalFactorExecutor:
     define one FactorExpr; a future compiler owns construction of this object.
     """
 
-    def __init__(self, factor_alias: str, update) -> None:
+    def __init__(
+        self,
+        factor_alias: str,
+        update: Callable[[pd.Timestamp, MarketSlice], Mapping[str, float] | None],
+    ) -> None:
         if not factor_alias or not callable(update):
             raise ValueError("incremental executor requires alias and update callable")
         self.factor_alias = factor_alias
@@ -79,8 +82,6 @@ class IncrementalFactorExecutor:
         if values is None:
             return None
         normalized = {name: float(value) for name, value in values.items()}
-        if any(not np.isfinite(value) for value in normalized.values()):
-            return None
         return EventDraft(
             EventTopic.FACTOR_SIGNAL,
             event.timestamp,

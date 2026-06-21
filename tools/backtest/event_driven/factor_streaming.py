@@ -11,6 +11,7 @@ import pandas as pd
 
 from tools.factors.expr import ColumnRef, CompositeExpr, ConstExpr, FactorExpr, RollingOp
 
+from .factor_events import IncrementalFactorExecutor
 from .runtime import MarketSlice
 
 
@@ -147,6 +148,17 @@ def compile_streaming_factor(
         return node
 
     return StreamingFactorPlan(expression, products, compile_node(expression))
+
+
+def compile_incremental_factor(
+    factor_alias: str,
+    expression: FactorExpr,
+    products: tuple[str, ...],
+) -> IncrementalFactorExecutor:
+    """Compile one author-facing FactorExpr into a runtime FactorActor."""
+
+    plan = compile_streaming_factor(expression, products)
+    return IncrementalFactorExecutor(factor_alias, plan.update)
 
 
 _COMPOSITE_OPS = {

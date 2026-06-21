@@ -82,6 +82,20 @@ ProductPrice
 `IncrementalFactorExecutor` 是编译目标，不是第二套作者 API。旧
 `EventDrivenFactor` 不再作为公共概念。
 
+Runner 的 `factors` 参数接收统一 `FactorActor`，因此 batch publisher 和 incremental
+executor 使用完全相同的事件位置。不得要求先完成全区间向量化计算才能启动回测；
+因子可以随着行情回放逐 bar 更新，并在当期直接驱动策略。
+
+外部框架桥接同样使用两种显式 Factor Source：
+
+- `PrecomputedFactorSource` 携带已计算的信号表；
+- `IncrementalFactorSource` 携带 FactorExpr 或编译计划，由目标框架 Adapter 接入其
+  indicator、data callback 或 strategy decision 生命周期。
+
+Capability report 必须区分 `PRECOMPUTED_SIGNALS` 与 `INCREMENTAL_FACTORS`。目标
+框架只有扩展点但尚未实现 FactorExpr Adapter 时，应报告 `extension_required`，不得
+静默退回预计算或声称原生支持。
+
 ### 状态修改权属于明确 actor
 
 | Actor | 订阅 | 可修改的状态 | 产生 |

@@ -4,22 +4,26 @@ import pandas as pd
 import pytest
 
 from tools.backtest.adapters.frameworks import (
+    FactorBridgeRequest,
     Framework,
     FrameworkFeature,
-    SignalBridgeRequest,
+    IncrementalFactorSource,
+    PrecomputedFactorSource,
     UnsupportedFrameworkPlan,
     built_in_adapters,
 )
+from tools.data.types import DataColumn
+from tools.factors.expr import ColumnRef
 
 
-def request(*features: FrameworkFeature) -> SignalBridgeRequest:
-    return SignalBridgeRequest(
+def request(*features: FrameworkFeature) -> FactorBridgeRequest:
+    return FactorBridgeRequest(
         factor_alias="momentum-5",
-        signals=pd.DataFrame(
+        factor_source=PrecomputedFactorSource(pd.DataFrame(
             [[0.2, -0.1]],
             index=[pd.Timestamp("2026-01-01")],
             columns=["A", "B"],
-        ),
+        )),
         strategy_ids=("group-1", "group-5"),
         required_features=frozenset(features),
     )
@@ -35,7 +39,32 @@ def test_same_factor_signals_prepare_for_all_frameworks() -> None:
     plans = {framework: adapter.prepare(bridge_request) for framework, adapter in adapters.items()}
 
     assert set(plans) == set(Framework)
-    assert all(plan.signals is bridge_request.signals for plan in plans.values())
+    assert all(
+        plan.factor_source is bridge_request.factor_source
+        for plan in plans.values()
+    )
+
+
+def test_incremental_factor_plan_is_not_forced_through_a_signal_dataframe() -> None:
+    expression = ColumnRef(DataColumn.CLOSE).rolling_mean(5)
+    bridge_request = FactorBridgeRequest(
+        factor_alias="momentum-5",
+        factor_source=IncrementalFactorSource(expression),
+        strategy_ids=("group-1",),
+        required_features=frozenset({FrameworkFeature.TARGET_WEIGHTS}),
+    )
+
+    plans = {
+        framework: adapter.prepare(bridge_request)
+        for framework, adapter in built_in_adapters().items()
+    }
+
+    assert all(plan.factor_source.factor_plan is expression for plan in plans.values())
+    assert FrameworkFeature.INCREMENTAL_FACTORS in plans[Framework.NATIVE].capability_report.native
+    for framework in (Framework.BACKTRADER, Framework.QLIB, Framework.ZIPLINE):
+        assert FrameworkFeature.INCREMENTAL_FACTORS in (
+            plans[framework].capability_report.extension_required
+        )
 
 
 def test_qlib_rejects_close_today_fee_semantics_before_execution() -> None:

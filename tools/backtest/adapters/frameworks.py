@@ -1,4 +1,4 @@
-"""Capability-first bridge from FactorTester signals to external frameworks."""
+"""Capability-first bridge from FactorTester factors to external frameworks."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ class Framework(str, Enum):
 
 class FrameworkFeature(str, Enum):
     PRECOMPUTED_SIGNALS = "precomputed_signals"
+    INCREMENTAL_FACTORS = "incremental_factors"
     TARGET_WEIGHTS = "target_weights"
     ISOLATED_MULTI_STRATEGY = "isolated_multi_strategy"
     PARTIAL_FILLS = "partial_fills"
@@ -59,51 +60,83 @@ class FrameworkCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
-class SignalBridgeRequest:
-    factor_alias: str
+class PrecomputedFactorSource:
     signals: pd.DataFrame
-    strategy_ids: tuple[str, ...]
-    required_features: frozenset[FrameworkFeature]
 
     def __post_init__(self) -> None:
-        if not self.factor_alias or self.signals.empty:
-            raise ValueError("signal bridge requires factor alias and signal values")
+        if self.signals.empty:
+            raise ValueError("precomputed factor source requires signal values")
         if not isinstance(self.signals.index, pd.DatetimeIndex):
-            raise ValueError("signal bridge requires a DatetimeIndex")
+            raise ValueError("precomputed signals require a DatetimeIndex")
         if not self.signals.index.is_unique or not self.signals.index.is_monotonic_increasing:
             raise ValueError("signal timestamps must be unique and monotonic")
         if not self.signals.columns.is_unique:
             raise ValueError("signal instruments must be unique")
-        if not self.strategy_ids or len(set(self.strategy_ids)) != len(self.strategy_ids):
-            raise ValueError("strategy_ids must be non-empty and unique")
 
 
 @dataclass(frozen=True, slots=True)
-class SignalBridgePlan:
+class IncrementalFactorSource:
+    """A FactorExpr or compiled plan that executes inside the target framework."""
+
+    factor_plan: object
+
+    def __post_init__(self) -> None:
+        if self.factor_plan is None:
+            raise ValueError("incremental factor source requires a factor plan")
+
+
+FactorSource = PrecomputedFactorSource | IncrementalFactorSource
+
+
+@dataclass(frozen=True, slots=True)
+class FactorBridgeRequest:
+    factor_alias: str
+    factor_source: FactorSource
+    strategy_ids: tuple[str, ...]
+    required_features: frozenset[FrameworkFeature]
+
+    def __post_init__(self) -> None:
+        if not self.factor_alias:
+            raise ValueError("factor bridge requires a factor alias")
+        if not self.strategy_ids or len(set(self.strategy_ids)) != len(self.strategy_ids):
+            raise ValueError("strategy_ids must be non-empty and unique")
+
+    @property
+    def effective_required_features(self) -> frozenset[FrameworkFeature]:
+        factor_feature = (
+            FrameworkFeature.PRECOMPUTED_SIGNALS
+            if isinstance(self.factor_source, PrecomputedFactorSource)
+            else FrameworkFeature.INCREMENTAL_FACTORS
+        )
+        return self.required_features | {factor_feature}
+
+
+@dataclass(frozen=True, slots=True)
+class FactorBridgePlan:
     framework: Framework
     factor_alias: str
-    signals: pd.DataFrame
+    factor_source: FactorSource
     strategy_ids: tuple[str, ...]
     capability_report: CapabilityReport
 
 
-class SignalFrameworkAdapter:
-    """Prepare a portable signal plan; framework packages execute it later."""
+class FactorFrameworkAdapter:
+    """Prepare a portable factor plan; framework packages execute it later."""
 
     def __init__(self, capabilities: FrameworkCapabilities) -> None:
         self.capabilities = capabilities
 
-    def prepare(self, request: SignalBridgeRequest) -> SignalBridgePlan:
-        report = self.capabilities.report(request.required_features)
+    def prepare(self, request: FactorBridgeRequest) -> FactorBridgePlan:
+        report = self.capabilities.report(request.effective_required_features)
         if report.missing:
             missing = ", ".join(sorted(feature.value for feature in report.missing))
             raise UnsupportedFrameworkPlan(
                 f"{self.capabilities.framework.value} cannot represent: {missing}"
             )
-        return SignalBridgePlan(
+        return FactorBridgePlan(
             framework=self.capabilities.framework,
             factor_alias=request.factor_alias,
-            signals=request.signals,
+            factor_source=request.factor_source,
             strategy_ids=request.strategy_ids,
             capability_report=report,
         )
@@ -126,6 +159,7 @@ BACKTRADER_CAPABILITIES = FrameworkCapabilities(
         FrameworkFeature.FUTURES_MARGIN,
         FrameworkFeature.DAILY_SETTLEMENT,
         FrameworkFeature.CLOSE_TODAY_FEES,
+        FrameworkFeature.INCREMENTAL_FACTORS,
     }),
 )
 
@@ -136,7 +170,10 @@ QLIB_CAPABILITIES = FrameworkCapabilities(
         FrameworkFeature.TARGET_WEIGHTS,
         FrameworkFeature.PARTIAL_FILLS,
     }),
-    extension_points=frozenset({FrameworkFeature.ISOLATED_MULTI_STRATEGY}),
+    extension_points=frozenset({
+        FrameworkFeature.ISOLATED_MULTI_STRATEGY,
+        FrameworkFeature.INCREMENTAL_FACTORS,
+    }),
 )
 
 ZIPLINE_CAPABILITIES = FrameworkCapabilities(
@@ -150,13 +187,14 @@ ZIPLINE_CAPABILITIES = FrameworkCapabilities(
         FrameworkFeature.ISOLATED_MULTI_STRATEGY,
         FrameworkFeature.FUTURES_MARGIN,
         FrameworkFeature.DAILY_SETTLEMENT,
+        FrameworkFeature.INCREMENTAL_FACTORS,
     }),
 )
 
 
-def built_in_adapters() -> dict[Framework, SignalFrameworkAdapter]:
+def built_in_adapters() -> dict[Framework, FactorFrameworkAdapter]:
     return {
-        capabilities.framework: SignalFrameworkAdapter(capabilities)
+        capabilities.framework: FactorFrameworkAdapter(capabilities)
         for capabilities in (
             NATIVE_CAPABILITIES,
             BACKTRADER_CAPABILITIES,
