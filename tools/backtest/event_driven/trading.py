@@ -349,7 +349,10 @@ class OrderManager:
                 continue
             side = OrderSide.BUY if delta > 0 else OrderSide.SELL
             order = Order(
-                order_id=f"{runtime.run_id}:{next(self._order_sequence)}",
+                order_id=(
+                    f"{runtime.run_id}:{intent.portfolio_id}:order:"
+                    f"{next(self._order_sequence)}"
+                ),
                 strategy_id=intent.strategy_id,
                 portfolio_id=intent.portfolio_id,
                 timestamp=event.timestamp,
@@ -383,7 +386,7 @@ class ImmediateBroker:
             return [EventDraft(EventTopic.ORDER_REJECTED, event.timestamp, order)]
         price = self.market.prices[order.instrument]
         fill = Fill(
-            fill_id=f"{runtime.run_id}:fill:{next(self._fill_sequence)}",
+            fill_id=f"{order.order_id}:fill:{next(self._fill_sequence)}",
             order_id=order.order_id,
             strategy_id=order.strategy_id,
             portfolio_id=order.portfolio_id,
@@ -492,7 +495,7 @@ class VolumeParticipationBroker:
         volume_share = quantity / raw_volume if raw_volume > 0 else 0.0
         price = float(self._fill_price(order, quote, quantity, volume_share))
         fill = Fill(
-            fill_id=f"{runtime.run_id}:fill:{next(self._fill_sequence)}",
+            fill_id=f"{order.order_id}:fill:{next(self._fill_sequence)}",
             order_id=order.order_id,
             strategy_id=order.strategy_id,
             portfolio_id=order.portfolio_id,

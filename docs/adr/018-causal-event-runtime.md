@@ -32,6 +32,23 @@ MARGIN、LIQUIDITY、FILL、PNL、REPORT 十类事件。它仍然是固定时间
 `EventRuntime` 必须是 run-scoped，不能由用户、页面或进程全局共享。`run_id`
 贯穿所有事件；多用户同时运行时拥有不同 runtime、queue、journal 和 actor 状态。
 
+### BacktestRunner 是唯一装配入口
+
+`BacktestRunner` 是每次运行的 Composition Root，负责验证并连接：
+
+- 一份共享的行情源、`MarketState`、截面屏障和 Factor actors；
+- 多个 `StrategyLane`，每个 lane 独占 strategy identity、portfolio、Ledger 和
+  OrderManager；
+- 一个或多个 `ExecutionVenue`。共享 Venue 表示共同消费执行容量，隔离 Venue
+  表示候选策略各自在独立虚拟市场中评估。
+
+Runner 不实现策略、费用、风控或成交算法。它只固定 actor 生命周期、订阅关系和
+标准结果收集。每个截面关闭后发布低优先级 `REPORT`，确保同时间戳的信号、风控、
+订单和成交完成后再记录各 portfolio 快照。
+
+所有订单 ID 包含 run 与 portfolio 命名空间；Fill ID 继承 order identity，保证同一
+run 中多策略和多 Venue 不会碰撞。
+
 ### 事件必须因果地产生
 
 ```text
@@ -116,3 +133,6 @@ ProductPrice
 - 事件数量取决于真实发生的行为，而不是时间点乘固定阶段数。
 - 需要逐步把现有 `simulate_group_trading_book` 拆成 actor；迁移期间以结果对照
   测试锁定期货费用、保证金和结算语义，不能一次性重写后宣称等价。
+- 原固定阶段 `EventDrivenEngine/WorldState/BacktestContext` 原型及其 models、
+  orders、factors 已删除；原生实现统一位于 `tools/backtest/event_driven/`，外部
+  框架边界统一位于 `tools/backtest/adapters/`，不提供旧 import 路径 fallback。

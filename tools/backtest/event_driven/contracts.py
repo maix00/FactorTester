@@ -156,20 +156,36 @@ class Fill:
 
 
 @dataclass(frozen=True, slots=True)
-class LedgerSnapshot:
+class PortfolioSnapshot:
     timestamp: pd.Timestamp
-    cash_minor: np.ndarray
-    equity_minor: np.ndarray
-    quantities: np.ndarray
+    cash_minor: int
+    margin_minor: int
+    equity_minor: int
+    realized_pnl_minor: int
+    positions: Mapping[str, float]
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioResult:
+    strategy_id: str
+    portfolio_id: str
+    snapshots: tuple[PortfolioSnapshot, ...]
+    fills: tuple[Fill, ...] = ()
+
+    @property
+    def final_snapshot(self) -> PortfolioSnapshot:
+        if not self.snapshots:
+            raise ValueError("portfolio result has no snapshots")
+        return self.snapshots[-1]
 
 
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
-    """Engine-neutral result; framework-specific objects stay in diagnostics."""
+    """One run containing independently accounted strategy portfolios."""
 
     identity: RunIdentity
     engine: str
-    snapshots: tuple[LedgerSnapshot, ...]
-    fills: tuple[Fill, ...] = ()
+    portfolios: Mapping[str, PortfolioResult]
+    event_count: int
     metrics: Mapping[str, float] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
