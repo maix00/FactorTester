@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 
 from tools.data.types import DataColumn, DataFreq
-from tools.factors.expr import ColumnRef, EvaluateContext
+from tools.factors.expr import CLOSE, HIGH, LOW, SMALL_VAL, ColumnRef, EvaluateContext
 
 from tools.backtest.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
 from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
 from tools.backtest.factors.incremental import (
+    UnsupportedStreamingFactor,
     compile_incremental_factor,
     compile_streaming_factor,
 )
@@ -137,3 +138,58 @@ def test_shift_rolling_and_cross_sectional_ops_match_batch_backend() -> None:
     ], index=index)
 
     pd.testing.assert_frame_equal(streamed, batch)
+
+
+def test_sgccs_duration_window_matches_batch_at_minute_frequency() -> None:
+    index = pd.date_range("2026-01-01 09:01", periods=5, freq="min")
+    products = ("A", "B")
+    close = pd.DataFrame({"A": [10, 11, 12, 11, 13], "B": [20, 19, 18, 19, 17]}, index=index)
+    high = close + 1
+    low = close - 1
+    window = pd.Timedelta("2min")
+    rolling_high = HIGH.rolling_max(window)
+    rolling_low = LOW.rolling_min(window)
+    expression = (2 * CLOSE - rolling_high - rolling_low) / (
+        rolling_high - rolling_low + SMALL_VAL
+    )
+    preloaded = {
+        (product, DataFreq.MIN1.name): pd.DataFrame(
+                {
+                    CLOSE.column.name: close[product],
+                    HIGH.column.name: high[product],
+                    LOW.column.name: low[product],
+            },
+            index=index,
+        )
+        for product in products
+    }
+    batch = expression.evaluate(ctx=EvaluateContext(
+        products, DataFreq.MIN1, preloaded=preloaded
+    ))
+    plan = compile_streaming_factor(
+        expression, products, source_freq=DataFreq.MIN1
+    )
+    streamed = pd.DataFrame([
+        plan.update(timestamp, MarketSlice({
+            product: ProductPrice(product, float(close.loc[timestamp, product]), {
+                CLOSE.column.name: float(close.loc[timestamp, product]),
+                HIGH.column.name: float(high.loc[timestamp, product]),
+                LOW.column.name: float(low.loc[timestamp, product]),
+            })
+            for product in products
+        }))
+        for timestamp in index
+    ], index=index)
+
+    pd.testing.assert_frame_equal(streamed, batch)
+
+
+def test_intraday_streaming_rejects_session_spanning_duration_window() -> None:
+    with np.testing.assert_raises_regex(
+        UnsupportedStreamingFactor, "trading-calendar kernel"
+    ):
+        compile_streaming_factor(
+            CLOSE.rolling_mean(pd.Timedelta("1D")),
+            ("A",),
+            source_freq=DataFreq.MIN1,
+        )

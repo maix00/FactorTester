@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import os
 import re
-import math
-
 import pytest
 
 from server import create_app
 from server.services import page_runtime
-from tools.backtest.strategies.group_worker import build_group_target_weight_payload
-from tools.backtest.workers import EngineWorkerDispatcher, WorkerRequest
+from tools.backtest.factors.incremental import compile_streaming_factor
 
 
 pytestmark = pytest.mark.skipif(
@@ -80,7 +77,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     dates = local["dates"]
     capital = local["initialCapital"]
     calendar = local["calendarFreq"]
-    response = client.post("/run_group_test", json={
+    base_payload = {
         "groups": groups,
         "flatCount": len(groups),
         "ls_configs": snapshot["group_settings"].get("lsConfigs", []),
@@ -95,46 +92,46 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "group_calendar_freq": calendar["groupCalendarFreq"],
         "_group_factor_params_list": snapshot["params_list"],
         "_group_owner_username": USERNAME,
-    })
-    body = response.get_json()
-    assert response.status_code == 200, body
-    assert body["success"], body
-    assert body["simulation_count"] == 1
-    assert len(body["groups"]) == 7
-    assert len(body["metrics"]) == 7
+    }
+    results = {}
+    for engine in ("native", "backtrader", "qlib", "zipline"):
+        response = client.post("/run_group_test", json={
+            **base_payload,
+            "backtest_settings": {
+                "application": "group_test",
+                "local_values": {
+                    "engine": engine,
+                    "factor_mode": "precomputed",
+                    "allocation_policy": "equal_notional",
+                    "rebalance_mode": "on_factor_signal",
+                    "fee_mode": "none",
+                    "initial_capital": capital["initialCapital"],
+                },
+                "group_values": {},
+            },
+        })
+        body = response.get_json()
+        assert response.status_code == 200, {"engine": engine, "body": body}
+        assert body["success"], body
+        assert body["simulation_count"] == 1
+        assert len(body["groups"]) == 7
+        assert len(body["metrics"]) == 7
+        assert body["engine_result"]["engine"] == engine
+        results[engine] = body
 
     tester = page_runtime.get_factor_tester("live-sgccs-0", caller="live-framework-test")
     factor = tester.resolve_factor("SgCCS|N:2m|$F:1m|$Rev")
     assert factor is not None
-    group_result = tester._get_result(factor).group_result
-    assert group_result is not None
-    strategy_ids = [group["shortAlias"] for group in groups]
-    payload = build_group_target_weight_payload(
-        group_result,
-        strategy_ids=strategy_ids,
-        rebalance_modes=[group["rebalanceMode"] for group in groups],
-        initial_cash=capital["initialCapital"],
+    compile_streaming_factor(
+        factor._source_expr,
+        tuple(str(product.name) for product in tester.products),
+        source_freq=factor._source_freq,
     )
-    assert len(payload["strategies"]) == 7
-    assert all(
-        abs(sum(weights.values()) - 1.0) < 1e-12
-        for strategy in payload["strategies"]
-        for weights in strategy["targets"].values()
-        if weights
-    )
-
-    dispatcher = EngineWorkerDispatcher()
-    for engine in ("backtrader", "qlib", "zipline"):
-        worker_result = dispatcher.dispatch(
-            WorkerRequest(f"live-sgccs-{engine}", engine, "run_target_weights", payload),
-            timeout_seconds=300,
-        ).result
-        assert set(worker_result["portfolios"]) == set(strategy_ids)
-        assert all(
-            math.isfinite(portfolio["final_value"])
-            and portfolio["final_value"] > 0
-            for portfolio in worker_result["portfolios"].values()
-        )
+    traces = {
+        engine: {group["group_id"]: group["target_trace"] for group in body["groups"]}
+        for engine, body in results.items()
+    }
+    assert traces["native"] == traces["backtrader"] == traces["qlib"] == traces["zipline"]
 
 
 def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict]:

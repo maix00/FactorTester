@@ -114,11 +114,14 @@ class BacktestRunner:
             raise RuntimeError("BacktestRunner instances are single-use")
         self._has_run = True
         runtime = EventRuntime(self.plan.identity.run_id)
-        barrier = MarketSliceBarrier(self.plan.instruments)
         runtime.add_source(self.market_source)
-        runtime.add_finalizer(barrier.finalize)
-        runtime.subscribe(EventTopic.MARKET_DATA, self.market.on_market_data)
-        runtime.subscribe(EventTopic.MARKET_DATA, barrier.on_price)
+        if getattr(self.market_source, "topic", None) == EventTopic.MARKET_SLICE_CLOSED:
+            runtime.subscribe(EventTopic.MARKET_SLICE_CLOSED, self.market.on_market_slice)
+        else:
+            barrier = MarketSliceBarrier(self.plan.instruments)
+            runtime.add_finalizer(barrier.finalize)
+            runtime.subscribe(EventTopic.MARKET_DATA, self.market.on_market_data)
+            runtime.subscribe(EventTopic.MARKET_DATA, barrier.on_price)
         runtime.subscribe(EventTopic.MARKET_SLICE_CLOSED, self._request_report)
         if self.progress is not None:
             runtime.subscribe(EventTopic.REPORT, self._report_progress)

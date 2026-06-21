@@ -33,6 +33,10 @@ class WeightAllocator(Protocol):
     def allocate(self, inputs: AllocationInput) -> np.ndarray: ...
 
 
+class AllocationInputsUnavailable(ValueError):
+    """A policy cannot run yet because required causal inputs are unavailable."""
+
+
 @dataclass(frozen=True, slots=True)
 class EqualNotionalAllocator:
     name: str = "equal_notional"
@@ -50,14 +54,24 @@ class InverseVolatilityAllocator:
 
     def allocate(self, inputs: AllocationInput) -> np.ndarray:
         if inputs.volatilities is None:
-            raise ValueError("inverse volatility allocation requires volatility estimates")
+            raise AllocationInputsUnavailable(
+                "inverse_volatility requires trailing volatility estimates"
+            )
         raw = np.zeros(len(inputs.instruments), dtype=float)
+        missing = []
         for index, instrument in enumerate(inputs.instruments):
             if not inputs.selected[index]:
                 continue
             volatility = float(inputs.volatilities.get(instrument, np.nan))
-            if np.isfinite(volatility) and volatility > 0:
+            if np.isfinite(volatility) and volatility >= 0:
                 raw[index] = 1.0 / max(volatility, self.volatility_floor)
+            else:
+                missing.append(f"{instrument}={volatility!r}")
+        if missing:
+            raise AllocationInputsUnavailable(
+                "inverse_volatility has no usable trailing volatility for "
+                + ", ".join(missing)
+            )
         return _normalize_selected(inputs, raw)
 
 
@@ -69,7 +83,7 @@ class EqualMarginAllocator:
 
     def allocate(self, inputs: AllocationInput) -> np.ndarray:
         if inputs.margin_ratios is None:
-            raise ValueError("equal margin allocation requires margin ratios")
+            raise AllocationInputsUnavailable("equal_margin requires margin ratios")
         raw = np.zeros(len(inputs.instruments), dtype=float)
         for index, instrument in enumerate(inputs.instruments):
             if not inputs.selected[index]:

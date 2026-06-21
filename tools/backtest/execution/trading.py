@@ -17,6 +17,7 @@ from ..event_driven.runtime import (
     EventRuntime,
     EventTopic,
     ProductPrice,
+    MarketSlice,
 )
 from .fees import CommissionModel, FeeJournal, ZeroCommissionModel
 from ..market_rules import (
@@ -40,6 +41,15 @@ class MarketState:
         if not np.isfinite(quote.price) or quote.price <= 0:
             raise ValueError(f"invalid market price for {quote.product}: {quote.price}")
         self.prices[quote.product] = float(quote.price)
+
+    def on_market_slice(self, event: EventEnvelope, runtime: EventRuntime) -> None:
+        market_slice = event.payload
+        if not isinstance(market_slice, MarketSlice):
+            raise TypeError("market.slice_closed payload must be MarketSlice")
+        for quote in market_slice.prices.values():
+            if not np.isfinite(quote.price) or quote.price <= 0:
+                raise ValueError(f"invalid market price for {quote.product}: {quote.price}")
+            self.prices[quote.product] = float(quote.price)
 
 
 @dataclass(frozen=True, slots=True)

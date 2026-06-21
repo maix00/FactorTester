@@ -26,10 +26,11 @@ def _make_spec(simulation_index: int, submission_id: str, factor_alias: str, sig
         shared_inputs=SimpleNamespace(
             index_list=[pd.Timestamp('2026-01-01 09:30:00')],
             signal_valid_cols=list(signal_cols),
+            signal_update_mask=np.array([True]),
             T=1,
         ),
         base_membership_np=signal_membership.copy(),
-        flat_group_info=[{'group_index': i} for i in range(flat_count)],
+        flat_group_info=[{'group_index': i, 'id': f'{submission_id}-{i}'} for i in range(flat_count)],
         group_name_map={i: f'{submission_id}-{i + 1}' for i in range(flat_count)},
         signal_products=frozenset({f'Product:{name}' for name in signal_cols}),
         signal_membership_np=signal_membership,

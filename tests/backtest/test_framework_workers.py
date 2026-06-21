@@ -125,3 +125,65 @@ def test_framework_workers_share_next_bar_target_weight_semantics() -> None:
 
     assert final_values["backtrader"] == pytest.approx(final_values["qlib"], abs=250.0)
     assert final_values["zipline"] == pytest.approx(final_values["qlib"], abs=250.0)
+
+
+def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+
+    dispatcher = EngineWorkerDispatcher()
+    payload = {
+        "timestamps": [
+            "2024-01-01T00:00:00",
+            "2024-01-02T00:00:00",
+            "2024-01-03T00:00:00",
+            "2024-01-04T00:00:00",
+        ],
+        "instruments": ["volatile", "stable"],
+        "prices": {
+            "volatile": [100.0, 110.0, 99.0, 118.8],
+            "stable": [100.0, 101.0, 102.01, 103.0301],
+        },
+        "membership": [
+            [[True, True], [True, False]],
+            [[True, True], [True, False]],
+            [[True, True], [False, True]],
+            [[True, True], [False, True]],
+        ],
+        "signal_updates": [
+            [True, True],
+            [True, True],
+            [True, True],
+            [True, True],
+        ],
+        "initial_cash": 100_000.0,
+        "strategy_configs": [
+            {
+                "strategy_id": "equal-risk",
+                "allocation_policy": "inverse_volatility",
+                "volatility_lookback": 2,
+                "rebalance_mode": "on_factor_signal",
+            },
+            {
+                "strategy_id": "membership",
+                "allocation_policy": "equal_notional",
+                "rebalance_mode": "membership_change",
+            },
+        ],
+    }
+
+    results = {
+        engine: dispatcher.dispatch(WorkerRequest(
+            f"group-target-{engine}", engine, "run_group_strategy", payload
+        )).result
+        for engine in ("backtrader", "qlib", "zipline")
+    }
+    results["native"] = run_native(payload)
+
+    traces = [results[engine]["target_trace"] for engine in results]
+    assert traces[1:] == traces[:-1], {
+        engine: results[engine]["target_trace"] for engine in results
+    }
+    assert all(
+        len(result["portfolios"]["equal-risk"]["equity_curve"]) == 4
+        for result in results.values()
+    )

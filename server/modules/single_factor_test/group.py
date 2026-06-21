@@ -967,6 +967,91 @@ def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_l
     return _compute_return_metrics(r_ls_array, index_like=index_like, avg_turnover=avg_turnover)
 
 
+def _serialize_event_execution(
+    execution: dict[str, Any],
+    *,
+    settings_by_group: dict[str, dict[str, Any]],
+    evaluation_split: str | None,
+) -> dict[str, Any]:
+    """Convert the selected framework's own ledger output to the UI contract."""
+
+    engine_result = execution["engine_result"]
+    portfolios = engine_result.get("portfolios") or {}
+    target_trace = engine_result.get("target_trace") or {}
+    diagnostics = engine_result.get("strategy_diagnostics") or {}
+    groups = []
+    metrics = {}
+    metrics_by_segment = {}
+    split = pd.Timestamp(evaluation_split) if evaluation_split else None
+    for owner in execution["group_owner"]:
+        strategy_id = str(owner.get("group_id") or "")
+        if strategy_id not in portfolios:
+            raise ValueError(
+                f"{engine_result.get('engine')} result missing portfolio {strategy_id!r}; "
+                f"available={sorted(portfolios)}"
+            )
+        portfolio = portfolios[strategy_id]
+        curve = portfolio.get("equity_curve") or {}
+        index = pd.DatetimeIndex([pd.Timestamp(value) for value in curve])
+        equity = np.asarray([float(value) for value in curve.values()], dtype=float)
+        if len(index) != len(equity) or not len(index):
+            raise ValueError(f"portfolio {strategy_id!r} returned an empty equity curve")
+        returns = pd.Series(equity, index=index).pct_change().fillna(0.0)
+        display_name = str(owner.get("group_name") or strategy_id)
+        settings = settings_by_group[strategy_id]
+        groups.append({
+            "key": display_name,
+            "name": display_name,
+            "group_id": strategy_id,
+            "group_index": int(owner.get("group_index") or 0),
+            "submission_id": str(owner.get("submission_id") or ""),
+            "factor_alias": str(owner.get("factor_alias") or ""),
+            "timestamps": [int(value.timestamp() * 1000) for value in index],
+            "total_equity": [round(float(value), 2) for value in equity],
+            "gross_returns": _serialize_float_series(returns.to_numpy()),
+            "fee_costs": [0.0] * len(index),
+            "trade_notional_ratios": [0.0] * len(index),
+            "engine": str(engine_result.get("engine") or ""),
+            "allocation_policy": settings["allocation_policy"],
+            "rebalance_mode": settings["rebalance_mode"],
+            "target_trace": target_trace.get(strategy_id, {}),
+            "strategy_diagnostics": diagnostics.get(strategy_id, {}),
+            "snapshot_available": engine_result.get("engine") == "native",
+        })
+        metrics[display_name] = _compute_return_metrics(
+            returns.to_numpy(), index_like=index
+        )
+        if split is not None:
+            comparable_split = split
+            if index.tz is not None and split.tzinfo is None:
+                comparable_split = split.tz_localize(index.tz)
+            elif index.tz is None and split.tzinfo is not None:
+                comparable_split = split.tz_localize(None)
+            in_sample = returns[index <= comparable_split]
+            out_of_sample = returns[index > comparable_split]
+            metrics_by_segment[display_name] = {
+                "in_sample": _compute_return_metrics(
+                    in_sample.to_numpy(), index_like=in_sample.index
+                ),
+                "out_of_sample": _compute_return_metrics(
+                    out_of_sample.to_numpy(), index_like=out_of_sample.index
+                ),
+                "full": metrics[display_name],
+            }
+    initial_values = [float(value.get("initial_value") or 0.0) for value in portfolios.values()]
+    return {
+        "groups": groups,
+        "metrics": metrics,
+        "metrics_by_segment": metrics_by_segment,
+        "initial_capital": initial_values[0] if initial_values else None,
+        "base_currency": "CNY",
+        "engine_result": {
+            "engine": engine_result.get("engine"),
+            "event_count": engine_result.get("event_count"),
+        },
+    }
+
+
 
 
 def _serialize_float_series(values: np.ndarray | list, default: float = 0.0) -> list:
@@ -1316,7 +1401,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"ls_configs={len(flat_ls_configs)}"
     )
 
-    rebalance_mode = 'buy_and_hold'
+    rebalance_mode = 'on_factor_signal'
 
     from tools.data.types import DataTime
 
@@ -1407,6 +1492,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                     liquidity_mode=g.get('liquidityMode'),
                     liquidity_percent=g.get('liquidityPercent'),
                     margin_mode=g.get('marginMode'),
+                    _id=str(g.get('id') or f'group-{len(all_flat_groups)}'),
                 )
                 offset = len(all_flat_groups)
                 sim_index_by_group[offset] = sim_index
@@ -1558,13 +1644,81 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         containment_ratio=containment_ratio,
         merge_cost_ratio=merge_cost_ratio,
         progress_hook=_progress,
-        single_runtime=common_backtest_settings['engine'] == 'native',
+        single_runtime=True,
     )
     _progress(
         f"group tester batches overlap_ratio={overlap_ratio:.2f} "
         f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
         f"batches={group_tester.build_batch_labels()}"
     )
+    from tools.backtest.orchestration import execute_group_plan
+
+    def _framework_progress(message: str, completed: int, total: int) -> None:
+        _core_emit_progress(
+            "framework_execution",
+            message,
+            completed=completed,
+            total=total,
+            engine=common_backtest_settings["engine"],
+        )
+
+    try:
+        execution = execute_group_plan(
+            group_tester,
+            engine=common_backtest_settings["engine"],
+            settings_by_group=resolved_backtest_settings,
+            initial_capital=initial_capital,
+            progress=_framework_progress,
+        )
+        serialized_execution = _serialize_event_execution(
+            execution,
+            settings_by_group=resolved_backtest_settings,
+            evaluation_split=common_backtest_settings["evaluation_split"] or None,
+        )
+    except Exception as exc:
+        import traceback as _traceback
+        return False, {
+            "success": False,
+            "error": f"{common_backtest_settings['engine']} 事件回测失败: {exc}",
+            "traceback": _traceback.format_exc(),
+            "status": 500,
+        }
+    first_owner = execution["group_owner"][0]
+    return True, {
+        "success": True,
+        **serialized_execution,
+        "metrics_meta": _get_metrics_meta(),
+        "n_groups": len(serialized_execution["groups"]),
+        "multi_session_active": any(
+            bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
+        ),
+        "multi_session_entries": [],
+        "rebalance_mode": "per_strategy",
+        "submission_id": str(first_owner.get("submission_id") or ""),
+        "factor_alias": str(first_owner.get("factor_alias") or ""),
+        "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
+        "tester_product_count": len(group_tester.specs[0].tester.products),
+        "simulation_count": execution["simulation_count"],
+        "cross_entry_ls_count": 0,
+        "errors": None,
+        "backtest_settings": {
+            "engine": common_backtest_settings["engine"],
+            "factor_mode": common_backtest_settings["factor_mode"],
+            "market_rule_fallback": common_backtest_settings["market_rule_fallback"],
+            "groups": resolved_backtest_settings,
+        },
+        "evaluation_window": {
+            "start_ms": int(start_dt.ts.timestamp() * 1000),
+            "end_ms": int(end_dt.ts.timestamp() * 1000),
+            "split_ms": (
+                int(pd.Timestamp(
+                    common_backtest_settings["evaluation_split"], tz=start_dt.ts.tz
+                ).timestamp() * 1000)
+                if common_backtest_settings["evaluation_split"] else None
+            ),
+        },
+    }
+
     errors = []
     try:
         raw_results = group_tester.run(

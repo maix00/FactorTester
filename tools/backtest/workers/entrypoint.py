@@ -21,7 +21,7 @@ def execute(request: WorkerRequest) -> dict:
     if request.engine not in PACKAGES:
         raise ValueError(f"unknown worker engine: {request.engine}")
     if request.operation == "health":
-        operations = ["health", "run_target_weights"]
+        operations = ["health", "run_target_weights", "run_group_strategy"]
         return {
             "framework_version": version(PACKAGES[request.engine]),
             "operations": operations,
@@ -35,6 +35,14 @@ def execute(request: WorkerRequest) -> dict:
         else:
             from .runners.zipline import run_target_weights
         return run_target_weights(request.payload)
+    if request.operation == "run_group_strategy":
+        if request.engine == "backtrader":
+            from .runners.backtrader import run_group_strategy
+        elif request.engine == "qlib":
+            from .runners.qlib import run_group_strategy
+        else:
+            from .runners.zipline import run_group_strategy
+        return run_group_strategy(request.payload)
     raise ValueError(
         f"operation {request.operation!r} is not implemented for {request.engine}"
     )

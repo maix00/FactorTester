@@ -8,48 +8,58 @@ from typing import Any
 import backtrader as bt
 import pandas as pd
 
+from .common import (
+    compile_group_strategy_input,
+    parse_target_weight_input,
+    target_quantities,
+    target_rows,
+    valuation_price,
+)
+
 
 class _TargetWeightStrategy(bt.Strategy):
-    params = (("targets", None), ("rebalance_mode", "membership_change"))
+    params = (("request", None), ("target_sequence", None))
 
     def __init__(self) -> None:
         self._pending_targets = None
+        self.equity_curve = []
 
     def next(self) -> None:
-        timestamp = pd.Timestamp(self.datas[0].datetime.datetime(0)).isoformat()
+        row = len(self) - 1
+        timestamp = self.p.request.timestamps[row]
+        self.equity_curve.append((timestamp.isoformat(), float(self.broker.getvalue())))
         if self._pending_targets is not None:
+            quantities = target_quantities(
+                self.p.request, row, self._pending_targets, float(self.broker.getvalue())
+            )
             for data in self.datas:
-                self.order_target_percent(
+                self.order_target_size(
                     data=data,
-                    target=float(self._pending_targets.get(data._name, 0.0)),
+                    target=float(quantities[data._name]),
                 )
-        next_target = self.p.targets.get(timestamp)
-        self._pending_targets = next_target if next_target is not None else (
-            self._pending_targets if self.p.rebalance_mode == "each_period" else None
-        )
+        self._pending_targets = self.p.target_sequence[row]
 
 
 def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
-    timestamps = [pd.Timestamp(value) for value in payload.get("timestamps", ())]
-    instruments = tuple(payload.get("instruments", ()))
-    prices = payload.get("prices", {})
-    strategies = payload.get("strategies", ())
-    initial_cash = float(payload.get("initial_cash", 0.0))
-    if not timestamps or not instruments or not strategies or initial_cash <= 0:
-        raise ValueError("target-weight run requires timestamps, instruments, strategies, and positive cash")
+    request = parse_target_weight_input(payload)
 
     portfolios = {}
-    for strategy in strategies:
+    for strategy in request.strategies:
         strategy_id = strategy.get("strategy_id", "")
         if not strategy_id or strategy_id in portfolios:
             raise ValueError("strategy ids must be non-empty and unique")
         cerebro = bt.Cerebro(stdstats=False)
-        cerebro.broker.setcash(initial_cash)
+        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
+        cerebro.broker.setcash(strategy_cash)
         cerebro.broker.set_coc(True)
-        for instrument in instruments:
-            values = prices.get(instrument)
-            if not isinstance(values, list) or len(values) != len(timestamps):
-                raise ValueError(f"price length mismatch for {instrument}")
+        cerebro.broker.setcommission(
+            commission=float(strategy.get("fee_rate") or 0.0), percabs=True
+        )
+        for instrument in request.instruments:
+            values = [
+                valuation_price(request, row, instrument)
+                for row in range(len(request.timestamps))
+            ]
             frame = pd.DataFrame(
                 {
                     "open": values,
@@ -59,25 +69,39 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
                     "volume": [1_000_000.0] * len(values),
                     "openinterest": [0.0] * len(values),
                 },
-                index=pd.DatetimeIndex(timestamps),
+                index=pd.DatetimeIndex(request.timestamps),
             )
             cerebro.adddata(bt.feeds.PandasData(dataname=frame), name=instrument)
-        targets = strategy.get("targets", {})
-        rebalance_mode = str(strategy.get("rebalance_mode", "membership_change"))
-        if rebalance_mode not in {"membership_change", "each_period", "buy_and_hold"}:
-            raise ValueError(f"unsupported rebalance mode: {rebalance_mode}")
+        targets = target_rows(strategy, request.timestamps)
+        target_sequence = [targets.get(timestamp) for timestamp in request.timestamps]
         cerebro.addstrategy(
             _TargetWeightStrategy,
-            targets=targets,
-            rebalance_mode=rebalance_mode,
+            request=request,
+            target_sequence=target_sequence,
         )
-        cerebro.run()
+        instances = cerebro.run()
+        instance = instances[0]
         portfolios[strategy_id] = {
-            "initial_value": initial_cash,
+            "initial_value": strategy_cash,
             "final_value": float(cerebro.broker.getvalue()),
             "positions": {
                 data._name: float(cerebro.broker.getposition(data).size)
                 for data in cerebro.datas
             },
+            "equity_curve": dict(instance.equity_curve),
         }
     return {"engine": "backtrader", "portfolios": portfolios}
+
+
+def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
+    calculated = compile_group_strategy_input(payload)
+    result = run_target_weights(calculated)
+    result["target_trace"] = {
+        strategy["strategy_id"]: strategy["targets"]
+        for strategy in calculated["strategies"]
+    }
+    result["strategy_diagnostics"] = {
+        strategy["strategy_id"]: strategy["diagnostics"]
+        for strategy in calculated["strategies"]
+    }
+    return result

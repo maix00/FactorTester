@@ -218,6 +218,10 @@ class ReplayEventSource:
         self._priority = priority
         self._pending_event_id: str | None = None
 
+    @property
+    def topic(self) -> EventTopic:
+        return self._topic
+
     def start(self, runtime: EventRuntime) -> None:
         self._publish_next(runtime)
 

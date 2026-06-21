@@ -57,6 +57,7 @@ class BatchExecutionPlan:
     group_owner: list[dict[str, Any]]
     group_slices: dict[int, list[int]]
     merged_membership_np: np.ndarray
+    merged_signal_update_mask: np.ndarray | None = None
     merged_returns_np: np.ndarray | None = None
     merged_price_np: np.ndarray | None = None
     merged_settlement_price_np: np.ndarray | None = None
@@ -93,6 +94,11 @@ class BatchExecutionPlan:
                 f"trade product axis mismatch: merged={self.merged_membership_np.shape[2]}, "
                 f"trade_product_names={len(self.trade_product_names)}"
             )
+        if (
+            self.merged_signal_update_mask is None
+            or self.merged_signal_update_mask.shape != self.merged_membership_np.shape[:2]
+        ):
+            raise ValueError("merged signal-update mask must match time/group axes")
 
         global_trade_positions = {
             name: idx for idx, name in enumerate(self.trade_product_names)
@@ -675,6 +681,7 @@ class FactorGroupTester:
         merged_membership_np = np.zeros(
             (T, batch_flat_count, len(trade_product_names)), dtype=bool,
         )
+        merged_signal_update_mask = np.zeros((T, batch_flat_count), dtype=bool)
         group_owner: list[dict[str, Any]] = []
         group_slices: dict[int, list[int]] = {}
 
@@ -709,6 +716,9 @@ class FactorGroupTester:
                     f"merged_shape={merged_membership_np.shape} si={si} | {e}"
                 ) from e
             group_slices[si] = list(range(group_offset, group_offset + local_flat_count))
+            merged_signal_update_mask[
+                :, group_offset:group_offset + local_flat_count
+            ] = np.asarray(entry.shared_inputs.signal_update_mask, dtype=bool)[:, np.newaxis]
             for local_group_idx in range(local_flat_count):
                 group_label = entry.group_name_map.get(local_group_idx, f"group_{local_group_idx}")
                 group_owner.append({
@@ -718,6 +728,7 @@ class FactorGroupTester:
                     "requested_n_groups": entry.n_groups,
                     "group_index": local_group_idx,
                     "group_name": group_label,
+                    "group_id": entry.flat_group_info[local_group_idx].get("id"),
                 })
             group_offset += local_flat_count
 
@@ -729,6 +740,7 @@ class FactorGroupTester:
             group_owner=group_owner,
             group_slices=group_slices,
             merged_membership_np=merged_membership_np,
+            merged_signal_update_mask=merged_signal_update_mask,
             entry_trade_valid_cols=entry_trade_valid_cols,
             entry_trade_membership_np=entry_trade_membership_np,
         )
