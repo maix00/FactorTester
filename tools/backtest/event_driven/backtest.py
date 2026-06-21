@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 import pandas as pd
 
 from .contracts import (
     BacktestPlan,
+    BacktestProgress,
     BacktestResult,
     PortfolioResult,
     PortfolioSnapshot,
@@ -83,6 +84,7 @@ class BacktestRunner:
         lanes: tuple[StrategyLane, ...],
         venues: tuple[ExecutionVenue, ...],
         observers: tuple[EventObserver, ...] = (),
+        progress: Callable[[BacktestProgress], None] | None = None,
     ) -> None:
         if not factors or not lanes or not venues:
             raise ValueError("backtest requires factors, strategy lanes, and venues")
@@ -93,6 +95,7 @@ class BacktestRunner:
         self.lanes = lanes
         self.venues = venues
         self.observers = observers
+        self.progress = progress
         self._has_run = False
         self._validate_lanes()
 
@@ -107,6 +110,8 @@ class BacktestRunner:
         runtime.subscribe(EventTopic.MARKET_DATA, self.market.on_market_data)
         runtime.subscribe(EventTopic.MARKET_DATA, barrier.on_price)
         runtime.subscribe(EventTopic.MARKET_SLICE_CLOSED, self._request_report)
+        if self.progress is not None:
+            runtime.subscribe(EventTopic.REPORT, self._report_progress)
 
         for venue in self.venues:
             if venue.on_market_data is not None:
@@ -137,7 +142,30 @@ class BacktestRunner:
             runtime.add_observer(observer)
 
         runtime.run()
-        return self._result(runtime, recorders)
+        result = self._result(runtime, recorders)
+        if self.progress is not None:
+            self.progress(BacktestProgress(
+                self.plan.identity.run_id,
+                "complete",
+                len(self.plan.timestamps),
+                len(self.plan.timestamps),
+                "事件驱动回测完成",
+            ))
+        return result
+
+    def _report_progress(
+        self, event: EventEnvelope, runtime: EventRuntime
+    ) -> None:
+        completed = sum(
+            1 for record in runtime.journal if record.event.topic == EventTopic.REPORT
+        ) + 1
+        self.progress(BacktestProgress(
+            self.plan.identity.run_id,
+            "event_replay",
+            completed,
+            len(self.plan.timestamps),
+            f"完成时间片 {completed}/{len(self.plan.timestamps)}",
+        ))
 
     @staticmethod
     def _request_report(

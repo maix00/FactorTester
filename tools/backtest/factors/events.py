@@ -23,7 +23,7 @@ class FactorSignal:
 
 
 class PrecomputedFactorPublisher:
-    """Expose existing vectorized Factor evaluation as causal signal events."""
+    """Publish precomputed factor rows as causal events during replay."""
 
     def __init__(self, factor_alias: str, values: pd.DataFrame) -> None:
         if not factor_alias:

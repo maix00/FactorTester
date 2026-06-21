@@ -189,3 +189,18 @@ class BacktestResult:
     event_count: int
     metrics: Mapping[str, float] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestProgress:
+    run_id: str
+    phase: str
+    completed: int
+    total: int
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.run_id or self.completed < 0 or self.total < 0:
+            raise ValueError("invalid backtest progress")
+        if self.total and self.completed > self.total:
+            raise ValueError("backtest progress cannot exceed total")

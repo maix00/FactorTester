@@ -21,12 +21,12 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "capital", "rebalance", "cost", "liquidity",
     ]
     assert index["defaults"]["engine"] == {
-        "value": "native_event",
+        "value": "native",
         "tab_key": "engine",
         "scope_policy": "local_only",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "factor_execution",
+        "engine", "factor_mode",
     ]
 
 
@@ -66,8 +66,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
     resolved = resolve_group_settings(
         application,
         local_values={
-            "engine": "native_event",
-            "factor_execution": "incremental",
+            "engine": "native",
+            "factor_mode": "auto",
             "initial_capital": 1_000_000.0,
             "rebalance_mode": "each_period",
             "fee_mode": "market",
