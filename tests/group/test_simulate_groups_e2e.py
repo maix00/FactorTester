@@ -47,30 +47,47 @@ def simulate_groups(
     _, M, P = membership_np.shape
     T = returns_np.shape[0]
     prices = np.full((T, P), 1e-6, dtype=float) if price_np is None else np.asarray(price_np, dtype=float)
-    open_fixed = np.zeros((M, P), dtype=float) if open_fixed_mat is None else np.asarray(open_fixed_mat, dtype=float)
-    close_fixed = np.zeros((M, P), dtype=float) if close_fixed_mat is None else np.asarray(close_fixed_mat, dtype=float)
+    open_fixed = np.zeros((1, P), dtype=float) if open_fixed_mat is None else np.asarray(open_fixed_mat, dtype=float)
+    close_fixed = np.zeros((1, P), dtype=float) if close_fixed_mat is None else np.asarray(close_fixed_mat, dtype=float)
     point_values = np.ones(P, dtype=float) if point_value_mat is None else np.asarray(point_value_mat, dtype=float)
     min_ticks = np.full(P, 1e-6, dtype=float) if min_tick_mat is None else np.asarray(min_tick_mat, dtype=float)
     lot_sizes = np.ones(P, dtype=float) if min_trade_quantity_mat is None else np.asarray(min_trade_quantity_mat, dtype=float)
-    margin_ratios_1d = np.ones(P, dtype=float) if margin_ratio_mat is None else np.asarray(margin_ratio_mat, dtype=float)
+    margin_ratios = np.ones((1, P), dtype=float) if margin_ratio_mat is None else np.asarray(margin_ratio_mat, dtype=float)
     margin_flags = np.zeros(P, dtype=bool) if is_margin_traded_vec is None else np.asarray(is_margin_traded_vec, dtype=bool)
     margin_mode_arr = np.full(M, "cash", dtype=object) if margin_modes is None else np.asarray(margin_modes, dtype=object)
     rebalance_mode_arr = np.full(M, rebalance_mode, dtype=object) if rebalance_modes is None else np.asarray(rebalance_modes, dtype=object)
     currency_arr = np.full(P, "CNY", dtype=object) if product_currency_vec is None else np.asarray(product_currency_vec, dtype=object)
 
+    def time_product(values: np.ndarray, name: str) -> np.ndarray:
+        array = np.asarray(values, dtype=float)
+        if array.ndim == 1:
+            array = array.reshape(1, P)
+        if array.shape == (T, P):
+            return array
+        if array.ndim != 2 or array.shape[1] != P:
+            raise ValueError(f"{name} must have product axis {P}, got {array.shape}")
+        if array.shape[0] > 1 and not np.allclose(array, array[0], equal_nan=True):
+            raise ValueError(f"{name} is a time-product rule and cannot vary by group")
+        return np.broadcast_to(array[0], (T, P)).copy()
+
+    open_rates = time_product(open_fee_mat, "open_fee_mat")
+    close_rates = time_product(close_fee_mat, "close_fee_mat")
+    open_fixed_rates = time_product(open_fixed, "open_fixed_mat")
+    close_fixed_rates = time_product(close_fixed, "close_fixed_mat")
+    margin_ratio_rates = time_product(margin_ratios, "margin_ratio_mat")
     spec_bundle = GroupTradeSpecBundle(
         valid_cols=[],
-        open_ratio_mat=np.tile(np.asarray(open_fee_mat, dtype=float).reshape(1, P), (T, 1)),
-        close_ratio_mat=np.tile(np.asarray(close_fee_mat, dtype=float).reshape(1, P), (T, 1)),
-        open_fixed_mat=np.tile(np.asarray(open_fixed).reshape(1, P), (T, 1)),
-        close_fixed_mat=np.tile(np.asarray(close_fixed).reshape(1, P), (T, 1)),
-        close_today_ratio_mat=np.tile(np.asarray(close_fee_mat, dtype=float).reshape(1, P), (T, 1)),
-        close_today_fixed_mat=np.tile(np.asarray(close_fixed).reshape(1, P), (T, 1)),
+        open_ratio_mat=open_rates,
+        close_ratio_mat=close_rates,
+        open_fixed_mat=open_fixed_rates,
+        close_fixed_mat=close_fixed_rates,
+        closetoday_ratio_mat=close_rates,
+        closetoday_fixed_mat=close_fixed_rates,
         use_closetoday_vec=np.zeros(P, dtype=bool),
-        point_value_mat=np.tile(point_values.reshape(1, P), (T, 1)),
+        multiplier_mat=np.tile(point_values.reshape(1, P), (T, 1)),
         min_tick_mat=np.tile(min_ticks.reshape(1, P), (T, 1)),
         min_trade_quantity_mat=np.tile(lot_sizes.reshape(1, P), (T, 1)),
-        long_margin_ratio_mat=np.tile(margin_ratios_1d.reshape(1, P), (T, 1)),
+        long_margin_ratio_mat=margin_ratio_rates,
         is_margin_traded_vec=margin_flags,
         variety_codes_lower=[],
         positions_by_variety_code_lower={},
@@ -79,10 +96,10 @@ def simulate_groups(
         membership_np=membership_np,
         returns_np=returns_np,
         price_np=prices,
-        open_rate_mat=np.asarray(open_fee_mat, dtype=float),
-        close_rate_mat=np.asarray(close_fee_mat, dtype=float),
-        open_fixed_mat=open_fixed,
-        close_fixed_mat=close_fixed,
+        open_rate_mat=open_rates,
+        close_rate_mat=close_rates,
+        open_fixed_mat=open_fixed_rates,
+        close_fixed_mat=close_fixed_rates,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=liquidity_modes,
@@ -98,6 +115,36 @@ def simulate_groups(
 def _cum_ret(net_returns: np.ndarray) -> np.ndarray:
     """Convert (T, M) net returns to cumulative return (ending wealth)."""
     return np.cumprod(1.0 + np.where(np.isnan(net_returns), 0.0, net_returns), axis=0)
+
+
+def trade_specs(
+    periods: int,
+    products: int,
+    *,
+    use_closetoday: bool = False,
+    multiplier: float = 1.0,
+    margin_ratio: float = 1.0,
+    margin_traded: bool = False,
+) -> GroupTradeSpecBundle:
+    zeros = np.zeros((periods, products), dtype=float)
+    ones = np.ones((periods, products), dtype=float)
+    return GroupTradeSpecBundle(
+        valid_cols=[],
+        open_ratio_mat=zeros.copy(),
+        open_fixed_mat=zeros.copy(),
+        close_ratio_mat=zeros.copy(),
+        close_fixed_mat=zeros.copy(),
+        closetoday_ratio_mat=zeros.copy(),
+        closetoday_fixed_mat=zeros.copy(),
+        use_closetoday_vec=np.full(products, use_closetoday, dtype=bool),
+        multiplier_mat=ones * multiplier,
+        min_tick_mat=ones.copy(),
+        min_trade_quantity_mat=ones.copy(),
+        long_margin_ratio_mat=ones * margin_ratio,
+        is_margin_traded_vec=np.full(products, margin_traded, dtype=bool),
+        variety_codes_lower=[],
+        positions_by_variety_code_lower={},
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -233,7 +280,7 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         point_value_mat=np.array([1.0]),
         min_tick_mat=np.array([0.01]),
         min_trade_quantity_mat=np.array([1.0]),
-        margin_ratio_mat=np.array([[1.0], [0.10]]),
+        margin_ratio_mat=np.array([1.0]),
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["margin", "margin"], dtype=object),
         rebalance_modes=np.array(["each_period", "each_period"], dtype=object),
@@ -275,7 +322,6 @@ def test_group_run_result_hold_amounts_use_simulated_target_not_end_valuation():
         index_list=[pd.Timestamp('2026-01-01')],
         n_names={0: 'A1'},
         group_configs=[{}],
-        use_closetoday_vec=np.array([False], dtype=bool),
         rebalance_mode='each_period',
         initial_capital=1000.0,
         multi_session_active=False,
@@ -283,18 +329,7 @@ def test_group_run_result_hold_amounts_use_simulated_target_not_end_valuation():
         start_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
         end_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
         source_freq=DataFreq.DAY,
-        open_ratio_mat=np.zeros(1, dtype=float),
-        close_ratio_mat=np.zeros(1, dtype=float),
-        close_today_ratio_mat=np.zeros(1, dtype=float),
-        open_fixed_mat=np.zeros(1, dtype=float),
-        close_fixed_mat=np.zeros(1, dtype=float),
-        close_today_fixed_mat=np.zeros(1, dtype=float),
-        point_value_mat=np.ones(1, dtype=float),
-        min_tick_mat=np.ones(1, dtype=float),
-        min_trade_quantity_mat=np.ones(1, dtype=float),
-        long_margin_ratio_mat=np.ones(1, dtype=float),
-        is_margin_traded_vec=np.array([False], dtype=bool),
-        positions_by_variety_code_lower={},
+        spec_bundle=trade_specs(1, 1),
     )
 
     np.testing.assert_allclose(group_result.position_quantities_np[0, 0, 0], 10.0)
@@ -312,25 +347,13 @@ def test_preloaded_group_requires_product_currency_metadata():
             index_list=[pd.Timestamp('2026-01-01')],
             n_names={0: 'A1'},
             group_configs=[{}],
-            use_closetoday_vec=np.array([False], dtype=bool),
             rebalance_mode='each_period',
             initial_capital=1000.0,
             multi_session_active=False,
             start_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
             end_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
             source_freq=DataFreq.DAY,
-            open_ratio_mat=np.zeros(1, dtype=float),
-            close_ratio_mat=np.zeros(1, dtype=float),
-            close_today_ratio_mat=np.zeros(1, dtype=float),
-            open_fixed_mat=np.zeros(1, dtype=float),
-            close_fixed_mat=np.zeros(1, dtype=float),
-            close_today_fixed_mat=np.zeros(1, dtype=float),
-            point_value_mat=np.ones(1, dtype=float),
-            min_tick_mat=np.ones(1, dtype=float),
-            min_trade_quantity_mat=np.ones(1, dtype=float),
-            long_margin_ratio_mat=np.ones(1, dtype=float),
-            is_margin_traded_vec=np.array([False], dtype=bool),
-            positions_by_variety_code_lower={},
+            spec_bundle=trade_specs(1, 1),
         )
 
 
@@ -1004,7 +1027,6 @@ def test_group_fee_close_override_applies_to_close_today_when_unspecified():
         index_list=[pd.Timestamp('2026-01-01 09:30:00'), pd.Timestamp('2026-01-01 09:31:00')],
         n_names={0: 'A1'},
         group_configs=[{'fee_override': {'open': 0.0, 'close': 0.02}}],
-        use_closetoday_vec=np.array([True], dtype=bool),
         rebalance_mode='each_period',
         initial_capital=1000.0,
         multi_session_active=False,
@@ -1012,18 +1034,7 @@ def test_group_fee_close_override_applies_to_close_today_when_unspecified():
         start_dt=DataTime.parse('2026-01-01 09:30:00'),
         end_dt=DataTime.parse('2026-01-01 09:31:00'),
         source_freq=DataFreq.MIN1,
-        open_ratio_mat=np.zeros(1, dtype=float),
-        close_ratio_mat=np.zeros(1, dtype=float),
-        close_today_ratio_mat=np.zeros(1, dtype=float),
-        open_fixed_mat=np.zeros(1, dtype=float),
-        close_fixed_mat=np.zeros(1, dtype=float),
-        close_today_fixed_mat=np.zeros(1, dtype=float),
-        point_value_mat=np.ones(1, dtype=float),
-        min_tick_mat=np.ones(1, dtype=float),
-        min_trade_quantity_mat=np.ones(1, dtype=float),
-        long_margin_ratio_mat=np.ones(1, dtype=float),
-        is_margin_traded_vec=np.zeros(1, dtype=bool),
-        positions_by_variety_code_lower={},
+        spec_bundle=trade_specs(2, 1, use_closetoday=True),
     )
 
     np.testing.assert_array_equal(group_result.sell_fee_amount_np[:, 0], [0, 2000])
@@ -1042,15 +1053,16 @@ def test_settlement_price_marks_open_margin_positions_only_on_day_end():
         price_np=price,
         settlement_price_np=settlement_price,
         settlement_bar_mask=np.array([[False], [True]], dtype=bool),
-        open_rate_mat=np.zeros((1, 1), dtype=float),
-        close_rate_mat=np.zeros((1, 1), dtype=float),
-        open_fixed_mat=np.zeros((1, 1), dtype=float),
-        close_fixed_mat=np.zeros((1, 1), dtype=float),
-        point_value_mat=np.array([1.0], dtype=float),
-        min_tick_mat=np.array([1.0], dtype=float),
-        min_trade_quantity_mat=np.array([1.0], dtype=float),
-        margin_ratio_mat=np.array([[0.10]], dtype=float),
-        is_margin_traded_vec=np.array([True], dtype=bool),
+        open_rate_mat=np.zeros((2, 1), dtype=float),
+        close_rate_mat=np.zeros((2, 1), dtype=float),
+        open_fixed_mat=np.zeros((2, 1), dtype=float),
+        close_fixed_mat=np.zeros((2, 1), dtype=float),
+        trade_specs=trade_specs(
+            2,
+            1,
+            margin_ratio=0.10,
+            margin_traded=True,
+        ),
         margin_modes=np.array(["margin"], dtype=object),
         rebalance_modes=np.array(["buy_and_hold"], dtype=object),
         product_currency_vec=np.array(["CNY"], dtype=object),

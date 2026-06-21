@@ -775,11 +775,11 @@ def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None
     quantities = getattr(group_result, 'position_quantities_np', None)
     membership = getattr(group_result, 'membership_np', None)
     prices = getattr(group_result, 'price_np', None)
-    point_values = getattr(group_result, 'point_value_vec', None)
-    lot_sizes = getattr(group_result, 'min_trade_quantity_vec', None)
-    open_ratios = getattr(group_result, 'open_ratio_vec', None)
-    open_fixed = getattr(group_result, 'open_fixed_vec', None)
-    margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
+    point_values = getattr(group_result, 'point_value_mat', None)
+    lot_sizes = getattr(group_result, 'min_trade_quantity_mat', None)
+    open_ratios = getattr(group_result, 'open_ratio_mat', None)
+    open_fixed = getattr(group_result, 'open_fixed_mat', None)
+    margin_ratios = getattr(group_result, 'margin_ratio_mat', None)
     margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
     initial_capital = getattr(group_result, 'initial_capital', None)
     base_currency = normalize_currency(getattr(group_result, 'base_currency', None), 'CNY')
@@ -811,11 +811,19 @@ def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None
     if price_row.size != product_count:
         price_row = _coerce_1d(price_row, product_count, default=np.nan)
 
-    point_values_row = _coerce_1d(point_values, product_count, default=1.0)
-    lot_sizes_row = _coerce_1d(lot_sizes, product_count, default=1.0)
-    open_ratio_row = _coerce_1d(open_ratios, product_count, default=0.0)
-    open_fixed_row = _coerce_1d(open_fixed, product_count, default=0.0)
-    margin_ratio_row = _coerce_1d(margin_ratios, product_count, default=1.0)
+    def _first_rule_row(values: Any, default: float) -> np.ndarray:
+        if values is None:
+            return np.full(product_count, default, dtype=float)
+        matrix = np.asarray(values, dtype=float)
+        if matrix.ndim != 2 or matrix.shape[1] != product_count or matrix.shape[0] == 0:
+            return np.full(product_count, default, dtype=float)
+        return matrix[0]
+
+    point_values_row = _first_rule_row(point_values, 1.0)
+    lot_sizes_row = _first_rule_row(lot_sizes, 1.0)
+    open_ratio_row = _first_rule_row(open_ratios, 0.0)
+    open_fixed_row = _first_rule_row(open_fixed, 0.0)
+    margin_ratio_row = _first_rule_row(margin_ratios, 1.0)
     margin_flag_row = _coerce_1d(margin_flags, product_count, default=False, dtype=bool)
     valid_cols = list(getattr(group_result, 'valid_cols', None) or [])
     group_names = getattr(group_result, 'group_names', None) or {}
