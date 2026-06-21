@@ -19,6 +19,7 @@ def execute_group_plan(
     engine: str,
     settings_by_group: Mapping[str, Mapping[str, Any]],
     initial_capital: float,
+    long_short_configs: list[Mapping[str, Any]] | None = None,
     progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Build raw membership input once; strategy targets remain engine-owned."""
@@ -35,7 +36,9 @@ def execute_group_plan(
         raise ValueError("group execution plan is missing prices or market rules")
     all_timestamps = np.asarray(plan.entries[0].shared_inputs.index_list, dtype=object)
     strategy_configs = []
-    for owner in plan.group_owner:
+    execution_owners = list(plan.group_owner)
+    settings_by_strategy: dict[str, dict[str, Any]] = {}
+    for membership_index, owner in enumerate(plan.group_owner):
         group_id = str(owner.get("group_id") or "")
         if group_id not in settings_by_group:
             raise ValueError(
@@ -48,8 +51,41 @@ def execute_group_plan(
             "group_id": group_id,
             "initial_capital": float(values.get("initial_capital") or initial_capital),
             "fee_rate": _fee_rate(values),
+            "membership_index": membership_index,
         })
         strategy_configs.append(values)
+        settings_by_strategy[group_id] = values
+    for position, config in enumerate(long_short_configs or []):
+        long_indices = tuple(int(leg["group"]) for leg in config.get("long") or ())
+        short_indices = tuple(int(leg["group"]) for leg in config.get("short") or ())
+        source_index = long_indices[0] if long_indices else -1
+        if source_index < 0 or source_index >= len(plan.group_owner):
+            raise ValueError(f"Long-Short #{position + 1} has no valid long group")
+        source_group_id = str(plan.group_owner[source_index].get("group_id") or "")
+        values = dict(settings_by_group[source_group_id])
+        strategy_id = f"long-short:{position + 1}"
+        display_name = str(config.get("name") or strategy_id)
+        values.update({
+            "strategy_id": strategy_id,
+            "strategy_kind": "long_short",
+            "display_name": display_name,
+            "long_indices": list(long_indices),
+            "short_indices": list(short_indices),
+            "initial_capital": float(values.get("initial_capital") or initial_capital),
+            "fee_rate": _fee_rate(values),
+        })
+        strategy_configs.append(values)
+        settings_by_strategy[strategy_id] = values
+        execution_owners.append({
+            "simulation_index": plan.group_owner[source_index].get("simulation_index"),
+            "submission_id": plan.group_owner[source_index].get("submission_id"),
+            "factor_alias": plan.group_owner[source_index].get("factor_alias"),
+            "requested_n_groups": plan.group_owner[source_index].get("requested_n_groups"),
+            "group_index": len(execution_owners),
+            "group_name": display_name,
+            "group_id": strategy_id,
+            "is_ls": True,
+        })
     spec = plan.merged_spec_bundle
     raw_prices = np.asarray(plan.merged_price_np, dtype=float)
     available = np.isfinite(raw_prices) & (raw_prices > 0)
@@ -98,7 +134,8 @@ def execute_group_plan(
     return {
         "engine_result": result,
         "payload": payload,
-        "group_owner": plan.group_owner,
+        "group_owner": execution_owners,
+        "settings_by_strategy": settings_by_strategy,
         "simulation_count": len(plan.entries),
     }
 

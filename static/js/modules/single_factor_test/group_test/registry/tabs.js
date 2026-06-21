@@ -355,24 +355,6 @@
             });
         }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
-        if (P.config && P.config.fee) {
-            registerPanel({
-                name: 'fee', label: '手续费', containerId: 'config-fee',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.fee
-            });
-        }
-        if (P.config && P.config.rebalance) {
-            registerPanel({
-                name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.rebalance
-            });
-        }
-        if (P.config && P.config.liquidity) {
-            registerPanel({
-                name: 'liquidity', label: '💧 流动性', containerId: 'config-liquidity',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.liquidity
-            });
-        }
         if (P.config && P.config.productSift) {
             registerPanel({
                 name: 'config-product-sift', label: '🌾 品种筛选', containerId: 'config-product-sift',

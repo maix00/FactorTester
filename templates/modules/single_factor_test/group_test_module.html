@@ -6,130 +6,14 @@
     </style>
     <div class="section-title">分组测试</div>
 
-    <!-- ═══════════════════════════════════════════════════════════════════════
-         第1层：时间范围（独立设置，不依赖时间模块）
-         ═══════════════════════════════════════════════════════════════════════ -->
-    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;flex-direction:column;gap:10px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
-        <div id="gt-local-settings-tab-bar" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-        <div data-local-settings-tab-panel="dates" style="display:flex;flex-direction:column;gap:8px;">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
-                <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
-            </div>
-            <div class="group-setting-row" style="margin-bottom:0;">
-                <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
-                <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="margin-left:4px;"></span>
-                <input type="number" id="group_start_hour" placeholder="时" min="0" max="23" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-                <span style="color:#999;">:</span>
-                <input type="number" id="group_start_minute" placeholder="分" min="0" max="59" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-            </div>
-            <div class="group-setting-row" style="margin-bottom:0;">
-                <label style="margin-bottom:0;white-space:nowrap;">终止：</label>
-                <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="margin-left:4px;"></span>
-                <input type="number" id="group_end_hour" placeholder="时" min="0" max="23" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-                <span style="color:#999;">:</span>
-                <input type="number" id="group_end_minute" placeholder="分" min="0" max="59" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-            </div>
-            <!-- 时间精度 + 时区（时区仅 exact 时显示） -->
-            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:4px;">
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-                    <input type="radio" name="group_time_precision" value="day" id="group_precision_day" style="width:auto;margin:0;"> 📅 天级
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-                    <input type="radio" name="group_time_precision" value="exact" id="group_precision_exact" checked style="width:auto;margin:0;"> ⏰ 精确时间
-                </label>
-                <span id="group_tz_wrap" style="display:flex;align-items:center;gap:4px;font-size:12px;">
-                    <span style="color:#888;">🌐 时区</span>
-                    <select id="group_tz" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;background:#fff;">
-                        <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
-                        <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
-                        <option value="Asia/Hong_Kong">Asia/Hong_Kong (UTC+8)</option>
-                        <option value="Asia/Singapore">Asia/Singapore (UTC+8)</option>
-                        <option value="Asia/Kolkata">Asia/Kolkata (UTC+5:30)</option>
-                        <option value="Europe/London">Europe/London (UTC+0/+1)</option>
-                        <option value="Europe/Paris">Europe/Paris (UTC+1/+2)</option>
-                        <option value="America/New_York">America/New_York (UTC-5/-4)</option>
-                        <option value="America/Chicago">America/Chicago (UTC-6/-5)</option>
-                        <option value="UTC">UTC</option>
-                    </select>
-                </span>
-            </div>
-        </div>
-        <div data-local-settings-tab-panel="initialCapital" style="display:none;flex-direction:column;gap:10px;">
-            <span style="font-weight:600;font-size:13px;color:#1f2937;">💵 初始金额</span>
-            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
-                    <input
-                        type="number"
-                        id="group_initial_capital"
-                        placeholder="100000000"
-                        min="0"
-                        step="1000"
-                        value="100000000"
-                        style="width:140px;text-align:right;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_base_currency" style="margin-bottom:0;white-space:nowrap;">基础货币：</label>
-                    <input
-                        type="text"
-                        id="group_base_currency"
-                        placeholder="CNY"
-                        value="CNY"
-                        style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_currency_conversion_fee_rate" style="margin-bottom:0;white-space:nowrap;">换汇佣金率：</label>
-                    <input
-                        type="number"
-                        id="group_currency_conversion_fee_rate"
-                        placeholder="0"
-                        min="0"
-                        step="0.000001"
-                        value="0"
-                        style="width:120px;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-            </div>
-            <span style="font-size:11px;color:#888;">用于交易簿回测的开仓资金；图表仍显示归一化净值</span>
-        </div>
-        <div data-local-settings-tab-panel="calendarFreq" style="display:flex;flex-direction:column;gap:10px;">
-            <label style="display:flex;align-items:center;gap:8px;margin:0;font-weight:600;font-size:13px;color:#1f2937;">
-                <input type="checkbox" id="group_calendar_freq_auto" checked>
-                自动判断公共时间轴频率
-            </label>
-            <div id="group_calendar_freq_manual_wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span style="font-size:12px;color:#4b5563;">手动选择：</span>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="1min" checked>
-                    <span>1分钟</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="5min">
-                    <span>5分钟</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="1day">
-                    <span>1天</span>
-                </label>
-            </div>
-            <span style="font-size:11px;color:#888;">仅允许 1min、5min、1day；手动选择若不能整除参与测试因子频率，后端会直接报错</span>
-        </div>
+    <div class="group-test-layer" id="gt-layer-backtest-settings">
+        <div id="gt-local-settings-tab-bar"></div>
+        <div
+            id="gt-backtest-local-host"
+            data-application="group_test"
+            style="display:none;margin-top:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"
+        ></div>
     </div>
-
-    <div id="gt-backtest-local-host" data-application="group_test" style="display:none;margin-top:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"></div>
     <!-- ═══════════════════════════════════════════════════════════════════════
          第2层：可折叠标题行 + 主 Tab + 子面板区
          ═══════════════════════════════════════════════════════════════════════ -->
@@ -1203,9 +1087,6 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/backend-settings.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
 
 <!-- GroupTest deferred scripts: lazy-loaded when user expands "分组组合设置" section (clicks ▼) -->
@@ -1225,9 +1106,6 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}",
@@ -1244,7 +1122,6 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
     "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",

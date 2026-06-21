@@ -19,12 +19,15 @@ def group_test_settings() -> ApplicationSettings:
             "engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
         ),
+        SettingTab("time", "时间范围", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
         SettingTab("allocation", "分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
         SettingTab("rebalance", "调仓", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
         SettingTab("cost", "费用", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 40),
         SettingTab("liquidity", "流动性", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 50),
+        SettingTab("margin", "保证金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 55),
         SettingTab("market_rules", "市场规则", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+        SettingTab("calendar", "回测时钟", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 65),
         SettingTab("evaluation", "样本划分", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 70),
     ):
         app.register_tab(tab)
@@ -58,6 +61,27 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="因子计算: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "start_date", "开始日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
+        chip_template="开始: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "end_date", "结束日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
+        chip_template="结束: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "time_precision", "时间精度", "time", "select", "exact", ScopePolicy.LOCAL_ONLY,
+        options=(SettingOption("exact", "精确时间"), SettingOption("day", "天级")),
+    ))
+    app.register_setting(SettingDefinition(
+        "timezone", "时区", "time", "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
+        options=(
+            SettingOption("Asia/Shanghai", "Asia/Shanghai (UTC+8)"),
+            SettingOption("UTC", "UTC"),
+            SettingOption("America/New_York", "America/New_York"),
+            SettingOption("Europe/London", "Europe/London"),
+        ),
+    ))
+    app.register_setting(SettingDefinition(
         "initial_capital",
         "初始资金",
         "capital",
@@ -67,6 +91,15 @@ def group_test_settings() -> ApplicationSettings:
         minimum=0.01,
         step=10_000.0,
         chip_template="资金: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "base_currency", "基础货币", "capital", "select", "CNY", ScopePolicy.GROUP_OVERRIDE,
+        options=(SettingOption("CNY", "CNY"), SettingOption("USD", "USD")),
+        chip_template="币种: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "currency_conversion_fee_rate", "换汇佣金率", "capital", "number", 0.0,
+        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.000001,
     ))
     app.register_setting(SettingDefinition(
         "allocation_policy",
@@ -92,6 +125,14 @@ def group_test_settings() -> ApplicationSettings:
         minimum=2,
         step=1,
         chip_template="波动率窗口: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "volatility_warmup", "等风险预热处理", "allocation", "select", "equal_notional",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("equal_notional", "预热期使用等市值并记录"),
+            SettingOption("error", "数据不足即报错"),
+        ),
     ))
     app.register_setting(SettingDefinition(
         "rebalance_mode",
@@ -123,6 +164,11 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="费用: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "custom_fee_rate", "自定义成交费率", "cost", "number", 0.0,
+        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.000001,
+        chip_template="费率: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "liquidity_mode",
         "流动性规则",
         "liquidity",
@@ -148,6 +194,17 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="参与率: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "margin_mode", "保证金约束", "margin", "select", "market",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(SettingOption("none", "关闭"), SettingOption("market", "市场保证金规则")),
+        chip_template="保证金: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "collateral_fraction", "最大保证金占权益", "margin", "number", 1.0,
+        ScopePolicy.GROUP_OVERRIDE, minimum=0.01, maximum=1.0, step=0.01,
+        chip_template="保证金上限: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "market_rule_fallback",
         "历史规则缺失处理",
         "market_rules",
@@ -170,6 +227,17 @@ def group_test_settings() -> ApplicationSettings:
         ScopePolicy.LOCAL_ONLY,
         chip_template="样本内截止: {value}",
         help_text="截止日期之后为样本外；留空表示全部为样本内。",
+    ))
+    app.register_setting(SettingDefinition(
+        "calendar_frequency", "公共回测时钟", "calendar", "select", "auto",
+        ScopePolicy.LOCAL_ONLY,
+        options=(
+            SettingOption("auto", "按因子频率自动判断"),
+            SettingOption("1min", "1 分钟"),
+            SettingOption("5min", "5 分钟"),
+            SettingOption("1day", "1 天"),
+        ),
+        chip_template="时钟: {value}",
     ))
     return app
 

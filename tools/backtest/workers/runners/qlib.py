@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 from qlib.backtest.decision import Order
 from qlib.backtest.position import Position
 
 from .common import (
-    compile_group_strategy_input,
+    parse_group_strategy_input,
     parse_target_weight_input,
     rebalance_mode,
     target_quantities,
@@ -18,12 +19,28 @@ from .common import (
 )
 
 
+class _SignedPosition(Position):
+    """Qlib Position extension that preserves its ledger API while allowing shorts."""
+
+    def _sell_stock(
+        self, stock_id: str, trade_val: float, cost: float, trade_price: float
+    ) -> None:
+        trade_amount = trade_val / trade_price
+        if stock_id not in self.position:
+            self._init_stock(stock_id, -trade_amount, trade_price)
+        else:
+            self.position[stock_id]["amount"] -= trade_amount
+            if np.isclose(self.position[stock_id]["amount"], 0.0):
+                self._del_stock(stock_id)
+        self.position["cash"] += trade_val - cost
+
+
 def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     request = parse_target_weight_input(payload)
     portfolios = {}
     for strategy in request.strategies:
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
-        position = Position(cash=strategy_cash)
+        position = _SignedPosition(cash=strategy_cash)
         targets = target_rows(strategy, request.timestamps)
         mode = rebalance_mode(strategy)
         pending = None
@@ -39,7 +56,11 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
                 _rebalance(
                     position,
                     target_quantities(
-                        request, index, pending, float(position.calculate_value())
+                        request,
+                        index,
+                        pending,
+                        float(position.calculate_value()),
+                        strategy,
                     ),
                     current_prices,
                     timestamp,
@@ -58,17 +79,52 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
-    calculated = compile_group_strategy_input(payload)
-    result = run_target_weights(calculated)
-    result["target_trace"] = {
-        strategy["strategy_id"]: strategy["targets"]
-        for strategy in calculated["strategies"]
+    request, memberships, updates, calculators = parse_group_strategy_input(payload)
+    portfolios = {}
+    for strategy, calculator in zip(request.strategies, calculators, strict=True):
+        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
+        position = _SignedPosition(cash=strategy_cash)
+        pending = None
+        equity_curve = {}
+        for row, timestamp in enumerate(request.timestamps):
+            current_prices = {
+                instrument: valuation_price(request, row, instrument)
+                for instrument in request.instruments
+            }
+            for instrument in position.get_stock_list():
+                position.update_stock_price(instrument, current_prices[instrument])
+            if pending is not None:
+                _rebalance(
+                    position,
+                    target_quantities(
+                        request, row, pending, float(position.calculate_value()), strategy
+                    ),
+                    current_prices,
+                    timestamp,
+                    fee_rate=float(strategy.get("fee_rate") or 0.0),
+                )
+            equity_curve[timestamp.isoformat()] = float(position.calculate_value())
+            pending = calculator.update(
+                timestamp,
+                np.asarray([request.prices[name][row] for name in request.instruments]),
+                memberships[row],
+                updates[row],
+                np.asarray(request.margin_ratios[row]),
+            )
+        portfolios[calculator.strategy_id] = {
+            "initial_value": strategy_cash,
+            "final_value": float(position.calculate_value()),
+            "positions": position.get_stock_amount_dict(),
+            "equity_curve": equity_curve,
+        }
+    return {
+        "engine": "qlib",
+        "portfolios": portfolios,
+        "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "strategy_diagnostics": {
+            item.strategy_id: item.diagnostics for item in calculators
+        },
     }
-    result["strategy_diagnostics"] = {
-        strategy["strategy_id"]: strategy["diagnostics"]
-        for strategy in calculated["strategies"]
-    }
-    return result
 
 
 def _rebalance(

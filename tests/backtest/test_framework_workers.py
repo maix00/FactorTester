@@ -144,16 +144,16 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
             "stable": [100.0, 101.0, 102.01, 103.0301],
         },
         "membership": [
-            [[True, True], [True, False]],
-            [[True, True], [True, False]],
-            [[True, True], [False, True]],
-            [[True, True], [False, True]],
+            [[True, True], [True, False], [False, True]],
+            [[True, True], [True, False], [False, True]],
+            [[True, True], [False, True], [True, False]],
+            [[True, True], [False, True], [True, False]],
         ],
         "signal_updates": [
-            [True, True],
-            [True, True],
-            [True, True],
-            [True, True],
+            [True, True, True],
+            [True, True, True],
+            [True, True, True],
+            [True, True, True],
         ],
         "initial_cash": 100_000.0,
         "strategy_configs": [
@@ -167,6 +167,14 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
                 "strategy_id": "membership",
                 "allocation_policy": "equal_notional",
                 "rebalance_mode": "membership_change",
+            },
+            {
+                "strategy_id": "long-short",
+                "strategy_kind": "long_short",
+                "long_indices": [1],
+                "short_indices": [2],
+                "allocation_policy": "equal_notional",
+                "rebalance_mode": "on_factor_signal",
             },
         ],
     }
@@ -187,3 +195,51 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
         len(result["portfolios"]["equal-risk"]["equity_curve"]) == 4
         for result in results.values()
     )
+    assert all(
+        result["portfolios"]["long-short"]["positions"]
+        for result in results.values()
+    )
+
+
+@pytest.mark.parametrize("engine", ["native", "backtrader", "qlib", "zipline"])
+def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine: str) -> None:
+    dispatcher = EngineWorkerDispatcher()
+    payload = {
+            "timestamps": [
+                "2024-01-01T00:00:00",
+                "2024-01-02T00:00:00",
+                "2024-01-03T00:00:00",
+            ],
+            "instruments": ["asset-a"],
+            "prices": {"asset-a": [100.0, 100.0, 100.0]},
+            "membership": [[[True]], [[True]], [[True]]],
+            "signal_updates": [[True], [True], [True]],
+            "initial_cash": 100_000.0,
+            "market_rules": {
+                "margin_ratios": [[0.2], [0.2], [0.2]],
+                "multipliers": [[1.0], [1.0], [1.0]],
+                "lot_sizes": [[1.0], [1.0], [1.0]],
+            },
+            "strategy_configs": [{
+                "strategy_id": "group-1",
+                "allocation_policy": "equal_notional",
+                "rebalance_mode": "on_factor_signal",
+                "margin_mode": "proportional_scale",
+                "collateral_fraction": 0.05,
+            }],
+    }
+    if engine == "native":
+        from tools.backtest.workers.runners.native import run_group_strategy
+
+        result = run_group_strategy(payload)
+    else:
+        result = dispatcher.dispatch(WorkerRequest(
+            f"margin-{engine}", engine, "run_group_strategy", payload
+        )).result
+
+    assert result["target_trace"]["group-1"] == {
+        "2024-01-01T00:00:00": {"asset-a": 1.0},
+        "2024-01-02T00:00:00": {"asset-a": 1.0},
+        "2024-01-03T00:00:00": {"asset-a": 1.0},
+    }
+    assert result["portfolios"]["group-1"]["positions"]["asset-a"] == 250.0

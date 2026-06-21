@@ -43,6 +43,7 @@ class MembershipAllocationStrategy:
         self.instruments = instruments
         self.market = market
         self.config = dict(config)
+        self.strategy_kind = str(config.get("strategy_kind") or "group")
         self.margin_ratios = margin_ratios
         self.active_timestamps = active_timestamps
         self.allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
@@ -77,33 +78,22 @@ class MembershipAllocationStrategy:
         self._previous_prices = current_prices
         if pd.Timestamp(event.timestamp) not in self.active_timestamps:
             return None
-        selected = np.asarray([
-            bool(signal.values.get(name, 0.0)) and np.isfinite(current_prices[name])
+        signed_membership = np.asarray([
+            float(signal.values.get(name, 0.0)) if np.isfinite(current_prices[name]) else 0.0
             for name in self.instruments
         ])
+        selected = signed_membership != 0 if self.strategy_kind == "long_short" else signed_membership > 0
         if not self.rebalance.should_rebalance(event.timestamp, selected):
             return None
         volatilities = self.estimator.snapshot()
-        inputs = AllocationInput(
-            self.instruments,
-            selected,
-            volatilities=volatilities,
-            margin_ratios=self.margin_ratios[pd.Timestamp(event.timestamp)],
-        )
-        try:
-            weights = self.allocator.allocate(inputs)
-        except AllocationInputsUnavailable as exc:
-            if self.allocation_name != "inverse_volatility" or str(
-                self.config.get("volatility_warmup") or "equal_notional"
-            ) != "equal_notional":
-                raise
-            weights = EqualNotionalAllocator().allocate(inputs)
-            self.fallback_events.append({
-                "timestamp": event.timestamp.isoformat(),
-                "reason": str(exc),
-                "fallback_policy": "equal_notional",
-                "volatilities": volatilities,
-            })
+        if self.strategy_kind == "long_short":
+            weights = self._allocate_long_short(
+                event.timestamp, signed_membership, volatilities
+            )
+        else:
+            weights = self._allocate(
+                event.timestamp, selected, volatilities, gross_exposure=1.0
+            )
         self.target_trace[event.timestamp.isoformat()] = {
             name: float(weight)
             for name, weight in zip(self.instruments, weights, strict=True)
@@ -120,6 +110,57 @@ class MembershipAllocationStrategy:
                 values=weights,
                 instruments=self.instruments,
             ),
+        )
+
+    def _allocate(
+        self,
+        timestamp: pd.Timestamp,
+        selected: np.ndarray,
+        volatilities: Mapping[str, float],
+        *,
+        gross_exposure: float,
+        leg: str | None = None,
+    ) -> np.ndarray:
+        inputs = AllocationInput(
+            self.instruments,
+            selected,
+            gross_exposure=gross_exposure,
+            volatilities=volatilities,
+            margin_ratios=self.margin_ratios[pd.Timestamp(timestamp)],
+        )
+        try:
+            return self.allocator.allocate(inputs)
+        except AllocationInputsUnavailable as exc:
+            if self.allocation_name != "inverse_volatility" or str(
+                self.config.get("volatility_warmup") or "equal_notional"
+            ) != "equal_notional":
+                raise
+            self.fallback_events.append({
+                "timestamp": timestamp.isoformat(),
+                "leg": leg,
+                "reason": str(exc),
+                "fallback_policy": "equal_notional",
+                "volatilities": volatilities,
+            })
+            return EqualNotionalAllocator().allocate(inputs)
+
+    def _allocate_long_short(
+        self,
+        timestamp: pd.Timestamp,
+        signed_membership: np.ndarray,
+        volatilities: Mapping[str, float],
+    ) -> np.ndarray:
+        long_selected = signed_membership > 0
+        short_selected = signed_membership < 0
+        if not np.any(long_selected) or not np.any(short_selected):
+            raise ValueError(
+                f"Long-Short strategy {self.strategy_id} has an empty leg at "
+                f"{timestamp.isoformat()}"
+            )
+        return self._allocate(
+            timestamp, long_selected, volatilities, gross_exposure=0.5, leg="long"
+        ) - self._allocate(
+            timestamp, short_selected, volatilities, gross_exposure=0.5, leg="short"
         )
 
     @property

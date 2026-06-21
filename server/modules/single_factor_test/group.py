@@ -959,13 +959,6 @@ def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=N
     }
 
 
-def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_like=None) -> dict:
-    """从 Long-Short 收益率序列计算绩效指标。"""
-    avg_turnover = round(float(
-        (report_df['Avg Turnover'].iloc[0] + report_df['Avg Turnover'].iloc[-1]) / 2
-    ), 4) if not report_df.empty and 'Avg Turnover' in report_df.columns else None
-    return _compute_return_metrics(r_ls_array, index_like=index_like, avg_turnover=avg_turnover)
-
 
 def _serialize_event_execution(
     execution: dict[str, Any],
@@ -1017,6 +1010,11 @@ def _serialize_event_execution(
             "target_trace": target_trace.get(strategy_id, {}),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": engine_result.get("engine") == "native",
+            "is_ls": bool(owner.get("is_ls")),
+            "ls_info": (
+                {"type": "long_short", "strategy_id": strategy_id}
+                if owner.get("is_ls") else None
+            ),
         })
         metrics[display_name] = _compute_return_metrics(
             returns.to_numpy(), index_like=index
@@ -1064,275 +1062,6 @@ def _serialize_float_series(values: np.ndarray | list, default: float = 0.0) -> 
             continue
         result.append(round(fv, 8) if not (math.isnan(fv) or math.isinf(fv)) else default)
     return result
-
-
-def _returns_to_cumulative(returns: np.ndarray) -> np.ndarray:
-    safe = np.nan_to_num(np.asarray(returns, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
-    return np.cumprod(1.0 + safe)
-
-
-def _unique_group_key(name: str, used: set[str]) -> str:
-    """去重：如果 name 已存在，追加 #2, #3..."""
-    key = name or 'LS'
-    suffix = 2
-    while key in used:
-        key = f'{name} #{suffix}'
-        suffix += 1
-    used.add(key)
-    return key
-
-
-def _normalize_group_names(group_names) -> dict[int, str]:
-    if not isinstance(group_names, dict):
-        return {}
-    normalized: dict[int, str] = {}
-    for key, value in group_names.items():
-        try:
-            normalized[int(key)] = str(value)
-        except (TypeError, ValueError):
-            continue
-    return normalized
-
-
-def _group_display_key(group_idx: int, group_names=None) -> str:
-    """扁平模型：直接用 group_names dict 或索引作为显示名。"""
-    names = _normalize_group_names(group_names)
-    if group_idx in names:
-        return names[group_idx]
-    return str(group_idx)
-
-
-def _metric_display_key(raw_key, group_names=None) -> str:
-    try:
-        key_int = int(raw_key)
-    except (TypeError, ValueError):
-        return str(raw_key)
-    return _group_display_key(key_int, group_names)
-
-
-def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_config: dict, n_groups: int) -> tuple[np.ndarray, np.ndarray]:
-    gross_np = np.nan_to_num(np.asarray(gross_np, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
-    fee_np = np.nan_to_num(np.asarray(fee_np, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
-    legs = []
-    for leg in ls_config.get('long') or []:
-        if 0 <= leg['group'] < n_groups:
-            legs.append({'side': 1.0, 'group': leg['group'], 'cap': leg['weight']})
-    for leg in ls_config.get('short') or []:
-        if 0 <= leg['group'] < n_groups:
-            legs.append({'side': -1.0, 'group': leg['group'], 'cap': leg['weight']})
-    if not legs:
-        legs = [{'side': 1.0, 'group': 0, 'cap': 0.5}, {'side': -1.0, 'group': n_groups - 1, 'cap': 0.5}]
-
-    initial_caps = np.array([float(leg['cap']) for leg in legs], dtype=float)
-    groups = np.array([int(leg['group']) for leg in legs], dtype=int)
-    sides = np.array([float(leg['side']) for leg in legs], dtype=float)
-
-    leg_gross = gross_np[:, groups] * sides[np.newaxis, :]
-    leg_fee = fee_np[:, groups]
-    leg_net = (1.0 - leg_fee) * (1.0 + leg_gross) - 1.0
-    leg_net = np.where(np.isfinite(leg_net), leg_net, 0.0)
-
-    leg_caps = initial_caps[np.newaxis, :] * np.cumprod(1.0 + leg_net, axis=0)
-    total_caps = np.nansum(leg_caps, axis=1)
-    previous_total_caps = np.concatenate([[np.nansum(initial_caps) or 1.0], total_caps[:-1]])
-    r_ls = np.divide(
-        total_caps,
-        previous_total_caps,
-        out=np.ones_like(total_caps, dtype=float),
-        where=np.abs(previous_total_caps) > 1e-12,
-    ) - 1.0
-    r_ls = np.where(np.isfinite(r_ls), r_ls, 0.0)
-    total_caps = np.where(np.isfinite(total_caps), total_caps, previous_total_caps)
-    return r_ls.astype(float), total_caps.astype(float)
-
-
-def _serialize_group_simulation_result(
-    *,
-    tester: Any,
-    submission_id: str,
-    factor_alias: str,
-    n_groups: int,
-    ls_configs: list[dict] | None,
-    rebalance_mode: str,
-    simulation_result: dict[str, Any],
-    flat_group_info: list[dict] | None = None,
-) -> dict[str, Any]:
-    report_df = simulation_result['report_df']
-    idx_list = simulation_result['idx_list']
-    timestamps = [to_epoch_ms(_signal_time(d)) for d in idx_list]
-    group_result = simulation_result['group_result']
-    n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
-
-    # ── Resolve group metadata: flat model (all groups are flat entries) ──
-    result_group_names = getattr(group_result, 'group_names', None) or {}
-
-    _gross = group_result.gross_returns_np if group_result is not None else None
-    gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
-    _fee = group_result.fee_costs_np if group_result is not None else None
-    fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
-
-    # 用模拟中实盘总权益（市值+现金），而非 cumsum(returns)
-    _equity = group_result.total_equity_np if group_result is not None else None
-    equity_np = minor_units_to_major(_equity) if _equity is not None else np.zeros((len(timestamps), n_total))
-    # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
-    cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
-    equity_np = np.where(equity_np <= 0, cap, equity_np)
-    capital_diagnostics = _build_zero_position_diagnostics(group_result)
-    capital_warning = capital_diagnostics['warning'] if capital_diagnostics else None
-
-    # Build flat_group_info lookup: {group_index: info_dict}
-    flat_info_by_idx: dict[int, dict] = {}
-    if flat_group_info:
-        for fi in flat_group_info:
-            gi = fi.get('group_index', -1)
-            if gi >= 0:
-                flat_info_by_idx[gi] = fi
-
-    groups_data = []
-    _progress(
-        f"simulation serialize groups start submission={submission_id} "
-        f"factor={factor_alias} total_groups={n_total}"
-    )
-    _core_emit_progress("serialize", f"开始序列化分组结果，共 {n_total} 组",
-                        completed=0, total=n_total)
-    for g in range(n_total):
-        _progress(
-            f"simulation serialize group {g + 1}/{n_total} "
-            f"submission={submission_id} factor={factor_alias}"
-        )
-        _core_emit_progress("serialize", f"序列化分组 {g+1}/{n_total}",
-                            completed=g + 1, total=n_total)
-        vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
-        gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
-        fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
-        group_key = _group_display_key(g, result_group_names)
-        group_name = group_key
-        entry = {
-            'key': group_key,
-            'name': group_name,
-            'group_index': g,
-            'submission_id': submission_id,
-            'timestamps': timestamps,
-            'total_equity': vals,
-            'gross_returns': gross_vals,
-            'fee_costs': fee_vals,
-            'trade_notional_ratios': [
-                round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0
-                for v in group_result.trade_notional_ratio_np[:, g]
-            ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
-        }
-        # If this group has a product-level filter (screened subgroup), attach metadata
-        fi = flat_info_by_idx.get(g)
-        if fi and fi.get('product_names'):
-            entry['product_names'] = fi['product_names']
-            if fi.get('id'):
-                entry['_id'] = fi['id']
-        groups_data.append(entry)
-    _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
-    _core_emit_progress("serialize", f"分组结果序列化完成，共 {n_total} 组",
-                        completed=n_total, total=n_total)
-
-    metrics: dict = {}
-    if not report_df.empty:
-        raw_metrics = report_df.to_dict(orient='index')
-        for metric_idx, (k, v) in enumerate(raw_metrics.items(), start=1):
-            _progress(
-                f"simulation serialize metric {metric_idx}/{len(raw_metrics)} "
-                f"submission={submission_id} factor={factor_alias}"
-            )
-            display_key = _metric_display_key(k, result_group_names)
-            metrics[display_key] = {
-                mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
-                for mk, mv in v.items()
-            }
-    used_keys = set(metrics.keys())
-    if ls_configs:
-        for ls_idx, ls_config in enumerate(ls_configs, start=1):
-            _progress(
-                f"simulation LS start {ls_idx}/{len(ls_configs)} "
-                f"submission={submission_id} factor={factor_alias} name={ls_config.get('name')}"
-            )
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
-            ls_name = ls_config['name'] or 'Long-Short'
-            ls_key = _unique_group_key(ls_name, used_keys)
-            ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
-            groups_data.append({
-                'key': ls_key,
-                'name': ls_name,
-                'submission_id': submission_id,
-                'timestamps': timestamps,
-                'total_equity': ls_vals,
-                'gross_returns': _serialize_float_series(r_ls, default=0.0),
-                'fee_costs': [0.0] * len(r_ls),
-                'trade_notional_ratios': [0.0] * len(r_ls),
-                'is_ls': True,
-                'ls_info': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
-            })
-            metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
-            _progress(
-                f"simulation LS done {ls_idx}/{len(ls_configs)} "
-                f"submission={submission_id} factor={factor_alias} key={ls_key}"
-            )
-
-    # DEBUG #110: validate groups key vs metrics key alignment
-    _debug_groups_keys = [g['key'] for g in groups_data]
-    _debug_metrics_keys = list(metrics.keys())
-    _debug_report_keys = []
-    if not report_df.empty:
-        for k in report_df.index:
-            _debug_report_keys.append(_metric_display_key(k, result_group_names))
-    # Detect mismatches: non-LS groups missing from metrics
-    _missing_from_metrics = []
-    for g_idx, gd in enumerate(groups_data):
-        gk = gd['key']
-        if not gd.get('is_ls') and gk not in metrics:
-            _missing_from_metrics.append(f"[{g_idx}] key='{gk}'")
-    if _missing_from_metrics:
-        print(f"[DEBUG #110] *** MISMATCH *** submission={submission_id} factor={factor_alias}")
-        print(f"[DEBUG #110]   groups keys: {_debug_groups_keys}")
-        print(f"[DEBUG #110]   metrics keys: {_debug_metrics_keys}")
-        print(f"[DEBUG #110]   report_df keys: {_debug_report_keys}")
-        print(f"[DEBUG #110]   result_group_names: {result_group_names}")
-        print(f"[DEBUG #110]   missing from metrics: {_missing_from_metrics}")
-    # Also check report_df key alignment with groups_data keys
-    _report_mismatches = []
-    for g_idx in range(min(len(groups_data), len(_debug_report_keys))):
-        gk = groups_data[g_idx]['key']
-        rk = _debug_report_keys[g_idx]
-        if gk != rk:
-            _report_mismatches.append(f"[{g_idx}] groups.key='{gk}' vs report_df.key='{rk}'")
-    if _report_mismatches:
-        print(f"[DEBUG #110] *** REPORT_DF MISMATCH *** {_report_mismatches}")
-    # Print summary even if no mismatches (for diagnosis)
-    print(f"[DEBUG #110] OK submission={submission_id} factor={factor_alias} n_total={n_total}")
-    print(f"[DEBUG #110]   groups_data keys: {_debug_groups_keys}")
-    print(f"[DEBUG #110]   report_df keys:  {_debug_report_keys}")
-    print(f"[DEBUG #110]   metrics keys:    {_debug_metrics_keys}")
-
-    return {
-        'success': True,
-        'groups': groups_data,
-        'metrics': metrics,
-        'metrics_meta': _get_metrics_meta(),
-        'n_groups': n_total,
-        'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
-        'base_currency': str(getattr(group_result, 'base_currency', None) or 'CNY').upper() if group_result is not None else 'CNY',
-        'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
-        'capital_warning': capital_warning,
-        'capital_diagnostics': capital_diagnostics,
-        'rebalance_mode': rebalance_mode,
-        'submission_id': submission_id,
-        'factor_alias': factor_alias,
-        'tester_alias': getattr(tester, 'alias', '?'),
-        'tester_product_count': len(tester.products) if hasattr(tester, 'products') else 0,
-        '_raw': {
-            'gross_np': gross_np,
-            'fee_np': fee_np,
-            'timestamps': timestamps,
-            'report_df': report_df,
-            'idx_list': idx_list,
-        },
-    }
 
 
 @sft_bp.route('/run_group_test', methods=['POST'])
@@ -1668,11 +1397,12 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             engine=common_backtest_settings["engine"],
             settings_by_group=resolved_backtest_settings,
             initial_capital=initial_capital,
+            long_short_configs=flat_ls_configs,
             progress=_framework_progress,
         )
         serialized_execution = _serialize_event_execution(
             execution,
-            settings_by_group=resolved_backtest_settings,
+            settings_by_group=execution["settings_by_strategy"],
             evaluation_split=common_backtest_settings["evaluation_split"] or None,
         )
     except Exception as exc:
@@ -1699,7 +1429,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
         "tester_product_count": len(group_tester.specs[0].tester.products),
         "simulation_count": execution["simulation_count"],
-        "cross_entry_ls_count": 0,
+        "cross_entry_ls_count": len(flat_ls_configs),
         "errors": None,
         "backtest_settings": {
             "engine": common_backtest_settings["engine"],
@@ -1715,204 +1445,6 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                     common_backtest_settings["evaluation_split"], tz=start_dt.ts.tz
                 ).timestamp() * 1000)
                 if common_backtest_settings["evaluation_split"] else None
-            ),
-        },
-    }
-
-    errors = []
-    try:
-        raw_results = group_tester.run(
-            fee=fee_uniform,
-            fee_modifications=fee_modifications,
-            use_closetoday=use_closetoday,
-            initial_capital=initial_capital,
-            rebalance_mode=rebalance_mode,
-            base_currency=base_currency,
-            currency_conversion_fee_rate=currency_conversion_fee_rate,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
-            progress_hook=_progress,
-        )
-    except Exception as e:
-        errors.append({'error': str(e)})
-        raw_results = []
-
-    simulated_flat_count = sum(
-        len(item.get('flat_group_info') or [])
-        for item in raw_results
-        if isinstance(item, dict)
-    )
-    if simulated_flat_count != len(all_flat_groups):
-                    # Collect detailed error info to help diagnose the root cause
-                    error_details = []
-                    for err in errors:
-                        if isinstance(err, dict):
-                            error_details.append(err.get('error', str(err)))
-                        else:
-                            error_details.append(str(err))
-                    detail_msg = '; '.join(error_details) if error_details else '无详细错误信息'
-                    return False, {
-                        'success': False,
-                        'error': (
-                            f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
-                            f'进入 simulate 的分组为 {simulated_flat_count} 个。'
-                            f'详细错误：{detail_msg}'
-                        ),
-                    }
-    submission_results: list[dict | None] = [None] * sim_index
-    for raw_result in raw_results:
-        idx = int(raw_result.get('simulation_index', -1))
-        if idx < 0 or idx >= sim_index:
-            continue
-        flat_info = raw_result.get('flat_group_info')
-        serialized = _serialize_group_simulation_result(
-            tester=raw_result['tester'],
-            submission_id=str(raw_result.get('submission_id') or ''),
-            factor_alias=str(raw_result.get('factor_alias') or ''),
-            n_groups=int(raw_result.get('n_groups', 5)),
-            ls_configs=raw_result.get('ls_configs'),
-            rebalance_mode=rebalance_mode,
-            simulation_result=raw_result,
-            flat_group_info=flat_info if isinstance(flat_info, list) and flat_info else None,
-        )
-        serialized['submission_id'] = str(raw_result.get('submission_id') or '')
-        serialized['factor_alias'] = str(raw_result.get('factor_alias') or '')
-        serialized['n_groups_requested'] = int(raw_result.get('n_groups', 5))
-        serialized['simulation_index'] = idx
-        submission_results[idx] = serialized
-        _progress(f"group tester accepted index={idx + 1}/{sim_index}")
-
-    valid_results = [r for r in submission_results if r is not None]
-    _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")
-    if not valid_results:
-        first_err = errors[0] if errors else {'error': '所有提交条目均失败'}
-        return False, {
-            'success': False,
-            'error': first_err.get('error', '所有提交条目均失败'),
-            'traceback': first_err.get('traceback'),
-            'simulation_errors': errors,
-            'status': 500,
-        }
-
-    # ── Per-entry LS configs are already computed inside each simulation result. ──
-    # Future: if ls_configs legs span different specs (cross-tester LS),
-    # build_overlap_batches merges those specs into one product_coverage_batch,
-    # so the LS computation happens naturally inside FactorGroupTester.run().
-
-    # ── Merge results ──
-    cross_ls_groups: list[dict] = []
-    cross_ls_metrics: dict = {}
-    _progress(
-        f"simulation merge start valid={len(valid_results)} "
-        f"cross_ls={len(cross_ls_groups)}"
-    )
-    merged_groups = []
-    merged_metrics = {}
-    used_merged_keys: set[str] = set()
-    multi_session_entries = []
-    last_n_groups = 0
-    last_multi_session = False
-    last_rebalance = rebalance_mode
-
-    for br_idx, br in enumerate(valid_results, start=1):
-        _progress(
-            f"simulation merge result {br_idx}/{len(valid_results)} "
-            f"submission={br.get('submission_id')} factor={br.get('factor_alias')}"
-        )
-        # 移除 _raw 内部数据（不进入 JSON）
-        br.pop('_raw', None)
-        br_metrics = br.get('metrics') or {}
-        consumed_metric_keys: set[str] = set()
-        if br.get('groups'):
-            for group in br['groups']:
-                original_key = str(group.get('key') or group.get('name') or f'Group {len(merged_groups) + 1}')
-                merged_key = _unique_group_key(original_key, used_merged_keys)
-                if merged_key != original_key:
-                    group = dict(group)
-                    group['key'] = merged_key
-                merged_groups.append(group)
-                if original_key in br_metrics:
-                    merged_metrics[merged_key] = br_metrics[original_key]
-                    consumed_metric_keys.add(original_key)
-        for metric_key, metric_value in br_metrics.items():
-            if metric_key in consumed_metric_keys:
-                continue
-            merged_key = _unique_group_key(str(metric_key), used_merged_keys)
-            merged_metrics[merged_key] = metric_value
-        last_n_groups = br.get('n_groups', last_n_groups)
-        simulation_multi_session = bool(br.get('multi_session_active', False))
-        if simulation_multi_session:
-            multi_session_entries.append({
-                'index': br.get('simulation_index'),
-                'submission_id': br.get('submission_id'),
-                'factor_alias': br.get('factor_alias'),
-                'tester_alias': br.get('tester_alias'),
-                'n_groups': br.get('n_groups_requested') or br.get('n_groups'),
-            })
-        last_multi_session = simulation_multi_session or last_multi_session
-        last_rebalance = br.get('rebalance_mode', last_rebalance) or last_rebalance
-
-    # 追加跨提交条目 LS 组
-    if cross_ls_groups:
-        for group_idx, group in enumerate(cross_ls_groups, start=1):
-            _progress(f"simulation merge cross LS group {group_idx}/{len(cross_ls_groups)}")
-            original_key = str(group.get('key') or group.get('name') or 'Long-Short')
-            merged_key = _unique_group_key(original_key, used_merged_keys)
-            if merged_key != original_key:
-                group = dict(group)
-                group['key'] = merged_key
-            merged_groups.append(group)
-            if original_key in cross_ls_metrics:
-                merged_metrics[merged_key] = cross_ls_metrics[original_key]
-
-    _progress(
-        f"group simulations request done groups={len(merged_groups)} metrics={len(merged_metrics)} "
-        f"elapsed={time.perf_counter() - request_started:.2f}s"
-    )
-    first_valid = valid_results[0] if valid_results else {}
-
-    # DEBUG #110: validate merged groups vs metrics key alignment
-    _merged_group_keys = [g.get('key') for g in merged_groups]
-    _merged_metric_keys = set(merged_metrics.keys())
-    _merged_missing = []
-    for g in merged_groups:
-        gk = g.get('key')
-        if not g.get('is_ls') and gk not in _merged_metric_keys:
-            _merged_missing.append(f"key='{gk}'")
-    if _merged_missing:
-        print(f"[DEBUG #110] MERGE MISMATCH: groups without metrics: {_merged_missing}")
-        print(f"[DEBUG #110]   merged_group_keys: {_merged_group_keys}")
-        print(f"[DEBUG #110]   merged_metric_keys: {sorted(_merged_metric_keys)}")
-
-    return True, {
-        'success': True,
-        'groups': merged_groups,
-        'metrics': merged_metrics,
-        'metrics_meta': _get_metrics_meta(),
-        'n_groups': last_n_groups,
-        'multi_session_active': last_multi_session,
-        'multi_session_entries': multi_session_entries,
-        'rebalance_mode': last_rebalance,
-        'submission_id': first_valid.get('submission_id', ''),
-        'factor_alias': first_valid.get('factor_alias', ''),
-        'tester_alias': first_valid.get('tester_alias', '?') if valid_results else '?',
-        'tester_product_count': first_valid.get('tester_product_count', 0),
-        'simulation_count': len(valid_results),
-        'cross_entry_ls_count': len(cross_ls_groups),
-        'errors': errors if errors else None,
-        'backtest_settings': {
-            'engine': common_backtest_settings['engine'],
-            'factor_mode': common_backtest_settings['factor_mode'],
-            'market_rule_fallback': common_backtest_settings['market_rule_fallback'],
-            'groups': resolved_backtest_settings,
-        },
-        'evaluation_window': {
-            'start_ms': int(start_dt.ts.timestamp() * 1000),
-            'end_ms': int(end_dt.ts.timestamp() * 1000),
-            'split_ms': (
-                int(pd.Timestamp(common_backtest_settings['evaluation_split'], tz=start_dt.ts.tz).timestamp() * 1000)
-                if common_backtest_settings['evaluation_split'] else None
             ),
         },
     }

@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ...strategies.targets import compile_group_target_payload
+from ...strategies.targets import GroupTargetCalculator
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +104,9 @@ def target_quantities(
     row: int,
     weights: Mapping[str, float],
     portfolio_value: float,
+    strategy: Mapping[str, Any] | None = None,
 ) -> dict[str, float]:
+    weights = approved_weights(request, row, weights, strategy or {})
     result = {}
     for position, instrument in enumerate(request.instruments):
         price = request.prices[instrument][row]
@@ -116,6 +118,26 @@ def target_quantities(
         lots = int(raw / lot_size + 1e-12)
         result[instrument] = np.sign(float(weights.get(instrument, 0.0))) * lots * lot_size
     return result
+
+
+def approved_weights(
+    request: TargetWeightInput,
+    row: int,
+    weights: Mapping[str, float],
+    strategy: Mapping[str, Any],
+) -> dict[str, float]:
+    normalized = {str(key): float(value) for key, value in weights.items()}
+    if str(strategy.get("margin_mode") or "none") == "none":
+        return normalized
+    collateral = float(strategy.get("collateral_fraction") or 1.0)
+    required = sum(
+        abs(normalized.get(instrument, 0.0)) * request.margin_ratios[row][position]
+        for position, instrument in enumerate(request.instruments)
+    )
+    if required <= collateral + 1e-12:
+        return normalized
+    scale = collateral / required
+    return {instrument: value * scale for instrument, value in normalized.items()}
 
 
 def valuation_price(request: TargetWeightInput, row: int, instrument: str) -> float:
@@ -141,32 +163,28 @@ def _parse_rule_matrix(
     return result
 
 
-def compile_group_strategy_input(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Calculate targets inside one framework worker from canonical raw inputs."""
+def parse_group_strategy_input(
+    payload: Mapping[str, Any],
+) -> tuple[TargetWeightInput, np.ndarray, np.ndarray, tuple[GroupTargetCalculator, ...]]:
+    """Parse raw membership without calculating any framework targets."""
 
-    timestamps = tuple(pd.Timestamp(value) for value in payload.get("timestamps", ()))
-    instruments = tuple(str(value) for value in payload.get("instruments", ()))
-    raw_prices = payload.get("prices", {})
-    if not timestamps or not instruments or not isinstance(raw_prices, Mapping):
-        raise ValueError("group strategy input requires timestamps, instruments, and prices")
-    prices = np.asarray([
-        [float(raw_prices[instrument][row]) for instrument in instruments]
-        for row in range(len(timestamps))
-    ])
-    rules = payload.get("market_rules", {})
-    return compile_group_target_payload(
-        timestamps=timestamps,
-        instruments=instruments,
-        membership=np.asarray(payload.get("membership"), dtype=bool),
-        prices=prices,
-        strategy_configs=tuple(payload.get("strategy_configs", ())),
-        initial_cash=float(payload.get("initial_cash", 0.0)),
-        margin_ratios=np.asarray(rules.get("margin_ratios"), dtype=float)
-        if rules.get("margin_ratios") is not None else None,
-        multipliers=np.asarray(rules.get("multipliers"), dtype=float)
-        if rules.get("multipliers") is not None else None,
-        lot_sizes=np.asarray(rules.get("lot_sizes"), dtype=float)
-        if rules.get("lot_sizes") is not None else None,
-        signal_updates=np.asarray(payload.get("signal_updates"), dtype=bool)
-        if payload.get("signal_updates") is not None else None,
+    configs = tuple(payload.get("strategy_configs", ()))
+    request = parse_target_weight_input({**dict(payload), "strategies": configs})
+    membership = np.asarray(payload.get("membership"), dtype=bool)
+    if membership.ndim != 3 or membership.shape[0] != len(
+        request.timestamps
+    ) or membership.shape[2] != len(request.instruments):
+        raise ValueError("membership must have timestamp, source-group, and instrument axes")
+    if payload.get("signal_updates") is None:
+        raise ValueError("group strategy requires an explicit signal-update mask")
+    signal_updates = np.asarray(payload["signal_updates"], dtype=bool)
+    if signal_updates.shape != membership.shape[:2]:
+        raise ValueError("signal-update mask must match membership time/source-group axes")
+    calculators = tuple(
+        GroupTargetCalculator(
+            request.instruments,
+            {**dict(config), "membership_index": config.get("membership_index", position)},
+        )
+        for position, config in enumerate(configs)
     )
+    return request, membership, signal_updates, calculators

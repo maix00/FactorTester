@@ -113,8 +113,6 @@
 
     function initEssential() {
         // Phase 1 loads only the backend tab index. Tab schemas load on first click.
-        call(dates().bindDateValidation, function(){})();
-        call(dates().bindTimePrecisionSwitch, function(){})();
         if (GT.backendSettings && typeof GT.backendSettings.registerSnapshot === 'function') {
             GT.backendSettings.registerSnapshot();
         }

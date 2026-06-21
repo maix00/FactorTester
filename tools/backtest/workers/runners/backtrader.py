@@ -6,10 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 import backtrader as bt
+import numpy as np
 import pandas as pd
 
 from .common import (
-    compile_group_strategy_input,
+    parse_group_strategy_input,
     parse_target_weight_input,
     target_quantities,
     target_rows,
@@ -18,7 +19,7 @@ from .common import (
 
 
 class _TargetWeightStrategy(bt.Strategy):
-    params = (("request", None), ("target_sequence", None))
+    params = (("request", None), ("target_sequence", None), ("strategy_config", None))
 
     def __init__(self) -> None:
         self._pending_targets = None
@@ -30,7 +31,11 @@ class _TargetWeightStrategy(bt.Strategy):
         self.equity_curve.append((timestamp.isoformat(), float(self.broker.getvalue())))
         if self._pending_targets is not None:
             quantities = target_quantities(
-                self.p.request, row, self._pending_targets, float(self.broker.getvalue())
+                self.p.request,
+                row,
+                self._pending_targets,
+                float(self.broker.getvalue()),
+                self.p.strategy_config,
             )
             for data in self.datas:
                 self.order_target_size(
@@ -38,6 +43,45 @@ class _TargetWeightStrategy(bt.Strategy):
                     target=float(quantities[data._name]),
                 )
         self._pending_targets = self.p.target_sequence[row]
+
+
+class _GroupMembershipStrategy(bt.Strategy):
+    params = (
+        ("request", None),
+        ("strategy_config", None),
+        ("calculator", None),
+        ("memberships", None),
+        ("signal_updates", None),
+    )
+
+    def __init__(self) -> None:
+        self._pending_targets = None
+        self.equity_curve = []
+
+    def next(self) -> None:
+        row = len(self) - 1
+        timestamp = self.p.request.timestamps[row]
+        self.equity_curve.append((timestamp.isoformat(), float(self.broker.getvalue())))
+        if self._pending_targets is not None:
+            quantities = target_quantities(
+                self.p.request,
+                row,
+                self._pending_targets,
+                float(self.broker.getvalue()),
+                self.p.strategy_config,
+            )
+            for data in self.datas:
+                self.order_target_size(data=data, target=float(quantities[data._name]))
+        self._pending_targets = self.p.calculator.update(
+            timestamp,
+            np.asarray([
+                self.p.request.prices[name][row]
+                for name in self.p.request.instruments
+            ]),
+            self.p.memberships[row],
+            self.p.signal_updates[row],
+            np.asarray(self.p.request.margin_ratios[row]),
+        )
 
 
 def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -78,6 +122,7 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
             _TargetWeightStrategy,
             request=request,
             target_sequence=target_sequence,
+            strategy_config=strategy,
         )
         instances = cerebro.run()
         instance = instances[0]
@@ -94,14 +139,56 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
-    calculated = compile_group_strategy_input(payload)
-    result = run_target_weights(calculated)
-    result["target_trace"] = {
-        strategy["strategy_id"]: strategy["targets"]
-        for strategy in calculated["strategies"]
+    request, memberships, updates, calculators = parse_group_strategy_input(payload)
+    portfolios = {}
+    for strategy, calculator in zip(request.strategies, calculators, strict=True):
+        cerebro = bt.Cerebro(stdstats=False)
+        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
+        cerebro.broker.setcash(strategy_cash)
+        cerebro.broker.set_coc(True)
+        cerebro.broker.setcommission(
+            commission=float(strategy.get("fee_rate") or 0.0), percabs=True
+        )
+        for instrument in request.instruments:
+            values = [
+                valuation_price(request, row, instrument)
+                for row in range(len(request.timestamps))
+            ]
+            frame = pd.DataFrame(
+                {
+                    "open": values,
+                    "high": values,
+                    "low": values,
+                    "close": values,
+                    "volume": [1_000_000.0] * len(values),
+                    "openinterest": [0.0] * len(values),
+                },
+                index=pd.DatetimeIndex(request.timestamps),
+            )
+            cerebro.adddata(bt.feeds.PandasData(dataname=frame), name=instrument)
+        cerebro.addstrategy(
+            _GroupMembershipStrategy,
+            request=request,
+            strategy_config=strategy,
+            calculator=calculator,
+            memberships=memberships,
+            signal_updates=updates,
+        )
+        instance = cerebro.run()[0]
+        portfolios[calculator.strategy_id] = {
+            "initial_value": strategy_cash,
+            "final_value": float(cerebro.broker.getvalue()),
+            "positions": {
+                data._name: float(cerebro.broker.getposition(data).size)
+                for data in cerebro.datas
+            },
+            "equity_curve": dict(instance.equity_curve),
+        }
+    return {
+        "engine": "backtrader",
+        "portfolios": portfolios,
+        "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "strategy_diagnostics": {
+            item.strategy_id: item.diagnostics for item in calculators
+        },
     }
-    result["strategy_diagnostics"] = {
-        strategy["strategy_id"]: strategy["diagnostics"]
-        for strategy in calculated["strategies"]
-    }
-    return result

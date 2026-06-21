@@ -22,12 +22,6 @@
         return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
     }
 
-    function prepareLocalRun() {
-        return GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
-            ? GT.localSettings.prepareRun()
-            : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
-    }
-
     async function resolveSubmissionIdForGroup(submissionId) {
         var targetId = String(submissionId || '');
         if (!targetId) return targetId;
@@ -229,9 +223,14 @@
         // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
-        var localRun = prepareLocalRun();
-        if (localRun.errors && localRun.errors.length) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
+        if (!GT.backendSettings || typeof GT.backendSettings.runPayload !== 'function') {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 后端注册的回测设置尚未加载'; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+        var backendRunPayload = GT.backendSettings.runPayload();
+        if (!backendRunPayload.start_date || !backendRunPayload.end_date) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 请在回测设置中指定有效时间范围'; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;
         }
@@ -242,7 +241,7 @@
         }
 
         // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
-        var bulkPayload = Object.assign({}, localRun.payload, {
+        var bulkPayload = Object.assign({}, backendRunPayload, {
             groups: runGroups,
             flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],

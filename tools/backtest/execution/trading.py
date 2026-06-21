@@ -217,6 +217,7 @@ class Ledger:
         instruments: tuple[str, ...],
         initial_cash_minor: int,
         accounting: FillAccounting,
+        valuation_prices: Mapping[str, float] | None = None,
     ) -> None:
         if initial_cash_minor < 0:
             raise ValueError("initial cash must be non-negative")
@@ -226,6 +227,7 @@ class Ledger:
         self.realized_pnl_minor = 0
         self.positions = {instrument: 0.0 for instrument in instruments}
         self.accounting = accounting
+        self.valuation_prices = valuation_prices
         self.fills: list[Fill] = []
         self.fee_journal = FeeJournal()
 
@@ -246,7 +248,19 @@ class Ledger:
 
     @property
     def equity_minor(self) -> int:
-        return self.cash_minor + self.margin_minor
+        equity = self.cash_minor + self.margin_minor
+        if isinstance(self.accounting, CashAccounting) and self.valuation_prices is not None:
+            point_values = self.accounting.point_values or {}
+            equity += sum(
+                round(
+                    quantity
+                    * float(self.valuation_prices[instrument])
+                    * float(point_values.get(instrument, 1.0))
+                    * self.accounting.minor_per_major
+                )
+                for instrument, quantity in self.positions.items()
+            )
+        return equity
 
     def on_settlement(self, event: EventEnvelope, runtime: EventRuntime) -> None:
         settlement = event.payload

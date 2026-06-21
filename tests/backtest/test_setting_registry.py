@@ -15,14 +15,15 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "capital", "allocation", "rebalance", "cost", "liquidity", "market_rules", "evaluation",
+        "engine", "time", "capital", "allocation", "rebalance", "cost",
+        "liquidity", "margin", "market_rules", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "capital", "allocation", "rebalance", "cost", "liquidity",
+        "capital", "allocation", "rebalance", "cost", "liquidity", "margin",
     ]
     assert index["defaults"]["engine"] == {
         "value": "native",

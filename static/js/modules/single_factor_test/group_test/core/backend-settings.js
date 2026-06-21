@@ -308,8 +308,14 @@
     function init() {
         var root = localHost();
         if (root) state.application = root.getAttribute('data-application') || state.application;
-        return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application)).then(function(index) {
+        var pageUuid = encodeURIComponent(window._pageUuid || '');
+        return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
+            Object.keys(index.defaults || {}).forEach(function(key) {
+                if (!Object.prototype.hasOwnProperty.call(state.localValues, key)) {
+                    state.localValues[key] = index.defaults[key].value;
+                }
+            });
             var defaults = index.default_mounted_tabs || {};
             [LOCAL, GROUP].forEach(function(mount) {
                 if (!state.mountedTabs[mount].length && Array.isArray(defaults[mount])) {
@@ -356,12 +362,29 @@
         }));
     }
 
+    function runPayload() {
+        var values = state.localValues || {};
+        var calendar = String(values.calendar_frequency || 'auto');
+        return {
+            start_date: values.start_date,
+            end_date: values.end_date,
+            precision: values.time_precision || 'exact',
+            timezone: values.timezone || 'Asia/Shanghai',
+            initial_capital: values.initial_capital,
+            base_currency: values.base_currency || 'CNY',
+            currency_conversion_fee_rate: values.currency_conversion_fee_rate || 0,
+            auto_group_calendar_freq: calendar === 'auto',
+            group_calendar_freq: calendar === 'auto' ? null : calendar,
+        };
+    }
+
     GT.backendSettings = {
         init: init,
         attachGroupTabs: attachGroupTabs,
         deactivateLocal: deactivateLocal,
         registerSnapshot: registerSnapshot,
         collect: collect,
+        runPayload: runPayload,
         _state: state,
     };
 })();

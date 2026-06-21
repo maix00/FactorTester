@@ -78,3 +78,32 @@ def test_equal_margin_is_explicitly_distinct_from_equal_notional() -> None:
     assert notional == {"low-margin": 0.5, "high-margin": 0.5}
     assert np.isclose(margin["low-margin"], 2 / 3)
     assert np.isclose(margin["high-margin"], 1 / 3)
+
+
+def test_long_short_is_a_peer_strategy_with_signed_target_weights() -> None:
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    membership = np.asarray([
+        [[True, False], [False, True]],
+        [[True, False], [False, True]],
+        [[False, True], [True, False]],
+    ])
+    payload = compile_group_target_payload(
+        timestamps=index,
+        instruments=("A", "B"),
+        membership=membership,
+        prices=np.asarray([[100.0, 100.0], [101.0, 99.0], [102.0, 98.0]]),
+        signal_updates=np.ones((3, 2), dtype=bool),
+        strategy_configs=({
+            "strategy_id": "long-short",
+            "strategy_kind": "long_short",
+            "long_indices": [0],
+            "short_indices": [1],
+            "allocation_policy": "equal_notional",
+            "rebalance_mode": "on_factor_signal",
+        },),
+        initial_cash=1_000_000,
+    )
+
+    targets = payload["strategies"][0]["targets"]
+    assert targets[index[0].isoformat()] == {"A": 0.5, "B": -0.5}
+    assert targets[index[-1].isoformat()] == {"A": -0.5, "B": 0.5}
