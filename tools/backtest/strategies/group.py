@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .contracts import PortfolioIntent, TargetKind
-from .factor_events import FactorSignal
-from .runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
+from ..event_driven.contracts import PortfolioIntent, TargetKind
+from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
+from ..factors.events import FactorSignal
 
 
 class QuantileGroupStrategy:

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from tools.backtest.event_driven.contracts import RunIdentity
-from tools.backtest.event_driven.observability import ProgressObserver, StructuredEventLogger
+from tools.backtest.observability.events import ProgressObserver, StructuredEventLogger
 from tools.backtest.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
 
 

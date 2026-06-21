@@ -10,16 +10,15 @@ from typing import Protocol
 
 import numpy as np
 
-from .contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
-from .factor_events import FactorSignal
-from .fees import CommissionModel, FeeJournal, ZeroCommissionModel
-from .runtime import (
+from ..event_driven.contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
+from ..event_driven.runtime import (
     EventDraft,
     EventEnvelope,
     EventRuntime,
     EventTopic,
     ProductPrice,
 )
+from .fees import CommissionModel, FeeJournal, ZeroCommissionModel
 
 
 class MarketState:
@@ -35,40 +34,6 @@ class MarketState:
         if not np.isfinite(quote.price) or quote.price <= 0:
             raise ValueError(f"invalid market price for {quote.product}: {quote.price}")
         self.prices[quote.product] = float(quote.price)
-
-
-class SignalStrategy:
-    """Translate factor signals into targets without touching orders or state."""
-
-    def __init__(
-        self,
-        strategy_id: str,
-        portfolio_id: str,
-        instruments: tuple[str, ...],
-        target_builder: Callable[[FactorSignal], np.ndarray],
-    ) -> None:
-        if not strategy_id or not portfolio_id:
-            raise ValueError("strategy_id and portfolio_id must not be empty")
-        self.strategy_id = strategy_id
-        self.portfolio_id = portfolio_id
-        self.instruments = instruments
-        self._target_builder = target_builder
-
-    def on_factor_signal(
-        self, event: EventEnvelope, runtime: EventRuntime
-    ) -> EventDraft:
-        signal = event.payload
-        if not isinstance(signal, FactorSignal):
-            raise TypeError("factor.signal payload must be FactorSignal")
-        intent = PortfolioIntent(
-            timestamp=event.timestamp,
-            strategy_id=self.strategy_id,
-            portfolio_id=self.portfolio_id,
-            target_kind=TargetKind.QUANTITY,
-            values=self._target_builder(signal),
-            instruments=self.instruments,
-        )
-        return EventDraft(EventTopic.PORTFOLIO_INTENT, event.timestamp, intent)
 
 
 @dataclass(frozen=True, slots=True)

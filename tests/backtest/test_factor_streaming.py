@@ -8,19 +8,19 @@ from tools.factors.expr import ColumnRef, EvaluateContext
 
 from tools.backtest.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
 from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.backtest.event_driven.factor_streaming import (
+from tools.backtest.factors.incremental import (
     compile_incremental_factor,
     compile_streaming_factor,
 )
 from tools.backtest.event_driven.runtime import MarketSlice, ProductPrice, ReplayEventSource
-from tools.backtest.event_driven.trading import (
+from tools.backtest.execution.trading import (
     CashAccounting,
     ImmediateBroker,
     Ledger,
     MarketState,
     OrderManager,
-    SignalStrategy,
 )
+from tools.backtest.strategies.signal import SignalStrategy
 
 
 def test_same_factor_expr_matches_batch_and_streaming_execution() -> None:

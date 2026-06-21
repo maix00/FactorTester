@@ -24,7 +24,7 @@ from .runtime import (
     EventTopic,
     MarketSliceBarrier,
 )
-from .trading import Ledger, MarketState, OrderManager
+from ..execution.trading import Ledger, MarketState, OrderManager
 
 
 class FactorActor(Protocol):

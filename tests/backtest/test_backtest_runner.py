@@ -9,16 +9,16 @@ from tools.backtest.event_driven.backtest import (
     StrategyLane,
 )
 from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.backtest.event_driven.factor_events import PrecomputedFactorPublisher
+from tools.backtest.factors.events import PrecomputedFactorPublisher
 from tools.backtest.event_driven.runtime import ProductPrice, ReplayEventSource
-from tools.backtest.event_driven.trading import (
+from tools.backtest.execution.trading import (
     CashAccounting,
     ImmediateBroker,
     Ledger,
     MarketState,
     OrderManager,
-    SignalStrategy,
 )
+from tools.backtest.strategies.signal import SignalStrategy
 
 
 def test_runner_wires_shared_data_into_isolated_strategy_ledgers() -> None:

@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 
 from tools.backtest.event_driven.contracts import PortfolioIntent, TargetKind
-from tools.backtest.event_driven.risk import FuturesMarginConstraint
+from tools.backtest.risk.margin import FuturesMarginConstraint
 from tools.backtest.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
-from tools.backtest.event_driven.trading import CashAccounting, Ledger
+from tools.backtest.execution.trading import CashAccounting, Ledger
 
 
 def test_margin_constraint_scales_all_group_weights_proportionally() -> None:

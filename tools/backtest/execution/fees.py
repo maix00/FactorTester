@@ -7,7 +7,7 @@ from typing import Protocol
 
 import pandas as pd
 
-from .contracts import FeeBreakdown, Fill, Order
+from ..event_driven.contracts import FeeBreakdown, Fill, Order
 
 
 class FeeScheduleProvider(Protocol):

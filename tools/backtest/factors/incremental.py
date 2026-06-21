@@ -11,8 +11,8 @@ import pandas as pd
 
 from tools.factors.expr import ColumnRef, CompositeExpr, ConstExpr, FactorExpr, RollingOp
 
-from .factor_events import IncrementalFactorExecutor
-from .runtime import MarketSlice
+from ..event_driven.runtime import MarketSlice
+from .events import IncrementalFactorExecutor
 
 
 class UnsupportedStreamingFactor(ValueError):

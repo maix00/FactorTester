@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import pandas as pd
 
 from tools.backtest.event_driven.contracts import FeeBreakdown, FeeComponent, Order, OrderSide
-from tools.backtest.event_driven.fees import FeeJournal
+from tools.backtest.execution.fees import FeeJournal
 from tools.backtest.event_driven.runtime import EventDraft, EventRuntime, EventTopic
-from tools.backtest.event_driven.trading import ImmediateBroker, Ledger, MarketState, CashAccounting
+from tools.backtest.execution.trading import CashAccounting, ImmediateBroker, Ledger, MarketState
 
 
 @dataclass(frozen=True)

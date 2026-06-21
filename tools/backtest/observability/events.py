@@ -6,8 +6,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .contracts import RunIdentity
-from .runtime import EventTopic, ProcessedEvent
+from ..event_driven.contracts import RunIdentity
+from ..event_driven.runtime import EventTopic, ProcessedEvent
 
 
 class StructuredEventLogger:

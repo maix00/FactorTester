@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest.event_driven.factor_events import PrecomputedFactorPublisher
+from tools.backtest.factors.events import PrecomputedFactorPublisher
 from tools.backtest.event_driven.runtime import (
     EventRuntime,
     EventTopic,
@@ -11,14 +11,14 @@ from tools.backtest.event_driven.runtime import (
     ProductPrice,
     ReplayEventSource,
 )
-from tools.backtest.event_driven.trading import (
+from tools.backtest.execution.trading import (
     CashAccounting,
     ImmediateBroker,
     Ledger,
     MarketState,
     OrderManager,
-    SignalStrategy,
 )
+from tools.backtest.strategies.signal import SignalStrategy
 
 
 def test_multiple_strategies_share_data_and_factor_but_not_portfolios() -> None:
