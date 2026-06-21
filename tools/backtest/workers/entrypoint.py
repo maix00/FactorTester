@@ -21,16 +21,19 @@ def execute(request: WorkerRequest) -> dict:
     if request.engine not in PACKAGES:
         raise ValueError(f"unknown worker engine: {request.engine}")
     if request.operation == "health":
-        operations = ["health"]
-        if request.engine == "backtrader":
-            operations.append("run_target_weights")
+        operations = ["health", "run_target_weights"]
         return {
             "framework_version": version(PACKAGES[request.engine]),
             "operations": operations,
             "process_isolation": "conda-subprocess",
         }
-    if request.operation == "run_target_weights" and request.engine == "backtrader":
-        from .runners.backtrader import run_target_weights
+    if request.operation == "run_target_weights":
+        if request.engine == "backtrader":
+            from .runners.backtrader import run_target_weights
+        elif request.engine == "qlib":
+            from .runners.qlib import run_target_weights
+        else:
+            from .runners.zipline import run_target_weights
         return run_target_weights(request.payload)
     raise ValueError(
         f"operation {request.operation!r} is not implemented for {request.engine}"
