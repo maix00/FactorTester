@@ -112,9 +112,14 @@
     }
 
     function initEssential() {
-        // ── Phase 1: runs immediately with 8 essential inline scripts ──
+        // Phase 1 loads only the backend tab index. Tab schemas load on first click.
         call(dates().bindDateValidation, function(){})();
         call(dates().bindTimePrecisionSwitch, function(){})();
+        if (GT.backendSettings && typeof GT.backendSettings.init === 'function') {
+            GT.backendSettings.init().catch(function(error) {
+                console.error('[GT backend-settings] index load failed', error);
+            });
+        }
         if (GT.localSettings && typeof GT.localSettings.initTabs === 'function') {
             GT.localSettings.initTabs();
         }
