@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from tools.backtest.framework_adapters import (
+from tools.backtest.adapters.frameworks import (
     Framework,
     FrameworkFeature,
     SignalBridgeRequest,

@@ -3,11 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest.contracts import PortfolioIntent, TargetKind
-from tools.backtest.factor_events import FactorSignal
-from tools.backtest.group_strategy import QuantileGroupStrategy
-from tools.backtest.runtime import EventRuntime, EventTopic, ReplayEventSource
-from tools.backtest.trading import (
+from tools.backtest.event_driven.contracts import PortfolioIntent, TargetKind
+from tools.backtest.event_driven.factor_events import FactorSignal
+from tools.backtest.event_driven.group_strategy import QuantileGroupStrategy
+from tools.backtest.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
+from tools.backtest.event_driven.trading import (
     CashAccounting,
     EqualNotionalSizer,
     Ledger,

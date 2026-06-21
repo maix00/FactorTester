@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.backtest.contracts import Order, OrderSide
-from tools.backtest.runtime import EventDraft, EventRuntime, EventTopic, ReplayEventSource
-from tools.backtest.trading import ProductPrice, VolumeParticipationBroker
+from tools.backtest.event_driven.contracts import Order, OrderSide
+from tools.backtest.event_driven.runtime import EventDraft, EventRuntime, EventTopic, ReplayEventSource
+from tools.backtest.event_driven.trading import ProductPrice, VolumeParticipationBroker
 
 
 def order(order_id: str, portfolio_id: str, quantity: float, timestamp) -> Order:

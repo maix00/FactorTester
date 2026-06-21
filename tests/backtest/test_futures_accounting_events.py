@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.backtest.contracts import Fill, OrderSide
-from tools.backtest.runtime import EventDraft, EventRuntime, EventTopic, ReplayEventSource
-from tools.backtest.trading import (
+from tools.backtest.event_driven.contracts import FeeBreakdown, FeeComponent, Fill, OrderSide
+from tools.backtest.event_driven.runtime import EventDraft, EventRuntime, EventTopic, ReplayEventSource
+from tools.backtest.event_driven.trading import (
     FuturesAccounting,
     FuturesContractSpec,
     Ledger,
@@ -30,7 +30,11 @@ def make_fill(
         side=side,
         quantity=quantity,
         price=price,
-        fee_minor=fee_minor,
+        fees=(
+            FeeBreakdown((FeeComponent("commission", fee_minor),))
+            if fee_minor
+            else FeeBreakdown()
+        ),
     )
 
 

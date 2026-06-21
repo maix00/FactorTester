@@ -12,6 +12,7 @@ import numpy as np
 
 from .contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
 from .factor_events import FactorSignal
+from .fees import CommissionModel, FeeJournal, ZeroCommissionModel
 from .runtime import (
     EventDraft,
     EventEnvelope,
@@ -103,8 +104,8 @@ class CashAccounting:
             fill.quantity * fill.price * point_value * self.minor_per_major
         )
         if fill.side == OrderSide.BUY:
-            return AccountingDelta(cash_minor=-notional_minor - fill.fee_minor)
-        return AccountingDelta(cash_minor=notional_minor - fill.fee_minor)
+            return AccountingDelta(cash_minor=-notional_minor - fill.fees.total_minor)
+        return AccountingDelta(cash_minor=notional_minor - fill.fees.total_minor)
 
     def process_settlement(self, settlement: SettlementPrices) -> AccountingDelta:
         return AccountingDelta()
@@ -190,14 +191,14 @@ class FuturesAccounting:
             margin = round(fill.quantity * mark_minor * spec.margin_ratio)
             book.open(fill.quantity, mark_minor)
             return AccountingDelta(
-                cash_minor=-margin - fill.fee_minor,
+                cash_minor=-margin - fill.fees.total_minor,
                 margin_minor=margin,
             )
         realized, released_margin = book.close(
             fill.quantity, mark_minor, spec.margin_ratio
         )
         return AccountingDelta(
-            cash_minor=released_margin + realized - fill.fee_minor,
+            cash_minor=released_margin + realized - fill.fees.total_minor,
             margin_minor=-released_margin,
             realized_pnl_minor=realized,
         )
@@ -245,6 +246,7 @@ class Ledger:
         self.positions = {instrument: 0.0 for instrument in instruments}
         self.accounting = accounting
         self.fills: list[Fill] = []
+        self.fee_journal = FeeJournal()
 
     def on_fill(self, event: EventEnvelope, runtime: EventRuntime) -> None:
         fill = event.payload
@@ -259,6 +261,7 @@ class Ledger:
         self.margin_minor += delta.margin_minor
         self.realized_pnl_minor += delta.realized_pnl_minor
         self.fills.append(fill)
+        self.fee_journal.record(fill)
 
     @property
     def equity_minor(self) -> int:
@@ -364,10 +367,10 @@ class ImmediateBroker:
     def __init__(
         self,
         market: MarketState,
-        fee_minor: Callable[[Order, float], int] | None = None,
+        commission_model: CommissionModel | None = None,
     ) -> None:
         self.market = market
-        self._fee_minor = fee_minor or (lambda order, price: 0)
+        self.commission_model = commission_model or ZeroCommissionModel()
         self._fill_sequence = itertools.count()
 
     def on_order_submitted(
@@ -389,7 +392,9 @@ class ImmediateBroker:
             side=order.side,
             quantity=order.quantity,
             price=price,
-            fee_minor=self._fee_minor(order, price),
+            fees=self.commission_model.calculate(
+                order, price=price, quantity=order.quantity
+            ),
         )
         return [
             EventDraft(EventTopic.ORDER_ACCEPTED, event.timestamp, order),
@@ -412,7 +417,7 @@ class VolumeParticipationBroker:
         *,
         participation_rate: float,
         volume_field: str = "VOLUME",
-        fee_minor: Callable[[Order, float, float], int] | None = None,
+        commission_model: CommissionModel | None = None,
         fill_price: Callable[[Order, ProductPrice, float, float], float] | None = None,
     ) -> None:
         if not portfolio_ids or not 0 < participation_rate <= 1:
@@ -420,7 +425,7 @@ class VolumeParticipationBroker:
         self.portfolio_ids = frozenset(portfolio_ids)
         self.participation_rate = participation_rate
         self.volume_field = volume_field
-        self._fee_minor = fee_minor or (lambda order, price, quantity: 0)
+        self.commission_model = commission_model or ZeroCommissionModel()
         self._fill_price = fill_price or (
             lambda order, quote, quantity, share: quote.price
         )
@@ -496,7 +501,9 @@ class VolumeParticipationBroker:
             side=order.side,
             quantity=quantity,
             price=price,
-            fee_minor=self._fee_minor(order, price, quantity),
+            fees=self.commission_model.calculate(
+                order, price=price, quantity=quantity
+            ),
         )
         open_order.remaining -= quantity
         self._bar_capacity[order.instrument] = available - quantity

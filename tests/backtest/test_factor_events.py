@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.backtest.factor_events import FactorSignal, PrecomputedFactorPublisher
-from tools.backtest.runtime import (
+from tools.backtest.event_driven.factor_events import FactorSignal, PrecomputedFactorPublisher
+from tools.backtest.event_driven.runtime import (
     EventRuntime,
     EventTopic,
     MarketSliceBarrier,

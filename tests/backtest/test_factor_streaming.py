@@ -6,8 +6,8 @@ import pandas as pd
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.expr import ColumnRef, EvaluateContext
 
-from tools.backtest.factor_streaming import compile_streaming_factor
-from tools.backtest.runtime import MarketSlice, ProductPrice
+from tools.backtest.event_driven.factor_streaming import compile_streaming_factor
+from tools.backtest.event_driven.runtime import MarketSlice, ProductPrice
 
 
 def test_same_factor_expr_matches_batch_and_streaming_execution() -> None:

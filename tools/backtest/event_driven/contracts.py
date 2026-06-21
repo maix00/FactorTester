@@ -89,6 +89,34 @@ class OrderSide(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class FeeComponent:
+    """One named fee component, expressed in base-currency minor units."""
+
+    name: str
+    amount_minor: int
+
+    def __post_init__(self) -> None:
+        if not self.name or self.amount_minor < 0:
+            raise ValueError("fee component requires a name and non-negative amount")
+
+
+@dataclass(frozen=True, slots=True)
+class FeeBreakdown:
+    """Fees frozen onto a fill so replay never queries mutable fee schedules."""
+
+    components: tuple[FeeComponent, ...] = ()
+
+    def __post_init__(self) -> None:
+        names = [component.name for component in self.components]
+        if len(names) != len(set(names)):
+            raise ValueError("fee component names must be unique")
+
+    @property
+    def total_minor(self) -> int:
+        return sum(component.amount_minor for component in self.components)
+
+
+@dataclass(frozen=True, slots=True)
 class Order:
     order_id: str
     strategy_id: str
@@ -120,11 +148,11 @@ class Fill:
     side: OrderSide
     quantity: float
     price: float
-    fee_minor: int = 0
+    fees: FeeBreakdown = field(default_factory=FeeBreakdown)
 
     def __post_init__(self) -> None:
-        if self.quantity <= 0 or self.price <= 0 or self.fee_minor < 0:
-            raise ValueError("fill quantity/price must be positive and fee non-negative")
+        if self.quantity <= 0 or self.price <= 0:
+            raise ValueError("fill quantity and price must be positive")
 
 
 @dataclass(frozen=True, slots=True)
