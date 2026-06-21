@@ -99,3 +99,38 @@ def test_runner_calculates_factor_incrementally_without_precomputed_values() -> 
     assert portfolio.final_snapshot.positions == {"A": 2.0}
     assert [fill.quantity for fill in portfolio.fills] == [1.0, 1.0]
     assert len(portfolio.snapshots) == 2
+
+
+def test_shift_rolling_and_cross_sectional_ops_match_batch_backend() -> None:
+    index = pd.date_range("2026-01-01 09:01", periods=4, freq="min")
+    products = ("A", "B")
+    values = pd.DataFrame(
+        {"A": [1.0, 2.0, 4.0, 8.0], "B": [4.0, 3.0, 2.0, 1.0]},
+        index=index,
+    )
+    close = ColumnRef(DataColumn.CLOSE)
+    expression = (close.shift(1) + close.rolling_std(3)).cs_rank()
+    preloaded = {
+        (product, DataFreq.MIN1.name): pd.DataFrame(
+            {DataColumn.CLOSE.name: values[product]}, index=index
+        )
+        for product in products
+    }
+    batch = expression.evaluate(ctx=EvaluateContext(
+        products, DataFreq.MIN1, preloaded=preloaded
+    ))
+    plan = compile_streaming_factor(expression, products)
+
+    streamed = pd.DataFrame([
+        plan.update(timestamp, MarketSlice({
+            product: ProductPrice(
+                product,
+                price=float(row[product]),
+                fields={DataColumn.CLOSE.name: float(row[product])},
+            )
+            for product in products
+        }))
+        for timestamp, row in values.iterrows()
+    ], index=index)
+
+    pd.testing.assert_frame_equal(streamed, batch)

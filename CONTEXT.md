@@ -65,6 +65,20 @@ DSL 核心。三层结构：
 
 求值流程：DAG → 拓扑排序 → 从 `product.{freq}` 求值每个节点 → 缓存 → 返回 "品种 × 时间" DataFrame。
 
+### 因子执行后端 (Factor Execution Backend)
+
+FactorExpr 是唯一作者接口，执行方式属于编译器后端：
+
+- **Batch backend**：`evaluate(ctx)` 对完整时间区间做向量化研究计算。
+- **Incremental backend**：编译为有状态 kernel，随行情或完整横截面逐 bar 更新，
+  直接在回测框架生命周期内产生同一种 `FactorSignal`。
+
+逐点、固定 Shift、有限 Rolling 和横截面算子可以拥有两种等价 Implementation；
+不支持增量 kernel 的算子必须在编译阶段报错，不得静默调用 batch backend。依赖
+Order、Fill、Position 或 Ledger 的路径状态不是市场 FactorExpr，应实现为策略状态、
+Risk Module 或 Analyzer。`NextReturns` 是事后评价 label，不得进入因果回测信号图。
+完整决策见 ADR-022。
+
 ### 信号对齐 (SignalAlign)
 
 原始因子值在数据源频率（如 1 分钟）下计算，然后对齐到信号频率（如日频）。`SignalAlign` 在可配置的 `basepoint`（last / first tick）采样，并可跳过盘间间隔（`end_session_skip`）。

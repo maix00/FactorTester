@@ -147,6 +147,7 @@ Capability report 必须区分 `PRECOMPUTED_SIGNALS` 与 `INCREMENTAL_FACTORS`�
 - 事件数量取决于真实发生的行为，而不是时间点乘固定阶段数。
 - 需要逐步把现有 `simulate_group_trading_book` 拆成 actor；迁移期间以结果对照
   测试锁定期货费用、保证金和结算语义，不能一次性重写后宣称等价。
-- 原固定阶段 `EventDrivenEngine/WorldState/BacktestContext` 原型及其 models、
-  orders、factors 已删除；原生实现统一位于 `tools/backtest/event_driven/`，外部
-  框架边界统一位于 `tools/backtest/adapters/`，不提供旧 import 路径 fallback。
+- 原固定阶段 `EventDrivenEngine/WorldState/BacktestContext` 原型已删除；
+  `tools/backtest/event_driven/` 只保留 runtime、canonical contracts 与 composition
+  root。Factor backend、Strategy、Execution、Risk、Observability 分属同级 package，
+  外部框架边界统一位于 `tools/backtest/adapters/`，不提供旧 import 路径 fallback。
