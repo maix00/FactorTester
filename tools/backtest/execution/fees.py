@@ -7,7 +7,13 @@ from typing import Protocol
 
 import pandas as pd
 
-from ..event_driven.contracts import FeeBreakdown, Fill, Order
+from ..event_driven.contracts import FeeBreakdown, FeeComponent, Fill, Order
+from ..market_rules import (
+    FeeSchedule,
+    RuleFallbackPolicy,
+    RuleProvider,
+    RuleUsageJournal,
+)
 
 
 class FeeScheduleProvider(Protocol):
@@ -40,6 +46,32 @@ class ZeroCommissionModel:
         quantity: float,
     ) -> FeeBreakdown:
         return FeeBreakdown()
+
+
+class ProviderCommissionModel:
+    def __init__(
+        self,
+        provider: RuleProvider[FeeSchedule],
+        fallback: RuleFallbackPolicy,
+        usage: RuleUsageJournal,
+        *,
+        minor_per_major: int = 100,
+    ) -> None:
+        self.provider = provider
+        self.fallback = fallback
+        self.usage = usage
+        self.minor_per_major = minor_per_major
+
+    def calculate(
+        self, order: Order, *, price: float, quantity: float
+    ) -> FeeBreakdown:
+        resolved = self.provider.resolve(order.instrument, order.timestamp, self.fallback)
+        self.usage.record("fee", order.instrument, order.timestamp, resolved)
+        schedule = resolved.value
+        notional_minor = round(price * quantity * self.minor_per_major)
+        amount = round(notional_minor * schedule.notional_rate)
+        amount += round(quantity * schedule.fixed_minor_per_unit)
+        return FeeBreakdown((FeeComponent("commission", amount),)) if amount else FeeBreakdown()
 
 
 @dataclass(frozen=True, slots=True)

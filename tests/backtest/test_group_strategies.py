@@ -16,6 +16,13 @@ from tools.backtest.execution.trading import (
     Ledger,
     MarketState,
 )
+from tools.backtest.execution.trading import ProviderContractSizer
+from tools.backtest.market_rules import (
+    ContractRule,
+    RuleFallbackPolicy,
+    RuleUsageJournal,
+    TemporalRuleProvider,
+)
 
 
 def test_five_groups_are_five_independent_strategies() -> None:
@@ -110,3 +117,26 @@ def test_long_short_is_a_peer_strategy_with_one_portfolio_intent() -> None:
 
     assert len(intents) == 1
     np.testing.assert_allclose(intents[0].values, [-0.25, -0.25, 0.25, 0.25])
+
+
+def test_contract_multiplier_and_minimum_lot_are_provider_driven() -> None:
+    timestamp = pd.Timestamp("2026-01-01")
+    market = MarketState()
+    market.prices["A"] = 100.0
+    usage = RuleUsageJournal()
+    sizer = ProviderContractSizer(
+        market,
+        TemporalRuleProvider({}, latest={"A": ContractRule(10.0, 2.0, 0.2)}),
+        RuleFallbackPolicy.LATEST_AVAILABLE,
+        usage,
+    )
+    ledger = Ledger("portfolio", ("A",), 1_000_000, CashAccounting())
+    intent = PortfolioIntent(
+        timestamp, "strategy", "portfolio", TargetKind.WEIGHT,
+        np.array([0.55]), ("A",),
+    )
+
+    quantities = sizer.target_quantities(intent, ledger)
+
+    np.testing.assert_array_equal(quantities, [4.0])
+    assert usage.approximation_count == 1

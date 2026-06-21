@@ -247,7 +247,10 @@
             flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
-            factor_family_alias: window.factorFamilyAlias || ''
+            factor_family_alias: window.factorFamilyAlias || '',
+            backtest_settings: GT.backendSettings && typeof GT.backendSettings.collect === 'function'
+                ? GT.backendSettings.collect()
+                : {}
         });
 
         try {

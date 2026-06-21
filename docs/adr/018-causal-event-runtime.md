@@ -42,6 +42,16 @@ MARGIN、LIQUIDITY、FILL、PNL、REPORT 十类事件。它仍然是固定时间
 - 一个或多个 `ExecutionVenue`。共享 Venue 表示共同消费执行容量，隔离 Venue
   表示候选策略各自在独立虚拟市场中评估。
 
+Runner 在订阅入口按 `factor_alias` 和 `portfolio_id` 路由 lane 事件，而不是依赖每个
+actor 收到全局广播后自行忽略。Venue 必须声明其拥有的 portfolio 集合，所有 Venue
+对本次 run 的 portfolio 做无重叠完整覆盖。
+
+对照回测默认采用 `independent_comparison`：每个 portfolio 独占一个 Venue，因此
+流动性容量、未成交订单、滑点状态和随机数流均不互相消耗。显式选择
+`shared_liquidity` 时，多个独立账户才可挂到同一 Venue，表达它们在同一虚拟市场中
+竞争成交容量；这仍不等于共享账户。若多个策略共同管理一份账户，应先由组合策略
+聚合为一个 portfolio，而不是让多个 Ledger 隐式串账。
+
 Runner 不实现策略、费用、风控或成交算法。它只固定 actor 生命周期、订阅关系和
 标准结果收集。每个截面关闭后发布低优先级 `REPORT`，确保同时间戳的信号、风控、
 订单和成交完成后再记录各 portfolio 快照。
@@ -151,3 +161,16 @@ Capability report 必须区分 `PRECOMPUTED_SIGNALS` 与 `INCREMENTAL_FACTORS`�
   `tools/backtest/event_driven/` 只保留 runtime、canonical contracts 与 composition
   root。Factor backend、Strategy、Execution、Risk、Observability 分属同级 package，
   外部框架边界统一位于 `tools/backtest/adapters/`，不提供旧 import 路径 fallback。
+
+## 执行隔离依据
+
+- Backtrader `Cerebro` 通过 `setbroker/getbroker` 管理运行级 broker；同一 Cerebro
+  中添加多个策略并不会自然获得多个独立账户。因此对照策略必须使用独立 Cerebro
+  或由我们的 lane/venue 边界显式隔离：
+  https://www.backtrader.com/docu/cerebro/
+- Zipline 为每个算法提供跨事件持久化的 `context`，算法、portfolio 与 ledger 属于
+  一次算法运行状态，而行情数据是事件输入：
+  https://zipline.ml4trading.io/beginner-tutorial.html
+- Qlib `BaseExecutor` 以 `trade_account` 为可重置执行状态；其嵌套 executor 甚至需要
+  显式复制 account，说明账户复制/共享必须是明确选择而非事件广播副作用：
+  https://github.com/microsoft/qlib/blob/main/qlib/backtest/executor.py

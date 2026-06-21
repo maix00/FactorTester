@@ -169,6 +169,7 @@ class FactorGroupTester:
         merge_cost_ratio: float | None = None,
         start_dt: Optional[Any] = None,  # DataTime
         end_dt: Optional[Any] = None,    # DataTime
+        single_runtime: bool = False,
     ):
         self.specs = list(specs)
         self.overlap_ratio = float(
@@ -182,6 +183,7 @@ class FactorGroupTester:
         )
         self.start_dt = start_dt
         self.end_dt = end_dt
+        self.single_runtime = bool(single_runtime)
 
     @classmethod
     def from_flat_groups(
@@ -198,6 +200,7 @@ class FactorGroupTester:
         containment_ratio: float | None = None,
         merge_cost_ratio: float | None = None,
         progress_hook: Optional[Callable[[str], None]] = None,
+        single_runtime: bool = False,
     ) -> "FactorGroupTester":
         """Build a FactorGroupTester from a flat list of _FactorGroupTestGroup.
 
@@ -407,6 +410,7 @@ class FactorGroupTester:
             merge_cost_ratio=merge_cost_ratio,
             start_dt=start_dt,
             end_dt=end_dt,
+            single_runtime=single_runtime,
         )
 
     @staticmethod
@@ -474,6 +478,8 @@ class FactorGroupTester:
         """
         if not self.specs:
             return []
+        if self.single_runtime:
+            return [list(self.specs)]
 
         # ── 1. Cluster by product-coverage overlap ──
         adjacency: dict[int, set[int]] = {idx: set() for idx in range(len(self.specs))}

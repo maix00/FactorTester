@@ -68,6 +68,7 @@ def test_runner_calculates_factor_incrementally_without_precomputed_values() -> 
     strategy = SignalStrategy(
         "incremental-strategy",
         "incremental-portfolio",
+        "live-close",
         products,
         lambda signal: np.array([signal.values["A"]]),
     )
@@ -90,7 +91,9 @@ def test_runner_calculates_factor_incrementally_without_precomputed_values() -> 
         market=market,
         factors=(factor,),
         lanes=(StrategyLane(strategy, ledger, OrderManager(ledger)),),
-        venues=(ExecutionVenue(broker.on_order_submitted),),
+        venues=(ExecutionVenue(
+            frozenset({strategy.portfolio_id}), broker.on_order_submitted
+        ),),
     )
 
     result = runner.run()

@@ -42,7 +42,6 @@ def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:
             columns=instruments,
         ),
     )
-    broker = ImmediateBroker(market)
     runner = BacktestRunner(
         BacktestPlan(
             RunIdentity("five-group-run"),
@@ -53,7 +52,13 @@ def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:
         market=market,
         factors=(factor,),
         lanes=lanes,
-        venues=(ExecutionVenue(broker.on_order_submitted),),
+        venues=tuple(
+            ExecutionVenue(
+                frozenset({lane.strategy.portfolio_id}),
+                ImmediateBroker(market).on_order_submitted,
+            )
+            for lane in lanes
+        ),
     )
 
     result = runner.run()

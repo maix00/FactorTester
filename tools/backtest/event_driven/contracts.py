@@ -33,6 +33,13 @@ class EvaluationSegment(str, Enum):
     OUT_OF_SAMPLE = "out_of_sample"
 
 
+class ExecutionIsolation(str, Enum):
+    """How strategy lanes consume simulated execution capacity."""
+
+    INDEPENDENT_COMPARISON = "independent_comparison"
+    SHARED_LIQUIDITY = "shared_liquidity"
+
+
 @dataclass(frozen=True, slots=True)
 class EvaluationWindow:
     start: pd.Timestamp
@@ -77,6 +84,7 @@ class BacktestPlan:
     timestamps: pd.DatetimeIndex
     instruments: tuple[str, ...]
     required_features: frozenset[ExecutionFeature] = frozenset()
+    execution_isolation: ExecutionIsolation = ExecutionIsolation.INDEPENDENT_COMPARISON
     factor_plan: Any | None = None
     evaluation_window: EvaluationWindow | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)

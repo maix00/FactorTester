@@ -25,6 +25,7 @@ def group_test_settings() -> ApplicationSettings:
         SettingTab("cost", "费用", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 40),
         SettingTab("liquidity", "流动性", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 50),
         SettingTab("market_rules", "市场规则", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+        SettingTab("evaluation", "样本划分", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 70),
     ):
         app.register_tab(tab)
     app.register_setting(SettingDefinition(
@@ -159,6 +160,16 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("configured_default", "使用注册默认值并标记近似"),
         ),
         chip_template="规则回退: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "evaluation_split",
+        "样本内截止日期",
+        "evaluation",
+        "date",
+        "",
+        ScopePolicy.LOCAL_ONLY,
+        chip_template="样本内截止: {value}",
+        help_text="截止日期之后为样本外；留空表示全部为样本内。",
     ))
     return app
 

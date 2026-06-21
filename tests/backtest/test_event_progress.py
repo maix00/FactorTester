@@ -17,7 +17,9 @@ def test_native_event_runner_reports_time_slice_progress() -> None:
     market = MarketState()
     broker = ImmediateBroker(market)
     ledger = Ledger("portfolio", products, 100_000, CashAccounting())
-    strategy = SignalStrategy("strategy", "portfolio", products, lambda signal: np.array([0.0]))
+    strategy = SignalStrategy(
+        "strategy", "portfolio", "factor", products, lambda signal: np.array([0.0])
+    )
     progress = []
     runner = BacktestRunner(
         BacktestPlan(RunIdentity("progress-run"), index, products),
@@ -25,7 +27,7 @@ def test_native_event_runner_reports_time_slice_progress() -> None:
         market=market,
         factors=(PrecomputedFactorPublisher("factor", pd.DataFrame({"A": [1.0, 2.0]}, index=index)),),
         lanes=(StrategyLane(strategy, ledger, OrderManager(ledger)),),
-        venues=(ExecutionVenue(broker.on_order_submitted),),
+        venues=(ExecutionVenue(frozenset({"portfolio"}), broker.on_order_submitted),),
         progress=progress.append,
     )
 

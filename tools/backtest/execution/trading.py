@@ -19,6 +19,12 @@ from ..event_driven.runtime import (
     ProductPrice,
 )
 from .fees import CommissionModel, FeeJournal, ZeroCommissionModel
+from ..market_rules import (
+    ContractRule,
+    RuleFallbackPolicy,
+    RuleProvider,
+    RuleUsageJournal,
+)
 
 
 class MarketState:
@@ -282,6 +288,46 @@ class EqualNotionalSizer:
         return quantities
 
 
+class ProviderContractSizer:
+    """Convert target weights using timestamped multiplier and lot-size rules."""
+
+    def __init__(
+        self,
+        market: MarketState,
+        provider: RuleProvider[ContractRule],
+        fallback: RuleFallbackPolicy,
+        usage: RuleUsageJournal,
+        *,
+        minor_per_major: int = 100,
+    ) -> None:
+        self.market = market
+        self.provider = provider
+        self.fallback = fallback
+        self.usage = usage
+        self.minor_per_major = minor_per_major
+
+    def target_quantities(self, intent: PortfolioIntent, ledger: Ledger) -> np.ndarray:
+        if intent.target_kind != TargetKind.WEIGHT or intent.values.ndim != 1:
+            raise ValueError("ProviderContractSizer requires one-dimensional target weights")
+        if float(np.sum(np.abs(intent.values))) > 1.0 + 1e-12:
+            raise ValueError("target weights exceed gross exposure 1")
+        equity_major = ledger.equity_minor / self.minor_per_major
+        quantities = np.zeros_like(intent.values, dtype=float)
+        for index, (instrument, weight) in enumerate(
+            zip(intent.instruments, intent.values, strict=True)
+        ):
+            resolved = self.provider.resolve(instrument, intent.timestamp, self.fallback)
+            self.usage.record("contract", instrument, intent.timestamp, resolved)
+            rule = resolved.value
+            raw = abs(float(weight)) * equity_major / (
+                self.market.prices[instrument] * rule.multiplier
+            )
+            quantities[index] = (
+                np.sign(weight) * np.floor(raw / rule.lot_size + 1e-12) * rule.lot_size
+            )
+        return quantities
+
+
 class OrderManager:
     """Convert target quantities to delta orders from the authoritative ledger."""
 
@@ -384,6 +430,9 @@ class VolumeParticipationBroker:
         portfolio_ids: set[str],
         *,
         participation_rate: float,
+        participation_provider: RuleProvider[float] | None = None,
+        fallback: RuleFallbackPolicy = RuleFallbackPolicy.STRICT_HISTORICAL,
+        rule_usage: RuleUsageJournal | None = None,
         volume_field: str = "VOLUME",
         commission_model: CommissionModel | None = None,
         fill_price: Callable[[Order, ProductPrice, float, float], float] | None = None,
@@ -392,6 +441,9 @@ class VolumeParticipationBroker:
             raise ValueError("broker requires portfolios and participation within (0, 1]")
         self.portfolio_ids = frozenset(portfolio_ids)
         self.participation_rate = participation_rate
+        self.participation_provider = participation_provider
+        self.fallback = fallback
+        self.rule_usage = rule_usage
         self.volume_field = volume_field
         self.commission_model = commission_model or ZeroCommissionModel()
         self._fill_price = fill_price or (
@@ -417,7 +469,19 @@ class VolumeParticipationBroker:
         if raw_volume is None or not np.isfinite(raw_volume) or raw_volume < 0:
             capacity = 0.0
         else:
-            capacity = float(raw_volume) * self.participation_rate
+            participation_rate = self.participation_rate
+            if self.participation_provider is not None:
+                resolved = self.participation_provider.resolve(
+                    quote.product, event.timestamp, self.fallback
+                )
+                participation_rate = float(resolved.value)
+                if self.rule_usage is not None:
+                    self.rule_usage.record(
+                        "liquidity", quote.product, event.timestamp, resolved
+                    )
+            if not 0 < participation_rate <= 1:
+                raise ValueError("participation rate must be within (0, 1]")
+            capacity = float(raw_volume) * participation_rate
         self._quotes[quote.product] = quote
         self._bar_capacity[quote.product] = capacity
         self._bar_timestamp[quote.product] = event.timestamp

@@ -38,12 +38,14 @@ def test_multiple_strategies_share_data_and_factor_but_not_portfolios() -> None:
     long_group = SignalStrategy(
         "combination-1:group-5",
         "portfolio-long",
+        "factor-combination-1",
         ("A", "B"),
         lambda signal: np.array([1.0, 0.0]),
     )
     short_group = SignalStrategy(
         "combination-1:group-1",
         "portfolio-short",
+        "factor-combination-1",
         ("A", "B"),
         lambda signal: np.array([0.0, 1.0]),
     )

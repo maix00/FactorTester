@@ -163,6 +163,16 @@
         bindLegacyLongShortDrawerChrome();
         bindGroupSectionToggles();
 
+        var chipToggle = document.getElementById('gt-toggle-config-chips');
+        var groupModule = document.getElementById('group_test_module');
+        if (chipToggle && groupModule) {
+            chipToggle.addEventListener('click', function() {
+                var hidden = groupModule.classList.toggle('gt-hide-config-chips');
+                chipToggle.textContent = hidden ? '显示设置标签' : '隐藏设置标签';
+                chipToggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+            });
+        }
+
         if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
             GT.panels.actions.updateRebalanceModeDescription();
         }

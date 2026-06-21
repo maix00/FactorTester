@@ -38,6 +38,7 @@ def test_market_to_factor_to_order_to_fill_to_ledger() -> None:
     strategy = SignalStrategy(
         "strategy-1",
         "portfolio-1",
+        "momentum",
         ("A", "B"),
         lambda signal: np.array([2.0, 0.0]),
     )

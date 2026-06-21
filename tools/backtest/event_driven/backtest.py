@@ -13,6 +13,7 @@ from .contracts import (
     BacktestProgress,
     BacktestResult,
     EvaluationSegment,
+    ExecutionIsolation,
     PortfolioResult,
     PortfolioSnapshot,
 )
@@ -30,6 +31,8 @@ from ..execution.trading import Ledger, MarketState, OrderManager
 
 
 class FactorActor(Protocol):
+    factor_alias: str
+
     def on_market_slice(
         self,
         event: EventEnvelope,
@@ -38,6 +41,7 @@ class FactorActor(Protocol):
 
 
 class StrategyActor(Protocol):
+    factor_alias: str
     strategy_id: str
     portfolio_id: str
 
@@ -66,10 +70,15 @@ class StrategyLane:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionVenue:
-    """Execution handlers; market-aware brokers opt into market events explicitly."""
+    """Execution handlers and the portfolios whose orders they may consume."""
 
+    portfolio_ids: frozenset[str]
     on_order: EventHandler
     on_market_data: EventHandler | None = None
+
+    def __post_init__(self) -> None:
+        if not self.portfolio_ids:
+            raise ValueError("execution venue must own at least one portfolio")
 
 
 class BacktestRunner:
@@ -117,24 +126,56 @@ class BacktestRunner:
         for venue in self.venues:
             if venue.on_market_data is not None:
                 runtime.subscribe(EventTopic.MARKET_DATA, venue.on_market_data)
-            runtime.subscribe(EventTopic.ORDER_SUBMITTED, venue.on_order)
+            runtime.subscribe(
+                EventTopic.ORDER_SUBMITTED,
+                _route_payload(venue.on_order, "portfolio_id", venue.portfolio_ids),
+            )
         for factor in self.factors:
             runtime.subscribe(EventTopic.MARKET_SLICE_CLOSED, factor.on_market_slice)
         recorders: dict[str, _PortfolioRecorder] = {}
         for lane in self.lanes:
-            runtime.subscribe(EventTopic.FACTOR_SIGNAL, lane.strategy.on_factor_signal)
+            runtime.subscribe(
+                EventTopic.FACTOR_SIGNAL,
+                _route_payload(
+                    lane.strategy.on_factor_signal,
+                    "factor_alias",
+                    frozenset({lane.strategy.factor_alias}),
+                ),
+            )
             if lane.intent_policy is None:
                 runtime.subscribe(
                     EventTopic.PORTFOLIO_INTENT,
-                    lane.order_manager.on_portfolio_intent,
+                    _route_payload(
+                        lane.order_manager.on_portfolio_intent,
+                        "portfolio_id",
+                        frozenset({lane.strategy.portfolio_id}),
+                    ),
                 )
             else:
-                runtime.subscribe(EventTopic.PORTFOLIO_INTENT, lane.intent_policy)
+                runtime.subscribe(
+                    EventTopic.PORTFOLIO_INTENT,
+                    _route_payload(
+                        lane.intent_policy,
+                        "portfolio_id",
+                        frozenset({lane.strategy.portfolio_id}),
+                    ),
+                )
                 runtime.subscribe(
                     EventTopic.PORTFOLIO_APPROVED,
-                    lane.order_manager.on_portfolio_intent,
+                    _route_payload(
+                        lane.order_manager.on_portfolio_intent,
+                        "portfolio_id",
+                        frozenset({lane.strategy.portfolio_id}),
+                    ),
                 )
-            runtime.subscribe(EventTopic.FILL, lane.ledger.on_fill)
+            runtime.subscribe(
+                EventTopic.FILL,
+                _route_payload(
+                    lane.ledger.on_fill,
+                    "portfolio_id",
+                    frozenset({lane.strategy.portfolio_id}),
+                ),
+            )
             runtime.subscribe(EventTopic.SETTLEMENT, lane.ledger.on_settlement)
             recorder = _PortfolioRecorder(lane.ledger, self.plan.evaluation_window)
             recorders[lane.strategy.portfolio_id] = recorder
@@ -185,6 +226,30 @@ class BacktestRunner:
         for lane in self.lanes:
             if set(lane.ledger.positions) != expected:
                 raise ValueError("every lane ledger must cover plan instruments")
+        owned = [portfolio_id for venue in self.venues for portfolio_id in venue.portfolio_ids]
+        if len(owned) != len(set(owned)):
+            raise ValueError("execution venues must not overlap portfolio ownership")
+        if set(owned) != set(portfolio_ids):
+            raise ValueError("execution venues must cover every lane portfolio exactly once")
+        if (
+            self.plan.execution_isolation == ExecutionIsolation.INDEPENDENT_COMPARISON
+            and any(len(venue.portfolio_ids) != 1 for venue in self.venues)
+        ):
+            raise ValueError(
+                "independent comparison requires one execution venue per portfolio"
+            )
+        venue_actors = [
+            actor
+            for venue in self.venues
+            if (actor := getattr(venue.on_order, "__self__", None)) is not None
+        ]
+        if (
+            self.plan.execution_isolation == ExecutionIsolation.INDEPENDENT_COMPARISON
+            and len({id(actor) for actor in venue_actors}) != len(venue_actors)
+        ):
+            raise ValueError(
+                "independent comparison requires distinct execution venue state"
+            )
 
     def _result(
         self,
@@ -228,3 +293,18 @@ class _PortfolioRecorder:
                 if self.evaluation_window is not None else EvaluationSegment.IN_SAMPLE
             ),
         ))
+
+
+def _route_payload(
+    handler: EventHandler,
+    attribute: str,
+    accepted: frozenset[str],
+) -> EventHandler:
+    """Route lane-scoped events before invoking mutable actors."""
+
+    def routed(event: EventEnvelope, runtime: EventRuntime):
+        if getattr(event.payload, attribute, None) not in accepted:
+            return None
+        return handler(event, runtime)
+
+    return routed

@@ -7,6 +7,11 @@ from tools.backtest.event_driven.contracts import PortfolioIntent, TargetKind
 from tools.backtest.risk.margin import FuturesMarginConstraint
 from tools.backtest.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
 from tools.backtest.execution.trading import CashAccounting, Ledger
+from tools.backtest.market_rules import (
+    RuleFallbackPolicy,
+    RuleUsageJournal,
+    TemporalRuleProvider,
+)
 
 
 def test_margin_constraint_scales_all_group_weights_proportionally() -> None:
@@ -22,7 +27,9 @@ def test_margin_constraint_scales_all_group_weights_proportionally() -> None:
     ledger = Ledger("portfolio-5", ("A", "B"), 1_000_000, CashAccounting())
     constraint = FuturesMarginConstraint(
         ledger,
-        {"A": 0.10, "B": 0.20},
+        TemporalRuleProvider({}, latest={"A": 0.10, "B": 0.20}),
+        RuleFallbackPolicy.LATEST_AVAILABLE,
+        RuleUsageJournal(),
         collateral_fraction=0.10,
     )
     approved: list[PortfolioIntent] = []
@@ -58,7 +65,9 @@ def test_margin_constraint_can_reject_whole_rebalance() -> None:
     ledger = Ledger("portfolio-1", ("A",), 1_000_000, CashAccounting())
     constraint = FuturesMarginConstraint(
         ledger,
-        {"A": 0.20},
+        TemporalRuleProvider({}, latest={"A": 0.20}),
+        RuleFallbackPolicy.LATEST_AVAILABLE,
+        RuleUsageJournal(),
         collateral_fraction=0.10,
         reject_instead_of_scale=True,
     )

@@ -1301,6 +1301,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
     from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+    from .backtest_runtime import resolve_request_settings
 
     flat_groups_raw = data.get('groups')
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
@@ -1430,6 +1431,15 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             'status': 400,
         }
 
+    group_ids = [str(group.get('id') or f'group-{index}') for index, group in enumerate(flat_groups_raw)]
+    try:
+        resolved_backtest_settings = resolve_request_settings(
+            data.get('backtest_settings'), group_ids
+        )
+    except ValueError as exc:
+        return False, {'success': False, 'error': str(exc), 'status': 400}
+    common_backtest_settings = resolved_backtest_settings[group_ids[0]]
+
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
     factor_family_alias = ''
@@ -1548,6 +1558,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         containment_ratio=containment_ratio,
         merge_cost_ratio=merge_cost_ratio,
         progress_hook=_progress,
+        single_runtime=common_backtest_settings['engine'] == 'native',
     )
     _progress(
         f"group tester batches overlap_ratio={overlap_ratio:.2f} "
@@ -1736,6 +1747,20 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         'simulation_count': len(valid_results),
         'cross_entry_ls_count': len(cross_ls_groups),
         'errors': errors if errors else None,
+        'backtest_settings': {
+            'engine': common_backtest_settings['engine'],
+            'factor_mode': common_backtest_settings['factor_mode'],
+            'market_rule_fallback': common_backtest_settings['market_rule_fallback'],
+            'groups': resolved_backtest_settings,
+        },
+        'evaluation_window': {
+            'start_ms': int(start_dt.ts.timestamp() * 1000),
+            'end_ms': int(end_dt.ts.timestamp() * 1000),
+            'split_ms': (
+                int(pd.Timestamp(common_backtest_settings['evaluation_split'], tz=start_dt.ts.tz).timestamp() * 1000)
+                if common_backtest_settings['evaluation_split'] else None
+            ),
+        },
     }
 
 @sft_bp.route('/get_group_snapshot', methods=['POST'])

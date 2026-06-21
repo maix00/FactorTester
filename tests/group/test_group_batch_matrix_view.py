@@ -82,3 +82,16 @@ def test_batch_execution_plan_reconstructs_merged_matrix_view(monkeypatch):
 
     # Local trade slices must be recoverable from the merged matrix.
     plan.validate_matrix_view()
+
+
+def test_native_single_runtime_never_splits_disjoint_specs() -> None:
+    specs = [
+        _make_spec(0, 'sub-a', 'FactorA', ['A'], ['A'], 1, flat_count=1),
+        _make_spec(1, 'sub-b', 'FactorB', ['Z'], ['Z'], 1, flat_count=1),
+    ]
+
+    ordinary = FactorGroupTester(specs, overlap_ratio=0.9)
+    native = FactorGroupTester(specs, overlap_ratio=0.9, single_runtime=True)
+
+    assert len(ordinary.build_overlap_batches()) == 2
+    assert native.build_overlap_batches() == [specs]

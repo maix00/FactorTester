@@ -11,6 +11,11 @@ from tools.backtest.event_driven.runtime import (
     ReplayEventSource,
 )
 from tools.backtest.execution.trading import VolumeParticipationBroker
+from tools.backtest.market_rules import (
+    RuleFallbackPolicy,
+    RuleUsageJournal,
+    TemporalRuleProvider,
+)
 
 
 def order(order_id: str, portfolio_id: str, quantity: float, timestamp) -> Order:
@@ -115,3 +120,34 @@ def test_isolated_brokers_do_not_make_candidate_groups_compete() -> None:
         ("p1", 4.0),
         ("p2", 4.0),
     ]
+
+
+def test_liquidity_participation_is_resolved_from_replaceable_provider() -> None:
+    timestamp = pd.Timestamp("2026-01-01 09:01")
+    usage = RuleUsageJournal()
+    broker = VolumeParticipationBroker(
+        {"portfolio"},
+        participation_rate=1.0,
+        participation_provider=TemporalRuleProvider({}, latest={"A": 0.25}),
+        fallback=RuleFallbackPolicy.LATEST_AVAILABLE,
+        rule_usage=usage,
+    )
+    runtime = EventRuntime("provider-capacity")
+    runtime.add_source(ReplayEventSource(
+        [timestamp], [ProductPrice("A", 100.0, {"VOLUME": 8.0})]
+    ))
+    runtime.subscribe(EventTopic.MARKET_DATA, broker.on_market_data)
+    runtime.subscribe(EventTopic.ORDER_SUBMITTED, broker.on_order_submitted)
+    runtime.publish(EventDraft(
+        EventTopic.ORDER_SUBMITTED,
+        timestamp,
+        order("o", "portfolio", 5.0, timestamp),
+    ))
+    runtime.run()
+
+    fills = [
+        record.event.payload for record in runtime.journal
+        if record.event.topic == EventTopic.FILL
+    ]
+    assert [fill.quantity for fill in fills] == [2.0]
+    assert usage.approximation_count == 1

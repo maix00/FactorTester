@@ -106,9 +106,9 @@
                 option.textContent = item.label;
                 control.appendChild(option);
             });
-        } else if (setting.control_template === 'number') {
+        } else if (setting.control_template === 'number' || setting.control_template === 'date') {
             control = document.createElement('input');
-            control.type = 'number';
+            control.type = setting.control_template;
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });

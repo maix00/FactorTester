@@ -53,6 +53,7 @@ function createDocument() {
     body: new MockElement('body'),
     createElement: (tag) => new MockElement(tag),
     getElementById: (id) => elements[id] || null,
+    querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {},
     registerElement: (id, el) => {

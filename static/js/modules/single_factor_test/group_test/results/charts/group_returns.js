@@ -123,6 +123,9 @@
         var series = buildSeries(groups, timeline);
         var initialCapital = options.initialCapital || 100000000;
         var baseCurrency = String(options.baseCurrency || 'CNY').toUpperCase();
+        var evaluationWindow = options.evaluationWindow || {};
+        var splitMs = evaluationWindow.split_ms || null;
+        var showOutOfSample = options.showOutOfSample === true;
         function formatMoney(value) {
             if (window.MoneyDisplay && window.MoneyDisplay.formatMajor) {
                 return window.MoneyDisplay.formatMajor(value, { currency: baseCurrency, decimals: 2 });
@@ -148,6 +151,13 @@
             },
             xAxis: {
                 type: 'datetime',
+                max: (!showOutOfSample && splitMs) ? splitMs : null,
+                plotBands: (showOutOfSample && splitMs) ? [{
+                    from: splitMs,
+                    to: evaluationWindow.end_ms || globalThis.Number.MAX_SAFE_INTEGER,
+                    color: 'rgba(217, 119, 6, 0.12)',
+                    label: { text: '样本外', style: { color: '#92400e', fontWeight: '600' } },
+                }] : [],
                 dateTimeLabelFormats: isIntraday
                     ? { day: '%m-%d', week: '%m-%d', month: '%Y-%m' }
                     : { day: '%Y-%m-%d', week: '%Y-%m-%d', month: '%Y-%m' },

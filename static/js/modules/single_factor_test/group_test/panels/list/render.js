@@ -347,7 +347,7 @@
                         }
                     }
                     h += '</span>';
-                    h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
+                    h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
                     for (ci = 0; ci < allChips.length; ci++) {
                         chip = allChips[ci];
                         if (chip.category !== 'config') continue;
@@ -462,7 +462,7 @@
         }
         h += '<span style="flex:1;"></span>';
         if (chips.length > 0) {
-            h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
+            h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
             for (var dci = 0; dci < chips.length; dci++) {
                 var dchip = chips[dci];
                 var ds = dchip.style || H.CHIP_STYLE_PLAIN;

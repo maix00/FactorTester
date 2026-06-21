@@ -8,7 +8,11 @@ from tools.backtest.event_driven.backtest import (
     ExecutionVenue,
     StrategyLane,
 )
-from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
+from tools.backtest.event_driven.contracts import (
+    BacktestPlan,
+    ExecutionIsolation,
+    RunIdentity,
+)
 from tools.backtest.factors.events import PrecomputedFactorPublisher
 from tools.backtest.event_driven.runtime import ProductPrice, ReplayEventSource
 from tools.backtest.execution.trading import (
@@ -38,7 +42,6 @@ def test_runner_wires_shared_data_into_isolated_strategy_ledgers() -> None:
         pd.DataFrame([[1.0, -1.0]], index=[timestamp], columns=instruments),
     )
     market = MarketState()
-    broker = ImmediateBroker(market)
     lanes = (
         make_lane("high", "portfolio-high", instruments, np.array([2.0, 0.0])),
         make_lane("low", "portfolio-low", instruments, np.array([0.0, 1.0])),
@@ -49,7 +52,13 @@ def test_runner_wires_shared_data_into_isolated_strategy_ledgers() -> None:
         market=market,
         factors=(factor,),
         lanes=lanes,
-        venues=(ExecutionVenue(broker.on_order_submitted),),
+        venues=tuple(
+            ExecutionVenue(
+                frozenset({lane.strategy.portfolio_id}),
+                ImmediateBroker(market).on_order_submitted,
+            )
+            for lane in lanes
+        ),
     )
 
     result = runner.run()
@@ -95,7 +104,9 @@ def test_runner_rejects_duplicate_portfolio_ownership() -> None:
                 pd.DataFrame([[1.0]], index=[timestamp], columns=instruments),
             ),),
             lanes=lanes,
-            venues=(ExecutionVenue(ImmediateBroker(market).on_order_submitted),),
+            venues=(ExecutionVenue(
+                frozenset({"same"}), ImmediateBroker(market).on_order_submitted
+            ),),
         )
     except ValueError as error:
         assert str(error) == "portfolio ids must be unique within a run"
@@ -103,15 +114,95 @@ def test_runner_rejects_duplicate_portfolio_ownership() -> None:
         raise AssertionError("duplicate portfolio ownership must be rejected")
 
 
+def test_runner_routes_factor_signals_only_to_their_strategy_lane() -> None:
+    timestamp = pd.Timestamp("2026-01-01 09:01")
+    instruments = ("A",)
+    market = MarketState()
+    lanes = (
+        make_lane("one", "portfolio-one", instruments, np.array([1.0]), "factor-1"),
+        make_lane("two", "portfolio-two", instruments, np.array([2.0]), "factor-2"),
+    )
+    runner = BacktestRunner(
+        BacktestPlan(RunIdentity("routed-run"), pd.DatetimeIndex([timestamp]), instruments),
+        market_source=ReplayEventSource([timestamp], [ProductPrice("A", 10.0)]),
+        market=market,
+        factors=(
+            PrecomputedFactorPublisher(
+                "factor-1", pd.DataFrame([[1.0]], index=[timestamp], columns=instruments)
+            ),
+            PrecomputedFactorPublisher(
+                "factor-2", pd.DataFrame([[2.0]], index=[timestamp], columns=instruments)
+            ),
+        ),
+        lanes=lanes,
+        venues=tuple(
+            ExecutionVenue(
+                frozenset({lane.strategy.portfolio_id}),
+                ImmediateBroker(market).on_order_submitted,
+            )
+            for lane in lanes
+        ),
+    )
+
+    result = runner.run()
+
+    assert result.portfolios["portfolio-one"].final_snapshot.positions == {"A": 1.0}
+    assert result.portfolios["portfolio-two"].final_snapshot.positions == {"A": 2.0}
+    assert len(result.portfolios["portfolio-one"].fills) == 1
+    assert len(result.portfolios["portfolio-two"].fills) == 1
+
+
+def test_comparison_rejects_shared_venue_but_shared_liquidity_is_explicit() -> None:
+    timestamp = pd.Timestamp("2026-01-01")
+    instruments = ("A",)
+    market = MarketState()
+    lanes = (
+        make_lane("one", "p1", instruments, np.array([1.0])),
+        make_lane("two", "p2", instruments, np.array([1.0])),
+    )
+    shared = ExecutionVenue(
+        frozenset({"p1", "p2"}), ImmediateBroker(market).on_order_submitted
+    )
+    common = dict(
+        market_source=ReplayEventSource([timestamp], [ProductPrice("A", 1.0)]),
+        market=market,
+        factors=(PrecomputedFactorPublisher(
+            "factor-1", pd.DataFrame([[1.0]], index=[timestamp], columns=instruments)
+        ),),
+        lanes=lanes,
+        venues=(shared,),
+    )
+
+    with np.testing.assert_raises_regex(
+        ValueError, "independent comparison requires one execution venue per portfolio"
+    ):
+        BacktestRunner(
+            BacktestPlan(RunIdentity("independent"), pd.DatetimeIndex([timestamp]), instruments),
+            **common,
+        )
+
+    BacktestRunner(
+        BacktestPlan(
+            RunIdentity("shared"),
+            pd.DatetimeIndex([timestamp]),
+            instruments,
+            execution_isolation=ExecutionIsolation.SHARED_LIQUIDITY,
+        ),
+        **common,
+    )
+
+
 def make_lane(
     strategy_id: str,
     portfolio_id: str,
     instruments: tuple[str, ...],
     target: np.ndarray,
+    factor_alias: str = "factor-1",
 ) -> StrategyLane:
     strategy = SignalStrategy(
         strategy_id,
         portfolio_id,
+        factor_alias,
         instruments,
         lambda signal: target,
     )

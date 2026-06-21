@@ -18,13 +18,15 @@ class SignalStrategy:
         self,
         strategy_id: str,
         portfolio_id: str,
+        factor_alias: str,
         instruments: tuple[str, ...],
         target_builder: Callable[[FactorSignal], np.ndarray],
     ) -> None:
-        if not strategy_id or not portfolio_id:
-            raise ValueError("strategy_id and portfolio_id must not be empty")
+        if not strategy_id or not portfolio_id or not factor_alias:
+            raise ValueError("strategy, portfolio, and factor ids must not be empty")
         self.strategy_id = strategy_id
         self.portfolio_id = portfolio_id
+        self.factor_alias = factor_alias
         self.instruments = instruments
         self._target_builder = target_builder
 
