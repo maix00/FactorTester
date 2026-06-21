@@ -28,6 +28,36 @@ class TargetKind(str, Enum):
     QUANTITY = "quantity"
 
 
+class EvaluationSegment(str, Enum):
+    IN_SAMPLE = "in_sample"
+    OUT_OF_SAMPLE = "out_of_sample"
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationWindow:
+    start: pd.Timestamp
+    end: pd.Timestamp
+    split: pd.Timestamp | None = None
+
+    def __post_init__(self) -> None:
+        start = pd.Timestamp(self.start)
+        end = pd.Timestamp(self.end)
+        split = None if self.split is None else pd.Timestamp(self.split)
+        if end < start or (split is not None and not start <= split < end):
+            raise ValueError("evaluation window requires start <= split < end")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+        object.__setattr__(self, "split", split)
+
+    def segment(self, timestamp: pd.Timestamp) -> EvaluationSegment:
+        timestamp = pd.Timestamp(timestamp)
+        if not self.start <= timestamp <= self.end:
+            raise ValueError("timestamp is outside the evaluation window")
+        if self.split is not None and timestamp > self.split:
+            return EvaluationSegment.OUT_OF_SAMPLE
+        return EvaluationSegment.IN_SAMPLE
+
+
 @dataclass(frozen=True, slots=True)
 class RunIdentity:
     """Correlation identity; it contains no credentials or user payloads."""
@@ -48,6 +78,7 @@ class BacktestPlan:
     instruments: tuple[str, ...]
     required_features: frozenset[ExecutionFeature] = frozenset()
     factor_plan: Any | None = None
+    evaluation_window: EvaluationWindow | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -59,6 +90,9 @@ class BacktestPlan:
             raise ValueError("timestamps must be monotonic increasing")
         if not self.instruments or len(set(self.instruments)) != len(self.instruments):
             raise ValueError("instruments must be non-empty and unique")
+        if self.evaluation_window is not None:
+            if self.timestamps[0] < self.evaluation_window.start or self.timestamps[-1] > self.evaluation_window.end:
+                raise ValueError("plan timestamps must be inside the evaluation window")
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +197,7 @@ class PortfolioSnapshot:
     equity_minor: int
     realized_pnl_minor: int
     positions: Mapping[str, float]
+    evaluation_segment: EvaluationSegment = EvaluationSegment.IN_SAMPLE
 
 
 @dataclass(frozen=True, slots=True)

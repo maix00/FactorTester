@@ -310,6 +310,12 @@
         if (root) state.application = root.getAttribute('data-application') || state.application;
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application)).then(function(index) {
             state.index = index;
+            var defaults = index.default_mounted_tabs || {};
+            [LOCAL, GROUP].forEach(function(mount) {
+                if (!state.mountedTabs[mount].length && Array.isArray(defaults[mount])) {
+                    state.mountedTabs[mount] = defaults[mount].slice();
+                }
+            });
             renderLocalTabs();
             attachGroupTabs();
             return index;

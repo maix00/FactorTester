@@ -61,8 +61,12 @@ class SettingTab:
     mount_points: tuple[TabMountPoint, ...]
     layout_template: str
     order: int
+    default_mount_points: tuple[TabMountPoint, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["mount_points"] = [mount.value for mount in self.mount_points]
+        value["default_mount_points"] = [
+            mount.value for mount in self.default_mount_points
+        ]
         return value

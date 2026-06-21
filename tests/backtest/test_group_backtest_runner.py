@@ -8,6 +8,8 @@ from tools.backtest.event_driven.runtime import ProductPrice, ReplayEventSource
 from tools.backtest.execution.trading import ImmediateBroker, MarketState
 from tools.backtest.factors.events import PrecomputedFactorPublisher
 from tools.backtest.strategies.group_backtest import build_quantile_group_lanes
+from tools.backtest.strategies.allocation import AllocationInput, EqualNotionalAllocator
+from tools.backtest.strategies.rebalance import OnFactorSignal
 
 
 def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:
@@ -24,6 +26,9 @@ def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:
         initial_cash_minor=100_000,
         point_values={instrument: 1.0 for instrument in instruments},
         lot_sizes={instrument: 1.0 for instrument in instruments},
+        allocator_factory=lambda _: EqualNotionalAllocator(),
+        allocation_inputs=lambda _, selected: AllocationInput(instruments, selected),
+        rebalance_policy_factory=lambda _: OnFactorSignal(),
     )
     source = ReplayEventSource(
         [timestamp] * len(instruments),

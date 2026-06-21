@@ -12,6 +12,7 @@ from .contracts import (
     BacktestPlan,
     BacktestProgress,
     BacktestResult,
+    EvaluationSegment,
     PortfolioResult,
     PortfolioSnapshot,
 )
@@ -135,7 +136,7 @@ class BacktestRunner:
                 )
             runtime.subscribe(EventTopic.FILL, lane.ledger.on_fill)
             runtime.subscribe(EventTopic.SETTLEMENT, lane.ledger.on_settlement)
-            recorder = _PortfolioRecorder(lane.ledger)
+            recorder = _PortfolioRecorder(lane.ledger, self.plan.evaluation_window)
             recorders[lane.strategy.portfolio_id] = recorder
             runtime.subscribe(EventTopic.REPORT, recorder.on_report)
         for observer in self.observers:
@@ -209,8 +210,9 @@ class BacktestRunner:
 
 
 class _PortfolioRecorder:
-    def __init__(self, ledger: Ledger) -> None:
+    def __init__(self, ledger: Ledger, evaluation_window=None) -> None:
         self.ledger = ledger
+        self.evaluation_window = evaluation_window
         self.snapshots: list[PortfolioSnapshot] = []
 
     def on_report(self, event: EventEnvelope, runtime: EventRuntime) -> None:
@@ -221,4 +223,8 @@ class _PortfolioRecorder:
             equity_minor=self.ledger.equity_minor,
             realized_pnl_minor=self.ledger.realized_pnl_minor,
             positions=dict(self.ledger.positions),
+            evaluation_segment=(
+                self.evaluation_window.segment(event.timestamp)
+                if self.evaluation_window is not None else EvaluationSegment.IN_SAMPLE
+            ),
         ))

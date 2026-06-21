@@ -15,11 +15,16 @@ from .registry import ApplicationSettings, BacktestSettingRegistry
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
     for tab in (
-        SettingTab("engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
+        SettingTab(
+            "engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
+        ),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
+        SettingTab("allocation", "分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
         SettingTab("rebalance", "调仓", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
         SettingTab("cost", "费用", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 40),
         SettingTab("liquidity", "流动性", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 50),
+        SettingTab("market_rules", "市场规则", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
     ):
         app.register_tab(tab)
     app.register_setting(SettingDefinition(
@@ -63,16 +68,42 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="资金: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "allocation_policy",
+        "组合分配",
+        "allocation",
+        "select",
+        "inverse_volatility",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("inverse_volatility", "等风险（波动率倒数）"),
+            SettingOption("equal_notional", "等市值"),
+            SettingOption("equal_margin", "等保证金（对照）"),
+        ),
+        chip_template="分配: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "volatility_lookback",
+        "波动率回看期数",
+        "allocation",
+        "number",
+        20,
+        ScopePolicy.GROUP_OVERRIDE,
+        minimum=2,
+        step=1,
+        chip_template="波动率窗口: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "rebalance_mode",
         "调仓规则",
         "rebalance",
         "select",
-        "each_period",
+        "on_factor_signal",
         ScopePolicy.GROUP_OVERRIDE,
         options=(
-            SettingOption("each_period", "每期调仓"),
+            SettingOption("on_factor_signal", "按因子频率调仓"),
             SettingOption("buy_and_hold", "买入持有"),
-            SettingOption("recycle", "退出后再配置"),
+            SettingOption("membership_change", "成员变化时调仓"),
+            SettingOption("scheduled", "按日历计划调仓"),
         ),
         chip_template="调仓: {value}",
     ))
@@ -114,6 +145,20 @@ def group_test_settings() -> ApplicationSettings:
         maximum=1.0,
         step=0.01,
         chip_template="参与率: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "market_rule_fallback",
+        "历史规则缺失处理",
+        "market_rules",
+        "select",
+        "latest_available",
+        ScopePolicy.LOCAL_ONLY,
+        options=(
+            SettingOption("latest_available", "使用最新规则并标记近似"),
+            SettingOption("strict_historical", "缺失即报错"),
+            SettingOption("configured_default", "使用注册默认值并标记近似"),
+        ),
+        chip_template="规则回退: {value}",
     ))
     return app
 

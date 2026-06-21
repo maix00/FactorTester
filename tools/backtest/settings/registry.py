@@ -37,6 +37,13 @@ class ApplicationSettings:
                 ]
                 for mount in TabMountPoint
             },
+            "default_mounted_tabs": {
+                mount.value: [
+                    tab.key for tab in ordered_tabs
+                    if mount in tab.default_mount_points
+                ]
+                for mount in TabMountPoint
+            },
             "defaults": {
                 key: {
                     "value": setting.default,
