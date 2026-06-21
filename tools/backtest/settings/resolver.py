@@ -1,62 +1,52 @@
-"""Resolve shared and per-strategy values without implicit compatibility rules."""
+"""Resolve schema defaults, local values, and sparse group overrides."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .contracts import ScopePolicy, SettingDefinition, SettingScope
+from .contracts import ScopePolicy, SettingDefinition
 from .registry import ApplicationSettings
 
 
-def resolve_strategy_settings(
+def resolve_group_settings(
     application: ApplicationSettings,
     *,
-    scopes: Mapping[str, str],
-    shared_values: Mapping[str, Any],
-    strategy_values: Mapping[str, Mapping[str, Any]],
-    strategy_ids: Sequence[str],
+    local_values: Mapping[str, Any],
+    group_values: Mapping[str, Mapping[str, Any]],
+    group_ids: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
-    unknown = (
-        set(scopes) | set(shared_values) |
-        {key for values in strategy_values.values() for key in values}
-    ) - application.settings.keys()
-    if unknown:
-        raise ValueError(f"unknown backtest settings: {sorted(unknown)}")
-    if set(strategy_values) - set(strategy_ids):
-        raise ValueError("strategy settings contain unknown strategy ids")
+    """Build complete settings using default -> local -> group precedence."""
+    unknown_local = set(local_values) - application.settings.keys()
+    unknown_group = {
+        key for values in group_values.values() for key in values
+    } - application.settings.keys()
+    if unknown_local or unknown_group:
+        raise ValueError(
+            f"unknown backtest settings: {sorted(unknown_local | unknown_group)}"
+        )
+    if set(group_values) - set(group_ids):
+        raise ValueError("group settings contain unknown group ids")
 
-    selected_scopes = {
-        key: _resolve_scope(definition, scopes.get(key))
-        for key, definition in application.settings.items()
-    }
-    resolved = {}
-    for strategy_id in strategy_ids:
-        values = {}
-        overrides = strategy_values.get(strategy_id, {})
+    resolved: dict[str, dict[str, Any]] = {}
+    for group_id in group_ids:
+        overrides = group_values.get(group_id, {})
+        values: dict[str, Any] = {}
         for key, definition in application.settings.items():
-            scope = selected_scopes[key]
-            if scope == SettingScope.SHARED:
-                value = shared_values.get(key, definition.default)
-                if key in overrides:
-                    raise ValueError(f"shared setting {key} cannot be overridden by {strategy_id}")
-            else:
-                value = overrides.get(key, definition.default)
-                if key in shared_values:
-                    raise ValueError(f"strategy setting {key} cannot be supplied as shared")
+            if (
+                definition.scope_policy == ScopePolicy.GROUP_ONLY
+                and key in local_values
+            ):
+                raise ValueError(f"group-only setting {key} cannot be set locally")
+            value = local_values.get(key, definition.default)
+            if key in overrides:
+                if definition.scope_policy == ScopePolicy.LOCAL_ONLY:
+                    raise ValueError(f"local-only setting {key} cannot be overridden")
+                value = overrides[key]
             _validate_value(definition, value)
             values[key] = value
-        resolved[strategy_id] = values
+        resolved[group_id] = values
     return resolved
-
-
-def _resolve_scope(definition: SettingDefinition, requested: str | None) -> SettingScope:
-    scope = definition.default_scope if requested is None else SettingScope(requested)
-    if definition.scope_policy == ScopePolicy.SHARED_ONLY and scope != SettingScope.SHARED:
-        raise ValueError(f"setting {definition.key} is shared-only")
-    if definition.scope_policy == ScopePolicy.STRATEGY_ONLY and scope != SettingScope.STRATEGY:
-        raise ValueError(f"setting {definition.key} is strategy-only")
-    return scope
 
 
 def _validate_value(definition: SettingDefinition, value: Any) -> None:

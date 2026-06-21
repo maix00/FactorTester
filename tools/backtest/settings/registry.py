@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .contracts import SettingDefinition, SettingTab
+from .contracts import SettingDefinition, SettingTab, TabMountPoint
 
 
 @dataclass(slots=True)
@@ -27,13 +27,24 @@ class ApplicationSettings:
         self.settings[setting.key] = setting
 
     def manifest(self) -> dict[str, Any]:
+        ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
         return {
             "schema_version": 1,
             "application": self.application,
-            "tabs": [
-                tab.to_dict()
-                for tab in sorted(self.tabs.values(), key=lambda item: item.order)
-            ],
+            "tab_lists": {
+                mount.value: [
+                    tab.to_dict() for tab in ordered_tabs if mount in tab.mount_points
+                ]
+                for mount in TabMountPoint
+            },
+            "defaults": {
+                key: {
+                    "value": setting.default,
+                    "tab_key": setting.tab,
+                    "scope_policy": setting.scope_policy.value,
+                }
+                for key, setting in self.settings.items()
+            },
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }
 

@@ -4,7 +4,7 @@ import pytest
 from flask import Flask
 
 from server.modules.single_factor_test import sft_bp
-from tools.backtest.settings import backtest_setting_registry, resolve_strategy_settings
+from tools.backtest.settings import backtest_setting_registry, resolve_group_settings
 
 
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
@@ -14,9 +14,17 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     engine_tab = application.tab_manifest("engine")
 
     assert "settings" not in index
-    assert [tab["key"] for tab in index["tabs"]] == [
+    assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "capital", "rebalance", "cost", "liquidity",
     ]
+    assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
+        "capital", "rebalance", "cost", "liquidity",
+    ]
+    assert index["defaults"]["engine"] == {
+        "value": "native_event",
+        "tab_key": "engine",
+        "scope_policy": "local_only",
+    }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine", "factor_execution",
     ]
@@ -44,33 +52,30 @@ def test_setting_index_is_a_real_lazy_loading_boundary() -> None:
     payload = app.test_client().get("/api/backtest/settings/group_test").get_json()
 
     assert payload["tab_url_template"].endswith("/tabs/{tab_key}")
-    assert all("settings" not in tab for tab in payload["tabs"])
+    assert all(
+        "settings" not in tab
+        for tabs in payload["tab_lists"].values()
+        for tab in tabs
+    )
     assert "settings" not in payload
 
 
-def test_selectable_settings_resolve_different_strategy_rules() -> None:
+def test_group_settings_override_local_values_for_each_combination() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    resolved = resolve_strategy_settings(
+    resolved = resolve_group_settings(
         application,
-        scopes={
-            "initial_capital": "shared",
-            "rebalance_mode": "strategy",
-            "fee_mode": "strategy",
-            "liquidity_mode": "strategy",
-            "participation_rate": "strategy",
-        },
-        shared_values={
+        local_values={
             "engine": "native_event",
             "factor_execution": "incremental",
             "initial_capital": 1_000_000.0,
+            "rebalance_mode": "each_period",
+            "fee_mode": "market",
+            "liquidity_mode": "volume_participation",
+            "participation_rate": 0.1,
         },
-        strategy_values={
+        group_values={
             "combination-a:group-1": {
-                "rebalance_mode": "each_period",
-                "fee_mode": "market",
-                "liquidity_mode": "volume_participation",
-                "participation_rate": 0.1,
             },
             "combination-b:group-1": {
                 "rebalance_mode": "buy_and_hold",
@@ -79,7 +84,7 @@ def test_selectable_settings_resolve_different_strategy_rules() -> None:
                 "participation_rate": 1.0,
             },
         },
-        strategy_ids=("combination-a:group-1", "combination-b:group-1"),
+        group_ids=("combination-a:group-1", "combination-b:group-1"),
     )
 
     assert resolved["combination-a:group-1"]["rebalance_mode"] == "each_period"
@@ -87,14 +92,13 @@ def test_selectable_settings_resolve_different_strategy_rules() -> None:
     assert resolved["combination-a:group-1"]["initial_capital"] == 1_000_000.0
 
 
-def test_shared_setting_cannot_be_overridden_per_strategy() -> None:
+def test_local_only_setting_cannot_be_overridden_by_group() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    with pytest.raises(ValueError, match="shared setting engine"):
-        resolve_strategy_settings(
+    with pytest.raises(ValueError, match="local-only setting engine"):
+        resolve_group_settings(
             application,
-            scopes={},
-            shared_values={},
-            strategy_values={"strategy-1": {"engine": "backtrader"}},
-            strategy_ids=("strategy-1",),
+            local_values={},
+            group_values={"group-1": {"engine": "backtrader"}},
+            group_ids=("group-1",),
         )

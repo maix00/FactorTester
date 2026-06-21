@@ -8,14 +8,19 @@ from typing import Any
 
 
 class SettingScope(str, Enum):
-    SHARED = "shared"
-    STRATEGY = "strategy"
+    LOCAL = "local"
+    GROUP = "group"
 
 
 class ScopePolicy(str, Enum):
-    SHARED_ONLY = "shared_only"
-    STRATEGY_ONLY = "strategy_only"
-    SELECTABLE = "selectable"
+    LOCAL_ONLY = "local_only"
+    GROUP_ONLY = "group_only"
+    GROUP_OVERRIDE = "group_override"
+
+
+class TabMountPoint(str, Enum):
+    LOCAL_SETTINGS = "local-settings"
+    GROUP_SETTINGS = "group-settings"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +37,6 @@ class SettingDefinition:
     control_template: str
     default: Any
     scope_policy: ScopePolicy
-    default_scope: SettingScope
     options: tuple[SettingOption, ...] = ()
     minimum: float | None = None
     maximum: float | None = None
@@ -43,15 +47,10 @@ class SettingDefinition:
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
             raise ValueError("setting definition requires key, label, tab, and template")
-        if self.scope_policy == ScopePolicy.SHARED_ONLY and self.default_scope != SettingScope.SHARED:
-            raise ValueError("shared-only setting must default to shared scope")
-        if self.scope_policy == ScopePolicy.STRATEGY_ONLY and self.default_scope != SettingScope.STRATEGY:
-            raise ValueError("strategy-only setting must default to strategy scope")
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["scope_policy"] = self.scope_policy.value
-        value["default_scope"] = self.default_scope.value
         return value
 
 
@@ -59,8 +58,11 @@ class SettingDefinition:
 class SettingTab:
     key: str
     label: str
+    mount_points: tuple[TabMountPoint, ...]
     layout_template: str
     order: int
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["mount_points"] = [mount.value for mount in self.mount_points]
+        return value

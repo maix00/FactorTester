@@ -1,29 +1,21 @@
-/** Backend-registered backtest settings with per-tab network lazy loading. */
+/** User-mounted, backend-registered, per-tab lazy backtest settings. */
 (function() {
     var GT = window.GroupTest;
     if (!GT) { console.warn('[GT backend-settings] bootstrap missing'); return; }
-    if (GT.backendSettings) { console.warn('[GT backend-settings] already loaded'); return; }
 
+    var LOCAL = 'local-settings';
+    var GROUP = 'group-settings';
     var state = {
-        application: null,
+        application: 'group_test',
         index: null,
-        activeTab: null,
-        activeStrategy: null,
         tabCache: Object.create(null),
         tabRequests: Object.create(null),
-        scopes: Object.create(null),
-        sharedValues: Object.create(null),
-        strategyValues: Object.create(null),
+        mountedTabs: { 'local-settings': [], 'group-settings': [] },
+        localValues: Object.create(null),
+        groupValues: Object.create(null),
+        activeGroup: null,
+        groupTabsAttached: false,
     };
-
-    function element(id) { return document.getElementById(id); }
-
-    function setStatus(message, isError) {
-        var target = element('gt-backtest-settings-status');
-        if (!target) return;
-        target.textContent = message || '';
-        target.style.color = isError ? '#b42318' : '#64748b';
-    }
 
     function requestJSON(url) {
         return fetch(url, { headers: { Accept: 'application/json' } }).then(function(response) {
@@ -36,8 +28,11 @@
         });
     }
 
+    function availableTabs(mount) {
+        return state.index && state.index.tab_lists ? (state.index.tab_lists[mount] || []) : [];
+    }
+
     function tabURL(tabKey) {
-        if (!state.index || !state.index.tab_url_template) throw new Error('设置目录缺少 tab_url_template');
         return state.index.tab_url_template.replace('{tab_key}', encodeURIComponent(tabKey));
     }
 
@@ -56,57 +51,52 @@
         return state.tabRequests[tabKey];
     }
 
-    function strategyValues() {
-        if (!state.activeStrategy) return null;
-        if (!state.strategyValues[state.activeStrategy]) {
-            state.strategyValues[state.activeStrategy] = Object.create(null);
+    function defaultsForTab(tabKey) {
+        var out = [];
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            if (defaults[key].tab_key === tabKey) out.push({ key: key, value: defaults[key].value });
+        });
+        return out;
+    }
+
+    function groupStore() {
+        if (!state.activeGroup) return null;
+        if (!state.groupValues[state.activeGroup]) state.groupValues[state.activeGroup] = Object.create(null);
+        return state.groupValues[state.activeGroup];
+    }
+
+    function effectiveValue(setting, mount) {
+        var groups = groupStore();
+        if (mount === GROUP && groups && Object.prototype.hasOwnProperty.call(groups, setting.key)) {
+            return groups[setting.key];
         }
-        return state.strategyValues[state.activeStrategy];
-    }
-
-    function settingScope(setting) {
-        return state.scopes[setting.key] || setting.default_scope;
-    }
-
-    function settingValue(setting) {
-        var scope = settingScope(setting);
-        if (scope === 'strategy') {
-            var values = strategyValues();
-            if (values && Object.prototype.hasOwnProperty.call(values, setting.key)) return values[setting.key];
+        if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
+            return state.localValues[setting.key];
         }
-        if (Object.prototype.hasOwnProperty.call(state.sharedValues, setting.key)) return state.sharedValues[setting.key];
-        return setting.default;
+        return state.index.defaults[setting.key].value;
     }
 
-    function writeValue(setting, value) {
-        if (settingScope(setting) === 'strategy') {
-            var values = strategyValues();
-            if (!values) throw new Error('按策略设置前必须选择策略');
-            values[setting.key] = value;
+    function writeValue(setting, mount, value) {
+        if (mount === GROUP) {
+            var groups = groupStore();
+            if (!groups) throw new Error('编辑组合设置前必须选择组合');
+            groups[setting.key] = value;
         } else {
-            state.sharedValues[setting.key] = value;
+            state.localValues[setting.key] = value;
         }
     }
 
-    function makeScopeSelect(setting, rerender) {
-        if (setting.scope_policy !== 'selectable') return null;
-        var select = document.createElement('select');
-        select.setAttribute('aria-label', setting.label + '作用域');
-        [['shared', '所有策略共用'], ['strategy', '每个策略']].forEach(function(item) {
-            var option = document.createElement('option');
-            option.value = item[0];
-            option.textContent = item[1];
-            select.appendChild(option);
-        });
-        select.value = settingScope(setting);
-        select.addEventListener('change', function() {
-            state.scopes[setting.key] = select.value;
-            rerender();
-        });
-        return select;
+    function chip(text, muted) {
+        var node = document.createElement('span');
+        node.textContent = text;
+        node.style.cssText = 'padding:3px 7px;border-radius:999px;font-size:11px;' + (
+            muted ? 'background:#f1f5f9;color:#64748b;' : 'background:#eef2ff;color:#3730a3;'
+        );
+        return node;
     }
 
-    function makeControl(setting) {
+    function makeControl(setting, mount, rerenderChips) {
         var control;
         if (setting.control_template === 'select') {
             control = document.createElement('select');
@@ -119,157 +109,252 @@
         } else if (setting.control_template === 'number') {
             control = document.createElement('input');
             control.type = 'number';
-            ['min', 'max', 'step'].forEach(function(attribute) {
-                var source = attribute === 'min' ? 'minimum' : attribute === 'max' ? 'maximum' : 'step';
-                if (setting[source] !== null && setting[source] !== undefined) control.setAttribute(attribute, setting[source]);
+            [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
+                if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
         } else {
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
-        control.id = 'gt-backtest-setting-' + setting.key;
-        control.value = settingValue(setting);
-        control.disabled = settingScope(setting) === 'strategy' && !state.activeStrategy;
+        control.value = effectiveValue(setting, mount);
+        control.disabled = mount === GROUP && !state.activeGroup;
         control.addEventListener('change', function() {
-            var value = setting.control_template === 'number' ? Number(control.value) : control.value;
-            writeValue(setting, value);
-            if (state.activeTab && state.tabCache[state.activeTab]) renderChips(state.tabCache[state.activeTab]);
+            writeValue(setting, mount, setting.control_template === 'number' ? Number(control.value) : control.value);
+            rerenderChips();
         });
         return control;
     }
 
-    function renderChips(manifest) {
-        var target = element('gt-backtest-settings-chips');
-        if (!target) return;
-        target.innerHTML = '';
-        (manifest.settings || []).forEach(function(setting) {
-            if (!setting.chip_template) return;
-            var chip = document.createElement('span');
-            chip.textContent = setting.chip_template.replace('{value}', String(settingValue(setting)));
-            chip.style.cssText = 'padding:3px 7px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;';
-            target.appendChild(chip);
-        });
-        target.style.display = target.childNodes.length ? 'flex' : 'none';
-    }
-
-    function renderSettingsGrid(manifest, panel) {
+    function renderManifest(manifest, mount, container) {
+        if (!manifest.tab || manifest.tab.layout_template !== 'settings-grid') {
+            throw new Error('不支持的页签布局模板: ' + (manifest.tab && manifest.tab.layout_template));
+        }
+        container.innerHTML = '';
+        var chips = document.createElement('div');
+        chips.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;';
         var grid = document.createElement('div');
         grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;';
+
+        function renderChips() {
+            chips.innerHTML = '';
+            (manifest.settings || []).forEach(function(setting) {
+                if (!setting.chip_template) return;
+                if (mount === GROUP) {
+                    var values = groupStore();
+                    if (!values || !Object.prototype.hasOwnProperty.call(values, setting.key)) return;
+                }
+                chips.appendChild(chip(
+                    setting.chip_template.replace('{value}', String(effectiveValue(setting, mount))),
+                    false
+                ));
+            });
+            chips.style.display = chips.childNodes.length ? 'flex' : 'none';
+        }
+
         (manifest.settings || []).forEach(function(setting) {
-            var row = document.createElement('div');
+            var row = document.createElement('label');
             row.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #e5e7eb;border-radius:6px;background:#fcfcfd;';
-            var header = document.createElement('div');
-            header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
-            var label = document.createElement('label');
-            label.htmlFor = 'gt-backtest-setting-' + setting.key;
-            label.textContent = setting.label;
-            label.style.fontWeight = '600';
-            header.appendChild(label);
-            var scope = makeScopeSelect(setting, function() { renderManifest(manifest); });
-            if (scope) header.appendChild(scope);
-            row.appendChild(header);
-            row.appendChild(makeControl(setting));
-            if (setting.help_text) {
-                var help = document.createElement('span');
-                help.textContent = setting.help_text;
-                help.style.cssText = 'font-size:11px;color:#64748b;';
-                row.appendChild(help);
-            }
+            var title = document.createElement('span');
+            title.textContent = setting.label;
+            title.style.fontWeight = '600';
+            row.appendChild(title);
+            row.appendChild(makeControl(setting, mount, renderChips));
             grid.appendChild(row);
         });
-        panel.appendChild(grid);
+        renderChips();
+        container.appendChild(chips);
+        container.appendChild(grid);
     }
 
-    var layoutRenderers = {
-        'settings-grid': renderSettingsGrid,
-    };
-
-    function renderManifest(manifest) {
-        var panel = element('gt-backtest-settings-panel');
-        if (!panel) return;
-        var template = manifest.tab && manifest.tab.layout_template;
-        var renderer = layoutRenderers[template];
-        if (!renderer) throw new Error('不支持的页签布局模板: ' + template);
-        panel.innerHTML = '';
-        renderer(manifest, panel);
-        renderChips(manifest);
-    }
-
-    function activateTab(tabKey) {
-        state.activeTab = tabKey;
-        document.querySelectorAll('[data-backtest-settings-tab]').forEach(function(button) {
-            var active = button.getAttribute('data-backtest-settings-tab') === tabKey;
-            button.classList.toggle('active', active);
-            button.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
-        var panel = element('gt-backtest-settings-panel');
-        if (panel) panel.textContent = '正在加载...';
-        setStatus('正在加载页签...');
+    function activateTab(tabKey, mount, container) {
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
         return loadTab(tabKey).then(function(manifest) {
-            if (state.activeTab !== tabKey) return manifest;
-            renderManifest(manifest);
-            setStatus('已加载');
+            renderManifest(manifest, mount, container);
             return manifest;
         }).catch(function(error) {
-            if (state.activeTab === tabKey && panel) panel.textContent = '加载失败：' + error.message;
-            setStatus('加载失败', true);
+            container.textContent = '加载失败：' + error.message;
             throw error;
         });
     }
 
-    function renderIndex(index) {
-        var tabBar = element('gt-backtest-settings-tabs');
-        if (!tabBar) return;
-        tabBar.innerHTML = '';
-        (index.tabs || []).forEach(function(tab) {
+    function isMounted(mount, tabKey) {
+        return state.mountedTabs[mount].indexOf(tabKey) >= 0;
+    }
+
+    function toggleMounted(mount, tabKey, enabled) {
+        var tabs = state.mountedTabs[mount];
+        var index = tabs.indexOf(tabKey);
+        if (enabled && index < 0) tabs.push(tabKey);
+        if (!enabled && index >= 0) tabs.splice(index, 1);
+        if (mount === LOCAL) renderLocalTabs();
+        if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+    }
+
+    function renderChooser(mount, container) {
+        container.innerHTML = '';
+        var intro = document.createElement('div');
+        intro.textContent = '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。';
+        intro.style.cssText = 'font-size:12px;color:#64748b;margin-bottom:10px;';
+        container.appendChild(intro);
+        availableTabs(mount).forEach(function(tab) {
+            var row = document.createElement('label');
+            row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-top:1px solid #eef2f7;';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = isMounted(mount, tab.key);
+            checkbox.addEventListener('change', function() { toggleMounted(mount, tab.key, checkbox.checked); });
+            var body = document.createElement('div');
+            var title = document.createElement('div');
+            title.textContent = tab.label;
+            title.style.fontWeight = '600';
+            body.appendChild(title);
+            var defaults = document.createElement('div');
+            defaults.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;';
+            defaultsForTab(tab.key).forEach(function(item) {
+                defaults.appendChild(chip(item.key + ': ' + item.value, true));
+            });
+            body.appendChild(defaults);
+            row.appendChild(checkbox);
+            row.appendChild(body);
+            container.appendChild(row);
+        });
+    }
+
+    function localHost() { return document.getElementById('gt-backtest-local-host'); }
+
+    function deactivateLocal() {
+        var host = localHost();
+        if (host) host.style.display = 'none';
+        document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
+            button.classList.remove('active');
+        });
+    }
+
+    function openLocal(tabKey) {
+        document.querySelectorAll('[data-local-settings-tab-panel]').forEach(function(panel) { panel.style.display = 'none'; });
+        document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
+        var host = localHost();
+        host.style.display = '';
+        document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
+            button.classList.toggle('active', button.getAttribute('data-backtest-local-tab') === tabKey);
+        });
+        if (tabKey === '__manage__') renderChooser(LOCAL, host);
+        else activateTab(tabKey, LOCAL, host).catch(function(error) { console.error(error); });
+    }
+
+    function renderLocalTabs() {
+        var bar = document.getElementById('gt-local-settings-tab-bar');
+        if (!bar || !state.index) return;
+        bar.querySelectorAll('[data-backtest-local-tab]').forEach(function(node) { node.remove(); });
+        availableTabs(LOCAL).forEach(function(tab) {
+            if (!isMounted(LOCAL, tab.key)) return;
             var button = document.createElement('button');
             button.type = 'button';
             button.className = 'btn btn-sm btn-outline-secondary';
             button.textContent = tab.label;
-            button.setAttribute('role', 'tab');
-            button.setAttribute('aria-selected', 'false');
-            button.setAttribute('data-backtest-settings-tab', tab.key);
-            button.addEventListener('click', function() {
-                activateTab(tab.key).catch(function(error) {
-                    console.error('[GT backend-settings] tab load failed', error);
-                });
+            button.setAttribute('data-backtest-local-tab', tab.key);
+            button.addEventListener('click', function() { openLocal(tab.key); });
+            bar.appendChild(button);
+        });
+        var manage = document.createElement('button');
+        manage.type = 'button';
+        manage.className = 'btn btn-sm btn-outline-secondary';
+        manage.textContent = '+ 回测设置';
+        manage.setAttribute('data-backtest-local-tab', '__manage__');
+        manage.addEventListener('click', function() { openLocal('__manage__'); });
+        bar.appendChild(manage);
+    }
+
+    function setActiveGroupFromUI() {
+        var registry = window.GT_CONFIG_REGISTRY;
+        var group = registry && registry.getReferenceGroup ? registry.getReferenceGroup() : null;
+        state.activeGroup = group && group.id ? String(group.id) : null;
+    }
+
+    function groupPanel(tabKey) {
+        return {
+            mount: function(container) {
+                setActiveGroupFromUI();
+                activateTab(tabKey, GROUP, container).catch(function(error) { console.error(error); });
+            },
+            unmount: function() {},
+        };
+    }
+
+    function attachGroupTabs() {
+        if (state.groupTabsAttached || !state.index || !GT.tabs) return;
+        state.groupTabsAttached = true;
+        availableTabs(GROUP).forEach(function(tab) {
+            GT.tabs.registerPanel({
+                name: 'backend-' + tab.key,
+                label: tab.label,
+                containerId: 'gt-backend-group-' + tab.key,
+                category: 3,
+                visible: function() { return isMounted(GROUP, tab.key); },
+                panel: groupPanel(tab.key),
             });
-            tabBar.appendChild(button);
+        });
+        GT.tabs.registerPanel({
+            name: 'backend-settings-manage',
+            label: '+ 回测设置',
+            containerId: 'gt-backend-group-manage',
+            category: 3,
+            panel: {
+                mount: function(container) { renderChooser(GROUP, container); },
+                unmount: function() {},
+            },
         });
     }
 
     function init() {
-        var root = element('gt-backtest-settings');
-        if (!root || state.index) return Promise.resolve(state.index);
-        state.application = root.getAttribute('data-application');
+        var root = localHost();
+        if (root) state.application = root.getAttribute('data-application') || state.application;
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application)).then(function(index) {
             state.index = index;
-            renderIndex(index);
-            setStatus('选择页签后按需加载');
+            renderLocalTabs();
+            attachGroupTabs();
             return index;
-        }).catch(function(error) {
-            setStatus('设置目录加载失败：' + error.message, true);
-            throw error;
         });
     }
 
-    function setActiveStrategy(strategyId) {
-        state.activeStrategy = strategyId === null || strategyId === undefined ? null : String(strategyId);
-        if (state.activeTab && state.tabCache[state.activeTab]) renderManifest(state.tabCache[state.activeTab]);
+    function apply(snapshot) {
+        snapshot = snapshot || {};
+        [LOCAL, GROUP].forEach(function(mount) {
+            state.mountedTabs[mount] = Array.isArray(snapshot.mounted_tabs && snapshot.mounted_tabs[mount])
+                ? snapshot.mounted_tabs[mount].slice()
+                : [];
+        });
+        state.localValues = Object.assign(Object.create(null), snapshot.local_values || {});
+        state.groupValues = Object.assign(Object.create(null), snapshot.group_values || {});
+        renderLocalTabs();
+        if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+    }
+
+    function registerSnapshot() {
+        if (!GT.localSettings || state.snapshotRegistered) return;
+        state.snapshotRegistered = true;
+        GT.localSettings.register({
+            key: 'backendBacktestSettings',
+            order: 90,
+            collect: collect,
+            apply: apply,
+            summarize: function() { return null; },
+        });
     }
 
     function collect() {
-        return {
+        return JSON.parse(JSON.stringify({
             application: state.application,
-            scopes: JSON.parse(JSON.stringify(state.scopes)),
-            shared_values: JSON.parse(JSON.stringify(state.sharedValues)),
-            strategy_values: JSON.parse(JSON.stringify(state.strategyValues)),
-        };
+            mounted_tabs: state.mountedTabs,
+            local_values: state.localValues,
+            group_values: state.groupValues,
+        }));
     }
 
     GT.backendSettings = {
         init: init,
-        activateTab: activateTab,
-        setActiveStrategy: setActiveStrategy,
+        attachGroupTabs: attachGroupTabs,
+        deactivateLocal: deactivateLocal,
+        registerSnapshot: registerSnapshot,
         collect: collect,
         _state: state,
     };

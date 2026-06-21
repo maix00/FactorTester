@@ -115,6 +115,9 @@
         // Phase 1 loads only the backend tab index. Tab schemas load on first click.
         call(dates().bindDateValidation, function(){})();
         call(dates().bindTimePrecisionSwitch, function(){})();
+        if (GT.backendSettings && typeof GT.backendSettings.registerSnapshot === 'function') {
+            GT.backendSettings.registerSnapshot();
+        }
         if (GT.backendSettings && typeof GT.backendSettings.init === 'function') {
             GT.backendSettings.init().catch(function(error) {
                 console.error('[GT backend-settings] index load failed', error);
@@ -139,6 +142,10 @@
         GT._deferredInitDone = true;
 
         if (GT.fee && typeof GT.fee.bind === 'function') GT.fee.bind();
+
+        if (GT.backendSettings && typeof GT.backendSettings.attachGroupTabs === 'function') {
+            GT.backendSettings.attachGroupTabs();
+        }
 
         window._getFeeModifications = function() {
             if (GT.fee && typeof GT.fee.getModifications === 'function') return GT.fee.getModifications();

@@ -401,6 +401,7 @@
         enterAddMode: _enterAddMode,
         exitAddMode: _exitAddMode,
         renderTabActions: _renderTabActions,
+        refreshTabBar: _renderTabBar,
         _selectedEditIds: function() { return M.getEditIds(); },
     };
 
