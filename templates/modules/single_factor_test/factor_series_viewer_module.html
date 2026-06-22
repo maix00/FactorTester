@@ -18,10 +18,12 @@
         </div>
         <div id="factor-series-viewer-body" style="display:none;">
             <div id="factor-series-controls" class="factor-series-controls">
+                <div class="factor-series-control-title">产品</div>
                 <div class="factor-series-product-picker">
                     <button type="button" id="factor-series-products-btn" class="factor-series-secondary-action">选择产品</button>
                     <span id="factor-series-path-summary" class="factor-series-path-summary"></span>
                 </div>
+                <div class="factor-series-control-title">因子</div>
                 <label class="factor-series-field">
                     <span>因子</span>
                     <select id="factor-series-factor"><option value="">加载中...</option></select>
@@ -57,7 +59,52 @@
 
 <div id="factor-series-products-overlay" class="factor-series-overlay" style="display:none;">
     <div class="factor-series-overlay-panel">
-        <div id="factor-series-product-selector-root" style="height:100%;"></div>
+        <div class="factor-series-overlay-header">
+            <div id="factor-series-overlay-title" class="factor-series-overlay-title">产品选择</div>
+            <button type="button" id="factor-series-products-close" class="factor-series-icon-btn" aria-label="关闭">×</button>
+        </div>
+        <div class="factor-series-overlay-body">
+            <div class="factor-series-overlay-left">
+                <div class="factor-series-overlay-left-title">📋 品种列表</div>
+                <div class="factor-series-overlay-tree-wrap">
+                    <div id="factor-series-tree-container" class="factor-series-overlay-tree"></div>
+                </div>
+            </div>
+            <div class="factor-series-overlay-right">
+                <div id="factor-series-chart-title" class="factor-series-overlay-chart-title">— 请选择品种 —</div>
+                <div id="factor-series-product-selected-summary" style="font-size:12px;color:#64748b;padding:0 12px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                <div class="factor-series-overlay-controls">
+                    <label>数据源：</label>
+                    <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
+                        <option value="">自动</option>
+                    </select>
+                    <label>频率：</label>
+                    <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
+                        <option value="">自动</option>
+                    </select>
+                    <span id="factor-series-price-type-wrap">
+                        <label style="margin-left:12px;">价格类型：</label>
+                        <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
+                            <option value="raw">原始</option>
+                            <option value="adjusted">复权</option>
+                        </select>
+                    </span>
+                </div>
+                <div id="factor-series-price-chart" class="factor-series-price-chart"></div>
+                <div id="factor-series-contract-table-container" style="display:none;">
+                    <table id="factor-series-contract-table" class="factor-series-contract-table">
+                        <thead>
+                            <tr>
+                                <th>合约</th>
+                                <th>起始日期</th>
+                                <th>结束日期</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -85,6 +132,12 @@
         border: 1px solid #eef2f7;
         border-radius: 8px;
         background: #fbfdff;
+    }
+    .factor-series-control-title {
+        width: 100%;
+        margin: 2px 0 2px;
+        font-size: 12px;
+        color: #64748b;
     }
     .factor-series-product-picker {
         display: flex;
@@ -136,6 +189,11 @@
         margin-top: 8px;
         max-width: 420px;
     }
+    .factor-series-inline-title {
+        font-size: 12px;
+        color: #64748b;
+        margin: 0 0 4px;
+    }
     .factor-series-path-summary {
         display: flex;
         gap: 4px;
@@ -176,7 +234,119 @@
         overflow: hidden;
         width: min(1020px, 96vw);
         max-height: 90vh;
+        min-height: min(86vh, 680px);
+    }
+    .factor-series-overlay-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f9fafb;
+        gap: 10px;
+    }
+    .factor-series-overlay-title {
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 15px;
+    }
+    .factor-series-overlay-body {
+        display: grid;
+        grid-template-columns: minmax(320px, 42%) minmax(360px, 1fr);
+        min-height: 0;
+        height: min(86vh, 680px);
+    }
+    .factor-series-overlay-left {
+        min-width: 0;
+        min-height: 0;
+        border-right: 1px solid #e5e7eb;
+        display: flex;
+        flex-direction: column;
+    }
+    .factor-series-overlay-right {
+        min-width: 0;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        padding: 6px 0;
+    }
+    .factor-series-overlay-left-title {
+        padding: 8px 12px;
+        border-bottom: 1px solid #eef2f7;
+        font-size: 12px;
+        font-weight: 700;
+        color: #475467;
+    }
+    .factor-series-overlay-tree-wrap {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 8px;
+        background: #fff;
+    }
+    .factor-series-overlay-tree {
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        box-sizing: border-box;
+    }
+    .factor-series-overlay-chart-title {
+        padding: 0 12px 8px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .factor-series-overlay-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 0 12px 10px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .factor-series-overlay-controls label {
+        font-size: 12px;
+        color: #555;
+    }
+    .factor-series-overlay-controls select {
+        font-size: 12px;
+        padding: 4px 8px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+    }
+    .factor-series-price-chart {
+        width: 100%;
+        height: 440px;
+        min-height: 360px;
         overflow: hidden;
+        padding: 0 4px;
+    }
+    .factor-series-contract-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    .factor-series-contract-table th {
+        position: sticky;
+        top: 0;
+        background: #f6f8fa;
+        z-index: 1;
+    }
+    .factor-series-contract-table td,
+    .factor-series-contract-table th {
+        padding: 6px 12px;
+        text-align: left;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+    .factor-series-contract-table a {
+        color: #0078d4;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .factor-series-contract-table a:hover {
+        text-decoration: underline;
     }
     #factor-series-chart-container {
         margin-top: 10px;
@@ -202,7 +372,7 @@
     #factor-series-term-table .contract-name-muted {
         color: #8a94a6;
     }
-    .factor-series-icon-btn {
+.factor-series-icon-btn {
         width: 28px;
         height: 28px;
         border: 1px solid #cbd5e1;
@@ -220,6 +390,19 @@
         .factor-series-controls .factor-series-field,
         .factor-series-product-picker {
             flex-basis: 100%;
+        }
+        .factor-series-overlay {
+            padding: 8px;
+        }
+        .factor-series-overlay-body {
+            grid-template-columns: 1fr;
+            height: min(90vh, 760px);
+        }
+        .factor-series-overlay-left {
+            border-right: 0;
+            border-bottom: 1px solid #e5e7eb;
+            height: 38vh;
+            min-height: 220px;
         }
     }
 </style>
@@ -246,6 +429,5 @@
     }
 </script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_charts.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_viewer_module.js') }}"></script>
