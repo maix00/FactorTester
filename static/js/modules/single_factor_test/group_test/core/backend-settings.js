@@ -16,7 +16,7 @@
         activeLocalTab: null,
         groupTabsAttached: false,
         settingDefs: Object.create(null),
-        chipsRegistered: false,
+        expandedProductMasks: Object.create(null),
     };
 
     function requestJSON(url) {
@@ -81,9 +81,100 @@
         return value === undefined || value === null ? '' : String(value);
     }
 
+    function escapeHTML(str) {
+        if (GT.escapeHTML) return GT.escapeHTML(str);
+        return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function chipText(setting, value) {
         var template = setting && setting.chip_template ? setting.chip_template : ((setting && setting.key || '') + ': {value}');
         return template.replace('{value}', displayValue(setting, value));
+    }
+
+    function valuesEqual(left, right) {
+        if (left === right) return true;
+        if (left === undefined && right === null) return true;
+        if (left === null && right === undefined) return true;
+        if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right);
+        return String(left) === String(right);
+    }
+
+    function resolveRootGroup(group) {
+        var current = group;
+        var seen = {};
+        while (current && current.parentId && GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.get) {
+            if (seen[current.id]) break;
+            seen[current.id] = true;
+            current = GT.groupSettings.groups.get(current.parentId);
+        }
+        return current || group;
+    }
+
+    function testerProducts(testerId) {
+        var subs = window.submissions || [];
+        for (var si = 0; si < subs.length; si++) {
+            if (String(subs[si].id) !== String(testerId)) continue;
+            var raw = (Array.isArray(subs[si].products) && subs[si].products.length)
+                ? subs[si].products
+                : (subs[si].product_groups || []);
+            return raw.map(function(item) {
+                if (typeof item === 'string') return { name: item, desc: '' };
+                return item && item.name ? { name: item.name, desc: item.desc || '' } : null;
+            }).filter(Boolean);
+        }
+        return [];
+    }
+
+    function testerLabel(testerId) {
+        var subs = window.submissions || [];
+        for (var si = 0; si < subs.length; si++) {
+            if (String(subs[si].id) === String(testerId)) {
+                return subs[si].product_group || subs[si].label || ('测试器 #' + subs[si].id);
+            }
+        }
+        return testerId ? String(testerId) : '';
+    }
+
+    function nodeProducts(group, seen) {
+        if (!group) return [];
+        seen = seen || {};
+        if (group.id && seen[group.id]) return [];
+        if (group.id) seen[group.id] = true;
+        var inherited = [];
+        if (group.parentId && GT.groupSettings && GT.groupSettings.groups) {
+            inherited = nodeProducts(GT.groupSettings.groups.get(group.parentId), seen);
+        } else {
+            inherited = testerProducts(group.testerId);
+        }
+        var mask = group.productMask || {};
+        if (!mask || Object.keys(mask).length === 0) return inherited;
+        return inherited.filter(function(product) { return product && mask[product.name]; });
+    }
+
+    function sameProductNames(left, right) {
+        var a = (left || []).map(function(p) { return p && p.name; }).filter(Boolean);
+        var b = (right || []).map(function(p) { return p && p.name; }).filter(Boolean);
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    function chipSourceGroup(group, chipDef) {
+        return chipDef && chipDef.inherit_from_root ? resolveRootGroup(group) : group;
+    }
+
+    function resolveChipValue(name, group, source, resolvers) {
+        var resolver = resolvers && resolvers[name];
+        if (resolver === 'tester_label') return testerLabel(source && source.testerId);
+        if (resolver === 'product_mask_count') return nodeProducts(group).length;
+        if (resolver === 'product_mask_expand_symbol') return state.expandedProductMasks && state.expandedProductMasks[group.id] ? '▾' : '▸';
+        return source && source[name] != null ? source[name] : '';
+    }
+
+    function renderChipTemplate(template, group, source, resolvers) {
+        return String(template || '').replace(/\{([^}]+)\}/g, function(_, key) {
+            return escapeHTML(resolveChipValue(key, group, source, resolvers));
+        }).replace(/\s+/g, ' ').trim();
     }
 
     function summaryTabs() {
@@ -444,10 +535,13 @@
         renderLocalSettingChips();
     }
 
+    function currentSelectionFirstId() {
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        return sel && sel.getFirst ? sel.getFirst() : null;
+    }
+
     function setActiveGroupFromUI() {
-        var registry = window.GT_CONFIG_REGISTRY;
-        var group = registry && registry.getReferenceGroup ? registry.getReferenceGroup() : null;
-        state.activeGroup = group && group.id ? String(group.id) : null;
+        state.activeGroup = currentSelectionFirstId();
     }
 
     function groupPanel(tabKey) {
@@ -461,51 +555,115 @@
     }
 
     function attachGroupTabs() {
-        if (state.groupTabsAttached || !state.index || !GT.tabs) return;
-        state.groupTabsAttached = true;
-        availableTabs(GROUP).forEach(function(tab) {
+        if (state.index) registerBackendFields(state.index);
+        if (!state.groupTabsAttached && state.index && GT.tabs) {
+            state.groupTabsAttached = true;
+            availableTabs(GROUP).forEach(function(tab) {
+                GT.tabs.registerPanel({
+                    name: 'backend-' + tab.key,
+                    label: tab.label,
+                    containerId: 'gt-backend-group-' + tab.key,
+                    category: 3,
+                    visible: function() { return isMounted(GROUP, tab.key); },
+                    panel: groupPanel(tab.key),
+                });
+            });
             GT.tabs.registerPanel({
-                name: 'backend-' + tab.key,
-                label: tab.label,
-                containerId: 'gt-backend-group-' + tab.key,
+                name: 'backend-settings-manage',
+                label: '+ 回测设置',
+                containerId: 'gt-backend-group-manage',
                 category: 3,
-                visible: function() { return isMounted(GROUP, tab.key); },
-                panel: groupPanel(tab.key),
+                panel: {
+                    mount: function(container) { renderChooser(GROUP, container); },
+                    unmount: function() {},
+                },
+            });
+        }
+    }
+
+    function backendSettingChips(group) {
+        if (!group) return [];
+        var defaults = state.index && state.index.defaults || {};
+        return Object.keys(defaults).filter(function(key) {
+            return Object.prototype.hasOwnProperty.call(group, key);
+        }).map(function(key) {
+            var value = group[key];
+            if (value === undefined || value === null || value === '') return null;
+            var setting = state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
+            var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
+            if (scope !== 'group_override' && scope !== 'group_only') return null;
+            if (defaults[key] && valuesEqual(value, defaults[key].value)) return null;
+            if (!setting.chip_template) return null;
+            return {
+                label: 'backtest-' + key,
+                html: escapeHTML(chipText(setting, value)),
+                category: 'config',
+                style: null,
+            };
+        }).filter(Boolean);
+    }
+
+    function manifestChips(group, categories) {
+        if (!group || !state.index) return [];
+        var filter = null;
+        if (categories) {
+            filter = {};
+            (Array.isArray(categories) ? categories : [categories]).forEach(function(category) { filter[category] = true; });
+        }
+        var chips = [];
+        (state.index.chip_fields || []).forEach(function(def) {
+            if (filter && !filter[def.category]) return;
+            var source = chipSourceGroup(group, def);
+            if (!source) return;
+            var missing = (def.source_keys || []).some(function(key) {
+                return source[key] === undefined || source[key] === null || source[key] === '';
+            });
+            if (missing) return;
+            if (def.key === 'product_mask') {
+                var ownMask = group.productMask || {};
+                if (!group.parentId || Object.keys(ownMask).length === 0) return;
+                var products = nodeProducts(group);
+                if (!products.length) return;
+                var parent = GT.groupSettings && GT.groupSettings.groups ? GT.groupSettings.groups.get(group.parentId) : null;
+                if (parent && sameProductNames(nodeProducts(parent), products)) return;
+            }
+            chips.push({
+                label: def.key,
+                html: renderChipTemplate(def.chip_template, group, source, def.value_resolvers || {}),
+                category: def.category,
+                clickable: !!def.clickable,
+                action: def.key === 'tester' ? 'tester-products' : (def.key === 'product_mask' ? 'toggle-product-mask' : ''),
+                style: null,
             });
         });
-        GT.tabs.registerPanel({
-            name: 'backend-settings-manage',
-            label: '+ 回测设置',
-            containerId: 'gt-backend-group-manage',
-            category: 3,
-            panel: {
-                mount: function(container) { renderChooser(GROUP, container); },
-                unmount: function() {},
-            },
+        return chips;
+    }
+
+    function getAllChips(group, categories) {
+        var chips = manifestChips(group, categories);
+        if (!categories || categories === 'config' || (Array.isArray(categories) && categories.indexOf('config') >= 0)) {
+            chips = chips.concat(backendSettingChips(group));
+        }
+        return chips;
+    }
+
+    function getOverrideChips(group) {
+        if (!group || !group.parentId || !GT.groupSettings || !GT.groupSettings.groups) return [];
+        var parent = GT.groupSettings.groups.get(group.parentId);
+        var base = {};
+        getAllChips(parent, ['config', 'derived']).forEach(function(chip) { base[chip.label] = chip.html; });
+        return getAllChips(group, ['config', 'derived']).filter(function(chip) {
+            return base[chip.label] !== chip.html;
         });
     }
 
-    function registerBackendChips() {
-        var registry = window.GT_CONFIG_REGISTRY;
-        if (state.chipsRegistered || !registry || !registry.registerChipProvider) return;
-        state.chipsRegistered = true;
-        registry.registerChipProvider({
-            category: 'config',
-            name: 'backend-backtest-settings',
-            getChips: function(group) {
-                if (!group) return [];
-                var defaults = state.index && state.index.defaults || {};
-                return Object.keys(defaults).filter(function(key) {
-                    return Object.prototype.hasOwnProperty.call(group, key);
-                }).map(function(key) {
-                    var setting = state.settingDefs[key] || { key: key, chip_template: key + ': {value}' };
-                    return {
-                        label: 'backtest-' + key,
-                        html: chipText(setting, group[key]),
-                    };
-                }).filter(Boolean);
-            },
-        });
+    function toggleProductMask(groupId) {
+        state.expandedProductMasks[groupId] = !state.expandedProductMasks[groupId];
+        return !!state.expandedProductMasks[groupId];
+    }
+
+    function isProductMaskExpanded(groupId) {
+        return !!state.expandedProductMasks[groupId];
     }
 
     function init() {
@@ -523,7 +681,6 @@
             });
             renderLocalTabs();
             attachGroupTabs();
-            registerBackendChips();
             return index;
         });
     }
@@ -541,6 +698,16 @@
                 key: key,
                 type: type,
                 default: item.value,
+            });
+        });
+        (index.chip_fields || []).forEach(function(chipDef) {
+            (chipDef.source_keys || []).forEach(function(key) {
+                if (!key) return;
+                api.registerField({
+                    key: key,
+                    type: key === 'productMask' ? 'object' : 'any',
+                    default: key === 'productMask' ? null : '',
+                });
             });
         });
     }
@@ -700,6 +867,10 @@
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,
         syncPageTimeDefaults: syncPageTimeDefaults,
+        getAllChips: getAllChips,
+        getOverrideChips: getOverrideChips,
+        toggleProductMask: toggleProductMask,
+        isProductMaskExpanded: isProductMaskExpanded,
         _state: state,
     };
 })();

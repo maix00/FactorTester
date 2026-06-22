@@ -11,11 +11,10 @@
     GT.panels = GT.panels || {};
     GT.panels.list = GT.panels.list || {};
 
-    var H, REG, SEL;
+    var H, SEL;
 
     function _ensureDeps() {
         if (!H) H = GT.panels.list._helpers;
-        if (!REG) REG = window.GT_CONFIG_REGISTRY;
     }
 
     function _setSEL(s) { SEL = s; }
@@ -270,7 +269,9 @@
     }
 
     function _chipsForGroup(group) {
-        return (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(group) : [];
+        return (GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function')
+            ? GT.backendSettings.getAllChips(group)
+            : [];
     }
 
     function _renderBaseSection(expandedBatches, collapsedIds, showFullChips) {
@@ -315,13 +316,13 @@
             }
             h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + H.escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="' + batchHeaderStyle + '">';
             h += '<span class="unified-batch-expand" style="margin-right:6px;width:20px;text-align:center;cursor:pointer;font-size:18px;line-height:1;">' + (isExpanded ? '▾' : '▸') + '</span>';
-            h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;">';
+            h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap;">';
             if (batchLetter) {
-                h += '<span style="font-weight:700;color:#4338ca;min-width:24px;">' + H.escapeHTML(batchLetter) + '</span>';
+                h += '<span style="' + H.CHIP_STYLE + '">' + H.escapeHTML(batchLetter) + '</span>';
             }
-            h += '<span style="font-weight:600;">' + H.escapeHTML(batch.factorAlias) + '</span>';
-            h += '<span style="color:#555;">' + H.escapeHTML(testerLabel) + '</span>';
-            h += '<span style="color:#888;font-size:11px;">' + batch.splitCount + '组</span>';
+            h += '<span style="' + H.CHIP_STYLE_PLAIN + '">' + H.escapeHTML(batch.factorAlias) + '</span>';
+            h += '<span class="unified-backend-chip" data-chip-action="tester-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="tester" style="' + H.CHIP_STYLE_PLAIN + 'cursor:pointer;">' + H.escapeHTML(testerLabel) + '</span>';
+            h += '<span style="' + H.CHIP_STYLE_PLAIN + '">' + batch.splitCount + '组</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
             h += '</div>';
@@ -347,8 +348,9 @@
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
-                        if (chip.label === 'tester') {
-                            h += '<span class="unified-tester-chip" data-tester-id="' + H.escapeHTML(bg.testerId) + '" style="' + s + ';">' + chip.html + '</span>';
+                        if (chip.label === 'factor_alias' || chip.label === 'tester') continue;
+                        if (chip.clickable) {
+                            h += '<span class="unified-backend-chip" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {
                             h += '<span style="' + s + ';">' + chip.html + '</span>';
                         }
@@ -360,8 +362,8 @@
                             chip = allChips[ci];
                             if (chip.category !== 'config') continue;
                             s = chip.style || H.CHIP_STYLE_PLAIN;
-                            if (chip.onClick) {
-                                var cls2 = ' class="unified-config-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
+                            if (chip.clickable) {
+                                var cls2 = ' class="unified-backend-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
                                 h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
                             } else {
                                 h += '<span style="' + s + ';">' + chip.html + '</span>';
@@ -443,14 +445,10 @@
         var shortAlias = H.deriveShortAlias(node);
         var products = H.nodeProducts(node);
         var chips = H.deriveOverrideChips(node);
-        var prodExpanded = REG && REG._expandedProducts && REG._expandedProducts[node.id] === true;
+        var prodExpanded = GT.backendSettings && GT.backendSettings.isProductMaskExpanded
+            ? GT.backendSettings.isProductMaskExpanded(node.id)
+            : false;
         var hasKids = node.children && node.children.length > 0;
-        var ownMask = node.productMask || {};
-        var ownMaskKeys = Object.keys(ownMask).filter(function(k) { return ownMask[k]; });
-        var parentProducts = node.parentId && GT.groupSettings.groups
-            ? H.nodeProducts(GT.groupSettings.groups.get(node.parentId))
-            : [];
-        var showProductChip = ownMaskKeys.length > 0 && (!parentProducts.length || products.length !== parentProducts.length);
 
         var nodeSelected = SEL && SEL.isSelected(node.id);
         var rowStyle = 'display:flex;align-items:center;flex-wrap:wrap;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;gap:2px 6px;';
@@ -475,19 +473,15 @@
             for (var dci = 0; dci < chips.length; dci++) {
                 var dchip = chips[dci];
                 var ds = dchip.style || H.CHIP_STYLE_PLAIN;
-                var dcls = dchip.onClick ? ' class="unified-config-chip" data-dgid="' + H.escapeHTML(node.id) + '" data-chip-label="' + H.escapeHTML(dchip.label) + '"' : '';
+                var dcls = dchip.clickable ? ' class="unified-backend-chip" data-gid="' + H.escapeHTML(node.id) + '" data-chip-action="' + H.escapeHTML(dchip.action || '') + '" data-chip-label="' + H.escapeHTML(dchip.label) + '"' : '';
                 h += '<span' + dcls + ' style="' + ds + ';">' + dchip.html + '</span>';
             }
             h += '</span>';
         }
-        if (showProductChip) {
-            var tri = prodExpanded ? '▾' : '▸';
-            h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
-        }
         h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
         h += '</div>';
 
-        if (showProductChip && prodExpanded && products.length > 0) {
+        if (prodExpanded && products.length > 0) {
             h += '<div class="unified-dg-product-list" style="margin-left:' + (indent + 34) + 'px;padding:4px 8px;border-left:2px solid #c7d2fe;font-size:11px;">';
             for (var pi = 0; pi < products.length; pi++) {
                 var pn = products[pi].name;

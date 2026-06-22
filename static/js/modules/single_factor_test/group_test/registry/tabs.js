@@ -80,11 +80,9 @@
         var el = document.getElementById('gt-section-status');
         if (!el) return;
         if (M.isMode('edit')) {
-            var REG = window.GT_CONFIG_REGISTRY;
-            var hasDirty = REG ? REG.hasDirty() : false;
             el.style.display = '';
-            el.style.color = hasDirty ? '#e65100' : '#888';
-            el.textContent = hasDirty ? '编辑中 - 未保存' : '编辑中';
+            el.style.color = '#888';
+            el.textContent = '编辑中';
         } else if (M.isMode('add')) {
             el.style.display = '';
             el.style.color = '#1565c0';
@@ -241,11 +239,6 @@
         var d = M.getAddDraft();
         if (!d) { alert('草稿丢失'); return; }
 
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.commitDirty === 'function') {
-            try { REG.commitDirty(); } catch(e) {}
-        }
-
         var onSubmit = M.getOnSubmit();
         if (typeof onSubmit === 'function') {
             onSubmit(d, { exitAdd: _exitAddMode });
@@ -256,8 +249,6 @@
     }
 
     function _enterEditMode(selection) {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.rollbackDirty();
         M.enterEdit(selection);
         _currentTab = 'list';
         _renderTabActions();
@@ -273,8 +264,6 @@
     }
 
     function _saveEditChanges() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.commitDirty();
         M.exitEdit();
         _renderTabActions();
         _renderTabBar();
@@ -366,12 +355,6 @@
             });
         }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
-        if (P.config && P.config.productSift) {
-            registerPanel({
-                name: 'config-product-sift', label: '🌾 品种筛选', containerId: 'config-product-sift',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.productSift
-            });
-        }
     }
 
     function init() {

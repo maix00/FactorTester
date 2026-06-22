@@ -94,7 +94,7 @@
         M.registerAddFlow({
             flow: 'derived',
             priority: 10,
-            defaultTab: 'config-product-sift',
+            defaultTab: 'list',
             condition: function(ctx) {
                 if (ctx && ctx.groups && ctx.groups.length >= 1) {
                     for (var i = 0; i < ctx.groups.length; i++) {
@@ -132,7 +132,7 @@
                 helpers.exitEdit();
                 M.enterAdd('derived');
                 M.setAddDraft(draft);
-                helpers.mountTab('config-product-sift');
+                helpers.mountTab('list');
                 helpers.renderActions();
             },
             standalone: true

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .contracts import SettingDefinition, SettingTab, TabMountPoint
+from .contracts import ChipDefinition, SettingDefinition, SettingTab, TabMountPoint
 
 
 @dataclass(slots=True)
@@ -13,6 +13,7 @@ class ApplicationSettings:
     application: str
     tabs: dict[str, SettingTab] = field(default_factory=dict)
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
+    chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
 
     def register_tab(self, tab: SettingTab) -> None:
         if tab.key in self.tabs:
@@ -25,6 +26,11 @@ class ApplicationSettings:
         if setting.tab not in self.tabs:
             raise ValueError(f"setting {setting.key} references unknown tab {setting.tab}")
         self.settings[setting.key] = setting
+
+    def register_chip_field(self, chip: ChipDefinition) -> None:
+        if chip.key in self.chip_fields:
+            raise ValueError(f"duplicate chip field: {chip.key}")
+        self.chip_fields[chip.key] = chip
 
     def manifest(self) -> dict[str, Any]:
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
@@ -49,9 +55,18 @@ class ApplicationSettings:
                     "value": setting.default,
                     "tab_key": setting.tab,
                     "scope_policy": setting.scope_policy.value,
+                    "chip_template": setting.chip_template,
+                    "options": [
+                        {"value": option.value, "label": option.label}
+                        for option in setting.options
+                    ],
                 }
                 for key, setting in self.settings.items()
             },
+            "chip_fields": [
+                chip.to_dict()
+                for chip in sorted(self.chip_fields.values(), key=lambda item: item.order)
+            ],
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }
 

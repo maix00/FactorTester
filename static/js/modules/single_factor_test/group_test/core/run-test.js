@@ -164,11 +164,6 @@
         var runBtn = document.getElementById('run_group_test_btn');
         var cancelBtn = document.getElementById('cancel_group_test_btn');
 
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
-            REG.commitDirty();
-        }
-
         // ── 0. 检查是否有分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
         var nonDerived = allBase.filter(function(g) { return !g.parentId; });

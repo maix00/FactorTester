@@ -117,12 +117,13 @@
     }
 
     // =========================================================================
-    // FIELD SCHEMA — base + dynamic (panel-registered) fields
+    // FIELD SCHEMA — structural fields + backend-registered runtime fields
     // =========================================================================
     //
-    // Core defines only structural fields. Config panel fields (fee, rebalance,
-    // liquidity, productMask, etc.) are injected at load time via registerField()
-    // from each panel's registry registration.
+    // Core defines only structural fields. Backtest settings, identity chips,
+    // and derived chip source fields are injected at load time via
+    // backendSettings after reading the backend manifest. UI panels do not own
+    // setting field definitions.
     //
     // registerField spec:
     //   { key, type: 'string'|'number'|'boolean'|'object'|'any', default, validate?, patchable? }
@@ -199,10 +200,10 @@
     _rebuildSchema();
 
     // ═══════════════════════════════════════════════════════════════
-    // Dynamic field registration — panels call this to inject fields
+    // Dynamic field registration — backend manifest injects fields
     // ═══════════════════════════════════════════════════════════════
 
-    /** Register a field spec from a config panel. Must be called before any groups are created. */
+    /** Register a field spec from the backend settings manifest before groups are created. */
     api.registerField = function(spec) {
         if (!spec || !spec.key) return;
         // dedup: remove existing entry with same key

@@ -615,7 +615,6 @@
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
         await _ensureGroupTestAdapters();
-        _commitGroupConfigDirty();
         var snapshot = await SnapshotRegistry.collectAll();
         if (window.GroupTest && GroupTest.backendSettings && typeof GroupTest.backendSettings.collectLocalSettings === 'function') {
             snapshot.local_settings = Object.assign(
@@ -662,17 +661,6 @@
         }
 
         refreshOuterSummaries();
-    }
-
-    function _commitGroupConfigDirty() {
-        try {
-            var reg = window.GT_CONFIG_REGISTRY;
-            if (reg && typeof reg.hasDirty === 'function' && reg.hasDirty() && typeof reg.commitDirty === 'function') {
-                reg.commitDirty();
-            }
-        } catch (e) {
-            console.warn('[global_template] commit group config dirty failed:', e);
-        }
     }
 
     /** 专门处理 submissions apply + testerId 重映射 */

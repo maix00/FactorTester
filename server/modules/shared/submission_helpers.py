@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Iterable, Sequence, Union
 
 import server.services.page_runtime as runtime_state
@@ -64,8 +65,48 @@ def product_attrs(p, *attrs: str) -> dict:
     result = {}
     for a in attrs:
         val = getattr(p, a, '')
+        if a == 'desc' and (not val or val == getattr(p, 'name', '')):
+            val = _openctp_product_desc(getattr(p, 'name', str(p))) or val
         result[a] = '' if val is None else val
     return result
+
+
+_EXCHANGE_SHORT_TO_OPENCTP = {
+    "CFE": "CFFEX",
+    "CFFEX": "CFFEX",
+    "CZC": "CZCE",
+    "CZCE": "CZCE",
+    "DCE": "DCE",
+    "GFE": "GFEX",
+    "GFEX": "GFEX",
+    "INE": "INE",
+    "SHF": "SHFE",
+    "SHFE": "SHFE",
+}
+
+
+@lru_cache(maxsize=512)
+def _openctp_product_desc(product_name: str) -> str:
+    """Return product Chinese name from OpenCTP SQLite cache; no sectors.csv fallback."""
+    if not product_name:
+        return ""
+    code, _, exchange_short = str(product_name).partition(".")
+    product_id = code.upper()
+    exchange_id = _EXCHANGE_SHORT_TO_OPENCTP.get(exchange_short.upper())
+    try:
+        from sources.OpenCTP.products import load_products_list
+
+        rows = load_products_list()
+    except Exception:
+        return ""
+    if exchange_id:
+        for row in rows:
+            if str(row.get("ExchangeID", "")).upper() == exchange_id and str(row.get("ProductID", "")).upper() == product_id:
+                return str(row.get("ProductName") or "")
+    for row in rows:
+        if str(row.get("ProductID", "")).upper() == product_id:
+            return str(row.get("ProductName") or "")
+    return ""
 
 
 # ── tester / submission 专用 ──────────────────────────────────────

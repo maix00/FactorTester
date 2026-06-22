@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .contracts import (
+    ChipDefinition,
     ScopePolicy,
     SettingDefinition,
     SettingOption,
@@ -41,6 +42,51 @@ def group_test_settings() -> ApplicationSettings:
         SettingTab("evaluation", "样本划分", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 70),
     ):
         app.register_tab(tab)
+    for chip in (
+        ChipDefinition(
+            "factor_alias",
+            "因子",
+            "identity",
+            "{factorAlias}",
+            ("factorAlias",),
+            order=10,
+            inherit_from_root=True,
+        ),
+        ChipDefinition(
+            "tester",
+            "测试器",
+            "identity",
+            "{testerLabel}",
+            ("testerId",),
+            order=20,
+            inherit_from_root=True,
+            value_resolvers={"testerLabel": "tester_label"},
+            clickable=True,
+        ),
+        ChipDefinition(
+            "group_index",
+            "分组序号",
+            "identity",
+            "{groupIndex}/{splitCount}",
+            ("groupIndex", "splitCount"),
+            order=30,
+            inherit_from_root=True,
+        ),
+        ChipDefinition(
+            "product_mask",
+            "品种范围",
+            "derived",
+            "📋 {productCount}品种 {expandSymbol}",
+            ("productMask",),
+            order=40,
+            value_resolvers={
+                "productCount": "product_mask_count",
+                "expandSymbol": "product_mask_expand_symbol",
+            },
+            clickable=True,
+        ),
+    ):
+        app.register_chip_field(chip)
     app.register_setting(SettingDefinition(
         "engine",
         "回测引擎",

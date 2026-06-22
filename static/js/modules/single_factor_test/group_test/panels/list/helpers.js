@@ -10,8 +10,6 @@
     GT.panels = GT.panels || {};
     GT.panels.list = GT.panels.list || {};
 
-    var REG = window.GT_CONFIG_REGISTRY;
-
     // ── Expand caches ──
     var _testerProductsCache = {};
     var _nodeFeeCache = {};
@@ -249,63 +247,28 @@
     }
 
     /**
-     * Get config chips for a child node using REG.getChips, diffed against root.
+     * Get backend-registered config/derived chips for a child node, diffed against parent.
      * Only shows chips where the resolved value differs from the root.
      */
     function deriveOverrideChips(node) {
         if (!node || !node.parentId) return [];
-        // Walk parentId chain to root
-        var cur = node;
-        var visited = {};
-        while (cur && cur.parentId) {
-            if (visited[cur.id]) { cur = null; break; }
-            visited[cur.id] = true;
-            cur = GT.groupSettings.groups && GT.groupSettings.groups.get(cur.parentId);
-        }
-        var bg = cur;
-        if (!bg) return [];
-        if (!REG || typeof REG.getChips !== 'function') return [];
-
-        var derivedSynth = synthGroupResolved(node);
-        if (!derivedSynth) return [];
-
-        var baseSynth = synthGroupResolved(bg);
-
-        var baseChips = REG.getChips(baseSynth);
-        var derivedChips = REG.getChips(derivedSynth);
-
-        var baseLabels = {};
-        for (var b = 0; b < baseChips.length; b++) {
-            baseLabels[baseChips[b].label] = baseChips[b].html;
-        }
-
-        var diff = [];
-        for (var d = 0; d < derivedChips.length; d++) {
-            var dc = derivedChips[d];
-            if (baseLabels[dc.label] !== dc.html) {
-                diff.push(dc);
-            }
-        }
-
-        return diff;
+        return GT.backendSettings && typeof GT.backendSettings.getOverrideChips === 'function'
+            ? GT.backendSettings.getOverrideChips(node)
+            : [];
     }
 
     /** Render all chips for a group */
     function renderAllChipsForGroup(g) {
         if (!g) return '';
-        if (!REG || typeof REG.getAllChips !== 'function') return '';
-        var allChips = REG.getAllChips(g);
+        var allChips = GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function'
+            ? GT.backendSettings.getAllChips(g)
+            : [];
         var html = '<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;">';
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
             var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
-            if (chip.onClick) {
-                var attr = g.parentId
-                    ? ('data-dgid="' + escapeHTML(g.id) + '"')
-                    : ('data-gid="' + escapeHTML(g.id) + '"');
-                html += '<span class="unified-config-chip" ' + attr
-                    + ' data-chip-label="' + escapeHTML(chip.label)
-                    + '" style="' + s + '">' + chip.html + '</span>';
+            if (chip.clickable) {
+                html += '<span class="unified-backend-chip" data-chip-action="' + escapeHTML(chip.action || '') + '" data-gid="' + escapeHTML(g.id) + '" data-chip-label="' + escapeHTML(chip.label) + '" style="' + s + '">' + chip.html + '</span>';
             } else {
                 html += '<span style="' + s + '">' + chip.html + '</span>';
             }

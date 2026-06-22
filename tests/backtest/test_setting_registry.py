@@ -26,10 +26,19 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "liquidity", "margin",
     ]
-    assert index["defaults"]["engine"] == {
+    assert index["defaults"]["engine"]["value"] == "native"
+    assert index["defaults"]["engine"]["tab_key"] == "engine"
+    assert index["defaults"]["engine"]["scope_policy"] == "local_only"
+    assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
+    assert index["defaults"]["engine"]["options"][0] == {
         "value": "native",
-        "tab_key": "engine",
-        "scope_policy": "local_only",
+        "label": "Native 事件驱动回测工具",
+    }
+    assert {chip["key"] for chip in index["chip_fields"]} >= {
+        "factor_alias",
+        "tester",
+        "group_index",
+        "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine",

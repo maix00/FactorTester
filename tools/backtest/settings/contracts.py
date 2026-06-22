@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -52,6 +52,28 @@ class SettingDefinition:
         value = asdict(self)
         value["scope_policy"] = self.scope_policy.value
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class ChipDefinition:
+    key: str
+    label: str
+    category: str
+    chip_template: str
+    source_keys: tuple[str, ...]
+    order: int = 100
+    inherit_from_root: bool = False
+    value_resolvers: dict[str, str] = field(default_factory=dict)
+    clickable: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.category or not self.chip_template:
+            raise ValueError("chip definition requires key, label, category, and template")
+        if not self.source_keys:
+            raise ValueError("chip definition requires at least one source key")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)

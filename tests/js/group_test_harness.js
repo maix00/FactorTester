@@ -85,26 +85,8 @@ function resetGroupTest() {
   };
   global.submissions = [];
   delete global.GroupTest;
-  delete global.GT_CONFIG_REGISTRY;
   load('bootstrap.js');
   return global.GroupTest;
-}
-
-function registerConfigFields(GT) {
-  [
-    { key: 'feeMode', type: 'string', default: 'none' },
-    { key: 'feeRate', type: 'number', default: null },
-    { key: 'feeMap', type: 'object', default: null },
-    { key: 'feeSensitivity', type: 'number', default: 1 },
-    { key: 'useCloseToday', type: 'boolean', default: false },
-    { key: 'rebalance_trigger', type: 'string', default: 'on_factor_signal' },
-    { key: 'position_policy', type: 'string', default: 'rebalance_to_target' },
-    { key: 'liquidityMode', type: 'string', default: 'infinite' },
-    { key: 'liquidityPercent', type: 'number', default: 100 },
-    { key: 'productMask', type: 'object', default: null },
-    { key: 'products', type: 'object', default: null },
-    { key: 'productNames', type: 'object', default: null },
-  ].forEach((spec) => GT.groupSettings.registerField(spec));
 }
 
 if (require.main === module) {
@@ -116,6 +98,5 @@ module.exports = {
   assert,
   MockElement,
   resetGroupTest,
-  registerConfigFields,
   load,
 };

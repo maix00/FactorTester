@@ -224,15 +224,11 @@
     // ── edit mode ──
 
     api.enterEdit = function(selection) {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.rollbackDirty === 'function') REG.rollbackDirty();
         _panelMode = 'edit';
         _editSelection = selection || {};
     };
 
     api.exitEdit = function() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.rollbackDirty === 'function') REG.rollbackDirty();
         _panelMode = 'list';
         _editSelection = null;
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
