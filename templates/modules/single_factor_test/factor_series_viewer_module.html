@@ -71,44 +71,43 @@
                     <div id="factor-series-tree-container" class="factor-series-overlay-tree"></div>
                 </div>
             </div>
-            <div class="factor-series-overlay-right">
-                <div id="factor-series-chart-title" class="factor-series-overlay-chart-title">— 请选择品种 —</div>
-                <div id="factor-series-product-selected-summary" style="font-size:12px;color:#64748b;padding:0 12px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-                <div id="factor-series-price-chart" class="factor-series-price-chart"></div>
-                <div id="factor-series-overlay-result-bar" class="factor-series-overlay-result-bar">
-                    <div class="factor-series-overlay-result-title">价格参数</div>
-                    <div class="factor-series-overlay-controls">
-                        <label>数据源：</label>
-                        <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
-                            <option value="">自动</option>
-                        </select>
-                        <label>频率：</label>
-                        <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
-                            <option value="">自动</option>
-                        </select>
-                        <span id="factor-series-price-type-wrap">
-                            <label style="margin-left:12px;">价格类型：</label>
-                            <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
-                                <option value="raw">原始</option>
-                                <option value="adjusted">复权</option>
-                            </select>
-                        </span>
-                    </div>
-                    <div id="factor-series-contract-table-container" style="display:none;">
-                        <table id="factor-series-contract-table" class="factor-series-contract-table">
-                            <thead>
-                                <tr>
-                                    <th>合约</th>
-                                    <th>起始日期</th>
-                                    <th>结束日期</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
         </div>
+    </div>
+</div>
+
+<div id="factor-series-overlay-result-bar" class="factor-series-overlay-result-bar">
+    <div id="factor-series-chart-title" class="factor-series-overlay-chart-title">— 请选择品种 —</div>
+    <div id="factor-series-product-selected-summary" class="factor-series-result-summary">—</div>
+    <div id="factor-series-price-chart" class="factor-series-price-chart"></div>
+    <div class="factor-series-overlay-result-title">价格参数</div>
+    <div class="factor-series-overlay-controls">
+        <label>数据源：</label>
+        <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
+            <option value="">自动</option>
+        </select>
+        <label>频率：</label>
+        <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
+            <option value="">自动</option>
+        </select>
+        <span id="factor-series-price-type-wrap">
+            <label style="margin-left:12px;">价格类型：</label>
+            <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
+                <option value="raw">原始</option>
+                <option value="adjusted">复权</option>
+            </select>
+        </span>
+    </div>
+    <div id="factor-series-contract-table-container" style="display:none;">
+        <table id="factor-series-contract-table" class="factor-series-contract-table">
+            <thead>
+                <tr>
+                    <th>合约</th>
+                    <th>起始日期</th>
+                    <th>结束日期</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
     </div>
 </div>
 
@@ -261,7 +260,6 @@
     }
     .factor-series-overlay-body {
         display: grid;
-        grid-template-columns: minmax(320px, 42%) minmax(360px, 1fr);
         min-height: 0;
         height: min(86vh, 680px);
     }
@@ -271,14 +269,6 @@
         border-right: 1px solid #e5e7eb;
         display: flex;
         flex-direction: column;
-    }
-    .factor-series-overlay-right {
-        min-width: 0;
-        min-height: 0;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        padding: 6px 0;
     }
     .factor-series-overlay-left-title {
         padding: 8px 12px;
@@ -315,9 +305,10 @@
         border-bottom: 1px solid #e5e7eb;
     }
     .factor-series-overlay-result-bar {
-        margin-top: 8px;
+        margin-top: 10px;
+        margin-bottom: 16px;
         border-top: 1px solid #e5e7eb;
-        padding: 8px 12px 6px;
+        padding: 10px 12px 10px;
         background: #f9fbff;
     }
     .factor-series-overlay-result-title {
@@ -341,6 +332,14 @@
         min-height: 360px;
         overflow: hidden;
         padding: 0 4px;
+    }
+    .factor-series-result-summary {
+        font-size: 12px;
+        color: #64748b;
+        padding: 0 4px 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .factor-series-contract-table {
         width: 100%;
@@ -415,7 +414,6 @@
         }
         .factor-series-overlay-body {
             grid-template-columns: 1fr;
-            height: min(90vh, 760px);
         }
         .factor-series-overlay-left {
             border-right: 0;
