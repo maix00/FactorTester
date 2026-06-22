@@ -220,6 +220,14 @@ document.dispatchEvent = () => {};
 global.CustomEvent = function CustomEvent(type, init) {
   return { type, detail: init && init.detail };
 };
+global.getSharedRuntimeTimeRange = () => ({
+  start_date: '2025-05-06',
+  end_date: '2025-05-30',
+  start_time: '09:01',
+  end_time: '14:59',
+  timezone: 'Asia/Shanghai',
+  is_trading_day: false,
+});
 
 return GT.backendSettings.init().then(async () => {
   load('panels/list/selection-state.js');
@@ -230,6 +238,40 @@ return GT.backendSettings.init().then(async () => {
     refreshTabBar() {},
   };
   GT.backendSettings.attachGroupTabs();
+
+  assert.equal(GT.backendSettings._state.index.defaults.start_date.value, '2025-05-06');
+  assert.equal(GT.backendSettings._state.index.defaults.end_date.value, '2025-05-30');
+  assert.equal(GT.backendSettings._state.index.defaults.start_time.value, '09:01');
+  assert.equal(GT.backendSettings._state.index.defaults.end_time.value, '14:59');
+  assert.equal(GT.backendSettings.collectLocalSettings().start_date, undefined);
+  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2025-05-06');
+
+  GT.backendSettings.applyFlatSnapshot({
+    local_settings: {
+      start_date: '2024-01-02',
+      end_date: '2024-01-31',
+      start_time: '10:00',
+      end_time: '14:30',
+      time_precision: 'exact',
+      timezone: 'Asia/Shanghai',
+    },
+  });
+  global.getSharedRuntimeTimeRange = () => ({
+    start_date: '2025-09-01',
+    end_date: '2025-09-30',
+    start_time: '09:00',
+    end_time: '15:00',
+    timezone: 'UTC',
+    is_trading_day: true,
+  });
+  assert.equal(
+    GT.backendSettings.copyLocalDefaultsFromProvider('page_time_range', {
+      blockOnUserKeys: ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'],
+    }),
+    false,
+  );
+  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2024-01-02');
+  assert.equal(GT.backendSettings.runPayload()._runtime_window.timezone, 'Asia/Shanghai');
 
   window.submissions = [{
     id: 'tester-chip-order',

@@ -5,6 +5,7 @@
 
     var LOCAL = 'local-settings';
     var GROUP = 'group-settings';
+    var RUN_WINDOW_KEYS = ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'];
     var state = {
         application: 'group_test',
         index: null,
@@ -17,6 +18,7 @@
         groupTabsAttached: false,
         settingDefs: Object.create(null),
         expandedProductMasks: Object.create(null),
+        localDefaultProviders: Object.create(null),
     };
 
     function requestJSON(url) {
@@ -379,7 +381,9 @@
                 option.textContent = item.label;
                 control.appendChild(option);
             });
-        } else if (setting.control_template === 'number' || setting.control_template === 'date' || setting.control_template === 'time') {
+        } else if (setting.control_template === 'date') {
+            control = makeDateControl(setting, mount);
+        } else if (setting.control_template === 'number' || setting.control_template === 'time') {
             control = document.createElement('input');
             control.type = setting.control_template;
             if (setting.control_template === 'time') control.step = '60';
@@ -400,6 +404,147 @@
             rerenderAfterChange();
         });
         return control;
+    }
+
+    function makeDateControl(setting, mount) {
+        var wrap = document.createElement('span');
+        wrap.className = 'gt-backtest-date-control';
+        wrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
+        var year = makeDatePart('year', '年', 4, '72px');
+        var month = makeDatePart('month', '月', 2, '46px');
+        var day = makeDatePart('day', '日', 2, '46px');
+        wrap.appendChild(year);
+        wrap.appendChild(dateSep('-'));
+        wrap.appendChild(month);
+        wrap.appendChild(dateSep('-'));
+        wrap.appendChild(day);
+
+        function setValue(value) {
+            var parts = parseDateParts(value);
+            year.value = parts.year;
+            month.value = parts.month;
+            day.value = parts.day;
+        }
+
+        function getValue() {
+            var y = sanitizeDigits(year.value).slice(-4);
+            var m = padDatePart(sanitizeDigits(month.value), 2);
+            var d = padDatePart(sanitizeDigits(day.value), 2);
+            if (y.length !== 4 || !m || !d) return '';
+            return y + '-' + m + '-' + d;
+        }
+
+        function normalizePart(part) {
+            part.value = sanitizeDigits(part.value).slice(part === year ? -4 : -2);
+            if (part === year) {
+                if (part.value.length === 4) {
+                    var y = clampNumber(part.value, 1900, 2100);
+                    part.value = String(y);
+                }
+                return;
+            }
+            if (part === month) {
+                part.value = padDatePart(clampNumber(part.value, 1, 12), 2);
+                normalizeDay();
+                return;
+            }
+            normalizeDay();
+        }
+
+        function normalizeDay() {
+            var y = parseInt(year.value, 10);
+            var m = parseInt(month.value, 10);
+            var maxDay = window.DateUtils && y && m ? window.DateUtils.getMaxDay(y, m) : 31;
+            day.value = padDatePart(clampNumber(day.value, 1, maxDay), 2);
+        }
+
+        [year, month, day].forEach(function(part) {
+            part.addEventListener('focus', function() { this.select(); });
+            part.addEventListener('input', function() {
+                this.value = sanitizeDigits(this.value).slice(this === year ? -4 : -2);
+            });
+            part.addEventListener('blur', function() {
+                normalizePart(this);
+                dispatchControlChange(wrap);
+            });
+            part.addEventListener('change', function() {
+                normalizePart(this);
+                dispatchControlChange(wrap);
+            });
+        });
+
+        Object.defineProperty(wrap, 'value', {
+            get: getValue,
+            set: setValue,
+        });
+        Object.defineProperty(wrap, 'disabled', {
+            get: function() { return year.disabled && month.disabled && day.disabled; },
+            set: function(disabled) {
+                [year, month, day].forEach(function(part) { part.disabled = !!disabled; });
+            },
+        });
+        wrap.value = effectiveValue(setting, mount);
+        return wrap;
+    }
+
+    function dispatchControlChange(control) {
+        if (!control) return;
+        if (typeof Event === 'function' && typeof control.dispatchEvent === 'function') {
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+        var listeners = control.listeners && control.listeners.change;
+        if (Array.isArray(listeners)) {
+            listeners.forEach(function(listener) {
+                listener.call(control, { type: 'change', target: control });
+            });
+        }
+    }
+
+    function makeDatePart(part, placeholder, maxLength, width) {
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.inputMode = 'numeric';
+        input.setAttribute('data-date-part', part);
+        input.placeholder = placeholder;
+        input.style.cssText = 'width:' + width + ';text-align:center;padding:5px 6px;border:1px solid #d8dee4;border-radius:6px;font-size:12px;';
+        input.min = part === 'year' ? '1900' : '1';
+        input.max = part === 'year' ? '2100' : (part === 'month' ? '12' : '31');
+        input.step = '1';
+        input.setAttribute('maxlength', String(maxLength));
+        return input;
+    }
+
+    function dateSep(text) {
+        var sep = document.createElement('span');
+        sep.textContent = text;
+        sep.style.cssText = 'color:#94a3b8;font-size:12px;';
+        return sep;
+    }
+
+    function parseDateParts(value) {
+        var match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(value || '').trim());
+        return {
+            year: match ? match[1] : '',
+            month: match ? padDatePart(match[2], 2) : '',
+            day: match ? padDatePart(match[3], 2) : '',
+        };
+    }
+
+    function sanitizeDigits(value) {
+        return String(value || '').replace(/\D/g, '');
+    }
+
+    function padDatePart(value, length) {
+        var digits = sanitizeDigits(value);
+        if (!digits) return '';
+        return digits.padStart(length, '0').slice(-length);
+    }
+
+    function clampNumber(value, min, max) {
+        var number = parseInt(value, 10);
+        if (isNaN(number)) return min;
+        return Math.max(min, Math.min(max, number));
     }
 
     function normalizeControlValue(setting, value) {
@@ -794,8 +939,10 @@
         var root = localHost();
         if (root) state.application = root.getAttribute('data-application') || state.application;
         var pageUuid = encodeURIComponent(window._pageUuid || '');
+        registerBuiltInDefaultProviders();
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
+            copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
             registerBackendFields(index);
             var defaults = index.default_mounted_tabs || {};
             [LOCAL, GROUP].forEach(function(mount) {
@@ -807,6 +954,63 @@
             attachGroupTabs();
             return index;
         });
+    }
+
+    function registerBuiltInDefaultProviders() {
+        if (state.localDefaultProviders.page_time_range) return;
+        registerLocalDefaultProvider('page_time_range', function() {
+            if (typeof window.getSharedRuntimeTimeRange !== 'function') return null;
+            var source = window.getSharedRuntimeTimeRange();
+            if (!source) return null;
+            return {
+                start_date: source.start_date || '',
+                end_date: source.end_date || '',
+                start_time: source.start_time || '',
+                end_time: source.end_time || '',
+                timezone: source.timezone || '',
+                time_precision: source.is_trading_day ? 'trading_day' : 'exact',
+            };
+        });
+    }
+
+    function registerLocalDefaultProvider(name, provider) {
+        if (!name || typeof provider !== 'function') return;
+        state.localDefaultProviders[name] = provider;
+    }
+
+    function copyLocalDefaultsFromProvider(name, options) {
+        var provider = state.localDefaultProviders[name];
+        if (!provider || !state.index || !state.index.defaults) return false;
+        var values = provider();
+        if (!values || typeof values !== 'object') return false;
+        return applyLocalDefaultValues(values, options);
+    }
+
+    function applyLocalDefaultValues(values, options) {
+        options = options || {};
+        var changed = false;
+        var defaults = state.index && state.index.defaults || {};
+        var blockOnUserKeys = Array.isArray(options.blockOnUserKeys) ? options.blockOnUserKeys : [];
+        if (blockOnUserKeys.some(function(key) {
+            return Object.prototype.hasOwnProperty.call(state.localValues, key);
+        })) {
+            return false;
+        }
+        Object.keys(values || {}).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (options.skipUserValues !== false && Object.prototype.hasOwnProperty.call(state.localValues, key)) return;
+            var value = normalizeControlValue(def, values[key]);
+            if (value === undefined || value === null || value === '') return;
+            if (valuesEqual(def.value, value)) return;
+            def.value = value;
+            changed = true;
+        });
+        if (changed) {
+            renderLocalTabs();
+            if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+        }
+        return changed;
     }
 
     function registerBackendFields(index) {
@@ -999,10 +1203,15 @@
         var pageUuid = encodeURIComponent(window._pageUuid || '');
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
+            copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
             renderLocalTabs();
             return index;
         });
     }
+
+    document.addEventListener('timeRangeDefaultLoaded', function() {
+        copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
+    });
 
     document.addEventListener('pageTimeRangeChanged', function() {
         syncPageTimeDefaults().catch(function(error) {
@@ -1022,6 +1231,9 @@
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,
         syncPageTimeDefaults: syncPageTimeDefaults,
+        registerLocalDefaultProvider: registerLocalDefaultProvider,
+        copyLocalDefaultsFromProvider: copyLocalDefaultsFromProvider,
+        applyLocalDefaultValues: applyLocalDefaultValues,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,
         configSettingKeys: configSettingKeys,
