@@ -129,11 +129,23 @@ def _resolve_flat_backtest_settings(
 ) -> dict[str, dict[str, Any]]:
     app = backtest_setting_registry.get("group_test")
     setting_keys = set(app.settings)
+    runtime_window = payload.get("_runtime_window")
+    runtime_defaults = runtime_window if isinstance(runtime_window, dict) else {}
     local_values = {
         key: payload[key]
         for key in setting_keys
         if key in payload
     }
+    for source_key, target_key in (
+        ("start_date", "start_date"),
+        ("end_date", "end_date"),
+        ("start_time", "start_time"),
+        ("end_time", "end_time"),
+        ("time_precision", "time_precision"),
+        ("timezone", "timezone"),
+    ):
+        if target_key not in local_values and source_key in runtime_defaults:
+            local_values[target_key] = runtime_defaults[source_key]
     # Keep existing request aliases as local fields.
     if "precision" in payload and "time_precision" not in local_values:
         local_values["time_precision"] = payload["precision"]
@@ -1285,9 +1297,22 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
 
     from tools.data.types import DataTime
 
-    precision = data.get("precision") or data.get("time_precision") or "exact"
-    start_dt = DataTime.from_dict(data, precision=precision)
-    end_data = dict(data)
+    runtime_window = data.get("_runtime_window") if isinstance(data.get("_runtime_window"), dict) else {}
+    time_source = dict(runtime_window)
+    for key in (
+        "start_date",
+        "start_time",
+        "end_date",
+        "end_time",
+        "timezone",
+        "time_precision",
+        "precision",
+    ):
+        if key in data:
+            time_source[key] = data[key]
+    precision = time_source.get("precision") or time_source.get("time_precision") or "exact"
+    start_dt = DataTime.from_dict(time_source, precision=precision)
+    end_data = dict(time_source)
     end_data["date"] = end_data.pop("end_date", end_data.pop("date", None))
     end_data["time"] = end_data.pop("end_time", end_data.pop("time", None))
     end_dt = DataTime.from_dict(end_data, precision=precision)

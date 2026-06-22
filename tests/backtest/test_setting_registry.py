@@ -122,6 +122,33 @@ def test_setting_manifest_uses_page_exact_time_as_run_default(monkeypatch) -> No
     assert payload["defaults"]["end_time"]["value"] == "15:00"
 
 
+def test_runtime_window_supplies_run_defaults_without_flat_frontend_values() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    resolved = _resolve_flat_backtest_settings(
+        {
+            "_runtime_window": {
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+                "start_time": "09:00",
+                "end_time": "15:00",
+                "time_precision": "exact",
+                "timezone": "Asia/Shanghai",
+            },
+        },
+        [{"id": "group-1"}],
+        [],
+    )
+
+    settings = resolved["group-1"]
+    assert settings["start_date"] == "2026-01-01"
+    assert settings["end_date"] == "2026-01-31"
+    assert settings["start_time"] == "09:00"
+    assert settings["end_time"] == "15:00"
+    assert settings["initial_capital"] == 100_000_000.0
+    assert settings["allocation_policy"] == "inverse_volatility"
+
+
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:
     app = Flask(__name__)
     app.register_blueprint(sft_bp)

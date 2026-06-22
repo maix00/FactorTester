@@ -231,7 +231,8 @@
             return;
         }
         var backendRunPayload = GT.backendSettings.runPayload();
-        if (!backendRunPayload.start_date || !backendRunPayload.end_date) {
+        var runtimeWindow = backendRunPayload._runtime_window || {};
+        if (!runtimeWindow.start_date || !runtimeWindow.end_date) {
             if (statusSpan) { statusSpan.innerHTML = '✗ 请在回测设置中指定有效时间范围'; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;

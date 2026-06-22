@@ -954,15 +954,14 @@
         var values = effectiveLocalValues();
         var calendar = String(values.calendar_frequency || 'auto');
         return Object.assign({}, collectLocalSettings(), {
-            start_date: values.start_date,
-            end_date: values.end_date,
-            start_time: values.start_time,
-            end_time: values.end_time,
-            precision: values.time_precision || 'exact',
-            timezone: values.timezone || 'Asia/Shanghai',
-            initial_capital: values.initial_capital,
-            base_currency: values.base_currency || 'CNY',
-            currency_conversion_fee_rate: values.currency_conversion_fee_rate || 0,
+            _runtime_window: {
+                start_date: values.start_date,
+                end_date: values.end_date,
+                start_time: values.start_time,
+                end_time: values.end_time,
+                time_precision: values.time_precision || 'exact',
+                timezone: values.timezone || 'Asia/Shanghai',
+            },
             auto_group_calendar_freq: calendar === 'auto',
             group_calendar_freq: calendar === 'auto' ? null : calendar,
         });

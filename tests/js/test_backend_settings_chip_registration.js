@@ -239,7 +239,13 @@ return GT.backendSettings.init().then(async () => {
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(GT.backendSettings.runPayload().allocation_policy, 'equal_notional');
+  const sparseRunPayload = GT.backendSettings.runPayload();
+  assert.equal(sparseRunPayload.allocation_policy, 'equal_notional');
+  assert.equal(sparseRunPayload.initial_capital, undefined);
+  assert.equal(sparseRunPayload.base_currency, undefined);
+  assert.equal(sparseRunPayload.currency_conversion_fee_rate, undefined);
+  assert.equal(sparseRunPayload.start_date, undefined);
+  assert.ok(sparseRunPayload._runtime_window);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['group-settings'], []);
   const localChipText = document.getElementById('gt-local-settings-chip-row').childNodes
     .map((chip) => chip.innerHTML.replace(/<[^>]+>/g, ''));
