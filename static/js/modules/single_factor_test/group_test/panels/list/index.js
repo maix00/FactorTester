@@ -22,6 +22,7 @@
     var _unbinders = [];
     var _expandedBatches = {};
     var _lsSectionExpanded = { val: false };
+    var _showFullChips = { val: false };
 
     function deps() {
         var list = GT.panels && GT.panels.list;
@@ -126,7 +127,7 @@
 
         d.H.invalidateExpandCaches();
         var lsHtml = d.R.renderLSSection(_lsSectionExpanded.val);
-        var baseHtml = d.R.renderBaseSection(_expandedBatches);
+        var baseHtml = d.R.renderBaseSection(_expandedBatches, null, _showFullChips.val);
         container.innerHTML = '<div id="unified-list-container">'
             + (lsHtml ? lsHtml + '<div style="margin-top:16px;">' + baseHtml + '</div>' : baseHtml)
             + '</div>';
@@ -142,6 +143,7 @@
             fullRender: fullRender,
             expandedBatches: _expandedBatches,
             lsSectionExpanded: _lsSectionExpanded,
+            showFullChips: _showFullChips,
             getAddGroupBatchMap: d.H.getAddGroupBatchMap,
         });
     }
@@ -216,6 +218,7 @@
             return {
                 expandedBatches: JSON.parse(JSON.stringify(_expandedBatches || {})),
                 lsSectionExpanded: !!_lsSectionExpanded.val,
+                showFullChips: !!_showFullChips.val,
             };
         },
         setBatchExpanded: function(batchKey, expanded) {
@@ -232,6 +235,15 @@
         setLSSectionExpanded: function(expanded) {
             _lsSectionExpanded.val = !!expanded;
             fullRender();
+        },
+        setShowFullChips: function(show) {
+            _showFullChips.val = !!show;
+            fullRender();
+        },
+        toggleShowFullChips: function() {
+            _showFullChips.val = !_showFullChips.val;
+            fullRender();
+            return _showFullChips.val;
         },
         _openLSForm: function(editData) {
             var d = deps();

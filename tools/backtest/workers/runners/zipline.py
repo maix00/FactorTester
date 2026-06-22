@@ -20,7 +20,6 @@ from .common import (
     parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
-    rebalance_mode,
     target_quantities,
     target_rows,
     valuation_price,
@@ -47,7 +46,6 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         ledger = Ledger(request.timestamps, strategy_cash, "daily")
         targets = target_rows(strategy, request.timestamps)
-        mode = rebalance_mode(strategy)
         pending = None
         transaction_number = 0
         equity_curve = {}

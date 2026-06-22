@@ -9,12 +9,6 @@
 
     GT.results = GT.results || {};
 
-    var MODE_LABELS = {
-        each_period: '每期等权再平衡',
-        buy_and_hold: '组内持仓不动',
-        recycle: '退出资金优先补新仓',
-    };
-
     function hide(layer, status, notice, head, body) {
         layer.style.display = 'none';
         if (status) status.textContent = '';
@@ -93,7 +87,7 @@
             + '</tr>';
     }
 
-    function render(multiSessionActive, usedMode, multiSessionBatches, capitalWarningData) {
+    function render(multiSessionActive, multiSessionBatches, capitalWarningData) {
         var layer = document.getElementById('gt-layer-strategy');
         var status = document.getElementById('gt-strategy-status');
         var notice = document.getElementById('gt-strategy-notice');
@@ -103,7 +97,6 @@
 
         var rows = [];
         var hasMultiSession = !!multiSessionActive;
-        var modeLabel = MODE_LABELS[usedMode] || usedMode || '当前再平衡模式';
         var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
             ? multiSessionBatches
             : [{ index: 0, tester_alias: '当前测试器', factor_alias: '当前因子', n_groups: null }];
@@ -115,7 +108,7 @@
                 if (productText) detail += ' ' + productText;
                 rows.push({
                     type: batches.length > 1 ? (batchLabel(batch) || 'MultiSession 批次') : '多交易时段',
-                    status: modeLabel,
+                    status: '按策略设置',
                     detail: detail,
                 });
             }
@@ -143,8 +136,8 @@
     }
 
     // 从 app.js 桥接：由 applyGroupTestResult 调用
-    function updatePanel(multiSessionActive, usedMode, multiSessionBatches, capitalWarningData) {
-        render(multiSessionActive, usedMode, multiSessionBatches, capitalWarningData);
+    function updatePanel(multiSessionActive, multiSessionBatches, capitalWarningData) {
+        render(multiSessionActive, multiSessionBatches, capitalWarningData);
     }
 
     GT.results.strategyPanel = {

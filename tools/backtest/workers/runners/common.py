@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.targets import GroupTargetCalculator
+from ...settings.strategy_fields import validate_resolved_strategy_settings
 
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
@@ -61,6 +62,8 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
     strategy_ids = [str(strategy.get("strategy_id", "")) for strategy in strategies]
     if any(not value for value in strategy_ids) or len(set(strategy_ids)) != len(strategy_ids):
         raise ValueError("strategy ids must be non-empty and unique")
+    for strategy in strategies:
+        validate_resolved_strategy_settings(strategy)
     rules = payload.get("market_rules", {})
     multipliers = _parse_rule_matrix(
         rules.get("multipliers"), len(timestamps), len(instruments), "multipliers"
@@ -117,13 +120,6 @@ def target_rows(
             raise ValueError("target gross exposure cannot exceed two")
         result[normalized_timestamp] = normalized_weights
     return result
-
-
-def rebalance_mode(strategy: Mapping[str, Any]) -> str:
-    mode = str(strategy.get("rebalance_mode", "on_factor_signal"))
-    if mode not in {"on_factor_signal", "membership_change", "buy_and_hold", "scheduled"}:
-        raise ValueError(f"unsupported rebalance mode: {mode}")
-    return mode
 
 
 def target_quantities(

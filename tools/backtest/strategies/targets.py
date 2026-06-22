@@ -8,6 +8,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..settings.strategy_fields import (
+    ALLOCATION_POLICY,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+    required_strategy_value,
+    strategy_value,
+)
 from .allocation import (
     AllocationInputsUnavailable,
     AllocationInput,
@@ -16,7 +23,7 @@ from .allocation import (
     InverseVolatilityAllocator,
     TrailingVolatilityEstimator,
 )
-from .rebalance import BuyAndHold, MembershipChange, OnFactorSignal, RebalanceTrigger
+from .rebalance import MembershipChange, OnFactorSignal, RebalanceTrigger
 
 
 class GroupTargetCalculator:
@@ -42,11 +49,11 @@ class GroupTargetCalculator:
             or set(self.long_indices) & set(self.short_indices)
         ):
             raise ValueError("Long-Short requires disjoint non-empty long and short groups")
-        self.allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
+        self.allocation_name = strategy_value(config, ALLOCATION_POLICY)
         self.allocator = _allocator(self.allocation_name)
-        self.rebalance_trigger = _rebalance_trigger(
-            str(config.get("rebalance_mode") or "on_factor_signal")
-        )
+        self.rebalance_trigger_name = required_strategy_value(config, REBALANCE_TRIGGER)
+        self.position_policy = required_strategy_value(config, POSITION_POLICY)
+        self.rebalance_trigger = _rebalance_trigger(self.rebalance_trigger_name)
         lookback = int(config.get("volatility_lookback") or 20)
         self.estimator = TrailingVolatilityEstimator(
             self.instruments,
@@ -62,6 +69,7 @@ class GroupTargetCalculator:
         self.fallback_events: list[dict[str, Any]] = []
         self.empty_leg_events: list[dict[str, Any]] = []
         self.overlap_events: list[dict[str, Any]] = []
+        self._position_initialized = False
 
     def update(
         self,
@@ -110,6 +118,8 @@ class GroupTargetCalculator:
             selected = long_selected | short_selected
             if not self.rebalance_trigger.should_rebalance(timestamp, selected):
                 return None
+            if self.position_policy == "buy_and_hold" and self._position_initialized:
+                return None
             if not np.any(long_selected) or not np.any(short_selected):
                 self.empty_leg_events.append({
                     "timestamp": pd.Timestamp(timestamp).isoformat(),
@@ -130,6 +140,8 @@ class GroupTargetCalculator:
             )
             if not self.rebalance_trigger.should_rebalance(timestamp, selected):
                 return None
+            if self.position_policy == "buy_and_hold" and self._position_initialized:
+                return None
             weights = self._allocate(timestamp, selected, margin_ratios, 1.0, None)
 
         target = {
@@ -138,6 +150,8 @@ class GroupTargetCalculator:
             if not np.isclose(weight, 0.0)
         }
         self.target_trace[pd.Timestamp(timestamp).isoformat()] = target
+        if target:
+            self._position_initialized = True
         return target
 
     def _allocate(
@@ -280,8 +294,9 @@ def _compile_strategy(
     strategy_id = str(config.get("strategy_id") or "")
     if not strategy_id:
         raise ValueError("strategy_id must not be empty")
-    allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
-    rebalance_name = str(config.get("rebalance_mode") or "on_factor_signal")
+    allocation_name = strategy_value(config, ALLOCATION_POLICY)
+    rebalance_name = required_strategy_value(config, REBALANCE_TRIGGER)
+    position_policy = required_strategy_value(config, POSITION_POLICY)
     allocator = _allocator(allocation_name)
     rebalance_trigger = _rebalance_trigger(rebalance_name)
     lookback = int(config.get("volatility_lookback") or 20)
@@ -305,6 +320,8 @@ def _compile_strategy(
             continue
         selected = membership[row] & np.isfinite(current_prices) & (current_prices > 0)
         if not rebalance_trigger.should_rebalance(timestamp, selected):
+            continue
+        if position_policy == "buy_and_hold" and targets:
             continue
         volatilities = estimator.snapshot()
         inputs = AllocationInput(
@@ -334,7 +351,8 @@ def _compile_strategy(
         }
     return {
         "strategy_id": strategy_id,
-        "rebalance_mode": rebalance_name,
+        "rebalance_trigger": rebalance_name,
+        "position_policy": position_policy,
         "allocation_policy": allocation_name,
         "fee_rate": float(config.get("fee_rate") or 0.0),
         "initial_capital": float(config.get("initial_capital") or 0.0) or None,
@@ -362,9 +380,11 @@ def _compile_long_short_strategy(
         raise ValueError("Long-Short requires disjoint non-empty long and short groups")
     if min(long_indices + short_indices) < 0 or max(long_indices + short_indices) >= memberships.shape[1]:
         raise ValueError("Long-Short membership index is outside the source-group axis")
-    allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
+    allocation_name = strategy_value(config, ALLOCATION_POLICY)
     allocator = _allocator(allocation_name)
-    rebalance_trigger = _rebalance_trigger(str(config.get("rebalance_mode") or "on_factor_signal"))
+    rebalance_name = required_strategy_value(config, REBALANCE_TRIGGER)
+    position_policy = required_strategy_value(config, POSITION_POLICY)
+    rebalance_trigger = _rebalance_trigger(rebalance_name)
     lookback = int(config.get("volatility_lookback") or 20)
     estimator = TrailingVolatilityEstimator(
         instruments,
@@ -405,6 +425,8 @@ def _compile_long_short_strategy(
             short_selected = short_selected & ~overlap
         active = long_selected | short_selected
         if not rebalance_trigger.should_rebalance(timestamp, active):
+            continue
+        if position_policy == "buy_and_hold" and targets:
             continue
         if not np.any(long_selected) or not np.any(short_selected):
             empty_leg_events.append({
@@ -450,7 +472,8 @@ def _compile_long_short_strategy(
     return {
         "strategy_id": strategy_id,
         "strategy_kind": "long_short",
-        "rebalance_mode": str(config.get("rebalance_mode") or "on_factor_signal"),
+        "rebalance_trigger": rebalance_name,
+        "position_policy": position_policy,
         "allocation_policy": allocation_name,
         "fee_rate": float(config.get("fee_rate") or 0.0),
         "initial_capital": float(config.get("initial_capital") or 0.0) or None,
@@ -482,8 +505,6 @@ def _rebalance_trigger(name: str) -> RebalanceTrigger:
         return OnFactorSignal()
     if name == "membership_change":
         return MembershipChange()
-    if name == "buy_and_hold":
-        return BuyAndHold()
     raise ValueError(f"unsupported rebalance trigger: {name}")
 
 

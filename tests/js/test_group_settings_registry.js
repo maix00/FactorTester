@@ -13,7 +13,8 @@ const id = GT.groupSettings.groups.add({
   factorAlias: 'FactorB',
   splitCount: 3,
   feeMode: 'none',
-  rebalanceMode: 'each_period',
+  rebalance_trigger: 'membership_change',
+  position_policy: 'rebalance_to_target',
 });
 GT.panels.list.selection.add(id);
 

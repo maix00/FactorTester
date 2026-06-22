@@ -171,7 +171,7 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
             index_list=list(pd.date_range("2024-01-01", periods=2, freq="min")),
         )
 
-    def fake_memberships(factor, shared, *, group_counts, rebalance_mode):
+    def fake_memberships(factor, shared, *, group_counts):
         out = []
         for n_groups in group_counts:
             membership = np.zeros((shared.T, int(n_groups), len(shared.signal_valid_cols)), dtype=bool)
@@ -187,7 +187,6 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
         testers_by_id={"tester-1": fake_tester},
         spec_index_by_group={0: 0, 1: 0},
         calendar_index=None,
-        rebalance_mode="each_period",
     )
 
     assert prepared_aliases == ["FactorA", "FactorB"]

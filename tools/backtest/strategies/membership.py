@@ -11,6 +11,13 @@ from ..event_driven.contracts import PortfolioIntent, TargetKind
 from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..factors.events import FactorSignal
 from ..execution.trading import MarketState
+from ..settings.strategy_fields import (
+    ALLOCATION_POLICY,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+    required_strategy_value,
+    strategy_value,
+)
 from .allocation import (
     AllocationInput,
     AllocationInputsUnavailable,
@@ -19,7 +26,7 @@ from .allocation import (
     InverseVolatilityAllocator,
     TrailingVolatilityEstimator,
 )
-from .rebalance import BuyAndHold, MembershipChange, OnFactorSignal
+from .rebalance import MembershipChange, OnFactorSignal
 
 
 class MembershipAllocationStrategy:
@@ -46,9 +53,11 @@ class MembershipAllocationStrategy:
         self.strategy_kind = str(config.get("strategy_kind") or "group")
         self.margin_ratios = margin_ratios
         self.active_timestamps = active_timestamps
-        self.allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
+        self.allocation_name = strategy_value(config, ALLOCATION_POLICY)
         self.allocator = _allocator(self.allocation_name)
-        self.rebalance_trigger = _rebalance(str(config.get("rebalance_mode") or "on_factor_signal"))
+        self.rebalance_trigger_name = required_strategy_value(config, REBALANCE_TRIGGER)
+        self.position_policy = required_strategy_value(config, POSITION_POLICY)
+        self.rebalance_trigger = _rebalance(self.rebalance_trigger_name)
         lookback = int(config.get("volatility_lookback") or 20)
         self.estimator = TrailingVolatilityEstimator(
             instruments,
@@ -63,6 +72,7 @@ class MembershipAllocationStrategy:
         self.target_trace: dict[str, dict[str, float]] = {}
         self.fallback_events: list[dict[str, object]] = []
         self.empty_leg_events: list[dict[str, object]] = []
+        self._position_initialized = False
 
     def on_factor_signal(
         self, event: EventEnvelope, runtime: EventRuntime
@@ -86,6 +96,8 @@ class MembershipAllocationStrategy:
         selected = signed_membership != 0 if self.strategy_kind == "long_short" else signed_membership > 0
         if not self.rebalance_trigger.should_rebalance(event.timestamp, selected):
             return None
+        if self.position_policy == "buy_and_hold" and self._position_initialized:
+            return None
         volatilities = self.estimator.snapshot()
         if self.strategy_kind == "long_short":
             weights = self._allocate_long_short(
@@ -97,11 +109,14 @@ class MembershipAllocationStrategy:
             weights = self._allocate(
                 event.timestamp, selected, volatilities, gross_exposure=1.0
             )
-        self.target_trace[event.timestamp.isoformat()] = {
+        target = {
             name: float(weight)
             for name, weight in zip(self.instruments, weights, strict=True)
             if not np.isclose(weight, 0.0)
         }
+        self.target_trace[event.timestamp.isoformat()] = target
+        if target:
+            self._position_initialized = True
         return EventDraft(
             EventTopic.PORTFOLIO_INTENT,
             event.timestamp,
@@ -194,6 +209,4 @@ def _rebalance(name: str):
         return OnFactorSignal()
     if name == "membership_change":
         return MembershipChange()
-    if name == "buy_and_hold":
-        return BuyAndHold()
     raise ValueError(f"unsupported rebalance policy: {name}")

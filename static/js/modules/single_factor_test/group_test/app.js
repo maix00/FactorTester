@@ -206,10 +206,6 @@
         bindGroupSectionToggles();
         initResearchDetailTabs();
 
-        if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
-            GT.panels.actions.updateRebalanceModeDescription();
-        }
-
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) {
             runBtn.addEventListener('click', function() {
@@ -230,13 +226,6 @@
             });
             runBtn.style.display = '';
         }
-        var rebalanceSelect = document.getElementById('rebalance_mode');
-        if (rebalanceSelect) rebalanceSelect.addEventListener('change', function() {
-            if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
-                GT.panels.actions.updateRebalanceModeDescription();
-            }
-        });
-
         if (GT.tabs && typeof GT.tabs.init === 'function') {
             GT.tabs.init();
         }

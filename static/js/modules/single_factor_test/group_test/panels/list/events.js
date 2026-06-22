@@ -59,6 +59,16 @@
         var fullRender = state.fullRender;
         var batchMapRef = state.getAddGroupBatchMap || function() { return H.getAddGroupBatchMap(); };
 
+        container.querySelectorAll('.unified-chip-toggle-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (state.showFullChips) {
+                    state.showFullChips.val = !state.showFullChips.val;
+                }
+                if (typeof fullRender === 'function') fullRender();
+            });
+        });
+
         // ── LS section ──
 
         container.querySelectorAll('.unified-ls-row').forEach(function(row) {

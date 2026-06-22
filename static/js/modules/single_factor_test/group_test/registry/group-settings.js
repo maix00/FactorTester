@@ -207,7 +207,6 @@
                 feeRate: draft.feeRate,
                 feeMap: draft.feeMap,
                 feeSensitivity: draft.feeSensitivity,
-                rebalanceMode: draft.rebalanceMode,
                 liquidityMode: draft.liquidityMode || GS.getFieldDefault('liquidityMode'),
                 liquidityPercent: draft.liquidityPercent !== undefined ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent'),
                 useCloseToday: draft.useCloseToday || false,

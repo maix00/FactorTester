@@ -13,7 +13,8 @@ def build_group_target_weight_payload(
     group_result: Any,
     *,
     strategy_ids: Sequence[str],
-    rebalance_modes: Sequence[str],
+    rebalance_triggers: Sequence[str],
+    position_policies: Sequence[str],
     initial_cash: float,
 ) -> dict[str, Any]:
     """Build equal-notional targets without consulting margin or fee matrices."""
@@ -23,8 +24,12 @@ def build_group_target_weight_payload(
     timestamps = pd.DatetimeIndex(group_result.index_list)
     if membership.ndim != 3 or prices.shape != (len(timestamps), len(instruments)):
         raise ValueError("group result membership, price, and axes do not align")
-    if membership.shape[1] != len(strategy_ids) or len(strategy_ids) != len(rebalance_modes):
-        raise ValueError("one strategy id and rebalance mode are required per group")
+    if (
+        membership.shape[1] != len(strategy_ids)
+        or len(strategy_ids) != len(rebalance_triggers)
+        or len(strategy_ids) != len(position_policies)
+    ):
+        raise ValueError("one strategy id, rebalance trigger, and position policy are required per group")
     if initial_cash <= 0:
         raise ValueError("initial cash must be positive")
 
@@ -37,8 +42,8 @@ def build_group_target_weight_payload(
     membership = membership[valid_positions]
 
     strategies = []
-    for group_index, (strategy_id, rebalance_mode) in enumerate(
-        zip(strategy_ids, rebalance_modes, strict=True)
+    for group_index, (strategy_id, rebalance_trigger, position_policy) in enumerate(
+        zip(strategy_ids, rebalance_triggers, position_policies, strict=True)
     ):
         targets = {}
         previous = None
@@ -55,11 +60,12 @@ def build_group_target_weight_payload(
                 else:
                     targets[timestamp.isoformat()] = {}
             previous = current
-            if rebalance_mode == "buy_and_hold" and targets:
+            if position_policy == "buy_and_hold" and targets:
                 break
         strategies.append({
             "strategy_id": str(strategy_id),
-            "rebalance_mode": str(rebalance_mode),
+            "rebalance_trigger": str(rebalance_trigger),
+            "position_policy": str(position_policy),
             "targets": targets,
         })
 

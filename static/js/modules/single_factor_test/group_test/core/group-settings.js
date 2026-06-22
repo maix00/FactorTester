@@ -609,7 +609,6 @@
     var _lsIdCounter = 0;
 
     var VALID_LS_FEE_MODES = ['inherit', 'override'];
-    var VALID_LS_REBALANCE_MODES = ['each_period', 'buy_and_hold', 'recycle'];
 
     function _lsUuid() {
         _lsIdCounter += 1;
@@ -663,9 +662,6 @@
         if (config.feeRate !== undefined && config.feeRate !== null && (typeof config.feeRate !== 'number' || config.feeRate < 0)) {
             errors.push('feeRate must be a non-negative number or null');
         }
-        if (config.rebalanceMode !== undefined && config.rebalanceMode !== null && VALID_LS_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
-            errors.push('rebalanceMode must be one of: ' + VALID_LS_REBALANCE_MODES.join(', '));
-        }
         if (config.metadata !== undefined && (typeof config.metadata !== 'object' || config.metadata === null || Array.isArray(config.metadata))) {
             errors.push('metadata must be a plain object');
         }
@@ -684,7 +680,6 @@
             feeMode: config.feeMode || 'inherit',
             feeRate: config.feeRate !== undefined ? config.feeRate : null,
             useCloseToday: config.useCloseToday !== undefined ? config.useCloseToday : null,
-            rebalanceMode: config.rebalanceMode !== undefined ? config.rebalanceMode : null,
             needsRegenerate: true,
             metadata: config.metadata !== undefined ? _deepCopy(config.metadata) : {},
         };
@@ -928,7 +923,7 @@
             var countText = group.splitCount != null ? group.splitCount : '未设置';
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
                 + ' · 设置 ' + Object.keys(group).filter(function(key) {
-                    return ['fee_mode', 'rebalance_trigger', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
+                    return ['fee_mode', 'rebalance_trigger', 'position_policy', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
                 }).join(', '));
         });
         if (baseGroups.length > 8) {

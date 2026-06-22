@@ -12,6 +12,15 @@ from tools.backtest.workers import (
 )
 
 
+def _strategy_settings(**overrides):
+    values = {
+        "rebalance_trigger": "on_factor_signal",
+        "position_policy": "rebalance_to_target",
+    }
+    values.update(overrides)
+    return values
+
+
 def test_worker_contract_rejects_unknown_schema_version() -> None:
     with pytest.raises(ValueError, match="schema version"):
         WorkerRequest.from_dict({
@@ -76,14 +85,14 @@ def test_framework_worker_health_and_multi_strategy_run(engine: str) -> None:
             "prices": {"asset-a": [100.0, 110.0, 120.0]},
             "initial_cash": 100_000.0,
             "strategies": [
-                    {
-                        "strategy_id": "comparison-a",
-                        "targets": {"2024-01-01T00:00:00": {"asset-a": 0.5}},
-                },
-                {
-                    "strategy_id": "comparison-b",
-                    "targets": {"2024-01-01T00:00:00": {"asset-a": 0.0}},
-                },
+                _strategy_settings(
+                    strategy_id="comparison-a",
+                    targets={"2024-01-01T00:00:00": {"asset-a": 0.5}},
+                ),
+                _strategy_settings(
+                    strategy_id="comparison-b",
+                    targets={"2024-01-01T00:00:00": {"asset-a": 0.0}},
+                ),
             ],
         },
     ))
@@ -108,12 +117,12 @@ def test_framework_workers_share_next_bar_target_weight_semantics() -> None:
             "asset-b": [100.0, 90.0, 81.0],
         },
         "initial_cash": 100_000.0,
-        "strategies": [{
-            "strategy_id": "equal-notional",
-            "targets": {
+        "strategies": [_strategy_settings(
+            strategy_id="equal-notional",
+            targets={
                 "2024-01-01T00:00:00": {"asset-a": 0.45, "asset-b": 0.45},
             },
-        }],
+        )],
     }
 
     final_values = {
@@ -142,10 +151,10 @@ def test_framework_worker_streams_event_time_progress() -> None:
                 "membership": [[[True]], [[True]], [[True]]],
                 "signal_updates": [[True], [True], [True]],
                 "initial_cash": 100_000.0,
-                "strategy_configs": [{
-                    "strategy_id": "group-1",
-                    "allocation_policy": "equal_notional",
-                }],
+                "strategy_configs": [_strategy_settings(
+                    strategy_id="group-1",
+                    allocation_policy="equal_notional",
+                )],
             },
         ),
         progress=events.append,
@@ -202,12 +211,14 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
                 "strategy_id": "equal-risk",
                 "allocation_policy": "inverse_volatility",
                 "volatility_lookback": 2,
-                "rebalance_mode": "on_factor_signal",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
             },
             {
                 "strategy_id": "membership",
                 "allocation_policy": "equal_notional",
-                "rebalance_mode": "membership_change",
+                "rebalance_trigger": "membership_change",
+                "position_policy": "rebalance_to_target",
             },
             {
                 "strategy_id": "long-short",
@@ -215,7 +226,8 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
                 "long_indices": [1],
                 "short_indices": [2],
                 "allocation_policy": "equal_notional",
-                "rebalance_mode": "on_factor_signal",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
             },
         ],
     }
@@ -264,7 +276,8 @@ def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine:
             "strategy_configs": [{
                 "strategy_id": "group-1",
                 "allocation_policy": "equal_notional",
-                "rebalance_mode": "on_factor_signal",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
                 "margin_mode": "proportional_scale",
                 "collateral_fraction": 0.05,
             }],
@@ -298,12 +311,12 @@ def test_framework_liquidity_plugin_limits_each_bar_without_changing_target() ->
         "membership": [[[True]]] * 4,
         "signal_updates": [[True]] * 4,
         "initial_cash": 100_000.0,
-        "strategy_configs": [{
-            "strategy_id": "group-1",
-            "allocation_policy": "equal_notional",
-            "liquidity_mode": "volume_participation",
-            "participation_rate": 0.1,
-        }],
+        "strategy_configs": [_strategy_settings(
+            strategy_id="group-1",
+            allocation_policy="equal_notional",
+            liquidity_mode="volume_participation",
+            participation_rate=0.1,
+        )],
     }
     dispatcher = EngineWorkerDispatcher()
     results = {
@@ -340,7 +353,8 @@ def test_framework_fee_and_slippage_plugins_are_consistent(
     config = {
         "strategy_id": "group-1",
         "allocation_policy": "equal_notional",
-        "rebalance_mode": "buy_and_hold",
+        "rebalance_trigger": "on_factor_signal",
+        "position_policy": "buy_and_hold",
         **overrides,
     }
     payload = {
@@ -397,7 +411,8 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
         "strategy_configs": [{
             "strategy_id": "group-1",
             "allocation_policy": "equal_notional",
-            "rebalance_mode": "on_factor_signal",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
             "fee_rate": 0.001,
         }],
     }

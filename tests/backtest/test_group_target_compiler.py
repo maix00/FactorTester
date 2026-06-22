@@ -25,12 +25,14 @@ def test_group_target_compiler_applies_per_strategy_policies_causally() -> None:
                 "strategy_id": "risk",
                 "allocation_policy": "inverse_volatility",
                 "volatility_lookback": 2,
-                "rebalance_mode": "on_factor_signal",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
             },
             {
                 "strategy_id": "hold",
                 "allocation_policy": "equal_notional",
-                "rebalance_mode": "buy_and_hold",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "buy_and_hold",
             },
         ),
         initial_cash=1_000_000,
@@ -67,8 +69,18 @@ def test_equal_margin_is_explicitly_distinct_from_equal_notional() -> None:
         prices=np.full((2, 2), 100.0),
         margin_ratios=np.asarray([[0.1, 0.2], [0.1, 0.2]]),
         strategy_configs=(
-            {"strategy_id": "notional", "allocation_policy": "equal_notional"},
-            {"strategy_id": "margin", "allocation_policy": "equal_margin"},
+            {
+                "strategy_id": "notional",
+                "allocation_policy": "equal_notional",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
+            },
+            {
+                "strategy_id": "margin",
+                "allocation_policy": "equal_margin",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
+            },
         ),
         initial_cash=1_000_000,
     )
@@ -99,7 +111,8 @@ def test_long_short_is_a_peer_strategy_with_signed_target_weights() -> None:
             "long_indices": [0],
             "short_indices": [1],
             "allocation_policy": "equal_notional",
-            "rebalance_mode": "on_factor_signal",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
         },),
         initial_cash=1_000_000,
     )
@@ -128,7 +141,8 @@ def test_long_short_skips_empty_leg_rebalances_with_diagnostics() -> None:
             "long_indices": [0],
             "short_indices": [1],
             "allocation_policy": "equal_notional",
-            "rebalance_mode": "on_factor_signal",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
         },),
         initial_cash=1_000_000,
     )
@@ -162,7 +176,8 @@ def test_long_short_nets_realized_membership_overlap() -> None:
             "long_indices": [0],
             "short_indices": [1],
             "allocation_policy": "equal_notional",
-            "rebalance_mode": "on_factor_signal",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
         },),
         initial_cash=1_000_000,
     )

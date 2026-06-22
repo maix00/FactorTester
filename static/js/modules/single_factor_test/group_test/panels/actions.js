@@ -5,7 +5,6 @@
  *   - 派生组面板渲染/绑定（renderDerivedGroupsPanel, bindDerivedGroupPanelEvents）
  *   - 长-短配置 UI（updateLongShortSummary, renderLongShortConfigList）
  *   - 面板工具函数（formatGroupProduct, fmtFeeRate, isRealFee 等）
- *   - 再平衡模式描述（updateRebalanceModeDescription）
  *
  * 挂载到 GT.panels.actions。所有函数通过 GT.panels.actions.* 访问。
  * 部分函数依赖 _lastGrossData / _lastMetrics，通过 GT.groupSettings.cache 读取。
@@ -459,22 +458,6 @@
                 actions.updateLongShortSummary();
             });
         });
-    };
-
-    /* ════════════════════════════════════════════════════════════════
-       再平衡模式描述
-       ════════════════════════════════════════════════════════════════ */
-
-    actions.updateRebalanceModeDescription = function() {
-        var select = document.getElementById('rebalance_mode');
-        var target = document.getElementById('rebalance_mode_description');
-        if (!select || !target) return;
-        var descriptions = {
-            each_period: '每一期都把当前组内成员重新调成等权。适合比较"每期按最新排序重新建仓"的理论表现，换手通常最高。',
-            buy_and_hold: '组内成员不变时保持原有持仓比例；只有成员进出组时才交易。更接近低换手的持有逻辑，也是默认模式。',
-            recycle: '留存成员的持仓不动；有成员退出时，把释放出的资金优先分给新进成员。适合观察"旧仓尽量不动、只用退出资金补新仓"的过渡方式。',
-        };
-        target.textContent = descriptions[select.value] || '';
     };
 
     /* ════════════════════════════════════════════════════════════════

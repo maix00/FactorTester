@@ -28,12 +28,15 @@ def test_group_worker_payload_is_equal_notional_and_keeps_rebalance_semantics() 
     payload = build_group_target_weight_payload(
         result,
         strategy_ids=("group-1", "group-2"),
-        rebalance_modes=("each_period", "buy_and_hold"),
+        rebalance_triggers=("on_factor_signal", "on_factor_signal"),
+        position_policies=("rebalance_to_target", "buy_and_hold"),
         initial_cash=1_000_000.0,
     )
 
     first, second = payload["strategies"]
-    assert first["rebalance_mode"] == "each_period"
+    assert first["rebalance_trigger"] == "on_factor_signal"
+    assert first["position_policy"] == "rebalance_to_target"
     assert list(first["targets"].values()) == [{"A": 0.5, "B": 0.5}]
-    assert second["rebalance_mode"] == "buy_and_hold"
+    assert second["rebalance_trigger"] == "on_factor_signal"
+    assert second["position_policy"] == "buy_and_hold"
     assert list(second["targets"].values()) == [{"C": 1.0}]

@@ -269,7 +269,11 @@
         return h;
     }
 
-    function _renderBaseSection(expandedBatches, collapsedIds) {
+    function _chipsForGroup(group) {
+        return (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(group) : [];
+    }
+
+    function _renderBaseSection(expandedBatches, collapsedIds, showFullChips) {
         _ensureDeps();
         var items = GT.groupSettings.groups.getAll();
         if (items.length === 0) {
@@ -281,7 +285,10 @@
         var h = '';
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">';
         h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span>';
+        h += '<span style="display:inline-flex;align-items:center;gap:8px;">';
         h += '<span style="font-size:11px;color:#666;">' + items.length + ' 个组 / ' + batches.length + ' 批</span>';
+        h += '<button type="button" class="unified-chip-toggle-btn' + (showFullChips ? ' active' : '') + '" title="' + (showFullChips ? '隐藏完整设置' : '显示完整设置') + '" style="height:22px;padding:0 8px;border:1px solid ' + (showFullChips ? '#6366f1' : '#cbd5e1') + ';border-radius:4px;background:' + (showFullChips ? '#eef2ff' : '#fff') + ';color:' + (showFullChips ? '#3730a3' : '#475569') + ';font-size:11px;line-height:20px;cursor:pointer;">' + (showFullChips ? '收起设置' : '显示设置') + '</button>';
+        h += '</span>';
         h += '</div>';
 
         for (var bi = 0; bi < batches.length; bi++) {
@@ -334,7 +341,7 @@
                     if (bg.shortAlias) {
                         h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + H.escapeHTML(bg.shortAlias) + '</span>';
                     }
-                    var allChips = (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(bg) : [];
+                    var allChips = _chipsForGroup(bg);
                     h += '<span style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;flex:1;min-width:0;">';
                     for (var ci = 0; ci < allChips.length; ci++) {
                         var chip = allChips[ci];
@@ -347,22 +354,24 @@
                         }
                     }
                     h += '</span>';
-                    h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
-                    for (ci = 0; ci < allChips.length; ci++) {
-                        chip = allChips[ci];
-                        if (chip.category !== 'config') continue;
-                        s = chip.style || H.CHIP_STYLE_PLAIN;
-                        if (chip.onClick) {
-                            var cls2 = ' class="unified-config-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
-                            h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
-                        } else {
-                            h += '<span style="' + s + ';">' + chip.html + '</span>';
+                    if (showFullChips) {
+                        h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
+                        for (ci = 0; ci < allChips.length; ci++) {
+                            chip = allChips[ci];
+                            if (chip.category !== 'config') continue;
+                            s = chip.style || H.CHIP_STYLE_PLAIN;
+                            if (chip.onClick) {
+                                var cls2 = ' class="unified-config-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
+                                h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
+                            } else {
+                                h += '<span style="' + s + ';">' + chip.html + '</span>';
+                            }
                         }
+                        h += '</span>';
                     }
-                    h += '</span>';
                     h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                     h += '</div>';
-                    h += _renderDerivedTreeForBase(bg.id, expandedBatches);
+                    h += _renderDerivedTreeForBase(bg.id, expandedBatches, showFullChips);
                 }
                 h += '</div>';
             }
@@ -370,7 +379,7 @@
         return h;
     }
 
-    function _renderDerivedTreeForBase(rootGroupId, expandedBatches) {
+    function _renderDerivedTreeForBase(rootGroupId, expandedBatches, showFullChips) {
         _ensureDeps();
         if (!GT.groupSettings.groups) return '';
         var allNodes = GT.groupSettings.groups.getAll();
@@ -416,7 +425,7 @@
 
         var h = '<div class="unified-derived-subtree" style="margin-left:16px;border-left:2px solid #c7d2fe;padding-left:8px;">';
         for (var r = 0; r < roots.length; r++) {
-            h += _renderNode(roots[r], 0, expandedBatches);
+            h += _renderNode(roots[r], 0, expandedBatches, showFullChips);
         }
         h += '</div>';
         return h;
@@ -426,7 +435,7 @@
         return '';
     }
 
-    function _renderNode(node, depth, expandedBatches) {
+    function _renderNode(node, depth, expandedBatches, showFullChips) {
         _ensureDeps();
         if (!node) return '';
         var indent = depth * 18;
@@ -461,7 +470,7 @@
             h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + H.escapeHTML(shortAlias) + '</span>';
         }
         h += '<span style="flex:1;"></span>';
-        if (chips.length > 0) {
+        if (showFullChips && chips.length > 0) {
             h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
             for (var dci = 0; dci < chips.length; dci++) {
                 var dchip = chips[dci];
@@ -495,7 +504,7 @@
 
         if (isExp && hasKids) {
             for (var ci = 0; ci < node.children.length; ci++) {
-                h += _renderNode(node.children[ci], depth + 1, expandedBatches);
+                h += _renderNode(node.children[ci], depth + 1, expandedBatches, showFullChips);
             }
         }
         h += '</div>';

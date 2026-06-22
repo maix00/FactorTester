@@ -107,7 +107,6 @@
         if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.update === 'function') {
             GT.results.strategyPanel.update(
                 data.multi_session_active,
-                data.rebalance_mode,
                 data.multi_session_entries,
                 {
                     capital_warning: data.capital_warning,

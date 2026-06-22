@@ -22,6 +22,11 @@ from tools.products.AdjustableTermStructure import resolve_term_structure_produc
 from tools.products.Product import Product
 from tools.products.product_utils import product_display_name
 from tools.backtest.settings import backtest_setting_registry
+from tools.backtest.settings.strategy_fields import (
+    ALLOCATION_POLICY,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+)
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, get_session_params
@@ -121,13 +126,6 @@ def _resolve_flat_backtest_settings(
     groups: list[dict[str, Any]],
     ls_configs: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    def _with_internal_execution_fields(values: dict[str, Any]) -> dict[str, Any]:
-        enriched = dict(values)
-        trigger = str(enriched.get("rebalance_trigger") or "on_factor_signal")
-        carry_policy = str(enriched.get("position_policy") or "rebalance_to_target")
-        enriched["rebalance_mode"] = "buy_and_hold" if carry_policy == "buy_and_hold" else trigger
-        return enriched
-
     app = backtest_setting_registry.get("group_test")
     manifest = app.manifest()
     defaults = {
@@ -154,7 +152,7 @@ def _resolve_flat_backtest_settings(
         for key in defaults:
             if key in item:
                 values[key] = item[key]
-        resolved[group_id] = _with_internal_execution_fields(values)
+        resolved[group_id] = values
     return resolved
 
 
@@ -1152,8 +1150,9 @@ def _serialize_event_execution(
             "fee_costs": [0.0] * len(index),
             "trade_notional_ratios": [0.0] * len(index),
             "engine": str(engine_result.get("engine") or ""),
-            "allocation_policy": settings["allocation_policy"],
-            "rebalance_mode": settings["rebalance_mode"],
+            "allocation_policy": settings[ALLOCATION_POLICY],
+            "rebalance_trigger": settings[REBALANCE_TRIGGER],
+            "position_policy": settings[POSITION_POLICY],
             "target_trace": target_trace.get(strategy_id, {}),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": bool(portfolio.get("position_curve")),
@@ -1269,8 +1268,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"ls_configs={len(flat_ls_configs)}"
     )
 
-    rebalance_mode = 'on_factor_signal'
-
     from tools.data.types import DataTime
 
     precision = data.get("precision") or data.get("time_precision") or "exact"
@@ -1361,7 +1358,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     fee_rate=group_settings.get('custom_fee_rate'),
                     fee_modifications=g.get('feeModifications'),
                     use_close_today=False,
-                    rebalance_mode=group_settings.get('rebalance_mode'),
+                    rebalance_trigger=group_settings[REBALANCE_TRIGGER],
+                    position_policy=group_settings[POSITION_POLICY],
                     liquidity_mode=group_settings.get('liquidity_mode'),
                     liquidity_percent=(
                         float(group_settings.get('participation_rate') or 0) * 100
@@ -1519,7 +1517,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         start_dt=start_dt,
         end_dt=end_dt,
         calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
-        rebalance_mode=rebalance_mode,
         overlap_ratio=overlap_ratio,
         containment_ratio=containment_ratio,
         merge_cost_ratio=merge_cost_ratio,
@@ -1622,7 +1619,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
         ),
         "multi_session_entries": multi_session_entries,
-        "rebalance_mode": "per_strategy",
         "submission_id": str(first_owner.get("submission_id") or ""),
         "factor_alias": str(first_owner.get("factor_alias") or ""),
         "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
@@ -2361,7 +2357,7 @@ def get_tester_session_info():
             factors: [{
                 alias, name, freq,
                 n_groups: int,   // 上次分组测试用的组数
-                rebalance_mode,  // 上次使用的再平衡模式
+                rebalance_trigger, position_policy,
                 has_results: bool,
             }]
         }]
@@ -2400,7 +2396,12 @@ def get_tester_session_info():
                 if result is not None and result.group_result is not None:
                     gr = result.group_result
                     info['n_groups'] = gr.returns_np.shape[1] if hasattr(gr, 'returns_np') and gr.returns_np is not None else None
-                    info['rebalance_mode'] = getattr(gr, 'rebalance_mode', None)
+                    trigger = getattr(gr, 'rebalance_trigger', None)
+                    policy = getattr(gr, 'position_policy', None)
+                    if trigger is not None:
+                        info['rebalance_trigger'] = trigger
+                    if policy is not None:
+                        info['position_policy'] = policy
                     info['has_results'] = True
                 else:
                     info['has_results'] = False
