@@ -1217,33 +1217,6 @@ def _serialize_float_series(values: np.ndarray | list, default: float = 0.0) -> 
     return result
 
 
-@sft_bp.route('/run_group_test', methods=['POST'])
-def run_group_test():
-    """运行分组测试，接收扁平 groups + ls_configs + page_uuid。
-    
-    Request JSON:
-    {
-        "groups": [ {... group fields (name, groupIndex, factorAlias, testerId, feeMode, ...} ],
-        "ls_configs": [ {"name": "LS-1", "long": [...], "short": [...]}, ... ],
-        "page_uuid": "...",
-        "start_date": "2024-01-01", "end_date": "2024-12-31",
-        "initial_capital": 1000000,
-    }
-    
-    前端只传 groups + ls_configs + page_uuid。
-    factor_family_alias 从 page_uuid 对应的 page state 解析。
-    fee / rebalance / close-today 从 group 自身字段读取。
-    跨 tester LS 自动由 ls_configs legs 中不同 tester_id 的合并（build_overlap_batches）处理。
-    """
-    data = request.get_json(silent=True) or {}
-    success, result = _run_group_test_core(data)
-    if success:
-        return jsonify(result)
-    else:
-        status = result.get('status', 500)
-        return jsonify(result), status
-
-
 def _product_list_from_group_payload(group: dict) -> list[str] | None:
     raw = group.get('productMask')
     if raw is None:
@@ -1259,7 +1232,7 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
 
 def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     """
-    核心分组测试逻辑，可以被 /run_group_test (JSON) 和 /run_group_test_stream (SSE) 共享。
+    核心分组测试逻辑，由 /run_group_test_stream (SSE) 的 worker 调用。
     
     返回 (success, dict)
     - success=True：dict 是成功响应

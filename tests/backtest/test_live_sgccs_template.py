@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import uuid
 import pytest
 
 from server import create_app
@@ -18,6 +20,23 @@ pytestmark = pytest.mark.skipif(
 USERNAME = "18717974771"
 TEMPLATE_ID = "1780356047164"
 FACTOR_FAMILY = "SgCCS"
+
+
+def _post_group_stream_result(client, payload: dict) -> tuple[int, dict]:
+    response = client.post("/run_group_test_stream", json={
+        **payload,
+        "run_token": uuid.uuid4().hex,
+    })
+    raw = response.get_data(as_text=True)
+    result = None
+    current_event = ""
+    for line in raw.splitlines():
+        if line.startswith("event: "):
+            current_event = line[7:].strip()
+        elif line.startswith("data: ") and current_event in {"result", "error"}:
+            result = json.loads(line[6:])
+    assert result is not None, raw[-2000:]
+    return response.status_code, result
 
 
 def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
@@ -147,7 +166,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         results[profile] = {}
         for engine in ("native", "backtrader", "qlib", "zipline"):
             profile_groups = [{**group, **profile_settings} for group in groups]
-            response = client.post("/run_group_test", json={
+            status_code, body = _post_group_stream_result(client, {
                 **base_payload,
                 "groups": profile_groups,
                 "engine": engine,
@@ -155,8 +174,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
                 "rebalance_mode": "on_factor_signal",
                 "initial_capital": local_values.get("initial_capital", 100000000),
             })
-            body = response.get_json()
-            assert response.status_code == 200, {
+            assert status_code == 200, {
                 "profile": profile, "engine": engine, "body": body,
             }
             assert body["success"], body
