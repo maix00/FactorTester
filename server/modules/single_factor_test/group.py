@@ -1191,6 +1191,15 @@ def _serialize_event_execution(
         ),
         default=0,
     )
+    setting_fallbacks = [
+        {
+            **dict(item),
+            "strategy_id": strategy_id,
+        }
+        for strategy_id, value in diagnostics.items()
+        for item in (value.get("setting_fallbacks") or [])
+        if isinstance(item, dict)
+    ]
     return {
         "groups": groups,
         "metrics": metrics,
@@ -1201,6 +1210,11 @@ def _serialize_event_execution(
         "market_rule_warning": (
             f"历史市场规则有 {approximation_count} 个单元格缺失，已按设置使用最新值或配置默认值近似。"
             if approximation_count else None
+        ),
+        "setting_fallbacks": setting_fallbacks,
+        "setting_fallback_warning": (
+            f"当前执行引擎替换了 {len(setting_fallbacks)} 个不适用设置，已使用该引擎默认值继续回测。"
+            if setting_fallbacks else None
         ),
         "engine_result": {
             "engine": engine_result.get("engine"),

@@ -52,6 +52,16 @@ Backtest ownership is split as follows:
   order generation, matching, fees, liquidity, margin, ledger, and event replay.
 - Snapshot trace: each execution module owns trace fragments for its own
   decisions. A later trace composer can build a detailed overlay on demand.
+- Asynchronous trading calendars are not unique to grouped tests. Any portfolio
+  holding instruments with different sessions, missing bars, or time zones can
+  encounter the same tradability problem. The generic ownership is the
+  market-calendar/data-availability module: instruments without a tradable bar
+  keep their existing holdings, and tradable instruments may be reallocated
+  within the current slice. Grouped tests add a strategy-specific explanation
+  layer because membership buckets affect how capital is distributed inside each
+  group. Both the generic tradability event and the grouped allocation
+  consequence must be surfaced immediately during progress and later in strategy
+  diagnostics.
 
 Factor execution follows ADR 022:
 

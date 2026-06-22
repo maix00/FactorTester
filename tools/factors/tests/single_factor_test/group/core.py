@@ -608,6 +608,24 @@ def _prepare_group_shared_inputs(
         after_head_missing = (~present_np) & (~head_missing)
         missing_cols = np.where(np.any(after_head_missing, axis=0))[0]
         missing_names = [str(signal_valid_cols[i]) for i in missing_cols]
+        _emit_progress(
+            "membership",
+            (
+                f"{factor.alias}: 检测到 {int(mixed_mask.sum())}/{T} 期存在部分品种无原始数据，"
+                "已启用多时段品种处理"
+            ),
+            completed=0,
+            total=max(T, 1),
+            module="market_calendar",
+            multi_session_active=True,
+            multi_session_entries=[{
+                "factor_alias": str(factor.alias),
+                "missing_product_count": len(missing_names),
+                "missing_products": missing_names[:20],
+                "mixed_slice_count": int(mixed_mask.sum()),
+                "slice_count": int(T),
+            }],
+        )
         print(
             f"[INFO] {factor.alias}: 检测到 {int(mixed_mask.sum())}/{T} 期存在部分品种无原始数据 "
             f"（{len(missing_names)} 个品种存在缺失：{', '.join(missing_names[:5])}"
@@ -1609,4 +1627,3 @@ def _build_normalized_liquidity_capacity(
     )
     _emit_progress("liquidity", "流动性容量计算完成", completed=P, total=P)
     return capacity
-

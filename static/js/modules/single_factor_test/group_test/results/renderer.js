@@ -113,6 +113,8 @@
                     capital_diagnostics: data.capital_diagnostics,
                     market_rule_warning: data.market_rule_warning,
                     market_rule_approximation_count: data.market_rule_approximation_count,
+                    setting_fallback_warning: data.setting_fallback_warning,
+                    setting_fallbacks: data.setting_fallbacks,
                 }
             );
         }

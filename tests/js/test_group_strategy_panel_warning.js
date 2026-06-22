@@ -9,7 +9,7 @@ document.registerElement('gt-strategy-notice');
 document.registerElement('gt-strategy-head');
 document.registerElement('gt-strategy-body');
 
-GT.results.strategyPanel.update(false, 'each_period', [], {
+GT.results.strategyPanel.update(false, [], {
   capital_warning: '首期有 1 个组未能开出任何仓位。',
   capital_diagnostics: {
     blocked_group_count: 1,
@@ -25,11 +25,27 @@ GT.results.strategyPanel.update(false, 'each_period', [], {
 });
 
 const layer = document.getElementById('gt-layer-strategy');
-const notice = document.getElementById('gt-strategy-notice').innerHTML;
+const body = document.getElementById('gt-strategy-body').innerHTML;
 
 assert.equal(layer.style.display, '');
-assert.match(notice, /未开仓组数/);
-assert.match(notice, /第一组/);
-assert.match(notice, /TEST/);
+assert.match(body, /未开仓组数/);
+assert.match(body, /第一组/);
+assert.match(body, /TEST/);
+
+GT.results.strategyPanel.update(false, [], {
+  setting_fallback_warning: '当前执行引擎替换了 1 个不适用设置，已使用该引擎默认值继续回测。',
+  setting_fallbacks: [{
+    module: 'accounting',
+    setting_key: 'money_unit_policy',
+    requested_value: 'minor_units',
+    applied_value: 'engine_native',
+  }],
+});
+
+const fallbackBody = document.getElementById('gt-strategy-body').innerHTML;
+assert.match(fallbackBody, /引擎设置/);
+assert.match(fallbackBody, /accounting/);
+assert.match(fallbackBody, /minor_units/);
+assert.match(fallbackBody, /engine_native/);
 
 console.log('PASS: group strategy panel shows capital warning');

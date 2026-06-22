@@ -77,6 +77,24 @@
                 detail: details.join('；'),
             });
         }
+        if (data.setting_fallback_warning) {
+            var fallbackDetails = [];
+            var fallbacks = Array.isArray(data.setting_fallbacks) ? data.setting_fallbacks : [];
+            if (fallbacks.length) {
+                var first = fallbacks[0];
+                fallbackDetails.push(
+                    String(first.module || first.setting_key || '设置')
+                    + ': ' + String(first.requested_value)
+                    + ' → ' + String(first.applied_value)
+                );
+                if (fallbacks.length > 1) fallbackDetails.push('等 ' + fallbacks.length + ' 项');
+            }
+            rows.push({
+                type: '引擎设置',
+                status: '已替换',
+                detail: data.setting_fallback_warning + (fallbackDetails.length ? ' ' + fallbackDetails.join('，') : ''),
+            });
+        }
     }
 
     function _rowHtml(row) {
@@ -104,7 +122,7 @@
             for (var bi = 0; bi < batches.length; bi++) {
                 var batch = batches[bi];
                 var productText = _formatMissingProducts(batch);
-                var detail = '后端按 MultiSession 处理：仅对当期有信号的品种交易和再平衡，无信号品种持仓保持不动。';
+                var detail = '市场日历检测到持仓池成员存在异步交易时段：不可交易成员沿用持仓，可交易成员按当前切片参与资金分配；分组测试会额外记录组内 membership 对资金分配的影响。';
                 if (productText) detail += ' ' + productText;
                 rows.push({
                     type: batches.length > 1 ? (batchLabel(batch) || 'MultiSession 批次') : '多交易时段',
