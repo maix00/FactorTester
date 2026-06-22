@@ -98,6 +98,7 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     portfolios = {}
+    total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
@@ -150,10 +151,16 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             )
             if (
                 progress is not None
-                and strategy_position == 0
-                and should_report_progress(row + 1, len(request.timestamps))
+                and should_report_progress(
+                    strategy_position * len(request.timestamps) + row + 1,
+                    total_replay_steps,
+                )
             ):
-                progress(row + 1, len(request.timestamps), timestamp)
+                progress(
+                    strategy_position * len(request.timestamps) + row + 1,
+                    total_replay_steps,
+                    timestamp,
+                )
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
             "final_value": float(position.calculate_value()),
@@ -211,7 +218,12 @@ def _rebalance(
         current,
         float(position.position.get("cash", 0.0)),
     )
-    if request is not None and row is not None and execution_trace is not None:
+    if (
+        request is not None
+        and row is not None
+        and execution_trace is not None
+        and any(abs(delta) > 1e-12 for delta in deltas.values())
+    ):
         execution_trace[timestamp.isoformat()] = execution_trace_entry(
             request,
             int(row),

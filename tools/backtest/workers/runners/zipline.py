@@ -143,6 +143,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         for index, instrument in enumerate(request.instruments)
     }
     portfolios = {}
+    total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
@@ -193,14 +194,15 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     )
                     for instrument, asset in assets.items()
                 }
-                execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                    request,
-                    row,
-                    strategy,
-                    current_positions,
-                    deltas,
-                    float(ledger.portfolio.cash),
-                )
+                if any(abs(delta) > 1e-12 for delta in deltas.values()):
+                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                        request,
+                        row,
+                        strategy,
+                        current_positions,
+                        deltas,
+                        float(ledger.portfolio.cash),
+                    )
                 for sell_first in (True, False):
                     for instrument, delta in deltas.items():
                         if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
@@ -245,10 +247,16 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             )
             if (
                 progress is not None
-                and strategy_position == 0
-                and should_report_progress(row + 1, len(request.timestamps))
+                and should_report_progress(
+                    strategy_position * len(request.timestamps) + row + 1,
+                    total_replay_steps,
+                )
             ):
-                progress(row + 1, len(request.timestamps), timestamp)
+                progress(
+                    strategy_position * len(request.timestamps) + row + 1,
+                    total_replay_steps,
+                    timestamp,
+                )
         portfolio = ledger.portfolio
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,

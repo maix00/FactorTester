@@ -27,6 +27,7 @@ GROUP_TEST_PHASES = [
     }},
     {"key": "liquidity",       "label": "流动性容量"},
     {"key": "framework_execution", "label": "事件回测工具"},
+    {"key": "result_packaging", "label": "结果整理"},
     {"key": "simulate",        "label": "模拟中", "sub_steps": {
         "slicing":        "结果切片",
     }},

@@ -169,17 +169,19 @@ class _GroupMembershipStrategy(bt.Strategy):
             trace_timestamp = self.p.request.timestamps[
                 min(row + 1, len(self.p.request.timestamps) - 1)
             ]
-            self.execution_trace[trace_timestamp.isoformat()] = execution_trace_entry(
-                self.p.request,
-                row,
-                self.p.strategy_config,
-                current_positions,
-                {
-                    name: float(targets[name]) - float(current_positions.get(name, 0.0))
-                    for name in targets
-                },
-                float(self.broker.getcash()),
-            )
+            deltas = {
+                name: float(targets[name]) - float(current_positions.get(name, 0.0))
+                for name in targets
+            }
+            if any(abs(delta) > 1e-12 for delta in deltas.values()):
+                self.execution_trace[trace_timestamp.isoformat()] = execution_trace_entry(
+                    self.p.request,
+                    row,
+                    self.p.strategy_config,
+                    current_positions,
+                    deltas,
+                    float(self.broker.getcash()),
+                )
             for sell_first in (True, False):
                 for data in self.datas:
                     name = data._name
@@ -277,9 +279,17 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     portfolios = {}
+    total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
+        progress_callback = None
+        if progress is not None:
+            progress_offset = strategy_position * len(request.timestamps)
+
+            def progress_callback(completed, _total, timestamp, offset=progress_offset):
+                progress(offset + completed, total_replay_steps, timestamp)
+
         cerebro = bt.Cerebro(stdstats=False)
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         cerebro.broker.setcash(strategy_cash)
@@ -328,7 +338,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             calculator=calculator,
             memberships=memberships,
             signal_updates=updates,
-            progress_callback=progress if strategy_position == 0 else None,
+            progress_callback=progress_callback,
         )
         instance = cerebro.run()[0]
         portfolios[calculator.strategy_id] = {

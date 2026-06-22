@@ -1581,10 +1581,22 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             progress=_framework_progress,
             cancel_event=cancel_event,
         )
+        _core_emit_progress(
+            "result_packaging",
+            "整理事件回测结果",
+            completed=0,
+            total=2 if page_uuid else 1,
+        )
         serialized_execution = _serialize_event_execution(
             execution,
             settings_by_group=execution["settings_by_strategy"],
             evaluation_split=common_backtest_settings["evaluation_split"] or None,
+        )
+        _core_emit_progress(
+            "result_packaging",
+            "事件回测结果序列化完成",
+            completed=1,
+            total=2 if page_uuid else 1,
         )
         if page_uuid:
             runtime_state.update_page_state(
@@ -1595,6 +1607,12 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     "group_owner": execution["group_owner"],
                     "serialized_execution": serialized_execution,
                 },
+            )
+            _core_emit_progress(
+                "result_packaging",
+                "事件回测结果已保存到页面状态",
+                completed=2,
+                total=2,
             )
     except BacktestCancelled:
         raise

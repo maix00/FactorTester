@@ -78,102 +78,23 @@
                 detail: details.join('；'),
             });
         }
-        if (data.setting_fallback_warning) {
-            var fallbackDetails = [];
-            var fallbacks = Array.isArray(data.setting_fallbacks) ? data.setting_fallbacks : [];
-            if (fallbacks.length) {
-                var first = fallbacks[0];
-                fallbackDetails.push(
-                    String(first.module || first.setting_key || '设置')
-                    + ': ' + String(first.requested_value)
-                    + ' → ' + String(first.applied_value)
-                );
-                if (fallbacks.length > 1) fallbackDetails.push('等 ' + fallbacks.length + ' 项');
-            }
-            rows.push({
-                type: '引擎设置',
-                status: '已替换',
-                detail: data.setting_fallback_warning + (fallbackDetails.length ? ' ' + fallbackDetails.join('，') : ''),
-            });
-        }
-    }
-
-    function _valueLabel(map, value) {
-        var key = value === undefined || value === null || value === '' ? '默认' : String(value);
-        return map[key] || key;
-    }
-
-    function _uniqueValues(settingsByGroup, key) {
-        var values = {};
-        Object.keys(settingsByGroup || {}).forEach(function(groupId) {
-            var item = settingsByGroup[groupId] || {};
-            if (groupId.indexOf('long-short:') === 0) return;
-            if (item[key] === undefined || item[key] === null || item[key] === '') return;
-            values[String(item[key])] = true;
-        });
-        return Object.keys(values);
-    }
-
-    function _formatUnique(settingsByGroup, key, labels) {
-        var values = _uniqueValues(settingsByGroup, key);
-        if (!values.length) return '';
-        if (values.length === 1) return _valueLabel(labels || {}, values[0]);
-        return values.map(function(value) { return _valueLabel(labels || {}, value); }).join(' / ');
     }
 
     function _pushRunSettingRows(rows, data) {
-        var settings = data && data.backtest_settings || {};
-        var groups = settings.groups || {};
-        if (!groups || !Object.keys(groups).length) return;
-        var engine = settings.engine || (data.engine_result && data.engine_result.engine) || '';
-        var allocation = _formatUnique(groups, 'allocation_policy', {
-            inverse_volatility: '等风险',
-            equal_notional: '等市值',
-            equal_margin: '等保证金',
-        });
-        var trigger = _formatUnique(groups, 'rebalance_trigger', {
-            on_factor_signal: '因子信号事件',
-            membership_change: '成员变化事件',
-            scheduled: '日历计划',
-        });
-        var position = _formatUnique(groups, 'position_policy', {
-            rebalance_to_target: '按目标调仓',
-            buy_and_hold: '买入持有',
-        });
-        var fee = _formatUnique(groups, 'fee_mode', {
-            none: '无费用',
-            market: '市场费率',
-            custom: '自定义费率',
-        });
-        var margin = _formatUnique(groups, 'margin_mode', {
-            none: '无保证金约束',
-            market: '市场保证金',
-        });
-        var liquidity = _formatUnique(groups, 'liquidity_mode', {
-            infinite: '无限流动性',
-            volume_participation: '成交量参与率',
-        });
-        var participation = _formatUnique(groups, 'participation_rate', {});
-        var parts = [];
-        function item(label, value) {
-            if (!value) return;
-            parts.push({ label: label, value: value });
-        }
-        item('引擎', _valueLabel({native: 'Native', backtrader: 'Backtrader', qlib: 'Qlib', zipline: 'Zipline', rqalpha: 'RQAlpha'}, engine));
-        item('目标分配', allocation);
-        item('触发', trigger);
-        item('持仓', position);
-        item('费用', fee);
-        item('保证金', margin);
-        item('流动性', liquidity + (liquidity === '成交量参与率' && participation ? ' ' + participation : ''));
-        if (!parts.length) return;
+        var fallbacks = Array.isArray(data && data.setting_fallbacks)
+            ? data.setting_fallbacks
+            : [];
+        if (!fallbacks.length) return;
         rows.push({
             type: '当前运行配置',
-            status: '默认',
-            detailHtml: '<div class="gt-strategy-chip-list">' + parts.map(function(part) {
+            status: '已使用默认值',
+            detailHtml: (data.setting_fallback_warning ? GT.escapeHTML(data.setting_fallback_warning) : '')
+                + '<div class="gt-strategy-chip-list">' + fallbacks.map(function(item) {
+                var label = String(item.setting_key || item.module || '设置');
+                var value = String(item.requested_value) + ' → ' + String(item.applied_value);
                 var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
-                    ? GT.backendSettings.renderChipHtml(part.label, part.value)
-                    : (GT.escapeHTML(part.label) + ': ' + GT.escapeHTML(part.value));
+                    ? GT.backendSettings.renderChipHtml(label, value)
+                    : (GT.escapeHTML(label) + ': ' + GT.escapeHTML(value));
                 return '<span class="gt-backend-chip">' + chipHtml + '</span>';
             }).join('') + '</div>',
         });

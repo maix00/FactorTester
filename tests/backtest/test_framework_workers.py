@@ -221,6 +221,51 @@ def test_framework_progress_is_bounded_for_long_replays() -> None:
     assert len(checkpoints) <= 102
 
 
+def test_native_group_strategy_progress_counts_every_strategy() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy
+
+    events = []
+    payload = {
+        "timestamps": ["2024-01-01", "2024-01-02", "2024-01-03"],
+        "instruments": ["asset-a"],
+        "prices": {"asset-a": [100.0, 101.0, 102.0]},
+        "membership": [
+            [[True], [False]],
+            [[True], [False]],
+            [[False], [True]],
+        ],
+        "signal_updates": [[True, True], [True, True], [True, True]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "margin_ratios": [[1.0], [1.0], [1.0]],
+            "multipliers": [[1.0], [1.0], [1.0]],
+            "lot_sizes": [[1.0], [1.0], [1.0]],
+        },
+        "strategy_configs": [
+            _strategy_settings(strategy_id="group-1", allocation_policy="equal_notional"),
+            _strategy_settings(strategy_id="group-2", allocation_policy="equal_notional"),
+            {
+                **_strategy_settings(
+                    strategy_id="long-short:1",
+                    allocation_policy="equal_notional",
+                ),
+                "strategy_kind": "long_short",
+                "long_indices": [0],
+                "short_indices": [1],
+            },
+        ],
+    }
+
+    run_group_strategy(payload, progress=lambda completed, total, timestamp: events.append({
+        "completed": completed,
+        "total": total,
+        "timestamp": timestamp,
+    }))
+
+    assert [event["completed"] for event in events] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert {event["total"] for event in events} == {9}
+
+
 def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
     from tools.backtest.workers.runners.native import run_group_strategy as run_native
 
