@@ -144,6 +144,18 @@ return GT.backendSettings.init().then(() => {
   assert.ok(configChips.some((chip) => chip.html === '流动性: 成交量参与率'));
   assert.ok(configChips.some((chip) => chip.html === '参与率: 0.02'));
 
+  GT.backendSettings.applyFlatSnapshot({
+    group_settings: {
+      groups: [{
+        id: baseId,
+        liquidity_mode: 'volume_participation',
+        participation_rate: 0.02,
+      }],
+    },
+  });
+  const mountedConfigChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'config');
+  assert.equal(mountedConfigChips.length, 0);
+
   const identityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'identity');
   assert.ok(identityChips.some((chip) => chip.html === 'FactorChipOrder'));
 

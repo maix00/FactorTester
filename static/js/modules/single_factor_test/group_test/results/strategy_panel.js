@@ -155,29 +155,36 @@
         });
         var participation = _formatUnique(groups, 'participation_rate', {});
         var parts = [];
-        if (engine) parts.push('引擎 ' + _valueLabel({native: 'Native', backtrader: 'Backtrader', qlib: 'Qlib', zipline: 'Zipline', rqalpha: 'RQAlpha'}, engine));
-        if (allocation) parts.push('目标分配 ' + allocation);
-        if (trigger) parts.push('触发 ' + trigger);
-        if (position) parts.push('持仓 ' + position);
-        if (fee) parts.push('费用 ' + fee);
-        if (margin) parts.push('保证金 ' + margin);
-        if (liquidity) parts.push('流动性 ' + liquidity + (liquidity === '成交量参与率' && participation ? ' ' + participation : ''));
+        function item(label, value) {
+            if (!value) return;
+            parts.push({ label: label, value: value });
+        }
+        item('引擎', _valueLabel({native: 'Native', backtrader: 'Backtrader', qlib: 'Qlib', zipline: 'Zipline', rqalpha: 'RQAlpha'}, engine));
+        item('目标分配', allocation);
+        item('触发', trigger);
+        item('持仓', position);
+        item('费用', fee);
+        item('保证金', margin);
+        item('流动性', liquidity + (liquidity === '成交量参与率' && participation ? ' ' + participation : ''));
         if (!parts.length) return;
-        var nonLsCount = Object.keys(groups).filter(function(groupId) {
-            return groupId.indexOf('long-short:') !== 0;
-        }).length;
         rows.push({
             type: '当前运行配置',
-            status: nonLsCount ? (nonLsCount + ' 个策略') : '已解析',
-            detail: parts.join('；'),
+            status: '默认',
+            detailHtml: '<div class="gt-strategy-chip-list">' + parts.map(function(part) {
+                return '<span class="gt-strategy-chip"><span class="gt-strategy-chip-label">'
+                    + GT.escapeHTML(part.label)
+                    + '</span><span class="gt-strategy-chip-value">'
+                    + GT.escapeHTML(part.value)
+                    + '</span></span>';
+            }).join('') + '</div>',
         });
     }
 
     function _rowHtml(row) {
         return '<tr class="gt-strategy-row">'
-            + '<td>' + GT.escapeHTML(row.type || '') + '</td>'
-            + '<td>' + GT.escapeHTML(row.status || '') + '</td>'
-            + '<td>' + (row.detailHtml || GT.escapeHTML(row.detail || '')) + '</td>'
+            + '<td class="gt-strategy-type-cell">' + GT.escapeHTML(row.type || '') + '</td>'
+            + '<td class="gt-strategy-status-cell">' + GT.escapeHTML(row.status || '') + '</td>'
+            + '<td class="gt-strategy-detail-cell">' + (row.detailHtml || GT.escapeHTML(row.detail || '')) + '</td>'
             + '</tr>';
     }
 
@@ -225,7 +232,7 @@
             notice.innerHTML = '';
             notice.style.display = 'none';
         }
-        head.innerHTML = '<tr><th>类型</th><th>状态</th><th>说明</th></tr>';
+        head.innerHTML = '<tr><th class="gt-strategy-type-cell">类型</th><th class="gt-strategy-status-cell">状态</th><th class="gt-strategy-detail-cell">说明</th></tr>';
         body.innerHTML = rows.map(_rowHtml).join('');
     }
 

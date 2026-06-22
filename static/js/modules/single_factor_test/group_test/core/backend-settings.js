@@ -56,6 +56,13 @@
         });
     }
 
+    function settingIsShownInMountedTab(mount, key) {
+        var meta = state.index && state.index.defaults && state.index.defaults[key];
+        var tabKey = meta && meta.tab_key;
+        if (!tabKey) return false;
+        return state.mountedTabs[mount] && state.mountedTabs[mount].indexOf(tabKey) >= 0;
+    }
+
     function tabMeta(tabKey) {
         var tabs = []
             .concat(availableTabs(LOCAL))
@@ -592,6 +599,7 @@
             var setting = state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
             if (scope !== 'group_override' && scope !== 'group_only') return null;
+            if (settingIsShownInMountedTab(GROUP, key)) return null;
             if (defaults[key] && valuesEqual(value, defaults[key].value)) return null;
             if (!setting.chip_template) return null;
             return {

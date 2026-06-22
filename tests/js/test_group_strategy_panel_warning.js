@@ -68,6 +68,7 @@ GT.results.strategyPanel.update(false, [], {
 
 const settingsBody = document.getElementById('gt-strategy-body').innerHTML;
 assert.match(settingsBody, /当前运行配置/);
+assert.match(settingsBody, /默认/);
 assert.match(settingsBody, /Native/);
 assert.match(settingsBody, /等风险/);
 assert.match(settingsBody, /按目标调仓/);
