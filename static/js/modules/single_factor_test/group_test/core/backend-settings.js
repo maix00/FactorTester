@@ -332,7 +332,10 @@
     }
 
     function settingVisibleForValues(setting, values) {
-        var visibleWhen = setting && setting.visible_when;
+        var meta = setting && setting.key && state.index && state.index.defaults
+            ? state.index.defaults[setting.key]
+            : null;
+        var visibleWhen = (setting && setting.visible_when) || (meta && meta.visible_when);
         if (!visibleWhen || !Object.keys(visibleWhen).length) return true;
         return Object.keys(visibleWhen).every(function(depKey) {
             var allowed = visibleWhen[depKey] || [];
@@ -519,6 +522,7 @@
             }
             (manifest.settings || []).forEach(function(setting) {
                 if (!setting.chip_template) return;
+                if (!settingVisible(setting, LOCAL)) return;
                 var value = effectiveValue(setting, LOCAL);
                 if (value === undefined || value === null || value === '') return;
                 var chipNode = chip(chipText(setting, value), false);
@@ -635,6 +639,48 @@
         }
     }
 
+    function settingDef(key) {
+        var defaults = state.index && state.index.defaults || {};
+        return state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
+    }
+
+    function configSettingKeys() {
+        var defaults = state.index && state.index.defaults || {};
+        return Object.keys(defaults).filter(function(key) {
+            var setting = settingDef(key);
+            var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
+            return (scope === 'group_override' || scope === 'group_only') && !!setting.chip_template;
+        });
+    }
+
+    function effectiveSettingValueForGroup(group, key) {
+        var source = group && group.value ? group.value : group;
+        if (source && Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+        if (source && source.parentId && GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) {
+            var inherited = GT.groupSettings.groups.resolveRootField(source, key);
+            if (inherited !== undefined && inherited !== null && inherited !== '') return inherited;
+        }
+        var local = effectiveLocalValues();
+        return local[key];
+    }
+
+    function configChipForGroupKey(group, key) {
+        if (!group) return null;
+        var value = effectiveSettingValueForGroup(group, key);
+        if (value === undefined || value === null || value === '') return null;
+        var setting = settingDef(key);
+        var values = effectiveValuesForNode(group);
+        values[key] = value;
+        if (!settingVisibleForValues(setting, values)) return null;
+        if (!setting.chip_template) return null;
+        return {
+            label: 'backtest-' + key,
+            html: renderChipHtml(chipText(setting, value)),
+            category: 'config',
+            style: null,
+        };
+    }
+
     function backendSettingChips(group) {
         if (!group) return [];
         var defaults = state.index && state.index.defaults || {};
@@ -644,12 +690,15 @@
         }).map(function(key) {
             var value = group[key];
             if (value === undefined || value === null || value === '') return null;
-            var setting = state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
+            var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
             if (scope !== 'group_override' && scope !== 'group_only') return null;
             if (!settingVisibleForValues(setting, values)) return null;
-            if (settingIsShownInMountedTab(GROUP, key)) return null;
-            if (defaults[key] && valuesEqual(value, defaults[key].value)) return null;
+            var localValue = effectiveLocalValues()[key];
+            var differsFromLocal = !valuesEqual(value, localValue);
+            var differsFromDefault = defaults[key] && !valuesEqual(value, defaults[key].value);
+            if (!differsFromLocal && !differsFromDefault) return null;
+            if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault) return null;
             if (!setting.chip_template) return null;
             return {
                 label: 'backtest-' + key,
@@ -773,6 +822,8 @@
         snapshot = snapshot || {};
         var snapshotValues = Object.assign({}, snapshot || {});
         state.localValues = snapshotValues;
+        state.mountedTabs[LOCAL] = [];
+        deactivateLocal();
         mountTabsForSnapshotValues(LOCAL, snapshotValues);
         renderLocalTabs();
         if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
@@ -834,6 +885,9 @@
             if (Object.prototype.hasOwnProperty.call(localSource, key)) local[key] = localSource[key];
         });
         state.localValues = local;
+        state.mountedTabs[LOCAL] = [];
+        state.mountedTabs[GROUP] = [];
+        deactivateLocal();
         mountTabsForSnapshotValues(LOCAL, local);
         groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
             mountTabsForSnapshotValues(GROUP, item || {});
@@ -848,13 +902,15 @@
         var out = {};
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveValuesForNode(source);
+        var localValues = effectiveLocalValues();
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
             if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
             if (def.scope_policy === 'local_only') return;
             if (!settingVisibleForValues(def, values)) return;
             if (source[key] === '' || source[key] === null || source[key] === undefined) return;
-            if (valuesEqual(source[key], def.value)) return;
+            if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key])) return;
+            if (def.scope_policy !== 'group_override' && valuesEqual(source[key], def.value)) return;
             out[key] = source[key];
         });
         return out;
@@ -947,6 +1003,9 @@
         syncPageTimeDefaults: syncPageTimeDefaults,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,
+        configSettingKeys: configSettingKeys,
+        effectiveSettingValueForGroup: effectiveSettingValueForGroup,
+        configChipForGroupKey: configChipForGroupKey,
         renderChipHtml: renderChipHtml,
         toggleProductMask: toggleProductMask,
         isProductMaskExpanded: isProductMaskExpanded,

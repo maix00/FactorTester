@@ -274,6 +274,34 @@
             : [];
     }
 
+    function _batchDiffConfigKeys(batch) {
+        if (!GT.backendSettings || typeof GT.backendSettings.configSettingKeys !== 'function') return {};
+        if (!batch || !Array.isArray(batch.items) || batch.items.length < 2) return {};
+        var keys = GT.backendSettings.configSettingKeys();
+        var diff = {};
+        for (var ki = 0; ki < keys.length; ki++) {
+            var key = keys[ki];
+            var seen = {};
+            var count = 0;
+            for (var ii = 0; ii < batch.items.length; ii++) {
+                var value = GT.backendSettings.effectiveSettingValueForGroup
+                    ? GT.backendSettings.effectiveSettingValueForGroup(batch.items[ii], key)
+                    : undefined;
+                if (value === undefined || value === null || value === '') continue;
+                var marker = String(value);
+                if (!seen[marker]) {
+                    seen[marker] = true;
+                    count += 1;
+                }
+                if (count > 1) {
+                    diff[key] = true;
+                    break;
+                }
+            }
+        }
+        return diff;
+    }
+
     function _renderBaseSection(expandedBatches, collapsedIds, showFullChips) {
         _ensureDeps();
         var items = GT.groupSettings.groups.getAll();
@@ -294,6 +322,7 @@
 
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
+            var batchDiffKeys = _batchDiffConfigKeys(batch);
             var batchId = batch.key;
             var isExpanded = batches.length === 1 ? true : (expandedBatches[batchId] === true);
             var isCollapsed = collapsedIds && collapsedIds[batchId];
@@ -357,10 +386,25 @@
                     }
                     h += '</span>';
                     if (showFullChips) {
+                        var renderedConfigLabels = {};
+                        var configChips = [];
                         h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
                         for (ci = 0; ci < allChips.length; ci++) {
                             chip = allChips[ci];
                             if (chip.category !== 'config') continue;
+                            renderedConfigLabels[chip.label] = true;
+                            configChips.push(chip);
+                        }
+                        if (GT.backendSettings && typeof GT.backendSettings.configChipForGroupKey === 'function') {
+                            Object.keys(batchDiffKeys).forEach(function(key) {
+                                var diffChip = GT.backendSettings.configChipForGroupKey(bg, key);
+                                if (!diffChip || renderedConfigLabels[diffChip.label]) return;
+                                renderedConfigLabels[diffChip.label] = true;
+                                configChips.push(diffChip);
+                            });
+                        }
+                        for (var cfgi = 0; cfgi < configChips.length; cfgi++) {
+                            chip = configChips[cfgi];
                             s = chip.style || H.CHIP_STYLE_PLAIN;
                             if (chip.clickable) {
                                 var cls2 = ' class="gt-backend-chip unified-backend-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
