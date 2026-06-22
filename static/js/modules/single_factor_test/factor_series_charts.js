@@ -106,4 +106,86 @@
             }]
         });
     };
+
+    namespace.renderDualSeriesChart = function(renderOptions) {
+        var opts = renderOptions || {};
+        var container = opts.container;
+        if (!container) return;
+        if (typeof Highcharts === 'undefined') {
+            container.innerHTML = message('Highcharts 未加载，无法显示图表。', true);
+            return;
+        }
+
+        container.style.height = opts.height || '520px';
+        var factorData = normalizePoints(ensureArray(opts.factorDates), ensureArray(opts.factorValues));
+        var returnData = normalizePoints(ensureArray(opts.returnDates), ensureArray(opts.returnValues));
+        if (!factorData.length && !returnData.length) {
+            container.innerHTML = message('没有可显示的序列。', true);
+            return;
+        }
+
+        var hasReturns = returnData.length > 0;
+        var series = [];
+
+        if (factorData.length) {
+            series.push({
+                name: opts.factorName || '因子值',
+                type: 'line',
+                data: factorData,
+                yAxis: 0,
+                color: opts.factorColor || '#2563eb',
+                dataGrouping: { enabled: false },
+            });
+        }
+        if (hasReturns) {
+            series.push({
+                name: opts.returnName || '收益率',
+                type: 'line',
+                data: returnData,
+                yAxis: 1,
+                color: opts.returnColor || '#d97706',
+                dataGrouping: { enabled: false },
+                tooltip: {
+                    valueDecimals: 6,
+                }
+            });
+        }
+
+        Highcharts.stockChart(container, {
+            chart: {
+                zoomType: 'x'
+            },
+            title: {
+                text: opts.title || '因子序列'
+            },
+            xAxis: {
+                type: 'datetime'
+            },
+            yAxis: [{
+                title: { text: opts.factorAxisLabel || '因子值' },
+                crosshair: true,
+            }, {
+                title: { text: opts.returnAxisLabel || '收益率' },
+                opposite: true,
+                visible: hasReturns,
+            }],
+            tooltip: {
+                shared: true,
+                valueDecimals: 6
+            },
+            legend: {
+                enabled: false
+            },
+            navigator: {
+                enabled: true
+            },
+            scrollbar: {
+                enabled: true
+            },
+            rangeSelector: {
+                enabled: true
+            },
+            series: series
+        });
+    };
 })();

@@ -4,16 +4,14 @@
         id="factor-series-viewer-root"
         style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;"
     >
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-            <div>
-                <div style="font-size:13px;font-weight:600;color:#1f2937;">产品序列 / 因子序列对比</div>
-                <div style="font-size:12px;color:#64748b;margin-top:2px;">选择产品、合约或期限后查看因子值、价格、收益标签和事件对齐。</div>
+        <div id="factor-series-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;cursor:pointer;user-select:none;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span id="factor-series-triangle" style="font-size:12px;color:#64748b;display:inline-block;transition:transform .15s ease;width:12px;">▸</span>
+                <div>
+                    <div style="font-size:13px;font-weight:600;color:#1f2937;">产品序列 / 因子序列对比</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">选择产品、合约或期限后查看因子值、价格、收益标签和事件对齐。</div>
+                </div>
             </div>
-            <button
-                type="button"
-                id="factor-series-open-btn"
-                style="height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;font-size:12px;cursor:pointer;"
-            >打开序列查看</button>
         </div>
         <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
             <div style="font-size:12px;color:#64748b;">从产品树选择产品或路径，再选择因子运行 factor.evaluate，显示原始因子信号序列。</div>
@@ -26,7 +24,7 @@
                     <span>因子</span>
                     <select id="factor-series-factor"><option value="">加载中...</option></select>
                 </label>
-                <button type="button" id="factor-series-run-btn" class="factor-series-action">运行 evaluate</button>
+                <button type="button" id="factor-series-run-btn" class="factor-series-action">计算因子</button>
                 <span id="factor-series-status" class="factor-series-status"></span>
             </div>
             <div id="factor-series-progress" class="ic-progress-container" style="display:none;">
@@ -36,14 +34,20 @@
                 <span id="factor-series-progress-text" class="ic-progress-text">0%</span>
             </div>
             <div id="factor-series-product-row" class="factor-series-product-row"></div>
-            <div class="factor-series-chart-layout">
-                <div>
-                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">因子序列</div>
-                    <div id="factor-series-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
-                </div>
-                <div>
-                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">收益序列</div>
-                    <div id="factor-series-return-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+            <div id="factor-series-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+            <div id="factor-series-term-table-container" style="display:none;">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px;">期限表</div>
+                <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                    <table id="factor-series-term-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead>
+                            <tr>
+                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>
+                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>
+                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -52,18 +56,7 @@
 
 <div id="factor-series-products-overlay" class="factor-series-overlay" style="display:none;">
     <div class="factor-series-overlay-panel">
-        <div class="factor-series-overlay-header">
-            <div>
-                <div style="font-size:14px;font-weight:700;color:#1f2937;">选择产品</div>
-                <div style="font-size:12px;color:#64748b;margin-top:2px;">从产品树勾选产品或路径，运行时按这些路径调用 factor.evaluate。</div>
-            </div>
-            <button type="button" id="factor-series-products-close" class="factor-series-icon-btn">×</button>
-        </div>
-        <div id="factor-series-tree" class="factor-series-tree"></div>
-        <div class="factor-series-overlay-footer">
-            <span id="factor-series-overlay-summary" class="factor-series-path-summary"></span>
-            <button type="button" id="factor-series-products-done" class="factor-series-action">完成</button>
-        </div>
+        <div id="factor-series-product-selector-root" style="height:100%;"></div>
     </div>
 </div>
 
@@ -171,40 +164,39 @@
         padding: 24px;
     }
     .factor-series-overlay-panel {
-        width: min(920px, 96vw);
-        max-height: 88vh;
         display: flex;
         flex-direction: column;
         background: #fff;
         border-radius: 10px;
         box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
         overflow: hidden;
+        width: min(1020px, 96vw);
+        max-height: 90vh;
+        overflow: hidden;
     }
-    .factor-series-overlay-header,
-    .factor-series-overlay-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 12px 14px;
-        border-bottom: 1px solid #e5e7eb;
-    }
-    .factor-series-overlay-footer {
-        border-top: 1px solid #e5e7eb;
-        border-bottom: none;
-        background: #f8fafc;
-    }
-    .factor-series-tree {
-        height: min(620px, 68vh);
-        overflow: auto;
-        padding: 10px 14px;
-        background: #fff;
-    }
-    .factor-series-chart-layout {
+    #factor-series-chart-container {
         margin-top: 10px;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
+    }
+    #factor-series-term-table-container {
+        margin-top: 10px;
+    }
+    #factor-series-term-table th,
+    #factor-series-term-table td {
+        padding: 6px 12px;
+        text-align: left;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+    #factor-series-term-table a {
+        color: #0078d4;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    #factor-series-term-table a:hover {
+        text-decoration: underline;
+    }
+    #factor-series-term-table .contract-name-muted {
+        color: #8a94a6;
     }
     .factor-series-icon-btn {
         width: 28px;
@@ -220,9 +212,6 @@
     @media (max-width: 900px) {
         .factor-series-action {
             width: 100%;
-        }
-        .factor-series-chart-layout {
-            grid-template-columns: 1fr;
         }
         .factor-series-controls .factor-series-field,
         .factor-series-product-picker {

@@ -8,6 +8,8 @@
         treeReady: false,
         loadingFactors: false,
         progressValue: 0,
+        productSelectorMounted: false,
+        termTableLoading: false,
     };
 
     function escapeHtml(value) {
@@ -65,45 +67,43 @@
     function renderPathSummary() {
         var html = pathSummaryHtml();
         var summary = document.getElementById('factor-series-path-summary');
-        var overlaySummary = document.getElementById('factor-series-overlay-summary');
         if (summary) summary.innerHTML = html;
-        if (overlaySummary) overlaySummary.innerHTML = html;
     }
 
-    function normalizeTreeSelections(tree) {
-        var paths = [];
-        if (!tree || !tree.visit) return paths;
-        tree.visit(function(node) {
-            if (!node || !node.selected) return;
-            if (!node) return false;
-            if (typeof node.isFolder === 'function') {
-                if (node.isFolder()) {
-                    node.setSelected(false);
-                    return;
-                }
-            } else if (node.folder) {
-                node.setSelected(false);
-                return;
-            }
-            paths.push(node.key);
-        });
-        return paths;
-    }
-
-    function initTree() {
-        var treeHost = document.getElementById('factor-series-tree');
-        var chart = document.getElementById('factor-series-chart-container');
-        if (!treeHost || state.treeReady) return;
-        if (!window.ProductSelector || !window.jQuery || !jQuery.fn || !jQuery.fn.fancytree) {
-            if (chart) chart.innerHTML = message('产品树依赖未加载，请刷新页面后重试。', true);
+    function mountProductSelector() {
+        if (state.productSelectorMounted) return;
+        var root = document.getElementById('factor-series-product-selector-root');
+        if (!root) return;
+        if (!window.jQuery || !window.ProductSelector) {
+            root.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px;">产品树组件未加载</div>';
             return;
         }
-        state.treeReady = true;
-        window.ProductSelector.createTree(jQuery(treeHost), {
+        if (typeof window.ProductSelector.render !== 'function' || typeof window.ProductSelector.initLeftTree !== 'function') {
+            root.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px;">产品树能力不完整</div>';
+            return;
+        }
+
+        var $root = window.jQuery(root);
+        $root.html('');
+        window.ProductSelector.render($root, {
+            title: '选择产品',
+            submitLabel: '完成',
+            toolbar: '',
+            headerBtns: '<button type="button" id="factor-series-products-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">×</button>',
+            onSubmit: function() {
+                var overlay = document.getElementById('factor-series-products-overlay');
+                if (overlay) overlay.style.display = 'none';
+            },
+        });
+
+        window.ProductSelector.initLeftTree($root, {
             onlyLeaf: true,
             onInit: function(tree) {
+                state.treeReady = true;
                 window.ProductSelector.restoreChecks(tree, state.paths);
-                state.paths = normalizeTreeSelections(tree);
+                state.paths = typeof window.ProductSelector.getLeafOnlyPaths === 'function'
+                    ? window.ProductSelector.getLeafOnlyPaths(tree)
+                    : [];
                 renderPathSummary();
             },
             onSelect: function(paths) {
@@ -111,6 +111,16 @@
                 renderPathSummary();
             },
         });
+
+        state.productSelectorMounted = true;
+    }
+
+    function openProductTreeOverlay() {
+        var overlay = document.getElementById('factor-series-products-overlay');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        mountProductSelector();
+        renderPathSummary();
     }
 
     function message(text, isError) {
@@ -213,9 +223,9 @@
             chart.innerHTML = message('请先选择因子。', true);
             return;
         }
-        if (status) status.textContent = '运行 factor.evaluate...';
+        if (status) status.textContent = '计算因子...';
         showProgress();
-        chart.innerHTML = message('正在运行 factor.evaluate...');
+        chart.innerHTML = message('正在计算因子...');
         try {
             var res = await fetch('/api/factor_series_viewer/evaluate', {
                 method: 'POST',
@@ -235,6 +245,7 @@
             state.activeProduct = state.lastSeries.length ? state.lastSeries[0].product : '';
             renderProductChooser();
             drawActiveSeries(data.factor || factor);
+            loadTermTable(state.activeProduct);
             var doneText = '完成：' + state.lastSeries.length + ' 个产品';
             if (data && data.meta && data.meta.elapsed_ms != null) {
                 doneText += '（' + data.meta.elapsed_ms + 'ms）';
@@ -268,63 +279,126 @@
             select.addEventListener('change', function() {
                 state.activeProduct = this.value;
                 drawActiveSeries(selectedFactor() || {});
+                loadTermTable(state.activeProduct);
             });
+        }
+    }
+
+    function normalizeProductForContractTable(productName) {
+        if (!productName) return '';
+        return String(productName);
+    }
+
+    function renderTermTableRows(contracts) {
+        var container = document.getElementById('factor-series-term-table-container');
+        var tbody = document.querySelector('#factor-series-term-table tbody');
+        if (!container || !tbody) return;
+        tbody.innerHTML = '';
+        if (!contracts.length) {
+            container.style.display = 'none';
+            return;
+        }
+        for (var i = 0; i < contracts.length; i++) {
+            var c = contracts[i];
+            var tr = document.createElement('tr');
+            var contractCell = c.has_data
+                ? '<a href="/products?contract_uid=' + encodeURIComponent(c.uid) + '" title="查看合约信息">'
+                    + escapeHtml(c.contract)
+                    + '</a>'
+                : '<span class="contract-name-muted" title="暂无价格数据，不能跳转">'
+                    + escapeHtml(c.contract || '')
+                    + '</span>';
+            tr.innerHTML =
+                '<td>' + contractCell + '</td>' +
+                '<td>' + escapeHtml(c.start || c.start_ts || '') + '</td>' +
+                '<td>' + escapeHtml(c.end || c.end_ts || '') + '</td>';
+            tbody.appendChild(tr);
+        }
+        container.style.display = 'block';
+    }
+
+    async function loadTermTable(productName) {
+        var container = document.getElementById('factor-series-term-table-container');
+        var tbody = document.querySelector('#factor-series-term-table tbody');
+        if (!container || !tbody) return;
+        if (state.termTableLoading) return;
+        if (!productName) {
+            container.style.display = 'none';
+            tbody.innerHTML = '';
+            return;
+        }
+
+        state.termTableLoading = true;
+        tbody.innerHTML = '<tr><td colspan="3" style="padding:12px 12px;color:#94a3b8;">加载期限信息...</td></tr>';
+        container.style.display = 'block';
+
+        try {
+            var product = normalizeProductForContractTable(productName);
+            var response = await fetch('/api/get_contracts?product=' + encodeURIComponent(product));
+            var data = await response.json();
+            if (!data.success || !data.contracts || data.contracts.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            renderTermTableRows(data.contracts);
+        } catch (err) {
+            container.style.display = 'none';
+        } finally {
+            state.termTableLoading = false;
         }
     }
 
     function drawActiveSeries(factor) {
         var chart = document.getElementById('factor-series-chart-container');
-        var returnChart = document.getElementById('factor-series-return-chart-container');
         if (!chart) return;
         var item = state.lastSeries.find(function(series) { return series.product === state.activeProduct; }) || state.lastSeries[0];
         if (!item) {
             chart.innerHTML = message('没有可显示的因子序列。', true);
-            if (returnChart) returnChart.innerHTML = '';
             return;
         }
-        if (typeof window.FactorSeriesCharts === 'undefined' || typeof window.FactorSeriesCharts.renderFactorSeriesChart !== 'function') {
+        if (typeof window.FactorSeriesCharts === 'undefined' || typeof window.FactorSeriesCharts.renderDualSeriesChart !== 'function') {
             chart.innerHTML = message('图表渲染函数未加载，请刷新页面后重试。', true);
-            if (returnChart) returnChart.innerHTML = '';
             return;
         }
-        window.FactorSeriesCharts.renderFactorSeriesChart({
+        window.FactorSeriesCharts.renderDualSeriesChart({
             container: chart,
             title: item.product + ' · ' + (factor.alias || factor.name || '因子序列'),
-            dates: item.dates,
-            values: item.values,
-            seriesName: factor.alias || factor.name || '因子值'
-        });
-
-        if (!returnChart) return;
-        if (!item.returns || !Array.isArray(item.returns.dates) || !Array.isArray(item.returns.values) || item.returns.values.length === 0) {
-            returnChart.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px;">收益序列不可用，请先确认当前因子在当前区间可计算收益。</div>';
-            return;
-        }
-        window.FactorSeriesCharts.renderFactorSeriesChart({
-            container: returnChart,
-            title: item.product + ' · 收益序列',
-            dates: item.returns.dates,
-            values: item.returns.values,
-            seriesName: '收益率',
-            yAxisLabel: '收益'
+            factorDates: item.dates,
+            factorValues: item.values,
+            factorName: factor.alias || factor.name || '因子值',
+            factorAxisLabel: factor.alias || factor.name || '因子值',
+            returnDates: item.returns ? item.returns.dates : [],
+            returnValues: item.returns ? item.returns.values : [],
+            returnName: '收益率',
+            returnAxisLabel: '收益率',
         });
     }
 
     function init() {
-        var btn = document.getElementById('factor-series-open-btn');
+        var header = document.getElementById('factor-series-header');
         var body = document.getElementById('factor-series-viewer-body');
         var runBtn = document.getElementById('factor-series-run-btn');
         var productsBtn = document.getElementById('factor-series-products-btn');
         var overlay = document.getElementById('factor-series-products-overlay');
         var closeBtn = document.getElementById('factor-series-products-close');
-        var doneBtn = document.getElementById('factor-series-products-done');
-        if (btn && body) {
-            btn.addEventListener('click', function() {
-                var open = body.style.display === 'none';
-                body.style.display = open ? '' : 'none';
-                btn.textContent = open ? '收起序列查看' : '打开序列查看';
-                if (open) render();
+        var triangle = document.getElementById('factor-series-triangle');
+
+        function setViewerOpen(open) {
+            if (!body) return;
+            var openState = !!open;
+            body.style.display = openState ? '' : 'none';
+            if (triangle) {
+                triangle.style.transform = openState ? 'rotate(90deg)' : 'rotate(0deg)';
+            }
+            if (openState) render();
+        }
+
+        if (header && body) {
+            header.addEventListener('click', function() {
+                var open = body.style.display !== 'none';
+                setViewerOpen(!open);
             });
+            setViewerOpen(false);
         }
         if (runBtn) runBtn.addEventListener('click', runEvaluate);
         function closeOverlay() {
@@ -332,13 +406,10 @@
         }
         if (productsBtn && overlay) {
             productsBtn.addEventListener('click', function() {
-                overlay.style.display = 'flex';
-                initTree();
-                renderPathSummary();
+                openProductTreeOverlay();
             });
         }
         if (closeBtn) closeBtn.addEventListener('click', closeOverlay);
-        if (doneBtn) doneBtn.addEventListener('click', closeOverlay);
         if (overlay) {
             overlay.addEventListener('click', function(event) {
                 if (event.target === overlay) closeOverlay();

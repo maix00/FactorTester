@@ -506,6 +506,7 @@
         updateLeftHint: updateLeftHint,
         createTree: createTree,
         getMinimalPaths: getMinimalPaths,
+        getLeafOnlyPaths: getLeafOnlyPaths,
         restoreChecks: restoreChecks,
         clearChecks: clearChecks,
         renderSubmissionHistory: renderSubmissionHistory,
