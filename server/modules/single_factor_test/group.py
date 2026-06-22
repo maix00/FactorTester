@@ -22,6 +22,7 @@ from tools.products.AdjustableTermStructure import resolve_term_structure_produc
 from tools.products.Product import Product
 from tools.products.product_utils import product_display_name
 from tools.backtest.settings import backtest_setting_registry
+from tools.backtest.settings.resolver import resolve_group_settings
 from tools.backtest.settings.strategy_fields import (
     ALLOCATION_POLICY,
     POSITION_POLICY,
@@ -127,33 +128,33 @@ def _resolve_flat_backtest_settings(
     ls_configs: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     app = backtest_setting_registry.get("group_test")
-    manifest = app.manifest()
-    defaults = {
-        key: item.get("value")
-        for key, item in (manifest.get("defaults") or {}).items()
-        if isinstance(item, dict)
-    }
+    setting_keys = set(app.settings)
     local_values = {
         key: payload[key]
-        for key in defaults
+        for key in setting_keys
         if key in payload
     }
     # Keep existing request aliases as local fields.
     if "precision" in payload and "time_precision" not in local_values:
         local_values["time_precision"] = payload["precision"]
 
-    resolved: dict[str, dict[str, Any]] = {}
+    group_ids: list[str] = []
+    group_values: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(list(groups) + list(ls_configs or [])):
         if not isinstance(item, dict):
             continue
         group_id = str(item.get("id") or f"group-{index}")
-        values = dict(defaults)
-        values.update(local_values)
-        for key in defaults:
+        group_ids.append(group_id)
+        group_values[group_id] = {}
+        for key in setting_keys:
             if key in item:
-                values[key] = item[key]
-        resolved[group_id] = values
-    return resolved
+                group_values[group_id][key] = item[key]
+    return resolve_group_settings(
+        app,
+        local_values=local_values,
+        group_values=group_values,
+        group_ids=group_ids,
+    )
 
 
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
@@ -1300,11 +1301,11 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             continue
         tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
 
-    # Determine split count per (tester_id, factor_alias). Frontend payload
-    # uses camelCase ``splitCount``; backend internals use ``split_count``.
-    # means "the factor was split into N buckets"; it is distinct from the
-    # number of flat groups submitted in this request.
-    split_count_by_triple: dict[tuple, int] = {}
+    # Determine the membership bucket count per (tester_id, factor_alias).
+    # This is not factor precomputation. It lets the group strategy build one
+    # membership tensor for the same tester/factor/split-count and then reuse
+    # it for multiple selected groups.
+    split_count_by_membership_key: dict[tuple[str, str], int] = {}
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
             split_count = None
@@ -1320,7 +1321,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     f"缺少 splitCount: tester_id={tid} factor_alias={fa} "
                     f"groups={missing}"
                 )
-            split_count_by_triple[(tid, fa)] = split_count
+            split_count_by_membership_key[(tid, fa)] = split_count
 
     # Build flat _FactorGroupTestGroup list
     all_flat_groups: list[_FactorGroupTestGroup] = []
@@ -1331,7 +1332,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     sim_index = 0
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
-            split_count = split_count_by_triple[(tid, fa)]
+            split_count = split_count_by_membership_key[(tid, fa)]
             existing = factor_aliases_by_submission.get(tid) or []
             if fa not in existing:
                 existing.append(fa)

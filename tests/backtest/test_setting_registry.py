@@ -17,14 +17,14 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
-        "liquidity", "margin", "market_rules", "calendar", "evaluation",
+        "order", "liquidity", "margin", "market_rules", "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "liquidity", "margin",
+        "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
@@ -34,6 +34,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "value": "native",
         "label": "Native 事件驱动回测工具",
     }
+    assert index["defaults"]["order_type"]["value"] == "market"
+    assert index["defaults"]["matching_model"]["value"] == "next_bar_full_fill"
+    assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
+    assert index["defaults"]["money_unit_policy"]["value"] == "minor_units"
     assert {chip["key"] for chip in index["chip_fields"]} >= {
         "factor_alias",
         "tester",

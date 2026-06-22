@@ -35,9 +35,11 @@ def group_test_settings() -> ApplicationSettings:
         SettingTab("rebalance_trigger", "调仓触发", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
         SettingTab("position_policy", "持仓政策", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 32),
         SettingTab("cost", "费用", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 40),
+        SettingTab("order", "订单执行", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 45),
         SettingTab("liquidity", "流动性", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 50),
         SettingTab("margin", "保证金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 55),
         SettingTab("market_rules", "市场规则", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+        SettingTab("accounting", "记账规则", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 62),
         SettingTab("calendar", "回测时钟", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 65),
         SettingTab("evaluation", "样本划分", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 70),
     ):
@@ -261,6 +263,45 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="滑点bp: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "order_type",
+        "订单类型",
+        "order",
+        "select",
+        "market",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("market", "市价单"),
+            SettingOption("limit", "限价单"),
+        ),
+        chip_template="订单: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "matching_model",
+        "撮合模型",
+        "order",
+        "select",
+        "next_bar_full_fill",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("next_bar_full_fill", "下一 bar 全额成交"),
+            SettingOption("bar_volume_limited", "按 bar 成交量限制"),
+        ),
+        chip_template="撮合: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "quantity_rounding_policy",
+        "数量取整",
+        "order",
+        "select",
+        "floor_to_lot",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("floor_to_lot", "按最小买入手数向下取整"),
+            SettingOption("nearest_lot", "按最小买入手数四舍五入"),
+        ),
+        chip_template="取整: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "liquidity_mode",
         "流动性规则",
         "liquidity",
@@ -309,6 +350,19 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("configured_default", "使用注册默认值并标记近似"),
         ),
         chip_template="规则回退: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "money_unit_policy",
+        "金额精度",
+        "accounting",
+        "select",
+        "minor_units",
+        ScopePolicy.LOCAL_ONLY,
+        options=(
+            SettingOption("minor_units", "内部按分制整数记账"),
+            SettingOption("engine_native", "使用执行引擎原生金额精度"),
+        ),
+        chip_template="金额精度: {value}",
     ))
     app.register_setting(SettingDefinition(
         "evaluation_split",
