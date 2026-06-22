@@ -17,13 +17,15 @@
         </div>
         <div id="factor-series-viewer-body" style="display:none;">
             <div id="factor-series-controls" class="factor-series-controls">
-                <div class="factor-series-control-subtitle">产品</div>
-                <div class="factor-series-product-picker">
-                    <button type="button" id="factor-series-products-btn" class="factor-series-secondary-action">选择产品</button>
-                    <span id="factor-series-path-summary" class="factor-series-path-summary"></span>
-                </div>
-                <label class="factor-series-field">
-                    <span>因子</span>
+                <label class="factor-series-control-block factor-series-field">
+                    <span class="factor-series-control-subtitle">产品</span>
+                    <div class="factor-series-product-picker">
+                        <button type="button" id="factor-series-products-btn" class="factor-series-secondary-action">选择产品</button>
+                        <span id="factor-series-path-summary" class="factor-series-path-summary"></span>
+                    </div>
+                </label>
+                <label class="factor-series-control-block factor-series-field">
+                    <span class="factor-series-control-subtitle">因子</span>
                     <select id="factor-series-factor"><option value="">加载中...</option></select>
                 </label>
                 <span id="factor-series-status" class="factor-series-status"></span>
@@ -121,28 +123,36 @@
     }
 
     .factor-series-controls {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+        column-gap: 8px;
+        row-gap: 8px;
         gap: 8px;
-        align-items: flex-end;
-        flex-wrap: wrap;
         margin-top: 10px;
         padding: 8px;
         border: 1px solid #eef2f7;
         border-radius: 8px;
         background: #fbfdff;
     }
+    .factor-series-control-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
     .factor-series-product-picker {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex: 1 1 320px;
-        min-width: 260px;
+        min-width: 0;
     }
     .factor-series-control-subtitle {
-        width: 100%;
-        margin: 2px 0 2px;
+        width: auto;
+        margin: 0;
         font-size: 12px;
         color: #64748b;
+        line-height: 1.4;
     }
     .factor-series-field {
         display: flex;
@@ -162,9 +172,9 @@
         font-size: 12px;
         padding: 0 8px;
     }
-    .factor-series-controls .factor-series-field {
-        min-width: 220px;
-        flex: 0 1 280px;
+    .factor-series-status {
+        grid-column: 1 / -1;
+        align-self: start;
     }
     .factor-series-secondary-action {
         height: 28px;
@@ -181,7 +191,6 @@
         font-size: 12px;
         color: #64748b;
         min-height: 18px;
-        align-self: center;
     }
     .factor-series-product-row {
         margin-top: 8px;
@@ -191,7 +200,7 @@
         display: flex;
         gap: 4px;
         flex-wrap: wrap;
-        justify-content: flex-end;
+        justify-content: flex-start;
         font-size: 11px;
         min-width: 0;
     }
@@ -380,9 +389,8 @@
         #factor-series-run-btn {
             width: 100%;
         }
-        .factor-series-controls .factor-series-field,
-        .factor-series-product-picker {
-            flex-basis: 100%;
+        .factor-series-controls {
+            grid-template-columns: 1fr;
         }
         .factor-series-overlay {
             padding: 8px;
