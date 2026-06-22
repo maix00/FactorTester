@@ -20,10 +20,15 @@ def get_backtest_setting_application(application: str):
     current_time = page_runtime.get_current_time(page_uuid) if page_uuid else None
     if current_time:
         start, end, _start_calc = current_time
-        manifest["defaults"]["start_date"]["value"] = _date_value(start)
-        manifest["defaults"]["end_date"]["value"] = _date_value(end)
-        manifest["defaults"]["start_time"]["value"] = _time_value(start)
-        manifest["defaults"]["end_time"]["value"] = _time_value(end)
+        defaults = manifest.get("defaults") or {}
+        if "start_date" in defaults:
+            defaults["start_date"]["value"] = _date_value(start)
+        if "end_date" in defaults:
+            defaults["end_date"]["value"] = _date_value(end)
+        if "start_time" in defaults:
+            defaults["start_time"]["value"] = _time_value(start)
+        if "end_time" in defaults:
+            defaults["end_time"]["value"] = _time_value(end)
     return jsonify({"success": True, **manifest})
 
 

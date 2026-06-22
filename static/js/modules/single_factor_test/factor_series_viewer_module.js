@@ -1,20 +1,24 @@
 (function() {
+    var APP = 'factor_evaluation';
+    var LOCAL = 'local-settings';
     var state = {
-        paths: [],
+        manifest: null,
+        tabCache: Object.create(null),
+        mountedTabs: [],
+        activeTab: null,
+        values: Object.create(null),
         factors: [],
+        paths: [],
+        currentProduct: null,
+        currentContracts: [],
         lastSeries: [],
         activeProduct: '',
-        loadingFactors: false,
-        progressValue: 0,
-        termTableLoading: false,
         treeReady: false,
         tree: null,
-        chart: null,
         allProductsMap: {},
-        currentProduct: null,
-        currentAdjusted: false,
+        chart: null,
+        loadingFactors: false,
     };
-
     var overlayProductReady = false;
 
     function escapeHtml(value) {
@@ -26,13 +30,13 @@
             .replace(/'/g, '&#39;');
     }
 
+    function isFunction(value) {
+        return typeof value === 'function';
+    }
+
     function bodyOpen() {
         var body = document.getElementById('factor-series-viewer-body');
         return body && body.style.display !== 'none';
-    }
-
-    function isFunction(value) {
-        return typeof value === 'function';
     }
 
     function message(text, isError) {
@@ -55,7 +59,6 @@
         var next = Math.max(0, Math.min(100, Math.floor(value)));
         if (ui.bar) ui.bar.style.width = next + '%';
         if (ui.text) ui.text.textContent = text || (next + '%');
-        state.progressValue = next;
     }
 
     function showProgress() {
@@ -67,12 +70,11 @@
 
     function hideProgress(successText) {
         var ui = getProgressEls();
-        setProgress(90, '计算中');
+        setProgress(100, successText || '完成');
         if (ui.runBtn) ui.runBtn.disabled = false;
         setTimeout(function() {
-            setProgress(100, successText || '完成');
             if (ui.wrapper) ui.wrapper.style.display = 'none';
-        }, 600);
+        }, 500);
     }
 
     function failProgress(errorText) {
@@ -85,70 +87,369 @@
         }, 1000);
     }
 
+    function requestJSON(url, options) {
+        return fetch(url, options || {}).then(function(response) {
+            return response.json().catch(function() { return {}; }).then(function(payload) {
+                if (!response.ok || payload.success === false) {
+                    throw new Error(payload.error || ('HTTP ' + response.status));
+                }
+                return payload;
+            });
+        });
+    }
+
+    function defaults() {
+        return state.manifest && state.manifest.defaults ? state.manifest.defaults : {};
+    }
+
+    function settingMeta(key) {
+        return defaults()[key] || null;
+    }
+
+    function tabMeta(tabKey) {
+        var tabs = state.manifest && state.manifest.tab_lists ? (state.manifest.tab_lists[LOCAL] || []) : [];
+        for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].key === tabKey) return tabs[i];
+        }
+        return null;
+    }
+
+    function settingKeysForTab(tabKey) {
+        var out = [];
+        var defs = defaults();
+        Object.keys(defs).forEach(function(key) {
+            if (defs[key] && defs[key].tab_key === tabKey) out.push(key);
+        });
+        return out;
+    }
+
+    function effectiveValue(key) {
+        if (Object.prototype.hasOwnProperty.call(state.values, key)) return state.values[key];
+        var meta = settingMeta(key);
+        return meta ? meta.value : '';
+    }
+
+    function displayValue(setting, value) {
+        if (setting && Array.isArray(setting.options)) {
+            for (var i = 0; i < setting.options.length; i++) {
+                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
+            }
+        }
+        if (setting && setting.key === 'product') {
+            return productLabel();
+        }
+        if (setting && setting.key === 'factor') {
+            var factor = selectedFactor();
+            return factor ? factor.alias || factor.name || '' : '';
+        }
+        return value === undefined || value === null || value === '' ? '自动' : String(value);
+    }
+
+    function chipParts(labelOrText, value) {
+        if (value !== undefined && value !== null && value !== '') {
+            return { label: String(labelOrText || ''), value: String(value) };
+        }
+        var text = String(labelOrText == null ? '' : labelOrText).trim();
+        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2]) return { label: match[1], value: match[2] };
+        return { label: '', value: text };
+    }
+
+    function renderChipHtml(text, value) {
+        var parts = chipParts(text, value);
+        if (!parts.label) return '<span class="factor-series-settings-chip-value">' + escapeHtml(parts.value) + '</span>';
+        return '<span class="factor-series-settings-chip-label">' + escapeHtml(parts.label) + '</span>'
+            + '<span class="factor-series-settings-chip-value">' + escapeHtml(parts.value) + '</span>';
+    }
+
+    function chipText(setting, value) {
+        var template = setting && setting.chip_template ? setting.chip_template : ((setting && setting.key || '') + ': {value}');
+        return template.replace('{value}', displayValue(setting, value));
+    }
+
+    function makeChip(setting, value) {
+        var node = document.createElement('span');
+        node.className = 'factor-series-settings-chip';
+        node.innerHTML = renderChipHtml(chipText(setting, value));
+        return node;
+    }
+
+    function productLabel() {
+        if (!state.currentProduct) return '';
+        var name = state.currentProduct.name || state.activeProduct || '';
+        var desc = state.currentProduct.desc || '';
+        return desc && desc !== name ? name + ' · ' + desc : name;
+    }
+
+    function mountedSettingKeys() {
+        var keys = {};
+        state.mountedTabs.forEach(function(tabKey) {
+            settingKeysForTab(tabKey).forEach(function(key) { keys[key] = true; });
+        });
+        return keys;
+    }
+
+    function renderSettingChips() {
+        var row = document.getElementById('factor-series-settings-chip-row');
+        if (!row || !state.manifest) return;
+        row.innerHTML = '';
+        state.mountedTabs.forEach(function(tabKey) {
+            var manifest = state.tabCache[tabKey];
+            if (!manifest) {
+                loadTab(tabKey).then(renderSettingChips).catch(function() {});
+                return;
+            }
+            (manifest.settings || []).forEach(function(setting) {
+                var value = effectiveValue(setting.key);
+                if (setting.key === 'product' && !state.currentProduct) return;
+                if (setting.key === 'factor' && !selectedFactor()) return;
+                row.appendChild(makeChip(setting, value));
+            });
+        });
+    }
+
+    function renderResultChips() {
+        var row = document.getElementById('factor-series-result-chip-row');
+        if (!row || !state.manifest) return;
+        row.innerHTML = '';
+        var mountedKeys = mountedSettingKeys();
+        Object.keys(defaults()).forEach(function(key) {
+            if (mountedKeys[key]) return;
+            var setting = Object.assign({ key: key }, defaults()[key] || {});
+            if (!setting.chip_template) return;
+            row.appendChild(makeChip(setting, effectiveValue(key)));
+        });
+    }
+
+    function loadManifest() {
+        if (state.manifest) return Promise.resolve(state.manifest);
+        var pageUuid = encodeURIComponent(window._pageUuid || '');
+        return requestJSON('/api/backtest/settings/' + APP + '?page_uuid=' + pageUuid).then(function(manifest) {
+            state.manifest = manifest;
+            state.mountedTabs = (manifest.default_mounted_tabs && manifest.default_mounted_tabs[LOCAL] || []).slice();
+            Object.keys(manifest.defaults || {}).forEach(function(key) {
+                state.values[key] = manifest.defaults[key].value;
+            });
+            return manifest;
+        });
+    }
+
+    function tabURL(tabKey) {
+        return state.manifest.tab_url_template.replace('{tab_key}', encodeURIComponent(tabKey));
+    }
+
+    function loadTab(tabKey) {
+        if (state.tabCache[tabKey]) return Promise.resolve(state.tabCache[tabKey]);
+        return requestJSON(tabURL(tabKey)).then(function(manifest) {
+            state.tabCache[tabKey] = manifest;
+            return manifest;
+        });
+    }
+
     async function loadFactors() {
         if (state.factors.length || state.loadingFactors) return state.factors;
         state.loadingFactors = true;
         try {
             var alias = window.factorFamilyAlias || '';
             if (!alias) return [];
-            var res = await fetch('/api/factor_list?factor_family_alias=' + encodeURIComponent(alias));
-            var data = await res.json();
-            state.factors = data && data.success && Array.isArray(data.factors) ? data.factors : [];
+            var data = await requestJSON('/api/factor_list?factor_family_alias=' + encodeURIComponent(alias));
+            state.factors = Array.isArray(data.factors) ? data.factors : [];
             window.factorList = state.factors;
+            if (!effectiveValue('factor') && state.factors.length) {
+                state.values.factor = state.factors[0].alias || state.factors[0].name || '';
+            }
             return state.factors;
-        } catch (err) {
-            return [];
         } finally {
             state.loadingFactors = false;
         }
     }
 
-    function renderFactorOptions() {
-        var select = document.getElementById('factor-series-factor');
-        if (!select) return;
-        var previous = select.value;
-        select.innerHTML = state.factors.map(function(factor) {
-            var value = factor.alias || factor.name || '';
-            var label = value + (factor.freq ? ' · ' + factor.freq : '');
-            return '<option value="' + escapeHtml(value) + '"' + (value === previous ? ' selected' : '') + '>'
-                + escapeHtml(label)
-                + '</option>';
-        }).join('') || '<option value="">暂无因子</option>';
+    function selectedFactor() {
+        var alias = effectiveValue('factor');
+        if (!alias) return null;
+        return state.factors.find(function(factor) {
+            return String(factor.alias || factor.name || '') === String(alias);
+        }) || null;
     }
 
-    function pathSummaryHtml() {
-        if (!state.paths.length) {
-            return '<span style="color:#94a3b8;">未选择产品</span>';
+    function optionHtml(value, label, selected) {
+        return '<option value="' + escapeHtml(value) + '"' + (String(value) === String(selected) ? ' selected' : '') + '>'
+            + escapeHtml(label)
+            + '</option>';
+    }
+
+    function renderTabBar() {
+        var bar = document.getElementById('factor-series-settings-tab-bar');
+        if (!bar || !state.manifest) return;
+        bar.innerHTML = '';
+        var tabs = state.manifest.tab_lists && state.manifest.tab_lists[LOCAL] || [];
+        tabs.forEach(function(tab) {
+            if (state.mountedTabs.indexOf(tab.key) < 0) return;
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = tab.label;
+            button.className = state.activeTab === tab.key ? 'active' : '';
+            button.addEventListener('click', function() { openTab(tab.key); });
+            bar.appendChild(button);
+        });
+        var manage = document.createElement('button');
+        manage.type = 'button';
+        manage.textContent = '+ 设置';
+        manage.className = state.activeTab === '__manage__' ? 'active' : '';
+        manage.addEventListener('click', function() { openTab('__manage__'); });
+        bar.appendChild(manage);
+    }
+
+    function writeValue(key, value) {
+        state.values[key] = value;
+        if (key === 'product') {
+            renderPathSummary();
         }
-        return state.paths.slice(0, 6).map(function(path) {
-            return '<span class="factor-series-path-chip">' + escapeHtml(path) + '</span>';
-        }).join('') + (state.paths.length > 6 ? '<span style="color:#64748b;">等 ' + state.paths.length + ' 条</span>' : '');
+        renderSettingChips();
+        renderResultChips();
+    }
+
+    function renderManifestTab(manifest) {
+        var host = document.getElementById('factor-series-settings-host');
+        if (!host) return;
+        host.innerHTML = '';
+        (manifest.settings || []).forEach(function(setting) {
+            var row = document.createElement('label');
+            row.className = 'factor-series-setting-row';
+            var label = document.createElement('span');
+            label.className = 'factor-series-setting-label';
+            label.textContent = setting.label;
+            var controlWrap = document.createElement('span');
+            controlWrap.className = 'factor-series-setting-control';
+            controlWrap.appendChild(makeControl(setting));
+            row.appendChild(label);
+            row.appendChild(controlWrap);
+            host.appendChild(row);
+        });
+    }
+
+    function makeControl(setting) {
+        if (setting.key === 'product') {
+            var wrap = document.createElement('div');
+            wrap.className = 'factor-series-product-picker';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'factor-series-secondary-action';
+            btn.textContent = '从产品树选择产品';
+            btn.addEventListener('click', openProductTreeOverlay);
+            var summary = document.createElement('span');
+            summary.id = 'factor-series-path-summary';
+            summary.className = 'factor-series-path-summary';
+            wrap.appendChild(btn);
+            wrap.appendChild(summary);
+            setTimeout(renderPathSummary, 0);
+            return wrap;
+        }
+        var control = document.createElement('select');
+        if (setting.key === 'factor') {
+            state.factors.forEach(function(factor) {
+                var value = factor.alias || factor.name || '';
+                var label = value + (factor.freq ? ' · ' + factor.freq : '');
+                control.insertAdjacentHTML('beforeend', optionHtml(value, label, effectiveValue(setting.key)));
+            });
+        } else {
+            (setting.options || []).forEach(function(option) {
+                control.insertAdjacentHTML('beforeend', optionHtml(option.value, option.label, effectiveValue(setting.key)));
+            });
+        }
+        control.addEventListener('change', function() {
+            writeValue(setting.key, control.value);
+            if (setting.key === 'data_source') writeValue('frequency', '');
+            if (setting.key === 'frequency') writeValue('data_source', '');
+            if (state.currentProduct && (setting.key === 'data_source' || setting.key === 'frequency' || setting.key === 'price_type')) {
+                loadPriceDataForCurrentProduct().then(function(priceData) {
+                    drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
+                }).catch(showResultError);
+            }
+        });
+        return control;
+    }
+
+    function renderChooser() {
+        var host = document.getElementById('factor-series-settings-host');
+        if (!host || !state.manifest) return;
+        host.innerHTML = '';
+        var tabs = state.manifest.tab_lists && state.manifest.tab_lists[LOCAL] || [];
+        tabs.forEach(function(tab) {
+            var row = document.createElement('label');
+            row.className = 'factor-series-setting-row';
+            var label = document.createElement('span');
+            label.className = 'factor-series-setting-label';
+            label.textContent = tab.label;
+            var wrap = document.createElement('span');
+            wrap.className = 'factor-series-setting-control';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = state.mountedTabs.indexOf(tab.key) >= 0;
+            input.addEventListener('change', function() {
+                var idx = state.mountedTabs.indexOf(tab.key);
+                if (input.checked && idx < 0) state.mountedTabs.push(tab.key);
+                if (!input.checked && idx >= 0) {
+                    state.mountedTabs.splice(idx, 1);
+                    settingKeysForTab(tab.key).forEach(function(key) { delete state.values[key]; });
+                }
+                renderTabBar();
+                renderSettingChips();
+                renderResultChips();
+            });
+            wrap.appendChild(input);
+            row.appendChild(label);
+            row.appendChild(wrap);
+            host.appendChild(row);
+        });
+    }
+
+    function openTab(tabKey) {
+        var host = document.getElementById('factor-series-settings-host');
+        if (!host) return;
+        if (state.activeTab === tabKey && host.style.display !== 'none') {
+            state.activeTab = null;
+            host.style.display = 'none';
+            renderTabBar();
+            return;
+        }
+        state.activeTab = tabKey;
+        host.style.display = '';
+        renderTabBar();
+        if (tabKey === '__manage__') {
+            renderChooser();
+            return;
+        }
+        host.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
+        loadTab(tabKey).then(function(manifest) {
+            renderManifestTab(manifest);
+            renderSettingChips();
+        }).catch(function(error) {
+            host.textContent = '加载失败：' + error.message;
+        });
     }
 
     function renderPathSummary() {
         var summary = document.getElementById('factor-series-path-summary');
-        if (summary) summary.innerHTML = pathSummaryHtml();
-    }
-
-    function selectedFactor() {
-        var select = document.getElementById('factor-series-factor');
-        if (!select) return null;
-        var alias = select.value;
-        return state.factors.find(function(factor) {
-            return String(factor.alias || factor.name || '') === alias;
-        }) || null;
+        if (!summary) return;
+        if (!state.paths.length) {
+            summary.innerHTML = '<span style="color:#94a3b8;">未选择产品</span>';
+            return;
+        }
+        summary.innerHTML = state.paths.slice(0, 4).map(function(path) {
+            return '<span class="factor-series-path-chip">' + escapeHtml(path) + '</span>';
+        }).join('');
     }
 
     function extractProductName(node) {
         if (!node || !node.key) return null;
+        var data = node.data || {};
+        if (data.product_name) return data.product_name;
+        if (data.has_data === false) return null;
         var parts = String(node.key).split('/');
         var last = parts[parts.length - 1];
         if (last === '_products' || /^[0-9]+$/.test(last)) return null;
         return last;
-    }
-
-    function normalizeProductForContractApi(name) {
-        return String(name == null ? '' : name);
     }
 
     function mountProductTree() {
@@ -157,7 +458,6 @@
         var container = document.getElementById('factor-series-tree-container');
         if (!container || !window.jQuery) return;
         container.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">加载产品树...</div>';
-
         var $container = window.jQuery(container);
         $container.fancytree({
             source: { url: '/api/product_tree' },
@@ -166,18 +466,6 @@
             init: function(e, data) {
                 state.tree = data.tree;
                 state.treeReady = true;
-                var el = $container[0];
-                if (el) {
-                    el.addEventListener('wheel', function(ev) {
-                        var scrollTop = el.scrollTop;
-                        var maxScroll = el.scrollHeight - el.clientHeight;
-                        var atTop = scrollTop <= 0;
-                        var atBottom = scrollTop >= maxScroll - 1;
-                        if ((ev.deltaY < 0 && atTop) || (ev.deltaY > 0 && atBottom)) return;
-                        ev.preventDefault();
-                        el.scrollTop = scrollTop + ev.deltaY;
-                    }, {passive: false});
-                }
             },
             lazyLoad: function(e, data) {
                 var node = data.node;
@@ -198,50 +486,11 @@
             activate: function(e, data) {
                 var node = data.node;
                 var nodeData = node ? node.data || {} : {};
-                var productName = nodeData.product_name || extractProductName(node);
-                if (!productName) return;
-                if (nodeData.has_data === false) return;
-                selectProduct(productName, nodeData);
+                var productName = extractProductName(node);
+                if (!productName || nodeData.has_data === false) return;
+                selectProduct(productName, nodeData, node.key);
+                closeProductTreeOverlay();
             },
-        });
-    }
-
-    function selectProduct(name, nodeData) {
-        var data = Object.assign({}, state.allProductsMap[name] || {}, nodeData || {});
-        if (!data || !data.name) {
-            data = { name: name, code: name };
-        }
-        state.currentProduct = data;
-        state.currentAdjusted = !!data.adjusted;
-        state.paths = [String(name)];
-        state.activeProduct = String(name);
-
-        var infoTitle = (data.code || (String(data.name || '').split('.')[0] || String(data.name || ''))) + ' ' + (data.desc || data.name || '');
-        var chartTitle = document.getElementById('factor-series-chart-title');
-        if (chartTitle) chartTitle.textContent = infoTitle || '— 请选择品种 —';
-        var selectedSummary = document.getElementById('factor-series-product-selected-summary');
-        if (selectedSummary) selectedSummary.textContent = data.desc ? (data.name + ' · ' + data.desc) : data.name;
-
-        renderPathSummary();
-
-        var contractsWrap = document.getElementById('factor-series-contract-table-container');
-        if (contractsWrap) contractsWrap.style.display = 'none';
-        var tableBody = document.querySelector('#factor-series-contract-table tbody');
-        if (tableBody) tableBody.innerHTML = '';
-
-        var dsSelect = document.getElementById('factor-series-data-source');
-        if (dsSelect) dsSelect.value = '';
-
-        var contractUid = data.contract_uid;
-        var isContract = data.product_type === 'contract' || contractUid;
-        if (isContract) {
-            factorSeriesUpdatePriceTypeControl(false, false);
-            return factorSeriesLoadPriceData();
-        }
-
-        state.currentProduct = data;
-        return loadTermTableForOverlay(data.name).then(function() {
-            factorSeriesLoadPriceData();
         });
     }
 
@@ -250,43 +499,33 @@
             .then(function(res) { return res.json ? res.json() : {success:false}; })
             .then(function(data) {
                 if (!data || !data.success || !Array.isArray(data.products)) return;
-                for (var i = 0; i < data.products.length; i++) {
-                    var p = data.products[i];
-                    state.allProductsMap[p.name] = p;
-                }
+                data.products.forEach(function(p) { state.allProductsMap[p.name] = p; });
             })
-            .catch(function() {
-                state.allProductsMap = {};
-            });
+            .catch(function() { state.allProductsMap = {}; });
     }
 
-    function updateTreeSelectionFromPaths() {
-        if (!state.tree || !state.tree.findFirst) return;
-        state.tree.visit(function(node) {
-            if (!node || !node.key) return;
-            var active = state.paths.indexOf(String(node.key)) >= 0;
-            node.setSelected && node.setSelected(active);
-        });
+    function selectProduct(name, nodeData, path) {
+        var data = Object.assign({}, state.allProductsMap[name] || {}, nodeData || {});
+        if (!data || !data.name) data = { name: name, code: name };
+        state.currentProduct = data;
+        state.paths = [String(path || name)];
+        state.activeProduct = String(name);
+        writeValue('product', String(name));
+        var title = document.getElementById('factor-series-chart-title');
+        if (title) title.textContent = productLabel() || '— 请选择品种 —';
+        var selectedSummary = document.getElementById('factor-series-product-selected-summary');
+        if (selectedSummary) selectedSummary.textContent = productLabel();
+        loadTermTable(data.name);
+        loadPriceDataForCurrentProduct().then(function(priceData) {
+            drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
+        }).catch(showResultError);
     }
 
     function openProductTreeOverlay() {
         var overlay = document.getElementById('factor-series-products-overlay');
         if (!overlay) return;
         overlay.style.display = 'flex';
-        if (!overlayProductReady) {
-            mountProductTree();
-        }
-        if (overlayProductReady) {
-            updateTreeSelectionFromPaths();
-        }
-        renderPathSummary();
-        var startDate = document.getElementById('factor-series-start-date');
-        if (startDate && !startDate.value) startDate.value = '2024-01-01';
-        var endDate = document.getElementById('factor-series-end-date');
-        if (endDate && !endDate.value) endDate.value = new Date().toISOString().split('T')[0];
-        if (!overlayProductReady) {
-            loadOverlayProducts();
-        }
+        mountProductTree();
     }
 
     function closeProductTreeOverlay() {
@@ -294,14 +533,101 @@
         if (overlay) overlay.style.display = 'none';
     }
 
-    async function render() {
-        await loadFactors();
-        renderFactorOptions();
-        renderPathSummary();
-        var chart = document.getElementById('factor-series-chart-container');
-        if (chart && !state.lastSeries.length) {
-            chart.innerHTML = message('从产品树选择产品，再选择因子并运行。');
+    function normalizeProductForContractApi(name) {
+        return String(name == null ? '' : name);
+    }
+
+    function renderTermTableRows(container, tbody, contracts) {
+        if (!container || !tbody) return;
+        tbody.innerHTML = '';
+        if (!contracts.length) {
+            container.style.display = 'none';
+            return;
         }
+        contracts.forEach(function(c) {
+            var tr = document.createElement('tr');
+            var contractCell = c.has_data
+                ? '<a href="/products?contract_uid=' + encodeURIComponent(c.uid) + '" title="查看合约信息">' + escapeHtml(c.contract) + '</a>'
+                : '<span class="contract-name-muted" title="暂无价格数据，不能跳转">' + escapeHtml(c.contract || '') + '</span>';
+            tr.innerHTML = '<td>' + contractCell + '</td>'
+                + '<td>' + escapeHtml(c.start || c.start_ts || '') + '</td>'
+                + '<td>' + escapeHtml(c.end || c.end_ts || '') + '</td>';
+            tbody.appendChild(tr);
+        });
+        container.style.display = 'block';
+    }
+
+    async function loadTermTable(productName) {
+        var container = document.getElementById('factor-series-term-table-container');
+        var tbody = document.querySelector('#factor-series-term-table tbody');
+        if (!container || !tbody) return;
+        container.style.display = 'none';
+        tbody.innerHTML = '';
+        if (!productName) return;
+        try {
+            var data = await requestJSON('/api/get_contracts?product=' + encodeURIComponent(normalizeProductForContractApi(productName)));
+            state.currentContracts = Array.isArray(data.contracts) ? data.contracts : [];
+            renderTermTableRows(container, tbody, state.currentContracts);
+        } catch (err) {
+            state.currentContracts = [];
+            container.style.display = 'none';
+        }
+    }
+
+    function priceTypeAdjusted() {
+        return effectiveValue('price_type') !== 'raw';
+    }
+
+    async function loadPriceDataForCurrentProduct() {
+        if (!state.currentProduct) return null;
+        var product = state.currentProduct;
+        var reqBody = {
+            product_name: product.name || product.code,
+            adjusted: priceTypeAdjusted(),
+            series_variant: product.series_variant || 'primary_raw',
+            freq: effectiveValue('frequency') || '',
+            data_source: effectiveValue('data_source') || null,
+        };
+        if (product.contract_uid || product.product_type === 'contract') {
+            reqBody.contract_uid = product.contract_uid || product.name;
+            reqBody.adjusted = false;
+        }
+        var data = await requestJSON('/api/get_price_data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody),
+        });
+        updateDynamicPriceOptions(data);
+        return data;
+    }
+
+    function updateDynamicPriceOptions(data) {
+        var freqMeta = settingMeta('frequency');
+        if (freqMeta) {
+            freqMeta.options = [{ value: '', label: '自动' }].concat((data.available_freqs || []).map(function(freq) {
+                var labels = { MIN1: '1分钟', MIN5: '5分钟', MIN15: '15分钟', MIN30: '30分钟', HOUR1: '1小时', DAY1: '日线' };
+                return { value: freq, label: labels[freq] || freq };
+            }));
+        }
+        var sourceMeta = settingMeta('data_source');
+        if (sourceMeta) {
+            sourceMeta.options = [{ value: '', label: '自动' }].concat((data.available_sources || []).map(function(source) {
+                var alias = source.alias || '';
+                return { value: alias, label: alias + (source.freq ? ' · ' + source.freq : '') };
+            }));
+        }
+        if (state.activeTab === 'frequency' || state.activeTab === 'data_source') refreshActiveTab();
+        renderResultChips();
+    }
+
+    function refreshActiveTab() {
+        if (!state.activeTab || state.activeTab === '__manage__') return;
+        var manifest = state.tabCache[state.activeTab];
+        if (manifest) renderManifestTab(manifest);
+    }
+
+    function selectedSeriesItem() {
+        return state.lastSeries.find(function(series) { return series.product === state.activeProduct; }) || state.lastSeries[0] || null;
     }
 
     function renderProductChooser() {
@@ -323,101 +649,117 @@
         if (select) {
             select.addEventListener('change', function() {
                 state.activeProduct = this.value;
-                drawActiveSeries(selectedFactor() || {});
                 loadTermTable(this.value);
+                loadPriceDataForCurrentProduct().then(function(priceData) {
+                    drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
+                }).catch(showResultError);
             });
         }
     }
 
-    function drawActiveSeries(factor) {
-        var chart = document.getElementById('factor-series-chart-container');
-        if (!chart) return;
-        var item = state.lastSeries.find(function(series) { return series.product === state.activeProduct; }) || state.lastSeries[0];
-        if (!item) {
-            chart.innerHTML = message('没有可显示的因子序列。', true);
+    function pointTime(ts) {
+        if (typeof ts === 'number') return ts;
+        var d = new Date(ts);
+        return isNaN(d.getTime()) ? new Date(String(ts) + 'T00:00:00').getTime() : d.getTime();
+    }
+
+    function factorPoints(item) {
+        if (!item || !Array.isArray(item.dates) || !Array.isArray(item.values)) return [];
+        var rows = [];
+        for (var i = 0; i < item.dates.length && i < item.values.length; i++) {
+            var t = pointTime(item.dates[i]);
+            var v = item.values[i];
+            if (t != null && v != null && !Number.isNaN(Number(v))) rows.push([t, v]);
+        }
+        return rows;
+    }
+
+    function drawResultChart(priceData, item, factor) {
+        var container = document.getElementById('factor-series-chart-container');
+        if (!container) return;
+        container.innerHTML = '';
+        if (!window.Highcharts) {
+            container.innerHTML = message('Highcharts 未加载，无法显示图表。', true);
             return;
         }
-        if (!window.FactorSeriesCharts || !isFunction(window.FactorSeriesCharts.renderDualSeriesChart)) {
-            chart.innerHTML = message('图表渲染函数未加载，请刷新页面后重试。', true);
+        var rows = priceData && Array.isArray(priceData.data) ? priceData.data.slice().sort(function(a, b) {
+            return (a.timestamp || 0) - (b.timestamp || 0);
+        }) : [];
+        var factorData = factorPoints(item);
+        if (!rows.length && !factorData.length) {
+            container.innerHTML = message('没有可显示的价格或因子序列。', true);
             return;
         }
-        window.FactorSeriesCharts.renderDualSeriesChart({
-            container: chart,
-            title: item.product + ' · ' + (factor.alias || factor.name || '因子序列'),
-            factorDates: item.dates,
-            factorValues: item.values,
-            factorName: factor.alias || factor.name || '因子值',
-            factorAxisLabel: factor.alias || factor.name || '因子值',
-            returnDates: item.returns ? item.returns.dates : [],
-            returnValues: item.returns ? item.returns.values : [],
-            returnName: '收益率',
-            returnAxisLabel: '收益率',
+        var priceSeries = window.PriceDisplay && window.PriceDisplay.normalizePriceApi ? window.PriceDisplay.normalizePriceApi(priceData) : null;
+        var ohlc = window.PriceDisplay && isFunction(window.PriceDisplay.toOhlc)
+            ? window.PriceDisplay.toOhlc(rows)
+            : rows.map(function(r) { return [r.timestamp, r.open, r.high, r.low, r.close]; });
+        var volume = window.PriceDisplay && isFunction(window.PriceDisplay.toColumn)
+            ? window.PriceDisplay.toColumn(rows, 'volume')
+            : rows.map(function(r) { return [r.timestamp, r.volume]; });
+        var hasOi = priceSeries ? priceSeries.has_open_interest : false;
+        var oi = hasOi && window.PriceDisplay && isFunction(window.PriceDisplay.toColumn)
+            ? window.PriceDisplay.toColumn(rows, 'open_interest')
+            : [];
+        var yAxis = [{
+            labels: { align: 'right', x: -3 },
+            title: { text: '价格' },
+            height: hasOi ? '48%' : '54%',
+            resize: { enabled: true },
+            lineWidth: 2,
+        }, {
+            labels: { align: 'right', x: -3 },
+            title: { text: '因子' },
+            top: hasOi ? '52%' : '59%',
+            height: hasOi ? '22%' : '23%',
+            opposite: true,
+        }, {
+            labels: { align: 'right', x: -3 },
+            title: { text: '成交量' },
+            top: hasOi ? '77%' : '84%',
+            height: hasOi ? '10%' : '15%',
+            opposite: true,
+        }];
+        var series = [];
+        if (ohlc.length) {
+            series.push({ type: 'candlestick', name: priceData.product || '价格', data: ohlc, yAxis: 0, legendIndex: 10 });
+        }
+        if (factorData.length) {
+            series.push({ type: 'line', name: factor.alias || factor.name || '因子值', data: factorData, yAxis: 1, color: '#2563eb', legendIndex: 20, dataGrouping: { enabled: false } });
+        }
+        if (volume.length) {
+            series.push({ type: 'column', name: '成交量', data: volume, yAxis: 2, color: '#90CAF9', legendIndex: 30 });
+        }
+        if (hasOi) {
+            yAxis.push({
+                labels: { align: 'right', x: -3 },
+                title: { text: '持仓量' },
+                top: '90%',
+                height: '10%',
+                opposite: true,
+            });
+            series.push({ type: 'line', name: '持仓量', data: oi, yAxis: 3, color: '#E91E63', legendIndex: 40 });
+        }
+        var title = productLabel() || (priceData && priceData.product) || '因子评估';
+        state.chart = window.Highcharts.stockChart(container, {
+            chart: { animation: false, height: Math.max(520, Math.floor(container.getBoundingClientRect().height || 520)) },
+            title: { text: title, style: { fontSize: '15px' } },
+            subtitle: { text: (priceData ? ((priceData.adjusted ? '复权' : '原始') + ' · ' + priceData.freq + ' · ' + priceData.count + ' 条') : ''), style: { fontSize: '11px', color: '#888' } },
+            rangeSelector: { enabled: true },
+            navigator: { enabled: true },
+            scrollbar: { enabled: true },
+            legend: { enabled: true },
+            xAxis: { type: 'datetime', ordinal: true },
+            yAxis: yAxis,
+            tooltip: { split: true, valueDecimals: 6 },
+            series: series,
+            credits: { enabled: false },
         });
     }
 
-    function renderTermTableRows(container, tbody, contracts) {
-        if (!container || !tbody) return;
-        tbody.innerHTML = '';
-        if (!contracts.length) {
-            container.style.display = 'none';
-            return;
-        }
-        for (var i = 0; i < contracts.length; i++) {
-            var c = contracts[i];
-            var tr = document.createElement('tr');
-            var contractCell = c.has_data
-                ? '<a href="/products?contract_uid=' + encodeURIComponent(c.uid) + '" title="查看合约信息">' + escapeHtml(c.contract) + '</a>'
-                : '<span class="contract-name-muted" title="暂无价格数据，不能跳转">' + escapeHtml(c.contract || '') + '</span>';
-            tr.innerHTML =
-                '<td>' + contractCell + '</td>' +
-                '<td>' + escapeHtml(c.start || c.start_ts || '') + '</td>' +
-                '<td>' + escapeHtml(c.end || c.end_ts || '') + '</td>';
-            tbody.appendChild(tr);
-        }
-        container.style.display = 'block';
-    }
-
-    async function loadTermTable(productName) {
-        var container = document.getElementById('factor-series-term-table-container');
-        var tbody = document.querySelector('#factor-series-term-table tbody');
-        if (!container || !tbody) return;
-        if (state.termTableLoading) return;
-        if (!productName) {
-            container.style.display = 'none';
-            tbody.innerHTML = '';
-            return;
-        }
-        state.termTableLoading = true;
-        container.style.display = 'block';
-        tbody.innerHTML = '<tr><td colspan="3" style="padding:12px 12px;color:#94a3b8;">加载期限信息...</td></tr>';
-        try {
-            var response = await fetch('/api/get_contracts?product=' + encodeURIComponent(normalizeProductForContractApi(productName)));
-            var data = await response.json();
-            if (!data.success || !Array.isArray(data.contracts) || !data.contracts.length) {
-                container.style.display = 'none';
-                return;
-            }
-            renderTermTableRows(container, tbody, data.contracts);
-        } catch (err) {
-            container.style.display = 'none';
-        } finally {
-            state.termTableLoading = false;
-        }
-    }
-
-    async function loadTermTableForOverlay(productName) {
-        var container = document.getElementById('factor-series-contract-table-container');
-        var tbody = document.querySelector('#factor-series-contract-table tbody');
-        if (!container || !tbody) return;
-        container.style.display = 'none';
-        tbody.innerHTML = '';
-        if (!productName) return;
-        var resp = await fetch('/api/get_contracts?product=' + encodeURIComponent(normalizeProductForContractApi(productName)));
-        var data = await resp.json();
-        state.currentContracts = data && data.success ? (Array.isArray(data.contracts) ? data.contracts : []) : [];
-        if (!state.currentContracts.length) return;
-        renderTermTableRows(container, tbody, state.currentContracts);
-        container.style.display = 'block';
+    function showResultError(error) {
+        var chart = document.getElementById('factor-series-chart-container');
+        if (chart) chart.innerHTML = message(error.message || String(error), true);
     }
 
     async function runEvaluate() {
@@ -437,7 +779,8 @@
         showProgress();
         chart.innerHTML = message('正在计算因子...');
         try {
-            var res = await fetch('/api/factor_series_viewer/evaluate', {
+            setProgress(25, '计算因子');
+            var data = await requestJSON('/api/factor_evaluation/evaluate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -445,22 +788,19 @@
                     factor_family_alias: window.factorFamilyAlias || '',
                     factor_alias: factor.alias || factor.name,
                     page_uuid: window._pageUuid || '',
+                    settings: Object.assign({}, state.values),
                 }),
             });
-            var data = await res.json();
-            if (!data.success) {
-                throw new Error(data.error || ('HTTP ' + res.status));
-            }
             state.lastSeries = Array.isArray(data.series) ? data.series : [];
-            state.activeProduct = state.lastSeries.length ? state.lastSeries[0].product : '';
+            state.activeProduct = state.lastSeries.length ? state.lastSeries[0].product : state.activeProduct;
             renderProductChooser();
-            drawActiveSeries(data.factor || factor);
-            loadTermTable(state.activeProduct);
+            setProgress(70, '加载价格');
+            var priceData = await loadPriceDataForCurrentProduct();
+            drawResultChart(priceData, selectedSeriesItem(), data.factor || factor);
+            renderResultChips();
             if (status) {
                 var doneText = '完成：' + state.lastSeries.length + ' 个产品';
-                if (data && data.meta && data.meta.elapsed_ms != null) {
-                    doneText += '（' + data.meta.elapsed_ms + 'ms）';
-                }
+                if (data.meta && data.meta.elapsed_ms != null) doneText += '（' + data.meta.elapsed_ms + 'ms）';
                 status.textContent = doneText;
             }
             hideProgress('100%');
@@ -471,268 +811,15 @@
         }
     }
 
-    function factorSeriesUpdatePriceTypeControl(supportsAdjusted, adjusted) {
-        var wrap = document.getElementById('factor-series-price-type-wrap');
-        var select = document.getElementById('factor-series-price-type');
-        if (!wrap || !select) return;
-        wrap.style.display = supportsAdjusted ? 'inline-flex' : 'none';
-        wrap.style.alignItems = 'center';
-        wrap.style.gap = '10px';
-        state.currentAdjusted = Boolean(supportsAdjusted && adjusted);
-        select.value = state.currentAdjusted ? 'adjusted' : 'raw';
-    }
-
-    function factorSeriesSetAdjusted(adjusted) {
-        state.currentAdjusted = adjusted;
-        var priceType = document.getElementById('factor-series-price-type');
-        if (priceType) priceType.value = adjusted ? 'adjusted' : 'raw';
-        if (state.currentProduct) factorSeriesLoadPriceData();
-    }
-
-    function factorSeriesUpdateFreqSelect(availableFreqs, currentFreq) {
-        var select = document.getElementById('factor-series-freq');
-        if (!select) return;
-        var freqLabels = {
-            'MIN1': '1分钟',
-            'MIN5': '5分钟',
-            'MIN15': '15分钟',
-            'MIN30': '30分钟',
-            'HOUR1': '1小时',
-            'DAY1': '日线'
-        };
-        var freqs = availableFreqs || [];
-        var oldValue = currentFreq || select.value;
-        if (!freqs.length) {
-            select.innerHTML = '<option value="">无可用频率</option>';
-            select.disabled = true;
-            return;
-        }
-        select.disabled = false;
-        select.innerHTML = freqs.map(function(freq) {
-            var label = freqLabels[freq] || freq;
-            return '<option value="' + escapeHtml(freq) + '">' + escapeHtml(label) + '</option>';
-        }).join('');
-        if (oldValue && freqs.indexOf(oldValue) >= 0) select.value = oldValue;
-    }
-
-    function factorSeriesUpdateSourceSelect(availableSources, currentSource) {
-        var select = document.getElementById('factor-series-data-source');
-        if (!select) return;
-        var selected = currentSource || select.value || '';
-        var html = '<option value="">自动</option>';
-        (availableSources || []).forEach(function(source) {
-            var alias = source.alias || '';
-            html += '<option value="' + escapeHtml(alias) + '">' + escapeHtml(alias + (source.freq ? ' · ' + source.freq : '')) + '</option>';
-        });
-        select.innerHTML = html;
-        if (selected && Array.prototype.some.call(select.options, function(opt) { return opt.value === selected; })) {
-            select.value = selected;
-        }
-    }
-
-    function factorSeriesDrawChart(data) {
-        var container = document.getElementById('factor-series-price-chart');
-        if (!container) return;
-        container.innerHTML = '';
-        if (!window.Highcharts) return;
-
-        var rows = data && Array.isArray(data.data) ? data.data : [];
-        if (!rows.length) {
-            container.innerHTML = '<div class="pv-empty" style="padding:80px 20px;color:#888;text-align:center;">'
-                + (data && data.error ? escapeHtml(data.error) : '无价格数据')
-                + '</div>';
-            return;
-        }
-        rows = rows.slice().sort(function(a, b) {
-            return (a.timestamp || 0) - (b.timestamp || 0);
-        });
-
-        var hasPriceNormalized = window.PriceDisplay && window.PriceDisplay.normalizePriceApi ? window.PriceDisplay.normalizePriceApi(data) : null;
-        var ohlc = window.PriceDisplay && isFunction(window.PriceDisplay.toOhlc)
-            ? window.PriceDisplay.toOhlc(rows)
-            : rows.map(function(r) { return [r.timestamp, r.open, r.high, r.low, r.close]; });
-        var volume = window.PriceDisplay && isFunction(window.PriceDisplay.toColumn)
-            ? window.PriceDisplay.toColumn(rows, 'volume')
-            : rows.map(function(r) { return [r.timestamp, r.volume]; });
-        var hasOi = hasPriceNormalized ? hasPriceNormalized.has_open_interest : false;
-        var oi = hasOi && (window.PriceDisplay && isFunction(window.PriceDisplay.toColumn))
-            ? window.PriceDisplay.toColumn(rows, 'open_interest')
-            : [];
-        var freqStr = String(data.freq || '');
-        var isIntraday = freqStr.indexOf('MIN') === 0 || freqStr.indexOf('HOUR') === 0 || freqStr.indexOf('SEC') === 0;
-        var plotBands = [];
-        if (data && data.supports_term_structure && data.contracts && data.contracts.length) {
-            plotBands = data.contracts.map(function(item) {
-                return { id: 'fs-contract-band', from: item.start_ts, to: item.end_ts, color: 'rgba(100,149,237,0.04)' };
-            });
-        }
-        var yAxis = [{
-            labels: { align: 'right', x: -3 },
-            title: { text: '' },
-            height: hasOi ? '50%' : '60%',
-            lineWidth: 2,
-            resize: { enabled: true },
-            plotBands: plotBands
-        }, {
-            labels: { align: 'right', x: -3 },
-            title: { text: '' },
-            top: hasOi ? '55%' : '65%',
-            height: hasOi ? '25%' : '35%',
-            offset: 0,
-            lineWidth: 2
-        }];
-        var series = [{
-            type: 'candlestick',
-            name: data.product || '价格',
-            data: ohlc,
-            tooltip: { pointFormat: '<span style="font-weight:bold">开盘</span> {point.open:.2f}<br/>'
-                + '<span style="font-weight:bold">最高</span> {point.high:.2f}<br/>'
-                + '<span style="font-weight:bold">最低</span> {point.low:.2f}<br/>'
-                + '<span style="font-weight:bold">收盘</span> {point.close:.2f}'
-            }
-        }, {
-            type: 'column',
-            name: '成交量',
-            data: volume,
-            yAxis: 1,
-            tooltip: { valueDecimals: 0 }
-        }];
-        if (hasOi) {
-            yAxis.push({
-                labels: { align: 'right', x: -3 },
-                title: { text: '' },
-                top: '82%',
-                height: '18%',
-                offset: 0,
-                lineWidth: 2
-            });
-            series.push({
-                type: 'line',
-                name: '持仓量',
-                data: oi,
-                yAxis: 2,
-                color: '#E91E63',
-                tooltip: { valueDecimals: 0 }
-            });
-        }
-        var title = data.product + (data.desc ? ' — ' + data.desc : '') + ' (' + (data.adjusted ? '复权' : '原始') + ')';
-        var subtitle = (data.freq || 'Auto') + ' · ' + (data.count != null ? data.count : ohlc.length) + ' 条';
-        state.chart = window.Highcharts.stockChart(container, {
-            chart: { animation: false, height: Math.max(320, Math.floor(container.getBoundingClientRect().height || 420)) },
-            title: { text: title, style: { fontSize: '15px' } },
-            subtitle: { text: subtitle, style: { fontSize: '11px', color: '#888' } },
-            rangeSelector: {
-                buttons: [
-                    { type: 'day', count: 3, text: '3天' },
-                    { type: 'week', count: 1, text: '1周' },
-                    { type: 'month', count: 1, text: '1月' },
-                    { type: 'month', count: 3, text: '3月' },
-                    { type: 'year', count: 1, text: '1年' },
-                    { type: 'all', text: '全部' },
-                ],
-                selected: 4,
-            },
-            xAxis: {
-                type: 'datetime',
-                labels: {
-                    rotation: -45,
-                    align: 'right',
-                    style: { fontSize: '10px', color: '#64748b' },
-                    formatter: function() {
-                        var d = new Date(this.value);
-                        var hh = String(d.getHours()).padStart(2, '0');
-                        var mm = String(d.getMinutes()).padStart(2, '0');
-                        var M = String(d.getMonth() + 1).padStart(2, '0');
-                        var dd = String(d.getDate()).padStart(2, '0');
-                        return isIntraday ? hh + ':' + mm + '<br/>' + M + '-' + dd : M + '-' + dd;
-                    }
-                },
-                ordinal: true,
-            },
-            yAxis: yAxis,
-            tooltip: {
-                shared: true,
-                useHTML: true,
-                formatter: function () {
-                    var d = new Date(this.x);
-                    var dateStr = isIntraday
-                        ? d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' +
-                            String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
-                        : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-                    var s = '<b>' + dateStr + '</b>';
-                    this.points.forEach(function (p) {
-                        if (p.series.type === 'candlestick') {
-                            s += '<br/><span style="font-weight:bold">开盘</span> ' + p.point.open.toFixed(2) +
-                                 '<br/><span style="font-weight:bold">最高</span> ' + p.point.high.toFixed(2) +
-                                 '<br/><span style="font-weight:bold">最低</span> ' + p.point.low.toFixed(2) +
-                                 '<br/><span style="font-weight:bold">收盘</span> ' + p.point.close.toFixed(2);
-                        } else {
-                            var decimals = typeof p.series.tooltipOptions.valueDecimals === 'number' ? p.series.tooltipOptions.valueDecimals : 2;
-                            var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
-                            s += '<br/>' + p.series.name + ': ' + val;
-                        }
-                    });
-                    return s;
-                }
-            },
-            series: series,
-            credits: { enabled: false },
-            navigator: { enabled: true },
-            scrollbar: { enabled: false }
-        });
-    }
-
-    window.factorSeriesLoadPriceData = factorSeriesLoadPriceData;
-    window.factorSeriesSetAdjusted = factorSeriesSetAdjusted;
-
-    async function factorSeriesLoadPriceData(freqOverride) {
-        if (!state.currentProduct) return;
-        var container = document.getElementById('factor-series-price-chart');
-        if (!container) return;
-        container.innerHTML = '<div class="pv-loading" style="padding:40px;text-align:center;color:#888;">加载中...</div>';
-        var product = state.currentProduct;
-        if (freqOverride) {
-            var freqEl = document.getElementById('factor-series-freq');
-            if (freqEl) freqEl.value = freqOverride;
-        }
-        var reqBody = {
-            product_name: product.name || product.code,
-            adjusted: !!state.currentAdjusted,
-            series_variant: product.series_variant || 'primary_raw',
-            freq: (document.getElementById('factor-series-freq') || {}).value || '',
-            data_source: (document.getElementById('factor-series-data-source') || {}).value || null,
-            start_date: (document.getElementById('factor-series-start-date') || {}).value || null,
-            end_date: (document.getElementById('factor-series-end-date') || {}).value || null,
-        };
-        if (product.contract_uid || product.product_type === 'contract') {
-            reqBody.contract_uid = product.contract_uid || product.name;
-            reqBody.adjusted = false;
-        }
-        try {
-            var resp = await fetch('/api/get_price_data', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(reqBody),
-            });
-            var data = await resp.json();
-            if (data.success && data.data && data.data.length > 0) {
-                var chartTitle = document.getElementById('factor-series-chart-info');
-                if (chartTitle) chartTitle.textContent = data.product + ' | ' + (data.adjusted ? '复权' : '原始') + ' | ' + data.freq + ' | ' + data.count + ' 条';
-                factorSeriesUpdatePriceTypeControl(data.supports_adjusted, data.adjusted);
-                factorSeriesUpdateFreqSelect(data.available_freqs || [], data.freq);
-                factorSeriesUpdateSourceSelect(data.available_sources || [], data.data_source);
-                factorSeriesDrawChart(data);
-                var tableWrap = document.getElementById('factor-series-contract-table-container');
-                if (tableWrap && data.supports_term_structure && !reqBody.contract_uid && Array.isArray(state.currentContracts) && state.currentContracts.length > 0) {
-                    tableWrap.style.display = 'block';
-                } else if (tableWrap) {
-                    tableWrap.style.display = 'none';
-                }
-                return;
-            }
-            container.innerHTML = '<div style="padding:40px 10px;color:#888;text-align:center;">' + escapeHtml((data && data.error) ? data.error : '无价格数据') + '</div>';
-        } catch (e) {
-            container.innerHTML = '<div style="padding:40px 10px;color:#888;text-align:center;">网络错误</div>';
+    async function render() {
+        await loadManifest();
+        await loadFactors();
+        renderTabBar();
+        renderSettingChips();
+        renderResultChips();
+        var chart = document.getElementById('factor-series-chart-container');
+        if (chart && !state.lastSeries.length) {
+            chart.innerHTML = message('从产品树选择产品，再选择因子并运行。');
         }
     }
 
@@ -740,7 +827,6 @@
         var header = document.getElementById('factor-series-header');
         var body = document.getElementById('factor-series-viewer-body');
         var runBtn = document.getElementById('factor-series-run-btn');
-        var productsBtn = document.getElementById('factor-series-products-btn');
         var overlay = document.getElementById('factor-series-products-overlay');
         var closeBtn = document.getElementById('factor-series-products-close');
         var triangle = document.getElementById('factor-series-triangle');
@@ -755,26 +841,17 @@
 
         if (header && body) {
             header.addEventListener('click', function() {
-                var open = body.style.display !== 'none';
-                setViewerOpen(!open);
+                setViewerOpen(body.style.display === 'none');
             });
             setViewerOpen(false);
         }
-
         if (runBtn) {
             runBtn.addEventListener('click', function(event) {
                 if (event && event.stopPropagation) event.stopPropagation();
                 runEvaluate();
             });
         }
-        if (productsBtn && overlay) {
-            productsBtn.addEventListener('click', function() {
-                openProductTreeOverlay();
-            });
-        }
-        if (closeBtn) {
-            closeBtn.addEventListener('click', closeProductTreeOverlay);
-        }
+        if (closeBtn) closeBtn.addEventListener('click', closeProductTreeOverlay);
         if (overlay) {
             overlay.addEventListener('click', function(event) {
                 if (event.target === overlay) closeProductTreeOverlay();
@@ -791,9 +868,6 @@
     };
 
     loadOverlayProducts();
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
 })();

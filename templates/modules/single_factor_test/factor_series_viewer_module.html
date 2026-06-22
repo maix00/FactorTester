@@ -17,41 +17,42 @@
             </div>
         </div>
         <div id="factor-series-viewer-body" style="display:none;">
-            <div id="factor-series-controls" class="factor-series-controls">
-                <label class="factor-series-control-block factor-series-field">
-                    <span class="factor-series-control-subtitle">产品</span>
-                    <div class="factor-series-product-picker">
-                    <button type="button" id="factor-series-products-btn" class="factor-series-secondary-action">从产品树选择产品</button>
-                        <span id="factor-series-path-summary" class="factor-series-path-summary"></span>
+            <div id="factor-series-settings-shell" class="factor-series-settings-shell">
+                <div id="factor-series-settings-tab-bar" class="factor-series-settings-tab-bar"></div>
+                <div id="factor-series-settings-chip-row" class="factor-series-settings-chip-row"></div>
+                <div id="factor-series-settings-host" class="factor-series-settings-host" style="display:none;"></div>
+            </div>
+            <div id="factor-series-result-panel" class="factor-series-result-panel">
+                <div class="factor-series-result-header">
+                    <div>
+                        <div id="factor-series-chart-title" class="factor-series-result-title">— 请选择品种 —</div>
+                        <div id="factor-series-product-selected-summary" class="factor-series-result-summary">从产品树选择产品，并选择因子后计算。</div>
                     </div>
-                </label>
-                <label class="factor-series-control-block factor-series-field">
-                    <span class="factor-series-control-subtitle">因子</span>
-                    <select id="factor-series-factor"><option value="">加载中...</option></select>
-                </label>
-                <span id="factor-series-status" class="factor-series-status"></span>
-            </div>
-            <div id="factor-series-progress" class="ic-progress-container" style="display:none;">
-                <div class="ic-progress-bar-bg">
-                    <div id="factor-series-progress-bar" class="ic-progress-bar-fill"></div>
+                    <span id="factor-series-status" class="factor-series-status"></span>
                 </div>
-                <span id="factor-series-progress-text" class="ic-progress-text">0%</span>
-            </div>
-            <div id="factor-series-product-row" class="factor-series-product-row"></div>
-            <div id="factor-series-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
-            <div id="factor-series-term-table-container" style="display:none;">
-                <div style="font-size:12px;color:#64748b;margin-bottom:6px;">期限表</div>
-                <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
-                    <table id="factor-series-term-table" style="width:100%;border-collapse:collapse;font-size:12px;">
-                        <thead>
-                            <tr>
-                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>
-                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>
-                                <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+                <div id="factor-series-result-chip-row" class="factor-series-settings-chip-row factor-series-result-chip-row"></div>
+                <div id="factor-series-progress" class="ic-progress-container" style="display:none;">
+                    <div class="ic-progress-bar-bg">
+                        <div id="factor-series-progress-bar" class="ic-progress-bar-fill"></div>
+                    </div>
+                    <span id="factor-series-progress-text" class="ic-progress-text">0%</span>
+                </div>
+                <div id="factor-series-product-row" class="factor-series-product-row"></div>
+                <div id="factor-series-chart-container" class="factor-series-main-chart"></div>
+                <div id="factor-series-term-table-container" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">期限结构表格</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table id="factor-series-term-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead>
+                                <tr>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -75,42 +76,6 @@
     </div>
 </div>
 
-<div id="factor-series-overlay-result-bar" class="factor-series-overlay-result-bar">
-    <div id="factor-series-chart-title" class="factor-series-overlay-chart-title">— 请选择品种 —</div>
-    <div id="factor-series-product-selected-summary" class="factor-series-result-summary">—</div>
-    <div id="factor-series-price-chart" class="factor-series-price-chart"></div>
-    <div class="factor-series-overlay-result-title">价格参数</div>
-    <div class="factor-series-overlay-controls">
-        <label>数据源：</label>
-        <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
-            <option value="">自动</option>
-        </select>
-        <label>频率：</label>
-        <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
-            <option value="">自动</option>
-        </select>
-        <span id="factor-series-price-type-wrap">
-            <label style="margin-left:12px;">价格类型：</label>
-            <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
-                <option value="raw">原始</option>
-                <option value="adjusted">复权</option>
-            </select>
-        </span>
-    </div>
-    <div id="factor-series-contract-table-container" style="display:none;">
-        <table id="factor-series-contract-table" class="factor-series-contract-table">
-            <thead>
-                <tr>
-                    <th>合约</th>
-                    <th>起始日期</th>
-                    <th>结束日期</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-    </div>
-</div>
-
 <style>
     #factor-series-viewer-root {
         margin-top: 8px;
@@ -118,25 +83,9 @@
 
     #factor-series-viewer-body {
         margin-top: 12px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #fff;
-        padding: 12px;
-        overflow: hidden;
-    }
-
-    .factor-series-controls {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        align-items: start;
-        column-gap: 8px;
-        row-gap: 8px;
-        gap: 8px;
-        margin-top: 10px;
-        padding: 8px;
-        border: 1px solid #eef2f7;
-        border-radius: 8px;
-        background: #fbfdff;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
     }
     .factor-series-control-block {
         display: flex;
@@ -210,11 +159,12 @@
         font-size: 11px;
         min-width: 0;
     }
-    .factor-series-path-chip {
+    .factor-series-path-chip,
+    .factor-series-settings-chip {
         display: inline-flex;
         align-items: center;
-        max-width: 180px;
-        height: 20px;
+        max-width: 220px;
+        min-height: 22px;
         padding: 0 6px;
         border: 1px solid #dbeafe;
         border-radius: 999px;
@@ -223,6 +173,114 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .factor-series-settings-chip-label {
+        color: #64748b;
+        margin-right: 4px;
+    }
+    .factor-series-settings-chip-value {
+        color: #1e293b;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .factor-series-settings-shell,
+    .factor-series-result-panel {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .factor-series-settings-tab-bar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+        min-height: 36px;
+        padding: 6px 12px;
+        border-bottom: 1px solid #eef2f7;
+        background: #fafbfc;
+    }
+    .factor-series-settings-tab-bar button {
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #475569;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .factor-series-settings-tab-bar button.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-weight: 700;
+    }
+    .factor-series-settings-chip-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 7px 12px;
+        min-height: 36px;
+        box-sizing: border-box;
+    }
+    .factor-series-settings-chip-row:empty {
+        display: none;
+    }
+    .factor-series-settings-host {
+        padding: 10px 12px;
+        border-top: 1px solid #eef2f7;
+    }
+    .factor-series-setting-row {
+        display: grid;
+        grid-template-columns: minmax(90px, 0.35fr) minmax(160px, 0.65fr);
+        align-items: center;
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 12px;
+    }
+    .factor-series-setting-row:last-child {
+        border-bottom: 0;
+    }
+    .factor-series-setting-label {
+        color: #64748b;
+    }
+    .factor-series-setting-control {
+        min-width: 0;
+    }
+    .factor-series-setting-control select,
+    .factor-series-setting-control input {
+        width: 100%;
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 12px;
+        padding: 0 8px;
+    }
+    .factor-series-result-panel {
+        padding: 12px;
+    }
+    .factor-series-result-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+    }
+    .factor-series-result-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .factor-series-main-chart {
+        width: 100%;
+        min-height: 520px;
+        border: 1px dashed #d8dee4;
+        border-radius: 8px;
+        background: #fafcff;
     }
     .factor-series-overlay {
         position: fixed;
@@ -290,53 +348,10 @@
         overflow: auto;
         box-sizing: border-box;
     }
-    .factor-series-overlay-chart-title {
-        padding: 0 12px 8px;
-        font-size: 14px;
-        font-weight: 600;
-        color: #1f2937;
-    }
-    .factor-series-overlay-controls {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        flex-wrap: wrap;
-        padding: 0 12px 10px;
-        border-bottom: 1px solid #e5e7eb;
-    }
-    .factor-series-overlay-result-bar {
-        margin-top: 10px;
-        margin-bottom: 16px;
-        border-top: 1px solid #e5e7eb;
-        padding: 10px 12px 10px;
-        background: #f9fbff;
-    }
-    .factor-series-overlay-result-title {
-        font-size: 12px;
-        color: #44515f;
-        margin-bottom: 6px;
-    }
-    .factor-series-overlay-controls label {
-        font-size: 12px;
-        color: #555;
-    }
-    .factor-series-overlay-controls select {
-        font-size: 12px;
-        padding: 4px 8px;
-        border: 1px solid #d0d5dd;
-        border-radius: 4px;
-    }
-    .factor-series-price-chart {
-        width: 100%;
-        height: 440px;
-        min-height: 360px;
-        overflow: hidden;
-        padding: 0 4px;
-    }
     .factor-series-result-summary {
         font-size: 12px;
         color: #64748b;
-        padding: 0 4px 8px;
+        margin-top: 3px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

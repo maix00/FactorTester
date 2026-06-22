@@ -8,7 +8,6 @@ Shared factor data-query routes (any test module can use):
 from typing import Any
 import numpy as np
 import pandas as pd
-import time
 import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
@@ -32,11 +31,8 @@ from .factor_data_helpers import (
 from .price_data_helpers import to_epoch_ms
 from .factor_tester_runtime import (
     create_factor_tester_for_product_path_selection,
-    create_factor_tester_for_run,
 )
-from server.modules.shared.submission_model import ProductPathSelection
-from server.modules.shared.submission_helpers import product_attrs
-from server.services.session_runtime import current_user_obj
+from server.modules.single_factor_test.evaluation import FactorEvaluation
 
 
 def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
@@ -77,125 +73,21 @@ def _get_or_create_selection_tester(data: dict[str, Any], *, page_uuid: str, cal
         )
 
 
-@shared_bp.route('/api/factor_series_viewer/evaluate', methods=['POST'])
-def factor_series_viewer_evaluate():
+@shared_bp.route('/api/factor_evaluation/evaluate', methods=['POST'])
+def factor_evaluation_evaluate():
     """Evaluate one factor for products selected directly from the product tree."""
     data = request.get_json() or {}
     page_uuid, error = _request_page_uuid(data)
     if error is not None:
         return error
-    paths = data.get("paths") or data.get("selected_paths") or []
-    factor_family_alias = data.get("factor_family_alias")
-    factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
-    product_name = str(data.get("product") or "").strip()
-    if not isinstance(paths, list) or not paths:
-        return jsonify({"success": False, "error": "请先从产品树选择产品或路径"}), 400
-    if not factor_family_alias or not factor_alias:
-        return jsonify({"success": False, "error": "请先选择因子"}), 400
 
     try:
-        started_at = time.time()
-        selection = ProductPathSelection.from_paths(
-            "factor-series-viewer",
-            paths,
-            label="因子序列查看",
-            source_type="factor_series_viewer",
-            page_uuid=page_uuid,
-        )
-        tester = create_factor_tester_for_run(
-            selection,
-            page_uuid=page_uuid,
-            user=current_user_obj(),
-        )
-        factor_family = get_factor_family_instance(
-            factor_family_alias,
-            page_uuid=page_uuid,
-        )
-        factors = factor_family.get_factors(
-            params_list=get_session_params(factor_family_alias, factor_family),
-            page_uuid=page_uuid,
-        )
-        factor = _find_factor(factors, factor_alias, factor_alias)
-        if factor is None:
-            return jsonify({"success": False, "error": "未找到因子"}), 404
-
-        from tools.factors.FactorTester import _active_tester
-
-        token = _active_tester.set(tester)
-        try:
-            tester.calc_factor(factor, parallel=False)
-        finally:
-            _active_tester.reset(token)
-
-        result = tester.results.get(factor)
-        table = result.func_table if result is not None and not result.func_table.empty else (
-            result.table if result is not None and not result.table.empty else pd.DataFrame()
-        )
-        if table.empty:
-            return jsonify({"success": False, "error": "因子 evaluate 未返回可显示序列"}), 400
-
-        selected_products = sorted(selection.products, key=lambda item: getattr(item, "name", str(item)))
-        series_items = []
-        for product in selected_products:
-            name = str(getattr(product, "name", product))
-            if product_name and name != product_name:
-                continue
-            col = _match_product_column(table, product)
-            if col is None:
-                continue
-            series = table[col].dropna()
-            if series.empty:
-                continue
-            series = clip_series_by_tester_range(series, tester)
-            dates_out, values = series_to_frontend(series, factor.freq is not None and factor.freq.is_day_multiple())
-            returns_payload = None
-            if result is not None and not getattr(result, 'returns', pd.DataFrame()).empty:
-                returns_df = result.returns
-                if isinstance(returns_df, pd.DataFrame):
-                    ret_col = _match_product_column(returns_df, product)
-                    if ret_col is not None:
-                        ret_series = returns_df[ret_col].dropna()
-                        if not ret_series.empty:
-                            ret_series = clip_series_by_tester_range(ret_series, tester)
-                            ret_dates_out, ret_values = series_to_frontend(
-                                ret_series,
-                                factor.freq is not None and factor.freq.is_day_multiple()
-                            )
-                            if len(ret_dates_out) and len(ret_dates_out) == len(ret_values):
-                                returns_payload = {
-                                    'dates': ret_dates_out,
-                                    'values': ret_values,
-                                }
-            meta = product_attrs(product, "name", "desc")
-            series_items.append({
-                "product": name,
-                "desc": meta.get("desc") or name,
-                "dates": dates_out,
-                "values": values,
-                "returns": returns_payload,
-                "chart": {
-                    "x_label": "time",
-                    "y_label": "factor",
-                    "title": name + ' · ' + getattr(factor, 'alias', factor_alias),
-                },
-            })
-
-        if not series_items:
-            return jsonify({"success": False, "error": "所选产品没有该因子的可显示序列"}), 404
-        return jsonify({
-            "success": True,
-            "factor": {
-                "alias": getattr(factor, "alias", factor_alias),
-                "name": getattr(factor, "name", factor_alias),
-                "freq": getattr(getattr(factor, "freq", None), "name", ""),
-            },
-            "products": [product_attrs(product, "name", "desc") for product in selected_products],
-            "series": series_items,
-            "meta": {
-                "elapsed_ms": round((time.time() - started_at) * 1000),
-                "product_count": len(series_items),
-            },
-        })
+        evaluation = FactorEvaluation.from_request(data, page_uuid=page_uuid)
+        return jsonify(evaluation.run())
+    except LookupError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "traceback": traceback.format_exc()}), 500
 
