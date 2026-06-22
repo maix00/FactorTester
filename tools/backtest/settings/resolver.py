@@ -66,6 +66,8 @@ def resolve_group_settings(
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
             except ValueError:
+                if definition.key == "time_precision":
+                    raise
                 requested_value = value
                 value = definition.engine_defaults.get(engine, definition.default)
                 value = _coerce_value(definition, value)

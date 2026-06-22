@@ -51,8 +51,8 @@ def group_test_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             15,
-            summary_template="{start_date} {start_time} → {end_date} {end_time} · {timezone} · {time_precision}",
-            summary_keys=("start_date", "start_time", "end_date", "end_time", "timezone", "time_precision"),
+            summary_template="{start_date} → {end_date} · {time_precision}",
+            summary_keys=("start_date", "end_date", "time_precision"),
         ),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
         SettingTab("target_allocation", "目标分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
@@ -163,16 +163,21 @@ def group_test_settings() -> ApplicationSettings:
         "start_time", "开始时间", "time", "time", "00:00", ScopePolicy.LOCAL_ONLY,
         module="run_window",
         chip_template="开始时刻: {value}",
+        visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", "time", "time", "23:59", ScopePolicy.LOCAL_ONLY,
         module="run_window",
         chip_template="结束时刻: {value}",
+        visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
         "time_precision", "时间精度", "time", "select", "exact", ScopePolicy.LOCAL_ONLY,
         module="run_window",
-        options=(SettingOption("exact", "精确时间"), SettingOption("day", "天级")),
+        options=(
+            SettingOption("exact", "精确时间"),
+            SettingOption("trading_day", "交易日"),
+        ),
         chip_template="精度: {value}",
     ))
     app.register_setting(SettingDefinition(
@@ -185,6 +190,7 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("Europe/London", "Europe/London"),
         ),
         chip_template="时区: {value}",
+        visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
         "initial_capital",

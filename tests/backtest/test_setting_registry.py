@@ -118,6 +118,19 @@ def test_setting_manifest_uses_page_exact_time_as_run_default(monkeypatch) -> No
     assert payload["defaults"]["start_time"]["value"] == "09:01"
     assert payload["defaults"]["end_date"]["value"] == "2026-05-31"
     assert payload["defaults"]["end_time"]["value"] == "15:00"
+    assert payload["defaults"]["time_precision"]["options"] == [
+        {"value": "exact", "label": "精确时间"},
+        {"value": "trading_day", "label": "交易日"},
+    ]
+    assert payload["defaults"]["start_time"]["visible_when"] == {
+        "time_precision": ["exact"],
+    }
+    assert payload["defaults"]["end_time"]["visible_when"] == {
+        "time_precision": ["exact"],
+    }
+    assert payload["defaults"]["timezone"]["visible_when"] == {
+        "time_precision": ["exact"],
+    }
 
 
 def test_runtime_window_supplies_run_defaults_without_flat_frontend_values() -> None:
@@ -165,6 +178,51 @@ def test_runtime_window_builds_explicit_start_and_end_datetimes() -> None:
     assert end_dt.is_set
     assert start_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-01 09:00"
     assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
+
+
+def test_runtime_window_builds_trading_day_datetimes_without_time_or_timezone() -> None:
+    from server.modules.single_factor_test.group import (
+        _resolve_flat_backtest_settings,
+        _runtime_datetimes,
+    )
+
+    payload = {
+        "_runtime_window": {
+            "start_date": "2025-04-01",
+            "end_date": "2025-04-30",
+            "start_time": "11:23",
+            "end_time": "14:56",
+            "time_precision": "trading_day",
+            "timezone": "Asia/Shanghai",
+        },
+    }
+    start_dt, end_dt = _runtime_datetimes(payload)
+    resolved = _resolve_flat_backtest_settings(payload, [{"id": "group-1"}], [])
+
+    assert start_dt.precision == "trading_day"
+    assert end_dt.precision == "trading_day"
+    assert start_dt.tz is None
+    assert end_dt.tz is None
+    assert start_dt.ts.strftime("%Y-%m-%d %H:%M") == "2025-04-01 00:00"
+    assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2025-04-30 00:00"
+    assert resolved["group-1"]["time_precision"] == "trading_day"
+
+
+def test_legacy_day_precision_is_rejected() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    with pytest.raises(ValueError, match="invalid value for time_precision"):
+        _resolve_flat_backtest_settings(
+            {
+                "_runtime_window": {
+                    "start_date": "2025-04-01",
+                    "end_date": "2025-04-30",
+                    "time_precision": "day",
+                },
+            },
+            [{"id": "group-1"}],
+            [],
+        )
 
 
 def test_runtime_window_reports_missing_dates_before_dataindex_slice() -> None:

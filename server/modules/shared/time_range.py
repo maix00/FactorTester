@@ -62,8 +62,8 @@ def set_time_range():
     timezone        = data.get('timezone', 'UTC')
 
     if is_trading_day:
-        start_dt = DataTime(ts=pd.Timestamp(start_date).tz_localize(timezone), precision='day')
-        end_dt   = DataTime(ts=pd.Timestamp(end_date).tz_localize(timezone),   precision='day')
+        start_dt = DataTime(ts=pd.Timestamp(start_date).tz_localize(timezone), precision='trading_day')
+        end_dt   = DataTime(ts=pd.Timestamp(end_date).tz_localize(timezone),   precision='trading_day')
     else:
         start_dt = DataTime(ts=pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone))
         end_dt   = DataTime(ts=pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone))

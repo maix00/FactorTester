@@ -392,10 +392,28 @@
         control.value = effectiveValue(setting, mount);
         control.disabled = mount === GROUP && !state.activeGroup;
         control.addEventListener('change', function() {
-            writeValue(setting, mount, setting.control_template === 'number' ? Number(control.value) : control.value);
+            var nextValue = setting.control_template === 'number'
+                ? Number(control.value)
+                : normalizeControlValue(setting, control.value);
+            control.value = nextValue;
+            writeValue(setting, mount, nextValue);
             rerenderAfterChange();
         });
         return control;
+    }
+
+    function normalizeControlValue(setting, value) {
+        if (!setting || setting.control_template !== 'date') return value;
+        var text = String(value || '').trim();
+        if (/^\d{8}$/.test(text)) {
+            text = text.slice(0, 4) + '-' + text.slice(4, 6) + '-' + text.slice(6, 8);
+        }
+        var match = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text);
+        if (!match) return text;
+        var year = match[1];
+        var month = match[2].padStart(2, '0');
+        var day = match[3].padStart(2, '0');
+        return year + '-' + month + '-' + day;
     }
 
     function renderManifest(manifest, mount, container) {
@@ -832,16 +850,18 @@
     function syncAppliedTimeRange() {
         var values = effectiveLocalValues();
         if (!values.start_date || !values.end_date) return Promise.resolve(null);
+        var precision = values.time_precision || 'exact';
+        var tradingDayMode = precision === 'trading_day';
         var timePayload = {
             factor_family_alias: window.factorFamilyAlias || window._sftCurrentFactorId || '',
             page_uuid: window._pageUuid || '',
             start_date: values.start_date || '',
-            start_time: values.start_time || '09:00',
+            start_time: tradingDayMode ? '' : (values.start_time || '09:00'),
             end_date: values.end_date || '',
-            end_time: values.end_time || '15:00',
-            timezone: values.timezone || 'Asia/Shanghai',
-            time_precision: values.time_precision || 'exact',
-            is_trading_day: false,
+            end_time: tradingDayMode ? '' : (values.end_time || '15:00'),
+            timezone: tradingDayMode ? 'UTC' : (values.timezone || 'Asia/Shanghai'),
+            time_precision: tradingDayMode ? 'trading_day' : precision,
+            is_trading_day: tradingDayMode,
             is_cn_futures_day: false,
             is_cn_futures_night: false,
         };
@@ -953,14 +973,16 @@
     function runPayload() {
         var values = effectiveLocalValues();
         var calendar = String(values.calendar_frequency || 'auto');
+        var precision = values.time_precision || 'exact';
+        var tradingDayMode = precision === 'trading_day';
         return Object.assign({}, collectLocalSettings(), {
             _runtime_window: {
                 start_date: values.start_date,
                 end_date: values.end_date,
-                start_time: values.start_time,
-                end_time: values.end_time,
-                time_precision: values.time_precision || 'exact',
-                timezone: values.timezone || 'Asia/Shanghai',
+                start_time: tradingDayMode ? '' : values.start_time,
+                end_time: tradingDayMode ? '' : values.end_time,
+                time_precision: tradingDayMode ? 'trading_day' : precision,
+                timezone: tradingDayMode ? '' : (values.timezone || 'Asia/Shanghai'),
             },
             auto_group_calendar_freq: calendar === 'auto',
             group_calendar_freq: calendar === 'auto' ? null : calendar,

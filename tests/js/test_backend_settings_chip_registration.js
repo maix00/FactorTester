@@ -26,6 +26,7 @@ const indexManifest = {
   application: 'group_test',
   tab_lists: {
     'local-settings': [
+      { key: 'time', label: '时间范围', mount_points: ['local-settings'], layout_template: 'settings-grid', order: 20 },
       { key: 'target_allocation', label: '分配方式', mount_points: ['local-settings'], layout_template: 'settings-grid', order: 30 },
     ],
     'group-settings': [
@@ -46,6 +47,57 @@ const indexManifest = {
         { value: 'native', label: 'Native' },
         { value: 'qlib', label: 'Qlib' },
       ],
+    },
+    start_date: {
+      value: '2026-01-01',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '开始: {value}',
+      options: [],
+    },
+    end_date: {
+      value: '2026-01-31',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '结束: {value}',
+      options: [],
+    },
+    start_time: {
+      value: '09:00',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '开始时刻: {value}',
+      options: [],
+      visible_when: { time_precision: ['exact'] },
+    },
+    end_time: {
+      value: '15:00',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '结束时刻: {value}',
+      options: [],
+      visible_when: { time_precision: ['exact'] },
+    },
+    time_precision: {
+      value: 'exact',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '精度: {value}',
+      options: [
+        { value: 'exact', label: '精确时间' },
+        { value: 'trading_day', label: '交易日' },
+      ],
+    },
+    timezone: {
+      value: 'Asia/Shanghai',
+      tab_key: 'time',
+      scope_policy: 'local_only',
+      chip_template: '时区: {value}',
+      options: [
+        { value: 'Asia/Shanghai', label: 'Asia/Shanghai (UTC+8)' },
+        { value: 'UTC', label: 'UTC' },
+      ],
+      visible_when: { time_precision: ['exact'] },
     },
     liquidity_mode: {
       value: 'infinite',
@@ -134,9 +186,25 @@ const indexManifest = {
 global.fetch = (url) => Promise.resolve({
   ok: true,
   json: () => {
-    if (String(url).indexOf('/tabs/target_allocation') >= 0) {
+    if (String(url).indexOf('/set_time_range') >= 0) {
+      return Promise.resolve({ ok: true, page_uuid: 'page-1' });
+    }
+    if (String(url).indexOf('/tabs/time') >= 0) {
       return Promise.resolve({
         tab: indexManifest.tab_lists['local-settings'][0],
+        settings: [
+          Object.assign({ key: 'start_date', label: '开始日期', control_template: 'date' }, indexManifest.defaults.start_date),
+          Object.assign({ key: 'end_date', label: '结束日期', control_template: 'date' }, indexManifest.defaults.end_date),
+          Object.assign({ key: 'start_time', label: '开始时间', control_template: 'time' }, indexManifest.defaults.start_time),
+          Object.assign({ key: 'end_time', label: '结束时间', control_template: 'time' }, indexManifest.defaults.end_time),
+          Object.assign({ key: 'time_precision', label: '时间精度', control_template: 'select' }, indexManifest.defaults.time_precision),
+          Object.assign({ key: 'timezone', label: '时区', control_template: 'select' }, indexManifest.defaults.timezone),
+        ],
+      });
+    }
+    if (String(url).indexOf('/tabs/target_allocation') >= 0) {
+      return Promise.resolve({
+        tab: indexManifest.tab_lists['local-settings'][1],
         settings: [
           Object.assign({ key: 'allocation_policy', label: '分配方式', control_template: 'select' }, indexManifest.defaults.allocation_policy),
           Object.assign({ key: 'volatility_lookback', label: '波动率回看期数', control_template: 'number' }, indexManifest.defaults.volatility_lookback),
@@ -148,6 +216,10 @@ global.fetch = (url) => Promise.resolve({
 });
 
 load('core/backend-settings.js');
+document.dispatchEvent = () => {};
+global.CustomEvent = function CustomEvent(type, init) {
+  return { type, detail: init && init.detail };
+};
 
 return GT.backendSettings.init().then(async () => {
   load('panels/list/selection-state.js');
@@ -251,6 +323,29 @@ return GT.backendSettings.init().then(async () => {
     .map((chip) => chip.innerHTML.replace(/<[^>]+>/g, ''));
   assert.ok(localChipText.some((text) => text === '分配等市值'));
   assert.ok(localChipText.every((text) => text.indexOf('波动率窗口') < 0));
+
+  await GT.backendSettings.applyFlatSnapshot({
+    local_settings: {
+      start_date: '2025-04-01',
+      end_date: '2025-04-30',
+      time_precision: 'trading_day',
+    },
+  });
+  const tradingDayPayload = GT.backendSettings.runPayload();
+  assert.equal(tradingDayPayload._runtime_window.start_date, '2025-04-01');
+  assert.equal(tradingDayPayload._runtime_window.end_date, '2025-04-30');
+  assert.equal(tradingDayPayload._runtime_window.time_precision, 'trading_day');
+  assert.equal(tradingDayPayload._runtime_window.start_time, '');
+  assert.equal(tradingDayPayload._runtime_window.end_time, '');
+  assert.equal(tradingDayPayload._runtime_window.timezone, '');
+  assert.deepEqual(GT.backendSettings._state.mountedTabs['local-settings'], ['time']);
+
+  GT.backendSettings.applyFlatSnapshot({
+    local_settings: {
+      allocation_policy: 'equal_notional',
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const hiddenVolatilityId = GT.groupSettings.groups.add({
     id: 'hidden-volatility-group',
     name: 'Hidden Volatility',

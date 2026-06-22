@@ -349,9 +349,9 @@ class DataIndex:
         """根据两个 DataTime 对象截取 boolean mask。
 
         start_dt, end_dt : DataTime（单时间点 + 精度 + 可选时区）
-        - 若任一 precision == "day"，用天级层截断（end 自动推至当天结束）
+        - 若任一 precision == "trading_day"，用交易日层截断（end 自动推至当天结束）
         - 否则用当前 signal_index 精确截断
-        - DataTime.ts 的时区由 DataTime 保证（exact + tz → tz-aware；day → tz-naive）
+        - DataTime.ts 的时区由 DataTime 保证（exact + tz → tz-aware；trading_day → tz-naive）
           此处通过 slice_by() → tz_align() 自动对齐
 
         守卫：
@@ -364,10 +364,12 @@ class DataIndex:
         if not start_dt.is_set or not end_dt.is_set:
             raise ValueError("Both DataTime must have ts set")
 
-        # 精度：任一是 day 就用天级层
-        precision = "day" if start_dt.precision == "day" or end_dt.precision == "day" else "exact"
+        # 精度：任一是 trading_day 就用交易日层
+        precision = "trading_day" if (
+            start_dt.precision == "trading_day" or end_dt.precision == "trading_day"
+        ) else "exact"
 
-        if precision == "day":
+        if precision == "trading_day":
             di_for_slice = self
             if self.is_multi:
                 from .time_freq import DataFreq
@@ -378,7 +380,7 @@ class DataIndex:
                 )
                 if day_name is not None:
                     di_for_slice = DataIndex(self.raw, time_name=str(day_name))
-            # day 精度：end 代表当天结束，推后一天使 <= 变为包含整天
+            # trading_day 精度：end 代表当天结束，推后一天使 <= 变为包含整天
             end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
@@ -389,7 +391,7 @@ class DataIndex:
                     f"slice_by_datatime: exact precision requires intraday signal_index, "
                     f"but signal_name='{self.signal_name}' has freq={sig_freq} "
                     f"which is a day-multiple (>= 1day, no sub-day component). "
-                    f"Use precision='day' or provide an intraday DataIndex."
+                    f"Use precision='trading_day' or provide an intraday DataIndex."
                 )
             return self.slice_by(start_dt.ts, end_dt.ts)
 

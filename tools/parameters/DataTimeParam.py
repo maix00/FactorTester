@@ -3,7 +3,7 @@
 # DataTime 参数类型 — 日期/时间参数
 #
 # rectified 为 DataTime，可直接传给 DataIndex.slice_by_datatime()。
-# 兼容 isDate=True 参数（→ precision="day"）。
+# isDate=True 参数（→ precision="trading_day"）。
 # =============================================================================
 import pandas as pd
 from typing import Optional, Any, TYPE_CHECKING
@@ -50,7 +50,7 @@ class DataTimeParam(Parameter):
         isDate = kwargs.get('isDate', False)
         tz = kwargs.get('timezone', None)
         if isDate:
-            return DataTime(ts=ts, precision='day')
+            return DataTime(ts=ts, precision='trading_day')
         else:
             return DataTime(ts=ts, tz=tz)
 
@@ -61,7 +61,7 @@ class DataTimeParam(Parameter):
     @factor_workspace
     def is_date(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         dt = self._resolve(object, value, **kwargs)
-        return dt is not None and dt.precision == 'day'
+        return dt is not None and dt.precision == 'trading_day'
 
     @factor_workspace
     def is_time(self, object: 'Optional[Any]' = None, value: Optional[Any] = None, **kwargs) -> bool:

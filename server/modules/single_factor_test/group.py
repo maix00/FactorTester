@@ -179,20 +179,20 @@ def _runtime_time_value(payload: dict[str, Any], key: str, default: Any = None) 
 def _runtime_datetimes(payload: dict[str, Any]):
     from tools.data.types import DataTime
 
-    precision = (
+    precision = str(
         _runtime_time_value(payload, "precision")
         or _runtime_time_value(payload, "time_precision")
         or "exact"
     )
-    timezone = _runtime_time_value(payload, "timezone")
+    timezone = None if precision == "trading_day" else _runtime_time_value(payload, "timezone")
     start_payload = {
         "date": _runtime_time_value(payload, "start_date"),
-        "time": _runtime_time_value(payload, "start_time"),
+        "time": None if precision == "trading_day" else _runtime_time_value(payload, "start_time"),
         "timezone": timezone,
     }
     end_payload = {
         "date": _runtime_time_value(payload, "end_date"),
-        "time": _runtime_time_value(payload, "end_time"),
+        "time": None if precision == "trading_day" else _runtime_time_value(payload, "end_time"),
         "timezone": timezone,
     }
     start_dt = DataTime.from_dict(start_payload, precision=precision)
