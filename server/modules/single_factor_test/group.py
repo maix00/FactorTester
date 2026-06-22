@@ -48,7 +48,6 @@ def _group_product_path_selection_id(group: dict[str, Any]) -> str:
         selection_id = str(
             selection.get("product_path_selection_id")
             or selection.get("selection_id")
-            or selection.get("submission_id")
             or selection.get("id")
             or ""
         )
@@ -1248,8 +1247,7 @@ def _serialize_event_execution(
             "name": display_name,
             "group_id": strategy_id,
             "group_index": int(owner.get("group_index") or 0),
-            "product_path_selection_id": str(owner.get("submission_id") or owner.get("product_path_selection_id") or ""),
-            "submission_id": str(owner.get("submission_id") or ""),
+            "product_path_selection_id": str(owner.get("product_path_selection_id") or ""),
             "factor_alias": str(owner.get("factor_alias") or ""),
             "timestamps": [int(value.timestamp() * 1000) for value in index],
             "total_equity": [round(float(value), 2) for value in equity],
@@ -1736,9 +1734,11 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         missing_products = [
             str(value) for value in (getattr(shared, "multi_session_missing_products", []) or [])
         ]
+        selection = getattr(entry.tester, "product_selection", None)
         multi_session_entries.append({
             "index": position,
-            "tester_alias": getattr(entry.tester, "alias", ""),
+            "product_path_selection_id": getattr(entry, "product_path_selection_id", ""),
+            "product_path_selection_label": getattr(selection, "label", "") or getattr(selection, "product_group", "") or getattr(entry, "product_path_selection_id", ""),
             "factor_alias": getattr(entry.factor, "alias", ""),
             "n_groups": int(getattr(entry, "n_groups", 0) or 0),
             "missing_products": missing_products,
@@ -1756,11 +1756,9 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
         ),
         "multi_session_entries": multi_session_entries,
-        "product_path_selection_id": str(first_owner.get("submission_id") or first_owner.get("product_path_selection_id") or ""),
-        "submission_id": str(first_owner.get("submission_id") or ""),
+        "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
         "factor_alias": str(first_owner.get("factor_alias") or ""),
-        "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
-        "tester_product_count": len(group_tester.specs[0].tester.products),
+        "product_path_selection_count": len(group_tester.specs[0].tester.products),
         "simulation_count": execution["simulation_count"],
         "cross_entry_ls_count": len(flat_ls_configs),
         "errors": None,
@@ -1787,8 +1785,8 @@ def get_group_snapshot():
     """获取某个时刻各分组的产品列表及与上一时刻的进出变化。
     
     请求参数：
-        submission_id : 提交 ID
-        timestamp_ms  : 目标时刻（UTC epoch 毫秒）
+        product_path_selection_id : 产品路径选择 ID
+        timestamp_ms              : 目标时刻（UTC epoch 毫秒）
     
     返回：{
         groups: [{
@@ -1801,11 +1799,11 @@ def get_group_snapshot():
     }
     """
     data = request.get_json()
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     timestamp_ms  = data.get('timestamp_ms')
     page_uuid = str(data.get('page_uuid') or '')
-    if not submission_id or not timestamp_ms:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 timestamp_ms'}), 400
+    if not product_path_selection_id or not timestamp_ms:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 timestamp_ms'}), 400
 
     try:
         if page_uuid and runtime_state.get_page_owner(page_uuid) != current_user():
@@ -1815,12 +1813,12 @@ def get_group_snapshot():
         if event_execution:
             return jsonify(_event_group_snapshot(
                 event_execution,
-                str(submission_id),
+                str(product_path_selection_id),
                 int(timestamp_ms),
                 data.get("event_cursor"),
             ))
         tester = runtime_state.get_factor_tester(
-            submission_id, caller='get_group_snapshot', page_uuid=page_uuid or None
+            product_path_selection_id, caller='get_group_snapshot', page_uuid=page_uuid or None
         )
 
         group_result = _latest_group_result(tester)
@@ -1953,7 +1951,7 @@ def get_group_snapshot():
 
 def _event_group_snapshot(
     execution: dict,
-    submission_id: str,
+    product_path_selection_id: str,
     timestamp_ms: int,
     event_cursor: str | None = None,
 ) -> dict:
@@ -1961,10 +1959,10 @@ def _event_group_snapshot(
     portfolios = engine_result.get("portfolios") or {}
     owners = [
         owner for owner in execution.get("group_owner") or []
-        if str(owner.get("submission_id") or "") == submission_id
+        if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
     ]
     if not owners:
-        raise ValueError("当前页面最近一次事件回测不包含该 submission_id")
+        raise ValueError("当前页面最近一次事件回测不包含该 product_path_selection_id")
     first = portfolios.get(str(owners[0].get("group_id") or "")) or {}
     first_curve = first.get("position_curve") or {}
     if not first_curve:
@@ -2364,16 +2362,16 @@ def _event_group_snapshot(
     }
 
 
-def _event_group_detail(execution: dict, submission_id: str, group_index: int) -> dict:
+def _event_group_detail(execution: dict, product_path_selection_id: str, group_index: int) -> dict:
     owners = [
         owner for owner in execution.get("group_owner") or []
-        if str(owner.get("submission_id") or "") == submission_id
+        if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
         and not owner.get("is_ls")
         and int(owner.get("group_index") or 0) == group_index
     ]
     if len(owners) != 1:
         raise ValueError(
-            f"事件回测中无法唯一定位分组：submission_id={submission_id}, "
+            f"事件回测中无法唯一定位分组：product_path_selection_id={product_path_selection_id}, "
             f"group_index={group_index}, matches={len(owners)}"
         )
     owner = owners[0]
@@ -2407,11 +2405,11 @@ def _event_group_detail(execution: dict, submission_id: str, group_index: int) -
     )
 
 
-def _event_group_ranking_detail(execution: dict, submission_id: str) -> dict:
+def _event_group_ranking_detail(execution: dict, product_path_selection_id: str) -> dict:
     owners = sorted(
         (
             owner for owner in execution.get("group_owner") or []
-            if str(owner.get("submission_id") or "") == submission_id
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
             and not owner.get("is_ls")
         ),
         key=lambda owner: int(owner.get("group_index") or 0),
@@ -2438,11 +2436,11 @@ def _event_group_ranking_detail(execution: dict, submission_id: str) -> dict:
 def get_group_detail():
     """Return first-phase detail analytics for one group from the latest run."""
     data = request.get_json() or {}
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     group_index = data.get('group_index')
     page_uuid = str(data.get('page_uuid') or '')
-    if submission_id is None or group_index is None:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
+    if product_path_selection_id is None or group_index is None:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 group_index'}), 400
     try:
         group_index = int(group_index)
         if runtime_state.get_page_owner(page_uuid) != current_user():
@@ -2453,7 +2451,7 @@ def get_group_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_detail(event_execution, str(submission_id), group_index),
+            'detail': _event_group_detail(event_execution, str(product_path_selection_id), group_index),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
@@ -2464,10 +2462,10 @@ def get_group_detail():
 def get_group_ranking_detail():
     """Return second-phase whole-test ranking analytics from the latest run."""
     data = request.get_json() or {}
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     page_uuid = str(data.get('page_uuid') or '')
-    if submission_id is None:
-        return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
+    if product_path_selection_id is None:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id'}), 400
     try:
         if runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
@@ -2477,21 +2475,21 @@ def get_group_ranking_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_ranking_detail(event_execution, str(submission_id)),
+            'detail': _event_group_ranking_detail(event_execution, str(product_path_selection_id)),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
-@sft_bp.route('/get_tester_session_info', methods=['POST'])
-def get_tester_session_info():
-    """返回测试器会话摘要信息（供第3层策略通知表格使用）。
+@sft_bp.route('/get_product_path_selection_session_info', methods=['POST'])
+def get_product_path_selection_session_info():
+    """返回产品路径选择运行摘要信息（供第3层策略通知表格使用）。
 
-    请求：{submission_ids: [str, ...]}  或  {submission_id: str}
+    请求：{product_path_selection_ids: [str, ...]}
 
     返回：{
-        testers: [{
-            submission_id, tester_alias, product_count,
+        product_path_selections: [{
+            product_path_selection_id, runtime_context_alias, product_count,
             factors: [{
                 alias, name, freq,
                 n_groups: int,   // 上次分组测试用的组数
@@ -2507,20 +2505,18 @@ def get_tester_session_info():
         return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
     if runtime_state.get_page_owner(page_uuid) != current_user():
         return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-    ids = data.get('submission_ids') or []
-    if not ids and data.get('submission_id'):
-        ids = [data['submission_id']]
+    ids = data.get('product_path_selection_ids') or []
     if not ids:
-        return jsonify({'success': False, 'error': '缺少 submission_ids'}), 400
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_ids'}), 400
 
-    testers_info = []
+    selections_info = []
     for sid in ids:
         try:
             tester = runtime_state.find_factor_tester(
                 str(sid), allow_suffix=True, page_uuid=page_uuid
             )
             if tester is None:
-                testers_info.append({'submission_id': str(sid), 'error': '未找到测试器实例'})
+                selections_info.append({'product_path_selection_id': str(sid), 'error': '未找到运行上下文'})
                 continue
             factors_info = []
             for f in (getattr(tester, 'factors', None) or []):
@@ -2544,16 +2540,16 @@ def get_tester_session_info():
                 else:
                     info['has_results'] = False
                 factors_info.append(info)
-            testers_info.append({
-                'submission_id': str(sid),
-                'tester_alias': getattr(tester, 'alias', '?'),
+            selections_info.append({
+                'product_path_selection_id': str(sid),
+                'runtime_context_alias': getattr(tester, 'alias', '?'),
                 'product_count': len(tester.products) if hasattr(tester, 'products') else 0,
                 'factors': factors_info,
             })
         except Exception as e:
-            testers_info.append({'submission_id': str(sid), 'error': str(e)})
+            selections_info.append({'product_path_selection_id': str(sid), 'error': str(e)})
 
-    return jsonify({'success': True, 'testers': testers_info})
+    return jsonify({'success': True, 'product_path_selections': selections_info})
 
 
 # ═══════════════════════════════════════════════════

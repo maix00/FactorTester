@@ -10,25 +10,15 @@ from server.services.session_runtime import current_user_obj
 
 
 def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPathSelection:
-    """Resolve the product universe carried by a test request.
-
-    Product-path submissions are templates or drafts.  Test modules should pass
-    the product selection they need as part of their own run settings.  The page
-    selection lookup is kept only as a compatibility bridge for older frontend
-    payloads that still send submission_id alone.
-    """
+    """Resolve the product universe carried by a test request."""
     raw = data.get("product_path_selection")
-    if raw is None:
-        raw = data.get("product_selection")
     if isinstance(raw, dict):
         return ProductPathSelection.from_paths(
             str(
                 raw.get("product_path_selection_id")
                 or raw.get("selection_id")
-                or raw.get("submission_id")
                 or data.get("product_path_selection_id")
                 or data.get("selection_id")
-                or data.get("submission_id")
                 or ""
             ),
             list(raw.get("selected_paths") or raw.get("paths") or []),
@@ -47,8 +37,6 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
             str(
                 data.get("product_path_selection_id")
                 or data.get("selection_id")
-                or data.get("submission_id")
-                or data.get("id_time")
                 or ""
             ),
             selected_paths,
@@ -61,7 +49,6 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
                 or group_name
                 or data.get("product_path_selection_id")
                 or data.get("selection_id")
-                or data.get("submission_id")
                 or ""
             ),
             page_uuid=page_uuid,
@@ -70,27 +57,27 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
     raise AssertionError("测试配置缺少产品组设置")
 
 
-def selection_for_submission(
+def selection_for_product_path_selection(
     data: dict[str, Any],
-    submission_id: str,
+    product_path_selection_id: str,
     *,
     page_uuid: str,
 ) -> ProductPathSelection:
-    """Resolve one submission's product universe from a test request."""
-    sid = str(submission_id)
+    """Resolve one product path selection from a test request."""
+    sid = str(product_path_selection_id)
     selections = data.get("product_selections")
     if isinstance(selections, dict):
         raw = selections.get(sid)
         if isinstance(raw, dict):
             return selection_from_request(
-                {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or raw.get("submission_id") or sid},
+                {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid},
                 page_uuid=page_uuid,
             )
     if isinstance(selections, list):
         for raw in selections:
-            if isinstance(raw, dict) and str(raw.get("product_path_selection_id") or raw.get("selection_id") or raw.get("submission_id") or raw.get("id") or "") == sid:
+            if isinstance(raw, dict) and str(raw.get("product_path_selection_id") or raw.get("selection_id") or raw.get("id") or "") == sid:
                 return selection_from_request(
-                    {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or raw.get("submission_id") or sid},
+                    {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid},
                     page_uuid=page_uuid,
                 )
     groups = data.get("groups")
@@ -119,7 +106,6 @@ def selection_for_submission(
                 raw_id = str(
                     raw.get("product_path_selection_id")
                     or raw.get("selection_id")
-                    or raw.get("submission_id")
                     or raw.get("id")
                     or ""
                 )
@@ -183,8 +169,5 @@ def create_factor_tester_for_product_path_selection(
     page_uuid: str,
     user: Any | None = None,
 ):
-    selection = selection_for_submission(data, product_path_selection_id, page_uuid=page_uuid)
+    selection = selection_for_product_path_selection(data, product_path_selection_id, page_uuid=page_uuid)
     return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)
-
-
-create_factor_tester_for_submission = create_factor_tester_for_product_path_selection

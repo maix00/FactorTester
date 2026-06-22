@@ -1324,6 +1324,7 @@
         white-space: nowrap;
     }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
 
 <!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
@@ -1362,7 +1363,11 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
-    "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
+    "https://code.jquery.com/jquery-3.6.0.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js",
+    "{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}",
+    "{{ url_for('static', filename='js/modules/products/product_selector.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/overlays/product_path_selection_products.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",

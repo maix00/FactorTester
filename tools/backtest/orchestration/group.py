@@ -126,7 +126,7 @@ def execute_group_plan(
         settings_by_strategy[strategy_id] = values
         execution_owners.append({
             "simulation_index": plan.group_owner[source_index].get("simulation_index"),
-            "submission_id": plan.group_owner[source_index].get("submission_id"),
+            "product_path_selection_id": plan.group_owner[source_index].get("product_path_selection_id"),
             "factor_alias": plan.group_owner[source_index].get("factor_alias"),
             "requested_n_groups": plan.group_owner[source_index].get("requested_n_groups"),
             "group_index": len(execution_owners),

@@ -138,29 +138,22 @@
         return current || group;
     }
 
-    function testerProducts(testerId) {
-        var subs = window.submissions || [];
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) !== String(testerId)) continue;
-            var raw = (Array.isArray(subs[si].products) && subs[si].products.length)
-                ? subs[si].products
-                : (subs[si].product_groups || []);
-            return raw.map(function(item) {
-                if (typeof item === 'string') return { name: item, desc: '' };
-                return item && item.name ? { name: item.name, desc: item.desc || '' } : null;
-            }).filter(Boolean);
-        }
-        return [];
+    function selectionId(selection) {
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
     }
 
-    function testerLabel(testerId) {
-        var subs = window.submissions || [];
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) === String(testerId)) {
-                return subs[si].product_group || subs[si].label || ('测试器 #' + subs[si].id);
-            }
-        }
-        return testerId ? String(testerId) : '';
+    function productPathSelectionProducts(selection) {
+        var raw = selection && ((Array.isArray(selection.products) && selection.products.length)
+            ? selection.products
+            : (selection.product_groups || []));
+        return (raw || []).map(function(item) {
+            if (typeof item === 'string') return { name: item, desc: '' };
+            return item && item.name ? { name: item.name, desc: item.desc || '' } : null;
+        }).filter(Boolean);
+    }
+
+    function productPathSelectionLabel(selection) {
+        return selection ? (selection.product_group || selection.label || selection.name || selectionId(selection)) : '';
     }
 
     function nodeProducts(group, seen) {
@@ -172,7 +165,7 @@
         if (group.parentId && GT.groupSettings && GT.groupSettings.groups) {
             inherited = nodeProducts(GT.groupSettings.groups.get(group.parentId), seen);
         } else {
-            inherited = testerProducts(group.testerId);
+            inherited = productPathSelectionProducts(group.product_path_selection);
         }
         var mask = group.productMask || {};
         if (!mask || Object.keys(mask).length === 0) return inherited;
@@ -193,7 +186,7 @@
 
     function resolveChipValue(name, group, source, resolvers) {
         var resolver = resolvers && resolvers[name];
-        if (resolver === 'tester_label') return testerLabel(source && source.testerId);
+        if (resolver === 'product_path_selection_label') return productPathSelectionLabel(source && source.product_path_selection);
         if (resolver === 'product_mask_count') return nodeProducts(group).length;
         if (resolver === 'product_mask_expand_symbol') return state.expandedProductMasks && state.expandedProductMasks[group.id] ? '▾' : '▸';
         return source && source[name] != null ? source[name] : '';

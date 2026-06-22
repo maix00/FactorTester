@@ -149,20 +149,20 @@
         html += '<label style="display:block;margin-bottom:12px;">';
         html += '<span style="display:block;font-size:13px;margin-bottom:4px;">品种筛选（留空=全选）</span>';
         html += '<div id="dg-f-product-mask" style="max-height:120px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;">';
-        var testerProds = [];
-        if (isEdit) { testerProds = H.nodeProducts(editData); }
-        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); testerProds = pn ? H.nodeProducts(pn) : []; }
+        var selectionProducts = [];
+        if (isEdit) { selectionProducts = H.nodeProducts(editData); }
+        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); selectionProducts = pn ? H.nodeProducts(pn) : []; }
         else {
             var allPs = {};
             for (var bi = 0; bi < bgs.length; bi++) {
-                var pp = H.testerProducts(bgs[bi].testerId);
+                var pp = H.productPathSelectionProducts(bgs[bi].product_path_selection);
                 for (var pi = 0; pi < pp.length; pi++) { allPs[pp[pi].name] = pp[pi]; }
             }
-            testerProds = Object.keys(allPs).map(function(k) { return allPs[k]; });
+            selectionProducts = Object.keys(allPs).map(function(k) { return allPs[k]; });
         }
         var existingMask = (editData && editData.productMask) ? editData.productMask : {};
-        for (var ti = 0; ti < testerProds.length; ti++) {
-            var pName = testerProds[ti].name;
+        for (var ti = 0; ti < selectionProducts.length; ti++) {
+            var pName = selectionProducts[ti].name;
             var checked = Object.keys(existingMask).length === 0 ? ' checked' : (existingMask[pName] ? ' checked' : '');
             html += '<label style="display:inline-block;margin-right:12px;font-size:12px;"><input type="checkbox" class="dg-f-prod" value="' + H.escapeHTML(pName) + '"' + checked + '> ' + H.escapeHTML(pName) + '</label>';
         }
@@ -335,7 +335,7 @@
                 }
             }
 
-            var testerLabel = H.testerLabel(batch.testerId);
+            var selectionLabel = H.productPathSelectionLabel(batch.product_path_selection);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
             var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
@@ -350,7 +350,7 @@
                 h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
             }
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.factorAlias) + '</span>';
-            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="tester-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="tester">' + H.renderChipHtml(testerLabel) + '</span>';
+            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml(selectionLabel) + '</span>';
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
@@ -377,7 +377,7 @@
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
-                        if (chip.label === 'factor_alias' || chip.label === 'tester') continue;
+                        if (chip.label === 'factor_alias' || chip.label === 'product_path_selection') continue;
                         if (chip.clickable) {
                             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {

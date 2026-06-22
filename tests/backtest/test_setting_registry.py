@@ -69,7 +69,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     } >= {"factor_execution", "product_selection", "group_strategy"}
     assert {chip["key"] for chip in index["chip_fields"]} >= {
         "factor_alias",
-        "tester",
+        "product_path_selection",
         "group_index",
         "product_mask",
     }

@@ -20,11 +20,11 @@
 
     function batchLabel(batch) {
         var batchIndex = Number.isFinite(Number(batch.index)) ? (Number(batch.index) + 1) : '';
-        var testerAlias = batch.tester_alias || batch.testerAlias || batch.submission_id || '';
+        var selectionLabel = batch.product_path_selection_label || batch.product_path_selection_id || '';
         var factorAlias = batch.factor_alias || batch.factorAlias || '';
         var groupText = batch.n_groups ? (' / ' + batch.n_groups + '组') : '';
         return (batchIndex ? ('Batch ' + batchIndex + ' · ') : '')
-            + [testerAlias, factorAlias].filter(Boolean).join(' / ')
+            + [selectionLabel, factorAlias].filter(Boolean).join(' / ')
             + groupText;
     }
 
@@ -151,7 +151,7 @@
         var hasMultiSession = !!multiSessionActive;
         var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
             ? multiSessionBatches
-            : [{ index: 0, tester_alias: '当前测试器', factor_alias: '当前因子', n_groups: null }];
+            : [{ index: 0, product_path_selection_label: '当前产品路径', factor_alias: '当前因子', n_groups: null }];
         if (hasMultiSession) {
             for (var bi = 0; bi < batches.length; bi++) {
                 var batch = batches[bi];

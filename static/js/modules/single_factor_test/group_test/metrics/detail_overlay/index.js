@@ -92,25 +92,25 @@
 
     /* ───── Data loading ───── */
 
-    function _getActiveSubmissionId() {
+    function _getActiveProductPathSelectionId() {
         var c = GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
         var grossData = c ? c.getLastGrossData() : null;
-        if (grossData && grossData.length > 0 && grossData[0] && grossData[0].submission_id) {
-            return grossData[0].submission_id;
+        if (grossData && grossData.length > 0 && grossData[0] && grossData[0].product_path_selection_id) {
+            return grossData[0].product_path_selection_id;
         }
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
-        if (sel && typeof sel.getFirstSubmissionId === 'function') {
-            return sel.getFirstSubmissionId();
+        if (sel && typeof sel.getFirstProductPathSelectionId === 'function') {
+            return sel.getFirstProductPathSelectionId();
         }
         return null;
     }
 
-    async function loadBaseGroupDetail(submissionId, groupIndex) {
+    async function loadBaseGroupDetail(productPathSelectionId, groupIndex) {
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                submission_id: submissionId,
+                product_path_selection_id: productPathSelectionId,
                 group_index: groupIndex,
                 page_uuid: window._pageUuid || ''
             }),
@@ -137,15 +137,15 @@
 
     /* ───── openResultGroupDetail ───── */
 
-    async function openResultGroupDetail(key, groupIndexHint, submissionIdHint) {
+    async function openResultGroupDetail(key, groupIndexHint, productPathSelectionIdHint) {
         var group = findResultGroup(key);
         if (!group) {
             alert('未找到该组的已生成结果。');
             return;
         }
-        var submissionId = submissionIdHint || group.submission_id || _getActiveSubmissionId();
-        if (!submissionId) {
-            alert('无法获取提交 ID，请先运行分组测试。');
+        var productPathSelectionId = productPathSelectionIdHint || group.product_path_selection_id || _getActiveProductPathSelectionId();
+        if (!productPathSelectionId) {
+            alert('无法获取产品路径选择 ID，请先运行分组测试。');
             return;
         }
         var groupIndex = group.group_index != null
@@ -167,7 +167,7 @@
             var metric = (lastMetrics || {})[group.key]
                 || (lastMetrics || {})[key] || {};
             var isLsGroup = !!group.is_ls;
-            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(submissionId, groupIndex);
+            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(productPathSelectionId, groupIndex);
             if (!detail) {
                 throw new Error('未获取到分组详情数据');
             }
@@ -193,8 +193,8 @@
     /* ───── openGroupRankingDetail ───── */
 
     async function openGroupRankingDetail() {
-        var submissionId = _getActiveSubmissionId();
-        if (!submissionId) return;
+        var productPathSelectionId = _getActiveProductPathSelectionId();
+        if (!productPathSelectionId) return;
         var overlay = document.getElementById('group-ranking-overlay');
         var loading = document.getElementById('group-ranking-loading');
         var content = document.getElementById('group-ranking-content');
@@ -207,7 +207,7 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    submission_id: submissionId,
+                    product_path_selection_id: productPathSelectionId,
                     page_uuid: window._pageUuid || ''
                 }),
             });

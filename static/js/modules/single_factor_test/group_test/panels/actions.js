@@ -117,22 +117,42 @@
        派生组面板
        ════════════════════════════════════════════════════════════════ */
 
-    actions.productNamesForTester = function(testerId) {
-        var subs = window.submissions || [];
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) !== String(testerId)) continue;
-            return (subs[i].products || []).map(function(product) {
-                return typeof product === 'string' ? product : (product && (product.name || product.desc)) || '';
-            }).filter(Boolean);
+    actions.productNamesForSelection = function(selection) {
+        var products = selection && (selection.products || selection.product_groups);
+        if (!Array.isArray(products)) return [];
+        return products.map(function(product) {
+            return typeof product === 'string' ? product : (product && (product.name || product.desc)) || '';
+        }).filter(Boolean);
+    };
+
+    function _selectionId(selection) {
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
+    }
+
+    actions.productPathSelectionIdForGroup = function(group) {
+        var selection = group && group.product_path_selection;
+        return _selectionId(selection);
+    };
+
+    actions.rootProductPathSelectionForGroup = function(group) {
+        var root = group;
+        while (root && root.parentId && GT.groupSettings.groups && GT.groupSettings.groups.get) {
+            root = GT.groupSettings.groups.get(root.parentId);
         }
-        return [];
+        return root ? root.product_path_selection : null;
+    };
+
+    actions.productNamesForProductPathSelection = function(selection) {
+        return actions.productNamesForSelection(selection);
+    };
+
+    actions.productNamesForGroup = function(group) {
+        return actions.productNamesForSelection(actions.rootProductPathSelectionForGroup(group));
     };
 
     actions.effectiveDerivedProductNames = function(node, seen) {
         if (GT.groupSettings.groups && typeof GT.groupSettings.groups.effectiveProductNames === 'function') {
-            return GT.groupSettings.groups.effectiveProductNames(node, {
-                getProductsForTester: actions.productNamesForTester
-            }, seen);
+            return GT.groupSettings.groups.effectiveProductNames(node, {}, seen);
         }
         return [];
     };
@@ -169,7 +189,7 @@
     actions.findRootGroupIdForResultGroup = function(groupIndex) {
         if (!GT.groupSettings.groups) return null;
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
-        var submissionId = sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
+        var productPathSelectionId = sel && typeof sel.getFirstProductPathSelectionId === 'function' ? sel.getFirstProductPathSelectionId() : null;
         var factorAlias = sel && typeof sel.getFirstFactorAlias === 'function' ? sel.getFirstFactorAlias() : '';
         var all = GT.groupSettings.groups.getAll ? (GT.groupSettings.groups.getAll() || []) : [];
         var c = cache();
@@ -182,7 +202,7 @@
         var matches = all.filter(function(group) {
             if (!group || group.parentId) return false;
             if (Number(group.groupIndex) !== expectedIndex) return false;
-            if (submissionId && String(group.testerId) !== String(submissionId)) return false;
+            if (productPathSelectionId && String(actions.productPathSelectionIdForGroup(group)) !== String(productPathSelectionId)) return false;
             if (factorAlias && String(group.factorAlias || '') !== String(factorAlias || '')) return false;
             return true;
         });

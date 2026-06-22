@@ -94,7 +94,7 @@
         (groups || []).forEach(function(g, idx) {
             if (!g || g.is_ls || !g.key) return;
             var groupIndex = g.group_index != null ? g.group_index : idx;
-            map[g.key] = { groupIndex: groupIndex, submissionId: g.submission_id || null };
+            map[g.key] = { groupIndex: groupIndex, productPathSelectionId: g.product_path_selection_id || null };
         });
         return map;
     }
@@ -185,20 +185,20 @@
             var entry = groupIndexMap[g];
             return (entry && entry.groupIndex != null) ? String(entry.groupIndex) : '';
         }
-        function groupSubmissionId(g) {
+        function groupProductPathSelectionId(g) {
             var entry = groupIndexMap[g];
-            return entry ? (entry.submissionId || null) : null;
+            return entry ? (entry.productPathSelectionId || null) : null;
         }
 
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
             var label = groupLabel(g);
             var indexDisplay = groupIndexDisplay(g);
-            var subId = groupSubmissionId(g);
+            var productPathSelectionId = groupProductPathSelectionId(g);
             headHtml += '<th class="group-detail-trigger"'
                 + ' data-group-key="' + escapeAttr(g) + '"'
                 + ' data-group-index="' + escapeAttr(indexDisplay) + '"'
-                + ' data-submission-id="' + escapeAttr(subId || '') + '"'
+                + ' data-product-path-selection-id="' + escapeAttr(productPathSelectionId || '') + '"'
                 + ' title="查看该组详情">' + label + '</th>';
         });
         headHtml += '</tr>';
@@ -238,7 +238,7 @@
             th.addEventListener('click', function() {
                 var groupKey = th.getAttribute('data-group-key');
                 if (typeof actions.openResultGroupDetail === 'function') {
-                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'), th.getAttribute('data-submission-id'));
+                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'), th.getAttribute('data-product-path-selection-id'));
                 } else if (typeof actions.openGroupDetail === 'function') {
                     actions.openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
                 }

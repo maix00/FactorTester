@@ -115,9 +115,10 @@
         return cur || group;
     }
 
-    function getFirstSubmissionId() {
+    function getFirstProductPathSelectionId() {
         var group = getFirstBaseGroup();
-        return group ? group.testerId : null;
+        var selection = group && group.product_path_selection;
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : null;
     }
 
     function getFirstFactorAlias() {
@@ -148,7 +149,7 @@
         getFirst: getFirst,
         getFirstGroup: getFirstGroup,
         getFirstBaseGroup: getFirstBaseGroup,
-        getFirstSubmissionId: getFirstSubmissionId,
+        getFirstProductPathSelectionId: getFirstProductPathSelectionId,
         getFirstFactorAlias: getFirstFactorAlias,
         count: count,
         on: on,

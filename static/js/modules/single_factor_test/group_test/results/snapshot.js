@@ -33,18 +33,17 @@
         return GT.panels && GT.panels.list && GT.panels.list.selection;
     }
 
-    function _activeSubmissionId() {
-        // 优先从最近的分组测试结果中获取 submission_id，
+    function _activeProductPathSelectionId() {
+        // 优先从最近的分组测试结果中获取 product_path_selection_id，
         // 这样用户无需在分组列表中手动选中即可查看快照 (refs #100)。
         var c = GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
         var grossData = c ? c.getLastGrossData() : null;
         if (grossData && grossData.length > 0) {
             var first = grossData[0];
-            if (first && first.submission_id) return first.submission_id;
+            if (first && first.product_path_selection_id) return first.product_path_selection_id;
         }
-        // fallback: 从分组列表 selection 获取
         var sel = _selection();
-        return sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
+        return sel && typeof sel.getFirstProductPathSelectionId === 'function' ? sel.getFirstProductPathSelectionId() : null;
     }
 
     function _escape(value) {
@@ -53,9 +52,9 @@
 
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs, eventCursor) {
-        var submissionId = _activeSubmissionId();
-        if (!submissionId) {
-            alert('请先在提交列表中选中一条提交记录，再点击图表查看持仓快照。');
+        var productPathSelectionId = _activeProductPathSelectionId();
+        if (!productPathSelectionId) {
+            alert('请先选择产品路径组合，再点击图表查看持仓快照。');
             return;
         }
 
@@ -93,7 +92,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                submission_id: submissionId,
+                product_path_selection_id: productPathSelectionId,
                 timestamp_ms: timestampMs,
                 page_uuid: window._pageUuid || '',
                 event_cursor: eventCursor || null

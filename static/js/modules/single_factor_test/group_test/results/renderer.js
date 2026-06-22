@@ -87,10 +87,9 @@
      */
     renderer.applyGroupTestResult = function(data, statusText) {
         console.log('[GroupTest] applyGroupTestResult:', {
-            submission_id: data.submission_id,
+            product_path_selection_id: data.product_path_selection_id,
             factor_alias: data.factor_alias,
-            tester_alias: data.tester_alias,
-            tester_product_count: data.tester_product_count,
+            product_path_selection_count: data.product_path_selection_count,
             n_groups: data.n_groups,
         });
 

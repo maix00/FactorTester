@@ -248,19 +248,18 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
 
 
 def test_product_path_selection_inherits_from_parent_group(monkeypatch):
-    from server.modules.shared.factor_tester_runtime import selection_for_submission
+    from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
 
     monkeypatch.setattr(
         "server.modules.shared.submission_model.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF"]),
     )
 
-    selection = selection_for_submission(
+    selection = selection_for_product_path_selection(
         {
             "groups": [
                 {
                     "id": "parent",
-                    "testerId": "sel-parent",
                     "product_path_selection": {
                         "product_path_selection_id": "sel-parent",
                         "paths": ["Futures/Metals"],
@@ -270,7 +269,6 @@ def test_product_path_selection_inherits_from_parent_group(monkeypatch):
                 {
                     "id": "child",
                     "parentId": "parent",
-                    "testerId": "sel-parent",
                 },
             ]
         },

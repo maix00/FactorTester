@@ -154,16 +154,16 @@
                 var groupId = this.getAttribute('data-gid') || '';
                 var group = GT.groupSettings.groups && GT.groupSettings.groups.get(groupId);
                 if (!group) return;
-                if (action === 'tester-products' && GT.overlays && GT.overlays.testerProducts) {
+                if (action === 'product-path-selection-products' && GT.overlays && GT.overlays.productPathSelectionProducts) {
                     var root = group;
                     while (root && root.parentId) {
                         root = GT.groupSettings.groups.get(root.parentId);
                         if (!root) break;
                     }
-                    var testerId = root && root.testerId;
-                    var products = H.testerProducts(testerId);
-                    var label = H.testerLabel(testerId);
-                    GT.overlays.testerProducts.open(label, products);
+                    var selection = root && H.nodeProductPathSelection(root);
+                    var products = H.productPathSelectionProducts(selection);
+                    var label = H.productPathSelectionLabel(selection);
+                    GT.overlays.productPathSelectionProducts.open(label, products, selection);
                 } else if (action === 'toggle-product-mask') {
                     if (GT.backendSettings && typeof GT.backendSettings.toggleProductMask === 'function') {
                         GT.backendSettings.toggleProductMask(groupId);

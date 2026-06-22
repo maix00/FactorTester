@@ -129,32 +129,6 @@
         activate('overview');
     }
 
-    function bindSubmissionBus() {
-        var bus = window._submissionBus;
-        if (!bus || typeof bus.on !== 'function') return;
-
-        bus.on(bus.EVENTS && bus.EVENTS.REMOVED, function(data) {
-            if (!data || !data.id_time) return;
-            var removedTesterId = String(data.id_time);
-            if (GT.groupSettings && GT.groupSettings.groups) {
-                GT.groupSettings.groups.getAll().forEach(function(group) {
-                    if (String(group.testerId) !== removedTesterId) return;
-                    try { GT.groupSettings.groups.remove(group.id); }
-                    catch (err) { console.warn('[group_test/bus] Failed to remove group:', group.id, err); }
-                });
-            }
-            if (GT.groupSettings && GT.groupSettings.lsConfigs) {
-                try { GT.groupSettings.lsConfigs._reset(); } catch (_) {}
-            }
-        });
-
-        bus.on('*', function() {
-            if (window.submissions && window.submissions.length > 0 && GT.tabs && GT.tabs.mountTab) {
-                GT.tabs.mountTab('list');
-            }
-        });
-    }
-
     function initEssential() {
         // Phase 1 loads only the backend tab index. Tab schemas load on first click.
         if (GT.backendSettings && typeof GT.backendSettings.registerSnapshot === 'function') {
@@ -229,7 +203,9 @@
         if (GT.tabs && typeof GT.tabs.init === 'function') {
             GT.tabs.init();
         }
-        if (window.submissions && window.submissions.length > 0 && GT.tabs && GT.tabs.mountTab) {
+        if (GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
+            && GT.groupSettings.groups.getAll().length > 0
+            && GT.tabs && GT.tabs.mountTab) {
             GT.tabs.mountTab('list');
         }
 
@@ -261,7 +237,6 @@
             });
         }
 
-        bindSubmissionBus();
     }
 
     GT.initEssential = initEssential;

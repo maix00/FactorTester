@@ -33,14 +33,25 @@
     }
 
     function _selectionId(selection) {
-        return selection ? String(selection.product_path_selection_id || selection.id || selection.selection_id || '') : '';
+        var utils = window.ProductPathSelectionUtils;
+        return utils && utils.selectionId ? utils.selectionId(selection)
+            : (selection ? String(selection.product_path_selection_id || selection.id || selection.selection_id || '') : '');
     }
 
     function _currentSelections() {
-        if (window.ProductPathSelectionState && typeof window.ProductPathSelectionState.getAll === 'function') {
-            return window.ProductPathSelectionState.getAll();
-        }
-        return Array.isArray(window.productPathSelections) ? window.productPathSelections : [];
+        var utils = window.ProductPathSelectionUtils || {};
+        var selections = [];
+        var groups = GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
+            ? GT.groupSettings.groups.getAll()
+            : [];
+        groups.forEach(function(group) {
+            if (group && group.product_path_selection) selections.push(group.product_path_selection);
+        });
+        var local = GT.backendSettings && GT.backendSettings._state && GT.backendSettings._state.localValues
+            ? GT.backendSettings._state.localValues.product_path_selection
+            : null;
+        if (local) selections.push(local);
+        return utils.dedupe ? utils.dedupe(selections) : selections;
     }
 
     function _findSelection(selectionId) {
@@ -52,8 +63,9 @@
     }
 
     function _selectionLabel(selection) {
-        if (!selection) return '';
-        return selection.product_group || selection.label || selection.name || _selectionId(selection);
+        var utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionLabel) return utils.selectionLabel(selection);
+        return selection ? (selection.product_group || selection.label || selection.name || _selectionId(selection)) : '';
     }
 
     function _comboKeyForGroup(group) {

@@ -28,7 +28,7 @@ from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHA
 @dataclass(slots=True)
 class GroupSimulationSpec:
     simulation_index: int
-    submission_id: str
+    product_path_selection_id: str
     tester: FactorTester
     factor_alias: str
     n_groups: int
@@ -227,7 +227,7 @@ class FactorGroupTester:
             if group.tester_id in tester_by_id
         ]
         if not flat_groups:
-            raise ValueError("没有找到可用于分组测试的测试器，请刷新提交列表后重试。")
+            raise ValueError("没有找到可用于分组测试的产品路径选择，请刷新配置后重试。")
 
         _emit_progress("info", f"分组测试准备开始，分组 {len(flat_groups)} 个")
 
@@ -348,7 +348,7 @@ class FactorGroupTester:
             built_specs.append(
                 GroupSimulationSpec(
                     simulation_index=si,
-                    submission_id=first_group.tester_id,
+                    product_path_selection_id=first_group.tester_id,
                     tester=tester,
                     factor_alias=factor_alias,
                     n_groups=n_groups,
@@ -568,7 +568,7 @@ class FactorGroupTester:
 
     def build_batch_labels(self) -> list[list[str]]:
         return [
-            [f"{entry.submission_id}|{entry.factor_alias}|{entry.n_groups}" for entry in batch]
+            [f"{entry.product_path_selection_id}|{entry.factor_alias}|{entry.n_groups}" for entry in batch]
             for batch in self.build_overlap_batches()
         ]
 
@@ -714,7 +714,7 @@ class FactorGroupTester:
                 group_label = entry.group_name_map.get(local_group_idx, f"group_{local_group_idx}")
                 group_owner.append({
                     "simulation_index": si,
-                    "submission_id": entry.submission_id,
+                    "product_path_selection_id": entry.product_path_selection_id,
                     "factor_alias": entry.factor_alias,
                     "requested_n_groups": entry.n_groups,
                     "group_index": local_group_idx,
@@ -859,4 +859,3 @@ class FactorGroupTester:
             market_rule_fallback=market_rule_fallback,
         )
         return plan
-
