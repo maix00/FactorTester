@@ -92,9 +92,9 @@
         }, 500);
     }
 
-    function failProgress(errorText) {
+    function failProgress(errorText, value) {
         var ui = getProgressEls();
-        setProgress(0, errorText || '失败');
+        setProgress(value == null ? 0 : value, errorText || '失败');
         if (ui.runBtn) ui.runBtn.disabled = false;
         if (ui.wrapper) ui.wrapper.style.display = 'flex';
         setTimeout(function() {
@@ -395,6 +395,17 @@
         }
         var control = document.createElement('select');
         if (setting.key === 'factor') {
+            if (!state.factors.length) {
+                control.insertAdjacentHTML(
+                    'beforeend',
+                    optionHtml('', '请先提交参数设置或加载模板因子', true)
+                );
+                control.disabled = true;
+                return control;
+            }
+            if (!effectiveValue(setting.key)) {
+                state.values[setting.key] = state.factors[0].alias || state.factors[0].name || '';
+            }
             state.factors.forEach(function(factor) {
                 var value = factor.alias || factor.name || '';
                 var label = value + (factor.freq ? ' · ' + factor.freq : '');
@@ -568,6 +579,37 @@
         loadPriceDataForCurrentProduct().then(function(priceData) {
             drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
         }).catch(showResultError);
+    }
+
+    function syncProductFromActiveTree() {
+        if (state.currentProduct && state.paths.length) return true;
+        var tree = state.tree;
+        if (!tree && window.jQuery && window.jQuery.ui && window.jQuery.ui.fancytree) {
+            try {
+                tree = window.jQuery.ui.fancytree.getTree('#factor-series-tree-container');
+            } catch (err) {
+                tree = null;
+            }
+        }
+        var node = tree && tree.getActiveNode ? tree.getActiveNode() : null;
+        if (!node) return false;
+        var nodeData = node.data || {};
+        var productName = extractProductName(node);
+        if (!productName || nodeData.has_data === false) return false;
+        selectProduct(productName, nodeData, node.key);
+        return true;
+    }
+
+    function showMissingProductState(chart, status) {
+        openTab('product');
+        var text = '请先从产品树选择产品';
+        if (chart) chart.innerHTML = message(text + '。', true);
+        if (status) status.textContent = text;
+        showProgress();
+        setProgress(8, text);
+        setTimeout(function() {
+            failProgress(text, 8);
+        }, 250);
     }
 
     function normalizeProductForContractApi(name) {
@@ -804,16 +846,23 @@
         var status = document.getElementById('factor-series-status');
         var factor = selectedFactor();
         if (!chart) return;
+        showProgress();
+        setProgress(5, '检查配置');
+        if (!state.paths.length) syncProductFromActiveTree();
         if (!state.paths.length) {
-            chart.innerHTML = message('请先从产品树选择产品。', true);
+            showMissingProductState(chart, status);
             return;
         }
         if (!factor) {
-            chart.innerHTML = message('请先选择因子。', true);
+            var factorText = '请先提交参数设置或加载模板因子';
+            openTab('factor');
+            chart.innerHTML = message(factorText + '。', true);
+            if (status) status.textContent = factorText;
+            setProgress(8, factorText);
+            failProgress(factorText, 8);
             return;
         }
         if (status) status.textContent = '计算因子...';
-        showProgress();
         chart.innerHTML = message('正在计算因子...');
         try {
             setProgress(25, '计算因子');

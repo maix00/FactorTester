@@ -1,7 +1,7 @@
 """国信页面用名 → 品种代码 的补充映射。
 
-sectors.csv 的「合约标的→品种代码」是主映射（通过 CNFutures.desc_to_code() 查询）。
-本文件仅补充 sectors.csv 覆盖不到的别名（国信页面用名 ≠ 合约标的）。
+SQLite catalog 的「合约标的→品种代码」是主映射（通过 CNFutures.desc_to_code() 查询）。
+本文件仅补充 catalog 覆盖不到的别名（国信页面用名 ≠ 合约标的）。
 """
 
 # 国信页面用名 → 品种代码

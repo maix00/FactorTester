@@ -79,7 +79,7 @@ class FactorEvaluation:
         )
         factor = _find_factor(factors, self.factor_alias, self.factor_alias)
         if factor is None:
-            raise LookupError("未找到因子")
+            raise LookupError("请先提交参数设置，或从模板加载已有因子")
 
         from tools.factors.FactorTester import _active_tester
 

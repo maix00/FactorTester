@@ -4,9 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 import server.services.page_runtime as runtime_state
 from server.modules.shared.submission_model import ProductPathSelection
 from server.services.session_runtime import current_user_obj
+from tools.data.types import DataTime
+
+
+def _as_data_time(value: Any) -> DataTime | None:
+    if value is None:
+        return None
+    if isinstance(value, DataTime):
+        return value
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("Asia/Shanghai")
+    return DataTime(ts=ts)
 
 
 def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPathSelection:
@@ -133,8 +147,8 @@ def create_factor_tester_for_run(
         default_start, default_end, _ = time_entry
     else:
         default_start, default_end = runtime_state.get_default_time()
-    start_dt = start_dt if start_dt is not None else default_start
-    end_dt = end_dt if end_dt is not None else default_end
+    start_dt = _as_data_time(start_dt if start_dt is not None else default_start)
+    end_dt = _as_data_time(end_dt if end_dt is not None else default_end)
 
     from tools.factors.FactorTester import FactorTester
 

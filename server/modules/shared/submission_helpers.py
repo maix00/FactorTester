@@ -87,7 +87,7 @@ _EXCHANGE_SHORT_TO_OPENCTP = {
 
 @lru_cache(maxsize=512)
 def _openctp_product_desc(product_name: str) -> str:
-    """Return product Chinese name from OpenCTP SQLite cache; no sectors.csv fallback."""
+    """Return product Chinese name from the OpenCTP SQLite cache only."""
     if not product_name:
         return ""
     code, _, exchange_short = str(product_name).partition(".")

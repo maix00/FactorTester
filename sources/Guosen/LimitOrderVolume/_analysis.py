@@ -8,9 +8,9 @@
 
 脏数据的主要挑战：
   1. 一行多品种（"铜期权、橡胶期权、黄金期权"）
-  2. "除XX外"反向排除（需查 sectors.csv 列出交易所全部品种再排除）
+  2. "除XX外"反向排除（需查 SQLite catalog 列出交易所全部品种再排除）
   3. 合约级 vs 品种级（"甲醇期货2606合约"  vs "红枣"）
-  4. product_label → product_code 映射（查 sectors.csv）
+  4. product_label → product_code 映射（查 SQLite catalog）
   5. note 中嵌入的历史调整事件（正则提取 date + new_value）
 """
 
@@ -34,7 +34,7 @@ from .alter import (
     _EXCLUSION_PATTERN,
 )
 
-# 品种代码映射：优先 sectors.csv（CNFutures.desc_to_code），其次国信别名
+# 品种代码映射：优先 SQLite catalog（CNFutures.desc_to_code），其次国信别名
 from sources.LocalCNFutures.CNFutures import CNFutures
 from sources.Guosen.mapping import GUOSEN_PRODUCT_ALIAS
 
@@ -67,12 +67,12 @@ _PRODUCT_CONTRACT_SHORT_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 # 品种中文名 → 品种代码（product_code）的映射
 # ---------------------------------------------------------------------------
-# 主映射：通过 CNFutures.desc_to_code() 查询 sectors.csv 的「合约标的→品种代码」
-# 补充别名：国信页面用名  ≠ sectors.csv 合约标的 时的兜底映射
+# 主映射：通过 CNFutures.desc_to_code() 查询 SQLite catalog 的「合约标的→品种代码」
+# 补充别名：国信页面用名  ≠ catalog 合约标的 时的兜底映射
 
 def lookup_product_code(product_label: str) -> str:
     """中文品种名 → 品种代码（如 '甲醇' → 'MA'）。未知时返回原字符串。"""
-    # 1) CNFutures.desc_to_code 先查 GUOSEN_PRODUCT_ALIAS，再查 sectors.csv
+    # 1) CNFutures.desc_to_code 先查 GUOSEN_PRODUCT_ALIAS，再查 SQLite catalog
     code = CNFutures.desc_to_code(product_label, extra_map=GUOSEN_PRODUCT_ALIAS)
     if code != product_label:
         return code
