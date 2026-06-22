@@ -31,6 +31,16 @@ const indexManifest = {
     'group-settings': [],
   },
   defaults: {
+    engine: {
+      value: 'native',
+      tab_key: 'engine',
+      scope_policy: 'local_only',
+      chip_template: '引擎: {value}',
+      options: [
+        { value: 'native', label: 'Native' },
+        { value: 'qlib', label: 'Qlib' },
+      ],
+    },
     liquidity_mode: {
       value: 'infinite',
       tab_key: 'liquidity',
@@ -111,6 +121,7 @@ return GT.backendSettings.init().then(() => {
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 1,
+    engine: 'qlib',
     liquidity_mode: 'volume_participation',
     participation_rate: 0.02,
   });
@@ -130,6 +141,10 @@ return GT.backendSettings.init().then(() => {
 
   const derivedChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(childId), 'derived');
   assert.ok(derivedChips.some((chip) => chip.html.indexOf('1品种') >= 0 && chip.clickable));
+
+  const flat = GT.backendSettings.flattenGroupForSnapshot(GT.groupSettings.groups.get(baseId));
+  assert.equal(flat.engine, undefined);
+  assert.equal(flat.liquidity_mode, 'volume_participation');
 
   console.log('PASS: backend settings owns field and chip registration');
 });

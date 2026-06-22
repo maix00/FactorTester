@@ -793,6 +793,7 @@
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
             if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
+            if (def.scope_policy === 'local_only') return;
             if (source[key] === def.value) return;
             out[key] = source[key];
         });

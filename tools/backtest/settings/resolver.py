@@ -44,8 +44,18 @@ def resolve_group_settings(
             value = local_values.get(key, definition.default)
             if key in overrides:
                 if definition.scope_policy == ScopePolicy.LOCAL_ONLY:
-                    raise ValueError(f"local-only setting {key} cannot be overridden")
-                value = overrides[key]
+                    requested_value = overrides[key]
+                    if requested_value != value:
+                        setting_fallbacks.append({
+                            "setting_key": definition.key,
+                            "module": definition.module,
+                            "engine": engine,
+                            "requested_value": requested_value,
+                            "applied_value": value,
+                            "reason": "local_only_group_override",
+                        })
+                else:
+                    value = overrides[key]
             if (
                 key not in local_values
                 and key not in overrides

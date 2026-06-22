@@ -156,16 +156,25 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
     assert resolved["combination-a:group-1"]["initial_capital"] == 1_000_000.0
 
 
-def test_local_only_setting_cannot_be_overridden_by_group() -> None:
+def test_local_only_group_override_falls_back_with_diagnostics() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    with pytest.raises(ValueError, match="local-only setting engine"):
-        resolve_group_settings(
-            application,
-            local_values={},
-            group_values={"group-1": {"engine": "backtrader"}},
-            group_ids=("group-1",),
-        )
+    resolved = resolve_group_settings(
+        application,
+        local_values={"engine": "native"},
+        group_values={"group-1": {"engine": "backtrader"}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["engine"] == "native"
+    assert resolved["group-1"]["_setting_fallbacks"] == [{
+        "setting_key": "engine",
+        "module": "execution_engine",
+        "engine": "native",
+        "requested_value": "backtrader",
+        "applied_value": "native",
+        "reason": "local_only_group_override",
+    }]
 
 
 def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
