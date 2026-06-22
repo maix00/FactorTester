@@ -7,6 +7,7 @@
         activeProduct: '',
         treeReady: false,
         loadingFactors: false,
+        progressValue: 0,
     };
 
     function escapeHtml(value) {
@@ -93,6 +94,68 @@
             + '</div>';
     }
 
+    function getProgressEls() {
+        return {
+            wrapper: document.getElementById('factor-series-progress'),
+            bar: document.getElementById('factor-series-progress-bar'),
+            text: document.getElementById('factor-series-progress-text'),
+            runBtn: document.getElementById('factor-series-run-btn'),
+        };
+    }
+
+    function setProgress(value, text) {
+        var ui = getProgressEls();
+        var next = Math.max(0, Math.min(100, Math.floor(value)));
+        if (ui.bar) {
+            ui.bar.style.width = next + '%';
+        }
+        if (ui.text) {
+            ui.text.textContent = text || (next + '%');
+        }
+        state.progressValue = next;
+    }
+
+    function showProgress() {
+        var ui = getProgressEls();
+        setProgress(0, '0%');
+        if (ui.wrapper) {
+            ui.wrapper.style.display = 'flex';
+        }
+        if (ui.runBtn) {
+            ui.runBtn.disabled = true;
+        }
+    }
+
+    function hideProgress(successText) {
+        var ui = getProgressEls();
+        setProgress(90, '计算中');
+        if (ui.runBtn) {
+            ui.runBtn.disabled = false;
+        }
+        setTimeout(function() {
+            setProgress(100, successText || '完成');
+            if (ui.wrapper) {
+                ui.wrapper.style.display = 'none';
+            }
+        }, 800);
+    }
+
+    function failProgress(errorText) {
+        var ui = getProgressEls();
+        setProgress(0, errorText || '失败');
+        if (ui.runBtn) {
+            ui.runBtn.disabled = false;
+        }
+        if (ui.wrapper) {
+            ui.wrapper.style.display = 'flex';
+        }
+        setTimeout(function() {
+            if (ui.wrapper) {
+                ui.wrapper.style.display = 'none';
+            }
+        }, 1200);
+    }
+
     async function render() {
         await loadFactors();
         renderFactorOptions();
@@ -126,6 +189,7 @@
             return;
         }
         if (status) status.textContent = '运行 factor.evaluate...';
+        showProgress();
         chart.innerHTML = message('正在运行 factor.evaluate...');
         try {
             var res = await fetch('/api/factor_series_viewer/evaluate', {
@@ -147,9 +211,11 @@
             renderProductChooser();
             drawActiveSeries(data.factor || factor);
             if (status) status.textContent = '完成：' + state.lastSeries.length + ' 个产品';
+            hideProgress('100%');
         } catch (err) {
             chart.innerHTML = message(err.message || String(err), true);
             if (status) status.textContent = '失败';
+            failProgress('失败');
         }
     }
 
