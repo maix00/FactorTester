@@ -32,25 +32,52 @@
         return s;
     }
 
-    function _preComputeComboLetters(testerId, factorAliases, splitCount) {
+    function _selectionId(selection) {
+        return selection ? String(selection.product_path_selection_id || selection.id || selection.selection_id || '') : '';
+    }
+
+    function _currentSelections() {
+        if (window.ProductPathSelectionState && typeof window.ProductPathSelectionState.getAll === 'function') {
+            return window.ProductPathSelectionState.getAll();
+        }
+        return Array.isArray(window.productPathSelections) ? window.productPathSelections : [];
+    }
+
+    function _findSelection(selectionId) {
+        var selections = _currentSelections();
+        for (var i = 0; i < selections.length; i++) {
+            if (_selectionId(selections[i]) === String(selectionId || '')) return selections[i];
+        }
+        return null;
+    }
+
+    function _selectionLabel(selection) {
+        if (!selection) return '';
+        return selection.product_group || selection.label || selection.name || _selectionId(selection);
+    }
+
+    function _comboKeyForGroup(group) {
+        return _addGroupBatchKey(_selectionId(group && group.product_path_selection), group && group.factorAlias, group && group.splitCount);
+    }
+
+    function _preComputeComboLetters(selectionId, factorAliases, splitCount) {
         var comboMap = {};
         var existing = GT.groupSettings.groups.getAll();
-        var subs = window.submissions || [];
 
         for (var i = 0; i < factorAliases.length; i++) {
             var alias = factorAliases[i];
-            var comboKey = _addGroupBatchKey(testerId, alias, splitCount);
+            var comboKey = _addGroupBatchKey(selectionId, alias, splitCount);
             if (comboMap[comboKey] !== undefined) continue;
 
             // Check existing groups for this combo
             var hasExisting = false;
             for (var j = 0; j < existing.length; j++) {
-                var k = _addGroupBatchKey(existing[j].testerId, existing[j].factorAlias, existing[j].splitCount);
+                var k = _comboKeyForGroup(existing[j]);
                 if (k === comboKey) { hasExisting = true; break; }
             }
             if (hasExisting) {
                 for (var ej = 0; ej < existing.length; ej++) {
-                    var ek = _addGroupBatchKey(existing[ej].testerId, existing[ej].factorAlias, existing[ej].splitCount);
+                    var ek = _comboKeyForGroup(existing[ej]);
                     if (ek === comboKey && existing[ej].shortAlias) {
                         var letterMatch = existing[ej].shortAlias.match(/^([A-Z]+)/);
                         if (letterMatch) {
@@ -66,7 +93,7 @@
                 // New comboKey: assign a brand-new letter
                 var usedLetters = {};
                 for (var ej2 = 0; ej2 < existing.length; ej2++) {
-                    var ek2 = _addGroupBatchKey(existing[ej2].testerId, existing[ej2].factorAlias, existing[ej2].splitCount);
+                    var ek2 = _comboKeyForGroup(existing[ej2]);
                     if (ek2 && existing[ej2].shortAlias) {
                         var lm = existing[ej2].shortAlias.match(/^([A-Z]+)/);
                         if (lm) usedLetters[lm[1]] = true;
@@ -85,26 +112,18 @@
         return comboMap;
     }
 
-    function _makeNames(testerId, factorAlias, splitCount, groupIndex, letter) {
-        var subs = window.submissions || [];
-        var testerLabel = '';
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) === String(testerId)) {
-                testerLabel = subs[i].product_group || subs[i].label || ('测试器' + subs[i].id);
-                break;
-            }
-        }
-        if (!testerLabel) testerLabel = '测试器' + testerId;
-        var fullName = testerLabel + '_' + factorAlias + '_' + splitCount + '组_' + '第' + groupIndex + '组';
+    function _makeNames(selection, factorAlias, splitCount, groupIndex, letter) {
+        var selectionLabel = _selectionLabel(selection) || '产品路径选择';
+        var fullName = selectionLabel + '_' + factorAlias + '_' + splitCount + '组_' + '第' + groupIndex + '组';
         var shortAlias = letter + groupIndex;
 
         var allGroups = GT.groupSettings.groups.getAll();
-        var comboKey = String(testerId) + '|' + factorAlias + '|' + splitCount;
+        var comboKey = _addGroupBatchKey(_selectionId(selection), factorAlias, splitCount);
         var sameIndexCount = 0;
         var usedSuffixes = {};
         for (var ai = 0; ai < allGroups.length; ai++) {
             var g = allGroups[ai];
-            var gk = String(g.testerId) + '|' + g.factorAlias + '|' + g.splitCount;
+            var gk = _comboKeyForGroup(g);
             if (gk !== comboKey) continue;
             if (g.groupIndex === groupIndex) { sameIndexCount++; }
             var sa = g.shortAlias;
@@ -132,7 +151,7 @@
         var container = $(_containerId);
         if (!container) return;
 
-        var subs = window.submissions || [];
+        var selections = _currentSelections();
         var factors = window.factorList || [];
         var draft = GT.tabs.getAddDraft();
         if (!draft) return;
@@ -148,24 +167,25 @@
         // LEFT COLUMN: Tester navigation (master-style)
         // ─────────────────────────────────────────────────────────
         html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:6px;max-height:440px;overflow:auto;">';
-        html += '<div style="font-size:12px;font-weight:700;color:#475467;padding:4px 6px 8px;">产品组 / 测试器</div>';
-        if (subs.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:8px;">暂无提交记录</div>';
+        html += '<div style="font-size:12px;font-weight:700;color:#475467;padding:4px 6px 8px;">产品路径选择</div>';
+        if (selections.length === 0) {
+            html += '<div style="color:#888;font-size:12px;padding:8px;">暂无产品路径选择</div>';
         } else {
-            for (var i = 0; i < subs.length; i++) {
-                var sub = subs[i];
-                var subId = String(sub.id);
-                var isPg = !!sub.product_group;
-                var label = isPg ? (sub.product_group || sub.label) : (sub.label || ('测试器 #' + subId));
-                var subMeta = isPg ? '产品组' : (sub.factor_tester_serial || 'FactorTester');
-                var isActive = (String(draft.testerId) === subId);
-                html += '<button type="button" class="add-tester-nav-btn" data-tester-id="' + escapeHTML(subId) + '"'
+            for (var i = 0; i < selections.length; i++) {
+                var selection = selections[i];
+                var selectionId = _selectionId(selection);
+                var label = _selectionLabel(selection) || ('产品路径 #' + selectionId);
+                var paths = selection.selected_paths || selection.paths || [];
+                var subMeta = selection.product_group_template_id || selection.path_id || (paths.length + ' 路径');
+                var activeId = _selectionId(draft.product_path_selection);
+                var isActive = (activeId === selectionId);
+                html += '<button type="button" class="add-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
                     + ' style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;'
                     + 'border:1px solid ' + (isActive ? '#9cc7f2' : 'transparent') + ';'
                     + 'background:' + (isActive ? '#e7f1ff' : 'transparent') + ';'
                     + 'border-radius:6px;padding:7px 8px;margin-bottom:4px;'
                     + 'text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
-                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (isPg ? '📦 ' : '') + escapeHTML(label) + '</span>'
+                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</span>'
                     + '<small style="color:#667085;font-size:11px;">' + escapeHTML(subMeta) + '</small>'
                     + '</button>';
             }
@@ -201,22 +221,16 @@
         html += '<div style="border-top:1px solid #eef2f7;margin:0 0 12px 0;"></div>';
 
         // ── Tester info banner ──
-        if (draft.testerId) {
-            var testerLabel = '';
-            for (var ti = 0; ti < subs.length; ti++) {
-                if (String(subs[ti].id) === String(draft.testerId)) {
-                    testerLabel = subs[ti].product_group || subs[ti].label || ('测试器 #' + draft.testerId);
-                    break;
-                }
-            }
+        if (draft.product_path_selection) {
+            var selectedLabel = _selectionLabel(draft.product_path_selection);
             html += '<div style="margin-bottom:12px;padding:8px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;font-size:12px;color:#0369a1;">';
-            html += '已选：<b>' + escapeHTML(testerLabel || draft.testerId) + '</b> · ' + (draft.splitCount || 5) + '组';
+            html += '已选：<b>' + escapeHTML(selectedLabel || '产品路径选择') + '</b> · ' + (draft.splitCount || 5) + '组';
             if (draft.allGroups) html += ' · 所有分组';
             else html += ' · 第 <b>' + (draft.groupIndex || 1) + '</b> 组';
             html += '</div>';
         } else {
             html += '<div style="margin-bottom:12px;padding:8px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;font-size:12px;color:#c2410c;">';
-            html += '⚠️ 请先在左侧选择测试器';
+            html += '请先在左侧选择产品路径';
             html += '</div>';
         }
 
@@ -259,12 +273,12 @@
 
         // ── Bind events ──
 
-        // Tester nav buttons
-        var testerBtns = container.querySelectorAll('.add-tester-nav-btn');
-        for (var tb = 0; tb < testerBtns.length; tb++) {
-            testerBtns[tb].addEventListener('click', function() {
-                var tid = this.getAttribute('data-tester-id');
-                GT.tabs.updateAddDraft({ testerId: tid });
+        // Product-path selection nav buttons
+        var selectionBtns = container.querySelectorAll('.add-product-path-selection-nav-btn');
+        for (var tb = 0; tb < selectionBtns.length; tb++) {
+            selectionBtns[tb].addEventListener('click', function() {
+                var selectionId = this.getAttribute('data-selection-id');
+                GT.tabs.updateAddDraft({ product_path_selection: _findSelection(selectionId) });
                 render();
             });
         }
@@ -359,8 +373,9 @@
     // ── Submit ──
 
     function submitAddBatches(draft) {
-        if (!draft || !draft.testerId) { alert('请先选择测试器'); return; }
-        var testerId = draft.testerId;
+        if (!draft || !draft.product_path_selection) { alert('请先选择产品路径'); return; }
+        var selection = draft.product_path_selection;
+        var selectionId = _selectionId(selection);
         var splitCount = draft.splitCount;
         var allGroups = draft.allGroups;
         var groupIndex = draft.groupIndex;
@@ -368,34 +383,25 @@
 
         if (factors.length === 0) { alert('请至少选择一个因子'); return; }
 
-        var comboLetters = _preComputeComboLetters(testerId, factors, splitCount);
+        var comboLetters = _preComputeComboLetters(selectionId, factors, splitCount);
 
         var added = 0;
 
-        // Resolve tester label once for batch naming
-        var subs = window.submissions || [];
-        var testerLabel = '';
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) === String(testerId)) {
-                testerLabel = subs[si].product_group || subs[si].label || ('测试器' + testerId);
-                break;
-            }
-        }
-        if (!testerLabel) testerLabel = '测试器' + testerId;
+        var selectionLabel = _selectionLabel(selection) || ('产品路径' + selectionId);
 
         for (var fi = 0; fi < factors.length; fi++) {
             var alias = factors[fi];
-            var comboKey = _addGroupBatchKey(testerId, alias, splitCount);
+            var comboKey = _addGroupBatchKey(selectionId, alias, splitCount);
             var letter = comboLetters[comboKey] || 'A';
 
             if (allGroups) {
                 for (var gi = 1; gi <= splitCount; gi++) {
-                    var names = _makeNames(testerId, alias, splitCount, gi, letter);
+                    var names = _makeNames(selection, alias, splitCount, gi, letter);
                     try {
                         GT.groupSettings.groups.add({
                             name: names.name,
                             shortAlias: names.shortAlias,
-                            testerId: testerId,
+                            product_path_selection: selection,
                             factorAlias: alias,
                             splitCount: splitCount,
                             groupIndex: gi,
@@ -405,12 +411,12 @@
                     } catch (err) { /* skip dup */ }
                 }
             } else {
-                var names2 = _makeNames(testerId, alias, splitCount, groupIndex, letter);
+                var names2 = _makeNames(selection, alias, splitCount, groupIndex, letter);
                 try {
                     GT.groupSettings.groups.add({
                         name: names2.name,
                         shortAlias: names2.shortAlias,
-                        testerId: testerId,
+                        product_path_selection: selection,
                         factorAlias: alias,
                         splitCount: splitCount,
                         groupIndex: groupIndex,
@@ -467,7 +473,7 @@
             buildDraft: function() {
                 return {
                     addFlow: 'group',
-                    testerId: null,
+                    product_path_selection: null,
                     splitCount: 5,
                     allGroups: true,
                     groupIndex: 1,

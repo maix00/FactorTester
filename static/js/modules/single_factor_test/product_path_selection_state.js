@@ -3,15 +3,16 @@
  *
  * The page no longer owns a product-category overlay.  Test modules keep their
  * own settings UI and can still share this transition state while they migrate
- * from legacy "submissions" naming.
+ * from earlier page-level product selection naming.
  */
 (function() {
     if (window.ProductPathSelectionState) return;
 
-    var selections = Array.isArray(window.submissions) ? window.submissions : [];
-    window.submissions = selections;
-    window.submissionRecords = selections;
-    window.getSubmissionRecords = function() { return selections; };
+    var selections = Array.isArray(window.productPathSelections)
+        ? window.productPathSelections
+        : (Array.isArray(window.submissions) ? window.submissions : []);
+    window.productPathSelections = selections;
+    window.getProductPathSelections = function() { return selections; };
 
     function cloneList(list) {
         return Array.isArray(list) ? list.slice() : [];
@@ -35,6 +36,7 @@
 
     function apply(newSelections, options) {
         selections = cloneList(newSelections);
+        window.productPathSelections = selections;
         window.submissions = selections;
         window.submissionRecords = selections;
         if (!options || options.notify !== false) notify();
@@ -45,6 +47,8 @@
         getAll: function() { return cloneList(selections); },
         apply: apply,
     };
+    window._getCurrentProductPathSelections = function() { return cloneList(selections); };
+    window._applyProductPathSelections = function(newSelections) { return apply(newSelections); };
     window._getCurrentSubmissions = function() { return cloneList(selections); };
     window._applySubmissions = function(newSelections) { return apply(newSelections); };
 })();

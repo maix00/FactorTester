@@ -125,9 +125,11 @@ def test_snapshot_migration_moves_submissions_to_product_path_selections_with_gr
         "label": "Metals",
         "product_group": "Metals Template",
         "product_group_template_id": "pg-metals",
+        "path_id": "pg-metals",
         "source_type": "user_product_group_template",
         "source_key": "pg-metals",
     }
+    assert "testerId" not in snapshot["group_settings"]["groups"][0]
 
 
 def test_snapshot_migration_does_not_fallback_unscoped_paths_to_local_settings():
@@ -145,3 +147,65 @@ def test_snapshot_migration_does_not_fallback_unscoped_paths_to_local_settings()
     assert "product_path_selections" not in snapshot
     assert "submissions" not in snapshot
     assert "local_settings" not in snapshot
+
+
+def test_snapshot_migration_normalizes_existing_product_path_selection_fields():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "local_settings": {
+                "product_path_selection": {
+                    "product_group_template_id": "pg-local",
+                    "paths": ["B/Path", "A/Path"],
+                }
+            },
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "testerId": "sel-1",
+                    "product_path_selection": {
+                        "path_id": "pg-group",
+                        "selected_paths": ["D/Path", "C/Path"],
+                    },
+                }]
+            },
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    assert snapshot["local_settings"]["product_path_selection"]["path_id"] == "pg-local"
+    assert snapshot["local_settings"]["product_path_selection"]["selected_paths"] == ["A/Path", "B/Path"]
+    selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
+    assert selection["product_group_template_id"] == "pg-group"
+    assert selection["paths"] == ["C/Path", "D/Path"]
+
+
+def test_snapshot_migration_materializes_parent_product_path_selection_on_derived_groups():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "group_settings": {
+                "groups": [
+                    {
+                        "id": "parent",
+                        "testerId": "sel-parent",
+                        "product_path_selection": {
+                            "product_path_selection_id": "sel-parent",
+                            "product_group_template_id": "pg-parent",
+                            "paths": ["Parent/Path"],
+                        },
+                    },
+                    {
+                        "id": "child",
+                        "parentId": "parent",
+                    },
+                ]
+            },
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    child = snapshot["group_settings"]["groups"][1]
+    assert "testerId" not in child
+    assert child["product_path_selection"]["path_id"] == "pg-parent"
+    assert child["product_path_selection"]["paths"] == ["Parent/Path"]

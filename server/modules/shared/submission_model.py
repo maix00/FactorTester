@@ -117,6 +117,7 @@ class ProductPathSelection:
             "label": self.label,
             "product_group": self.product_group,
             "product_group_template_id": self.product_group_template_id,
+            "path_id": self.product_group_template_id,
             "source_type": self.source_type,
             "source_key": self.source_key,
         }

@@ -34,13 +34,13 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
             list(raw.get("selected_paths") or raw.get("paths") or []),
             label=str(raw.get("label") or raw.get("name") or ""),
             product_group=str(raw.get("product_group") or ""),
-            product_group_template_id=str(raw.get("product_group_template_id") or raw.get("template_id") or ""),
+            product_group_template_id=str(raw.get("product_group_template_id") or raw.get("path_id") or raw.get("template_id") or ""),
             source_type=str(raw.get("source_type") or "manual_selection"),
             source_key=str(raw.get("source_key") or ""),
             page_uuid=page_uuid,
         )
 
-    selected_paths = data.get("selected_paths")
+    selected_paths = data.get("selected_paths") or data.get("paths")
     if isinstance(selected_paths, list) and selected_paths:
         group_name = str(data.get("product_group") or data.get("group_name") or "")
         return ProductPathSelection.from_paths(
@@ -54,7 +54,7 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
             selected_paths,
             label=str(data.get("label") or group_name),
             product_group=group_name,
-            product_group_template_id=str(data.get("product_group_template_id") or data.get("template_id") or ""),
+            product_group_template_id=str(data.get("product_group_template_id") or data.get("path_id") or data.get("template_id") or ""),
             source_type=str(data.get("source_type") or "manual_selection"),
             source_key=str(
                 data.get("source_key")
@@ -95,12 +95,36 @@ def selection_for_submission(
                 )
     groups = data.get("groups")
     if isinstance(groups, list):
+        groups_by_id = {
+            str(group.get("id")): group
+            for group in groups
+            if isinstance(group, dict) and group.get("id")
+        }
+
+        def resolve_group_selection(group: dict[str, Any]) -> dict[str, Any] | None:
+            raw = group.get("product_path_selection")
+            if isinstance(raw, dict):
+                return raw
+            parent = groups_by_id.get(str(group.get("parentId") or ""))
+            if isinstance(parent, dict):
+                return resolve_group_selection(parent)
+            return None
+
         for group in groups:
             if not isinstance(group, dict):
                 continue
-            if str(group.get("testerId") or group.get("product_path_selection_id") or "") != sid:
+            raw = resolve_group_selection(group)
+            raw_id = ""
+            if isinstance(raw, dict):
+                raw_id = str(
+                    raw.get("product_path_selection_id")
+                    or raw.get("selection_id")
+                    or raw.get("submission_id")
+                    or raw.get("id")
+                    or ""
+                )
+            if str(group.get("product_path_selection_id") or raw_id or "") != sid:
                 continue
-            raw = group.get("product_path_selection")
             if isinstance(raw, dict):
                 return selection_from_request(
                     {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("id") or sid},
@@ -115,6 +139,7 @@ def create_factor_tester_for_run(
     page_uuid: str,
     start_dt: Any | None = None,
     end_dt: Any | None = None,
+    user: Any | None = None,
 ):
     """Create and register the FactorTester used by a concrete test run."""
     time_entry = runtime_state.get_current_time(page_uuid)
@@ -132,7 +157,7 @@ def create_factor_tester_for_run(
         alias=selection.selection_id,
         start_dt=start_dt,
         end_dt=end_dt,
-        user=current_user_obj(),
+        user=user if user is not None else current_user_obj(),
     )
     tester.selected_paths = list(selection.selected_paths)
     tester.label = selection.label
@@ -146,9 +171,9 @@ def create_factor_tester_for_run(
     return tester
 
 
-def create_factor_tester_from_request(data: dict[str, Any], *, page_uuid: str):
+def create_factor_tester_from_request(data: dict[str, Any], *, page_uuid: str, user: Any | None = None):
     selection = selection_from_request(data, page_uuid=page_uuid)
-    return create_factor_tester_for_run(selection, page_uuid=page_uuid)
+    return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)
 
 
 def create_factor_tester_for_product_path_selection(
@@ -156,9 +181,10 @@ def create_factor_tester_for_product_path_selection(
     product_path_selection_id: str,
     *,
     page_uuid: str,
+    user: Any | None = None,
 ):
     selection = selection_for_submission(data, product_path_selection_id, page_uuid=page_uuid)
-    return create_factor_tester_for_run(selection, page_uuid=page_uuid)
+    return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)
 
 
 create_factor_tester_for_submission = create_factor_tester_for_product_path_selection

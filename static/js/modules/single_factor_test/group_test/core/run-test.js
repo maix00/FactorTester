@@ -22,58 +22,12 @@
         return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
     }
 
-    async function resolveSubmissionIdForGroup(submissionId) {
-        var targetId = String(submissionId || '');
-        if (!targetId) return targetId;
-        try {
-            var subs = Array.isArray(window.submissions) ? window.submissions : [];
-            var pageUuid = encodeURIComponent(window._pageUuid || '');
-            var resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
-            var data = await resp.json();
-            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
-                return targetId;
-            }
-
-            for (var j = 0; j < data.submissions.length; j++) {
-                if (String(data.submissions[j].id) === targetId) return String(data.submissions[j].id);
-            }
-
-            var localSub = null;
-            for (var k = 0; k < subs.length; k++) {
-                if (String(subs[k].id) === targetId) {
-                    localSub = subs[k];
-                    break;
-                }
-            }
-            var rawLocalPaths = localSub && (localSub.paths || localSub.selected_paths);
-            var localPaths = Array.isArray(rawLocalPaths) ? rawLocalPaths.map(String) : [];
-            if (localPaths.length > 0) {
-                var pathSet = {};
-                localPaths.forEach(function(p) { pathSet[p] = true; });
-                for (var m = 0; m < data.submissions.length; m++) {
-                    var remotePaths = (data.submissions[m].selected_paths || []).map(String);
-                    if (remotePaths.length !== localPaths.length) continue;
-                    var same = true;
-                    for (var rp = 0; rp < remotePaths.length; rp++) {
-                        if (!pathSet[remotePaths[rp]]) {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (same) {
-                        console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[m].id));
-                        return String(data.submissions[m].id);
-                    }
-                }
-            }
-            if (targetId.indexOf('tpl-') === 0 && data.submissions.length === 1) {
-                console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[0].id));
-                return String(data.submissions[0].id);
-            }
-        } catch (e) {
-            console.warn('resolveSubmissionIdForGroup failed:', e);
+    function productPathSelectionIdFromGroup(group) {
+        var selection = group && group.product_path_selection;
+        if (selection && typeof selection === 'object') {
+            return String(selection.product_path_selection_id || selection.selection_id || selection.id || '');
         }
-        return targetId;
+        return String(group && group.product_path_selection_id || '');
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -180,7 +134,7 @@
         function _resolvedGroupForRun(group) {
             var out = Object.assign({}, group || {});
             if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
-                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate', 'product_path_selection'].forEach(function(key) {
+                ['factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate', 'product_path_selection'].forEach(function(key) {
                     var resolved = GT.groupSettings.groups.resolveRootField(out, key);
                     if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
                 });
@@ -416,7 +370,7 @@
 
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
-                    ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
+                    ? '当前产品路径选择还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
                     : data.error;
                 markProgressRowsDone(false, errorText || '分组测试失败');
                 if (statusSpan) {
@@ -433,7 +387,7 @@
             var doneGroups = allStoredGroups || [];
             for (var bi = 0; bi < doneGroups.length; bi++) {
                 var btch = doneGroups[bi];
-                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
+                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(productPathSelectionIdFromGroup(btch), btch.factorAlias, 'done');
             }
             markProgressRowsDone(true, '分组测试完成');
 
@@ -477,12 +431,12 @@
     // ════════════════════════════════════════════════════════════════
 
     /** 为单个派生组发请求，不画图 */
-    runTest._generateDerivedGroupOnce = async function(def, fee, fee_mods, submissionId) {
-        if (!def || !submissionId) return null;
+    runTest._generateDerivedGroupOnce = async function(def, fee, fee_mods, productPathSelectionId) {
+        if (!def || !productPathSelectionId) return null;
         if (def.baseGroup == null) return null;
         try {
             var resp = await GT.api.createDerivedGroup({
-                submission_id: submissionId,
+                product_path_selection_id: productPathSelectionId,
                 group_index: def.baseGroup,
                 product_names: def.productNames,
                 name: def.name,
@@ -586,7 +540,7 @@
             productMask: node.productMask || {}
         };
 
-        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_mods, baseNode ? baseNode.testerId : null);
+        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_mods, baseNode ? productPathSelectionIdFromGroup(baseNode) : null);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;

@@ -1,5 +1,6 @@
 """Group test endpoint."""
 import logging, math, time, traceback
+from copy import deepcopy
 from typing import Any, cast
 import numpy as np
 import pandas as pd
@@ -30,12 +31,65 @@ from tools.backtest.settings.strategy_fields import (
 )
 from . import sft_bp
 import server.services.page_runtime as runtime_state
-from server.services.session_runtime import current_user, get_session_params
+from server.services.session_runtime import current_user, current_user_obj, get_session_params
 from server.modules.shared.price_data_helpers import to_epoch_ms
 from server.services.factor_registry import get_factor_family_instance
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
+
+
+_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
+
+
+def _group_product_path_selection_id(group: dict[str, Any]) -> str:
+    selection = group.get("product_path_selection")
+    if isinstance(selection, dict):
+        selection_id = str(
+            selection.get("product_path_selection_id")
+            or selection.get("selection_id")
+            or selection.get("submission_id")
+            or selection.get("id")
+            or ""
+        )
+        if selection_id:
+            return selection_id
+    return str(group.get("product_path_selection_id") or "")
+
+
+def _groups_with_parent_fallback(groups: list[dict]) -> list[dict]:
+    """Build the run-time view where derived groups inherit omitted parent fields."""
+    groups_by_id = {
+        str(group.get("id")): group
+        for group in groups
+        if isinstance(group, dict) and group.get("id")
+    }
+    resolving: set[str] = set()
+    resolved: dict[str, dict] = {}
+
+    def resolve(group: dict) -> dict:
+        group_id = str(group.get("id") or "")
+        if group_id and group_id in resolved:
+            return deepcopy(resolved[group_id])
+        if group_id:
+            if group_id in resolving:
+                return deepcopy(group)
+            resolving.add(group_id)
+        merged = deepcopy(group)
+        parent = groups_by_id.get(str(group.get("parentId") or ""))
+        if isinstance(parent, dict):
+            parent_view = resolve(parent)
+            for key, value in parent_view.items():
+                if key in _GROUP_INHERIT_UNIQUE_KEYS:
+                    continue
+                if merged.get(key) in (None, ""):
+                    merged[key] = deepcopy(value)
+        if group_id:
+            resolving.discard(group_id)
+            resolved[group_id] = deepcopy(merged)
+        return merged
+
+    return [resolve(group) if isinstance(group, dict) else group for group in groups]
 
 
 def _ensure_tester_factors_for_group(
@@ -1194,6 +1248,7 @@ def _serialize_event_execution(
             "name": display_name,
             "group_id": strategy_id,
             "group_index": int(owner.get("group_index") or 0),
+            "product_path_selection_id": str(owner.get("submission_id") or owner.get("product_path_selection_id") or ""),
             "submission_id": str(owner.get("submission_id") or ""),
             "factor_alias": str(owner.get("factor_alias") or ""),
             "timestamps": [int(value.timestamp() * 1000) for value in index],
@@ -1324,6 +1379,9 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     flat_groups_raw = data.get('groups')
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         return False, {'success': False, 'error': 'groups 必须是非空数组', 'status': 400}
+    flat_groups_raw = _groups_with_parent_fallback(flat_groups_raw)
+    data = dict(data)
+    data['groups'] = flat_groups_raw
     flat_ls_configs = data.get('ls_configs') or []
     if not isinstance(flat_ls_configs, list):
         flat_ls_configs = []
@@ -1351,12 +1409,12 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     common_backtest_settings = resolved_backtest_settings[first_group_id]
 
     # ── Build _FactorGroupTestGroup from flat groups array ──
-    # Group by tester_id, then by factor_alias
-    tester_groups: dict[str, dict[str, list[dict]]] = {}  # tester_id → factor_alias → [group_dicts]
+    # Group by product_path_selection_id, then by factor_alias.
+    tester_groups: dict[str, dict[str, list[dict]]] = {}  # selection_id → factor_alias → [group_dicts]
     for g in flat_groups_raw:
         if not isinstance(g, dict):
             continue
-        tid = str(g.get('testerId', ''))
+        tid = _group_product_path_selection_id(g)
         fa = str(g.get('factorAlias', ''))
         if not tid or not fa:
             continue
@@ -1388,16 +1446,16 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     all_flat_groups: list[_FactorGroupTestGroup] = []
     sim_index_by_group: dict[int, int] = {}
     all_ls_configs_by_index: dict[int, list[dict] | None] = {}
-    factor_aliases_by_submission: dict[str, list[str]] = {}
+    factor_aliases_by_selection: dict[str, list[str]] = {}
 
     sim_index = 0
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
             split_count = split_count_by_membership_key[(tid, fa)]
-            existing = factor_aliases_by_submission.get(tid) or []
+            existing = factor_aliases_by_selection.get(tid) or []
             if fa not in existing:
                 existing.append(fa)
-            factor_aliases_by_submission[tid] = existing
+            factor_aliases_by_selection[tid] = existing
             for g in gs:
                 # frontend groupIndex is 1-based → convert to 0-based
                 gi = int(g.get('groupIndex', 1)) - 1
@@ -1449,7 +1507,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             'success': False,
             'error': (
                 f'前端传回 {expected_flat_count} 个扁平组，但后端只解析出 '
-                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少测试器/因子/组数继承字段。'
+                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少产品路径选择/因子/组数继承字段。'
             ),
             'status': 400,
         }
@@ -1480,13 +1538,14 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     # Ensure testers and factors
     tester0 = None
     testers_by_id = {}
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
+    for selection_id, factor_aliases in factor_aliases_by_selection.items():
         tester = create_factor_tester_for_product_path_selection(
             data,
-            submission_id,
+            selection_id,
             page_uuid=page_uuid,
+            user=data.get('_run_user'),
         )
-        testers_by_id[submission_id] = tester
+        testers_by_id[selection_id] = tester
         if tester0 is None:
             tester0 = tester
         _ensure_tester_factors_for_group(
@@ -1513,11 +1572,11 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
 
     calendar_indices: list[pd.Index] = []
     all_factor_freqs: list[Any] = []
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
+    for selection_id, factor_aliases in factor_aliases_by_selection.items():
         try:
-            tester = testers_by_id[submission_id]
+            tester = testers_by_id[selection_id]
         except Exception as exc:
-            _progress(f"calendar build skip submission={submission_id} error={exc}")
+            _progress(f"calendar build skip product_path_selection={selection_id} error={exc}")
             continue
         tester_factor_freqs = tester.collect_group_factor_freqs(factor_aliases)
         all_factor_freqs.extend(tester_factor_freqs)
@@ -1532,8 +1591,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"calendar resolve done effective_freq={effective_group_calendar_freq} "
         f"factor_freq_count={len(all_factor_freqs)}"
     )
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = testers_by_id[submission_id]
+    for selection_id, factor_aliases in factor_aliases_by_selection.items():
+        tester = testers_by_id[selection_id]
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
             requested_calendar_freq=(
@@ -1697,6 +1756,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
         ),
         "multi_session_entries": multi_session_entries,
+        "product_path_selection_id": str(first_owner.get("submission_id") or first_owner.get("product_path_selection_id") or ""),
         "submission_id": str(first_owner.get("submission_id") or ""),
         "factor_alias": str(first_owner.get("factor_alias") or ""),
         "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
@@ -2544,6 +2604,7 @@ def run_group_test_stream():
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
     owner = str(current_user() or '')
+    run_user = current_user_obj()
     if not page_uuid or runtime_state.get_page_owner(page_uuid) != owner:
         return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
     run_token = str(data.get('run_token') or uuid.uuid4().hex)
@@ -2562,6 +2623,8 @@ def run_group_test_stream():
     req_family = data.get('factor_family_alias')
     if req_family:
         factor_family_alias = str(req_family)
+    data = dict(data)
+    data['_run_user'] = run_user
     if factor_family_alias:
         try:
             factor_family = get_factor_family_instance(
@@ -2569,7 +2632,6 @@ def run_group_test_stream():
                 username=owner,
                 page_uuid=page_uuid,
             )
-            data = dict(data)
             data['_group_owner_username'] = owner
             data['_group_factor_params_list'] = get_session_params(
                 factor_family_alias,

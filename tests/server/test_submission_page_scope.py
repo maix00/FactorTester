@@ -200,6 +200,88 @@ def test_runtime_tester_rejects_missing_product_path_selection():
         selection_from_request({"submission_id": "missing"}, page_uuid="page-a")
 
 
+def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import create_factor_tester_from_request
+
+    created = {}
+
+    class _RuntimeTester:
+        def __init__(self, *, products, alias, start_dt, end_dt, user):
+            created.update({"products": products, "alias": alias, "user": user})
+            self.products = products
+            self.alias = alias
+            self.selected_paths = []
+
+    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_time_store = dict(runtime_state.page_time_store)
+    runtime_state.page_factor_testers = {}
+    runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
+    monkeypatch.setattr(
+        "server.modules.shared.submission_model.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user_obj",
+        lambda: (_ for _ in ()).throw(RuntimeError("request context touched")),
+    )
+    monkeypatch.setattr("tools.factors.FactorTester.FactorTester", _RuntimeTester)
+
+    try:
+        tester = create_factor_tester_from_request(
+            {
+                "product_path_selection": {
+                    "product_path_selection_id": "sel-run",
+                    "paths": ["Futures/Metals"],
+                    "path_id": "pg-metals",
+                },
+            },
+            page_uuid="page-a",
+            user="captured-user",
+        )
+
+        assert tester.alias == "sel-run"
+        assert tester.product_group_template_id == "pg-metals"
+        assert created == {"products": ["CU.SHF"], "alias": "sel-run", "user": "captured-user"}
+    finally:
+        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_time_store = original_time_store
+
+
+def test_product_path_selection_inherits_from_parent_group(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import selection_for_submission
+
+    monkeypatch.setattr(
+        "server.modules.shared.submission_model.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+
+    selection = selection_for_submission(
+        {
+            "groups": [
+                {
+                    "id": "parent",
+                    "testerId": "sel-parent",
+                    "product_path_selection": {
+                        "product_path_selection_id": "sel-parent",
+                        "paths": ["Futures/Metals"],
+                        "path_id": "pg-metals",
+                    },
+                },
+                {
+                    "id": "child",
+                    "parentId": "parent",
+                    "testerId": "sel-parent",
+                },
+            ]
+        },
+        "sel-parent",
+        page_uuid="page-a",
+    )
+
+    assert selection.product_group_template_id == "pg-metals"
+    assert selection.selected_paths == ["Futures/Metals"]
+
+
 def test_scoped_mutation_cannot_target_another_page(app, two_page_testers):
     _, page_b = two_page_testers
 

@@ -10,7 +10,7 @@
  * - label:     摘要行中文标签
  * - icon:      摘要行 emoji 图标
  * - collect(): 返回当前模块状态的纯数据对象（同步或 async）
- * - apply():   接收快照数据 + ctx{tplId, oldToNewTesterId}，恢复到页面（同步或 async）
+ * - apply():   接收快照数据 + ctx{tplId}，恢复到页面（同步或 async）
  * - summarize(): 接收快照数据，返回摘要字符串（或字符串数组，多行展示）
  */
 (function() {
@@ -245,73 +245,6 @@
         return html;
     }
 
-    function _normalizeSubmissionForTemplate(s) {
-        var paths = _asArray(s && (s.selected_paths || s.paths)).slice();
-        return {
-            id: s && s.id,
-            label: (s && s.label) || '',
-            product_group: (s && s.product_group) || '',
-            paths: paths.slice(),
-            selected_paths: paths.slice(),
-            factor_tester_name: (s && (s.factor_tester_name || s.name)) || '',
-            factor_tester_serial: (s && s.factor_tester_serial) || '',
-            product_count: (s && s.product_count) || 0,
-            products: _asArray(s && s.products).slice()
-        };
-    }
-
-    function _normalizeServerSubmission(s) {
-        var paths = _asArray(s && (s.selected_paths || s.paths)).slice();
-        return {
-            id: s && s.id,
-            label: (s && s.label) || '',
-            product_group: (s && s.product_group) || '',
-            paths: paths.slice(),
-            selected_paths: paths.slice(),
-            pathsDescMap: {},
-            factor_tester_name: (s && (s.name || s.factor_tester_name)) || '',
-            factor_tester_serial: (s && s.factor_tester_serial) || '',
-            product_count: (s && s.product_count) || 0,
-            products: _asArray(s && s.products).slice(),
-            count_desc: ((s && s.product_count) || 0) + ' 个产品',
-            timestamp: '',
-            start_date: '',
-            end_date: '',
-            start_time: '',
-            end_time: ''
-        };
-    }
-
-    function _submissionTitle(s, index) {
-        return _firstNonEmpty([
-            s && s.product_group,
-            s && s.label,
-            s && s.factor_tester_serial,
-            s && s.id
-        ], '#' + (index + 1));
-    }
-
-    function _findCreatedSubmission(serverSubs, expectedId, oldSub, usedIds) {
-        var subs = _asArray(serverSubs);
-        var expected = expectedId !== undefined && expectedId !== null ? String(expectedId) : '';
-        for (var i = 0; i < subs.length; i++) {
-            if (subs[i] && String(subs[i].id) === expected) return subs[i];
-        }
-        var oldPaths = JSON.stringify(_asArray(oldSub && (oldSub.selected_paths || oldSub.paths)).slice().sort());
-        var oldName = (oldSub && (oldSub.product_group || oldSub.label)) || '';
-        for (var j = subs.length - 1; j >= 0; j--) {
-            var candidate = subs[j];
-            if (!candidate || !candidate.id || usedIds[String(candidate.id)]) continue;
-            var candPaths = JSON.stringify(_asArray(candidate.selected_paths || candidate.paths).slice().sort());
-            var candName = candidate.product_group || candidate.label || '';
-            if (candPaths === oldPaths && (!oldName || !candName || oldName === candName)) return candidate;
-        }
-        for (var k = subs.length - 1; k >= 0; k--) {
-            if (subs[k] && subs[k].id && !usedIds[String(subs[k].id)]) return subs[k];
-        }
-        return null;
-    }
-
     function _hasOwn(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj || {}, key);
     }
@@ -396,96 +329,6 @@
         }
     });
 
-    // ── 3. product_path_selections (order=30, 在参数之后) ──
-    SnapshotRegistry.register({
-        key: 'product_path_selections',
-        order: 30,
-        label: '产品路径选择',
-        icon: '▦',
-        collect: function() {
-            var raw = (window._getCurrentSubmissions) ? window._getCurrentSubmissions() : [];
-            // 返回深拷贝，避免引用共享 + 按 id 去重
-            var seen = {};
-            var deduped = [];
-            for (var i = 0; i < raw.length; i++) {
-                var s = _normalizeSubmissionForTemplate(raw[i]);
-                var sid = s.id;
-                if (!sid || seen[sid]) continue;
-                seen[sid] = true;
-                deduped.push(s);
-            }
-            return deduped;
-        },
-        apply: async function(subs, ctx) {
-            ctx = ctx || {};
-            var savedSubs = _asArray(subs);
-            var oldToNewTesterId = {};
-            var latestServerSubmissions = [];
-
-            // 先清空
-            try {
-                var clearResp = await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
-                var clearData = await clearResp.json();
-                if (clearData && clearData.submissions) latestServerSubmissions = clearData.submissions;
-                if (typeof window._applySubmissions === 'function') window._applySubmissions([]);
-            } catch (e) { console.error('清空旧测试器失败:', e); }
-            if (!savedSubs.length) {
-                ctx.oldToNewTesterId = oldToNewTesterId;
-                ctx.newSubmissions = [];
-                return { oldToNewTesterId: oldToNewTesterId, product_path_selections: [] };
-            }
-
-            var usedNewIds = {};
-            for (var i = 0; i < savedSubs.length; i++) {
-                var sub = _normalizeSubmissionForTemplate(savedSubs[i]);
-                var paths = sub.selected_paths || sub.paths || [];
-                if (!paths.length) continue;
-                var id_time = 'tpl-' + Date.now() + '-' + i;
-                try {
-                    var resp = await fetch('/submit_selected_products', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ selected_paths: paths, id_time: id_time, group_name: sub.product_group || '', page_uuid: window._pageUuid || '' })
-                    });
-                    var result = await resp.json();
-                    if (result.success) {
-                        latestServerSubmissions = result.submissions || latestServerSubmissions;
-                        var created = _findCreatedSubmission(latestServerSubmissions, id_time, sub, usedNewIds);
-                        var newId = created && created.id ? String(created.id) : String(id_time);
-                        if (sub.id) oldToNewTesterId[String(sub.id)] = newId;
-                        usedNewIds[newId] = true;
-                        if (sub.label) {
-                            try {
-                                var renameResp = await fetch('/rename_submission', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_time: newId, new_name: sub.label, page_uuid: window._pageUuid || '' }) });
-                                var renameData = await renameResp.json();
-                                if (renameData && renameData.submissions) latestServerSubmissions = renameData.submissions;
-                            } catch (e) {}
-                        }
-                    }
-                } catch (e) { console.error('重新提交测试器失败:', sub.id, e); }
-            }
-            try {
-                var listResp = await fetch('/api/list_submissions?page_uuid=' + encodeURIComponent(window._pageUuid || ''));
-                var listData = await listResp.json();
-                if (listData.success && listData.submissions) latestServerSubmissions = listData.submissions;
-            } catch (e) {}
-            var normalized = _asArray(latestServerSubmissions).map(_normalizeServerSubmission);
-            if (latestServerSubmissions && typeof window._applySubmissions === 'function') {
-                window._applySubmissions(normalized);
-            }
-            ctx.oldToNewTesterId = oldToNewTesterId;
-            ctx.newSubmissions = normalized;
-            return { oldToNewTesterId: oldToNewTesterId, product_path_selections: normalized };
-        },
-        summarize: function(subs) {
-            return _asArray(subs).map(function(s, idx) {
-                var paths = _asArray(s.selected_paths || s.paths);
-                var count = s.product_count ? (s.product_count + ' 个产品') : '产品数待计算';
-                var pathText = paths.length ? ('路径: ' + paths.join('；')) : '未选择路径';
-                return _submissionTitle(s, idx) + ' · ' + count + ' · ' + pathText;
-            });
-        }
-    });
-
     // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
     var _gtAdaptersRegistered = false;
     async function _ensureGroupTestAdapters() {
@@ -502,7 +345,7 @@
         }
         if (_gtAdaptersRegistered) return;  // lazy loader already called us
 
-        // 6. group_settings (order=50, 依赖 product_path_selections 的 testerId 重映射)
+        // 6. group_settings (order=50)
         if (GT && GT.groupSettings && GT.groupSettings.settings) {
             var base = GT.groupSettings.settings;
             SnapshotRegistry.register({
@@ -513,32 +356,11 @@
                 collect: base.collect,
                 apply: function(gs, ctx) {
                     var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
-                    var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
-                    var remappedCount = 0;
-                    var unmappedCount = 0;
-                    if (working && working.groups) {
-                        var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
-                        var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
-                        working.groups.forEach(function(g) {
-                            if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
-                                g.testerId = oldToNew[String(g.testerId)];
-                                remappedCount++;
-                            } else if (g.testerId && fallbackNewId) {
-                                g.testerId = fallbackNewId;
-                                remappedCount++;
-                            } else if (g.testerId) {
-                                unmappedCount++;
-                            }
-                        });
-                        if (unmappedCount > 0) {
-                            console.warn('[global_template] group_settings: ' + unmappedCount + ' groups have unmapped testerId (oldToNew keys: ' + Object.keys(oldToNew).length + ', fallback: ' + (fallbackNewId || 'none') + ')');
-                        }
-                    }
                     var applyResult = base.apply(working);
                     if (applyResult.errors && applyResult.errors.length > 0) {
                         console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                     }
-                    console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups, ' + remappedCount + ' remapped');
+                    console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups');
                     if (GT.backendSettings && typeof GT.backendSettings.applyFlatSnapshot === 'function') {
                         GT.backendSettings.applyFlatSnapshot((ctx && ctx.snapshot) || { group_settings: working });
                     }
@@ -600,97 +422,12 @@
         if (!snapshot) return;
         await _ensureGroupTestAdapters();
 
-        // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId, snapshot: snapshot };
-
-        // 在 apply product_path_selections 之后，构建 oldToNewTesterId 映射供 group_settings 使用
-        // 这是跨注册项的依赖：group_settings(50) 依赖产品路径选择(30) 重映射后的 testerId
-        // 通过 ctx 传递
-        var subsEntry = SnapshotRegistry._registryByKey['product_path_selections'];
-        var savedSelections = _asArray(snapshot.product_path_selections);
-        var hasSubsKey = savedSelections.length > 0;
         var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
-
-        if (hasSubsKey && subsEntry) {
-            // 先恢复 time/params 等上游状态，确保 tester 重建时使用模板中的时间范围和参数。
-            await _applyEntriesWhere(snapshot, ctx, function(entry) {
-                return entry.key !== 'product_path_selections' && entry.order < subsEntry.order;
-            });
-            // product_path_selections 是产品路径选择快照：随后清空旧运行对象，再逐条重建并生成旧→新 ID 映射。
-            await _applySubmissionsWithRemapping(savedSelections, snapshot, ctx);
-            // 最后恢复依赖 testerId 映射的模块（尤其 group_settings）。
-            await _applyEntriesWhere(snapshot, ctx, function(entry) {
-                return entry.key !== 'product_path_selections' && entry.order > subsEntry.order;
-            });
-        } else {
-            // 没有保存产品路径选择的旧模板不主动删除当前运行对象；但若也没有分组配置，就清空分组 UI 状态。
-            if (!hasGroups) _clearGroupTestData();
-            await SnapshotRegistry.applyAll(snapshot, ctx);
-        }
+        if (!hasGroups) _clearGroupTestData();
+        await SnapshotRegistry.applyAll(snapshot, ctx);
 
         refreshOuterSummaries();
-    }
-
-    /** 专门处理 product_path_selections apply + testerId 重映射 */
-    async function _applySubmissionsWithRemapping(subs, snapshot, ctx) {
-        // 记录旧的 product path selection ids 及其 product_group/label（用于匹配）
-        var oldSubs = _asArray(subs);
-
-        // 先执行 product_path_selections apply（清空 + 重建）
-        var subsEntry = SnapshotRegistry._registryByKey['product_path_selections'];
-        var applyResult = null;
-        if (subsEntry) {
-            applyResult = await subsEntry.apply(subs, ctx);
-        }
-        if (applyResult && applyResult.oldToNewTesterId && Object.keys(applyResult.oldToNewTesterId).length > 0) {
-            ctx.oldToNewTesterId = applyResult.oldToNewTesterId;
-            return;
-        }
-
-        // apply 返回了空的 oldToNewTesterId 映射（submissions 重建可能失败），
-        // 回到兜底逻辑按位置/product_group 匹配
-        console.warn('[global_template] product_path_selections apply returned empty oldToNewTesterId, falling back to position/label matching');
-
-        // 构建 oldTesterId → newTesterId 映射
-        // 优先按数组位置，兜底按 product_group/label 匹配
-        var curSubmissions = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
-        var oldToNewTesterId = {};
-
-        // 第一遍：按位置匹配
-        for (var mi = 0; mi < oldSubs.length && mi < curSubmissions.length; mi++) {
-            var oldId = oldSubs[mi].id;
-            var newId = (curSubmissions[mi] && curSubmissions[mi].id) ? curSubmissions[mi].id : null;
-            if (oldId && newId) {
-                oldToNewTesterId[String(oldId)] = String(newId);
-            }
-        }
-
-        // 第二遍：对未匹配的旧 submission，按 product_group/label 查找
-        for (var oi = 0; oi < oldSubs.length; oi++) {
-            var os = oldSubs[oi];
-            var oid = String(os.id);
-            if (oldToNewTesterId[oid]) continue; // 已匹配
-            var oldGroup = os.product_group || os.label || '';
-            if (!oldGroup) continue;
-            for (var ci = 0; ci < curSubmissions.length; ci++) {
-                var cs = curSubmissions[ci];
-                var cid = String(cs.id);
-                // 避免一个 newId 被匹配多次
-                var alreadyUsed = false;
-                var keys = Object.keys(oldToNewTesterId);
-                for (var ki = 0; ki < keys.length; ki++) {
-                    if (oldToNewTesterId[keys[ki]] === cid) { alreadyUsed = true; break; }
-                }
-                if (alreadyUsed) continue;
-                var curGroup = cs.product_group || cs.label || '';
-                if (oldGroup === curGroup) {
-                    oldToNewTesterId[oid] = cid;
-                    break;
-                }
-            }
-        }
-
-        ctx.oldToNewTesterId = oldToNewTesterId;
     }
 
     /** 清空分组测试数据（分组组合列表和 LS 组表），用于模板无 group_settings 时重置。 */
@@ -979,17 +716,6 @@
     } else {
         initGlobalTemplateModule();
     }
-
-    // ── Submission bus subscriptions ────────────────────────────────────────────
-    (function() {
-        var bus = window._submissionBus;
-        if (!bus) return;
-
-        // React to any change: refresh outer summaries
-        bus.on('*', function(event) {
-            refreshOuterSummaries();
-        });
-    })();
 
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;
