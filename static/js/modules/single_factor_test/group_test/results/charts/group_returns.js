@@ -137,9 +137,32 @@
             if (typeof options.onSnapshot === 'function') options.onSnapshot(ts);
         }
 
+        function nearestTimelineMs(value) {
+            if (!timeline.length || !isFinite(value)) return null;
+            var best = timeline[0];
+            var bestDist = Math.abs(best - value);
+            for (var ti = 1; ti < timeline.length; ti++) {
+                var dist = Math.abs(timeline[ti] - value);
+                if (dist < bestDist) {
+                    best = timeline[ti];
+                    bestDist = dist;
+                }
+            }
+            return best;
+        }
+
         _groupChart = Highcharts.stockChart(container, {
             chart: {
                 zoomType: 'x',
+                events: {
+                    click: function(event) {
+                        if (!event || !event.chartX || !this.xAxis || !this.xAxis.length) return;
+                        var plotX = event.chartX - this.plotLeft;
+                        if (plotX < 0 || plotX > this.plotWidth) return;
+                        var ts = nearestTimelineMs(this.xAxis[0].toValue(plotX));
+                        if (ts !== null) openSnapshotAt(ts);
+                    },
+                },
             },
             title: { text: '分组累计收益' },
             legend: {

@@ -89,10 +89,14 @@ assert.match(body, /一手估算 CNY\s*10,000\.00（保证金 CNY\s*8,000\.00 \+
 assert.match(body, /计划开 0 手/);
 assert.match(body, /目标预算 CNY\s*1,000\.00/);
 assert.match(body, /剩余现金约 CNY 1,000\.00，小于一手总成本约 CNY 10,000\.00/);
-assert.match(body, /变化 \+1/);
-assert.match(body, /变化 -2/);
-assert.match(body, /金额 \+60\.00/);
-assert.match(body, /金额 -20\.00/);
+assert.match(body, /手数变化 \+1/);
+assert.match(body, /手数变化 -2/);
+assert.match(body, /变化 \+60\.00/);
+assert.match(body, /变化 -20\.00/);
+assert.match(body, /金额变化 \+CNY\s*5,000\.00/);
+assert.match(body, /金额变化 -CNY\s*2,500\.00/);
+assert.match(body, /<div>手数变化 \+1<\/div><div>金额变化 \+CNY\s*5,000\.00<\/div>/);
+assert.doesNotMatch(body, /手数变化 \+1 · 金额变化/);
 assert.match(body, /调仓前 1,250\.00/);
 assert.match(body, /调仓后 1,240\.00/);
 assert.match(body, /期末 1,300\.00/);

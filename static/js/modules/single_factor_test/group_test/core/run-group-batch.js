@@ -440,15 +440,15 @@
                         row.pct = 100;
                         row.fillEl.style.width = '100%';
                         row.fillEl.style.background = 'linear-gradient(90deg,#12a150,#4caf50)';
-                        row.phaseEl.textContent = '✓';
+                        row.phaseEl.textContent = '分组测试';
                         row.phaseEl.style.color = '#12a150';
-                        row.textEl.textContent = '完成';
-                        // 完成后隐藏消息行，只保留左侧标签 + 进度条 + 计数
+                        row.textEl.textContent = '100%';
+                        // 完成后保留稳定标题，只更新消息和进度，避免整行视觉跳变。
                         if (row.messageEl) {
-                            row.messageEl.style.display = 'none';
+                            row.messageEl.style.display = '';
                         }
                     } else {
-                        row.phaseEl.textContent = '✗';
+                        row.phaseEl.textContent = '分组测试';
                         row.phaseEl.style.color = '#d92d20';
                         row.fillEl.style.background = 'linear-gradient(90deg,#d92d20,#f97066)';
                     }

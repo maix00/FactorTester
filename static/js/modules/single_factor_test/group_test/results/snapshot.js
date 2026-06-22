@@ -448,17 +448,19 @@
         }
         var deltaParts = [];
         if (cell.delta_quantity !== null && cell.delta_quantity !== undefined) {
-            deltaParts.push('变化 ' + _formatSignedQuantity(cell.delta_quantity));
+            deltaParts.push('<div>手数变化 ' + _escape(_formatSignedQuantity(cell.delta_quantity)) + '</div>');
         }
         if (cell.delta_amount !== null && cell.delta_amount !== undefined) {
-            deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount, currency));
+            var productName = cell.product && cell.product.name ? String(cell.product.name) : '';
+            var amountDeltaLabel = (productName === '现金' || productName === '总资产') ? '变化' : '金额变化';
+            deltaParts.push('<div>' + _escape(amountDeltaLabel + ' ' + _formatSignedAmount(cell.delta_amount, currency)) + '</div>');
         }
         if (cell.delta_margin_amount !== null && cell.delta_margin_amount !== undefined) {
-            deltaParts.push('保证金 ' + _formatSignedAmount(cell.delta_margin_amount, currency));
+            deltaParts.push('<div>' + _escape('保证金变化 ' + _formatSignedAmount(cell.delta_margin_amount, currency)) + '</div>');
         }
         if (deltaParts.length) {
             var direction = cell.change_direction || 'flat';
-            parts.push('<div class="snapshot-cell-delta snapshot-delta-' + _escape(direction) + '">' + deltaParts.join(' · ') + '</div>');
+            parts.push('<div class="snapshot-cell-delta snapshot-delta-' + _escape(direction) + '">' + deltaParts.join('') + '</div>');
         }
         return parts.join('');
     }

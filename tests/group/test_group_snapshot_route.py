@@ -21,6 +21,26 @@ def _cny_vec(count: int):
     return np.full(count, 'CNY', dtype=object)
 
 
+def test_snapshot_product_display_falls_back_to_openctp_product_name(monkeypatch):
+    from sources.LocalCNFutures import product_catalog
+    from sources.OpenCTP import products as openctp_products
+
+    monkeypatch.setattr(
+        product_catalog,
+        "load_product_catalog",
+        lambda **_: pd.DataFrame(columns=["_product_name", "品种代码", "交易所代码", "合约标的", "简称", "类别"]),
+    )
+    monkeypatch.setattr(
+        openctp_products,
+        "load_products_list",
+        lambda: [
+            {"ExchangeID": "CZCE", "ProductID": "AP", "ProductName": "苹果", "ProductClass": "1"},
+        ],
+    )
+
+    assert group_routes._snapshot_product_display("AP.CZC")["desc"] == "苹果"
+
+
 def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     app = Flask(__name__)
     app.config['TESTING'] = True

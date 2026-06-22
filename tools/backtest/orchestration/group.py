@@ -183,10 +183,16 @@ def execute_group_plan(
             name: volume_values[:, column].tolist()
             for column, name in enumerate(plan.trade_product_names)
         }
+    engine_label = {
+        "native": "Native",
+        "backtrader": "Backtrader",
+        "qlib": "Qlib",
+        "zipline": "Zipline",
+    }.get(engine, engine)
     if progress is not None:
         progress(
             "framework_execution",
-            f"{engine} 开始计算策略 target 并执行事件回测",
+            f"{engine_label} 开始计算策略 target 并执行事件回测",
             0,
             1,
             {"engine": engine},
@@ -196,7 +202,7 @@ def execute_group_plan(
         if progress is not None:
             progress(
                 "event_replay",
-                f"{engine} 回放至 {timestamp.isoformat()}",
+                f"{engine_label} 回放至 {timestamp.isoformat()}",
                 completed,
                 total,
                 {"engine": engine, "event_timestamp": timestamp.isoformat()},
@@ -220,7 +226,7 @@ def execute_group_plan(
     if progress is not None:
         progress(
             "framework_execution",
-            f"{engine} 事件回测完成",
+            f"{engine_label} 事件回测完成",
             1,
             1,
             {"engine": engine},

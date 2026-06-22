@@ -48,7 +48,7 @@ def group_test_settings() -> ApplicationSettings:
         "native",
         ScopePolicy.LOCAL_ONLY,
         options=(
-            SettingOption("native", "GTHT 事件驱动回测工具"),
+            SettingOption("native", "Native 事件驱动回测工具"),
             SettingOption("backtrader", "Backtrader 事件驱动回测工具"),
             SettingOption("qlib", "Qlib 事件驱动回测工具"),
             SettingOption("zipline", "Zipline 事件驱动回测工具"),

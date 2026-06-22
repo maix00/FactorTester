@@ -197,6 +197,88 @@ def _registered_product(product_name: str):
     return None
 
 
+def _cn_futures_desc_from_openctp(product_name: Any) -> str | None:
+    name = str(product_name or "").strip()
+    if not name:
+        return None
+    code, exchange = (name.split(".", 1) + [""])[:2] if "." in name else (name, "")
+    exchange_map = {
+        "CFE": "CFFEX",
+        "CZC": "CZCE",
+        "GFE": "GFEX",
+        "SHF": "SHFE",
+    }
+    wanted_exchange = exchange_map.get(exchange.upper(), exchange.upper())
+    try:
+        from sources.OpenCTP.products import load_products_list
+    except Exception:
+        return None
+    try:
+        products = load_products_list()
+    except Exception:
+        return None
+    for row in products:
+        row_code = str(row.get("ProductID") or "").upper()
+        row_exchange = str(row.get("ExchangeID") or "").upper()
+        if row_code == code.upper() and (not wanted_exchange or row_exchange == wanted_exchange):
+            desc = str(row.get("ProductName") or "").strip()
+            return desc or None
+    return None
+
+
+def _cn_futures_catalog_desc(product_name: Any) -> str | None:
+    name = str(product_name or "").strip()
+    if not name:
+        return None
+    try:
+        from sources.LocalCNFutures.product_catalog import load_product_catalog
+    except Exception:
+        return _cn_futures_desc_from_openctp(name)
+    try:
+        catalog = load_product_catalog(sync=False)
+    except Exception:
+        return _cn_futures_desc_from_openctp(name)
+    if catalog is None or getattr(catalog, "empty", True) or "_product_name" not in catalog:
+        return _cn_futures_desc_from_openctp(name)
+    row = catalog[catalog["_product_name"].astype(str) == name]
+    if row.empty and "." in name:
+        code, exchange = name.split(".", 1)
+        exchange_map = {
+            "CFE": "CFFEX",
+            "CZC": "CZCE",
+            "GFE": "GFEX",
+            "SHF": "SHFE",
+        }
+        code_series = catalog["品种代码"] if "品种代码" in catalog else pd.Series(dtype=object)
+        exchange_series = catalog["交易所代码"] if "交易所代码" in catalog else pd.Series(dtype=object)
+        row = catalog[
+            (code_series.astype(str).str.upper() == code.upper())
+            & (
+                exchange_series.astype(str)
+                .str.upper()
+                .isin({exchange.upper(), exchange_map.get(exchange.upper(), exchange.upper())})
+            )
+        ]
+    if row.empty:
+        return _cn_futures_desc_from_openctp(name)
+    record = row.iloc[0]
+    for column in ("合约标的", "简称", "类别"):
+        value = record.get(column)
+        if value is not None and not pd.isna(value) and str(value).strip():
+            return str(value).strip()
+    openctp_desc = _cn_futures_desc_from_openctp(name)
+    if openctp_desc:
+        return openctp_desc
+    code = record.get("品种代码")
+    exchange = record.get("交易所代码")
+    parts = [
+        str(value).strip()
+        for value in (code, exchange)
+        if value is not None and not pd.isna(value) and str(value).strip()
+    ]
+    return " · ".join(parts) if parts else None
+
+
 def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]] | None = None, *, collapsed_from: str | None = None) -> dict[str, Any]:
     fee_rates = fee_rates or {}
     raw_name = getattr(product_ref, 'name', str(product_ref) if product_ref is not None else '')
@@ -209,6 +291,10 @@ def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, f
     else:
         display = _display_product_with_fee(raw_name, fee_rates)
     name = display.get('name') or raw_name
+    if display.get('desc') in (None, '', name):
+        desc = _cn_futures_catalog_desc(name or raw_name)
+        if desc and desc != name:
+            display['desc'] = desc
     if collapsed_from and collapsed_from != name:
         display['source_name'] = collapsed_from
     return display

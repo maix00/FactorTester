@@ -72,6 +72,20 @@
         }).replace(/\s+/g, ' ').trim();
     }
 
+    function displayValue(setting, value) {
+        if (setting && Array.isArray(setting.options)) {
+            for (var i = 0; i < setting.options.length; i++) {
+                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
+            }
+        }
+        return value === undefined || value === null ? '' : String(value);
+    }
+
+    function chipText(setting, value) {
+        var template = setting && setting.chip_template ? setting.chip_template : ((setting && setting.key || '') + ': {value}');
+        return template.replace('{value}', displayValue(setting, value));
+    }
+
     function summaryTabs() {
         return availableTabs(LOCAL).filter(function(tab) {
             return !!tab.summary_template;
@@ -249,7 +263,7 @@
         var chips = document.createElement('div');
         chips.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;';
         var grid = document.createElement('div');
-        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;';
+        grid.style.cssText = 'display:flex;flex-direction:column;gap:0;';
 
         function renderChips() {
             chips.innerHTML = '';
@@ -259,22 +273,22 @@
                     var node = activeNode();
                     if (!node || !Object.prototype.hasOwnProperty.call(node.value, setting.key)) return;
                 }
-                chips.appendChild(chip(
-                    setting.chip_template.replace('{value}', String(effectiveValue(setting, mount))),
-                    false
-                ));
+                chips.appendChild(chip(chipText(setting, effectiveValue(setting, mount)), false));
             });
             chips.style.display = chips.childNodes.length ? 'flex' : 'none';
         }
 
         (manifest.settings || []).forEach(function(setting) {
             var row = document.createElement('label');
-            row.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #e5e7eb;border-radius:6px;background:#fcfcfd;';
+            row.className = 'gt-backtest-setting-row';
             var title = document.createElement('span');
             title.textContent = setting.label;
-            title.style.fontWeight = '600';
+            title.className = 'gt-backtest-setting-label';
+            var controlWrap = document.createElement('span');
+            controlWrap.className = 'gt-backtest-setting-control';
+            controlWrap.appendChild(makeControl(setting, mount, renderChips));
             row.appendChild(title);
-            row.appendChild(makeControl(setting, mount, renderChips));
+            row.appendChild(controlWrap);
             grid.appendChild(row);
         });
         renderChips();
@@ -362,7 +376,7 @@
                 if (!setting.chip_template) return;
                 var value = effectiveValue(setting, LOCAL);
                 if (value === undefined || value === null || value === '') return;
-                var chipNode = chip(setting.chip_template.replace('{value}', String(value)), false);
+                var chipNode = chip(chipText(setting, value), false);
                 chipNode.setAttribute('data-backtest-local-chip', setting.key);
                 chipNode.title = '打开' + ((manifest.tab && manifest.tab.label) || setting.tab_key || tabKey);
                 chipNode.style.cursor = 'pointer';
@@ -484,11 +498,10 @@
                 return Object.keys(defaults).filter(function(key) {
                     return Object.prototype.hasOwnProperty.call(group, key);
                 }).map(function(key) {
-                    var setting = state.settingDefs[key];
-                    var template = setting && setting.chip_template ? setting.chip_template : (key + ': {value}');
+                    var setting = state.settingDefs[key] || { key: key, chip_template: key + ': {value}' };
                     return {
                         label: 'backtest-' + key,
-                        html: template.replace('{value}', String(group[key])),
+                        html: chipText(setting, group[key]),
                     };
                 }).filter(Boolean);
             },

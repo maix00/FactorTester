@@ -779,6 +779,55 @@
         color: #0f4c81;
         font-weight: 600;
     }
+    #group_test_module #gt-tab-actions .btn,
+    #group_test_module #gt-local-settings-tab-bar .btn {
+        min-height: 28px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    #group_test_module #gt-tab-actions .btn {
+        min-width: 30px;
+        font-weight: 600;
+    }
+    #group_test_module .gt-backtest-setting-row {
+        display: grid;
+        grid-template-columns: minmax(92px, 132px) minmax(150px, 1fr);
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #eef2f7;
+        font-size: 12px;
+        color: #334155;
+    }
+    #group_test_module .gt-backtest-setting-row:last-child {
+        border-bottom: 0;
+    }
+    #group_test_module .gt-backtest-setting-label {
+        color: #64748b;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    #group_test_module .gt-backtest-setting-control {
+        min-width: 0;
+    }
+    #group_test_module .gt-backtest-setting-control select,
+    #group_test_module .gt-backtest-setting-control input {
+        width: 100%;
+        min-height: 28px;
+        padding: 4px 8px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 12px;
+        line-height: 1.2;
+    }
 
     /* Submission tabs in selector bar */
     #group_test_module .gt-submission-tab {
@@ -817,14 +866,18 @@
 
     /* ── Snapshot 矩阵表格 ── */
     #group_test_module .snapshot-matrix-table {
-        width: 100%;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: 12px;
-        table-layout: fixed;
+        table-layout: auto;
     }
     #group_test_module .snapshot-matrix-scroll {
         width: 100%;
-        overflow: auto;
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: auto;
+        overscroll-behavior-x: contain;
     }
     #group_test_module .snapshot-matrix-table th {
         position: sticky;
@@ -842,10 +895,11 @@
         padding: 4px 8px;
         border-bottom: 1px solid #edf0f4;
         white-space: normal;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow: visible;
+        text-overflow: clip;
         vertical-align: middle;
         word-break: break-word;
+        min-width: 150px;
     }
     #group_test_module .snapshot-prod-name-cell {
         font-weight: 500;
@@ -854,7 +908,8 @@
         position: sticky;
         left: 0;
         z-index: 1;
-        min-width: 90px;
+        min-width: 132px;
+        max-width: 190px;
     }
     /* 状态颜色 */
     #group_test_module .snapshot-cell-holding {
@@ -958,6 +1013,9 @@
         font-size: 11px;
         line-height: 1.35;
         font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
     }
     #group_test_module .snapshot-status-label {
         display: inline-block;
