@@ -48,4 +48,31 @@ assert.match(fallbackBody, /accounting/);
 assert.match(fallbackBody, /minor_units/);
 assert.match(fallbackBody, /engine_native/);
 
+GT.results.strategyPanel.update(false, [], {
+  engine_result: { engine: 'native' },
+  backtest_settings: {
+    engine: 'native',
+    groups: {
+      group_1: {
+        allocation_policy: 'inverse_volatility',
+        rebalance_trigger: 'on_factor_signal',
+        position_policy: 'rebalance_to_target',
+        fee_mode: 'market',
+        margin_mode: 'market',
+        liquidity_mode: 'volume_participation',
+        participation_rate: 0.02,
+      },
+    },
+  },
+});
+
+const settingsBody = document.getElementById('gt-strategy-body').innerHTML;
+assert.match(settingsBody, /当前运行配置/);
+assert.match(settingsBody, /Native/);
+assert.match(settingsBody, /等风险/);
+assert.match(settingsBody, /按目标调仓/);
+assert.match(settingsBody, /市场费率/);
+assert.match(settingsBody, /市场保证金/);
+assert.match(settingsBody, /成交量参与率 0.02/);
+
 console.log('PASS: group strategy panel shows capital warning');

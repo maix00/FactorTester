@@ -41,6 +41,7 @@
 
     function _pushCapitalRows(rows, data) {
         if (!data) return;
+        _pushRunSettingRows(rows, data);
         if (data.capital_warning) {
             rows.push({
                 type: '资金约束',
@@ -95,6 +96,81 @@
                 detail: data.setting_fallback_warning + (fallbackDetails.length ? ' ' + fallbackDetails.join('，') : ''),
             });
         }
+    }
+
+    function _valueLabel(map, value) {
+        var key = value === undefined || value === null || value === '' ? '默认' : String(value);
+        return map[key] || key;
+    }
+
+    function _uniqueValues(settingsByGroup, key) {
+        var values = {};
+        Object.keys(settingsByGroup || {}).forEach(function(groupId) {
+            var item = settingsByGroup[groupId] || {};
+            if (groupId.indexOf('long-short:') === 0) return;
+            if (item[key] === undefined || item[key] === null || item[key] === '') return;
+            values[String(item[key])] = true;
+        });
+        return Object.keys(values);
+    }
+
+    function _formatUnique(settingsByGroup, key, labels) {
+        var values = _uniqueValues(settingsByGroup, key);
+        if (!values.length) return '';
+        if (values.length === 1) return _valueLabel(labels || {}, values[0]);
+        return values.map(function(value) { return _valueLabel(labels || {}, value); }).join(' / ');
+    }
+
+    function _pushRunSettingRows(rows, data) {
+        var settings = data && data.backtest_settings || {};
+        var groups = settings.groups || {};
+        if (!groups || !Object.keys(groups).length) return;
+        var engine = settings.engine || (data.engine_result && data.engine_result.engine) || '';
+        var allocation = _formatUnique(groups, 'allocation_policy', {
+            inverse_volatility: '等风险',
+            equal_notional: '等市值',
+            equal_margin: '等保证金',
+        });
+        var trigger = _formatUnique(groups, 'rebalance_trigger', {
+            on_factor_signal: '因子信号事件',
+            membership_change: '成员变化事件',
+            scheduled: '日历计划',
+        });
+        var position = _formatUnique(groups, 'position_policy', {
+            rebalance_to_target: '按目标调仓',
+            buy_and_hold: '买入持有',
+        });
+        var fee = _formatUnique(groups, 'fee_mode', {
+            none: '无费用',
+            market: '市场费率',
+            custom: '自定义费率',
+        });
+        var margin = _formatUnique(groups, 'margin_mode', {
+            none: '无保证金约束',
+            market: '市场保证金',
+        });
+        var liquidity = _formatUnique(groups, 'liquidity_mode', {
+            infinite: '无限流动性',
+            volume_participation: '成交量参与率',
+        });
+        var participation = _formatUnique(groups, 'participation_rate', {});
+        var parts = [];
+        if (engine) parts.push('引擎 ' + _valueLabel({native: 'Native', backtrader: 'Backtrader', qlib: 'Qlib', zipline: 'Zipline', rqalpha: 'RQAlpha'}, engine));
+        if (allocation) parts.push('目标分配 ' + allocation);
+        if (trigger) parts.push('触发 ' + trigger);
+        if (position) parts.push('持仓 ' + position);
+        if (fee) parts.push('费用 ' + fee);
+        if (margin) parts.push('保证金 ' + margin);
+        if (liquidity) parts.push('流动性 ' + liquidity + (liquidity === '成交量参与率' && participation ? ' ' + participation : ''));
+        if (!parts.length) return;
+        var nonLsCount = Object.keys(groups).filter(function(groupId) {
+            return groupId.indexOf('long-short:') !== 0;
+        }).length;
+        rows.push({
+            type: '当前运行配置',
+            status: nonLsCount ? (nonLsCount + ' 个策略') : '已解析',
+            detail: parts.join('；'),
+        });
     }
 
     function _rowHtml(row) {
