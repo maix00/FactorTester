@@ -4,13 +4,17 @@
         id="factor-series-viewer-root"
         style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;"
     >
-        <div id="factor-series-header" class="gt-section-title-strip factor-series-header-row" >
-            <div class="factor-series-header-title gt-backtest-setting-label">
-                <span id="factor-series-triangle" class="gt-section-toggle" aria-hidden="true">▼</span>
-                <span class="factor-series-title-text gt-section-title-text">产品序列 / 因子序列对比</span>
-            </div>
-            <div class="gt-backtest-setting-control">
-                <button type="button" id="factor-series-run-btn" class="factor-series-action">计算因子</button>
+        <div id="factor-series-header" class="gt-section-title-strip gt-section-title-strip-spaced">
+            <span id="factor-series-triangle" class="gt-section-toggle" aria-hidden="true">▼</span>
+            <span class="gt-section-title-text">产品序列 / 因子序列对比</span>
+            <div class="gt-section-title-actions" onclick="event.stopPropagation()">
+                <button
+                    type="button"
+                    id="factor-series-run-btn"
+                    class="btn btn-primary btn-sm"
+                >
+                    计算因子
+                </button>
             </div>
         </div>
         <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
@@ -99,49 +103,6 @@
     .factor-series-controls .factor-series-field {
         min-width: 220px;
         flex: 0 1 280px;
-    }
-    #factor_series_viewer_module .gt-backtest-setting-row {
-        display: grid;
-        grid-template-columns: minmax(92px, 1fr) minmax(80px, 120px);
-        align-items: center;
-        gap: 8px;
-        padding: 6px 0;
-        border-bottom: 1px solid #eef2f7;
-        font-size: 12px;
-        color: #334155;
-    }
-    #factor_series_viewer_module .gt-backtest-setting-label {
-        color: #64748b;
-        font-weight: 500;
-        white-space: nowrap;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-    }
-    #factor_series_viewer_module .gt-backtest-setting-control {
-        min-width: 0;
-        justify-self: end;
-    }
-    #factor_series_viewer_module .factor-series-header-row {
-        margin-bottom: 4px;
-        padding-bottom: 0;
-    }
-    #factor_series_viewer_module .factor-series-header-title {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-    }
-    .factor-series-action {
-        height: 28px;
-        border: 1px solid #2563eb;
-        border-radius: 6px;
-        background: #2563eb;
-        color: #fff;
-        font-size: 12px;
-        padding: 0 10px;
-        cursor: pointer;
     }
     .factor-series-secondary-action {
         height: 28px;
@@ -242,7 +203,7 @@
         cursor: pointer;
     }
     @media (max-width: 900px) {
-        .factor-series-action {
+        #factor-series-run-btn {
             width: 100%;
         }
         .factor-series-controls .factor-series-field,

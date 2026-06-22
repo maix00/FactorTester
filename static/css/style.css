@@ -120,6 +120,20 @@ input[type="text"]:focus {
     white-space: nowrap;
 }
 
+.gt-section-title-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.gt-section-title-meta {
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+}
+
 button {
     padding: 8px 16px;
     border-radius: 4px;
