@@ -300,7 +300,7 @@
         renderPathSummary();
         var chart = document.getElementById('factor-series-chart-container');
         if (chart && !state.lastSeries.length) {
-            chart.innerHTML = message('从产品树选择产品或路径，再选择因子并运行。');
+            chart.innerHTML = message('从产品树选择产品，再选择因子并运行。');
         }
     }
 
