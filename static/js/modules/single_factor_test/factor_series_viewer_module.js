@@ -400,7 +400,14 @@
             });
             setViewerOpen(false);
         }
-        if (runBtn) runBtn.addEventListener('click', runEvaluate);
+        if (runBtn) {
+            runBtn.addEventListener('click', function(event) {
+                if (event && event.stopPropagation) {
+                    event.stopPropagation();
+                }
+                runEvaluate();
+            });
+        }
         function closeOverlay() {
             if (overlay) overlay.style.display = 'none';
         }
