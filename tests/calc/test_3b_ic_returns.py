@@ -159,7 +159,7 @@ def _iter_products(products: Iterable[str] | None = None) -> list[str]:
 
 
 def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
-    tester = FactorTester(products=[product], logger_file=False)
+    tester = FactorTester(products=[product])
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
     factor.evaluate([product])
     next_returns = NextReturns().get_factor(

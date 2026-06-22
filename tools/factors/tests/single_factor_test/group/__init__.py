@@ -49,8 +49,10 @@ class _FactorGroupTestGroup:
         Uniform fee rate override for this group.
     use_close_today : bool | None
         Close-today override for this group.
-    rebalance_mode : str | None
-        Rebalance mode override for this group.
+    rebalance_trigger : str | None
+        Rebalance trigger override for this group.
+    position_policy : str | None
+        Position carry policy override for this group.
     liquidity_mode : str | None
         Liquidity mode override for this group.
     liquidity_percent : float | None
@@ -75,7 +77,8 @@ class _FactorGroupTestGroup:
     fee_mode: Optional[str] = None
     fee_rate: Optional[float] = None
     use_close_today: Optional[bool] = None
-    rebalance_mode: Optional[str] = None
+    rebalance_trigger: Optional[str] = None
+    position_policy: Optional[str] = None
     liquidity_mode: Optional[str] = None
     liquidity_percent: Optional[float] = None
     margin_mode: Optional[str] = None
@@ -101,7 +104,8 @@ class _FactorGroupTestGroup:
             'fee_mode': self.fee_mode,
             'fee_rate': self.fee_rate,
             'use_close_today': self.use_close_today,
-            'rebalance_mode': self.rebalance_mode,
+            'rebalance_trigger': self.rebalance_trigger,
+            'position_policy': self.position_policy,
             'liquidity_mode': self.liquidity_mode,
             'liquidity_percent': self.liquidity_percent,
             'margin_mode': self.margin_mode,

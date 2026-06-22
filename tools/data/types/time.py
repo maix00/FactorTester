@@ -6,12 +6,12 @@
 # 与 DataIndex 配合：DataIndex.slice_by_datatime(start, end) 根据精度自动选层截断。
 #
 # 时区规则：
-#   - precision="day"  → 无时区（tz-naive），ts 被 normalize 到 00:00:00
+#   - precision="trading_day" → 无时区（tz-naive），ts 被 normalize 到 00:00:00
 #   - precision="exact" → 可选时区，前端可传入 tz 指定
 #
 # 用法：
 #   start = DataTime.from_dict({"date":"2024-01-01", "time":"09:30", "tz":"Asia/Shanghai"})
-#   end   = DataTime.from_dict({"date":"2024-12-31"}, precision="day")
+#   end   = DataTime.from_dict({"date":"2024-12-31"}, precision="trading_day")
 #   mask  = data_index.slice_by_datatime(start, end)
 #
 # 设计原则：
@@ -29,11 +29,11 @@ import pandas as pd
 # ── 时间精度 ──────────────────────────────────────────────────────────────
 
 class TimePrecision:
-    """时间精度：day（天级，忽略时分秒）或 exact（精确）。"""
-    DAY = "day"
+    """时间精度：trading_day（交易日，忽略时分秒）或 exact（精确）。"""
+    TRADING_DAY = "trading_day"
     EXACT = "exact"
 
-    _ALL = frozenset({DAY, EXACT})
+    _ALL = frozenset({TRADING_DAY, EXACT})
 
     @classmethod
     def validate(cls, p: str) -> str:
@@ -50,14 +50,14 @@ class DataTime:
 
     构造：
         DataTime(ts=pd.Timestamp("2024-01-01 09:30"), tz="Asia/Shanghai")
-        DataTime(ts=pd.Timestamp("2024-01-01"), precision="day")        # 天级，无 tz
+        DataTime(ts=pd.Timestamp("2024-01-01"), precision="trading_day")  # 交易日，无 tz
         DataTime.from_dict({"date":"2024-01-01", "time":"09:30", "tz":"UTC+8"})
         DataTime.parse("2024-01-01 09:30", tz="Asia/Shanghai")
 
     属性：
         .ts         : pd.Timestamp | None  时间点
-        .tz         : str | None           时区（仅 exact 精度有效；day 精度强制 None）
-        .precision  : "day" | "exact"
+        .tz         : str | None           时区（仅 exact 精度有效；trading_day 精度强制 None）
+        .precision  : "trading_day" | "exact"
         .is_set     : bool
     """
     ts: Optional[pd.Timestamp] = None
@@ -67,8 +67,8 @@ class DataTime:
     def __post_init__(self):
         TimePrecision.validate(self.precision)
 
-        # day 精度：强制无时区 + normalize 到 00:00:00
-        if self.precision == TimePrecision.DAY:
+        # trading_day 精度：强制无时区 + normalize 到 00:00:00
+        if self.precision == TimePrecision.TRADING_DAY:
             if self.tz is not None:
                 object.__setattr__(self, 'tz', None)
             if self.ts is not None:
@@ -92,7 +92,7 @@ class DataTime:
             date / start_date / end_date → 日期部分 "YYYY-MM-DD"
             time / start_time / end_time → 时间部分 "HH:MM"
             tz                            → 时区（仅 exact 精度有效）
-        precision → "day" | "exact"（默认 "exact"）
+        precision → "trading_day" | "exact"（默认 "exact"）
         """
         date_str = data.get("date") or data.get("start_date") or data.get("end_date")
         time_str = data.get("time") or data.get("start_time") or data.get("end_time")

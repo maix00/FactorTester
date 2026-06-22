@@ -117,12 +117,13 @@
     }
 
     // =========================================================================
-    // FIELD SCHEMA — base + dynamic (panel-registered) fields
+    // FIELD SCHEMA — structural fields + backend-registered runtime fields
     // =========================================================================
     //
-    // Core defines only structural fields. Config panel fields (fee, rebalance,
-    // liquidity, productMask, etc.) are injected at load time via registerField()
-    // from each panel's registry registration.
+    // Core defines only structural fields. Backtest settings, identity chips,
+    // and derived chip source fields are injected at load time via
+    // backendSettings after reading the backend manifest. UI panels do not own
+    // setting field definitions.
     //
     // registerField spec:
     //   { key, type: 'string'|'number'|'boolean'|'object'|'any', default, validate?, patchable? }
@@ -199,10 +200,10 @@
     _rebuildSchema();
 
     // ═══════════════════════════════════════════════════════════════
-    // Dynamic field registration — panels call this to inject fields
+    // Dynamic field registration — backend manifest injects fields
     // ═══════════════════════════════════════════════════════════════
 
-    /** Register a field spec from a config panel. Must be called before any groups are created. */
+    /** Register a field spec from the backend settings manifest before groups are created. */
     api.registerField = function(spec) {
         if (!spec || !spec.key) return;
         // dedup: remove existing entry with same key
@@ -609,7 +610,6 @@
     var _lsIdCounter = 0;
 
     var VALID_LS_FEE_MODES = ['inherit', 'override'];
-    var VALID_LS_REBALANCE_MODES = ['each_period', 'buy_and_hold', 'recycle'];
 
     function _lsUuid() {
         _lsIdCounter += 1;
@@ -663,9 +663,6 @@
         if (config.feeRate !== undefined && config.feeRate !== null && (typeof config.feeRate !== 'number' || config.feeRate < 0)) {
             errors.push('feeRate must be a non-negative number or null');
         }
-        if (config.rebalanceMode !== undefined && config.rebalanceMode !== null && VALID_LS_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
-            errors.push('rebalanceMode must be one of: ' + VALID_LS_REBALANCE_MODES.join(', '));
-        }
         if (config.metadata !== undefined && (typeof config.metadata !== 'object' || config.metadata === null || Array.isArray(config.metadata))) {
             errors.push('metadata must be a plain object');
         }
@@ -684,7 +681,6 @@
             feeMode: config.feeMode || 'inherit',
             feeRate: config.feeRate !== undefined ? config.feeRate : null,
             useCloseToday: config.useCloseToday !== undefined ? config.useCloseToday : null,
-            rebalanceMode: config.rebalanceMode !== undefined ? config.rebalanceMode : null,
             needsRegenerate: true,
             metadata: config.metadata !== undefined ? _deepCopy(config.metadata) : {},
         };
@@ -828,9 +824,42 @@
      */
     function _settingsSnapshot() {
         return {
-            groups: _groupsGetAll(),
-            lsConfigs: _lsConfigsGetAll(),
+            groups: _groupsGetAll().map(_settingsGroupSnapshot),
+            lsConfigs: _lsConfigsGetAll().map(_settingsLongShortSnapshot),
         };
+    }
+
+    function _copyKeys(source, keys) {
+        var out = {};
+        keys.forEach(function(key) {
+            if (source[key] !== undefined) out[key] = _deepCopy(source[key]);
+        });
+        return out;
+    }
+
+    function _settingsGroupSnapshot(group) {
+        var out = _copyKeys(group || {}, [
+            'id', 'name', 'parentId', 'testerId', 'factorAlias', 'splitCount',
+            'groupIndex', 'isAllGroups', 'needsRegenerate', 'startDate', 'endDate',
+            'shortAlias', 'overrides', '_expanded', 'productMask',
+        ]);
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(group || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
+    }
+
+    function _settingsLongShortSnapshot(config) {
+        var out = _copyKeys(config || {}, [
+            'id', 'name', 'shortAlias', 'longGroupId', 'shortGroupId',
+            'needsRegenerate', 'metadata',
+        ]);
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(config || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
     }
 
     /**
@@ -893,10 +922,10 @@
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
             var countText = group.splitCount != null ? group.splitCount : '未设置';
-            var feeText = group.feeMode || api.getFieldDefault('feeMode');
-            var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
-                + ' · 费率 ' + feeText + ' · 再平衡 ' + rebalanceText);
+                + ' · 设置 ' + Object.keys(group).filter(function(key) {
+                    return ['fee_mode', 'rebalance_trigger', 'position_policy', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
+                }).join(', '));
         });
         if (baseGroups.length > 8) {
             lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');

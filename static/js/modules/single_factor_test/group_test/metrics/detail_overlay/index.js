@@ -93,6 +93,11 @@
     /* ───── Data loading ───── */
 
     function _getActiveSubmissionId() {
+        var c = GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+        var grossData = c ? c.getLastGrossData() : null;
+        if (grossData && grossData.length > 0 && grossData[0] && grossData[0].submission_id) {
+            return grossData[0].submission_id;
+        }
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && typeof sel.getFirstSubmissionId === 'function') {
             return sel.getFirstSubmissionId();
@@ -104,7 +109,11 @@
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ submission_id: submissionId, group_index: groupIndex }),
+            body: JSON.stringify({
+                submission_id: submissionId,
+                group_index: groupIndex,
+                page_uuid: window._pageUuid || ''
+            }),
         });
         var data = await resp.json();
         if (!data.success) throw new Error(data.error || '加载失败');
@@ -197,7 +206,10 @@
             var resp = await fetch('/get_group_ranking_detail', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ submission_id: submissionId }),
+                body: JSON.stringify({
+                    submission_id: submissionId,
+                    page_uuid: window._pageUuid || ''
+                }),
             });
             var data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');

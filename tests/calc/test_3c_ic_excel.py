@@ -170,7 +170,7 @@ def _resolve_series(table: pd.DataFrame, product) -> pd.Series:
 
 
 def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: pd.Timestamp, rf_minutes: int):
-    tester = FactorTester(products=products, time_range=(start, end), logger_file=False)
+    tester = FactorTester(products=products, time_range=(start, end))
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
     factor.evaluate(products)
     next_returns = NextReturns().get_factor(

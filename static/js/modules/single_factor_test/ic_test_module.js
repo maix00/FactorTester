@@ -855,7 +855,8 @@
                         factor_family_alias: factorFamilyAlias,
                         factor_name: factorName,
                         factor_alias: factorAlias,
-                        product: testerPrimary || product
+                        product: testerPrimary || product,
+                        page_uuid: window._pageUuid || ''
                     })
                 }).then(r => _safeJson(r, 'get_factor_series')),
                 fetch('/get_return_series', {
@@ -866,7 +867,8 @@
                         factor_alias: factorAlias,
                         factor_family_alias: factorFamilyAlias,
                         product: testerPrimary || product,
-                        paths: submission.paths
+                        paths: submission.paths,
+                        page_uuid: window._pageUuid || ''
                     })
                 }).then(r => _safeJson(r, 'get_return_series'))
             ]);
@@ -1183,7 +1185,8 @@
                 paths: submission.paths,
                 factors: selectedFactors,
                 ic_decay_lags: ic_decay_lags,
-                rolling_window: rolling_window
+                rolling_window: rolling_window,
+                page_uuid: window._pageUuid || ''
             });
 
             const sseResponse = await fetch('/run_ic_test_stream', {
@@ -1628,6 +1631,7 @@
                     factor_alias: factorAlias,
                     timestamp: tsMs,
                     product: product || null,
+                    page_uuid: window._pageUuid || '',
                 }),
             });
             const data = await res.json();

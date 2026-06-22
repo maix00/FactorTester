@@ -32,7 +32,8 @@ class GroupRunResult:
     use_closetoday_vec: np.ndarray | None = None                               # per-product bool
     index_list: list = field(default_factory=list)
     multi_session_active: bool = False
-    rebalance_mode: str = ""
+    rebalance_trigger: str = ""
+    position_policy: str = ""
     report_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     group_names: Any = None  # {expanded_group_index: display_name}
     hold_amounts_np: np.ndarray | None = None  # (T, M, P) int64 minor units in base currency — 每期实际持仓金额

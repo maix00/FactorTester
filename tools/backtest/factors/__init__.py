@@ -1,4 +1,5 @@
-"""事件驱动因子 — EventDrivenFactor 协议 + 示例。
+"""Factor actors used by the event-driven backtest runtime."""
 
-用于需要维护跨期状态的路径依赖因子（区别于声明式 FactorExpr DSL）。
-"""
+from .selection import FactorMode, select_factor_mode
+
+__all__ = ["FactorMode", "select_factor_mode"]

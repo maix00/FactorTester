@@ -265,7 +265,7 @@ def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: l
 
 
 def _backend_rolling_mean(product: CNFutures, window_val) -> pd.Series:
-    tester = FactorTester(products=[product], logger_file=False)
+    tester = FactorTester(products=[product])
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
     factor.evaluate([product])
 

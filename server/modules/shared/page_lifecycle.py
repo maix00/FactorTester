@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from flask import request
 
-from server.services.api_response import api_ok, route_guard
+from server.services.api_response import api_fail, api_ok, route_guard
 from server.services.factor_registry import clear_page_factor_family
 from server.services.page_state_debug import build_page_debug_payload
+from server.services.session_runtime import current_user
+import server.services.page_runtime as page_runtime
 
 from . import shared_bp
 
@@ -21,6 +23,20 @@ def close_page():
     if page_uuid and factor_family_alias:
         clear_page_factor_family(page_uuid, factor_family_alias)
     return api_ok({'page_uuid': page_uuid, 'factor_family_alias': factor_family_alias})
+
+
+@shared_bp.route('/unregister_page', methods=['POST'])
+@route_guard
+def unregister_page():
+    """Release every strong reference owned by a closed browser page."""
+    data = request.get_json(silent=True) or {}
+    page_uuid = str(data.get('page_uuid', '')).strip()
+    if not page_uuid:
+        return api_fail('缺少 page_uuid', status_code=400)
+    if page_runtime.get_page_owner(page_uuid) != current_user():
+        return api_fail('page_uuid 不属于当前用户', status_code=403)
+    page_runtime.unregister_page(page_uuid)
+    return api_ok({'page_uuid': page_uuid})
 
 
 @shared_bp.route('/api/debug/page_state')

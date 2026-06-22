@@ -22,7 +22,9 @@ from tools.data.account_manage import accounts_lock, load_accounts
 from server.services.session_runtime import current_user
 from tools.data.cache.IdleResourceManager import IdleResourceManager
 import settings
+from server.services.logging_config import configure_logging
 
+configure_logging(settings.logger_dir_path_default)
 app = create_app()
 
 

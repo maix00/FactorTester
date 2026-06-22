@@ -55,7 +55,6 @@
             feeMap: group && group.feeMap != null ? group.feeMap : (base ? base.feeMap : null),
             feeSensitivity: group && group.feeSensitivity != null ? group.feeSensitivity : (base && base.feeSensitivity != null ? base.feeSensitivity : 1),
             useCloseToday: group && group.useCloseToday != null ? !!group.useCloseToday : !!(base && base.useCloseToday),
-            rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : GS.getFieldDefault('rebalanceMode')),
             liquidityMode: group && group.liquidityMode != null ? group.liquidityMode : (base && base.liquidityMode ? base.liquidityMode : GS.getFieldDefault('liquidityMode')),
             liquidityPercent: group && group.liquidityPercent != null ? group.liquidityPercent : (base && base.liquidityPercent != null ? base.liquidityPercent : GS.getFieldDefault('liquidityPercent'))
         };
@@ -225,15 +224,11 @@
     // ── edit mode ──
 
     api.enterEdit = function(selection) {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.rollbackDirty === 'function') REG.rollbackDirty();
         _panelMode = 'edit';
         _editSelection = selection || {};
     };
 
     api.exitEdit = function() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.rollbackDirty === 'function') REG.rollbackDirty();
         _panelMode = 'list';
         _editSelection = null;
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;

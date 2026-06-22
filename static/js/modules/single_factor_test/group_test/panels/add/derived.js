@@ -17,13 +17,6 @@
         return GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
     }
 
-    function _inheritedConfigKeys() {
-        var keys = {};
-        ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
-         'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(k) { keys[k] = true; });
-        return keys;
-    }
-
     function _buildDerivedAddDraft(ctx) {
         var ids = (ctx && ctx.ids) ? ctx.ids : [];
         if (ids.length !== 1) return { addFlow: 'derived' };
@@ -39,9 +32,6 @@
                 draft.preselectedProducts = Object.keys(parentMask).filter(function(k) { return parentMask[k]; });
             }
         }
-        var cfg = M.resolveConfig(selected);
-        if (cfg) Object.assign(draft, cfg);
-        draft._inheritedConfigKeys = _inheritedConfigKeys();
         return draft;
     }
 
@@ -56,9 +46,6 @@
                 if (active.productMask) {
                     draft.preselectedProducts = Object.keys(active.productMask).filter(function(k) { return active.productMask[k]; });
                 }
-                var cfg = M.resolveConfig(active);
-                if (cfg) Object.assign(draft, cfg);
-                draft._inheritedConfigKeys = _inheritedConfigKeys();
             }
         }
         return draft;
@@ -91,11 +78,6 @@
             productMask: productMask,
             splitCount: (parentNode && parentNode.splitCount) || 1,
         };
-        ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
-         'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
-            var inherited = draft._inheritedConfigKeys && draft._inheritedConfigKeys[key];
-            if (!inherited && draft[key] !== undefined) config[key] = draft[key];
-        });
         try {
             GT.groupSettings.groups.add(config);
         } catch (err) {
@@ -112,7 +94,7 @@
         M.registerAddFlow({
             flow: 'derived',
             priority: 10,
-            defaultTab: 'config-product-sift',
+            defaultTab: 'list',
             condition: function(ctx) {
                 if (ctx && ctx.groups && ctx.groups.length >= 1) {
                     for (var i = 0; i < ctx.groups.length; i++) {
@@ -128,13 +110,13 @@
                 return _buildDerivedDraftFromState(ctx);
             },
             onSubmit: _submitDerived,
-            submitLabel: '<i class="fas fa-code-branch"></i>',
+            submitLabel: '创建派生组',
             submitTitle: '创建派生组'
         });
 
         M.registerEditAction({
             name: 'create-derived',
-            label: '<i class="fas fa-code-branch"></i>',
+            label: '创建派生组',
             title: '创建派生组',
             priority: 10,
             condition: function(ctx) {
@@ -150,7 +132,7 @@
                 helpers.exitEdit();
                 M.enterAdd('derived');
                 M.setAddDraft(draft);
-                helpers.mountTab('config-product-sift');
+                helpers.mountTab('list');
                 helpers.renderActions();
             },
             standalone: true

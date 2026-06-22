@@ -1,0 +1,249 @@
+"""Canonical contracts shared by research, execution engines, and adapters."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Mapping
+
+import numpy as np
+import pandas as pd
+
+
+class ExecutionFeature(str, Enum):
+    VECTOR_BATCH = "vector_batch"
+    CLOCKED_STATE = "clocked_state"
+    ASYNC_ORDERS = "async_orders"
+    TRANSACTION_COSTS = "transaction_costs"
+    LIQUIDITY = "liquidity"
+    MARGIN = "margin"
+    FUTURES = "futures"
+    FUTURES_ROLL = "futures_roll"
+    MULTI_CURRENCY = "multi_currency"
+    STREAMING_FACTORS = "streaming_factors"
+
+
+class TargetKind(str, Enum):
+    WEIGHT = "weight"
+    QUANTITY = "quantity"
+
+
+class EvaluationSegment(str, Enum):
+    IN_SAMPLE = "in_sample"
+    OUT_OF_SAMPLE = "out_of_sample"
+
+
+class ExecutionIsolation(str, Enum):
+    """How strategy lanes consume simulated execution capacity."""
+
+    INDEPENDENT_COMPARISON = "independent_comparison"
+    SHARED_LIQUIDITY = "shared_liquidity"
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationWindow:
+    start: pd.Timestamp
+    end: pd.Timestamp
+    split: pd.Timestamp | None = None
+
+    def __post_init__(self) -> None:
+        start = pd.Timestamp(self.start)
+        end = pd.Timestamp(self.end)
+        split = None if self.split is None else pd.Timestamp(self.split)
+        if end < start or (split is not None and not start <= split < end):
+            raise ValueError("evaluation window requires start <= split < end")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+        object.__setattr__(self, "split", split)
+
+    def segment(self, timestamp: pd.Timestamp) -> EvaluationSegment:
+        timestamp = pd.Timestamp(timestamp)
+        if not self.start <= timestamp <= self.end:
+            raise ValueError("timestamp is outside the evaluation window")
+        if self.split is not None and timestamp > self.split:
+            return EvaluationSegment.OUT_OF_SAMPLE
+        return EvaluationSegment.IN_SAMPLE
+
+
+@dataclass(frozen=True, slots=True)
+class RunIdentity:
+    """Correlation identity; it contains no credentials or user payloads."""
+
+    run_id: str
+    user_id: str | None = None
+    page_uuid: str | None = None
+    session_id: str | None = None
+    tester_alias: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestPlan:
+    """Portable description of what an execution engine must support."""
+
+    identity: RunIdentity
+    timestamps: pd.DatetimeIndex
+    instruments: tuple[str, ...]
+    required_features: frozenset[ExecutionFeature] = frozenset()
+    execution_isolation: ExecutionIsolation = ExecutionIsolation.INDEPENDENT_COMPARISON
+    factor_plan: Any | None = None
+    evaluation_window: EvaluationWindow | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.identity.run_id:
+            raise ValueError("run_id must not be empty")
+        if self.timestamps.empty:
+            raise ValueError("timestamps must not be empty")
+        if not self.timestamps.is_monotonic_increasing:
+            raise ValueError("timestamps must be monotonic increasing")
+        if not self.instruments or len(set(self.instruments)) != len(self.instruments):
+            raise ValueError("instruments must be non-empty and unique")
+        if self.evaluation_window is not None:
+            if self.timestamps[0] < self.evaluation_window.start or self.timestamps[-1] > self.evaluation_window.end:
+                raise ValueError("plan timestamps must be inside the evaluation window")
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioIntent:
+    """Strategy output. Execution engines own order and fill generation."""
+
+    timestamp: pd.Timestamp
+    strategy_id: str
+    portfolio_id: str
+    target_kind: TargetKind
+    values: np.ndarray
+    instruments: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.strategy_id or not self.portfolio_id:
+            raise ValueError("strategy_id and portfolio_id must not be empty")
+        values = np.asarray(self.values, dtype=float)
+        if values.ndim not in (1, 2) or values.shape[-1] != len(self.instruments):
+            raise ValueError("intent values must end with the instrument axis")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("intent values must be finite")
+        object.__setattr__(self, "values", values)
+
+
+class OrderSide(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+@dataclass(frozen=True, slots=True)
+class FeeComponent:
+    """One named fee component, expressed in base-currency minor units."""
+
+    name: str
+    amount_minor: int
+
+    def __post_init__(self) -> None:
+        if not self.name or self.amount_minor < 0:
+            raise ValueError("fee component requires a name and non-negative amount")
+
+
+@dataclass(frozen=True, slots=True)
+class FeeBreakdown:
+    """Fees frozen onto a fill so replay never queries mutable fee schedules."""
+
+    components: tuple[FeeComponent, ...] = ()
+
+    def __post_init__(self) -> None:
+        names = [component.name for component in self.components]
+        if len(names) != len(set(names)):
+            raise ValueError("fee component names must be unique")
+
+    @property
+    def total_minor(self) -> int:
+        return sum(component.amount_minor for component in self.components)
+
+
+@dataclass(frozen=True, slots=True)
+class Order:
+    order_id: str
+    strategy_id: str
+    portfolio_id: str
+    timestamp: pd.Timestamp
+    instrument: str
+    side: OrderSide
+    quantity: float
+
+    def __post_init__(self) -> None:
+        if (
+            not self.order_id
+            or not self.strategy_id
+            or not self.portfolio_id
+            or not self.instrument
+            or self.quantity <= 0
+        ):
+            raise ValueError("order requires id, instrument, and positive quantity")
+
+
+@dataclass(frozen=True, slots=True)
+class Fill:
+    fill_id: str
+    order_id: str
+    strategy_id: str
+    portfolio_id: str
+    timestamp: pd.Timestamp
+    instrument: str
+    side: OrderSide
+    quantity: float
+    price: float
+    fees: FeeBreakdown = field(default_factory=FeeBreakdown)
+
+    def __post_init__(self) -> None:
+        if self.quantity <= 0 or self.price <= 0:
+            raise ValueError("fill quantity and price must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioSnapshot:
+    timestamp: pd.Timestamp
+    cash_minor: int
+    margin_minor: int
+    equity_minor: int
+    realized_pnl_minor: int
+    positions: Mapping[str, float]
+    evaluation_segment: EvaluationSegment = EvaluationSegment.IN_SAMPLE
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioResult:
+    strategy_id: str
+    portfolio_id: str
+    snapshots: tuple[PortfolioSnapshot, ...]
+    fills: tuple[Fill, ...] = ()
+
+    @property
+    def final_snapshot(self) -> PortfolioSnapshot:
+        if not self.snapshots:
+            raise ValueError("portfolio result has no snapshots")
+        return self.snapshots[-1]
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestResult:
+    """One run containing independently accounted strategy portfolios."""
+
+    identity: RunIdentity
+    engine: str
+    portfolios: Mapping[str, PortfolioResult]
+    event_count: int
+    metrics: Mapping[str, float] = field(default_factory=dict)
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestProgress:
+    run_id: str
+    phase: str
+    completed: int
+    total: int
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.run_id or self.completed < 0 or self.total < 0:
+            raise ValueError("invalid backtest progress")
+        if self.total and self.completed > self.total:
+            raise ValueError("backtest progress cannot exceed total")

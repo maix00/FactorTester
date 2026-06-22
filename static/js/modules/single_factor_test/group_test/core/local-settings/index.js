@@ -44,6 +44,9 @@
     }
 
     function activateTab(tabKey) {
+        if (GT.backendSettings && typeof GT.backendSettings.deactivateLocal === 'function') {
+            GT.backendSettings.deactivateLocal();
+        }
         var tabs = getTabEntries();
         if (!tabs.length) return;
         var nextKey = _byKey[tabKey] ? tabKey : tabs[0].key;

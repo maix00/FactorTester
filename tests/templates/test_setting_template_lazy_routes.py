@@ -1,6 +1,7 @@
 from flask import Flask
 
 from server.modules.templates import setting_snapshot_routes as routes
+from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
 
 
 def test_template_list_returns_metadata_without_snapshot(monkeypatch):
@@ -53,3 +54,32 @@ def test_template_detail_loads_only_requested_template(monkeypatch):
     assert response.get_json() == {"success": True, "template": template}
     assert len(calls) == 1
     assert calls[0][0][2] == "tpl-2"
+
+
+def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
+    snapshot, changed = migrate_snapshot_backend_settings({
+        "time_data": {
+            "start_date": "2024-01-02",
+            "start_time": "09:00",
+            "end_date": "2026-05-31",
+            "end_time": "15:00",
+            "timezone": "Asia/Shanghai",
+            "time_precision": "exact",
+        },
+        "local_settings": {
+            "initialCapital": {"initialCapital": 100000000},
+            "calendarFreq": {"autoGroupCalendarFreq": True, "groupCalendarFreq": "1min"},
+        },
+    })
+
+    assert changed is True
+    assert "time_data" not in snapshot
+    assert "initialCapital" not in snapshot["local_settings"]
+    assert "calendarFreq" not in snapshot["local_settings"]
+    assert "backendBacktestSettings" not in snapshot["local_settings"]
+    assert snapshot["local_settings"] == {
+        "start_date": "2024-01-02",
+        "start_time": "09:00",
+        "end_date": "2026-05-31",
+        "end_time": "15:00",
+    }

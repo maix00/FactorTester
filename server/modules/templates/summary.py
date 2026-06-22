@@ -2,37 +2,53 @@
 
 from __future__ import annotations
 
+from tools.backtest.settings import backtest_setting_registry
+
 
 def build_snapshot_summary(snapshot: dict) -> dict:
     """Build a readable summary from a saved single-factor-test snapshot."""
     summary = {}
 
-    time_data = snapshot.get('time_data', {})
-    if time_data:
-        start_date = time_data.get('start_date') or time_data.get('start') or ''
-        start_time = time_data.get('start_time', '')
-        end_date = time_data.get('end_date') or time_data.get('end') or ''
-        end_time = time_data.get('end_time', '')
-        parts = [start_date]
-        if start_time:
-            parts.append(' ' + start_time)
-        parts.append(' ~ ')
-        parts.append(end_date)
-        if end_time:
-            parts.append(' ' + end_time)
-        suffix = ''
-        if time_data.get('is_trading_day'):
-            suffix = ' (交易日)'
-        elif time_data.get('is_cn_futures_day'):
-            suffix = ' (期货日盘)'
-        elif time_data.get('is_cn_futures_night'):
-            suffix = ' (期货夜盘)'
-        timezone = time_data.get('timezone') or 'Asia/Shanghai'
-        summary['time_range'] = [
-            f"起始: {start_date}{(' ' + start_time) if start_time else ''}",
-            f"终止: {end_date}{(' ' + end_time) if end_time else ''}",
-            f"时区: {timezone}{suffix}",
-        ]
+    local_settings = snapshot.get('local_settings') or {}
+    backend_local = local_settings if isinstance(local_settings, dict) else {}
+
+    if backend_local:
+        try:
+            app_settings = backtest_setting_registry.get(
+                'group_test'
+            )
+            manifest = app_settings.manifest()
+            defaults = manifest.get('defaults') or {}
+            values = {
+                key: item.get('value')
+                for key, item in defaults.items()
+                if isinstance(item, dict)
+            }
+            values.update(backend_local)
+            for tab in (manifest.get('tab_lists') or {}).get('local-settings') or []:
+                template = tab.get('summary_template')
+                if not template:
+                    continue
+                keys = tab.get('summary_keys') or [
+                    key for key, item in defaults.items()
+                    if isinstance(item, dict) and item.get('tab_key') == tab.get('key')
+                ]
+                if not any(key in backend_local for key in keys):
+                    continue
+                text = str(template)
+                for key in keys:
+                    text = text.replace('{' + key + '}', str(values.get(key) or ''))
+                summary.setdefault('backtest_settings', []).append(
+                    f"{tab.get('label') or tab.get('key')}: {' '.join(text.split())}"
+                )
+        except Exception:
+            pass
+        explicit_keys = sorted(
+            key for key in backend_local
+        )
+        parts = summary.setdefault('backtest_settings', [])
+        if explicit_keys:
+            parts.append('显式字段: ' + ', '.join(explicit_keys))
 
     params = snapshot.get('params_list', [])
     if params:
@@ -94,22 +110,30 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             group_parts.append(
                 f"共 {total_groups} 组{screen_note} · Long-Short {len(ls_configs)} 个"
             )
-            fee_labels = {'none': '无费率', 'uniform': '统一费率', 'per_product': '分品种费率', 'custom': '自定义费率'}
-            rebalance_labels = {'hold': '组内持仓不动', 'daily': '每日调仓', 'signal': '信号频率调仓'}
+            fee_labels = {'none': '无费用', 'market': '市场规则', 'custom': '自定义费率'}
+            trigger_labels = {
+                'on_factor_signal': '因子信号事件',
+                'membership_change': '成员变化事件',
+                'scheduled': '日历计划事件',
+            }
+            position_labels = {
+                'rebalance_to_target': '按目标调仓',
+                'buy_and_hold': '买入持有',
+            }
             for group in flat_groups[:8]:
                 label = group.get('shortAlias') or group.get('name') or group.get('id') or '未命名组'
                 group_index = group.get('groupIndex', '未设置')
                 group_count_value = group.get('splitCount', '未设置')
                 factor_alias = group.get('factorAlias') or '因子未设置'
-                fee_mode_value = group.get('feeMode') or 'none'
+                overrides = group if isinstance(group, dict) else {}
+                fee_mode_value = overrides.get('fee_mode') or '默认'
                 fee_text = fee_labels.get(fee_mode_value, fee_mode_value)
-                fee_map = group.get('feeMap') if isinstance(group.get('feeMap'), dict) else {}
-                if fee_mode_value in {'per_product', 'custom'} and fee_map:
-                    fee_text += f"({len(fee_map)} 个品种)"
-                rebalance = (group.get('rebalanceConfig') or {}).get('mode')
-                rebalance_text = rebalance_labels.get(rebalance, rebalance or '默认调仓')
+                trigger = overrides.get('rebalance_trigger')
+                trigger_text = trigger_labels.get(trigger, trigger or '默认触发')
+                position_policy = overrides.get('position_policy')
+                position_text = position_labels.get(position_policy, position_policy or '默认持仓')
                 group_parts.append(
-                    f"{label} · 第{group_index}/{group_count_value}组 · 因子 {factor_alias} · {fee_text} · {rebalance_text}"
+                    f"{label} · 第{group_index}/{group_count_value}组 · 因子 {factor_alias} · {fee_text} · {trigger_text} · {position_text}"
                 )
             if len(flat_groups) > 8:
                 group_parts.append(f"…另 {len(flat_groups) - 8} 个组")

@@ -22,12 +22,6 @@
         return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
     }
 
-    function prepareLocalRun() {
-        return GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
-            ? GT.localSettings.prepareRun()
-            : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
-    }
-
     async function resolveSubmissionIdForGroup(submissionId) {
         var targetId = String(submissionId || '');
         if (!targetId) return targetId;
@@ -113,11 +107,12 @@
     /**
      * 批量分组测试 POST（SSE 流式）
      */
-    runTest.postBatchGroupTest = function(payload, onEvent) {
+    runTest.postBatchGroupTest = function(payload, onEvent, signal) {
         return fetch('/run_group_test_stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: signal
         }).then(async function(res) {
             if (!res.ok) {
                 throw new Error('HTTP ' + res.status);
@@ -167,11 +162,7 @@
     runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
-
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
-            REG.commitDirty();
-        }
+        var cancelBtn = document.getElementById('cancel_group_test_btn');
 
         // ── 0. 检查是否有分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
@@ -196,7 +187,12 @@
             }
             return out;
         }
-        var runGroups = allStoredGroups.map(_resolvedGroupForRun);
+        var runGroups = allStoredGroups.map(_resolvedGroupForRun).map(function(group) {
+            if (GT.backendSettings && typeof GT.backendSettings.groupPayloadForRun === 'function') {
+                return GT.backendSettings.groupPayloadForRun(group);
+            }
+            return group;
+        });
         // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
         var groupIdToIndex = {};
         for (var ai = 0; ai < runGroups.length; ai++) {
@@ -221,17 +217,23 @@
             flatLSConfigs.push({
                 name: lsName,
                 key: lsName,
-                long: [{ group: longIdx - 1, weight: 1.0 }],
-                short: [{ group: shortIdx - 1, weight: 1.0 }]
+                long: [{ group_id: String(ls.longGroupId), group: longIdx - 1, weight: 1.0 }],
+                short: [{ group_id: String(ls.shortGroupId), group: shortIdx - 1, weight: 1.0 }]
             });
         }
 
         // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
-        var localRun = prepareLocalRun();
-        if (localRun.errors && localRun.errors.length) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
+        if (!GT.backendSettings || typeof GT.backendSettings.runPayload !== 'function') {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 后端注册的回测设置尚未加载'; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+        var backendRunPayload = GT.backendSettings.runPayload();
+        var runtimeWindow = backendRunPayload._runtime_window || {};
+        if (!runtimeWindow.start_date || !runtimeWindow.end_date) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 请在回测设置中指定有效时间范围'; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;
         }
@@ -242,13 +244,43 @@
         }
 
         // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
-        var bulkPayload = Object.assign({}, localRun.payload, {
+        var bulkPayload = Object.assign({}, backendRunPayload, {
             groups: runGroups,
             flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''
         });
+        var runToken = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        var abortController = new AbortController();
+        bulkPayload.run_token = runToken;
+        runTest._activeRun = { token: runToken, controller: abortController };
+        if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.onclick = async function() {
+                if (!runTest._activeRun || runTest._activeRun.token !== runToken) return;
+                cancelBtn.disabled = true;
+                if (statusSpan) {
+                    statusSpan.textContent = '正在取消测试...';
+                    statusSpan.style.color = '#b45309';
+                }
+                try {
+                    await fetch('/cancel_group_test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            run_token: runToken,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    });
+                } finally {
+                    abortController.abort();
+                }
+            };
+        }
 
         try {
             // ── 多行并行进度条 ──
@@ -266,11 +298,63 @@
             }
             progressContainer.innerHTML = '';
 
+            var batchProgressHost = document.createElement('div');
+            progressContainer.appendChild(batchProgressHost);
+
+            var replayProgress = document.createElement('div');
+            replayProgress.className = 'gt-progress-track';
+            replayProgress.style.cssText = 'display:none;margin-top:10px;';
+            replayProgress.innerHTML = '<div style="display:flex;align-items:center;gap:8px;width:100%;">'
+                + '<span data-replay-phase style="flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">交易账本回放</span>'
+                + '<span data-replay-count style="flex:0 0 auto;font-size:12px;color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">0/0</span>'
+                + '<span style="flex:0 0 24px;width:24px;height:22px;"></span></div>'
+                + '<div style="width:100%;margin-top:6px;"><div style="display:block;background:#e2e8f0;border-radius:999px;height:7px;overflow:hidden;">'
+                + '<div data-replay-fill style="display:block;height:100%;width:0;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .18s ease;border-radius:999px;"></div></div></div>'
+                + '<div data-replay-label style="margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">等待事件回放</div>';
+            var progressNotice = document.createElement('div');
+            progressNotice.className = 'gt-progress-notice';
+            progressNotice.style.cssText = 'display:none;margin-top:10px;padding:8px 10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;line-height:1.5;';
+            var seenProgressNotices = {};
+            function pushProgressNotice(kind, text) {
+                if (!text || seenProgressNotices[kind + ':' + text]) return;
+                seenProgressNotices[kind + ':' + text] = true;
+                progressNotice.style.display = 'block';
+                var row = document.createElement('div');
+                row.textContent = text;
+                progressNotice.appendChild(row);
+            }
+            function updateProgressNotice(payload) {
+                var fallbacks = Array.isArray(payload.setting_fallbacks) ? payload.setting_fallbacks : [];
+                if (fallbacks.length) {
+                    pushProgressNotice('setting-fallbacks', '已按当前执行引擎替换 ' + fallbacks.length + ' 个不适用设置，结果摘要中会保留明细。');
+                }
+                var multiSession = Array.isArray(payload.multi_session_entries) ? payload.multi_session_entries : [];
+                if (multiSession.length) {
+                    var totalMissing = 0;
+                    for (var mi = 0; mi < multiSession.length; mi++) {
+                        totalMissing += Number(multiSession[mi].missing_product_count || 0);
+                    }
+                    pushProgressNotice('multi-session', '检测到持仓池内存在多时段/缺 bar/异步交易品种，已启用按可交易切片处理（涉及 ' + totalMissing + ' 个品种）。');
+                }
+            }
+            function updateReplayProgress(payload) {
+                var completed = Number(payload.completed || 0);
+                var total = Number(payload.total || 0);
+                var percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
+                replayProgress.style.display = 'block';
+                replayProgress.querySelector('[data-replay-fill]').style.width = percent.toFixed(2) + '%';
+                replayProgress.querySelector('[data-replay-count]').textContent = completed + '/' + total;
+                replayProgress.querySelector('[data-replay-label]').textContent =
+                    (payload.event_timestamp || payload.message || '');
+            }
+
             var pendingGlobalProgress = [];
 
             var batchMgr = GT.groupSettings.runGroupBatch.createManager({
-                progressContainer: progressContainer,
+                progressContainer: batchProgressHost,
             });
+            progressContainer.appendChild(replayProgress);
+            progressContainer.appendChild(progressNotice);
 
             markProgressRowsDone = function(done, message) {
                 batchMgr.markAllDone(done, message);
@@ -306,6 +390,11 @@
                         }
                     }
                 } else if (event === 'progress') {
+                    updateProgressNotice(payload);
+                    if (payload.phase === 'event_replay') {
+                        updateReplayProgress(payload);
+                        return;
+                    }
                     var bi = payload.product_coverage_batch_index;
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));
@@ -323,7 +412,7 @@
                         batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
                 }
-            });
+            }, abortController.signal);
 
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
@@ -360,12 +449,21 @@
             }
         } catch (e) {
             console.error('[runGroupTest] error:', e);
-            markProgressRowsDone(false, e.message || '未知错误');
+            var wasCancelled = e && e.name === 'AbortError';
+            markProgressRowsDone(false, wasCancelled ? '测试已取消' : (e.message || '未知错误'));
             if (statusSpan) {
-                statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
-                statusSpan.style.color = '#d40000';
+                statusSpan.innerHTML = wasCancelled ? '已取消测试' : ('✗ ' + (e.message || '未知错误'));
+                statusSpan.style.color = wasCancelled ? '#b45309' : '#d40000';
             }
         } finally {
+            if (runTest._activeRun && runTest._activeRun.token === runToken) {
+                runTest._activeRun = null;
+            }
+            if (cancelBtn) {
+                cancelBtn.style.display = 'none';
+                cancelBtn.disabled = false;
+                cancelBtn.onclick = null;
+            }
             if (runBtn) {
                 runBtn.disabled = false;
                 runBtn.style.display = '';

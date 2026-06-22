@@ -8,7 +8,7 @@
  * 进度条设计：
  * - 单条渐变色进度条，颜色随当前阶段变化
  * - 下拉列表（点击 ▼ 展开）显示每阶段的完成详情
- * - 布局：Batch标签 + 阶段名 + 渐变色进度条 + 计数 + ▼按钮
+ * - 布局：阶段名 + 计数 + ▼按钮，下一行显示全宽渐变进度条
  * - 进度永不回退（pct 只增不减）
  *
  * 挂载到 GT.groupSettings.runGroupBatch（内部模块，由 run-test.js 调用）。
@@ -297,38 +297,27 @@
             }
 
             var row = document.createElement('div');
-            row.style.cssText = 'margin-bottom:6px;';
+            row.className = 'gt-progress-track';
+            row.style.cssText = 'margin-bottom:10px;';
 
-            // 第一行：标签 + 阶段名 + 进度条 + 计数 + 展开按钮
+            // 第一行：阶段名 + 计数 + 展开按钮
             var line = document.createElement('div');
             line.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
 
-            // 标签（左侧信息栏）
+            // 兼容旧调用保留 labelEl，但单批运行不再展示 Batch 标签。
             var labelEl = document.createElement('span');
-            labelEl.style.cssText = 'flex:0 0 70px;font-size:12px;font-weight:600;color:#333;white-space:nowrap;';
-            labelEl.textContent = label || ('Batch ' + (index + 1));
-            line.appendChild(labelEl);
+            labelEl.style.cssText = 'display:none;';
+            labelEl.textContent = label || '';
 
             // 阶段名
             var phaseEl = document.createElement('span');
-            phaseEl.style.cssText = 'flex:0 0 65px;font-size:11px;color:#888;white-space:nowrap;';
+            phaseEl.style.cssText = 'flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
             phaseEl.textContent = '准备中';
             line.appendChild(phaseEl);
 
-            // 单条渐变色进度条
-            var barWrap = document.createElement('span');
-            barWrap.style.cssText = 'flex:1 1 auto;min-width:120px;';
-            var bar = document.createElement('span');
-            bar.style.cssText = 'display:block;background:#e0e0e0;border-radius:4px;height:8px;overflow:hidden;';
-            var fill = document.createElement('span');
-            fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:4px;';
-            bar.appendChild(fill);
-            barWrap.appendChild(bar);
-            line.appendChild(barWrap);
-
             // 计数
             var textEl = document.createElement('span');
-            textEl.style.cssText = 'flex:0 0 100px;font-size:11px;color:#666;text-align:right;white-space:nowrap;';
+            textEl.style.cssText = 'flex:0 0 auto;font-size:12px;color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;';
             textEl.textContent = '0/0';
             line.appendChild(textEl);
 
@@ -341,15 +330,26 @@
 
             row.appendChild(line);
 
+            // 单条全宽渐变色进度条，与交易账本回放进度条对齐。
+            var barWrap = document.createElement('div');
+            barWrap.style.cssText = 'width:100%;margin-top:6px;';
+            var bar = document.createElement('div');
+            bar.style.cssText = 'display:block;background:#e2e8f0;border-radius:999px;height:7px;overflow:hidden;';
+            var fill = document.createElement('div');
+            fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:999px;';
+            bar.appendChild(fill);
+            barWrap.appendChild(bar);
+            row.appendChild(barWrap);
+
             // 消息行
             var messageEl = document.createElement('div');
-            messageEl.style.cssText = 'margin-left:143px;margin-right:32px;margin-top:2px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            messageEl.style.cssText = 'margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
             messageEl.textContent = '';
             row.appendChild(messageEl);
 
             // 下拉历史面板（默认隐藏）
             var historyEl = document.createElement('div');
-            historyEl.style.cssText = 'display:none;margin-left:143px;margin-right:32px;margin-top:4px;padding:6px 8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;font-size:11px;';
+            historyEl.style.cssText = 'display:none;margin-top:6px;padding:6px 8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;font-size:11px;';
             row.appendChild(historyEl);
 
             toggle.addEventListener('click', function() {
@@ -440,15 +440,15 @@
                         row.pct = 100;
                         row.fillEl.style.width = '100%';
                         row.fillEl.style.background = 'linear-gradient(90deg,#12a150,#4caf50)';
-                        row.phaseEl.textContent = '✓';
+                        row.phaseEl.textContent = '分组测试';
                         row.phaseEl.style.color = '#12a150';
-                        row.textEl.textContent = '完成';
-                        // 完成后隐藏消息行，只保留左侧标签 + 进度条 + 计数
+                        row.textEl.textContent = '100%';
+                        // 完成后保留稳定标题，只更新消息和进度，避免整行视觉跳变。
                         if (row.messageEl) {
-                            row.messageEl.style.display = 'none';
+                            row.messageEl.style.display = '';
                         }
                     } else {
-                        row.phaseEl.textContent = '✗';
+                        row.phaseEl.textContent = '分组测试';
                         row.phaseEl.style.color = '#d92d20';
                         row.fillEl.style.background = 'linear-gradient(90deg,#d92d20,#f97066)';
                     }

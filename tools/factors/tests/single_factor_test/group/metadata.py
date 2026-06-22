@@ -9,6 +9,7 @@
 
 GROUP_TEST_PHASES = [
     {"key": "factor_eval",     "label": "因子计算"},
+    {"key": "signal_sequence", "label": "因子信号序列"},
     {"key": "returns_eval",    "label": "收益率计算"},
     {"key": "membership",      "label": "分组隶属"},
     {"key": "flat_membership", "label": "展开隶属"},
@@ -25,6 +26,8 @@ GROUP_TEST_PHASES = [
         "ready":          "数据就绪",
     }},
     {"key": "liquidity",       "label": "流动性容量"},
+    {"key": "framework_execution", "label": "事件回测工具"},
+    {"key": "result_packaging", "label": "结果整理"},
     {"key": "simulate",        "label": "模拟中", "sub_steps": {
         "slicing":        "结果切片",
     }},

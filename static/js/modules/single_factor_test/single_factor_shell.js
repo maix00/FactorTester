@@ -264,11 +264,14 @@ async function executeScriptsIn(root) {
 }
 
 function loadExternalScript(src) {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         const script = document.createElement('script');
         script.src = src;
         script.onload = function() { script.remove(); resolve(); };
-        script.onerror = function() { script.remove(); resolve(); };
+        script.onerror = function() {
+            script.remove();
+            reject(new Error('Failed to load script: ' + src));
+        };
         document.body.appendChild(script);
     });
 }

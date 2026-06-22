@@ -10,8 +10,6 @@
     GT.panels = GT.panels || {};
     GT.panels.list = GT.panels.list || {};
 
-    var REG = window.GT_CONFIG_REGISTRY;
-
     // ── Expand caches ──
     var _testerProductsCache = {};
     var _nodeFeeCache = {};
@@ -25,9 +23,16 @@
 
     function escapeHTML(str) { return GT.escapeHTML(str); }
 
-    // ── Chip badge style ──
-    var CHIP_STYLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
-    var CHIP_STYLE_PLAIN = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+    // ── Chip badge class marker; visual styling is centralized in CSS. ──
+    var CHIP_STYLE = '';
+    var CHIP_STYLE_PLAIN = '';
+
+    function renderChipHtml(labelOrText, value) {
+        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
+            return GT.backendSettings.renderChipHtml(labelOrText, value);
+        }
+        return escapeHTML(value === undefined ? labelOrText : (labelOrText + ': ' + value));
+    }
 
     /** Get products list for a tester from window.submissions (cached) */
     function testerProducts(testerId) {
@@ -140,24 +145,27 @@
     }
 
     function derivedFeeDisplay(node) {
-        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
+        var values = GT.backendSettings && GT.backendSettings.groupOverrideValues
+            ? GT.backendSettings.groupOverrideValues(node && node.id)
+            : null;
+        var mode = values && values.fee_mode;
         if (mode === 'none' || !mode) return '—';
-        if (mode === 'uniform' || mode === 'fixed') return (node.feeRate != null) ? Number(node.feeRate).toFixed(6) : '—';
-        if (mode === 'per_product') { var m1 = node.feeMap || {}; return '按品种(' + Object.keys(m1).length + ')'; }
-        if (mode === 'custom') { var m2 = node.feeMap || {}; return '自定义(' + Object.keys(m2).length + ')'; }
+        if (mode === 'market') return '市场规则';
+        if (mode === 'custom') return values.custom_fee_rate != null ? Number(values.custom_fee_rate).toFixed(6) : '自定义';
         return mode;
     }
 
     function derivedRebalanceLabel(node) {
-        var mode = node.rebalanceMode || null;
-        var map = { 'each_period': '每期', 'buy_and_hold': '持仓不动', 'recycle': '退出补新' };
+        var values = GT.backendSettings && GT.backendSettings.groupOverrideValues
+            ? GT.backendSettings.groupOverrideValues(node && node.id)
+            : null;
+        var mode = values && values.rebalance_trigger;
+        var map = { 'on_factor_signal': '因子信号事件', 'membership_change': '成员变化事件', 'scheduled': '日历计划事件' };
         return map[mode] || (mode || '—');
     }
 
     function derivedCloseTodayLabel(node) {
-        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
-        if (mode === 'none' || mode === 'fixed') return '—';
-        return node.useCloseToday ? '平今' : '平昨';
+        return '—';
     }
 
     function rebalanceLabel(mode) {
@@ -246,65 +254,30 @@
     }
 
     /**
-     * Get config chips for a child node using REG.getChips, diffed against root.
+     * Get backend-registered config/derived chips for a child node, diffed against parent.
      * Only shows chips where the resolved value differs from the root.
      */
     function deriveOverrideChips(node) {
         if (!node || !node.parentId) return [];
-        // Walk parentId chain to root
-        var cur = node;
-        var visited = {};
-        while (cur && cur.parentId) {
-            if (visited[cur.id]) { cur = null; break; }
-            visited[cur.id] = true;
-            cur = GT.groupSettings.groups && GT.groupSettings.groups.get(cur.parentId);
-        }
-        var bg = cur;
-        if (!bg) return [];
-        if (!REG || typeof REG.getChips !== 'function') return [];
-
-        var derivedSynth = synthGroupResolved(node);
-        if (!derivedSynth) return [];
-
-        var baseSynth = synthGroupResolved(bg);
-
-        var baseChips = REG.getChips(baseSynth);
-        var derivedChips = REG.getChips(derivedSynth);
-
-        var baseLabels = {};
-        for (var b = 0; b < baseChips.length; b++) {
-            baseLabels[baseChips[b].label] = baseChips[b].html;
-        }
-
-        var diff = [];
-        for (var d = 0; d < derivedChips.length; d++) {
-            var dc = derivedChips[d];
-            if (baseLabels[dc.label] !== dc.html) {
-                diff.push(dc);
-            }
-        }
-
-        return diff;
+        return GT.backendSettings && typeof GT.backendSettings.getOverrideChips === 'function'
+            ? GT.backendSettings.getOverrideChips(node)
+            : [];
     }
 
     /** Render all chips for a group */
     function renderAllChipsForGroup(g) {
         if (!g) return '';
-        if (!REG || typeof REG.getAllChips !== 'function') return '';
-        var allChips = REG.getAllChips(g);
+        var allChips = GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function'
+            ? GT.backendSettings.getAllChips(g)
+            : [];
         var html = '<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;">';
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
-            var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
-            if (chip.onClick) {
-                var attr = g.parentId
-                    ? ('data-dgid="' + escapeHTML(g.id) + '"')
-                    : ('data-gid="' + escapeHTML(g.id) + '"');
-                html += '<span class="unified-config-chip" ' + attr
-                    + ' data-chip-label="' + escapeHTML(chip.label)
-                    + '" style="' + s + '">' + chip.html + '</span>';
+            var s = chip.style || CHIP_STYLE_PLAIN;
+            if (chip.clickable) {
+                html += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + escapeHTML(chip.action || '') + '" data-gid="' + escapeHTML(g.id) + '" data-chip-label="' + escapeHTML(chip.label) + '" style="' + s + '">' + chip.html + '</span>';
             } else {
-                html += '<span style="' + s + '">' + chip.html + '</span>';
+                html += '<span class="gt-backend-chip" style="' + s + '">' + chip.html + '</span>';
             }
         }
         html += '</span>';
@@ -331,6 +304,7 @@
         escapeHTML: escapeHTML,
         CHIP_STYLE: CHIP_STYLE,
         CHIP_STYLE_PLAIN: CHIP_STYLE_PLAIN,
+        renderChipHtml: renderChipHtml,
         testerProducts: testerProducts,
         testerLabel: testerLabel,
         dgName: dgName,

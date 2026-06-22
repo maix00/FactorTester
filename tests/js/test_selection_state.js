@@ -1,9 +1,8 @@
-const { assert, resetGroupTest, registerConfigFields, load } = require('./group_test_harness');
+const { assert, resetGroupTest, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
 load('panels/list/selection-state.js');
 load('core/group-settings.js');
-registerConfigFields(GT);
 
 GT.groupSettings.groups.add({
   id: 'base-select',

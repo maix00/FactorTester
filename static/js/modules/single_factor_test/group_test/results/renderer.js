@@ -25,6 +25,8 @@
     var getLastMetrics   = function() { var c = cache(); return c ? c.getLastMetrics() : null; };
     var _lastInitialCapital = 100000000;
     var _lastBaseCurrency = 'CNY';
+    var _lastEvaluationWindow = null;
+    var _showOutOfSample = false;
     function setLastInitialCapital(v) { if (typeof v === 'number' && v > 0) _lastInitialCapital = v; }
     function getLastInitialCapital() { return _lastInitialCapital; }
     function setLastBaseCurrency(v) { _lastBaseCurrency = String(v || 'CNY').toUpperCase(); }
@@ -43,6 +45,8 @@
             GT.results.chart.groups.draw(groups, {
                 initialCapital: getLastInitialCapital(),
                 baseCurrency: getLastBaseCurrency(),
+                evaluationWindow: _lastEvaluationWindow,
+                showOutOfSample: _showOutOfSample,
                 onSnapshot: function(t) {
                     return GT.results.snapshot ? GT.results.snapshot.fetchGroupSnapshot(t) : null;
                 },
@@ -103,11 +107,16 @@
         if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.update === 'function') {
             GT.results.strategyPanel.update(
                 data.multi_session_active,
-                data.rebalance_mode,
                 data.multi_session_entries,
                 {
                     capital_warning: data.capital_warning,
                     capital_diagnostics: data.capital_diagnostics,
+                    market_rule_warning: data.market_rule_warning,
+                    market_rule_approximation_count: data.market_rule_approximation_count,
+                    setting_fallback_warning: data.setting_fallback_warning,
+                    setting_fallbacks: data.setting_fallbacks,
+                    backtest_settings: data.backtest_settings,
+                    engine_result: data.engine_result,
                 }
             );
         }
@@ -117,6 +126,22 @@
         setLastMetrics(data.metrics);
         setLastInitialCapital(data.initial_capital);
         setLastBaseCurrency(data.base_currency);
+        _lastEvaluationWindow = data.evaluation_window || null;
+        _showOutOfSample = false;
+
+        var evaluationToolbar = document.getElementById('group-evaluation-toolbar');
+        var oosToggle = document.getElementById('group-oos-toggle');
+        if (evaluationToolbar) {
+            evaluationToolbar.style.display = _lastEvaluationWindow && _lastEvaluationWindow.split_ms ? 'flex' : 'none';
+        }
+        if (oosToggle) {
+            oosToggle.textContent = '显示样本外';
+            oosToggle.onclick = function() {
+                _showOutOfSample = !_showOutOfSample;
+                oosToggle.textContent = _showOutOfSample ? '仅显示样本内' : '显示样本外';
+                renderer.drawGroupChart(getLastGrossData());
+            };
+        }
 
         // 3) 画图 + 指标表
         renderer.drawGroupChart(data.groups);

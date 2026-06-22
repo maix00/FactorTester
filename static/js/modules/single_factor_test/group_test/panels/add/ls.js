@@ -139,14 +139,13 @@
         return html;
     }
 
-    // ── Chips: unified via GT_CONFIG_REGISTRY.getAllChips ──
+    // ── Chips: unified via backend-registered settings manifest ──
 
     function _chipsHTML(g) {
         if (!g) return '';
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (!REG || typeof REG.getAllChips !== 'function') return '';
-
-        var allChips = REG.getAllChips(g);
+        var allChips = GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function'
+            ? GT.backendSettings.getAllChips(g)
+            : [];
         var html = '';
         for (var i = 0; i < allChips.length; i++) {
             var c = allChips[i];
@@ -232,6 +231,7 @@
         GT.modes.registerEditAction({
             name: 'create-ls',
             label: '⚡ 创建 LS 组合',
+            title: '创建 Long-Short 组合',
             priority: 20,
             condition: function(ctx) {
                 return ctx && ctx.count === 2;

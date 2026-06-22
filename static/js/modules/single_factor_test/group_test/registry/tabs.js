@@ -80,11 +80,9 @@
         var el = document.getElementById('gt-section-status');
         if (!el) return;
         if (M.isMode('edit')) {
-            var REG = window.GT_CONFIG_REGISTRY;
-            var hasDirty = REG ? REG.hasDirty() : false;
             el.style.display = '';
-            el.style.color = hasDirty ? '#e65100' : '#888';
-            el.textContent = hasDirty ? '编辑中 - 未保存' : '编辑中';
+            el.style.color = '#888';
+            el.textContent = '编辑中';
         } else if (M.isMode('add')) {
             el.style.display = '';
             el.style.color = '#1565c0';
@@ -160,8 +158,19 @@
         if (!bar) return;
         var html = '';
         var d = M.getAddDraft();
+        function visibleIcon(innerHtml, title) {
+            var raw = String(innerHtml || '');
+            if (raw.indexOf('<i') < 0) return raw;
+            if (raw.indexOf('fa-plus') >= 0) return '+';
+            if (raw.indexOf('fa-times') >= 0) return '&times;';
+            if (raw.indexOf('fa-save') >= 0) return '&#10003;';
+            if (raw.indexOf('fa-copy') >= 0) return '&#10697;';
+            if (raw.indexOf('fa-trash') >= 0) return '&times;';
+            if (raw.indexOf('fa-edit') >= 0 || raw.indexOf('fa-pencil') >= 0) return '&#9998;';
+            return String(title || '') || raw;
+        }
         function iconButton(id, title, innerHtml, cls, extraStyle) {
-            return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + innerHtml + '</button>';
+            return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + visibleIcon(innerHtml, title) + '</button>';
         }
 
         if (M.isMode('add')) {
@@ -230,11 +239,6 @@
         var d = M.getAddDraft();
         if (!d) { alert('草稿丢失'); return; }
 
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.commitDirty === 'function') {
-            try { REG.commitDirty(); } catch(e) {}
-        }
-
         var onSubmit = M.getOnSubmit();
         if (typeof onSubmit === 'function') {
             onSubmit(d, { exitAdd: _exitAddMode });
@@ -245,8 +249,6 @@
     }
 
     function _enterEditMode(selection) {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.rollbackDirty();
         M.enterEdit(selection);
         _currentTab = 'list';
         _renderTabActions();
@@ -262,8 +264,6 @@
     }
 
     function _saveEditChanges() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.commitDirty();
         M.exitEdit();
         _renderTabActions();
         _renderTabBar();
@@ -355,30 +355,6 @@
             });
         }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
-        if (P.config && P.config.fee) {
-            registerPanel({
-                name: 'fee', label: '手续费', containerId: 'config-fee',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.fee
-            });
-        }
-        if (P.config && P.config.rebalance) {
-            registerPanel({
-                name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.rebalance
-            });
-        }
-        if (P.config && P.config.liquidity) {
-            registerPanel({
-                name: 'liquidity', label: '💧 流动性', containerId: 'config-liquidity',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.liquidity
-            });
-        }
-        if (P.config && P.config.productSift) {
-            registerPanel({
-                name: 'config-product-sift', label: '🌾 品种筛选', containerId: 'config-product-sift',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.productSift
-            });
-        }
     }
 
     function init() {
@@ -401,6 +377,7 @@
         enterAddMode: _enterAddMode,
         exitAddMode: _exitAddMode,
         renderTabActions: _renderTabActions,
+        refreshTabBar: _renderTabBar,
         _selectedEditIds: function() { return M.getEditIds(); },
     };
 
@@ -452,12 +429,6 @@
                     groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
                     productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
                 };
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
-                 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
-                    if (src[key] !== undefined && src[key] !== null) {
-                        clone[key] = (typeof src[key] === 'object') ? JSON.parse(JSON.stringify(src[key])) : src[key];
-                    }
-                });
                 try {
                     var newId = groups.add(clone);
                     created.push(newId);

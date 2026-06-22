@@ -12,6 +12,8 @@ import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.page_runtime import get_factor_tester
+import server.services.page_runtime as page_runtime
+from server.services.session_runtime import current_user
 from server.services.session_runtime import get_session_params
 from tools.data.types import finest_index
 from . import shared_bp
@@ -27,6 +29,15 @@ from .factor_data_helpers import (
     series_to_frontend,
 )
 from .price_data_helpers import to_epoch_ms
+
+
+def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
+    page_uuid = str(data.get('page_uuid') or '').strip()
+    if not page_uuid:
+        return None, (jsonify({'error': '缺少 page_uuid'}), 400)
+    if page_runtime.get_page_owner(page_uuid) != current_user():
+        return None, (jsonify({'error': 'page_uuid 不属于当前用户'}), 403)
+    return page_uuid, None
 
 
 @shared_bp.route('/api/factor_list')
@@ -75,15 +86,23 @@ def factor_list():
 @shared_bp.route('/get_factor_series', methods=['POST'])
 def get_factor_series():
     data = request.get_json()
+    page_uuid, error = _request_page_uuid(data)
+    if error is not None:
+        return error
     submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     product_name        = data.get('product')
     try:
-        tester = get_factor_tester(submission_id, caller='get_factor_series')
-        factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
+        tester = get_factor_tester(
+            submission_id, caller='get_factor_series', page_uuid=page_uuid
+        )
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
+        factors = factor_family.get_factors(
+            params_list=get_session_params(factor_family_alias, factor_family),
+            page_uuid=page_uuid,
+        )
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -152,15 +171,23 @@ def get_factor_series():
 @shared_bp.route('/get_return_series', methods=['POST'])
 def get_return_series():
     data = request.get_json()
+    page_uuid, error = _request_page_uuid(data)
+    if error is not None:
+        return error
     submission_id       = data.get('submission_id')
     product_name        = data.get('product')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = get_factor_tester(submission_id, caller='get_return_series')
-        factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
+        tester = get_factor_tester(
+            submission_id, caller='get_return_series', page_uuid=page_uuid
+        )
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
+        factors = factor_family.get_factors(
+            params_list=get_session_params(factor_family_alias, factor_family),
+            page_uuid=page_uuid,
+        )
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -205,6 +232,9 @@ def get_return_series():
 @shared_bp.route('/get_price_series', methods=['POST'])
 def get_price_series():
     data = request.get_json()
+    page_uuid, error = _request_page_uuid(data)
+    if error is not None:
+        return error
     submission_id       = data.get('submission_id')
     product_name        = data.get('product')
     products_list       = data.get('products') or []
@@ -215,9 +245,14 @@ def get_price_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = get_factor_tester(submission_id, caller='get_price_series')
-        factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
+        tester = get_factor_tester(
+            submission_id, caller='get_price_series', page_uuid=page_uuid
+        )
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
+        factors = factor_family.get_factors(
+            params_list=get_session_params(factor_family_alias, factor_family),
+            page_uuid=page_uuid,
+        )
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -326,6 +361,9 @@ def get_price_series():
 def get_factor_distribution():
     """返回某个时间点所有品种的因子截面分布值。"""
     data = request.get_json()
+    page_uuid, error = _request_page_uuid(data)
+    if error is not None:
+        return error
     submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
@@ -334,9 +372,14 @@ def get_factor_distribution():
     product_name        = data.get('product')    # 当前选中产品名，用于高亮
     try:
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
-        tester = get_factor_tester(submission_id, caller='get_factor_distribution')
-        factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
+        tester = get_factor_tester(
+            submission_id, caller='get_factor_distribution', page_uuid=page_uuid
+        )
+        factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
+        factors = factor_family.get_factors(
+            params_list=get_session_params(factor_family_alias, factor_family),
+            page_uuid=page_uuid,
+        )
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404

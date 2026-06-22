@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import threading
 from dataclasses import dataclass
 
 from tools.data.types import DataFreq
@@ -8,6 +9,7 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
 from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+from tools.factors.FactorTester import FactorTester
 
 
 class _FakeFactor:
@@ -138,7 +140,6 @@ class _FakeRuntimeTester:
 
 
 def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monkeypatch):
-    from server.services import page_runtime
     from tools.factors.tests.single_factor_test.group import group_tester as group_tester_module
 
     fake_tester = _FakeRuntimeTester()
@@ -170,7 +171,7 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
             index_list=list(pd.date_range("2024-01-01", periods=2, freq="min")),
         )
 
-    def fake_memberships(factor, shared, *, group_counts, rebalance_mode):
+    def fake_memberships(factor, shared, *, group_counts):
         out = []
         for n_groups in group_counts:
             membership = np.zeros((shared.T, int(n_groups), len(shared.signal_valid_cols)), dtype=bool)
@@ -178,18 +179,47 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
             out.append(membership)
         return out
 
-    monkeypatch.setattr(page_runtime, "get_factor_tester", lambda alias, caller=None: fake_tester)
     monkeypatch.setattr(group_tester_module, "_prepare_group_shared_inputs", fake_prepare)
     monkeypatch.setattr(group_tester_module, "_build_group_memberships_from_shared", fake_memberships)
 
     tester = FactorGroupTester.from_flat_groups(
         groups,
+        testers_by_id={"tester-1": fake_tester},
         spec_index_by_group={0: 0, 1: 0},
         calendar_index=None,
-        rebalance_mode="each_period",
     )
 
     assert prepared_aliases == ["FactorA", "FactorB"]
     assert [spec.factor_alias for spec in tester.specs] == ["FactorA", "FactorB"]
     assert [spec.simulation_index for spec in tester.specs] == [0, 0]
     assert [spec.signal_membership_np.shape[1] for spec in tester.specs] == [1, 1]
+
+
+def test_group_calendar_auto_preserves_factor_signal_events() -> None:
+    tester = FactorTester.__new__(FactorTester)
+    factor = _FakeFactor()
+    factor.alias = "SparseSignal"
+    factor.freq = DataFreq.MIN1
+    factor._expr = object()
+    tester.factors = [factor]
+    tester.group_calendar_freq = "auto"
+    tester.products = ["P"]
+    tester._results_lock = threading.RLock()
+    tester.results = {
+        factor: FactorRunResult(factor=factor)
+    }
+    sparse_index = pd.to_datetime([
+        "2024-01-01 09:00",
+        "2024-01-01 09:07",
+        "2024-01-01 09:30",
+    ])
+    tester.results[factor].table = pd.DataFrame({"P": [1.0, 2.0, 3.0]}, index=sparse_index)
+    tester.results[factor].returns = pd.DataFrame({"P": [0.01, 0.02, 0.03]}, index=sparse_index)
+
+    auto_index = tester.build_group_calendar_index(["SparseSignal"], requested_calendar_freq="auto")
+    dense_index = tester.build_group_calendar_index(["SparseSignal"], requested_calendar_freq=DataFreq.MIN1)
+
+    assert list(auto_index) == list(sparse_index)
+    assert len(dense_index) == 31
+    assert dense_index[0] == sparse_index[0]
+    assert dense_index[-1] == sparse_index[-1]
