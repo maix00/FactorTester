@@ -47,7 +47,7 @@ def test_five_groups_are_five_independent_strategies() -> None:
             group_count=5,
             allocator=EqualNotionalAllocator(),
             allocation_inputs=lambda _, selected: AllocationInput(instruments, selected),
-            rebalance_policy=OnFactorSignal(),
+            rebalance_trigger=OnFactorSignal(),
         )
         runtime.subscribe(EventTopic.FACTOR_SIGNAL, strategy.on_factor_signal)
     runtime.subscribe(
@@ -102,7 +102,7 @@ def test_long_short_is_a_peer_strategy_with_one_portfolio_intent() -> None:
         allocation_inputs=lambda _, selected, gross: AllocationInput(
             instruments, selected, gross_exposure=gross
         ),
-        rebalance_policy=OnFactorSignal(),
+        rebalance_trigger=OnFactorSignal(),
     )
     runtime = EventRuntime("long-short-run")
     runtime.add_source(ReplayEventSource(

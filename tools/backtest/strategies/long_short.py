@@ -11,7 +11,7 @@ from ..event_driven.contracts import PortfolioIntent, TargetKind
 from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..factors.events import FactorSignal
 from .allocation import AllocationInput, WeightAllocator
-from .rebalance import RebalancePolicy
+from .rebalance import RebalanceTrigger
 
 
 class QuantileLongShortStrategy:
@@ -27,7 +27,7 @@ class QuantileLongShortStrategy:
         short_group_number: int,
         allocator: WeightAllocator,
         allocation_inputs: Callable[[pd.Timestamp, np.ndarray, float], AllocationInput],
-        rebalance_policy: RebalancePolicy,
+        rebalance_trigger: RebalanceTrigger,
         gross_exposure: float = 1.0,
     ) -> None:
         if (
@@ -47,7 +47,7 @@ class QuantileLongShortStrategy:
         self.short_group_number = short_group_number
         self.allocator = allocator
         self.allocation_inputs = allocation_inputs
-        self.rebalance_policy = rebalance_policy
+        self.rebalance_trigger = rebalance_trigger
         self.gross_exposure = gross_exposure
 
     def on_factor_signal(
@@ -78,7 +78,7 @@ class QuantileLongShortStrategy:
             [instrument in short_names for instrument in self.instruments], dtype=bool
         )
         membership = long_selected | short_selected
-        if not self.rebalance_policy.should_rebalance(event.timestamp, membership):
+        if not self.rebalance_trigger.should_rebalance(event.timestamp, membership):
             return None
         leg_exposure = self.gross_exposure / 2.0
         long_weights = self.allocator.allocate(

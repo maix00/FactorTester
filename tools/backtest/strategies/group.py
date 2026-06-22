@@ -11,7 +11,7 @@ from ..event_driven.contracts import PortfolioIntent, TargetKind
 from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..factors.events import FactorSignal
 from .allocation import AllocationInput, WeightAllocator
-from .rebalance import RebalancePolicy
+from .rebalance import RebalanceTrigger
 
 
 class QuantileGroupStrategy:
@@ -28,7 +28,7 @@ class QuantileGroupStrategy:
         group_count: int,
         allocator: WeightAllocator,
         allocation_inputs: Callable[[pd.Timestamp, np.ndarray], AllocationInput],
-        rebalance_policy: RebalancePolicy,
+        rebalance_trigger: RebalanceTrigger,
     ) -> None:
         if not 1 <= group_number <= group_count:
             raise ValueError("group_number must be within 1..group_count")
@@ -40,7 +40,7 @@ class QuantileGroupStrategy:
         self.group_count = group_count
         self.allocator = allocator
         self.allocation_inputs = allocation_inputs
-        self.rebalance_policy = rebalance_policy
+        self.rebalance_trigger = rebalance_trigger
 
     def on_factor_signal(
         self, event: EventEnvelope, runtime: EventRuntime
@@ -63,7 +63,7 @@ class QuantileGroupStrategy:
         selected = np.asarray([
             instrument in selected_names for instrument in self.instruments
         ], dtype=bool)
-        if not self.rebalance_policy.should_rebalance(event.timestamp, selected):
+        if not self.rebalance_trigger.should_rebalance(event.timestamp, selected):
             return None
         weights = self.allocator.allocate(
             self.allocation_inputs(event.timestamp, selected)

@@ -16,7 +16,7 @@ from .allocation import (
     InverseVolatilityAllocator,
     TrailingVolatilityEstimator,
 )
-from .rebalance import BuyAndHold, MembershipChange, OnFactorSignal, RebalancePolicy
+from .rebalance import BuyAndHold, MembershipChange, OnFactorSignal, RebalanceTrigger
 
 
 class GroupTargetCalculator:
@@ -44,7 +44,7 @@ class GroupTargetCalculator:
             raise ValueError("Long-Short requires disjoint non-empty long and short groups")
         self.allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
         self.allocator = _allocator(self.allocation_name)
-        self.rebalance = _rebalance_policy(
+        self.rebalance_trigger = _rebalance_trigger(
             str(config.get("rebalance_mode") or "on_factor_signal")
         )
         lookback = int(config.get("volatility_lookback") or 20)
@@ -108,7 +108,7 @@ class GroupTargetCalculator:
                 long_selected = long_selected & ~overlap
                 short_selected = short_selected & ~overlap
             selected = long_selected | short_selected
-            if not self.rebalance.should_rebalance(timestamp, selected):
+            if not self.rebalance_trigger.should_rebalance(timestamp, selected):
                 return None
             if not np.any(long_selected) or not np.any(short_selected):
                 self.empty_leg_events.append({
@@ -128,7 +128,7 @@ class GroupTargetCalculator:
                 & np.isfinite(current_prices)
                 & (current_prices > 0)
             )
-            if not self.rebalance.should_rebalance(timestamp, selected):
+            if not self.rebalance_trigger.should_rebalance(timestamp, selected):
                 return None
             weights = self._allocate(timestamp, selected, margin_ratios, 1.0, None)
 
@@ -283,7 +283,7 @@ def _compile_strategy(
     allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
     rebalance_name = str(config.get("rebalance_mode") or "on_factor_signal")
     allocator = _allocator(allocation_name)
-    rebalance = _rebalance_policy(rebalance_name)
+    rebalance_trigger = _rebalance_trigger(rebalance_name)
     lookback = int(config.get("volatility_lookback") or 20)
     estimator = TrailingVolatilityEstimator(
         instruments,
@@ -304,7 +304,7 @@ def _compile_strategy(
         if not signal_updates[row]:
             continue
         selected = membership[row] & np.isfinite(current_prices) & (current_prices > 0)
-        if not rebalance.should_rebalance(timestamp, selected):
+        if not rebalance_trigger.should_rebalance(timestamp, selected):
             continue
         volatilities = estimator.snapshot()
         inputs = AllocationInput(
@@ -364,7 +364,7 @@ def _compile_long_short_strategy(
         raise ValueError("Long-Short membership index is outside the source-group axis")
     allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
     allocator = _allocator(allocation_name)
-    rebalance = _rebalance_policy(str(config.get("rebalance_mode") or "on_factor_signal"))
+    rebalance_trigger = _rebalance_trigger(str(config.get("rebalance_mode") or "on_factor_signal"))
     lookback = int(config.get("volatility_lookback") or 20)
     estimator = TrailingVolatilityEstimator(
         instruments,
@@ -404,7 +404,7 @@ def _compile_long_short_strategy(
             long_selected = long_selected & ~overlap
             short_selected = short_selected & ~overlap
         active = long_selected | short_selected
-        if not rebalance.should_rebalance(timestamp, active):
+        if not rebalance_trigger.should_rebalance(timestamp, active):
             continue
         if not np.any(long_selected) or not np.any(short_selected):
             empty_leg_events.append({
@@ -477,14 +477,14 @@ def _allocator(name: str):
     raise ValueError(f"unsupported allocation policy: {name}")
 
 
-def _rebalance_policy(name: str) -> RebalancePolicy:
+def _rebalance_trigger(name: str) -> RebalanceTrigger:
     if name == "on_factor_signal":
         return OnFactorSignal()
     if name == "membership_change":
         return MembershipChange()
     if name == "buy_and_hold":
         return BuyAndHold()
-    raise ValueError(f"unsupported rebalance policy: {name}")
+    raise ValueError(f"unsupported rebalance trigger: {name}")
 
 
 def _rule_matrix(

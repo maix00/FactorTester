@@ -15,7 +15,7 @@ from ..execution.trading import (
 )
 from .group import QuantileGroupStrategy
 from .allocation import AllocationInput, WeightAllocator
-from .rebalance import RebalancePolicy
+from .rebalance import RebalanceTrigger
 
 
 def build_quantile_group_lanes(
@@ -30,7 +30,7 @@ def build_quantile_group_lanes(
     lot_sizes: Mapping[str, float],
     allocator_factory: Callable[[str], WeightAllocator],
     allocation_inputs: Callable[[object, object], AllocationInput],
-    rebalance_policy_factory: Callable[[str], RebalancePolicy],
+    rebalance_trigger_factory: Callable[[str], RebalanceTrigger],
     accounting_factory: Callable[[str], FillAccounting] | None = None,
 ) -> tuple[StrategyLane, ...]:
     """Build isolated group lanes that share only market data and factor signals."""
@@ -56,7 +56,7 @@ def build_quantile_group_lanes(
             group_count=group_count,
             allocator=allocator_factory(strategy_id),
             allocation_inputs=allocation_inputs,
-            rebalance_policy=rebalance_policy_factory(strategy_id),
+            rebalance_trigger=rebalance_trigger_factory(strategy_id),
         )
         ledger = Ledger(
             portfolio_id,

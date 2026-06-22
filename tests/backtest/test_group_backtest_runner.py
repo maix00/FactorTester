@@ -28,7 +28,7 @@ def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:
         lot_sizes={instrument: 1.0 for instrument in instruments},
         allocator_factory=lambda _: EqualNotionalAllocator(),
         allocation_inputs=lambda _, selected: AllocationInput(instruments, selected),
-        rebalance_policy_factory=lambda _: OnFactorSignal(),
+        rebalance_trigger_factory=lambda _: OnFactorSignal(),
     )
     source = ReplayEventSource(
         [timestamp] * len(instruments),

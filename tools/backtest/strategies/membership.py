@@ -48,7 +48,7 @@ class MembershipAllocationStrategy:
         self.active_timestamps = active_timestamps
         self.allocation_name = str(config.get("allocation_policy") or "inverse_volatility")
         self.allocator = _allocator(self.allocation_name)
-        self.rebalance = _rebalance(str(config.get("rebalance_mode") or "on_factor_signal"))
+        self.rebalance_trigger = _rebalance(str(config.get("rebalance_mode") or "on_factor_signal"))
         lookback = int(config.get("volatility_lookback") or 20)
         self.estimator = TrailingVolatilityEstimator(
             instruments,
@@ -84,7 +84,7 @@ class MembershipAllocationStrategy:
             for name in self.instruments
         ])
         selected = signed_membership != 0 if self.strategy_kind == "long_short" else signed_membership > 0
-        if not self.rebalance.should_rebalance(event.timestamp, selected):
+        if not self.rebalance_trigger.should_rebalance(event.timestamp, selected):
             return None
         volatilities = self.estimator.snapshot()
         if self.strategy_kind == "long_short":

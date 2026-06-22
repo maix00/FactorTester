@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 
-class RebalancePolicy(Protocol):
+class RebalanceTrigger(Protocol):
     name: str
 
     def should_rebalance(
