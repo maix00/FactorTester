@@ -13,6 +13,9 @@ from zipline.finance.ledger import Ledger
 from zipline.finance.transaction import Transaction
 
 from .common import (
+    market_rule_diagnostics,
+    capacity_limited_deltas,
+    execution_price,
     parse_group_strategy_input,
     parse_target_weight_input,
     rebalance_mode,
@@ -45,6 +48,7 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
         pending = None
         transaction_number = 0
         equity_curve = {}
+        position_curve = {}
         for index, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, index, instrument)
@@ -60,26 +64,45 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
             if pending is not None:
                 value = float(ledger.portfolio.portfolio_value)
                 desired = target_quantities(request, index, pending, value, strategy)
-                deltas = {instrument: desired[instrument] - ledger.position_tracker.positions[asset].amount for instrument, asset in assets.items()}
+                deltas = capacity_limited_deltas(
+                    request,
+                    index,
+                    strategy,
+                    desired,
+                    {
+                        instrument: ledger.position_tracker.positions[asset].amount
+                        for instrument, asset in assets.items()
+                    },
+                )
                 for sell_first in (True, False):
                     for instrument, delta in deltas.items():
                         if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
                             continue
                         transaction_number += 1
+                        fill_price = execution_price(
+                            current_prices[instrument], delta, strategy
+                        )
                         ledger.process_transaction(Transaction(
                             assets[instrument],
                             delta,
                             timestamp,
-                            current_prices[instrument],
+                            fill_price,
                             f"order-{transaction_number}",
                         ))
-                        fee = abs(delta) * current_prices[instrument] * float(
+                        fee = abs(delta) * fill_price * float(
                             strategy.get("fee_rate") or 0.0
                         )
                         if fee:
                             ledger.process_commission({"asset": assets[instrument], "cost": fee})
             ledger._dirty_portfolio = True
             equity_curve[timestamp.isoformat()] = float(ledger.portfolio.portfolio_value)
+            position_curve[timestamp.isoformat()] = {
+                instrument: float(
+                    ledger.position_tracker.positions[asset].amount
+                    if asset in ledger.position_tracker.positions else 0.0
+                )
+                for instrument, asset in assets.items()
+            }
             next_target = targets.get(timestamp)
             pending = next_target
         portfolio = ledger.portfolio
@@ -94,11 +117,12 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
                 for instrument, asset in assets.items()
             },
             "equity_curve": equity_curve,
+            "position_curve": position_curve,
         }
     return {"engine": "zipline", "portfolios": portfolios}
 
 
-def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     exchange = ExchangeInfo("GTHT", "GTHT", "CN")
     assets = {
@@ -113,12 +137,15 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
         for index, instrument in enumerate(request.instruments)
     }
     portfolios = {}
-    for strategy, calculator in zip(request.strategies, calculators, strict=True):
+    for strategy_position, (strategy, calculator) in enumerate(
+        zip(request.strategies, calculators, strict=True)
+    ):
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         ledger = Ledger(request.timestamps, strategy_cash, "daily")
         pending = None
         transaction_number = 0
         equity_curve = {}
+        position_curve = {}
         for row, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, row, instrument)
@@ -139,30 +166,45 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
                     float(ledger.portfolio.portfolio_value),
                     strategy,
                 )
-                deltas = {
-                    instrument: desired[instrument]
-                    - ledger.position_tracker.positions[asset].amount
-                    for instrument, asset in assets.items()
-                }
+                deltas = capacity_limited_deltas(
+                    request,
+                    row,
+                    strategy,
+                    desired,
+                    {
+                        instrument: ledger.position_tracker.positions[asset].amount
+                        for instrument, asset in assets.items()
+                    },
+                )
                 for sell_first in (True, False):
                     for instrument, delta in deltas.items():
                         if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
                             continue
                         transaction_number += 1
+                        fill_price = execution_price(
+                            current_prices[instrument], delta, strategy
+                        )
                         ledger.process_transaction(Transaction(
                             assets[instrument],
                             delta,
                             timestamp,
-                            current_prices[instrument],
+                            fill_price,
                             f"order-{transaction_number}",
                         ))
-                        fee = abs(delta) * current_prices[instrument] * float(
+                        fee = abs(delta) * fill_price * float(
                             strategy.get("fee_rate") or 0.0
                         )
                         if fee:
                             ledger.process_commission({"asset": assets[instrument], "cost": fee})
             ledger._dirty_portfolio = True
             equity_curve[timestamp.isoformat()] = float(ledger.portfolio.portfolio_value)
+            position_curve[timestamp.isoformat()] = {
+                instrument: float(
+                    ledger.position_tracker.positions[asset].amount
+                    if asset in ledger.position_tracker.positions else 0.0
+                )
+                for instrument, asset in assets.items()
+            }
             pending = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -170,6 +212,8 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
+            if progress is not None and strategy_position == 0:
+                progress(row + 1, len(request.timestamps), timestamp)
         portfolio = ledger.portfolio
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
@@ -182,12 +226,14 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
                 for instrument, asset in assets.items()
             },
             "equity_curve": equity_curve,
+            "position_curve": position_curve,
         }
     return {
         "engine": "zipline",
         "portfolios": portfolios,
         "target_trace": {item.strategy_id: item.target_trace for item in calculators},
         "strategy_diagnostics": {
-            item.strategy_id: item.diagnostics for item in calculators
+            item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
+            for item in calculators
         },
     }

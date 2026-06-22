@@ -15,6 +15,8 @@
         groupValues: Object.create(null),
         activeGroup: null,
         groupTabsAttached: false,
+        settingDefs: Object.create(null),
+        chipsRegistered: false,
     };
 
     function requestJSON(url) {
@@ -42,6 +44,9 @@
         state.tabRequests[tabKey] = requestJSON(tabURL(tabKey)).then(function(manifest) {
             if (!manifest.tab || manifest.tab.key !== tabKey) throw new Error('后端返回了不匹配的设置页签');
             state.tabCache[tabKey] = manifest;
+            (manifest.settings || []).forEach(function(setting) {
+                state.settingDefs[setting.key] = setting;
+            });
             delete state.tabRequests[tabKey];
             return manifest;
         }).catch(function(error) {
@@ -305,6 +310,28 @@
         });
     }
 
+    function registerBackendChips() {
+        var registry = window.GT_CONFIG_REGISTRY;
+        if (state.chipsRegistered || !registry || !registry.registerChipProvider) return;
+        state.chipsRegistered = true;
+        registry.registerChipProvider({
+            category: 'config',
+            name: 'backend-backtest-settings',
+            getChips: function(group) {
+                var values = group && state.groupValues[String(group.id)];
+                if (!values) return [];
+                return Object.keys(values).map(function(key) {
+                    var setting = state.settingDefs[key];
+                    if (!setting || !setting.chip_template) return null;
+                    return {
+                        label: 'backtest-' + key,
+                        html: setting.chip_template.replace('{value}', String(values[key])),
+                    };
+                }).filter(Boolean);
+            },
+        });
+    }
+
     function init() {
         var root = localHost();
         if (root) state.application = root.getAttribute('data-application') || state.application;
@@ -324,6 +351,7 @@
             });
             renderLocalTabs();
             attachGroupTabs();
+            registerBackendChips();
             return index;
         });
     }

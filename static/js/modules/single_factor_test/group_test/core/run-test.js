@@ -268,6 +268,24 @@
             }
             progressContainer.innerHTML = '';
 
+            var replayProgress = document.createElement('div');
+            replayProgress.style.cssText = 'display:none;margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;';
+            replayProgress.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#334155;">'
+                + '<strong>交易账本回放</strong><span data-replay-label>等待事件回放</span></div>'
+                + '<div style="height:7px;margin-top:6px;border-radius:999px;background:#e2e8f0;overflow:hidden;">'
+                + '<div data-replay-fill style="height:100%;width:0;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .18s ease;"></div></div>';
+            progressContainer.appendChild(replayProgress);
+
+            function updateReplayProgress(payload) {
+                var completed = Number(payload.completed || 0);
+                var total = Number(payload.total || 0);
+                var percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
+                replayProgress.style.display = 'block';
+                replayProgress.querySelector('[data-replay-fill]').style.width = percent.toFixed(2) + '%';
+                replayProgress.querySelector('[data-replay-label]').textContent =
+                    (payload.event_timestamp || payload.message || '') + ' · ' + completed + '/' + total;
+            }
+
             var pendingGlobalProgress = [];
 
             var batchMgr = GT.groupSettings.runGroupBatch.createManager({
@@ -308,6 +326,10 @@
                         }
                     }
                 } else if (event === 'progress') {
+                    if (payload.phase === 'event_replay') {
+                        updateReplayProgress(payload);
+                        return;
+                    }
                     var bi = payload.product_coverage_batch_index;
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));

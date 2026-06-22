@@ -21,7 +21,9 @@
     window.rememberSingleFactorPageUuid = rememberPageUuid;
 
     var _pageCleanupSent = false;
-    function sendPageCleanup() {
+    function sendPageCleanup(event) {
+        // A page kept in the back-forward cache is suspended, not closed.
+        if (event && event.type === 'pagehide' && event.persisted) return;
         if (_pageCleanupSent) return;
         var pageUuid = window._pageUuid || '';
         var factorFamilyAlias = window._sftCurrentFactorId || '';
@@ -31,11 +33,11 @@
         try {
             if (navigator.sendBeacon) {
                 var blob = new Blob([payload], { type: 'application/json' });
-                if (navigator.sendBeacon('/close_page', blob)) return;
+                if (navigator.sendBeacon('/unregister_page', blob)) return;
             }
         } catch (e) {}
         try {
-            fetch('/close_page', {
+            fetch('/unregister_page', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: payload,

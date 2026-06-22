@@ -1009,7 +1009,7 @@ def _serialize_event_execution(
             "rebalance_mode": settings["rebalance_mode"],
             "target_trace": target_trace.get(strategy_id, {}),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
-            "snapshot_available": engine_result.get("engine") == "native",
+            "snapshot_available": bool(portfolio.get("position_curve")),
             "is_ls": bool(owner.get("is_ls")),
             "ls_info": (
                 {"type": "long_short", "strategy_id": strategy_id}
@@ -1037,15 +1037,28 @@ def _serialize_event_execution(
                 "full": metrics[display_name],
             }
     initial_values = [float(value.get("initial_value") or 0.0) for value in portfolios.values()]
+    approximation_count = max(
+        (
+            int(value.get("market_rule_approximation_count") or 0)
+            for value in diagnostics.values()
+        ),
+        default=0,
+    )
     return {
         "groups": groups,
         "metrics": metrics,
         "metrics_by_segment": metrics_by_segment,
         "initial_capital": initial_values[0] if initial_values else None,
         "base_currency": "CNY",
+        "market_rule_approximation_count": approximation_count,
+        "market_rule_warning": (
+            f"历史市场规则有 {approximation_count} 个单元格缺失，已按设置使用最新值或配置默认值近似。"
+            if approximation_count else None
+        ),
         "engine_result": {
             "engine": engine_result.get("engine"),
             "event_count": engine_result.get("event_count"),
+            "signal_kind": execution.get("signal_kind"),
         },
     }
 
@@ -1280,8 +1293,12 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
 
     # Ensure testers and factors
     tester0 = None
+    testers_by_id = {}
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_prepare_factors')
+        tester = runtime_state.get_factor_tester(
+            submission_id, caller='run_group_test_prepare_factors', page_uuid=page_uuid
+        )
+        testers_by_id[submission_id] = tester
         if tester0 is None:
             tester0 = tester
         _ensure_tester_factors_for_group(
@@ -1310,7 +1327,9 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     all_factor_freqs: list[Any] = []
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
         try:
-            tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar')
+            tester = runtime_state.get_factor_tester(
+                submission_id, caller='run_group_test_calendar', page_uuid=page_uuid
+            )
         except Exception as exc:
             _progress(f"calendar build skip submission={submission_id} error={exc}")
             continue
@@ -1328,7 +1347,9 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"factor_freq_count={len(all_factor_freqs)}"
     )
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar_build')
+        tester = runtime_state.get_factor_tester(
+            submission_id, caller='run_group_test_calendar_build', page_uuid=page_uuid
+        )
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
             requested_calendar_freq=effective_group_calendar_freq,
@@ -1363,6 +1384,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
     group_tester = FactorGroupTester.from_flat_groups(
         all_flat_groups,
+        testers_by_id=testers_by_id,
         spec_index_by_group=sim_index_by_group,
         ls_configs_by_index=all_ls_configs_by_index,
         start_dt=start_dt,
@@ -1382,13 +1404,19 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     )
     from tools.backtest.orchestration import execute_group_plan
 
-    def _framework_progress(message: str, completed: int, total: int) -> None:
+    def _framework_progress(
+        phase: str,
+        message: str,
+        completed: int,
+        total: int,
+        extra: dict,
+    ) -> None:
         _core_emit_progress(
-            "framework_execution",
+            phase,
             message,
             completed=completed,
             total=total,
-            engine=common_backtest_settings["engine"],
+            **extra,
         )
 
     try:
@@ -1405,6 +1433,16 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             settings_by_group=execution["settings_by_strategy"],
             evaluation_split=common_backtest_settings["evaluation_split"] or None,
         )
+        if page_uuid:
+            runtime_state.update_page_state(
+                page_uuid,
+                latest_group_execution={
+                    "run_id": execution["payload"]["run_id"],
+                    "engine_result": execution["engine_result"],
+                    "group_owner": execution["group_owner"],
+                    "serialized_execution": serialized_execution,
+                },
+            )
     except Exception as exc:
         import traceback as _traceback
         return False, {
@@ -1470,11 +1508,25 @@ def get_group_snapshot():
     data = request.get_json()
     submission_id = data.get('submission_id')
     timestamp_ms  = data.get('timestamp_ms')
+    page_uuid = str(data.get('page_uuid') or '')
     if not submission_id or not timestamp_ms:
         return jsonify({'success': False, 'error': '缺少 submission_id 或 timestamp_ms'}), 400
 
     try:
-        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
+        if page_uuid and runtime_state.get_page_owner(page_uuid) != current_user():
+            return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        page_state = runtime_state.get_page_state(page_uuid) if page_uuid else None
+        event_execution = getattr(page_state, 'latest_group_execution', None)
+        if event_execution:
+            return jsonify(_event_group_snapshot(
+                event_execution,
+                str(submission_id),
+                int(timestamp_ms),
+                data.get("event_cursor"),
+            ))
+        tester = runtime_state.get_factor_tester(
+            submission_id, caller='get_group_snapshot', page_uuid=page_uuid or None
+        )
 
         group_result = _latest_group_result(tester)
         valid_cols_raw = group_result.valid_cols if group_result is not None else None
@@ -1604,45 +1656,280 @@ def get_group_snapshot():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
+def _event_group_snapshot(
+    execution: dict,
+    submission_id: str,
+    timestamp_ms: int,
+    event_cursor: str | None = None,
+) -> dict:
+    engine_result = execution.get("engine_result") or {}
+    portfolios = engine_result.get("portfolios") or {}
+    owners = [
+        owner for owner in execution.get("group_owner") or []
+        if str(owner.get("submission_id") or "") == submission_id
+    ]
+    if not owners:
+        raise ValueError("当前页面最近一次事件回测不包含该 submission_id")
+    first = portfolios.get(str(owners[0].get("group_id") or "")) or {}
+    first_curve = first.get("position_curve") or {}
+    if not first_curve:
+        raise ValueError("所选回测框架没有返回逐事件持仓快照")
+    timestamps = sorted(pd.Timestamp(value) for value in first_curve)
+    target = pd.Timestamp(timestamp_ms, unit="ms", tz="UTC")
+    if timestamps[0].tzinfo is None:
+        target = target.tz_localize(None)
+    timestamp_index = min(
+        range(len(timestamps)), key=lambda index: abs(timestamps[index] - target)
+    )
+    events = []
+    latest_targets = {str(owner.get("group_id") or ""): {} for owner in owners}
+    previous_positions = None
+    traces = engine_result.get("target_trace") or {}
+    for timestamp in timestamps:
+        timestamp_positions = {
+            str(owner.get("group_id") or ""): (
+                portfolios[str(owner.get("group_id") or "")]
+                .get("position_curve", {})
+                .get(timestamp.isoformat(), {})
+            )
+            for owner in owners
+        }
+        target_changed = False
+        for strategy_id in latest_targets:
+            exact = (traces.get(strategy_id) or {}).get(timestamp.isoformat())
+            if exact is not None:
+                latest_targets[strategy_id] = exact
+                target_changed = True
+        event_types = []
+        if target_changed:
+            event_types.append("TARGET")
+        if previous_positions is not None and timestamp_positions != previous_positions:
+            event_types.append("FILL")
+        event_types.append("BAR_CLOSE")
+        timestamp_ms_value = int(timestamp.timestamp() * 1000)
+        for sequence, event_type in enumerate(event_types):
+            event_positions = (
+                previous_positions
+                if event_type == "TARGET" and previous_positions is not None
+                else timestamp_positions
+            )
+            events.append({
+                "cursor": f"{timestamp_ms_value}:{sequence}",
+                "timestamp": timestamp,
+                "event_type": event_type,
+                "positions": event_positions,
+                "targets": {key: dict(value) for key, value in latest_targets.items()},
+            })
+        previous_positions = timestamp_positions
+    if event_cursor:
+        matching = [index for index, event in enumerate(events) if event["cursor"] == event_cursor]
+        if not matching:
+            raise ValueError("事件快照 cursor 已过期，请重新点击图表")
+        event_index = matching[0]
+    else:
+        target_timestamp = timestamps[timestamp_index]
+        matching = [
+            index for index, event in enumerate(events)
+            if event["timestamp"] == target_timestamp
+        ]
+        event_index = matching[-1]
+    selected_event = events[event_index]
+    previous_event = events[event_index - 1] if event_index > 0 else None
+    current = selected_event["timestamp"]
+    instruments = sorted({
+        instrument
+        for owner in owners
+        for positions in (portfolios.get(str(owner.get("group_id") or ""), {}).get("position_curve") or {}).values()
+        for instrument in positions
+    })
+
+    columns = []
+    position_cells = [[] for _ in instruments]
+    target_cells = [[] for _ in instruments]
+    total_changed = 0
+    for owner in owners:
+        strategy_id = str(owner.get("group_id") or "")
+        portfolio = portfolios[strategy_id]
+        now = selected_event["positions"].get(strategy_id, {})
+        before = (
+            previous_event["positions"].get(strategy_id, {})
+            if previous_event is not None else {}
+        )
+        active_count = sum(abs(float(value)) > 1e-12 for value in now.values())
+        columns.append({
+            "label": str(owner.get("group_name") or strategy_id),
+            "count": active_count,
+        })
+        weights = selected_event["targets"].get(strategy_id, {})
+        for row, instrument in enumerate(instruments):
+            quantity = float(now.get(instrument, 0.0))
+            old_quantity = float(before.get(instrument, 0.0))
+            delta = quantity - old_quantity
+            if abs(delta) > 1e-12:
+                total_changed += 1
+            status = (
+                "entering" if abs(old_quantity) <= 1e-12 and abs(quantity) > 1e-12
+                else "exiting" if abs(old_quantity) > 1e-12 and abs(quantity) <= 1e-12
+                else "increasing" if abs(quantity) > abs(old_quantity) + 1e-12
+                else "decreasing" if abs(quantity) + 1e-12 < abs(old_quantity)
+                else "holding" if abs(quantity) > 1e-12 else "absent"
+            )
+            position_cells[row].append({
+                "status": status,
+                "product": {"name": instrument},
+                "quantity": quantity,
+                "delta_quantity": delta,
+                "change_direction": "up" if delta > 0 else "down" if delta < 0 else "flat",
+                "currency": "CNY",
+            })
+            weight = float(weights.get(instrument, 0.0))
+            target_cells[row].append({
+                "status": "selected" if abs(weight) > 1e-12 else "absent",
+                "product": {"name": instrument},
+                "selected": abs(weight) > 1e-12,
+                "open_reason": f"目标权重 {weight:.4%}" if abs(weight) > 1e-12 else None,
+                "currency": "CNY",
+            })
+    rows = [{"name": instrument} for instrument in instruments]
+    all_ms = [int(timestamp.timestamp() * 1000) for timestamp in timestamps]
+    change_indices = [
+        index for index, event in enumerate(events) if event["event_type"] in {"FILL", "REJECT"}
+    ]
+    previous_change = next(
+        (events[index] for index in reversed(change_indices) if index < event_index), None
+    )
+    next_change = next(
+        (events[index] for index in change_indices if index > event_index), None
+    )
+    return {
+        "success": True,
+        "run_id": execution.get("run_id"),
+        "engine": engine_result.get("engine"),
+        "matrices": [
+            {"key": "positions", "label": "实际持仓", "columns": columns, "rows": rows, "cells": position_cells},
+            {"key": "targets", "label": "策略目标", "columns": columns, "rows": rows, "cells": target_cells},
+        ],
+        "default_matrix_key": "positions",
+        "timestamp_ms": int(current.timestamp() * 1000),
+        "event_cursor": selected_event["cursor"],
+        "event_type": selected_event["event_type"],
+        "event_label": {
+            "TARGET": "策略目标更新",
+            "FILL": "成交后账本",
+            "REJECT": "订单拒绝",
+            "BAR_CLOSE": "时间片收盘",
+        }[selected_event["event_type"]],
+        "event_cursors": [event["cursor"] for event in events],
+        "all_timestamps_ms": all_ms,
+        "has_prev": event_index > 0,
+        "has_next": event_index + 1 < len(events),
+        "prev_change_timestamp_ms": (
+            int(previous_change["timestamp"].timestamp() * 1000) if previous_change else None
+        ),
+        "next_change_timestamp_ms": (
+            int(next_change["timestamp"].timestamp() * 1000) if next_change else None
+        ),
+        "prev_change_event_cursor": previous_change["cursor"] if previous_change else None,
+        "next_change_event_cursor": next_change["cursor"] if next_change else None,
+        "summary": {
+            "avg_turnover": 0.0,
+            "total_changed": total_changed,
+            "total_prod_count": sum(column["count"] for column in columns),
+        },
+    }
+
+
+def _event_group_detail(execution: dict, submission_id: str, group_index: int) -> dict:
+    owners = [
+        owner for owner in execution.get("group_owner") or []
+        if str(owner.get("submission_id") or "") == submission_id
+        and not owner.get("is_ls")
+        and int(owner.get("group_index") or 0) == group_index
+    ]
+    if len(owners) != 1:
+        raise ValueError(
+            f"事件回测中无法唯一定位分组：submission_id={submission_id}, "
+            f"group_index={group_index}, matches={len(owners)}"
+        )
+    owner = owners[0]
+    strategy_id = str(owner.get("group_id") or "")
+    engine_result = execution.get("engine_result") or {}
+    portfolio = (engine_result.get("portfolios") or {}).get(strategy_id) or {}
+    curve = portfolio.get("equity_curve") or {}
+    position_curve = portfolio.get("position_curve") or {}
+    if not curve or not position_curve:
+        raise ValueError("所选回测框架没有返回逐事件净值与持仓曲线")
+
+    index = [pd.Timestamp(value) for value in curve]
+    equity = pd.Series([float(value) for value in curve.values()], index=index)
+    returns = equity.pct_change().fillna(0.0).to_numpy().reshape(-1, 1)
+    products_by_group = {0: {}}
+    for timestamp in index:
+        positions = position_curve.get(timestamp.isoformat(), {})
+        products_by_group[0][timestamp] = [
+            instrument for instrument, quantity in positions.items()
+            if abs(float(quantity)) > 1e-12
+        ]
+    serialized = execution.get("serialized_execution") or {}
+    display_name = str(owner.get("group_name") or strategy_id)
+    summary = (serialized.get("metrics") or {}).get(display_name) or {}
+    return build_group_detail(
+        0,
+        products_by_group,
+        returns,
+        index,
+        summary,
+    )
+
+
+def _event_group_ranking_detail(execution: dict, submission_id: str) -> dict:
+    owners = sorted(
+        (
+            owner for owner in execution.get("group_owner") or []
+            if str(owner.get("submission_id") or "") == submission_id
+            and not owner.get("is_ls")
+        ),
+        key=lambda owner: int(owner.get("group_index") or 0),
+    )
+    if len(owners) < 2:
+        raise ValueError("事件回测中至少需要两个普通分组才能分析排序能力")
+    portfolios = (execution.get("engine_result") or {}).get("portfolios") or {}
+    series = []
+    for owner in owners:
+        strategy_id = str(owner.get("group_id") or "")
+        curve = (portfolios.get(strategy_id) or {}).get("equity_curve") or {}
+        if not curve:
+            raise ValueError(f"分组 {strategy_id} 没有返回净值曲线")
+        equity = pd.Series(
+            [float(value) for value in curve.values()],
+            index=pd.DatetimeIndex([pd.Timestamp(value) for value in curve]),
+        )
+        series.append(equity.pct_change().fillna(0.0).rename(strategy_id))
+    aligned = pd.concat(series, axis=1, join="inner").sort_index()
+    return build_group_ranking_detail(aligned.to_numpy(), list(aligned.index))
+
+
 @sft_bp.route('/get_group_detail', methods=['POST'])
 def get_group_detail():
     """Return first-phase detail analytics for one group from the latest run."""
     data = request.get_json() or {}
     submission_id = data.get('submission_id')
     group_index = data.get('group_index')
+    page_uuid = str(data.get('page_uuid') or '')
     if submission_id is None or group_index is None:
         return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
     try:
         group_index = int(group_index)
-        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_detail')
-        group_result = _latest_group_result(tester)
-        products = group_result.get_products_by_group() if group_result is not None else None
-        returns_np = group_result.returns_np if group_result is not None else None
-        product_contrib_np = group_result.product_gross_contrib_np if group_result is not None else None
-        gross_returns_np = group_result.gross_returns_np if group_result is not None else None
-        trade_notional_np = group_result.trade_notional_ratio_np if group_result is not None else None
-        valid_cols = group_result.valid_cols if group_result is not None else None
-        index_list = group_result.index_list if group_result is not None else None
-        if not products or returns_np is None or not index_list:
-            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        if group_index < 0 or group_index >= returns_np.shape[1]:
-            return jsonify({'success': False, 'error': '分组索引无效'}), 400
-        metrics = group_result.report_df if group_result is not None else None
-        summary = {}
-        if isinstance(metrics, pd.DataFrame) and group_index in metrics.index:
-            summary = {
-                str(key): _safe_float(value)
-                for key, value in metrics.loc[group_index].to_dict().items()
-            }
-        detail = build_group_detail(
-            group_index, products, returns_np, index_list, summary,
-            product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
-            group_result.fee_costs_np if group_result is not None else None,
-            group_result.open_ratio_mat if group_result is not None else None,
-            group_result.close_ratio_mat if group_result is not None else None,
-            group_result.close_today_ratio_mat if group_result is not None else None,
-        )
-        return jsonify({'success': True, 'detail': detail})
+        if runtime_state.get_page_owner(page_uuid) != current_user():
+            return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        page_state = runtime_state.get_page_state(page_uuid)
+        event_execution = getattr(page_state, 'latest_group_execution', None)
+        if not event_execution:
+            return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
+        return jsonify({
+            'success': True,
+            'detail': _event_group_detail(event_execution, str(submission_id), group_index),
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
@@ -1653,16 +1940,20 @@ def get_group_ranking_detail():
     """Return second-phase whole-test ranking analytics from the latest run."""
     data = request.get_json() or {}
     submission_id = data.get('submission_id')
+    page_uuid = str(data.get('page_uuid') or '')
     if submission_id is None:
         return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
     try:
-        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_ranking_detail')
-        group_result = _latest_group_result(tester)
-        returns_np = group_result.returns_np if group_result is not None else None
-        index_list = group_result.index_list if group_result is not None else None
-        if returns_np is None:
-            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np, index_list)})
+        if runtime_state.get_page_owner(page_uuid) != current_user():
+            return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        page_state = runtime_state.get_page_state(page_uuid)
+        event_execution = getattr(page_state, 'latest_group_execution', None)
+        if not event_execution:
+            return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
+        return jsonify({
+            'success': True,
+            'detail': _event_group_ranking_detail(event_execution, str(submission_id)),
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
@@ -1686,6 +1977,11 @@ def get_tester_session_info():
     }
     """
     data = request.get_json() or {}
+    page_uuid = str(data.get('page_uuid') or '')
+    if not page_uuid:
+        return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
+    if runtime_state.get_page_owner(page_uuid) != current_user():
+        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
     ids = data.get('submission_ids') or []
     if not ids and data.get('submission_id'):
         ids = [data['submission_id']]
@@ -1695,7 +1991,9 @@ def get_tester_session_info():
     testers_info = []
     for sid in ids:
         try:
-            tester = runtime_state.find_factor_tester(str(sid), allow_suffix=True)
+            tester = runtime_state.find_factor_tester(
+                str(sid), allow_suffix=True, page_uuid=page_uuid
+            )
             if tester is None:
                 testers_info.append({'submission_id': str(sid), 'error': '未找到测试器实例'})
                 continue

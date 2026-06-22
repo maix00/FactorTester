@@ -15,7 +15,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "time", "capital", "allocation", "rebalance", "cost",
+        "engine", "factor", "time", "capital", "allocation", "rebalance", "cost",
         "liquidity", "margin", "market_rules", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
@@ -31,7 +31,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "scope_policy": "local_only",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "factor_mode",
+        "engine",
     ]
 
 
@@ -47,7 +47,7 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert index.status_code == 200
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
-    assert len(tab.get_json()["settings"]) == 2
+    assert len(tab.get_json()["settings"]) == 1
     assert missing.status_code == 404
 
 

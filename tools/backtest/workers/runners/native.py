@@ -14,9 +14,9 @@ from ...event_driven.runtime import EventTopic, MarketSlice, ProductPrice, Repla
 from ...execution.fees import ProviderCommissionModel
 from ...execution.trading import (
     CashAccounting,
-    ImmediateBroker,
     Ledger,
     MarketState,
+    NextBarBroker,
     OrderManager,
     ProviderContractSizer,
 )
@@ -30,10 +30,10 @@ from ...market_rules import (
 )
 from ...risk.margin import FuturesMarginConstraint
 from ...strategies.membership import MembershipAllocationStrategy
-from .common import parse_target_weight_input
+from .common import market_rule_diagnostics, parse_target_weight_input
 
 
-def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
     strategy_configs = tuple(payload.get("strategy_configs", ()))
     request = parse_target_weight_input({
         **dict(payload),
@@ -55,7 +55,14 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
         request.timestamps,
         [
             MarketSlice({
-                name: ProductPrice(name, adjusted[row, column])
+                name: ProductPrice(
+                    name,
+                    adjusted[row, column],
+                    (
+                        {"VOLUME": request.volumes[name][row]}
+                        if request.volumes is not None else {}
+                    ),
+                )
                 for column, name in enumerate(request.instruments)
             })
             for row in range(len(request.timestamps))
@@ -174,15 +181,41 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
             for name in request.instruments
             for timestamp in request.timestamps[:1]
         }
-        broker = ImmediateBroker(
-            market,
-            ProviderCommissionModel(
+        def _fill_price(order, quote, quantity, config=config):
+            mode = str(config.get("slippage_mode") or "none")
+            if mode == "none":
+                return quote.price
+            if mode == "fixed_bps":
+                bps = float(config.get("slippage_bps") or 0.0)
+                direction = 1.0 if order.side.value == "buy" else -1.0
+                return quote.price * (1.0 + direction * bps / 10_000.0)
+            raise ValueError(f"unsupported slippage mode: {mode}")
+
+        def _capacity(order, quote, config=config):
+            mode = str(config.get("liquidity_mode") or "infinite")
+            if mode == "infinite":
+                return float("inf")
+            if mode == "volume_participation":
+                return float(quote.fields["VOLUME"]) * float(
+                    config.get("participation_rate") or 0.0
+                )
+            raise ValueError(f"unsupported liquidity mode: {mode}")
+
+        broker = NextBarBroker(
+            {portfolio_id},
+            commission_model=ProviderCommissionModel(
                 TemporalRuleProvider(fee_history),
                 RuleFallbackPolicy.STRICT_HISTORICAL,
                 usage,
             ),
+            capacity=_capacity,
+            fill_price=_fill_price,
         )
-        venues.append(ExecutionVenue(frozenset({portfolio_id}), broker.on_order_submitted))
+        venues.append(ExecutionVenue(
+            frozenset({portfolio_id}),
+            broker.on_order_submitted,
+            on_market_slice=broker.on_market_slice,
+        ))
         strategies.append(strategy)
     result = BacktestRunner(
         BacktestPlan(RunIdentity(str(payload.get("run_id") or "native-group")), pd.DatetimeIndex(request.timestamps), request.instruments),
@@ -191,6 +224,15 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
         factors=tuple(factors),
         lanes=tuple(lanes),
         venues=tuple(venues),
+        progress=(
+            lambda item: progress(
+                item.completed,
+                item.total,
+                request.timestamps[min(item.completed, len(request.timestamps)) - 1],
+            )
+            if progress is not None and item.phase == "event_replay" and item.completed
+            else None
+        ),
     ).run()
     portfolios = {
         portfolio.strategy_id: {
@@ -199,6 +241,10 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
             "positions": dict(portfolio.final_snapshot.positions),
             "equity_curve": {
                 snapshot.timestamp.isoformat(): snapshot.equity_minor / 100.0
+                for snapshot in portfolio.snapshots
+            },
+            "position_curve": {
+                snapshot.timestamp.isoformat(): dict(snapshot.positions)
                 for snapshot in portfolio.snapshots
             },
         }
@@ -211,7 +257,8 @@ def run_group_strategy(payload: Mapping[str, Any]) -> dict[str, Any]:
         "strategy_diagnostics": {
             strategy.strategy_id: {
                 **strategy.diagnostics,
-                "market_rule_approximation_count": rule_usages[
+                **market_rule_diagnostics(payload),
+                "runtime_rule_approximation_count": rule_usages[
                     strategy.strategy_id
                 ].approximation_count,
             }

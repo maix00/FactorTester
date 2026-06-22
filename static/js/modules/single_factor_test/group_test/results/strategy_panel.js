@@ -35,9 +35,15 @@
     }
 
     function _formatCapitalNotice(data) {
-        if (!data || !data.capital_warning) return '';
+        if (!data || (!data.capital_warning && !data.market_rule_warning)) return '';
         var parts = [];
-        parts.push('<div style="font-weight:600;margin-bottom:4px;">⚠️ ' + GT.escapeHTML(data.capital_warning) + '</div>');
+        if (data.capital_warning) {
+            parts.push('<div style="font-weight:600;margin-bottom:4px;">⚠️ ' + GT.escapeHTML(data.capital_warning) + '</div>');
+        }
+        if (data.market_rule_warning) {
+            parts.push('<div style="font-weight:600;margin-bottom:4px;color:#92400e;">市场规则近似 · '
+                + GT.escapeHTML(data.market_rule_warning) + '</div>');
+        }
         var diag = data.capital_diagnostics || {};
         if (diag.blocked_group_count !== undefined && diag.blocked_group_count !== null) {
             parts.push('<div>未开仓组数：' + GT.escapeHTML(String(diag.blocked_group_count)) + '</div>');

@@ -57,6 +57,7 @@ class BatchExecutionPlan:
     group_owner: list[dict[str, Any]]
     group_slices: dict[int, list[int]]
     merged_membership_np: np.ndarray
+    trade_products: list[Any] | None = None
     merged_signal_update_mask: np.ndarray | None = None
     merged_returns_np: np.ndarray | None = None
     merged_price_np: np.ndarray | None = None
@@ -196,6 +197,7 @@ class FactorGroupTester:
         cls,
         flat_groups: list[_FactorGroupTestGroup],
         *,
+        testers_by_id: dict[str, FactorTester],
         spec_index_by_group: dict[int, int] | None = None,  # group → simulation_index
         ls_configs_by_index: dict[int, list[dict] | None] | None = None,
         start_dt: Optional[Any] = None,  # DataTime
@@ -222,11 +224,8 @@ class FactorGroupTester:
         # ── Group by tester_id ──
         tester_by_id: dict[str, tuple[FactorTester, list[_FactorGroupTestGroup]]] = {}
         for group in flat_groups:
-            try:
-                from server.services import page_runtime
-                tester = page_runtime.get_factor_tester(group.tester_id, caller='from_flat_groups')
-            except Exception:
-                # tester_id may be a raw tester object in some contexts
+            tester = testers_by_id.get(group.tester_id)
+            if tester is None:
                 continue
             tester_by_id.setdefault(group.tester_id, (tester, []))[1].append(group)
 
@@ -762,6 +761,7 @@ class FactorGroupTester:
         fee: float,
         fee_modifications: list | None = None,
         use_closetoday: bool = False,
+        market_rule_fallback: str = "latest_available",
     ) -> BatchExecutionPlan:
         first_entry = plan.entries[0]
         T = len(first_entry.shared_inputs.index_list)
@@ -822,6 +822,7 @@ class FactorGroupTester:
                 merged_price_np[price_missing, global_col_idx] = local_price_col[price_missing]
 
         ordered_trade_products = [global_products_by_name[name] for name in plan.trade_product_names]
+        plan.trade_products = ordered_trade_products
         signal_valid_cols = list(dict.fromkeys(
             product
             for entry in plan.entries
@@ -863,6 +864,7 @@ class FactorGroupTester:
             fee_modifications=fee_modifications,
             use_closetoday=use_closetoday,
             index_list=list(first_entry.shared_inputs.index_list),
+            market_rule_fallback=market_rule_fallback,
         )
         return plan
 

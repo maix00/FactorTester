@@ -22,6 +22,7 @@ class TargetWeightInput:
     multipliers: tuple[tuple[float, ...], ...]
     lot_sizes: tuple[tuple[float, ...], ...]
     margin_ratios: tuple[tuple[float, ...], ...]
+    volumes: dict[str, tuple[float, ...]] | None = None
 
 
 def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
@@ -62,6 +63,23 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
     margin_ratios = _parse_rule_matrix(
         rules.get("margin_ratios"), len(timestamps), len(instruments), "margin ratios"
     )
+    raw_volumes = payload.get("volumes")
+    volumes = None
+    if raw_volumes is not None:
+        volumes = {}
+        for instrument in instruments:
+            values = raw_volumes.get(instrument) if isinstance(raw_volumes, Mapping) else None
+            if not isinstance(values, list) or len(values) != len(timestamps):
+                raise ValueError(f"volume length mismatch for {instrument}")
+            normalized = tuple(float(value) for value in values)
+            if any(not np.isfinite(value) or value < 0 for value in normalized):
+                raise ValueError(f"volumes must be finite and non-negative for {instrument}")
+            volumes[instrument] = normalized
+    if volumes is None and any(
+        str(strategy.get("liquidity_mode") or "infinite") == "volume_participation"
+        for strategy in strategies
+    ):
+        raise ValueError("volume_participation requires observed volume data")
     return TargetWeightInput(
         timestamps,
         instruments,
@@ -71,6 +89,7 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
         multipliers,
         lot_sizes,
         margin_ratios,
+        volumes,
     )
 
 
@@ -145,6 +164,48 @@ def valuation_price(request: TargetWeightInput, row: int, instrument: str) -> fl
     return request.prices[instrument][row] * request.multipliers[row][position]
 
 
+def execution_price(
+    base_price: float,
+    signed_quantity: float,
+    strategy: Mapping[str, Any],
+) -> float:
+    mode = str(strategy.get("slippage_mode") or "none")
+    if mode == "none":
+        return float(base_price)
+    if mode == "fixed_bps":
+        bps = float(strategy.get("slippage_bps") or 0.0)
+        return float(base_price) * (1.0 + np.sign(signed_quantity) * bps / 10_000.0)
+    raise ValueError(f"unsupported slippage mode: {mode}")
+
+
+def capacity_limited_deltas(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+) -> dict[str, float]:
+    deltas = {
+        instrument: float(desired.get(instrument, 0.0))
+        - float(current.get(instrument, 0.0))
+        for instrument in request.instruments
+    }
+    mode = str(strategy.get("liquidity_mode") or "infinite")
+    if mode == "infinite":
+        return deltas
+    if mode != "volume_participation" or request.volumes is None:
+        raise ValueError(f"unsupported or unavailable liquidity mode: {mode}")
+    rate = float(strategy.get("participation_rate") or 0.0)
+    if not 0 < rate <= 1:
+        raise ValueError("participation_rate must be within (0, 1]")
+    return {
+        instrument: np.sign(delta) * min(
+            abs(delta), request.volumes[instrument][row] * rate
+        )
+        for instrument, delta in deltas.items()
+    }
+
+
 def _parse_rule_matrix(
     value: Any,
     rows: int,
@@ -188,3 +249,16 @@ def parse_group_strategy_input(
         for position, config in enumerate(configs)
     )
     return request, membership, signal_updates, calculators
+
+
+def market_rule_diagnostics(payload: Mapping[str, Any]) -> dict[str, Any]:
+    provenance = (payload.get("market_rules") or {}).get("provenance") or {}
+    approximation_count = sum(
+        int(counts.get("as_of_latest", 0))
+        + int(counts.get("configured_default", 0))
+        for counts in provenance.values()
+    )
+    return {
+        "market_rule_approximation_count": approximation_count,
+        "market_rule_provenance": provenance,
+    }

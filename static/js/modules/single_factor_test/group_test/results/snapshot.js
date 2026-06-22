@@ -24,6 +24,10 @@
     var _snapshotCurrentMs = null; // 当前显示的时间点
     var _snapshotPrevChangeMs = null;
     var _snapshotNextChangeMs = null;
+    var _snapshotEventCursors = [];
+    var _snapshotCurrentEventCursor = null;
+    var _snapshotPrevChangeEventCursor = null;
+    var _snapshotNextChangeEventCursor = null;
 
     function _selection() {
         return GT.panels && GT.panels.list && GT.panels.list.selection;
@@ -48,7 +52,7 @@
     }
 
     // ---------- 获取并展示分组快照 ----------
-    function fetchGroupSnapshot(timestampMs) {
+    function fetchGroupSnapshot(timestampMs, eventCursor) {
         var submissionId = _activeSubmissionId();
         if (!submissionId) {
             alert('请先在提交列表中选中一条提交记录，再点击图表查看持仓快照。');
@@ -90,7 +94,9 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 submission_id: submissionId,
-                timestamp_ms: timestampMs
+                timestamp_ms: timestampMs,
+                page_uuid: window._pageUuid || '',
+                event_cursor: eventCursor || null
             })
         };
 
@@ -124,6 +130,10 @@
             _snapshotCurrentMs = data.timestamp_ms;
             _snapshotPrevChangeMs = data.prev_change_timestamp_ms || null;
             _snapshotNextChangeMs = data.next_change_timestamp_ms || null;
+            _snapshotEventCursors = data.event_cursors || [];
+            _snapshotCurrentEventCursor = data.event_cursor || null;
+            _snapshotPrevChangeEventCursor = data.prev_change_event_cursor || null;
+            _snapshotNextChangeEventCursor = data.next_change_event_cursor || null;
 
             try {
                 renderGroupSnapshot(data, data.timestamp_ms);
@@ -153,8 +163,8 @@
         var prevChangeBtn = document.getElementById('snapshot-prev-change-btn');
         var nextChangeBtn = document.getElementById('snapshot-next-change-btn');
 
-        if (prevBtn) prevBtn.textContent = '◀ 前一时刻';
-        if (nextBtn) nextBtn.textContent = '后一时刻 ▶';
+        if (prevBtn) prevBtn.textContent = '◀ 前一事件';
+        if (nextBtn) nextBtn.textContent = '后一事件 ▶';
         if (prevChangeBtn) prevChangeBtn.textContent = '◀ 前一变化';
         if (nextChangeBtn) nextChangeBtn.textContent = '后一变化 ▶';
 
@@ -185,6 +195,14 @@
 
     /** 导航到上一个/下一个时点 */
     function navigateSnapshot(direction) {
+        if (_snapshotEventCursors.length && _snapshotCurrentEventCursor) {
+            var eventIndex = _snapshotEventCursors.indexOf(_snapshotCurrentEventCursor);
+            var targetIndex = eventIndex + (direction === 'next' ? 1 : -1);
+            if (eventIndex >= 0 && targetIndex >= 0 && targetIndex < _snapshotEventCursors.length) {
+                fetchGroupSnapshot(_snapshotCurrentMs, _snapshotEventCursors[targetIndex]);
+            }
+            return;
+        }
         if (!_snapshotTimestamps.length) return;
         var idx = _snapshotTimestamps.indexOf(_snapshotCurrentMs);
         if (idx < 0) return;
@@ -195,8 +213,10 @@
 
     function navigateSnapshotChange(direction) {
         var target = direction === 'next' ? _snapshotNextChangeMs : _snapshotPrevChangeMs;
+        var cursor = direction === 'next'
+            ? _snapshotNextChangeEventCursor : _snapshotPrevChangeEventCursor;
         if (target === null || target === undefined) return;
-        fetchGroupSnapshot(target);
+        fetchGroupSnapshot(target, cursor);
     }
 
     function openSnapshotDrawer() {
@@ -498,7 +518,8 @@
         var timeStr = _fmtTs(timestampMs, timezone);
         var nextTs = _nextTimestampMs(timestampMs);
         var titlePeriod = nextTs ? (timeStr + ' 至 ' + _fmtTs(nextTs, timezone)) : (timeStr + ' 起');
-        document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + titlePeriod;
+        document.getElementById('snapshot_title').innerHTML = '📋 分组事件快照 — '
+            + titlePeriod + (data.event_label ? ' · ' + _escape(data.event_label) : '');
 
         var bodyEl = document.getElementById('snapshot_body');
         var statsEl = document.getElementById('snapshot_flow_stats');

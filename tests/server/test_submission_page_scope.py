@@ -7,6 +7,7 @@ from flask import Flask
 
 import server.services.page_runtime as runtime_state
 from server.modules.shared import submissions as submission_routes
+from server.modules.shared import factor_data as factor_data_routes
 from server.modules.shared import page_lifecycle as page_lifecycle_routes
 from server.modules.single_factor_test import page as page_routes
 from server.modules.single_factor_test import view_helpers
@@ -39,20 +40,17 @@ def app():
 
 @pytest.fixture
 def two_page_testers():
-    original = runtime_state.factor_testers
     original_page_factor_testers = dict(runtime_state.page_factor_testers)
     original_page_owners = dict(runtime_state.page_owners)
     original_time_store = dict(runtime_state.page_time_store)
     page_a = [_Tester("a1", "page-a"), _Tester("a2", "page-a")]
     page_b = [_Tester("b1", "page-b"), _Tester("b2", "page-b")]
-    runtime_state.factor_testers = [page_a[0], page_b[0], page_a[1], page_b[1]]
     runtime_state.page_factor_testers = {"page-a": [page_a[0], page_a[1]], "page-b": [page_b[0], page_b[1]]}
     runtime_state.page_owners = {"page-a": "user-a", "page-b": "user-b"}
     runtime_state.page_time_store = {"page-a": ("start", "end", "start"), "page-b": ("start", "end", "start")}
     try:
         yield page_a, page_b
     finally:
-        runtime_state.factor_testers = original
         runtime_state.page_factor_testers = original_page_factor_testers
         runtime_state.page_owners = original_page_owners
         runtime_state.page_time_store = original_time_store
@@ -64,9 +62,9 @@ def test_rename_response_only_contains_current_page_submissions(app, two_page_te
         method="POST",
         json={"id_time": "a1", "new_name": "A new name", "page_uuid": "page-a"},
     ):
-        response, status = submission_routes.rename_submission()
+        response = submission_routes.rename_submission()
 
-    assert status == 200
+    assert response.status_code == 200
     payload = response.get_json()
     assert payload["success"] is True
     assert [item["id"] for item in payload["submissions"]] == ["a1", "a2"]
@@ -80,11 +78,12 @@ def test_reorder_only_reorders_testers_from_current_page(app, two_page_testers):
         method="POST",
         json={"new_order": ["a2", "a1"], "page_uuid": "page-a"},
     ):
-        response, status = submission_routes.reorder_submissions()
+        response = submission_routes.reorder_submissions()
 
-    assert status == 200
+    assert response.status_code == 200
     assert response.get_json()["success"] is True
-    assert runtime_state.factor_testers == [page_a[1], page_b[0], page_a[0], page_b[1]]
+    assert runtime_state.page_factor_testers["page-a"] == [page_a[1], page_a[0]]
+    assert runtime_state.page_factor_testers["page-b"] == page_b
 
 
 def test_scoped_mutation_cannot_target_another_page(app, two_page_testers):
@@ -95,11 +94,49 @@ def test_scoped_mutation_cannot_target_another_page(app, two_page_testers):
         method="POST",
         json={"id_time": "b1", "new_name": "Wrong page", "page_uuid": "page-a"},
     ):
-        response, status = submission_routes.rename_submission()
+        response = submission_routes.rename_submission()
 
-    assert status == 200
+    assert response.status_code == 200
     assert response.get_json()["success"] is False
     assert page_b[0].label == ""
+
+
+def test_factor_tester_lookup_is_isolated_by_page(two_page_testers):
+    page_a, page_b = two_page_testers
+    page_a[0].alias = "user-a:same-submission"
+    page_b[0].alias = "user-b:same-submission"
+
+    assert runtime_state.get_factor_tester(
+        "same-submission", page_uuid="page-a"
+    ) is page_a[0]
+    assert runtime_state.get_factor_tester(
+        "same-submission", page_uuid="page-b"
+    ) is page_b[0]
+
+
+def test_factor_data_requires_page_uuid(app):
+    with app.test_request_context(
+        "/get_factor_series",
+        method="POST",
+        json={"submission_id": "same-submission"},
+    ):
+        response, status = factor_data_routes.get_factor_series()
+
+    assert status == 400
+    assert response.get_json()["error"] == "缺少 page_uuid"
+
+
+def test_factor_data_rejects_another_users_page(app, two_page_testers, monkeypatch):
+    monkeypatch.setattr(factor_data_routes, "current_user", lambda: "user-b")
+    with app.test_request_context(
+        "/get_factor_series",
+        method="POST",
+        json={"submission_id": "a1", "page_uuid": "page-a"},
+    ):
+        response, status = factor_data_routes.get_factor_series()
+
+    assert status == 403
+    assert response.get_json()["error"] == "page_uuid 不属于当前用户"
 
 
 def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
@@ -192,6 +229,35 @@ def test_close_page_unregisters_page_resources(app):
     page_factors.pop("page-a", None)
     runtime_state.page_owners.pop("page-a", None)
     runtime_state.page_states.pop("page-a", None)
+
+
+def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
+    from server.services.factor_registry import page_families, page_factors
+
+    tester = _Tester("alice:submission-1", "page-unload")
+    runtime_state.page_factor_testers["page-unload"] = [tester]
+    runtime_state.page_owners["page-unload"] = "alice"
+    runtime_state.page_states["page-unload"] = {"latest_group_execution": object()}
+    runtime_state.page_time_store["page-unload"] = ("start", "end", "start")
+    page_families["page-unload"] = {}
+    page_factors["page-unload"] = {}
+    monkeypatch.setattr(page_lifecycle_routes, "current_user", lambda: "alice")
+
+    with app.test_request_context(
+        "/unregister_page",
+        method="POST",
+        json={"page_uuid": "page-unload"},
+    ):
+        response = page_lifecycle_routes.unregister_page()
+
+    assert response.status_code == 200
+    assert tester.deleted is True
+    assert "page-unload" not in runtime_state.page_factor_testers
+    assert "page-unload" not in runtime_state.page_owners
+    assert "page-unload" not in runtime_state.page_states
+    assert "page-unload" not in runtime_state.page_time_store
+    assert "page-unload" not in page_families
+    assert "page-unload" not in page_factors
 
 
 def test_debug_page_state_reports_page_scope(app, monkeypatch):

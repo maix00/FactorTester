@@ -75,6 +75,7 @@ class ExecutionVenue:
     portfolio_ids: frozenset[str]
     on_order: EventHandler
     on_market_data: EventHandler | None = None
+    on_market_slice: EventHandler | None = None
 
     def __post_init__(self) -> None:
         if not self.portfolio_ids:
@@ -129,6 +130,8 @@ class BacktestRunner:
         for venue in self.venues:
             if venue.on_market_data is not None:
                 runtime.subscribe(EventTopic.MARKET_DATA, venue.on_market_data)
+            if venue.on_market_slice is not None:
+                runtime.subscribe(EventTopic.MARKET_SLICE_CLOSED, venue.on_market_slice)
             runtime.subscribe(
                 EventTopic.ORDER_SUBMITTED,
                 _route_payload(venue.on_order, "portfolio_id", venue.portfolio_ids),

@@ -15,11 +15,12 @@ if TYPE_CHECKING:
     from tools.factors import FactorTester
 
 
-factor_testers: list = []
 page_factor_testers: dict[str, list] = {}
 page_owners: dict[str, str | None] = {}
 page_states: dict[str, dict[str, Any]] = {}
-factor_testers_lock = threading.Lock()
+# Submission mutations may call scoped lookup helpers while holding the state
+# lock. An RLock preserves the atomic mutation without deadlocking that lookup.
+factor_testers_lock = threading.RLock()
 
 MAX_PAGE_UUIDS = 500
 page_time_store: dict = {}
@@ -49,55 +50,68 @@ def alias_matches_submission_id(alias: str, submission_id: str | int | None, all
     return False
 
 
-def find_factor_tester(submission_id: str | int | None, allow_suffix: bool = True):
+def find_factor_tester(
+    submission_id: str | int | None,
+    allow_suffix: bool = True,
+    *,
+    page_uuid: str,
+):
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("查找 FactorTester 必须提供 page_uuid")
     with factor_testers_lock:
+        candidates = page_factor_testers.get(page_uuid, [])
         return next(
             (
-                t for t in factor_testers
+                t for t in candidates
                 if alias_matches_submission_id(getattr(t, 'alias', ''), submission_id, allow_suffix=allow_suffix)
             ),
             None,
         )
 
 
-def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
-    tester = find_factor_tester(alias, allow_suffix=True)
+def get_factor_tester(
+    alias: str,
+    caller: Optional[Any] = None,
+    *,
+    page_uuid: str,
+) -> 'FactorTester':
+    tester = find_factor_tester(alias, allow_suffix=True, page_uuid=page_uuid)
     if tester is None:
-        aliases = [getattr(t, 'alias', '?') for t in factor_testers]
+        with factor_testers_lock:
+            candidates = page_factor_testers.get(str(page_uuid), [])
+            aliases = [getattr(t, 'alias', '?') for t in candidates]
         raise AssertionError(
             f"{str(caller) + ': ' if caller is not None else ''}"
             f"未找到对应的测试器实例 alias={alias!r}, "
-            f"available={aliases}"
+            f"page_uuid={page_uuid!r}, available={aliases}"
         )
     return tester
 
 
-def iter_factor_testers(page_uuid: Optional[str] = None) -> list:
+def iter_factor_testers(page_uuid: str) -> list:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("遍历 FactorTester 必须提供 page_uuid")
     with factor_testers_lock:
-        if page_uuid:
-            return list(page_factor_testers.get(page_uuid, []))
-        return list(factor_testers)
+        return list(page_factor_testers.get(page_uuid, []))
 
 
 def register_factor_tester(tester: Any, page_uuid: Optional[str] = None) -> None:
     if page_uuid is None:
         page_uuid = _tester_page_uuid(tester)
-    if page_uuid:
-        try:
-            setattr(tester, '_page_uuid', page_uuid)
-        except Exception:
-            pass
-    with factor_testers_lock:
-        factor_testers.append(tester)
-        if page_uuid:
-            page_factor_testers.setdefault(page_uuid, []).append(tester)
-
-
-def _remove_from_flat_store_locked(tester: Any) -> None:
+    page_uuid = str(page_uuid or '').strip()
+    if not page_uuid:
+        raise ValueError("注册 FactorTester 必须提供 page_uuid")
     try:
-        factor_testers.remove(tester)
-    except ValueError:
+        setattr(tester, '_page_uuid', page_uuid)
+    except Exception:
         pass
+    with factor_testers_lock:
+        page_factor_testers.setdefault(page_uuid, []).append(tester)
+
+
+def _remove_from_page_store_locked(tester: Any) -> None:
     page_uuid = _tester_page_uuid(tester)
     if not page_uuid:
         return
@@ -114,7 +128,7 @@ def _remove_from_flat_store_locked(tester: Any) -> None:
 
 def remove_factor_tester(tester: Any, *, delete: bool = True) -> None:
     with factor_testers_lock:
-        _remove_from_flat_store_locked(tester)
+        _remove_from_page_store_locked(tester)
     if delete:
         try:
             tester.delete()
@@ -124,39 +138,18 @@ def remove_factor_tester(tester: Any, *, delete: bool = True) -> None:
 
 def replace_page_factor_testers(page_uuid: str, ordered_testers: list) -> None:
     page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("重排 FactorTester 必须提供 page_uuid")
     with factor_testers_lock:
         page_factor_testers[page_uuid] = list(ordered_testers)
-        new_flat: list = []
-        inserted = False
-        for tester in factor_testers:
-            if _tester_page_uuid(tester) == page_uuid:
-                if not inserted:
-                    new_flat.extend(ordered_testers)
-                    inserted = True
-                continue
-            new_flat.append(tester)
-        if not inserted:
-            new_flat.extend(ordered_testers)
-        factor_testers[:] = new_flat
 
 
-def clear_page_factor_testers(page_uuid: str | None, *, delete: bool = True) -> None:
-    if page_uuid is None:
-        with factor_testers_lock:
-            testers = list(factor_testers)
-            factor_testers.clear()
-            page_factor_testers.clear()
-        if delete:
-            for tester in testers:
-                try:
-                    tester.delete()
-                except Exception:
-                    pass
-        return
+def clear_page_factor_testers(page_uuid: str, *, delete: bool = True) -> None:
     page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("清理 FactorTester 必须提供 page_uuid")
     with factor_testers_lock:
         testers = list(page_factor_testers.pop(page_uuid, []))
-        factor_testers[:] = [tester for tester in factor_testers if _tester_page_uuid(tester) != page_uuid]
     if delete:
         for tester in testers:
             try:
@@ -243,6 +236,14 @@ def get_page_state(page_uuid: str) -> Any:
     return SimpleNamespace(**state)
 
 
+def get_page_owner(page_uuid: str) -> str | None:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        return None
+    with factor_testers_lock:
+        return page_owners.get(page_uuid)
+
+
 def cleanup_user_pages(user: Any) -> None:
     if user is None:
         return
@@ -255,15 +256,6 @@ def cleanup_user_pages(user: Any) -> None:
         }
     for page_uuid in page_uuids:
         unregister_page(page_uuid)
-
-
-def cleanup_user_testers(user: Any) -> None:
-    if user is None:
-        return
-    with factor_testers_lock:
-        testers = [tester for tester in factor_testers if getattr(tester, 'user', None) is user]
-    for tester in testers:
-        remove_factor_tester(tester, delete=True)
 
 
 def _evict_page(page_uuid: str) -> None:

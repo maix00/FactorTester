@@ -23,8 +23,8 @@ from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
 from server.services.factor_registry import get_factor_family_instance
-from server.services.page_runtime import get_factor_tester
-from server.services.session_runtime import get_session_params
+from server.services.page_runtime import get_factor_tester, get_page_owner
+from server.services.session_runtime import current_user, get_session_params
 from server.services.sse_progress import SSEProgressEmitter
 
 
@@ -566,13 +566,20 @@ def _prepare_ic_compute(
 def run_ic_test():
     """IC 测试（JSON 一次性返回）。"""
     data = request.get_json(silent=True) or {}
+    page_uuid = str(data.get('page_uuid') or '')
+    if not page_uuid:
+        return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
+    if get_page_owner(page_uuid) != current_user():
+        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
     _token = None
     tester = None
 
     try:
         (_, _, _, _, _, _, ic_lags, primary_ic_lag) = _parse_ic_params(data)
 
-        tester = get_factor_tester(data.get('submission_id', ''), caller='run_ic_test')
+        tester = get_factor_tester(
+            data.get('submission_id', ''), caller='run_ic_test', page_uuid=page_uuid
+        )
         factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
@@ -617,10 +624,19 @@ def run_ic_test():
 def run_ic_test_stream():
     """SSE 流式 IC 测试 — 推送进度事件 + 最终结果"""
     data = request.get_json(silent=True) or {}
+    page_uuid = str(data.get('page_uuid') or '')
+    if not page_uuid:
+        return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
+    if get_page_owner(page_uuid) != current_user():
+        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
 
     # ── 在主线程中完成所有需要 context 的操作 ──
     try:
-        tester = get_factor_tester(str(data.get('submission_id', '')), caller='run_ic_test_stream')
+        tester = get_factor_tester(
+            str(data.get('submission_id', '')),
+            caller='run_ic_test_stream',
+            page_uuid=page_uuid,
+        )
         factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)

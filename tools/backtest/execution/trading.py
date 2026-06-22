@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+import pandas as pd
 
 from ..event_driven.contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
 from ..event_driven.runtime import (
@@ -438,6 +439,92 @@ class ImmediateBroker:
             EventDraft(EventTopic.ORDER_ACCEPTED, event.timestamp, order),
             EventDraft(EventTopic.FILL, event.timestamp, fill),
         ]
+
+
+class NextBarBroker:
+    """Fill open orders on the first later market slice through injected models."""
+
+    def __init__(
+        self,
+        portfolio_ids: set[str],
+        *,
+        commission_model: CommissionModel | None = None,
+        capacity: Callable[[Order, ProductPrice], float] | None = None,
+        fill_price: Callable[[Order, ProductPrice, float], float] | None = None,
+    ) -> None:
+        if not portfolio_ids:
+            raise ValueError("next-bar broker requires at least one portfolio")
+        self.portfolio_ids = frozenset(portfolio_ids)
+        self.commission_model = commission_model or ZeroCommissionModel()
+        self.capacity = capacity or (lambda order, quote: float("inf"))
+        self.fill_price = fill_price or (lambda order, quote, quantity: quote.price)
+        self._open_orders: dict[str, _OpenOrder] = {}
+        self._fill_sequence = itertools.count()
+
+    @property
+    def open_order_count(self) -> int:
+        return len(self._open_orders)
+
+    def on_order_submitted(
+        self, event: EventEnvelope, runtime: EventRuntime
+    ) -> list[EventDraft] | None:
+        order = event.payload
+        if not isinstance(order, Order):
+            raise TypeError("order.submitted payload must be Order")
+        if order.portfolio_id not in self.portfolio_ids:
+            return None
+        if order.order_id in self._open_orders:
+            raise ValueError(f"duplicate order id: {order.order_id}")
+        for existing_id, existing in tuple(self._open_orders.items()):
+            if (
+                existing.order.portfolio_id == order.portfolio_id
+                and existing.order.instrument == order.instrument
+            ):
+                del self._open_orders[existing_id]
+        self._open_orders[order.order_id] = _OpenOrder(order, order.quantity)
+        return [EventDraft(EventTopic.ORDER_ACCEPTED, event.timestamp, order)]
+
+    def on_market_slice(
+        self, event: EventEnvelope, runtime: EventRuntime
+    ) -> list[EventDraft]:
+        market_slice = event.payload
+        if not isinstance(market_slice, MarketSlice):
+            raise TypeError("market.slice_closed payload must be MarketSlice")
+        drafts = []
+        remaining_capacity: dict[str, float] = {}
+        for open_order in tuple(self._open_orders.values()):
+            order = open_order.order
+            if pd.Timestamp(event.timestamp) <= pd.Timestamp(order.timestamp):
+                continue
+            quote = market_slice.prices.get(order.instrument)
+            if quote is None:
+                continue
+            if order.instrument not in remaining_capacity:
+                remaining_capacity[order.instrument] = max(
+                    0.0, float(self.capacity(order, quote))
+                )
+            quantity = min(open_order.remaining, remaining_capacity[order.instrument])
+            if quantity <= 1e-12:
+                continue
+            price = float(self.fill_price(order, quote, quantity))
+            fill = Fill(
+                fill_id=f"{order.order_id}:fill:{next(self._fill_sequence)}",
+                order_id=order.order_id,
+                strategy_id=order.strategy_id,
+                portfolio_id=order.portfolio_id,
+                timestamp=event.timestamp,
+                instrument=order.instrument,
+                side=order.side,
+                quantity=quantity,
+                price=price,
+                fees=self.commission_model.calculate(order, price=price, quantity=quantity),
+            )
+            open_order.remaining -= quantity
+            remaining_capacity[order.instrument] -= quantity
+            if open_order.remaining <= 1e-12:
+                del self._open_orders[order.order_id]
+            drafts.append(EventDraft(EventTopic.FILL, event.timestamp, fill))
+        return drafts
 
 
 @dataclass(slots=True)

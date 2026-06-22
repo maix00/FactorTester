@@ -112,6 +112,8 @@
                 {
                     capital_warning: data.capital_warning,
                     capital_diagnostics: data.capital_diagnostics,
+                    market_rule_warning: data.market_rule_warning,
+                    market_rule_approximation_count: data.market_rule_approximation_count,
                 }
             );
         }

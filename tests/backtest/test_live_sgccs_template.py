@@ -93,33 +93,62 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "_group_factor_params_list": snapshot["params_list"],
         "_group_owner_username": USERNAME,
     }
+    profiles = {
+        "baseline": {
+            "allocation_policy": "equal_notional",
+            "fee_mode": "none",
+            "margin_mode": "none",
+            "liquidity_mode": "infinite",
+        },
+        "execution_plugins": {
+            "allocation_policy": "inverse_volatility",
+            "volatility_lookback": 20,
+            "volatility_warmup": "equal_notional",
+            "fee_mode": "custom",
+            "custom_fee_rate": 0.000001,
+            "margin_mode": "market",
+            "collateral_fraction": 1.0,
+            "liquidity_mode": "volume_participation",
+            "participation_rate": 0.1,
+            "slippage_mode": "fixed_bps",
+            "slippage_bps": 0.1,
+        },
+    }
+    selected_profile = os.environ.get("LIVE_SGCCS_PROFILE")
+    if selected_profile:
+        profiles = {selected_profile: profiles[selected_profile]}
     results = {}
-    for engine in ("native", "backtrader", "qlib", "zipline"):
-        response = client.post("/run_group_test", json={
-            **base_payload,
-            "backtest_settings": {
-                "application": "group_test",
-                "local_values": {
-                    "engine": engine,
-                    "factor_mode": "precomputed",
-                    "allocation_policy": "equal_notional",
-                    "rebalance_mode": "on_factor_signal",
-                    "fee_mode": "none",
-                    "initial_capital": capital["initialCapital"],
+    for profile, profile_settings in profiles.items():
+        results[profile] = {}
+        for engine in ("native", "backtrader", "qlib", "zipline"):
+            response = client.post("/run_group_test", json={
+                **base_payload,
+                "backtest_settings": {
+                    "application": "group_test",
+                    "local_values": {
+                        "engine": engine,
+                        "factor_mode": "precomputed",
+                        "rebalance_mode": "on_factor_signal",
+                        "initial_capital": capital["initialCapital"],
+                        **profile_settings,
+                    },
+                    "group_values": {},
                 },
-                "group_values": {},
-            },
-        })
-        body = response.get_json()
-        assert response.status_code == 200, {"engine": engine, "body": body}
-        assert body["success"], body
-        assert body["simulation_count"] == 1
-        assert len(body["groups"]) == 7
-        assert len(body["metrics"]) == 7
-        assert body["engine_result"]["engine"] == engine
-        results[engine] = body
+            })
+            body = response.get_json()
+            assert response.status_code == 200, {
+                "profile": profile, "engine": engine, "body": body,
+            }
+            assert body["success"], body
+            assert body["simulation_count"] == 1
+            assert len(body["groups"]) == 7
+            assert len(body["metrics"]) == 7
+            assert body["engine_result"]["engine"] == engine
+            results[profile][engine] = body
 
-    tester = page_runtime.get_factor_tester("live-sgccs-0", caller="live-framework-test")
+    tester = page_runtime.get_factor_tester(
+        "live-sgccs-0", caller="live-framework-test", page_uuid=page_uuid
+    )
     factor = tester.resolve_factor("SgCCS|N:2m|$F:1m|$Rev")
     assert factor is not None
     compile_streaming_factor(
@@ -127,11 +156,43 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         tuple(str(product.name) for product in tester.products),
         source_freq=factor._source_freq,
     )
-    traces = {
-        engine: {group["group_id"]: group["target_trace"] for group in body["groups"]}
-        for engine, body in results.items()
-    }
-    assert traces["native"] == traces["backtrader"] == traces["qlib"] == traces["zipline"]
+    for profile, profile_results in results.items():
+        traces = {
+            engine: {
+                group["group_id"]: group["target_trace"] for group in body["groups"]
+            }
+            for engine, body in profile_results.items()
+        }
+        assert traces["native"] == traces["backtrader"] == traces["qlib"] == traces["zipline"], profile
+
+    latest = results[next(reversed(results))]["zipline"]
+    first_group = latest["groups"][0]
+    detail = client.post("/get_group_detail", json={
+        "submission_id": first_group["submission_id"],
+        "group_index": first_group["group_index"],
+        "page_uuid": page_uuid,
+    })
+    assert detail.status_code == 200, detail.get_json()
+    assert detail.get_json()["detail"]["return_series"]
+
+    ranking = client.post("/get_group_ranking_detail", json={
+        "submission_id": first_group["submission_id"],
+        "page_uuid": page_uuid,
+    })
+    assert ranking.status_code == 200, ranking.get_json()
+    assert ranking.get_json()["detail"]["adjacent_spreads"]
+
+    snapshot_response = client.post("/get_group_snapshot", json={
+        "submission_id": first_group["submission_id"],
+        "timestamp_ms": first_group["timestamps"][-1],
+        "page_uuid": page_uuid,
+    })
+    assert snapshot_response.status_code == 200, snapshot_response.get_json()
+    snapshot_body = snapshot_response.get_json()
+    assert snapshot_body["event_cursor"]
+    assert [matrix["key"] for matrix in snapshot_body["matrices"]] == [
+        "positions", "targets",
+    ]
 
 
 def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict]:

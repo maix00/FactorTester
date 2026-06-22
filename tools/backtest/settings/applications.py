@@ -19,6 +19,7 @@ def group_test_settings() -> ApplicationSettings:
             "engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
         ),
+        SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 12),
         SettingTab("time", "时间范围", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
         SettingTab("allocation", "分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
@@ -49,7 +50,7 @@ def group_test_settings() -> ApplicationSettings:
     app.register_setting(SettingDefinition(
         "factor_mode",
         "因子计算模式",
-        "engine",
+        "factor",
         "select",
         "auto",
         ScopePolicy.LOCAL_ONLY,
@@ -167,6 +168,20 @@ def group_test_settings() -> ApplicationSettings:
         "custom_fee_rate", "自定义成交费率", "cost", "number", 0.0,
         ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.000001,
         chip_template="费率: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "slippage_mode", "滑点模型", "cost", "select", "none",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("none", "零滑点"),
+            SettingOption("fixed_bps", "固定基点"),
+        ),
+        chip_template="滑点: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "slippage_bps", "固定滑点（基点）", "cost", "number", 0.0,
+        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.1,
+        chip_template="滑点bp: {value}",
     ))
     app.register_setting(SettingDefinition(
         "liquidity_mode",

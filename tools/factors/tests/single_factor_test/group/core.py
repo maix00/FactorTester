@@ -193,6 +193,7 @@ class GroupTradeSpecBundle:
     is_margin_traded_vec: np.ndarray     # (P,)
     variety_codes_lower: list[str]
     positions_by_variety_code_lower: dict[str, list[int]]
+    rule_provenance: dict[str, dict[str, int]] | None = None
 
 
 def slice_group_run_result(
@@ -855,6 +856,7 @@ def _resolve_group_trade_specs(
     fee_modifications: list | None = None,
     use_closetoday: bool = False,
     index_list: pd.DatetimeIndex | list | None = None,
+    market_rule_fallback: str = "latest_available",
 ) -> GroupTradeSpecBundle:
     term_structure_paths = list(dict.fromkeys(
         path
@@ -918,7 +920,11 @@ def _resolve_group_trade_specs(
                 trading_days=index_list,
                 fields=list(_spec_field_names),
             )
-        except Exception:
+        except Exception as exc:
+            if market_rule_fallback == "strict_historical":
+                raise RuntimeError(
+                    f"历史市场规则查询失败，strict_historical 不允许回退: {exc}"
+                ) from exc
             db_time_specs = {}
 
     T = len(index_list) if index_list is not None else 1
@@ -987,20 +993,50 @@ def _resolve_group_trade_specs(
         is_margin_traded_list.append(bool(getattr(col, "is_margin_traded", False)))
 
     # ── Build (T, P) matrices ──
+    if market_rule_fallback not in {
+        "latest_available", "strict_historical", "configured_default"
+    }:
+        raise ValueError(f"unsupported market_rule_fallback: {market_rule_fallback}")
+    rule_provenance: dict[str, dict[str, int]] = {}
+
     def _build_mat(field: str, per_product_defaults: list[float], default_fallback: float = 0.0) -> np.ndarray:
-        """Build (T, P) matrix: prefer DB time-series, then per-product default as constant column, then scalar fallback."""
+        """Resolve historical rules under an explicit, observable fallback policy."""
         df = db_time_specs.get(field)
         if df is not None and not df.empty:
             idx = pd.DatetimeIndex(index_list) if index_list is not None else pd.DatetimeIndex([])
             mat = df.reindex(index=idx).to_numpy(dtype=float)
-            # Fill NaN with per-product defaults expanded to (T, P)
-            defaults_arr = np.asarray(per_product_defaults, dtype=float).reshape(1, P)
-            mask = np.isnan(mat)
-            mat = np.where(mask, np.broadcast_to(defaults_arr, (T, P))[mask.any(axis=1, keepdims=True) * mask], mat)
-            mat = np.nan_to_num(mat, nan=default_fallback)
-            return mat
+            if mat.shape != (T, P):
+                raise ValueError(
+                    f"历史市场规则 {field} shape={mat.shape}，期望 {(T, P)}"
+                )
         else:
-            return np.broadcast_to(np.asarray(per_product_defaults, dtype=float).reshape(1, P), (T, P)).copy()
+            mat = np.full((T, P), np.nan, dtype=float)
+        missing = ~np.isfinite(mat)
+        missing_count = int(np.count_nonzero(missing))
+        rule_provenance[field] = {
+            "effective_at": int(mat.size - missing_count),
+            "as_of_latest": 0,
+            "configured_default": 0,
+        }
+        if not missing_count:
+            return mat
+        if market_rule_fallback == "strict_historical":
+            row, column = np.argwhere(missing)[0]
+            product_name = getattr(valid_cols[int(column)], "name", str(valid_cols[int(column)]))
+            timestamp = pd.DatetimeIndex(index_list)[int(row)] if index_list is not None else row
+            raise ValueError(
+                f"缺少历史市场规则 field={field}, product={product_name}, timestamp={timestamp}"
+            )
+        if market_rule_fallback == "latest_available":
+            fallback_values = np.broadcast_to(
+                np.asarray(per_product_defaults, dtype=float).reshape(1, P), (T, P)
+            )
+            mat = np.where(missing, fallback_values, mat)
+            rule_provenance[field]["as_of_latest"] = missing_count
+        else:
+            mat = np.where(missing, float(default_fallback), mat)
+            rule_provenance[field]["configured_default"] = missing_count
+        return mat
 
     open_ratio_mat = _build_mat("open_ratio", prod_open_ratio, half_fee)
     open_fixed_mat = _build_mat("open_fixed", prod_open_fixed, 0.0)
@@ -1029,6 +1065,7 @@ def _resolve_group_trade_specs(
         is_margin_traded_vec=np.asarray(is_margin_traded_list, dtype=bool),
         variety_codes_lower=variety_codes_lower,
         positions_by_variety_code_lower=positions_by_variety_code_lower,
+        rule_provenance=rule_provenance,
     )
 
 

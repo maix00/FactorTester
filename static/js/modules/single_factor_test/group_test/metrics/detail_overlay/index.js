@@ -104,7 +104,11 @@
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ submission_id: submissionId, group_index: groupIndex }),
+            body: JSON.stringify({
+                submission_id: submissionId,
+                group_index: groupIndex,
+                page_uuid: window._pageUuid || ''
+            }),
         });
         var data = await resp.json();
         if (!data.success) throw new Error(data.error || '加载失败');
@@ -197,7 +201,10 @@
             var resp = await fetch('/get_group_ranking_detail', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ submission_id: submissionId }),
+                body: JSON.stringify({
+                    submission_id: submissionId,
+                    page_uuid: window._pageUuid || ''
+                }),
             });
             var data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');

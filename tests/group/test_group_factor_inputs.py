@@ -138,7 +138,6 @@ class _FakeRuntimeTester:
 
 
 def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monkeypatch):
-    from server.services import page_runtime
     from tools.factors.tests.single_factor_test.group import group_tester as group_tester_module
 
     fake_tester = _FakeRuntimeTester()
@@ -178,12 +177,12 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
             out.append(membership)
         return out
 
-    monkeypatch.setattr(page_runtime, "get_factor_tester", lambda alias, caller=None: fake_tester)
     monkeypatch.setattr(group_tester_module, "_prepare_group_shared_inputs", fake_prepare)
     monkeypatch.setattr(group_tester_module, "_build_group_memberships_from_shared", fake_memberships)
 
     tester = FactorGroupTester.from_flat_groups(
         groups,
+        testers_by_id={"tester-1": fake_tester},
         spec_index_by_group={0: 0, 1: 0},
         calendar_index=None,
         rebalance_mode="each_period",

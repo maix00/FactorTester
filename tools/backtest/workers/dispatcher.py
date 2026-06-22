@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import threading
+from collections.abc import Callable
 
 from .contracts import WorkerRequest, WorkerResponse
 
@@ -29,6 +31,7 @@ class EngineWorkerDispatcher:
         request: WorkerRequest,
         *,
         timeout_seconds: float = 120.0,
+        progress: Callable[[dict], None] | None = None,
     ) -> WorkerResponse:
         try:
             environment = self.environments[request.engine]
@@ -39,14 +42,23 @@ class EngineWorkerDispatcher:
             "python", "-m", "tools.backtest.workers.entrypoint",
         ]
         try:
-            completed = subprocess.run(
-                command,
-                cwd=REPO_ROOT,
-                input=json.dumps(request.to_dict()),
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
+            completed = (
+                self._run_streaming(
+                    command,
+                    json.dumps(request.to_dict()),
+                    timeout_seconds,
+                    progress,
+                )
+                if progress is not None
+                else subprocess.run(
+                    command,
+                    cwd=REPO_ROOT,
+                    input=json.dumps(request.to_dict()),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
             )
         except subprocess.TimeoutExpired as exc:
             raise WorkerExecutionError(
@@ -68,3 +80,53 @@ class EngineWorkerDispatcher:
         if not response.success:
             raise WorkerExecutionError(response.error or "worker failed without an error")
         return response
+
+    @staticmethod
+    def _run_streaming(command, request_json, timeout_seconds, progress):
+        process = subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+
+        def _read_stdout() -> None:
+            assert process.stdout is not None
+            stdout_parts.append(process.stdout.read())
+
+        def _read_stderr() -> None:
+            assert process.stderr is not None
+            for line in process.stderr:
+                if line.startswith("GTHT_PROGRESS "):
+                    try:
+                        progress(json.loads(line[len("GTHT_PROGRESS "):]))
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        stderr_parts.append(line)
+                else:
+                    stderr_parts.append(line)
+
+        stdout_thread = threading.Thread(target=_read_stdout, daemon=True)
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        assert process.stdin is not None
+        process.stdin.write(request_json)
+        process.stdin.close()
+        try:
+            returncode = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        stdout_thread.join()
+        stderr_thread.join()
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            "".join(stdout_parts),
+            "".join(stderr_parts),
+        )
