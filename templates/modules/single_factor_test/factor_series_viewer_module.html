@@ -17,7 +17,7 @@
                 </button>
             </div>
         </div>
-        <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
+        <div id="factor-series-viewer-body" style="display:none;">
             <div style="font-size:12px;color:#64748b;">从产品树选择产品或路径，再选择因子运行 factor.evaluate，显示原始因子信号序列。</div>
             <div id="factor-series-controls" class="factor-series-controls">
                 <div class="factor-series-product-picker">
@@ -64,6 +64,20 @@
 </div>
 
 <style>
+    #factor-series-viewer-root {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    #factor-series-viewer-body {
+        flex: 1;
+        min-height: 0;
+        margin-top: 12px;
+        border-top: 1px solid #eef2f7;
+        padding-top: 12px;
+    }
+
     .factor-series-controls {
         display: flex;
         gap: 8px;
