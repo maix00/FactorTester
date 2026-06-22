@@ -888,9 +888,9 @@
         factorChartDiv.style.height = 'auto';
         factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:18px 0;">加载价格与因子值...</div>';
 
-        const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
-        if (!submission) { 
-            factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">未找到提交记录</div>'; 
+        const selection = selectionById(subId);
+        if (!selection) {
+            factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">未找到产品路径选择</div>';
             return; 
         }
 
@@ -907,7 +907,8 @@
                 fetch('/get_factor_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: subId,
+                        product_path_selection_id: selectionId(selection),
+                        product_path_selection: selection,
                         factor_family_alias: factorFamilyAlias,
                         factor_name: factorName,
                         factor_alias: factorAlias,
@@ -918,12 +919,13 @@
                 fetch('/get_return_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: subId,
+                        product_path_selection_id: selectionId(selection),
+                        product_path_selection: selection,
                         factor_name: factorName,
                         factor_alias: factorAlias,
                         factor_family_alias: factorFamilyAlias,
                         product: testerPrimary || product,
-                        paths: submission.paths,
+                        paths: selection.paths || selection.selected_paths || [],
                         page_uuid: window._pageUuid || ''
                     })
                 }).then(r => _safeJson(r, 'get_return_series'))
@@ -953,7 +955,7 @@
             // 主价格序列改为复用价格查看模块链路，保证连续性
             const priceApi = await fetch('/api/get_price_data', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, submission, adjusted, isTermContractProduct, freq))
+                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, selection, adjusted, isTermContractProduct, freq))
             }).then(r => r.json());
 
             const priceData = priceApiToSeries(priceApi);
@@ -975,7 +977,7 @@
                 const selectedContractUids = Array.from(icContractSelection[key] || []);
                 const contractSeriesList = adjusted
                     ? []
-                    : await fetchContractSeriesForOverlay(selectedContractUids, submission, adjusted);
+                    : await fetchContractSeriesForOverlay(selectedContractUids, selection, adjusted);
                 priceData.contract_series_list = contractSeriesList;
 
                 // 缓存数据以便 Volume/OI 复选框切换时重绘
@@ -1007,14 +1009,14 @@
         const key = `${subId}-${factorIdx}`;
         icContractSelection[key] = new Set();
         try {
-            const submission = window.submissions ? window.submissions.find(s => String(s.id) === String(subId)) : null;
+            const selection = selectionById(subId);
             const primarySelect = document.getElementById(`primary-product-select-${subId}-${factorIdx}`);
             const selectedOption = primarySelect ? primarySelect.options[primarySelect.selectedIndex] : null;
             const isTermContractProduct = selectedOption ? selectedOption.getAttribute('data-is-term-contract') === '1' : false;
             if (isTermContractProduct) return;
             const q = new URLSearchParams({ product: productName });
-            if (submission && submission.start_date) q.set('start_date', submission.start_date);
-            if (submission && submission.end_date) q.set('end_date', submission.end_date);
+            if (selection && selection.start_date) q.set('start_date', selection.start_date);
+            if (selection && selection.end_date) q.set('end_date', selection.end_date);
             const resp = await fetch('/api/get_contracts?' + q.toString());
             const data = await resp.json();
             if (!data.success || !Array.isArray(data.contracts)) return;
@@ -1606,11 +1608,13 @@
         chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">加载中...</div>';
 
         try {
+            const selection = selectionById(subId);
             const res = await fetch('/get_factor_distribution', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    submission_id: String(subId),
+                    product_path_selection_id: selectionId(selection),
+                    product_path_selection: selection,
                     factor_family_alias: factorFamilyAlias,
                     factor_name: factorName,
                     factor_alias: factorAlias,
