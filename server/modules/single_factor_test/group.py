@@ -33,6 +33,7 @@ import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, get_session_params
 from server.modules.shared.price_data_helpers import to_epoch_ms
 from server.services.factor_registry import get_factor_family_instance
+from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
 
@@ -1480,8 +1481,10 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     tester0 = None
     testers_by_id = {}
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(
-            submission_id, caller='run_group_test_prepare_factors', page_uuid=page_uuid
+        tester = create_factor_tester_for_product_path_selection(
+            data,
+            submission_id,
+            page_uuid=page_uuid,
         )
         testers_by_id[submission_id] = tester
         if tester0 is None:
@@ -1512,9 +1515,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     all_factor_freqs: list[Any] = []
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
         try:
-            tester = runtime_state.get_factor_tester(
-                submission_id, caller='run_group_test_calendar', page_uuid=page_uuid
-            )
+            tester = testers_by_id[submission_id]
         except Exception as exc:
             _progress(f"calendar build skip submission={submission_id} error={exc}")
             continue
@@ -1532,9 +1533,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"factor_freq_count={len(all_factor_freqs)}"
     )
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(
-            submission_id, caller='run_group_test_calendar_build', page_uuid=page_uuid
-        )
+        tester = testers_by_id[submission_id]
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
             requested_calendar_freq=(

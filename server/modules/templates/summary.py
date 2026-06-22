@@ -63,10 +63,10 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         if param_items:
             summary['params'] = param_items
 
-    submissions = snapshot.get('submissions', [])
-    if submissions:
+    selections = _snapshot_product_path_selections(snapshot)
+    if selections:
         submission_items = []
-        for index, submission in enumerate(submissions):
+        for index, submission in enumerate(selections):
             label = (
                 submission.get('product_group')
                 or submission.get('label')
@@ -81,21 +81,6 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             submission_items.append(f"{label} · {count_desc} · {path_desc}")
         if submission_items:
             summary['products'] = submission_items
-
-    return_freqs = snapshot.get('return_freqs', [])
-    if return_freqs:
-        freq_items = []
-        for freq in return_freqs:
-            if freq.get('checked') is False:
-                continue
-            alias = freq.get('alias', '?')
-            return_freq = freq.get('return_freq', '')
-            if return_freq:
-                freq_items.append(f"{alias} · 收益率频率 {return_freq}")
-            else:
-                freq_items.append(f"{alias} · 收益率频率 默认")
-        if freq_items:
-            summary['return_freqs'] = freq_items
 
     group_settings = snapshot.get('group_settings', {})
     if group_settings:
@@ -177,3 +162,27 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             summary['group_test'] = ', '.join(group_parts)
 
     return summary
+
+
+def _snapshot_product_path_selections(snapshot: dict) -> list[dict]:
+    selections: list[dict] = []
+    seen: set[str] = set()
+
+    def add(item):
+        if not isinstance(item, dict):
+            return
+        sid = str(item.get('product_path_selection_id') or item.get('id') or len(selections))
+        if sid in seen:
+            return
+        seen.add(sid)
+        selections.append(item)
+
+    local_settings = snapshot.get('local_settings')
+    if isinstance(local_settings, dict):
+        add(local_settings.get('product_path_selection'))
+    group_settings = snapshot.get('group_settings')
+    if isinstance(group_settings, dict):
+        for group in group_settings.get('groups') or []:
+            if isinstance(group, dict):
+                add(group.get('product_path_selection'))
+    return selections

@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 import settings as Settings
 from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
+from server.modules.products.product_group_store import load_product_groups
 from tools.data.sqlite.account_manager.user_template import TEMPLATE_TABLE, ensure_user_template_schema
 from tools.data.sqlite.db import connect_sqlite
 
@@ -62,7 +63,10 @@ def migrate_templates(
                 continue
             if not isinstance(payload, dict) or not isinstance(payload.get("snapshot"), dict):
                 continue
-            snapshot, changed = migrate_snapshot_backend_settings(payload["snapshot"])
+            snapshot, changed = migrate_snapshot_backend_settings(
+                payload["snapshot"],
+                load_product_groups(str(row["username"])),
+            )
             if not changed:
                 continue
             payload["snapshot"] = snapshot

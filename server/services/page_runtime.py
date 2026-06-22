@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 
 page_factor_testers: dict[str, list] = {}
+page_product_selections: dict[str, list] = {}
 page_owners: dict[str, str | None] = {}
 page_states: dict[str, dict[str, Any]] = {}
 # Submission mutations may call scoped lookup helpers while holding the state
@@ -70,6 +71,102 @@ def find_factor_tester(
         )
 
 
+def _selection_id(selection: Any) -> str:
+    return str(
+        getattr(
+            selection,
+            "selection_id",
+            getattr(selection, "product_path_selection_id", getattr(selection, "id", "")),
+        )
+        or ""
+    )
+
+
+def find_product_selection(
+    submission_id: str | int | None,
+    *,
+    page_uuid: str,
+):
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("查找产品路径组合必须提供 page_uuid")
+    sid = str(submission_id or "")
+    with factor_testers_lock:
+        return next(
+            (
+                selection for selection in page_product_selections.get(page_uuid, [])
+                if _selection_id(selection) == sid
+            ),
+            None,
+        )
+
+
+def get_product_selection(
+    submission_id: str | int | None,
+    *,
+    page_uuid: str,
+):
+    selection = find_product_selection(submission_id, page_uuid=page_uuid)
+    if selection is None:
+        available = [_selection_id(item) for item in page_product_selections.get(str(page_uuid), [])]
+        raise AssertionError(
+            f"未找到对应的产品路径组合 selection_id={submission_id!r}, "
+            f"page_uuid={page_uuid!r}, available={available}"
+        )
+    return selection
+
+
+def iter_product_selections(page_uuid: str) -> list:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("遍历产品路径组合必须提供 page_uuid")
+    with factor_testers_lock:
+        return list(page_product_selections.get(page_uuid, []))
+
+
+def register_product_selection(selection: Any, page_uuid: str) -> None:
+    page_uuid = str(page_uuid or "").strip()
+    if not page_uuid:
+        raise ValueError("注册产品路径组合必须提供 page_uuid")
+    try:
+        setattr(selection, "page_uuid", page_uuid)
+    except Exception:
+        pass
+    sid = _selection_id(selection)
+    with factor_testers_lock:
+        items = page_product_selections.setdefault(page_uuid, [])
+        items[:] = [item for item in items if _selection_id(item) != sid]
+        items.append(selection)
+
+
+def replace_page_product_selections(page_uuid: str, ordered_selections: list) -> None:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("重排产品路径组合必须提供 page_uuid")
+    with factor_testers_lock:
+        page_product_selections[page_uuid] = list(ordered_selections)
+
+
+def remove_product_selection(selection: Any) -> None:
+    page_uuid = str(getattr(selection, "page_uuid", "") or "").strip()
+    if not page_uuid:
+        return
+    sid = _selection_id(selection)
+    with factor_testers_lock:
+        items = page_product_selections.get(page_uuid, [])
+        items[:] = [item for item in items if _selection_id(item) != sid]
+        if not items:
+            page_product_selections.pop(page_uuid, None)
+
+
+def clear_page_product_selections(page_uuid: str) -> None:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        raise ValueError("清理产品路径组合必须提供 page_uuid")
+    with factor_testers_lock:
+        page_product_selections.pop(page_uuid, None)
+
+
 def get_factor_tester(
     alias: str,
     caller: Optional[Any] = None,
@@ -108,7 +205,16 @@ def register_factor_tester(tester: Any, page_uuid: Optional[str] = None) -> None
     except Exception:
         pass
     with factor_testers_lock:
-        page_factor_testers.setdefault(page_uuid, []).append(tester)
+        items = page_factor_testers.setdefault(page_uuid, [])
+        items[:] = [
+            item for item in items
+            if not alias_matches_submission_id(
+                getattr(item, "alias", ""),
+                getattr(tester, "alias", ""),
+                allow_suffix=False,
+            )
+        ]
+        items.append(tester)
 
 
 def _remove_from_page_store_locked(tester: Any) -> None:
@@ -156,6 +262,11 @@ def clear_page_factor_testers(page_uuid: str, *, delete: bool = True) -> None:
                 tester.delete()
             except Exception:
                 pass
+
+
+def clear_page_submissions(page_uuid: str, *, delete_testers: bool = True) -> None:
+    clear_page_product_selections(page_uuid)
+    clear_page_factor_testers(page_uuid, delete=delete_testers)
 
 
 def get_default_time():
@@ -208,7 +319,7 @@ def unregister_page(page_uuid: str) -> None:
         return
     from server.services.backtest_runs import cancel_page
     cancel_page(page_uuid)
-    clear_page_factor_testers(page_uuid, delete=True)
+    clear_page_submissions(page_uuid, delete_testers=True)
     from server.services.factor_registry import unregister_page as _unreg_page
     _unreg_page(page_uuid)
     with page_time_store_lock:

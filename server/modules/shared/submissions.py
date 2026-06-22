@@ -10,17 +10,16 @@ Shared submission routes:
   POST /rename_submission
 """
 from flask import request, jsonify
-import time
-from typing import Any, cast
+from typing import Any
 from server.services.product_tree import (
     find_node_by_path, get_minimal_paths,
 )
 import server.services.page_runtime as runtime_state
 from server.services.page_runtime import factor_testers_lock
-from server.services.session_runtime import current_user_obj
 from . import shared_bp
 from .submission_helpers import resolve_products_from_paths, submissions_payload
 from .submission_ids import make_submission_id
+from .submission_model import ProductPathSelection
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 from server.modules.shared.price_services import product_public_fields
@@ -43,6 +42,10 @@ def _matches_page(tester: Any, page_uuid: str | None) -> bool:
 
 
 def _find_submission(id_time: str, page_uuid: str | None):
+    if page_uuid:
+        selection = runtime_state.find_product_selection(id_time, page_uuid=page_uuid)
+        if selection is not None:
+            return selection
     return next(
         (
             tester for tester in runtime_state.iter_factor_testers(page_uuid)
@@ -187,31 +190,30 @@ def submit_selected_products():
     if err is not None:
         return err
     selected_paths = data.get('selected_paths', [])
-    id_time = make_submission_id(data.get('id_time'))
+    id_time = make_submission_id(
+        data.get('product_path_selection_id')
+        or data.get('selection_id')
+        or data.get('id_time')
+    )
     group_name = data.get('group_name', '').strip() or None
     assert selected_paths, "未选择任何产品路径"
-    selected_paths, selected_products = resolve_products_from_paths(selected_paths)
-
-    from tools.factors.FactorTester import FactorTester
-    # 按 page_uuid 查找运行时时间：无记录则拒绝创建
-    time_entry = runtime_state.get_current_time(page_uuid)
-    if time_entry is None:
-        return api_fail('请先在时间范围设置模块中设置起止时间')
-    _start, _end, _start_calc = time_entry
-    user = current_user_obj()
-    factor_tester = FactorTester(products=selected_products, alias=id_time, start_dt=_start, end_dt=_end, user=user)
-    factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
-    if group_name:
-        factor_tester.product_group = group_name
-    if page_uuid:
-        cast(Any, factor_tester)._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
-    runtime_state.register_factor_tester(factor_tester, page_uuid=page_uuid)
+    selection = ProductPathSelection.from_paths(
+        id_time,
+        selected_paths,
+        label=group_name or '',
+        product_group=group_name or '',
+        source_type='user_product_group_template' if group_name else 'manual_selection',
+        source_key=group_name or id_time,
+        page_uuid=page_uuid,
+    )
+    runtime_state.register_product_selection(selection, page_uuid=page_uuid)
+    selected_products = selection.products
     return api_ok({
         'count':               len(selected_products),
-        'count_paths':         len(selected_paths),
+        'count_paths':         len(selection.selected_paths),
         'selected_products':   [str(p) for p in selected_products],
-        'selected_paths':      selected_paths,
-        'factor_tester_name':   factor_tester.name,
+        'selected_paths':      selection.selected_paths,
+        'factor_tester_name':   '',
         'factor_tester_serial': f"#{id_time}",
         'count_desc':          f"{len(selected_products)} 个产品",
         'submissions':         submissions_payload(page_uuid),
@@ -225,16 +227,8 @@ def reorder_submissions():
     page_uuid, err = _require_page_uuid(data)
     if err is not None:
         return err
-    new_order = data.get('new_order', [])
-    scoped_testers = runtime_state.iter_factor_testers(page_uuid)
-    alias_to_tester = {}
-    for t in scoped_testers:
-        core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
-        alias_to_tester[core_id] = t
-    ordered = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
-    if len(ordered) != len(scoped_testers) or {id(t) for t in ordered} != {id(t) for t in scoped_testers}:
-        return api_fail(f'排序失败: 期望{len(scoped_testers)}条，实际匹配{len(ordered)}条')
-    runtime_state.replace_page_factor_testers(page_uuid, ordered)
+    # Product-path selections are scoped to a concrete tester configuration, not
+    # to the page.  Ordering belongs to the user's product-group template store.
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -252,12 +246,24 @@ def update_submission_paths():
     selected_paths, selected_products = resolve_products_from_paths(selected_paths)
     assert selected_paths, "未选择任何产品路径"
     with factor_testers_lock:
-        tester = _find_submission(id_time, page_uuid)
-        assert tester is not None, "Submission not found"
-        tester.products = sorted(list(set(selected_products)))
-        tester.selected_paths = selected_paths
-        if new_name:
-            tester.label = new_name
+        submission = _find_submission(id_time, page_uuid)
+        assert submission is not None, "Submission not found"
+        if isinstance(submission, ProductPathSelection):
+            updated = ProductPathSelection.from_paths(
+                id_time,
+                selected_paths,
+                label=new_name or submission.label,
+                product_group=submission.product_group,
+                source_type=submission.source_type,
+                source_key=submission.source_key,
+                page_uuid=page_uuid,
+            )
+            runtime_state.register_product_selection(updated, page_uuid=page_uuid)
+        else:
+            submission.products = sorted(list(set(selected_products)))
+            submission.selected_paths = selected_paths
+            if new_name:
+                submission.label = new_name
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -273,9 +279,9 @@ def rename_submission():
     new_name = (data.get('new_name') or '').strip()
     assert new_name, "新名称不能为空"
     with factor_testers_lock:
-        tester = _find_submission(id_time, page_uuid)
-        assert tester is not None, "Submission not found"
-        tester.label = new_name
+        submission = _find_submission(id_time, page_uuid)
+        assert submission is not None, "Submission not found"
+        submission.label = new_name
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -288,9 +294,15 @@ def delete_submission():
         return err
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
     assert id_time is not None, "Missing id_time"
-    tester = _find_submission(id_time, page_uuid)
-    assert tester is not None, "Submission not found"
-    runtime_state.remove_factor_tester(tester, delete=True)
+    submission = _find_submission(id_time, page_uuid)
+    assert submission is not None, "Submission not found"
+    if isinstance(submission, ProductPathSelection):
+        runtime_state.remove_product_selection(submission)
+        tester = runtime_state.find_factor_tester(id_time, page_uuid=page_uuid)
+        if tester is not None:
+            runtime_state.remove_factor_tester(tester, delete=True)
+    else:
+        runtime_state.remove_factor_tester(submission, delete=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -305,7 +317,7 @@ def clear_all_submissions():
     page_uuid, err = _require_page_uuid(data)
     if err is not None:
         return err
-    runtime_state.clear_page_factor_testers(page_uuid, delete=True)
+    runtime_state.clear_page_submissions(page_uuid, delete_testers=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -321,8 +333,20 @@ def delete_path_of_submission():
     new_paths = data.get('new_paths')
     selected_paths, selected_products = resolve_products_from_paths(new_paths)
     with factor_testers_lock:
-        tester = _find_submission(id_time, page_uuid)
-        assert tester is not None, "Submission not found"
-        tester.products = sorted(list(set(selected_products)))
-        tester.selected_paths = selected_paths
+        submission = _find_submission(id_time, page_uuid)
+        assert submission is not None, "Submission not found"
+        if isinstance(submission, ProductPathSelection):
+            updated = ProductPathSelection.from_paths(
+                id_time,
+                selected_paths,
+                label=submission.label,
+                product_group=submission.product_group,
+                source_type=submission.source_type,
+                source_key=submission.source_key,
+                page_uuid=page_uuid,
+            )
+            runtime_state.register_product_selection(updated, page_uuid=page_uuid)
+        else:
+            submission.products = sorted(list(set(selected_products)))
+            submission.selected_paths = selected_paths
     return api_ok({'submissions': submissions_payload(page_uuid)})

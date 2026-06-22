@@ -1388,19 +1388,16 @@
         }
     };
 
-    // 填充收益率频率设置抽屉
+    // Populate hidden return-frequency state until IC settings UI is lazy-loaded.
     function populateFreqDrawer(factors) {
         const tbody = document.getElementById('ic-freq-table-body');
         const summaryText = document.getElementById('ic-freq-summary-text');
-        const summaryRow = document.getElementById('ic-freq-summary-row');
         if (!tbody || !summaryText) return;
         if (!factors || factors.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
             summaryText.textContent = '暂无因子数据';
             return;
         }
-        // 如果摘要行隐藏，显示它
-        if (summaryRow) summaryRow.style.display = '';
         let rows = '';
         let customCount = 0;
         factors.forEach(f => {

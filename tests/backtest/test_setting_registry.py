@@ -16,7 +16,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
+        "engine", "factor", "product_path_selection", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
         "order", "liquidity", "margin", "market_rules", "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
@@ -75,6 +75,38 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine",
+    ]
+
+
+def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
+    application = backtest_setting_registry.get("ic_test")
+
+    index = application.manifest()
+    time_tab = application.tab_manifest("time")
+    product_tab = application.tab_manifest("product_path_selection")
+
+    assert "settings" not in index
+    assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
+        "factor", "product_path_selection", "time", "return_frequency", "delay", "summary",
+    ]
+    assert index["default_mounted_tabs"] == {
+        "local-settings": [],
+        "group-settings": [],
+    }
+    assert index["defaults"]["product_path_selection"]["module"] == "product_selection"
+    assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
+    assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
+    assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
+    assert index["defaults"]["start_time"]["visible_when"] == {
+        "time_precision": ["exact"],
+    }
+    assert {chip["key"] for chip in index["chip_fields"]} >= {
+        "factor_alias",
+        "product_selection",
+    }
+    assert [setting["key"] for setting in product_tab["settings"]] == ["product_path_selection"]
+    assert [setting["key"] for setting in time_tab["settings"]] == [
+        "start_date", "end_date", "start_time", "end_time", "time_precision", "timezone",
     ]
 
 

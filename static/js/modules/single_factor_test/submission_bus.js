@@ -1,8 +1,8 @@
 /**
- * submission_bus.js — 统一测试器变更通知总线
+ * submission_bus.js — product-path-selection 变更通知总线
  *
- * 解决 category_filter_module 作为 submissions 唯一真实数据源时，
- * 多个下游模块（IC、GroupTest、global_template 等）需要感知变更的问题。
+ * 多个下游模块（IC、GroupTest、global_template 等）仍通过 legacy
+ * submissions 事件名感知产品路径选择变更。
  *
  * 事件类型：
  *   submission:added      — 新增测试器 { submission }

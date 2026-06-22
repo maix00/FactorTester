@@ -41,6 +41,7 @@ def app():
 @pytest.fixture
 def two_page_testers():
     original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_page_product_selections = dict(runtime_state.page_product_selections)
     original_page_owners = dict(runtime_state.page_owners)
     original_time_store = dict(runtime_state.page_time_store)
     page_a = [_Tester("a1", "page-a"), _Tester("a2", "page-a")]
@@ -52,6 +53,7 @@ def two_page_testers():
         yield page_a, page_b
     finally:
         runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_product_selections = original_page_product_selections
         runtime_state.page_owners = original_page_owners
         runtime_state.page_time_store = original_time_store
 
@@ -82,8 +84,120 @@ def test_reorder_only_reorders_testers_from_current_page(app, two_page_testers):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    assert runtime_state.page_factor_testers["page-a"] == [page_a[1], page_a[0]]
+    assert runtime_state.page_factor_testers["page-a"] == [page_a[0], page_a[1]]
     assert runtime_state.page_factor_testers["page-b"] == page_b
+
+
+def test_submit_selected_products_registers_selection_not_factor_tester(app, monkeypatch):
+    from server.modules.shared.submission_model import ProductPathSelection
+
+    original_page_product_selections = dict(runtime_state.page_product_selections)
+    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    runtime_state.page_product_selections = {}
+    runtime_state.page_factor_testers = {}
+    monkeypatch.setattr(
+        "server.modules.shared.submission_model.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF", "AL.SHF"]),
+    )
+
+    try:
+        with app.test_request_context(
+            "/submit_selected_products",
+            method="POST",
+            json={
+                "id_time": "sel-1",
+                "selected_paths": ["Futures/Metals"],
+                "group_name": "Metals",
+                "page_uuid": "page-a",
+            },
+        ):
+            response = submission_routes.submit_selected_products()
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["submissions"][0]["product_path_selection_id"] == "sel-1"
+        assert payload["submissions"][0]["source_type"] == "user_product_group_template"
+        assert runtime_state.page_factor_testers == {}
+        selection = runtime_state.get_product_selection("sel-1", page_uuid="page-a")
+        assert isinstance(selection, ProductPathSelection)
+        assert selection.product_group == "Metals"
+    finally:
+        runtime_state.page_product_selections = original_page_product_selections
+        runtime_state.page_factor_testers = original_page_factor_testers
+
+
+def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import create_factor_tester_from_request
+
+    created = {}
+
+    class _RuntimeTester:
+        def __init__(self, *, products, alias, start_dt, end_dt, user):
+            created.update({
+                "products": products,
+                "alias": alias,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "user": user,
+            })
+            self.products = products
+            self.alias = alias
+            self.selected_paths = []
+
+    original_page_product_selections = dict(runtime_state.page_product_selections)
+    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_time_store = dict(runtime_state.page_time_store)
+    runtime_state.page_product_selections = {}
+    runtime_state.page_factor_testers = {}
+    runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
+    monkeypatch.setattr(
+        "server.modules.shared.submission_model.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user_obj",
+        lambda: "alice",
+    )
+    monkeypatch.setattr(
+        "tools.factors.FactorTester.FactorTester",
+        _RuntimeTester,
+    )
+
+    try:
+        tester = create_factor_tester_from_request(
+            {
+                "product_path_selection": {
+                    "product_path_selection_id": "sel-run",
+                    "selected_paths": ["Futures/Metals"],
+                    "product_group": "Metals",
+                },
+            },
+            page_uuid="page-a",
+        )
+
+        assert tester.alias == "sel-run"
+        assert tester.product_group == "Metals"
+        assert tester.selection_source_type == "manual_selection"
+        assert created == {
+            "products": ["CU.SHF"],
+            "alias": "sel-run",
+            "start_dt": "run-start",
+            "end_dt": "run-end",
+            "user": "alice",
+        }
+        assert runtime_state.get_factor_tester("sel-run", page_uuid="page-a") is tester
+    finally:
+        runtime_state.page_product_selections = original_page_product_selections
+        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_time_store = original_time_store
+
+
+def test_runtime_tester_rejects_missing_product_path_selection():
+    from server.modules.shared.factor_tester_runtime import selection_from_request
+
+    with pytest.raises(AssertionError, match="测试配置缺少产品组设置"):
+        selection_from_request({"submission_id": "missing"}, page_uuid="page-a")
 
 
 def test_scoped_mutation_cannot_target_another_page(app, two_page_testers):

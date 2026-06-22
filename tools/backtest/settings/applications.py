@@ -14,6 +14,85 @@ from .contracts import (
 from .registry import ApplicationSettings, BacktestSettingRegistry
 
 
+def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "factor") -> None:
+    app.register_setting(SettingDefinition(
+        "factor_mode",
+        "因子计算模式",
+        tab,
+        "select",
+        "auto",
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
+        options=(
+            SettingOption("auto", "自动选择"),
+            SettingOption("precomputed", "预计算后按事件回放"),
+            SettingOption("incremental", "随事件增量计算"),
+        ),
+        chip_template="因子计算: {value}",
+    ))
+
+
+def register_run_window_base(app: ApplicationSettings, *, tab: str = "time") -> None:
+    app.register_setting(SettingDefinition(
+        "start_date", "开始日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
+        module="run_window", chip_template="开始: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "end_date", "结束日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
+        module="run_window", chip_template="结束: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "start_time", "开始时间", tab, "time", "00:00", ScopePolicy.LOCAL_ONLY,
+        module="run_window", chip_template="开始时刻: {value}",
+        visible_when={"time_precision": ("exact",)},
+    ))
+    app.register_setting(SettingDefinition(
+        "end_time", "结束时间", tab, "time", "23:59", ScopePolicy.LOCAL_ONLY,
+        module="run_window", chip_template="结束时刻: {value}",
+        visible_when={"time_precision": ("exact",)},
+    ))
+    app.register_setting(SettingDefinition(
+        "time_precision", "时间精度", tab, "select", "exact", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
+        options=(
+            SettingOption("exact", "精确时间"),
+            SettingOption("trading_day", "交易日"),
+        ),
+        chip_template="精度: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "timezone", "时区", tab, "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
+        options=(
+            SettingOption("Asia/Shanghai", "Asia/Shanghai (UTC+8)"),
+            SettingOption("UTC", "UTC"),
+            SettingOption("America/New_York", "America/New_York"),
+            SettingOption("Europe/London", "Europe/London"),
+        ),
+        chip_template="时区: {value}",
+        visible_when={"time_precision": ("exact",)},
+    ))
+
+
+def register_product_path_selection_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "product_path_selection",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "product_path_selection",
+        "产品路径选择",
+        tab,
+        "select",
+        None,
+        scope_policy,
+        module="product_selection",
+        chip_template="产品路径: {value}",
+        help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
+    ))
+
+
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
     for module in (
@@ -45,6 +124,13 @@ def group_test_settings() -> ApplicationSettings:
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 12),
+        SettingTab(
+            "product_path_selection",
+            "产品路径选择",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            13,
+        ),
         SettingTab(
             "time",
             "时间范围",
@@ -134,64 +220,9 @@ def group_test_settings() -> ApplicationSettings:
         ),
         chip_template="引擎: {value}",
     ))
-    app.register_setting(SettingDefinition(
-        "factor_mode",
-        "因子计算模式",
-        "factor",
-        "select",
-        "auto",
-        ScopePolicy.LOCAL_ONLY,
-        module="factor_execution",
-        options=(
-            SettingOption("auto", "自动选择"),
-            SettingOption("precomputed", "预计算后按事件回放"),
-            SettingOption("incremental", "随事件增量计算"),
-        ),
-        chip_template="因子计算: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "start_date", "开始日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        chip_template="开始: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "end_date", "结束日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        chip_template="结束: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "start_time", "开始时间", "time", "time", "00:00", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        chip_template="开始时刻: {value}",
-        visible_when={"time_precision": ("exact",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "end_time", "结束时间", "time", "time", "23:59", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        chip_template="结束时刻: {value}",
-        visible_when={"time_precision": ("exact",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "time_precision", "时间精度", "time", "select", "exact", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        options=(
-            SettingOption("exact", "精确时间"),
-            SettingOption("trading_day", "交易日"),
-        ),
-        chip_template="精度: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "timezone", "时区", "time", "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
-        module="run_window",
-        options=(
-            SettingOption("Asia/Shanghai", "Asia/Shanghai (UTC+8)"),
-            SettingOption("UTC", "UTC"),
-            SettingOption("America/New_York", "America/New_York"),
-            SettingOption("Europe/London", "Europe/London"),
-        ),
-        chip_template="时区: {value}",
-        visible_when={"time_precision": ("exact",)},
-    ))
+    register_factor_execution_base(app)
+    register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
+    register_run_window_base(app)
     app.register_setting(SettingDefinition(
         "initial_capital",
         "初始资金",
@@ -502,5 +533,136 @@ def group_test_settings() -> ApplicationSettings:
     return app
 
 
+def ic_test_settings() -> ApplicationSettings:
+    app = ApplicationSettings("ic_test")
+    for module in (
+        SettingModule("factor_execution", "因子执行", "factor", 10),
+        SettingModule("product_selection", "品种/路径选择", "product", 20),
+        SettingModule("run_window", "运行时间范围", "backtest", 30),
+        SettingModule("return_frequency", "收益率频率", "analysis", 40),
+        SettingModule("return_definition", "收益率定义", "analysis", 50),
+        SettingModule("ic_delay", "IC Delay", "analysis", 60),
+        SettingModule("ic_summary", "IC 汇总", "analysis", 70),
+    ):
+        app.register_module(module)
+    for tab in (
+        SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
+        SettingTab(
+            "product_path_selection",
+            "产品路径选择",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            20,
+        ),
+        SettingTab(
+            "time",
+            "时间范围",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            30,
+            summary_template="{start_date} → {end_date} · {time_precision}",
+            summary_keys=("start_date", "end_date", "time_precision"),
+        ),
+        SettingTab("return_frequency", "收益率频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
+        SettingTab("delay", "Delay", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
+        SettingTab("summary", "汇总", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
+    ):
+        app.register_tab(tab)
+    for chip in (
+        ChipDefinition(
+            "factor_alias",
+            "因子",
+            "identity",
+            "{factorAlias}",
+            ("factorAlias",),
+            module="factor_execution",
+            order=10,
+            inherit_from_root=True,
+        ),
+        ChipDefinition(
+            "product_selection",
+            "产品组",
+            "identity",
+            "{productSelectionLabel}",
+            ("product_selection",),
+            module="product_selection",
+            order=20,
+            value_resolvers={"productSelectionLabel": "product_selection_label"},
+            clickable=True,
+        ),
+    ):
+        app.register_chip_field(chip)
+    register_factor_execution_base(app)
+    register_product_path_selection_base(app)
+    register_run_window_base(app)
+    app.register_setting(SettingDefinition(
+        "return_frequency_mode",
+        "收益率频率",
+        "return_frequency",
+        "select",
+        "factor_frequency",
+        ScopePolicy.LOCAL_ONLY,
+        module="return_frequency",
+        options=(
+            SettingOption("factor_frequency", "跟随因子频率"),
+            SettingOption("daily", "日频"),
+            SettingOption("minute", "分钟频"),
+        ),
+        chip_template="收益频率: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "return_price_basis",
+        "收益口径",
+        "return_frequency",
+        "select",
+        "next_open_to_open_adjusted",
+        ScopePolicy.LOCAL_ONLY,
+        module="return_definition",
+        options=(
+            SettingOption("next_open_to_open_adjusted", "下一期开盘到开盘（复权）"),
+            SettingOption("next_close_to_close_adjusted", "下一期收盘到收盘（复权）"),
+        ),
+        chip_template="收益口径: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "ic_lag",
+        "IC Lag",
+        "delay",
+        "number",
+        0,
+        ScopePolicy.LOCAL_ONLY,
+        module="ic_delay",
+        minimum=0,
+        step=1,
+        chip_template="Lag: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "ic_decay_lags",
+        "IC 衰减阶数",
+        "delay",
+        "number",
+        5,
+        ScopePolicy.LOCAL_ONLY,
+        module="ic_delay",
+        minimum=1,
+        step=1,
+        chip_template="衰减阶数: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "rolling_window",
+        "滚动窗口",
+        "summary",
+        "number",
+        20,
+        ScopePolicy.LOCAL_ONLY,
+        module="ic_summary",
+        minimum=2,
+        step=1,
+        chip_template="滚动窗口: {value}",
+    ))
+    return app
+
+
 backtest_setting_registry = BacktestSettingRegistry()
 backtest_setting_registry.register(group_test_settings())
+backtest_setting_registry.register(ic_test_settings())

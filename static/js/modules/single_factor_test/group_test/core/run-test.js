@@ -180,7 +180,7 @@
         function _resolvedGroupForRun(group) {
             var out = Object.assign({}, group || {});
             if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
-                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
+                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate', 'product_path_selection'].forEach(function(key) {
                     var resolved = GT.groupSettings.groups.resolveRootField(out, key);
                     if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
                 });

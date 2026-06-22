@@ -1,6 +1,6 @@
 /**
  * 单因子测试的因子家族设置模板模块。
- * 保存/加载当前因子家族的测试设置：参数、时间范围、品种分类、收益率频率、分组测试设置。
+ * 保存/加载当前因子家族的测试设置：参数、时间范围、产品路径选择、分组/IC 测试设置。
  *
  * ── Snapshot Registry（快照注册表）─────────────────────────────────────
  * 扩展方式：调用 window._snapshotRegistry.register({ key, order, label, icon,
@@ -396,12 +396,12 @@
         }
     });
 
-    // ── 3. submissions (order=30, 在参数之后) ──
+    // ── 3. product_path_selections (order=30, 在参数之后) ──
     SnapshotRegistry.register({
-        key: 'submissions',
+        key: 'product_path_selections',
         order: 30,
-        label: '产品类别筛选',
-        icon: '🌳',
+        label: '产品路径选择',
+        icon: '▦',
         collect: function() {
             var raw = (window._getCurrentSubmissions) ? window._getCurrentSubmissions() : [];
             // 返回深拷贝，避免引用共享 + 按 id 去重
@@ -432,7 +432,7 @@
             if (!savedSubs.length) {
                 ctx.oldToNewTesterId = oldToNewTesterId;
                 ctx.newSubmissions = [];
-                return { oldToNewTesterId: oldToNewTesterId, submissions: [] };
+                return { oldToNewTesterId: oldToNewTesterId, product_path_selections: [] };
             }
 
             var usedNewIds = {};
@@ -474,7 +474,7 @@
             }
             ctx.oldToNewTesterId = oldToNewTesterId;
             ctx.newSubmissions = normalized;
-            return { oldToNewTesterId: oldToNewTesterId, submissions: normalized };
+            return { oldToNewTesterId: oldToNewTesterId, product_path_selections: normalized };
         },
         summarize: function(subs) {
             return _asArray(subs).map(function(s, idx) {
@@ -483,39 +483,6 @@
                 var pathText = paths.length ? ('路径: ' + paths.join('；')) : '未选择路径';
                 return _submissionTitle(s, idx) + ' · ' + count + ' · ' + pathText;
             });
-        }
-    });
-
-    // ── 4. return_freqs (order=40) ──
-    SnapshotRegistry.register({
-        key: 'return_freqs',
-        order: 40,
-        label: '收益率频率',
-        icon: '📈',
-        collect: function() {
-            var rows = document.querySelectorAll('#ic-freq-table-body tr');
-            var result = [];
-            rows.forEach(function(row) {
-                var cb = row.querySelector('.factor-checkbox');
-                var inp = row.querySelector('.factor-return-freq-input');
-                if (cb) result.push({ alias: cb.getAttribute('data-factor-alias'), checked: cb.checked, return_freq: inp ? inp.value.trim() : '' });
-            });
-            return result;
-        },
-        apply: function(freqs) {
-            if (!freqs || freqs.length === 0) return;
-            freqs.forEach(function(fr) {
-                var cb = document.querySelector('#ic-freq-table-body .factor-checkbox[data-factor-alias="' + fr.alias + '"]');
-                var inp = document.querySelector('#ic-freq-table-body .factor-return-freq-input[data-factor-alias="' + fr.alias + '"]');
-                if (cb) cb.checked = fr.checked !== false;
-                if (inp) inp.value = fr.return_freq || '';
-            });
-            var tbody = document.getElementById('ic-freq-table-body');
-            if (tbody) tbody.querySelectorAll('.factor-return-freq-input').forEach(function(inp) { inp.dispatchEvent(new Event('input', { bubbles: true })); });
-        },
-        summarize: function(freqs) {
-            var checked = freqs.filter(function(f) { return f.checked; });
-            return checked.map(function(f) { return (f.alias || '未命名因子') + ' · 收益率频率 ' + (f.return_freq || '未设置'); });
         }
     });
 
@@ -535,7 +502,7 @@
         }
         if (_gtAdaptersRegistered) return;  // lazy loader already called us
 
-        // 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射)
+        // 6. group_settings (order=50, 依赖 product_path_selections 的 testerId 重映射)
         if (GT && GT.groupSettings && GT.groupSettings.settings) {
             var base = GT.groupSettings.settings;
             SnapshotRegistry.register({
@@ -636,26 +603,27 @@
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId, snapshot: snapshot };
 
-        // 在 apply submissions 之后，构建 oldToNewTesterId 映射供 group_settings 使用
-        // 这是跨注册项的依赖：group_settings(50) 依赖 submissions(30) 重映射后的 testerId
+        // 在 apply product_path_selections 之后，构建 oldToNewTesterId 映射供 group_settings 使用
+        // 这是跨注册项的依赖：group_settings(50) 依赖产品路径选择(30) 重映射后的 testerId
         // 通过 ctx 传递
-        var subsEntry = SnapshotRegistry._registryByKey['submissions'];
-        var hasSubsKey = _hasOwn(snapshot, 'submissions') && Array.isArray(snapshot.submissions);
+        var subsEntry = SnapshotRegistry._registryByKey['product_path_selections'];
+        var savedSelections = _asArray(snapshot.product_path_selections);
+        var hasSubsKey = savedSelections.length > 0;
         var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
 
         if (hasSubsKey && subsEntry) {
             // 先恢复 time/params 等上游状态，确保 tester 重建时使用模板中的时间范围和参数。
             await _applyEntriesWhere(snapshot, ctx, function(entry) {
-                return entry.key !== 'submissions' && entry.order < subsEntry.order;
+                return entry.key !== 'product_path_selections' && entry.order < subsEntry.order;
             });
-            // submissions 是 tester 的权威快照：随后清空旧 tester，再逐条重建并生成旧→新 ID 映射。
-            await _applySubmissionsWithRemapping(snapshot.submissions || [], snapshot, ctx);
+            // product_path_selections 是产品路径选择快照：随后清空旧运行对象，再逐条重建并生成旧→新 ID 映射。
+            await _applySubmissionsWithRemapping(savedSelections, snapshot, ctx);
             // 最后恢复依赖 testerId 映射的模块（尤其 group_settings）。
             await _applyEntriesWhere(snapshot, ctx, function(entry) {
-                return entry.key !== 'submissions' && entry.order > subsEntry.order;
+                return entry.key !== 'product_path_selections' && entry.order > subsEntry.order;
             });
         } else {
-            // 没有保存 submissions 的旧模板不主动删除当前 tester；但若也没有分组配置，就清空分组 UI 状态。
+            // 没有保存产品路径选择的旧模板不主动删除当前运行对象；但若也没有分组配置，就清空分组 UI 状态。
             if (!hasGroups) _clearGroupTestData();
             await SnapshotRegistry.applyAll(snapshot, ctx);
         }
@@ -663,13 +631,13 @@
         refreshOuterSummaries();
     }
 
-    /** 专门处理 submissions apply + testerId 重映射 */
+    /** 专门处理 product_path_selections apply + testerId 重映射 */
     async function _applySubmissionsWithRemapping(subs, snapshot, ctx) {
-        // 记录旧的 submission ids 及其 product_group/label（用于匹配）
-        var oldSubs = snapshot.submissions || [];
+        // 记录旧的 product path selection ids 及其 product_group/label（用于匹配）
+        var oldSubs = _asArray(subs);
 
-        // 先执行 submissions apply（清空 + 重建）
-        var subsEntry = SnapshotRegistry._registryByKey['submissions'];
+        // 先执行 product_path_selections apply（清空 + 重建）
+        var subsEntry = SnapshotRegistry._registryByKey['product_path_selections'];
         var applyResult = null;
         if (subsEntry) {
             applyResult = await subsEntry.apply(subs, ctx);
@@ -681,7 +649,7 @@
 
         // apply 返回了空的 oldToNewTesterId 映射（submissions 重建可能失败），
         // 回到兜底逻辑按位置/product_group 匹配
-        console.warn('[global_template] submissions apply returned empty oldToNewTesterId, falling back to position/label matching');
+        console.warn('[global_template] product_path_selections apply returned empty oldToNewTesterId, falling back to position/label matching');
 
         // 构建 oldTesterId → newTesterId 映射
         // 优先按数组位置，兜底按 product_group/label 匹配

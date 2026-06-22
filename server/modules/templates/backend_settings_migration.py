@@ -21,7 +21,10 @@ LEGACY_GROUP_KEYS = {
 }
 
 
-def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def migrate_snapshot_backend_settings(
+    snapshot: dict[str, Any],
+    product_groups: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], bool]:
     """Return a snapshot whose backtest settings live on flat group/strategy rows."""
     if not isinstance(snapshot, dict):
         return snapshot, False
@@ -29,10 +32,12 @@ def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[st
     before = deepcopy(migrated)
 
     defaults = _defaults()
+    product_path_selections = _migrate_product_path_selections(migrated, product_groups or [])
     local_defaults = _extract_local_values(migrated)
     backend_group_values = _extract_backend_group_values(migrated)
     group_settings = migrated.get("group_settings")
     if isinstance(group_settings, dict):
+        _attach_product_path_selections_to_groups(group_settings, product_path_selections)
         _migrate_items(group_settings.get("groups"), backend_group_values, defaults, STRUCTURAL_GROUP_KEYS)
         _migrate_items(group_settings.get("lsConfigs"), backend_group_values, defaults, STRUCTURAL_LS_KEYS)
 
@@ -55,6 +60,97 @@ def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[st
         migrated.pop("local_settings", None)
 
     return migrated, migrated != before
+
+
+def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    raw_items = snapshot.get("submissions") or []
+    selections: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    for index, item in enumerate(raw_items if isinstance(raw_items, list) else []):
+        if not isinstance(item, dict):
+            continue
+        selection_id = str(
+            item.get("product_path_selection_id")
+            or item.get("selection_id")
+            or item.get("id")
+            or f"product-path-selection-{index + 1}"
+        )
+        if selection_id in seen:
+            continue
+        seen.add(selection_id)
+        paths = list(item.get("selected_paths") or item.get("paths") or [])
+        paths = _canonical_paths(paths)
+        matched_group = _match_product_group(paths, item, product_groups)
+        product_group = str((matched_group or {}).get("name") or item.get("product_group") or "")
+        template_id = str(
+            item.get("product_group_template_id")
+            or item.get("template_id")
+            or (matched_group or {}).get("id")
+            or ""
+        )
+        source_type = str(
+            item.get("source_type")
+            or ("user_product_group_template" if template_id else "manual_selection")
+        )
+        selection = {
+            "id": selection_id,
+            "product_path_selection_id": selection_id,
+            "selected_paths": paths,
+            "paths": list(paths),
+            "label": str(item.get("label") or ""),
+            "product_group": product_group,
+            "product_group_template_id": template_id,
+            "source_type": source_type,
+            "source_key": str(item.get("source_key") or template_id or selection_id),
+        }
+        if item.get("product_count") not in (None, ""):
+            selection["product_count"] = item.get("product_count")
+        if item.get("products"):
+            selection["products"] = item.get("products")
+        selections[selection_id] = selection
+    snapshot.pop("submissions", None)
+    snapshot.pop("product_path_selections", None)
+    return selections
+
+
+def _attach_product_path_selections_to_groups(
+    group_settings: dict[str, Any],
+    selections_by_id: dict[str, dict[str, Any]],
+) -> None:
+    if not selections_by_id:
+        return
+    groups = group_settings.get("groups")
+    if not isinstance(groups, list):
+        return
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        selection_id = str(group.get("product_path_selection_id") or group.get("testerId") or "")
+        selection = selections_by_id.get(selection_id)
+        if selection is not None:
+            group["product_path_selection"] = selection
+
+
+def _canonical_paths(paths: Any) -> list[str]:
+    return sorted({str(path) for path in (paths or []) if str(path).strip()})
+
+
+def _match_product_group(paths: list[str], item: dict[str, Any], product_groups: list[dict[str, Any]]) -> dict[str, Any] | None:
+    template_id = str(item.get("product_group_template_id") or item.get("template_id") or "").strip()
+    if template_id:
+        for group in product_groups:
+            if str(group.get("id") or "") == template_id:
+                return group
+    wanted = set(paths)
+    for group in product_groups:
+        if set(_canonical_paths(group.get("paths") or [])) == wanted:
+            return group
+    name = str(item.get("product_group") or "").strip()
+    if name:
+        for group in product_groups:
+            if str(group.get("name") or "") == name:
+                return group
+    return None
 
 
 def _defaults() -> dict[str, Any]:

@@ -113,7 +113,19 @@ def _openctp_product_desc(product_name: str) -> str:
 
 
 def tester_to_dict(t):
-    """Convert FactorTester to frontend payload."""
+    """Convert ProductPathSelection or legacy FactorTester to frontend payload."""
+    if hasattr(t, "to_submission_dict") and hasattr(t, "products"):
+        base = t.to_submission_dict()
+        _, products_list = resolve_products(t.products, 'name', 'desc')
+        base.update({
+            'name': base.get('id', ''),
+            'product_count': len(products_list),
+            'products': products_list,
+            'factor_tester_name': '',
+            'factor_tester_serial': f"#{base.get('id', '')}",
+        })
+        return base
+
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
 
     selected_paths = getattr(t, 'selected_paths', None) or []
@@ -129,6 +141,8 @@ def tester_to_dict(t):
         'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
         'label':                getattr(t, 'label', '') or '',
         'product_group':        getattr(t, 'product_group', '') or '',
+        'source_type':          getattr(t, 'selection_source_type', '') or 'legacy_factor_tester',
+        'source_key':           getattr(t, 'selection_source_key', '') or '',
     }
 
 
@@ -138,7 +152,14 @@ def resolve_products_from_paths(raw_paths: list[str]):
 
 
 def valid_testers(page_uuid=None):
-    """Return active testers that still hold products (via paths or direct products)."""
+    """Return active submissions, preferring product selections over legacy testers."""
+    selections = runtime_state.iter_product_selections(page_uuid)
+    if selections:
+        return [
+            selection for selection in selections
+            if getattr(selection, 'selected_paths', None)
+            or getattr(selection, 'products', None)
+        ]
     testers = runtime_state.iter_factor_testers(page_uuid)
     return [
         t for t in testers

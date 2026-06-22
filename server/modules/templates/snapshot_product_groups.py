@@ -13,14 +13,31 @@ def refresh_template_product_group_paths(template: dict, groups: list[dict]) -> 
         for group in groups
         if isinstance(group, dict) and group.get('name')
     }
-    submissions = refreshed.get('snapshot', {}).get('submissions', [])
-    for submission in submissions:
-        if not isinstance(submission, dict):
+    snapshot = refreshed.get('snapshot', {})
+    selections = []
+    local_settings = snapshot.get("local_settings") if isinstance(snapshot, dict) else None
+    if isinstance(local_settings, dict) and isinstance(local_settings.get("product_path_selection"), dict):
+        selections.append(local_settings["product_path_selection"])
+    group_settings = snapshot.get("group_settings") if isinstance(snapshot, dict) else None
+    if isinstance(group_settings, dict):
+        for group in group_settings.get("groups") or []:
+            if isinstance(group, dict) and isinstance(group.get("product_path_selection"), dict):
+                selections.append(group["product_path_selection"])
+    for selection in selections:
+        if not isinstance(selection, dict):
             continue
-        product_group = submission.get('product_group')
-        if not product_group or product_group not in paths_by_name:
+        product_group = selection.get('product_group')
+        product_group_template_id = selection.get('product_group_template_id')
+        current_paths = None
+        if product_group_template_id:
+            for group in groups:
+                if isinstance(group, dict) and group.get("id") == product_group_template_id:
+                    current_paths = list(group.get("paths", []))
+                    break
+        if current_paths is None and product_group and product_group in paths_by_name:
+            current_paths = list(paths_by_name[product_group])
+        if current_paths is None:
             continue
-        current_paths = list(paths_by_name[product_group])
-        submission['paths'] = current_paths
-        submission['selected_paths'] = list(current_paths)
+        selection['paths'] = current_paths
+        selection['selected_paths'] = list(current_paths)
     return refreshed

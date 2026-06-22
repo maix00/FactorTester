@@ -51,7 +51,10 @@ def test_template_detail_loads_only_requested_template(monkeypatch):
     with app.test_request_context("/api/single_factor_setting_templates/MmRet/tpl-2"):
         response = routes.get_single_factor_setting_template.__wrapped__("MmRet", "tpl-2")
 
-    assert response.get_json() == {"success": True, "template": template}
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["template"]["id"] == "tpl-2"
+    assert payload["template"]["snapshot"]["params_list"] == [{"N": 2}]
     assert len(calls) == 1
     assert calls[0][0][2] == "tpl-2"
 
@@ -83,3 +86,62 @@ def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
         "end_date": "2026-05-31",
         "end_time": "15:00",
     }
+
+
+def test_snapshot_migration_moves_submissions_to_product_path_selections_with_group_id_by_paths():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "submissions": [{
+                "id": "old-sub",
+                "label": "Metals",
+                "product_group": "Old Name",
+                "selected_paths": ["B/Path", "A/Path"],
+            }],
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "testerId": "old-sub",
+                    "factorAlias": "F",
+                    "splitCount": 5,
+                    "groupIndex": 1,
+                }]
+            },
+        },
+        product_groups=[{
+            "id": "pg-metals",
+            "name": "Metals Template",
+            "paths": ["A/Path", "B/Path"],
+        }],
+    )
+
+    assert changed is True
+    assert "submissions" not in snapshot
+    assert "product_path_selections" not in snapshot
+    assert snapshot["group_settings"]["groups"][0]["product_path_selection"] == {
+        "id": "old-sub",
+        "product_path_selection_id": "old-sub",
+        "selected_paths": ["A/Path", "B/Path"],
+        "paths": ["A/Path", "B/Path"],
+        "label": "Metals",
+        "product_group": "Metals Template",
+        "product_group_template_id": "pg-metals",
+        "source_type": "user_product_group_template",
+        "source_key": "pg-metals",
+    }
+
+
+def test_snapshot_migration_does_not_fallback_unscoped_paths_to_local_settings():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "submissions": [{
+                "id": "plain-paths",
+                "selected_paths": ["Only/Paths"],
+            }],
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    assert "product_path_selections" not in snapshot
+    assert "submissions" not in snapshot
+    assert "local_settings" not in snapshot
