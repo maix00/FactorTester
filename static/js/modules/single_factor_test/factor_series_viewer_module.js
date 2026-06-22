@@ -70,6 +70,26 @@
         if (overlaySummary) overlaySummary.innerHTML = html;
     }
 
+    function normalizeTreeSelections(tree) {
+        var paths = [];
+        if (!tree || !tree.visit) return paths;
+        tree.visit(function(node) {
+            if (!node || !node.selected) return;
+            if (!node) return false;
+            if (typeof node.isFolder === 'function') {
+                if (node.isFolder()) {
+                    node.setSelected(false);
+                    return;
+                }
+            } else if (node.folder) {
+                node.setSelected(false);
+                return;
+            }
+            paths.push(node.key);
+        });
+        return paths;
+    }
+
     function initTree() {
         var treeHost = document.getElementById('factor-series-tree');
         var chart = document.getElementById('factor-series-chart-container');
@@ -80,7 +100,12 @@
         }
         state.treeReady = true;
         window.ProductSelector.createTree(jQuery(treeHost), {
-            onInit: function(tree) { window.ProductSelector.restoreChecks(tree, state.paths); },
+            onlyLeaf: true,
+            onInit: function(tree) {
+                window.ProductSelector.restoreChecks(tree, state.paths);
+                state.paths = normalizeTreeSelections(tree);
+                renderPathSummary();
+            },
             onSelect: function(paths) {
                 state.paths = Array.isArray(paths) ? paths.slice() : [];
                 renderPathSummary();
@@ -210,7 +235,11 @@
             state.activeProduct = state.lastSeries.length ? state.lastSeries[0].product : '';
             renderProductChooser();
             drawActiveSeries(data.factor || factor);
-            if (status) status.textContent = '完成：' + state.lastSeries.length + ' 个产品';
+            var doneText = '完成：' + state.lastSeries.length + ' 个产品';
+            if (data && data.meta && data.meta.elapsed_ms != null) {
+                doneText += '（' + data.meta.elapsed_ms + 'ms）';
+            }
+            if (status) status.textContent = doneText;
             hideProgress('100%');
         } catch (err) {
             chart.innerHTML = message(err.message || String(err), true);
@@ -243,36 +272,41 @@
         }
     }
 
-    function parseTs(ts) {
-        return typeof ts === 'string' ? new Date(ts + 'T00:00:00').getTime() : ts;
-    }
-
     function drawActiveSeries(factor) {
         var chart = document.getElementById('factor-series-chart-container');
+        var returnChart = document.getElementById('factor-series-return-chart-container');
         if (!chart) return;
         var item = state.lastSeries.find(function(series) { return series.product === state.activeProduct; }) || state.lastSeries[0];
         if (!item) {
             chart.innerHTML = message('没有可显示的因子序列。', true);
+            if (returnChart) returnChart.innerHTML = '';
             return;
         }
-        if (typeof Highcharts === 'undefined') {
-            chart.innerHTML = message('Highcharts 未加载，无法显示图表。', true);
+        if (typeof window.FactorSeriesCharts === 'undefined' || typeof window.FactorSeriesCharts.renderFactorSeriesChart !== 'function') {
+            chart.innerHTML = message('图表渲染函数未加载，请刷新页面后重试。', true);
+            if (returnChart) returnChart.innerHTML = '';
             return;
         }
-        chart.style.height = '520px';
-        var values = (item.dates || []).map(function(ts, idx) {
-            return [parseTs(ts), item.values[idx]];
+        window.FactorSeriesCharts.renderFactorSeriesChart({
+            container: chart,
+            title: item.product + ' · ' + (factor.alias || factor.name || '因子序列'),
+            dates: item.dates,
+            values: item.values,
+            seriesName: factor.alias || factor.name || '因子值'
         });
-        Highcharts.stockChart(chart, {
-            chart: { zoomType: 'x' },
-            title: { text: item.product + ' · ' + (factor.alias || factor.name || '因子序列') },
-            xAxis: { type: 'datetime' },
-            yAxis: { title: { text: '因子值' }, crosshair: true },
-            tooltip: { shared: true, valueDecimals: 6 },
-            series: [{ name: factor.alias || factor.name || '因子值', type: 'line', data: values, dataGrouping: { enabled: false } }],
-            navigator: { enabled: true },
-            scrollbar: { enabled: true },
-            rangeSelector: { enabled: true },
+
+        if (!returnChart) return;
+        if (!item.returns || !Array.isArray(item.returns.dates) || !Array.isArray(item.returns.values) || item.returns.values.length === 0) {
+            returnChart.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px;">收益序列不可用，请先确认当前因子在当前区间可计算收益。</div>';
+            return;
+        }
+        window.FactorSeriesCharts.renderFactorSeriesChart({
+            container: returnChart,
+            title: item.product + ' · 收益序列',
+            dates: item.returns.dates,
+            values: item.returns.values,
+            seriesName: '收益率',
+            yAxisLabel: '收益'
         });
     }
 

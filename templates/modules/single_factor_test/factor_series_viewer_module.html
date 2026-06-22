@@ -36,7 +36,16 @@
                 <span id="factor-series-progress-text" class="ic-progress-text">0%</span>
             </div>
             <div id="factor-series-product-row" class="factor-series-product-row"></div>
-            <div id="factor-series-chart-container" style="width:100%;min-height:360px;margin-top:10px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+            <div class="factor-series-chart-layout">
+                <div>
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">因子序列</div>
+                    <div id="factor-series-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+                </div>
+                <div>
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">收益序列</div>
+                    <div id="factor-series-return-chart-container" style="width:100%;min-height:360px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -191,6 +200,12 @@
         padding: 10px 14px;
         background: #fff;
     }
+    .factor-series-chart-layout {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
     .factor-series-icon-btn {
         width: 28px;
         height: 28px;
@@ -206,6 +221,9 @@
         .factor-series-action {
             width: 100%;
         }
+        .factor-series-chart-layout {
+            grid-template-columns: 1fr;
+        }
         .factor-series-controls .factor-series-field,
         .factor-series-product-picker {
             flex-basis: 100%;
@@ -216,6 +234,25 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts/highstock.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts/boost.min.js') }}"></script>
+<script>
+    if (typeof Highcharts !== 'undefined') {
+        Highcharts.setOptions({
+            boost: {
+                enabled: true,
+                usePreallocated: true
+            },
+            plotOptions: {
+                series: { boostThreshold: 500 }
+            },
+            global: {
+                useUTC: false
+            }
+        });
+    }
+</script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_charts.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_viewer_module.js') }}"></script>

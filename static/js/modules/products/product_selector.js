@@ -35,12 +35,24 @@
     function getMinimalPaths(tree) {
         if (!tree) return [];
         var sel = tree.getSelectedNodes();
+        if (!sel || !sel.length) return [];
         var keySet = {};
         sel.forEach(function(n) { keySet[n.key] = true; });
         return sel.filter(function(n) {
             var p = n.parent;
             while (p && p.key) { if (keySet[p.key]) return false; p = p.parent; }
             return true;
+        }).map(function(n) { return n.key; });
+    }
+
+    function getLeafOnlyPaths(tree) {
+        if (!tree) return [];
+        return tree.getSelectedNodes().filter(function(n) {
+            if (!n) return false;
+            if (typeof n.isFolder === 'function') {
+                return !n.isFolder();
+            }
+            return !n.folder;
         }).map(function(n) { return n.key; });
     }
 
@@ -58,11 +70,13 @@
 
     function createTree($container, opts) {
         opts = opts || {};
+        var onlyLeaf = !!opts.onlyLeaf;
+        var selectMode = opts.selectMode || 3;
         $container.empty();
         $container.fancytree({
             source: { url: '/api/product_tree?checkbox=1' },
             checkbox: true,
-            selectMode: 3,
+            selectMode: selectMode,
             init: function(e, data) {
                 var el = $container[0];
                 el.addEventListener('wheel', function(ev) {
@@ -87,7 +101,19 @@
                 data.result = { url: '/get_products', data: { path: node.key } };
             },
             select: function(e, data) {
-                if (opts.onSelect) opts.onSelect(getMinimalPaths(data.tree));
+                if (onlyLeaf && data.node && data.node.key && data.node.getParent) {
+                    var isFolder = typeof data.node.isFolder === 'function'
+                        ? data.node.isFolder()
+                        : !!data.node.folder;
+                    if (isFolder) {
+                        data.node.setSelected(false);
+                        return;
+                    }
+                }
+                if (opts.onSelect) {
+                    var paths = onlyLeaf ? getLeafOnlyPaths(data.tree) : getMinimalPaths(data.tree);
+                    opts.onSelect(paths);
+                }
             },
             renderNode: function(e, data) {
                 var desc = data.node.data.desc;

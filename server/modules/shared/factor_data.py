@@ -8,6 +8,7 @@ Shared factor data-query routes (any test module can use):
 from typing import Any
 import numpy as np
 import pandas as pd
+import time
 import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
@@ -93,6 +94,7 @@ def factor_series_viewer_evaluate():
         return jsonify({"success": False, "error": "请先选择因子"}), 400
 
     try:
+        started_at = time.time()
         selection = ProductPathSelection.from_paths(
             "factor-series-viewer",
             paths,
@@ -146,12 +148,36 @@ def factor_series_viewer_evaluate():
                 continue
             series = clip_series_by_tester_range(series, tester)
             dates_out, values = series_to_frontend(series, factor.freq is not None and factor.freq.is_day_multiple())
+            returns_payload = None
+            if result is not None and not getattr(result, 'returns', pd.DataFrame()).empty:
+                returns_df = result.returns
+                if isinstance(returns_df, pd.DataFrame):
+                    ret_col = _match_product_column(returns_df, product)
+                    if ret_col is not None:
+                        ret_series = returns_df[ret_col].dropna()
+                        if not ret_series.empty:
+                            ret_series = clip_series_by_tester_range(ret_series, tester)
+                            ret_dates_out, ret_values = series_to_frontend(
+                                ret_series,
+                                factor.freq is not None and factor.freq.is_day_multiple()
+                            )
+                            if len(ret_dates_out) and len(ret_dates_out) == len(ret_values):
+                                returns_payload = {
+                                    'dates': ret_dates_out,
+                                    'values': ret_values,
+                                }
             meta = product_attrs(product, "name", "desc")
             series_items.append({
                 "product": name,
                 "desc": meta.get("desc") or name,
                 "dates": dates_out,
                 "values": values,
+                "returns": returns_payload,
+                "chart": {
+                    "x_label": "time",
+                    "y_label": "factor",
+                    "title": name + ' · ' + getattr(factor, 'alias', factor_alias),
+                },
             })
 
         if not series_items:
@@ -165,6 +191,10 @@ def factor_series_viewer_evaluate():
             },
             "products": [product_attrs(product, "name", "desc") for product in selected_products],
             "series": series_items,
+            "meta": {
+                "elapsed_ms": round((time.time() - started_at) * 1000),
+                "product_count": len(series_items),
+            },
         })
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "traceback": traceback.format_exc()}), 500
