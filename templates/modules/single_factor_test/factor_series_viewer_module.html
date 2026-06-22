@@ -74,35 +74,38 @@
             <div class="factor-series-overlay-right">
                 <div id="factor-series-chart-title" class="factor-series-overlay-chart-title">— 请选择品种 —</div>
                 <div id="factor-series-product-selected-summary" style="font-size:12px;color:#64748b;padding:0 12px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-                <div class="factor-series-overlay-controls">
-                    <label>数据源：</label>
-                    <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
-                        <option value="">自动</option>
-                    </select>
-                    <label>频率：</label>
-                    <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
-                        <option value="">自动</option>
-                    </select>
-                    <span id="factor-series-price-type-wrap">
-                        <label style="margin-left:12px;">价格类型：</label>
-                        <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
-                            <option value="raw">原始</option>
-                            <option value="adjusted">复权</option>
-                        </select>
-                    </span>
-                </div>
                 <div id="factor-series-price-chart" class="factor-series-price-chart"></div>
-                <div id="factor-series-contract-table-container" style="display:none;">
-                    <table id="factor-series-contract-table" class="factor-series-contract-table">
-                        <thead>
-                            <tr>
-                                <th>合约</th>
-                                <th>起始日期</th>
-                                <th>结束日期</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+                <div id="factor-series-overlay-result-bar" class="factor-series-overlay-result-bar">
+                    <div class="factor-series-overlay-result-title">价格参数</div>
+                    <div class="factor-series-overlay-controls">
+                        <label>数据源：</label>
+                        <select id="factor-series-data-source" onchange="document.getElementById('factor-series-freq').value=''; factorSeriesLoadPriceData()">
+                            <option value="">自动</option>
+                        </select>
+                        <label>频率：</label>
+                        <select id="factor-series-freq" onchange="document.getElementById('factor-series-data-source').value=''; factorSeriesLoadPriceData()">
+                            <option value="">自动</option>
+                        </select>
+                        <span id="factor-series-price-type-wrap">
+                            <label style="margin-left:12px;">价格类型：</label>
+                            <select id="factor-series-price-type" onchange="factorSeriesSetAdjusted(this.value === 'adjusted')">
+                                <option value="raw">原始</option>
+                                <option value="adjusted">复权</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div id="factor-series-contract-table-container" style="display:none;">
+                        <table id="factor-series-contract-table" class="factor-series-contract-table">
+                            <thead>
+                                <tr>
+                                    <th>合约</th>
+                                    <th>起始日期</th>
+                                    <th>结束日期</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -310,6 +313,17 @@
         flex-wrap: wrap;
         padding: 0 12px 10px;
         border-bottom: 1px solid #e5e7eb;
+    }
+    .factor-series-overlay-result-bar {
+        margin-top: 8px;
+        border-top: 1px solid #e5e7eb;
+        padding: 8px 12px 6px;
+        background: #f9fbff;
+    }
+    .factor-series-overlay-result-title {
+        font-size: 12px;
+        color: #44515f;
+        margin-bottom: 6px;
     }
     .factor-series-overlay-controls label {
         font-size: 12px;
