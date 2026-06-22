@@ -794,10 +794,24 @@
             var def = defaults[key];
             if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
             if (def.scope_policy === 'local_only') return;
-            if (source[key] === def.value) return;
+            if (source[key] === '' || source[key] === null || source[key] === undefined) return;
+            if (valuesEqual(source[key], def.value)) return;
             out[key] = source[key];
         });
         return out;
+    }
+
+    function stripRegisteredSettings(group) {
+        var out = Object.assign({}, group || {});
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            delete out[key];
+        });
+        return out;
+    }
+
+    function groupPayloadForRun(group) {
+        return Object.assign(stripRegisteredSettings(group), flattenGroupForSnapshot(group));
     }
 
     function collectLocalSettings() {
@@ -806,7 +820,8 @@
         Object.keys(state.localValues || {}).forEach(function(key) {
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
-            if (state.localValues[key] === def.value) return;
+            if (state.localValues[key] === '' || state.localValues[key] === null || state.localValues[key] === undefined) return;
+            if (valuesEqual(state.localValues[key], def.value)) return;
             out[key] = state.localValues[key];
         });
         return out;
@@ -863,6 +878,7 @@
         deactivateLocal: deactivateLocal,
         applyFlatSnapshot: applyFlatSnapshot,
         flattenGroupForSnapshot: flattenGroupForSnapshot,
+        groupPayloadForRun: groupPayloadForRun,
         collectLocalSettings: collectLocalSettings,
         registerSnapshot: registerSnapshot,
         runPayload: runPayload,

@@ -62,7 +62,23 @@ def resolve_group_settings(
                 and engine in definition.engine_defaults
             ):
                 value = definition.engine_defaults[engine]
-            _validate_value(definition, value)
+            try:
+                value = _coerce_value(definition, value)
+                _validate_value(definition, value)
+            except ValueError:
+                requested_value = value
+                value = definition.engine_defaults.get(engine, definition.default)
+                value = _coerce_value(definition, value)
+                _validate_value(definition, value)
+                if user_provided:
+                    setting_fallbacks.append({
+                        "setting_key": definition.key,
+                        "module": definition.module,
+                        "engine": engine,
+                        "requested_value": requested_value,
+                        "applied_value": value,
+                        "reason": "invalid_setting_value",
+                    })
             value, fallback = _resolve_engine_value(
                 definition,
                 value,
@@ -76,6 +92,24 @@ def resolve_group_settings(
             values["_setting_fallbacks"] = setting_fallbacks
         resolved[group_id] = values
     return resolved
+
+
+def _coerce_value(definition: SettingDefinition, value: Any) -> Any:
+    if definition.control_template != "number":
+        return value
+    if isinstance(value, bool):
+        raise ValueError(f"setting {definition.key} requires a number")
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError(f"setting {definition.key} requires a number")
+        try:
+            return float(text)
+        except ValueError as exc:
+            raise ValueError(f"setting {definition.key} requires a number") from exc
+    raise ValueError(f"setting {definition.key} requires a number")
 
 
 def _validate_value(definition: SettingDefinition, value: Any) -> None:

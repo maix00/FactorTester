@@ -188,8 +188,8 @@
             return out;
         }
         var runGroups = allStoredGroups.map(_resolvedGroupForRun).map(function(group) {
-            if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
-                return Object.assign({}, group, GT.backendSettings.flattenGroupForSnapshot(group));
+            if (GT.backendSettings && typeof GT.backendSettings.groupPayloadForRun === 'function') {
+                return GT.backendSettings.groupPayloadForRun(group);
             }
             return group;
         });

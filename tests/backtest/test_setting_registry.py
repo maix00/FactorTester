@@ -177,6 +177,41 @@ def test_local_only_group_override_falls_back_with_diagnostics() -> None:
     }]
 
 
+def test_numeric_setting_strings_are_normalized() -> None:
+    application = backtest_setting_registry.get("group_test")
+
+    resolved = resolve_group_settings(
+        application,
+        local_values={},
+        group_values={"group-1": {"initial_capital": "123456.5"}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["initial_capital"] == 123456.5
+    assert "_setting_fallbacks" not in resolved["group-1"]
+
+
+def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
+    application = backtest_setting_registry.get("group_test")
+
+    resolved = resolve_group_settings(
+        application,
+        local_values={},
+        group_values={"group-1": {"initial_capital": ""}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["initial_capital"] == 100_000_000.0
+    assert resolved["group-1"]["_setting_fallbacks"] == [{
+        "setting_key": "initial_capital",
+        "module": "portfolio_capital",
+        "engine": "native",
+        "requested_value": "",
+        "applied_value": 100_000_000.0,
+        "reason": "invalid_setting_value",
+    }]
+
+
 def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
     application = backtest_setting_registry.get("group_test")
 

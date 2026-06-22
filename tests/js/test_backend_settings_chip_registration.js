@@ -58,6 +58,13 @@ const indexManifest = {
       chip_template: '参与率: {value}',
       options: [],
     },
+    initial_capital: {
+      value: 100000000,
+      tab_key: 'capital',
+      scope_policy: 'group_override',
+      chip_template: '资金: {value}',
+      options: [],
+    },
   },
   chip_fields: [
     {
@@ -122,6 +129,7 @@ return GT.backendSettings.init().then(() => {
     splitCount: 5,
     groupIndex: 1,
     engine: 'qlib',
+    initial_capital: '',
     liquidity_mode: 'volume_participation',
     participation_rate: 0.02,
   });
@@ -144,7 +152,13 @@ return GT.backendSettings.init().then(() => {
 
   const flat = GT.backendSettings.flattenGroupForSnapshot(GT.groupSettings.groups.get(baseId));
   assert.equal(flat.engine, undefined);
+  assert.equal(flat.initial_capital, undefined);
   assert.equal(flat.liquidity_mode, 'volume_participation');
+
+  const runPayload = GT.backendSettings.groupPayloadForRun(GT.groupSettings.groups.get(baseId));
+  assert.equal(runPayload.engine, undefined);
+  assert.equal(runPayload.initial_capital, undefined);
+  assert.equal(runPayload.liquidity_mode, 'volume_participation');
 
   console.log('PASS: backend settings owns field and chip registration');
 });
