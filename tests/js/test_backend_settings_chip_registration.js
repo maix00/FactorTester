@@ -70,6 +70,16 @@ const indexManifest = {
       chip_template: '资金: {value}',
       options: [],
     },
+    allocation_policy: {
+      value: 'inverse_volatility',
+      tab_key: 'target_allocation',
+      scope_policy: 'group_override',
+      chip_template: '分配: {value}',
+      options: [
+        { value: 'inverse_volatility', label: '等风险' },
+        { value: 'equal_notional', label: '等市值' },
+      ],
+    },
   },
   chip_fields: [
     {
@@ -191,6 +201,13 @@ return GT.backendSettings.init().then(() => {
   const hiddenPayload = GT.backendSettings.groupPayloadForRun(GT.groupSettings.groups.get(hiddenDependentId));
   assert.equal(hiddenPayload.liquidity_mode, undefined);
   assert.equal(hiddenPayload.participation_rate, undefined);
+
+  GT.backendSettings.applyFlatSnapshot({
+    local_settings: {
+      allocation_policy: 'equal_notional',
+    },
+  });
+  assert.equal(GT.backendSettings.runPayload().allocation_policy, 'equal_notional');
 
   console.log('PASS: backend settings owns field and chip registration');
 });

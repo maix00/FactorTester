@@ -110,13 +110,13 @@
                 return _buildDerivedDraftFromState(ctx);
             },
             onSubmit: _submitDerived,
-            submitLabel: '<i class="fas fa-code-branch"></i>',
+            submitLabel: '创建派生组',
             submitTitle: '创建派生组'
         });
 
         M.registerEditAction({
             name: 'create-derived',
-            label: '<i class="fas fa-code-branch"></i>',
+            label: '创建派生组',
             title: '创建派生组',
             priority: 10,
             condition: function(ctx) {

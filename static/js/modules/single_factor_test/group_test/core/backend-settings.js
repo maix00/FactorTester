@@ -897,7 +897,7 @@
     function runPayload() {
         var values = effectiveLocalValues();
         var calendar = String(values.calendar_frequency || 'auto');
-        return {
+        return Object.assign({}, collectLocalSettings(), {
             start_date: values.start_date,
             end_date: values.end_date,
             start_time: values.start_time,
@@ -909,7 +909,7 @@
             currency_conversion_fee_rate: values.currency_conversion_fee_rate || 0,
             auto_group_calendar_freq: calendar === 'auto',
             group_calendar_freq: calendar === 'auto' ? null : calendar,
-        };
+        });
     }
 
     function groupOverrideValues(groupId) {

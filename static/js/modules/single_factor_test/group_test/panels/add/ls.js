@@ -231,6 +231,7 @@
         GT.modes.registerEditAction({
             name: 'create-ls',
             label: '⚡ 创建 LS 组合',
+            title: '创建 Long-Short 组合',
             priority: 20,
             condition: function(ctx) {
                 return ctx && ctx.count === 2;

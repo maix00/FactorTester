@@ -167,7 +167,7 @@
             if (raw.indexOf('fa-copy') >= 0) return '&#10697;';
             if (raw.indexOf('fa-trash') >= 0) return '&times;';
             if (raw.indexOf('fa-edit') >= 0 || raw.indexOf('fa-pencil') >= 0) return '&#9998;';
-            return String(title || '').slice(0, 1) || raw;
+            return String(title || '') || raw;
         }
         function iconButton(id, title, innerHtml, cls, extraStyle) {
             return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + visibleIcon(innerHtml, title) + '</button>';
