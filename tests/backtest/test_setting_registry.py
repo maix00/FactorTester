@@ -87,7 +87,8 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "factor", "product_path_selection", "time", "return_frequency", "delay", "summary",
+        "factor", "product_path_selection", "time", "return_frequency", "delay",
+        "ic_method", "cross_section", "summary",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": [],
@@ -97,13 +98,23 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
     assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
+    assert index["defaults"]["ic_correlation"]["value"] == "rank"
+    assert index["defaults"]["group_adjust"]["value"] == "off"
+    assert index["defaults"]["by_group"]["value"] == "off"
     assert index["defaults"]["start_time"]["visible_when"] == {
         "time_precision": ["exact"],
     }
     assert {chip["key"] for chip in index["chip_fields"]} >= {
         "factor_alias",
-        "product_selection",
+        "product_path_selection",
     }
+    assert [tab["key"] for tab in index["result_tabs"]][:3] == [
+        "cross_sectional_rank_ic",
+        "cross_sectional_pearson_ic",
+        "ic_summary",
+    ]
+    assert index["result_tabs"][0]["default"] is True
+    assert index["result_tabs"][0]["requires"] == {"ic_correlation": ["rank", "both"]}
     assert [setting["key"] for setting in product_tab["settings"]] == ["product_path_selection"]
     assert [setting["key"] for setting in time_tab["settings"]] == [
         "start_date", "end_date", "start_time", "end_time", "time_precision", "timezone",

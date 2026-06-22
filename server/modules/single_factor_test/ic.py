@@ -79,7 +79,7 @@ def _is_term_contract_product(product: Any) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_ic_params(data: dict) -> Tuple[
-    str,                    # submission_id
+    str,                    # product_path_selection_id
     str,                    # factor_family_alias
     List[dict],             # factor_alias_return_freq
     List[str],              # paths
@@ -91,9 +91,17 @@ def _parse_ic_params(data: dict) -> Tuple[
     """从 request JSON 中解析所有 IC 测试参数并校验。"""
     errors: List[str] = []
 
-    submission_id = str(data.get('submission_id') or '')
-    if not submission_id:
-        errors.append('缺少 submission_id')
+    product_path_selection = data.get('product_path_selection')
+    product_path_selection_id = str(data.get('product_path_selection_id') or '')
+    if isinstance(product_path_selection, dict):
+        product_path_selection_id = str(
+            product_path_selection.get('product_path_selection_id')
+            or product_path_selection.get('selection_id')
+            or product_path_selection.get('id')
+            or product_path_selection_id
+        )
+    if not product_path_selection_id:
+        errors.append('缺少 product_path_selection_id')
 
     factor_family_alias = str(data.get('factor_family_alias') or '')
     if not factor_family_alias:
@@ -130,7 +138,7 @@ def _parse_ic_params(data: dict) -> Tuple[
         raise ValueError('; '.join(errors))
 
     return (
-        submission_id, factor_family_alias, factor_alias_return_freq,
+        product_path_selection_id, factor_family_alias, factor_alias_return_freq,
         paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
     )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .contracts import (
     ChipDefinition,
+    ResultTabDefinition,
     ScopePolicy,
     SettingDefinition,
     SettingModule,
@@ -542,7 +543,9 @@ def ic_test_settings() -> ApplicationSettings:
         SettingModule("return_frequency", "收益率频率", "analysis", 40),
         SettingModule("return_definition", "收益率定义", "analysis", 50),
         SettingModule("ic_delay", "IC Delay", "analysis", 60),
-        SettingModule("ic_summary", "IC 汇总", "analysis", 70),
+        SettingModule("ic_method", "IC 类型", "analysis", 70),
+        SettingModule("cross_section", "截面处理", "analysis", 80),
+        SettingModule("ic_summary", "IC 汇总", "analysis", 90),
     ):
         app.register_module(module)
     for tab in (
@@ -565,6 +568,8 @@ def ic_test_settings() -> ApplicationSettings:
         ),
         SettingTab("return_frequency", "收益率频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
         SettingTab("delay", "Delay", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
+        SettingTab("ic_method", "IC 类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 55),
+        SettingTab("cross_section", "截面处理", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 58),
         SettingTab("summary", "汇总", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
     ):
         app.register_tab(tab)
@@ -580,14 +585,14 @@ def ic_test_settings() -> ApplicationSettings:
             inherit_from_root=True,
         ),
         ChipDefinition(
-            "product_selection",
-            "产品组",
+            "product_path_selection",
+            "产品路径",
             "identity",
-            "{productSelectionLabel}",
-            ("product_selection",),
+            "{productPathSelectionLabel}",
+            ("product_path_selection",),
             module="product_selection",
             order=20,
-            value_resolvers={"productSelectionLabel": "product_selection_label"},
+            value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
             clickable=True,
         ),
     ):
@@ -637,6 +642,61 @@ def ic_test_settings() -> ApplicationSettings:
         chip_template="Lag: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "ic_correlation",
+        "默认 IC",
+        "ic_method",
+        "select",
+        "rank",
+        ScopePolicy.LOCAL_ONLY,
+        module="ic_method",
+        options=(
+            SettingOption("rank", "Cross-sectional Rank IC"),
+            SettingOption("pearson", "Cross-sectional Pearson IC"),
+            SettingOption("both", "Rank IC + Pearson IC"),
+        ),
+        chip_template="IC: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "group_adjust",
+        "组内去均值",
+        "cross_section",
+        "select",
+        "off",
+        ScopePolicy.LOCAL_ONLY,
+        module="cross_section",
+        options=(
+            SettingOption("off", "关闭"),
+            SettingOption("on", "按组调整收益"),
+        ),
+        chip_template="组调整: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "by_group",
+        "分组 IC",
+        "cross_section",
+        "select",
+        "off",
+        ScopePolicy.LOCAL_ONLY,
+        module="cross_section",
+        options=(
+            SettingOption("off", "关闭"),
+            SettingOption("on", "按组输出"),
+        ),
+        chip_template="分组IC: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "min_cross_section_count",
+        "最小截面样本数",
+        "cross_section",
+        "number",
+        5,
+        ScopePolicy.LOCAL_ONLY,
+        module="cross_section",
+        minimum=2,
+        step=1,
+        chip_template="最小样本: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "ic_decay_lags",
         "IC 衰减阶数",
         "delay",
@@ -660,6 +720,35 @@ def ic_test_settings() -> ApplicationSettings:
         step=1,
         chip_template="滚动窗口: {value}",
     ))
+    for tab in (
+        ResultTabDefinition(
+            "cross_sectional_rank_ic",
+            "Cross-sectional Rank IC",
+            "ic_method",
+            10,
+            default=True,
+            requires={"ic_correlation": ("rank", "both")},
+        ),
+        ResultTabDefinition(
+            "cross_sectional_pearson_ic",
+            "Cross-sectional Pearson IC",
+            "ic_method",
+            20,
+            requires={"ic_correlation": ("pearson", "both")},
+        ),
+        ResultTabDefinition("ic_summary", "IC Summary", "ic_summary", 30),
+        ResultTabDefinition("ic_decay", "IC Decay", "ic_delay", 40),
+        ResultTabDefinition("rolling_ic", "Rolling IC", "ic_summary", 50),
+        ResultTabDefinition(
+            "by_group_ic",
+            "By Group IC",
+            "cross_section",
+            60,
+            requires={"by_group": ("on",)},
+        ),
+        ResultTabDefinition("coverage_missing", "Coverage / Missing", "cross_section", 70),
+    ):
+        app.register_result_tab(tab)
     return app
 
 

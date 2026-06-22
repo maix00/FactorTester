@@ -119,3 +119,26 @@ class SettingTab:
             mount.value for mount in self.default_mount_points
         ]
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class ResultTabDefinition:
+    key: str
+    label: str
+    module: str
+    order: int
+    default: bool = False
+    requires: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    help_text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.module:
+            raise ValueError("result tab requires key, label, and module")
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["requires"] = {
+            key: list(values)
+            for key, values in self.requires.items()
+        }
+        return value

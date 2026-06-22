@@ -1,0 +1,25 @@
+<div class="module" id="factor_series_viewer_module" style="margin-top:24px;">
+    <div class="section-title">因子序列查看</div>
+    <div
+        id="factor-series-viewer-root"
+        style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;"
+    >
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:13px;font-weight:600;color:#1f2937;">产品序列 / 因子序列对比</div>
+                <div style="font-size:12px;color:#64748b;margin-top:2px;">选择产品、合约或期限后查看因子值、价格、收益标签和事件对齐。</div>
+            </div>
+            <button
+                type="button"
+                id="factor-series-open-btn"
+                style="height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#334155;font-size:12px;cursor:pointer;"
+            >打开序列查看</button>
+        </div>
+        <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
+            <div style="font-size:12px;color:#64748b;">序列查看器将使用当前测试模块传入的 ProductPathSelection，并独立于 IC 结果 tabs 展示产品级时间序列。</div>
+            <div id="factor-series-chart-container" style="width:100%;min-height:260px;margin-top:10px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_viewer_module.js') }}"></script>

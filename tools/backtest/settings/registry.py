@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import (
     ChipDefinition,
+    ResultTabDefinition,
     SettingDefinition,
     SettingModule,
     SettingTab,
@@ -21,6 +22,7 @@ class ApplicationSettings:
     tabs: dict[str, SettingTab] = field(default_factory=dict)
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
+    result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
 
     def register_module(self, module: SettingModule) -> None:
         if module.key in self.modules:
@@ -51,6 +53,15 @@ class ApplicationSettings:
                 f"chip {chip.key} references unknown module {chip.module}"
             )
         self.chip_fields[chip.key] = chip
+
+    def register_result_tab(self, tab: ResultTabDefinition) -> None:
+        if tab.key in self.result_tabs:
+            raise ValueError(f"duplicate result tab: {tab.key}")
+        if tab.module not in self.modules:
+            raise ValueError(
+                f"result tab {tab.key} references unknown module {tab.module}"
+            )
+        self.result_tabs[tab.key] = tab
 
     def manifest(self) -> dict[str, Any]:
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
@@ -98,6 +109,10 @@ class ApplicationSettings:
             "chip_fields": [
                 chip.to_dict()
                 for chip in sorted(self.chip_fields.values(), key=lambda item: item.order)
+            ],
+            "result_tabs": [
+                tab.to_dict()
+                for tab in sorted(self.result_tabs.values(), key=lambda item: item.order)
             ],
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }

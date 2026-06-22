@@ -6,6 +6,9 @@
     // 全局变量
     let factorFamilyAlias = window.factorFamilyAlias || '';
     let factorList = [];  // 存储因子列表 [{alias, name, freq}]
+    let icProductPathSelections = [];
+    let icSettingsManifest = null;
+    let icSettingValues = {};
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
     let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
@@ -33,6 +36,115 @@
             console.error('获取因子列表异常:', err);
             return [];
         }
+    }
+
+    function selectionId(selection) {
+        const utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionId) return utils.selectionId(selection);
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
+    }
+
+    function selectionLabel(selection) {
+        const utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionLabel) return utils.selectionLabel(selection);
+        return selection ? (selection.product_group || selection.label || selection.name || selectionId(selection)) : '';
+    }
+
+    function selectionById(id) {
+        const target = String(id || '');
+        return icProductPathSelections.find(selection => selectionId(selection) === target) || null;
+    }
+
+    async function loadICSettingsManifest() {
+        if (icSettingsManifest) return icSettingsManifest;
+        const pageUuid = encodeURIComponent(window._pageUuid || '');
+        const resp = await fetch('/api/backtest/settings/ic_test?page_uuid=' + pageUuid, {
+            headers: { Accept: 'application/json' },
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.success === false) {
+            throw new Error(data.error || ('HTTP ' + resp.status));
+        }
+        icSettingsManifest = data;
+        icSettingValues = {};
+        Object.keys(data.defaults || {}).forEach(key => {
+            icSettingValues[key] = data.defaults[key].value;
+        });
+        return data;
+    }
+
+    function enabledResultTabs(manifest) {
+        const defaults = manifest && manifest.defaults ? manifest.defaults : {};
+        const values = {};
+        Object.keys(defaults).forEach(key => { values[key] = defaults[key].value; });
+        Object.keys(icSettingValues || {}).forEach(key => { values[key] = icSettingValues[key]; });
+        return (manifest && manifest.result_tabs || []).filter(tab => {
+            const requires = tab.requires || {};
+            return Object.keys(requires).every(key => {
+                const allowed = requires[key] || [];
+                return allowed.map(String).indexOf(String(values[key])) >= 0;
+            });
+        });
+    }
+
+    function renderICResultTabs(subId, manifest) {
+        const tabs = enabledResultTabs(manifest);
+        if (!tabs.length) return '';
+        return '<div class="ic-result-tabs" data-product-path-selection-id="' + subId + '" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px;">'
+            + tabs.map((tab, idx) => '<button type="button" class="ic-result-tab-btn' + (idx === 0 || tab.default ? ' active' : '') + '" data-result-tab="' + tab.key + '" style="height:26px;padding:0 9px;border:1px solid ' + (idx === 0 || tab.default ? '#2563eb' : '#cbd5e1') + ';border-radius:6px;background:' + (idx === 0 || tab.default ? '#eff6ff' : '#fff') + ';color:' + (idx === 0 || tab.default ? '#1d4ed8' : '#475569') + ';font-size:12px;cursor:pointer;">' + tab.label + '</button>').join('')
+            + '</div>';
+    }
+
+    function renderICSettingsPanel(manifest) {
+        const host = document.getElementById('ic-settings-container');
+        if (!host || !manifest) return;
+        const defaults = manifest.defaults || {};
+        const tabs = (manifest.tab_lists && manifest.tab_lists['local-settings'] || [])
+            .filter(tab => tab.key !== 'factor' && tab.key !== 'product_path_selection');
+        const settingsByTab = {};
+        Object.keys(defaults).forEach(key => {
+            const meta = defaults[key];
+            if (!settingsByTab[meta.tab_key]) settingsByTab[meta.tab_key] = [];
+            settingsByTab[meta.tab_key].push({ key, meta });
+        });
+        let html = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">'
+            + '<span style="font-size:13px;font-weight:700;color:#1f2937;">IC 设置</span>'
+            + '<span style="font-size:12px;color:#64748b;">后端注册字段，结果 tabs 按设置显示</span>'
+            + '</div>';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">';
+        tabs.forEach(tab => {
+            const rows = settingsByTab[tab.key] || [];
+            if (!rows.length) return;
+            html += '<div style="border:1px solid #eef2f7;border-radius:8px;padding:8px;background:#fbfdff;">';
+            html += '<div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:6px;">' + tab.label + '</div>';
+            rows.forEach(row => {
+                const meta = row.meta;
+                const value = icSettingValues[row.key];
+                html += '<label style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0;font-size:12px;color:#475569;">';
+                html += '<span>' + meta.label + '</span>';
+                if ((meta.options || []).length) {
+                    html += '<select data-ic-setting="' + row.key + '" style="max-width:150px;height:26px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:12px;">';
+                    meta.options.forEach(option => {
+                        html += '<option value="' + option.value + '"' + (String(option.value) === String(value) ? ' selected' : '') + '>' + option.label + '</option>';
+                    });
+                    html += '</select>';
+                } else {
+                    html += '<input data-ic-setting="' + row.key + '" type="' + (meta.control_template === 'number' ? 'number' : 'text') + '" value="' + (value == null ? '' : value) + '" style="max-width:110px;height:26px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:12px;padding:0 6px;">';
+                }
+                html += '</label>';
+            });
+            html += '</div>';
+        });
+        html += '</div>';
+        host.innerHTML = html;
+        host.querySelectorAll('[data-ic-setting]').forEach(control => {
+            control.addEventListener('change', function() {
+                const key = this.getAttribute('data-ic-setting');
+                const meta = defaults[key] || {};
+                icSettingValues[key] = meta.control_template === 'number' ? Number(this.value) : this.value;
+                if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
+            });
+        });
     }
 
     function drawComparisonChart(containerId, priceData, factorData, returnData, productName, factorName, factorAlias, subId, product) {
@@ -744,37 +856,7 @@
             + '</div>'
             + icDecayHtml
             + rollingIcHtml
-            // 产品选择、加载按钮
-            + '<div style="margin-top:16px;">'
-            + '<label>主产品(用于因子/收益率)：</label>'
-            + '<select id="primary-product-select-' + subId + '-' + idx + '" class="form-select" style="width:240px; display:inline-block; margin-left:8px;">' + productOptions + '</select>'
-            + '<button class="btn btn-sm btn-outline-primary" data-sub="' + subId + '" data-idx="' + idx + '" data-factor-name="' + factor.name + '" data-factor-alias="' + factor.alias + '">加载因子和收益</button>'
-            + '<span id="adjust-wrap-' + subId + '-' + idx + '" style="margin-left:12px;display:none;">'
-            + '<label style="margin:0;"><input type="checkbox" id="adjust-price-' + subId + '-' + idx + '"> 复权价格</label>'
-            + '</span>'
-            + '<span id="show-volume-wrap-' + subId + '-' + idx + '" style="margin-left:12px;display:none;">'
-            + '<label><input type="checkbox" id="show-volume-' + subId + '-' + idx + '" checked onchange="window.icRedrawComparison(' + subId + ',' + idx + ')"> 📊 成交量</label>'
-            + '</span>'
-            + '<span id="show-oi-wrap-' + subId + '-' + idx + '" style="margin-left:8px;display:none;">'
-            + '<label><input type="checkbox" id="show-oi-' + subId + '-' + idx + '" checked onchange="window.icRedrawComparison(' + subId + ',' + idx + ')"> 📈 持仓量</label>'
-            + '</span>'
-            + '<div style="margin-top:6px;color:#666;font-size:12px;">期限合约请在下方点击表格选择</div>'
-            + '</div>'
-            + '<div id="contract-table-wrap-' + subId + '-' + idx + '" style="margin-top:10px;display:none;border:1px solid #e1e4e8;border-radius:6px;background:#fff;max-height:220px;overflow:auto;">'
-            + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-            + '<thead><tr style="position:sticky;top:0;background:#f6f8fa;z-index:1;">'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>'
-            + '</tr></thead>'
-            + '<tbody id="contract-table-body-' + subId + '-' + idx + '"></tbody>'
-            + '</table>'
-            + '</div>'
-            // 价格/因子值/收益率三联图容器
-            + '<div style="margin-top:8px;">'
-            + '<p style="font-size:11px;color:#888;margin:0 0 4px 0;">💡 点击图中 <b style="color:#0078d4;">因子值</b> 曲线上的数据点可查看该时刻的截面分布</p>'
-            + '<div id="factor-chart-' + subId + '-' + idx + '" style="width:100%;"></div>'
-            + '</div>';
+            + '<div style="margin-top:14px;padding:10px 12px;border:1px dashed #d8dee4;border-radius:8px;color:#64748b;font-size:12px;background:#fafcff;">产品级因子值、价格、收益标签和合约/期限对比已拆到上方“因子序列查看”模块。</div>';
 
         // 绘制 IC 图表
         if (factor.ic_series && factor.ic_series.dates && factor.ic_series.values) {
@@ -790,32 +872,6 @@
             drawRollingICChart('ic-rolling-chart-' + subId + '-' + idx, factor.rolling_ic);
         }
 
-        // 初始化期限合约表格
-        var primarySelect = document.getElementById('primary-product-select-' + subId + '-' + idx);
-        if (primarySelect) {
-            populateContractTable(subId, idx, primarySelect.value);
-            primarySelect.addEventListener('change', function() {
-                populateContractTable(subId, idx, primarySelect.value);
-            });
-        }
-
-        // 绑定加载按钮事件
-        var loadBtns = document.querySelectorAll('[data-sub="' + subId + '"][data-idx="' + idx + '"]');
-        loadBtns.forEach(function(btn) {
-            btn.removeEventListener('click', loadHandler);
-            btn.addEventListener('click', loadHandler);
-        });
-        async function loadHandler(e) {
-            var sub = e.currentTarget.getAttribute('data-sub');
-            var ix = e.currentTarget.getAttribute('data-idx');
-            var fName = e.currentTarget.getAttribute('data-factor-name');
-            var fAlias = e.currentTarget.getAttribute('data-factor-alias');
-            try {
-                await loadFactorAndReturn(sub, ix, fName, fAlias);
-            } catch (err) {
-                console.error('loadFactorAndReturn 失败:', err);
-            }
-        }
     }
 
     // 加载因子值和收益率并绘图
@@ -1082,38 +1138,7 @@
         });
     };
 
-    // 运行 IC 测试（核心修改）
-    async function resolveSubmissionIdForIC(subId, submission) {
-        try {
-            const pageUuid = encodeURIComponent(window._pageUuid || '');
-            const resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
-            const data = await resp.json();
-            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
-                return String(subId);
-            }
-
-            const targetId = String(subId);
-            const exact = data.submissions.find(s => String(s.id) === targetId);
-            if (exact) return String(exact.id);
-
-            const localPaths = new Set((submission?.paths || []).map(String));
-            if (localPaths.size > 0) {
-                const matched = data.submissions.find(s => {
-                    const sp = new Set((s.selected_paths || []).map(String));
-                    if (sp.size !== localPaths.size) return false;
-                    for (const p of localPaths) {
-                        if (!sp.has(p)) return false;
-                    }
-                    return true;
-                });
-                if (matched) return String(matched.id);
-            }
-        } catch (e) {
-            console.warn('resolveSubmissionIdForIC failed:', e);
-        }
-        return String(subId);
-    }
-
+    // 运行 IC 测试
     window.runIC = async function(subId) {
         const btn = document.getElementById(`run-ic-btn-${subId}`);
         const statusSpan = document.getElementById(`ic-status-${subId}`);
@@ -1135,9 +1160,9 @@
             const return_freq = freqInput ? freqInput.value.trim() : '';
             selectedFactors.push({ alias, return_freq });
         });
-        const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
-        if (!submission) {
-            statusSpan.innerText = '错误：未找到提交';
+        const selection = selectionById(subId);
+        if (!selection) {
+            statusSpan.innerText = '错误：未找到产品路径选择';
             btn.disabled = false;
             return;
         }
@@ -1161,8 +1186,6 @@
         }
 
         try {
-            const effectiveSubmissionId = await resolveSubmissionIdForIC(subId, submission);
-
             // 显示进度条
             const progressBarId = `ic-progress-${subId}`;
             let progressDiv = document.getElementById(progressBarId);
@@ -1180,9 +1203,10 @@
             }
 
             const body = JSON.stringify({
-                submission_id: effectiveSubmissionId,
+                product_path_selection_id: selectionId(selection),
+                product_path_selection: selection,
                 factor_family_alias: factorFamilyAlias,
-                paths: submission.paths,
+                paths: selection.paths || selection.selected_paths || [],
                 factors: selectedFactors,
                 ic_decay_lags: ic_decay_lags,
                 rolling_window: rolling_window,
@@ -1456,50 +1480,58 @@
     }
 
     // 渲染主选项卡（外部调用）
-    window.renderICTabs = async function(submissions) {
+    window.renderICTabs = async function(productPathSelections) {
         const container = document.getElementById('ic-tab-container');
         if (!container) return;
-        if (!submissions || submissions.length === 0) {
-            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请先完成产品类别设置并提交。</div>';
+        icProductPathSelections = Array.isArray(productPathSelections) ? productPathSelections.slice() : [];
+        if (window.FactorSeriesViewer && typeof window.FactorSeriesViewer.setSelections === 'function') {
+            window.FactorSeriesViewer.setSelections(icProductPathSelections);
+        }
+        if (icProductPathSelections.length === 0) {
+            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请在 IC 测试设置中选择产品路径。</div>';
             return;
         }
+        const settingsManifest = await loadICSettingsManifest();
+        renderICSettingsPanel(settingsManifest);
         // 获取因子列表（如果尚未获取）
         if (factorList.length === 0) await fetchFactorList();
         // 填充收益率频率抽屉（全局，所有tab共享）
         populateFreqDrawer(factorList);
         let tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         let panelsHtml = '<div class="tab-content" id="icTabContent">';
-        submissions.forEach((sub, idx) => {
+        icProductPathSelections.forEach((sub, idx) => {
+            const subId = selectionId(sub);
             const activeClass = idx === 0 ? 'active' : '';
             const showClass = idx === 0 ? 'show active' : '';
-            const tabId = `ic-tab-${sub.id}`;
-            const panelId = `ic-panel-${sub.id}`;
-            const tabLabel = sub.product_group || sub.label || sub.factor_tester_serial || ('测试器' + (idx+1));
+            const tabId = `ic-tab-${subId}`;
+            const panelId = `ic-panel-${subId}`;
+            const tabLabel = selectionLabel(sub) || ('产品路径' + (idx+1));
             const pgPrefix = sub.product_group ? '📦 ' : '';
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-submission-id="${sub.id}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-product-path-selection-id="${subId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
-                            <button class="btn btn-primary btn-sm" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
-                            <span id="ic-status-${sub.id}" class="ic-status"></span>
+                            <button class="btn btn-primary btn-sm" id="run-ic-btn-${subId}" onclick="runIC('${subId}')">运行IC测试</button>
+                            <span id="ic-status-${subId}" class="ic-status"></span>
                         </div>
+                        ${renderICResultTabs(subId, settingsManifest)}
                         <!-- IC 衰减 & 滚动窗口 参数 -->
                         <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
                             <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
                             <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 IC衰减滞后期
-                                <input type="text" id="ic-decay-lags-${sub.id}" value="" placeholder="1,2,3,5,10,20"
+                                <input type="text" id="ic-decay-lags-${subId}" value="" placeholder="1,2,3,5,10,20"
                                        style="width:110px; font-size:12px; padding:2px 6px; vertical-align:center; margin:0;" title="逗号分隔的滞后期数，计算各周期IC统计量">
                             </label>
                             <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 滚动窗口
-                                <input type="number" id="ic-rolling-window-${sub.id}" value="" placeholder="如60"
+                                <input type="number" id="ic-rolling-window-${subId}" value="" placeholder="如60"
                                        min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px; vertical-align:center;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
                             </label>
                         </div>
-                        <div id="ic-result-${sub.id}"></div>
-                        <div id="chart-container-${sub.id}" style="width:100%; margin-top:14px;"></div>
+                        <div id="ic-result-${subId}"></div>
+                        <div id="chart-container-${subId}" style="width:100%; margin-top:14px;"></div>
                     </div>
                 </div>
             `;
@@ -1513,9 +1545,6 @@
                 const tab = new bootstrap.Tab(trigger);
                 trigger.addEventListener('click', (e) => { e.preventDefault(); tab.show(); });
             });
-        }
-        if (typeof window.renderGroupTabs === 'function') {
-            window.renderGroupTabs(submissions);
         }
     };
 
@@ -1543,9 +1572,7 @@
         initFreqDrawerButtons();
         await fetchFactorList();
         populateFreqDrawer(factorList);
-        if (window.submissions && window.submissions.length) {
-            await window.renderICTabs(window.submissions);
-        }
+        await window.renderICTabs(icProductPathSelections);
     }
 
     if (document.readyState === 'loading') {
@@ -1554,52 +1581,13 @@
         initICModule();
     }
 
-    // ── Submission bus subscriptions ────────────────────────────────────────────
-    (function() {
-        var bus = window._submissionBus;
-        if (!bus) return;
-
-        // React to tester deletion: clear IC caches for removed tester
-        bus.on(bus.EVENTS.REMOVED, function(data) {
-            if (!data || !data.id_time) return;
-            var removedId = String(data.id_time);
-
-            // Clear _icComparisonCache entries for this tester (keys are "subId-idx")
-            if (window._icComparisonCache) {
-                var prefix = removedId + '-';
-                Object.keys(window._icComparisonCache).forEach(function(key) {
-                    if (key.indexOf(prefix) === 0) {
-                        delete window._icComparisonCache[key];
-                    }
-                });
-            }
-
-            // Clear _icDataFactors entry for this tester
-            if (window._icDataFactors && window._icDataFactors[removedId]) {
-                delete window._icDataFactors[removedId];
-            }
-        });
-
-        // React to any change: re-render IC tabs
-        bus.on('*', function(event) {
-            if (window.submissions && window.submissions.length > 0) {
-                window.renderICTabs(window.submissions);
-            }
-        });
-    })();
-
     // 供参数模块调用，刷新因子列表和 IC 选项卡
     window.refreshICModule = async function() {
         console.log('刷新 IC 模块因子列表');
         await fetchFactorList();  // 重新获取因子列表
         populateFreqDrawer(factorList);  // 刷新收益率频率抽屉
-        if (window.submissions && window.submissions.length) {
-            await window.renderICTabs(window.submissions);
-        }
+        await window.renderICTabs(icProductPathSelections);
         window.factorList = factorList;
-        if (typeof window.renderGroupTabs === 'function' && window.submissions && window.submissions.length) {
-            window.renderGroupTabs(window.submissions);
-        }
     };
 
     window.factorList = factorList;
