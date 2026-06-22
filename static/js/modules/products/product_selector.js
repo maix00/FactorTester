@@ -185,7 +185,7 @@
     function initLeftTree($container, treeOpts) {
         var $left = $container.find('.ps-left-content');
         $left.html('<div style="margin-bottom:8px;color:#586069;font-size:13px;">树状结构，勾选叶子节点或分类后提交</div>'
-            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;flex:1 1 0;min-height:0;overflow-x:auto;overflow-y:scroll;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
+            + '<div class="ps-tree-container product-tree-scrollbox" style="width:100%;box-sizing:border-box;flex:1 1 0;min-height:0;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
         createTree($left.find('.ps-tree-container'), treeOpts);
     }
 

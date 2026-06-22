@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/product_tree.css') }}">
     <!-- Fancytree -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
@@ -21,7 +22,7 @@
         .pv-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
         .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
         .pv-header .back-link:hover { text-decoration: underline; }
-        .pv-layout { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
+        .pv-layout { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; align-items: flex-start; }
         .pv-sidebar {
             width: fit-content; min-width: 0; max-width: min(70vw, 760px); flex: 0 0 auto; background: #fff; border: 1px solid #e2e8f0;
             border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
@@ -66,27 +67,9 @@
             width: 340px;
             min-width: 260px;
             max-width: min(62vw, 700px);
+            max-height: calc(100vh - 190px);
             box-sizing: border-box;
             resize: horizontal;
-            overflow-x: auto;
-            overflow-y: scroll;
-        }
-        #pv-tree-container > ul.ui-fancytree.fancytree-container {
-            display: block;
-            width: 100% !important;
-            max-width: 100%;
-            min-width: 0;
-            box-sizing: border-box;
-            margin: 0;
-        }
-        #pv-tree-container .fancytree-title {
-            white-space: normal;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-        }
-        #pv-tree-container .node-description {
-            white-space: normal;
-            overflow-wrap: anywhere;
         }
         @media (max-width: 1024px) {
             .pv-layout { flex-direction: column; }
@@ -127,7 +110,7 @@
                 树状结构，点击叶子节点查看序列
             </div>
             <!-- Fancytree 容器 -->
-            <div id="pv-tree-container" style="flex:1 1 0; min-height:0; box-sizing:border-box; overflow-y:scroll; overflow-x:auto; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
+            <div id="pv-tree-container" class="product-tree-scrollbox" style="flex:0 1 auto; min-height:0; box-sizing:border-box; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
         </div>
 
         <!-- 右侧图表区 -->

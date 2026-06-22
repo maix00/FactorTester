@@ -98,7 +98,9 @@ def factor_list():
     factor_family_alias = request.args.get('factor_family_alias')
     if not factor_family_alias:
         return api_fail('缺少参数')
-    ff = get_factor_family_instance(factor_family_alias)
+    page_uuid = request.args.get('page_uuid') or None
+    owner_username = request.args.get('owner_username') or None
+    ff = get_factor_family_instance(factor_family_alias, username=owner_username, page_uuid=page_uuid)
     params_list = get_session_params(factor_family_alias, ff)
     factors = ff.get_factors(params_list=params_list)
     # 构建 alias -> category 映射（从 session params 行中读取）

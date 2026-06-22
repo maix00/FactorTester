@@ -19,8 +19,6 @@
         chart: null,
         loadingFactors: false,
     };
-    var overlayProductReady = false;
-
     function escapeHtml(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -32,6 +30,23 @@
 
     function isFunction(value) {
         return typeof value === 'function';
+    }
+
+    function currentFactorFamilyAlias() {
+        if (window.factorFamilyAlias) return window.factorFamilyAlias;
+        if (window._sftCurrentFactorId) return window._sftCurrentFactorId;
+        var module = document.getElementById('factor_series_viewer_module');
+        if (module && module.dataset && module.dataset.factorFamilyAlias) return module.dataset.factorFamilyAlias;
+        var section = document.querySelector('[data-factor-alias]');
+        if (section && section.dataset && section.dataset.factorAlias) return section.dataset.factorAlias;
+        var params = new URLSearchParams(window.location.search || '');
+        return params.get('factor') || '';
+    }
+
+    function currentOwnerUsername() {
+        if (window._sftCurrentOwner) return window._sftCurrentOwner;
+        var params = new URLSearchParams(window.location.search || '');
+        return params.get('owner_username') || '';
     }
 
     function bodyOpen() {
@@ -157,9 +172,9 @@
 
     function renderChipHtml(text, value) {
         var parts = chipParts(text, value);
-        if (!parts.label) return '<span class="factor-series-settings-chip-value">' + escapeHtml(parts.value) + '</span>';
-        return '<span class="factor-series-settings-chip-label">' + escapeHtml(parts.label) + '</span>'
-            + '<span class="factor-series-settings-chip-value">' + escapeHtml(parts.value) + '</span>';
+        if (!parts.label) return '<span class="gt-backend-chip-value">' + escapeHtml(parts.value) + '</span>';
+        return '<span class="gt-backend-chip-label">' + escapeHtml(parts.label) + '</span>'
+            + '<span class="gt-backend-chip-value">' + escapeHtml(parts.value) + '</span>';
     }
 
     function chipText(setting, value) {
@@ -169,7 +184,7 @@
 
     function makeChip(setting, value) {
         var node = document.createElement('span');
-        node.className = 'factor-series-settings-chip';
+        node.className = 'gt-backend-chip factor-series-settings-chip';
         node.innerHTML = renderChipHtml(chipText(setting, value));
         return node;
     }
@@ -238,6 +253,32 @@
         return state.manifest.tab_url_template.replace('{tab_key}', encodeURIComponent(tabKey));
     }
 
+    function factorsFromParamTable() {
+        var tbody = document.getElementById('factor_table_body');
+        if (!tbody) return [];
+        return Array.from(tbody.querySelectorAll('tr')).filter(function(row) {
+            return row.id !== 'add_row' && row.style.display !== 'none';
+        }).map(function(row) {
+            var firstCell = row.querySelector('td:first-child');
+            var alias = firstCell ? (firstCell.textContent || '').trim() : '';
+            if (!alias) return null;
+            return { alias: alias, name: alias, source: 'params_table' };
+        }).filter(Boolean);
+    }
+
+    function syncFactorsFromParamTable() {
+        var rows = factorsFromParamTable();
+        if (!rows.length) return false;
+        state.factors = rows;
+        window.factorList = rows;
+        var current = effectiveValue('factor');
+        var exists = rows.some(function(factor) {
+            return String(factor.alias || factor.name || '') === String(current);
+        });
+        if (!exists) state.values.factor = rows[0].alias || rows[0].name || '';
+        return true;
+    }
+
     function loadTab(tabKey) {
         if (state.tabCache[tabKey]) return Promise.resolve(state.tabCache[tabKey]);
         return requestJSON(tabURL(tabKey)).then(function(manifest) {
@@ -247,12 +288,18 @@
     }
 
     async function loadFactors() {
+        if (syncFactorsFromParamTable()) return state.factors;
         if (state.factors.length || state.loadingFactors) return state.factors;
         state.loadingFactors = true;
         try {
-            var alias = window.factorFamilyAlias || '';
+            var alias = currentFactorFamilyAlias();
             if (!alias) return [];
-            var data = await requestJSON('/api/factor_list?factor_family_alias=' + encodeURIComponent(alias));
+            var params = new URLSearchParams();
+            params.set('factor_family_alias', alias);
+            if (window._pageUuid) params.set('page_uuid', window._pageUuid);
+            var owner = currentOwnerUsername();
+            if (owner) params.set('owner_username', owner);
+            var data = await requestJSON('/api/factor_list?' + params.toString());
             state.factors = Array.isArray(data.factors) ? data.factors : [];
             window.factorList = state.factors;
             if (!effectiveValue('factor') && state.factors.length) {
@@ -265,6 +312,7 @@
     }
 
     function selectedFactor() {
+        syncFactorsFromParamTable();
         var alias = effectiveValue('factor');
         if (!alias) return null;
         return state.factors.find(function(factor) {
@@ -316,13 +364,14 @@
         (manifest.settings || []).forEach(function(setting) {
             var row = document.createElement('label');
             row.className = 'factor-series-setting-row';
+            if (setting.key === 'product') row.className += ' factor-series-setting-row-wide';
             var label = document.createElement('span');
             label.className = 'factor-series-setting-label';
             label.textContent = setting.label;
             var controlWrap = document.createElement('span');
             controlWrap.className = 'factor-series-setting-control';
             controlWrap.appendChild(makeControl(setting));
-            row.appendChild(label);
+            if (setting.key !== 'product') row.appendChild(label);
             row.appendChild(controlWrap);
             host.appendChild(row);
         });
@@ -331,18 +380,17 @@
     function makeControl(setting) {
         if (setting.key === 'product') {
             var wrap = document.createElement('div');
-            wrap.className = 'factor-series-product-picker';
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'factor-series-secondary-action';
-            btn.textContent = '从产品树选择产品';
-            btn.addEventListener('click', openProductTreeOverlay);
+            wrap.className = 'factor-series-product-tab';
             var summary = document.createElement('span');
             summary.id = 'factor-series-path-summary';
             summary.className = 'factor-series-path-summary';
-            wrap.appendChild(btn);
             wrap.appendChild(summary);
+            var treeWrap = document.createElement('div');
+            treeWrap.className = 'factor-series-tab-tree-wrap product-tree-scrollbox';
+            treeWrap.innerHTML = '<div id="factor-series-tree-container" class="factor-series-tab-tree"></div>';
+            wrap.appendChild(treeWrap);
             setTimeout(renderPathSummary, 0);
+            setTimeout(mountProductTree, 0);
             return wrap;
         }
         var control = document.createElement('select');
@@ -421,7 +469,9 @@
             return;
         }
         host.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
+        if (tabKey === 'factor') syncFactorsFromParamTable();
         loadTab(tabKey).then(function(manifest) {
+            if (tabKey === 'factor') syncFactorsFromParamTable();
             renderManifestTab(manifest);
             renderSettingChips();
         }).catch(function(error) {
@@ -437,7 +487,7 @@
             return;
         }
         summary.innerHTML = state.paths.slice(0, 4).map(function(path) {
-            return '<span class="factor-series-path-chip">' + escapeHtml(path) + '</span>';
+            return '<span class="gt-backend-chip factor-series-path-chip">' + renderChipHtml(path) + '</span>';
         }).join('');
     }
 
@@ -453,11 +503,11 @@
     }
 
     function mountProductTree() {
-        if (overlayProductReady) return;
-        overlayProductReady = true;
         var container = document.getElementById('factor-series-tree-container');
         if (!container || !window.jQuery) return;
-        container.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">加载产品树...</div>';
+        if (container.dataset.ready === '1') return;
+        container.dataset.ready = '1';
+        container.textContent = '';
         var $container = window.jQuery(container);
         $container.fancytree({
             source: { url: '/api/product_tree' },
@@ -489,7 +539,6 @@
                 var productName = extractProductName(node);
                 if (!productName || nodeData.has_data === false) return;
                 selectProduct(productName, nodeData, node.key);
-                closeProductTreeOverlay();
             },
         });
     }
@@ -519,18 +568,6 @@
         loadPriceDataForCurrentProduct().then(function(priceData) {
             drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
         }).catch(showResultError);
-    }
-
-    function openProductTreeOverlay() {
-        var overlay = document.getElementById('factor-series-products-overlay');
-        if (!overlay) return;
-        overlay.style.display = 'flex';
-        mountProductTree();
-    }
-
-    function closeProductTreeOverlay() {
-        var overlay = document.getElementById('factor-series-products-overlay');
-        if (overlay) overlay.style.display = 'none';
     }
 
     function normalizeProductForContractApi(name) {
@@ -785,7 +822,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     paths: state.paths,
-                    factor_family_alias: window.factorFamilyAlias || '',
+                    factor_family_alias: currentFactorFamilyAlias(),
                     factor_alias: factor.alias || factor.name,
                     page_uuid: window._pageUuid || '',
                     settings: Object.assign({}, state.values),
@@ -849,12 +886,6 @@
             runBtn.addEventListener('click', function(event) {
                 if (event && event.stopPropagation) event.stopPropagation();
                 runEvaluate();
-            });
-        }
-        if (closeBtn) closeBtn.addEventListener('click', closeProductTreeOverlay);
-        if (overlay) {
-            overlay.addEventListener('click', function(event) {
-                if (event.target === overlay) closeProductTreeOverlay();
             });
         }
     }
