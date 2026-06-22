@@ -88,10 +88,83 @@ def resolve_group_settings(
             if fallback is not None:
                 setting_fallbacks.append(fallback)
             values[key] = value
+        _resolve_setting_dependencies(
+            application,
+            values,
+            engine,
+            local_values,
+            overrides,
+            setting_fallbacks,
+        )
         if setting_fallbacks:
             values["_setting_fallbacks"] = setting_fallbacks
         resolved[group_id] = values
     return resolved
+
+
+def _resolve_setting_dependencies(
+    application: ApplicationSettings,
+    values: dict[str, Any],
+    engine: str,
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+    setting_fallbacks: list[dict[str, Any]],
+) -> None:
+    timing = str(values.get("execution_timing") or "next_bar")
+    basis = str(values.get("execution_price_basis") or "close")
+    if timing == "same_bar" and basis == "open":
+        _replace_setting_value(
+            application,
+            values,
+            "execution_price_basis",
+            "close",
+            engine,
+            local_values,
+            overrides,
+            setting_fallbacks,
+            reason="incompatible_setting_value",
+        )
+        basis = "close"
+    if basis in {"open", "vwap"}:
+        _replace_setting_value(
+            application,
+            values,
+            "execution_price_basis",
+            "close",
+            engine,
+            local_values,
+            overrides,
+            setting_fallbacks,
+            reason="unavailable_market_price_basis",
+        )
+
+
+def _replace_setting_value(
+    application: ApplicationSettings,
+    values: dict[str, Any],
+    key: str,
+    applied_value: Any,
+    engine: str,
+    local_values: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+    setting_fallbacks: list[dict[str, Any]],
+    *,
+    reason: str,
+) -> None:
+    requested_value = values.get(key)
+    if requested_value == applied_value:
+        return
+    definition = application.settings[key]
+    values[key] = applied_value
+    if key in local_values or key in overrides:
+        setting_fallbacks.append({
+            "setting_key": definition.key,
+            "module": definition.module,
+            "engine": engine,
+            "requested_value": requested_value,
+            "applied_value": applied_value,
+            "reason": reason,
+        })
 
 
 def _coerce_value(definition: SettingDefinition, value: Any) -> Any:

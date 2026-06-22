@@ -12,10 +12,14 @@ from qlib.backtest.position import Position
 from .common import (
     market_rule_diagnostics,
     capacity_limited_deltas,
-    execution_trace_entry,
+    execute_target_weights,
+    execution_delay_bars,
     execution_price,
+    execution_trace_entry,
+    execution_timing,
     parse_group_strategy_input,
     parse_target_weight_input,
+    portfolio_value,
     position_value_snapshot,
     setting_fallback_diagnostics,
     target_quantities,
@@ -104,12 +108,16 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
     ):
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         position = _SignedPosition(cash=strategy_cash)
-        pending = None
+        cash = strategy_cash
+        positions = {instrument: 0.0 for instrument in request.instruments}
+        pending_targets = []
         equity_curve = {}
         position_curve = {}
         notional_curve = {}
         margin_curve = {}
         execution_trace = {}
+        timing = execution_timing(strategy)
+        delay_bars = execution_delay_bars(strategy)
         for row, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, row, instrument)
@@ -117,38 +125,50 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             }
             for instrument in position.get_stock_list():
                 position.update_stock_price(instrument, current_prices[instrument])
-            if pending is not None:
-                _rebalance(
-                    position,
-                    target_quantities(
-                        request, row, pending, float(position.calculate_value()), strategy
-                    ),
-                    current_prices,
-                    timestamp,
-                    fee_rate=float(strategy.get("fee_rate") or 0.0),
-                    strategy=strategy,
-                    request=request,
-                    row=row,
-                    execution_trace=execution_trace,
+            due_targets = [target for due_row, target in pending_targets if due_row <= row]
+            pending_targets = [
+                (due_row, target) for due_row, target in pending_targets if due_row > row
+            ]
+            for pending in due_targets:
+                before = dict(positions)
+                cash_before = cash
+                cash, positions, deltas = execute_target_weights(
+                    request, row, strategy, pending, positions, cash
                 )
-            equity_curve[timestamp.isoformat()] = float(position.calculate_value())
-            position_curve[timestamp.isoformat()] = {
-                instrument: float(position.get_stock_amount(instrument))
-                for instrument in request.instruments
-            }
-            notional_values, margin_values = position_value_snapshot(
-                request, row, strategy, position_curve[timestamp.isoformat()]
-            )
-            notional_curve[timestamp.isoformat()] = notional_values
-            if margin_values is not None:
-                margin_curve[timestamp.isoformat()] = margin_values
-            pending = calculator.update(
+                if any(abs(delta) > 1e-12 for delta in deltas.values()):
+                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                        request, row, strategy, before, deltas, cash_before
+                    )
+            target = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
                 memberships[row],
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
+            if timing == "same_bar" and target is not None:
+                before = dict(positions)
+                cash_before = cash
+                cash, positions, deltas = execute_target_weights(
+                    request, row, strategy, target, positions, cash
+                )
+                if any(abs(delta) > 1e-12 for delta in deltas.values()):
+                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                        request, row, strategy, before, deltas, cash_before
+                    )
+            elif timing == "next_bar":
+                if target is not None:
+                    pending_targets.append((row + delay_bars, target))
+            equity_curve[timestamp.isoformat()] = float(
+                portfolio_value(request, row, positions, cash)
+            )
+            position_curve[timestamp.isoformat()] = dict(positions)
+            notional_values, margin_values = position_value_snapshot(
+                request, row, strategy, positions
+            )
+            notional_curve[timestamp.isoformat()] = notional_values
+            if margin_values is not None:
+                margin_curve[timestamp.isoformat()] = margin_values
             if (
                 progress is not None
                 and should_report_progress(
@@ -163,11 +183,8 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 )
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
-            "final_value": float(position.calculate_value()),
-            "positions": {
-                instrument: float(position.get_stock_amount(instrument))
-                for instrument in request.instruments
-            },
+            "final_value": float(portfolio_value(request, len(request.timestamps) - 1, positions, cash)),
+            "positions": positions,
             "equity_curve": equity_curve,
             "position_curve": position_curve,
             "notional_curve": notional_curve,

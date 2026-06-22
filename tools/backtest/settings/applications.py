@@ -313,6 +313,48 @@ def group_test_settings() -> ApplicationSettings:
         visible_when={"slippage_mode": ("fixed_bps",)},
     ))
     app.register_setting(SettingDefinition(
+        "execution_timing",
+        "执行时点",
+        "order",
+        "select",
+        "next_bar",
+        ScopePolicy.GROUP_OVERRIDE,
+        module="order_execution",
+        options=(
+            SettingOption("next_bar", "下一 bar 执行"),
+            SettingOption("same_bar", "本 bar 执行"),
+        ),
+        chip_template="执行: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "execution_price_basis",
+        "执行价格",
+        "order",
+        "select",
+        "close",
+        ScopePolicy.GROUP_OVERRIDE,
+        module="order_execution",
+        options=(
+            SettingOption("close", "收盘/切片价格"),
+            SettingOption("open", "开盘价"),
+            SettingOption("vwap", "VWAP"),
+        ),
+        chip_template="价格: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "execution_delay_bars",
+        "执行延迟",
+        "order",
+        "number",
+        1,
+        ScopePolicy.GROUP_OVERRIDE,
+        module="order_execution",
+        minimum=0,
+        step=1,
+        chip_template="延迟: {value}bar",
+        visible_when={"execution_timing": ("next_bar",)},
+    ))
+    app.register_setting(SettingDefinition(
         "order_type",
         "订单类型",
         "order",
@@ -422,9 +464,8 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("minor_units", "内部按分制整数记账"),
             SettingOption("engine_native", "使用执行引擎原生金额精度"),
         ),
-        engine_defaults={"qlib": "engine_native", "rqalpha": "engine_native"},
+        engine_defaults={"rqalpha": "engine_native"},
         disabled_values_by_engine={
-            "qlib": ("minor_units",),
             "rqalpha": ("minor_units",),
         },
         chip_template="金额精度: {value}",

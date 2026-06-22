@@ -12,6 +12,9 @@ GROUP_TEST_APPLICATION = "group_test"
 ALLOCATION_POLICY = "allocation_policy"
 REBALANCE_TRIGGER = "rebalance_trigger"
 POSITION_POLICY = "position_policy"
+EXECUTION_TIMING = "execution_timing"
+EXECUTION_PRICE_BASIS = "execution_price_basis"
+EXECUTION_DELAY_BARS = "execution_delay_bars"
 OBSOLETE_REBALANCE_MODE = "rebalance_mode"
 
 
@@ -65,3 +68,5 @@ def validate_resolved_strategy_settings(config: Mapping[str, Any]) -> None:
         )
     required_strategy_value(config, REBALANCE_TRIGGER)
     required_strategy_value(config, POSITION_POLICY)
+    strategy_value(config, EXECUTION_TIMING)
+    strategy_value(config, EXECUTION_PRICE_BASIS)

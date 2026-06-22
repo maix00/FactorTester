@@ -566,3 +566,157 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
         engine: final_values["native"]
         for engine in results
     }
+
+
+def test_framework_execution_timing_changes_returns_without_changing_targets() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+
+    base_payload = {
+        "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 4)],
+        "instruments": ["asset-a"],
+        "prices": {"asset-a": [100.0, 200.0, 200.0]},
+        "membership": [[[True]], [[True]], [[True]]],
+        "signal_updates": [[True], [False], [False]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "multipliers": [[1.0], [1.0], [1.0]],
+            "lot_sizes": [[1.0], [1.0], [1.0]],
+            "margin_ratios": [[1.0], [1.0], [1.0]],
+        },
+        "strategy_configs": [{
+            "strategy_id": "group-1",
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "buy_and_hold",
+        }],
+    }
+
+    same_bar_payload = {
+        **base_payload,
+        "strategy_configs": [{
+            **base_payload["strategy_configs"][0],
+            "execution_timing": "same_bar",
+        }],
+    }
+    next_bar_payload = {
+        **base_payload,
+        "strategy_configs": [{
+            **base_payload["strategy_configs"][0],
+            "execution_timing": "next_bar",
+        }],
+    }
+    same_bar = run_native(same_bar_payload)
+    next_bar = run_native(next_bar_payload)
+
+    assert same_bar["target_trace"] == next_bar["target_trace"]
+    assert same_bar["portfolios"]["group-1"]["positions"]["asset-a"] == 1000.0
+    assert next_bar["portfolios"]["group-1"]["positions"]["asset-a"] == 500.0
+    assert same_bar["portfolios"]["group-1"]["final_value"] == 200_000.0
+    assert next_bar["portfolios"]["group-1"]["final_value"] == 100_000.0
+
+
+def test_execution_delay_bars_is_a_matching_parameter_not_slippage() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy
+
+    payload = {
+        "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],
+        "instruments": ["asset-a"],
+        "prices": {"asset-a": [100.0, 200.0, 400.0, 400.0]},
+        "membership": [[[True]], [[True]], [[True]], [[True]]],
+        "signal_updates": [[True], [False], [False], [False]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "multipliers": [[1.0], [1.0], [1.0], [1.0]],
+            "lot_sizes": [[1.0], [1.0], [1.0], [1.0]],
+            "margin_ratios": [[1.0], [1.0], [1.0], [1.0]],
+        },
+        "strategy_configs": [_strategy_settings(
+            strategy_id="group-1",
+            allocation_policy="equal_notional",
+            position_policy="buy_and_hold",
+            execution_timing="next_bar",
+            execution_delay_bars=2,
+            slippage_mode="none",
+        )],
+    }
+
+    result = run_group_strategy(payload)
+
+    assert result["portfolios"]["group-1"]["position_curve"] == {
+        "2024-01-01T00:00:00": {"asset-a": 0.0},
+        "2024-01-02T00:00:00": {"asset-a": 0.0},
+        "2024-01-03T00:00:00": {"asset-a": 250.0},
+        "2024-01-04T00:00:00": {"asset-a": 250.0},
+    }
+    assert result["portfolios"]["group-1"]["final_value"] == 100_000.0
+
+
+def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+
+    payload = {
+        "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],
+        "instruments": ["asset-a", "asset-b"],
+        "prices": {
+            "asset-a": [100.0, 110.0, 120.0, 130.0],
+            "asset-b": [200.0, 190.0, 180.0, 170.0],
+        },
+        "membership": [
+            [[True, False]],
+            [[True, False]],
+            [[False, True]],
+            [[False, True]],
+        ],
+        "signal_updates": [[True], [False], [True], [False]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "multipliers": [[10.0, 20.0]] * 4,
+            "lot_sizes": [[1.0, 1.0]] * 4,
+            "margin_ratios": [[1.0, 1.0]] * 4,
+        },
+        "strategy_configs": [{
+            "strategy_id": "group-1",
+            "allocation_policy": "equal_notional",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+            "execution_timing": "next_bar",
+            "fee_rate": 0.001,
+        }],
+    }
+    dispatcher = EngineWorkerDispatcher()
+    results = {
+        engine: dispatcher.dispatch(WorkerRequest(
+            f"multiplier-fee-{engine}", engine, "run_group_strategy", payload
+        )).result
+        for engine in ("backtrader", "qlib", "zipline")
+    }
+    results["native"] = run_native(payload)
+
+    assert {
+        engine: result["target_trace"]["group-1"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["target_trace"]["group-1"]
+        for engine in results
+    }
+    assert {
+        engine: result["portfolios"]["group-1"]["position_curve"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["portfolios"]["group-1"]["position_curve"]
+        for engine in results
+    }
+    assert {
+        engine: result["portfolios"]["group-1"]["equity_curve"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["portfolios"]["group-1"]["equity_curve"]
+        for engine in results
+    }
+    assert {
+        engine: result["execution_trace"]["group-1"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["execution_trace"]["group-1"]
+        for engine in results
+    }

@@ -168,6 +168,127 @@ def valuation_price(request: TargetWeightInput, row: int, instrument: str) -> fl
     return request.prices[instrument][row] * request.multipliers[row][position]
 
 
+def portfolio_value(
+    request: TargetWeightInput,
+    row: int,
+    positions: Mapping[str, float],
+    cash: float,
+) -> float:
+    return float(cash) + sum(
+        float(positions.get(instrument, 0.0)) * valuation_price(request, row, instrument)
+        for instrument in request.instruments
+    )
+
+
+def executable_deltas(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+    cash: float,
+) -> dict[str, float]:
+    deltas = capacity_limited_deltas(request, row, strategy, desired, current)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    available = float(cash)
+    buy_cost = 0.0
+    for instrument, delta in deltas.items():
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            available += notional - notional * fee_rate
+        else:
+            buy_cost += notional * (1.0 + fee_rate)
+    if buy_cost <= max(available, 0.0) + 1e-9:
+        return deltas
+    if buy_cost <= 0.0 or available <= 0.0:
+        return {
+            instrument: (delta if delta < 0 else 0.0)
+            for instrument, delta in deltas.items()
+        }
+    scale = available / buy_cost
+    adjusted = dict(deltas)
+    for position, instrument in enumerate(request.instruments):
+        delta = adjusted.get(instrument, 0.0)
+        if delta <= 0:
+            continue
+        lot_size = request.lot_sizes[row][position]
+        adjusted[instrument] = float(
+            int((delta * scale) / lot_size + 1e-12) * lot_size
+        )
+    return adjusted
+
+
+def apply_deltas(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    positions: Mapping[str, float],
+    cash: float,
+    deltas: Mapping[str, float],
+) -> tuple[float, dict[str, float]]:
+    updated = {
+        instrument: float(positions.get(instrument, 0.0))
+        for instrument in request.instruments
+    }
+    next_cash = float(cash)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    for sell_first in (True, False):
+        for instrument in request.instruments:
+            delta = float(deltas.get(instrument, 0.0))
+            if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
+                continue
+            fill_price = execution_price(
+                valuation_price(request, row, instrument), delta, strategy
+            )
+            trade_value = abs(delta) * fill_price
+            fee = trade_value * fee_rate
+            next_cash -= delta * fill_price + fee
+            updated[instrument] += delta
+    return next_cash, updated
+
+
+def execute_target_weights(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    target: Mapping[str, float],
+    positions: Mapping[str, float],
+    cash: float,
+) -> tuple[float, dict[str, float], dict[str, float]]:
+    desired = target_quantities(
+        request,
+        row,
+        target,
+        portfolio_value(request, row, positions, cash),
+        strategy,
+    )
+    deltas = executable_deltas(request, row, strategy, desired, positions, cash)
+    next_cash, next_positions = apply_deltas(
+        request, row, strategy, positions, cash, deltas
+    )
+    return next_cash, next_positions, deltas
+
+
+def execution_timing(strategy: Mapping[str, Any]) -> str:
+    timing = str(strategy.get("execution_timing") or "next_bar")
+    if timing not in {"next_bar", "same_bar"}:
+        raise ValueError(f"unsupported execution_timing: {timing}")
+    return timing
+
+
+def execution_delay_bars(strategy: Mapping[str, Any]) -> int:
+    timing = execution_timing(strategy)
+    if timing == "same_bar":
+        return 0
+    delay = int(float(strategy.get("execution_delay_bars") or 1))
+    if delay < 1:
+        raise ValueError("next_bar execution requires execution_delay_bars >= 1")
+    return delay
+
+
 def position_value_snapshot(
     request: TargetWeightInput,
     row: int,

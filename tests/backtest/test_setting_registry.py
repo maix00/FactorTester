@@ -57,11 +57,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["money_unit_policy"]["value"] == "minor_units"
     assert index["defaults"]["money_unit_policy"]["engine_defaults"] == {
-        "qlib": "engine_native",
         "rqalpha": "engine_native",
     }
     assert index["defaults"]["money_unit_policy"]["disabled_values_by_engine"] == {
-        "qlib": ["minor_units"],
         "rqalpha": ["minor_units"],
     }
     assert all(item.get("module") for item in index["defaults"].values())
@@ -289,7 +287,7 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
     }]
 
 
-def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
+def test_qlib_keeps_default_minor_unit_policy() -> None:
     application = backtest_setting_registry.get("group_test")
 
     resolved = resolve_group_settings(
@@ -299,15 +297,15 @@ def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
         group_ids=("group-1",),
     )
 
-    assert resolved["group-1"]["money_unit_policy"] == "engine_native"
+    assert resolved["group-1"]["money_unit_policy"] == "minor_units"
 
 
-def test_disabled_engine_setting_falls_back_with_diagnostics() -> None:
+def test_rqalpha_disabled_money_unit_policy_falls_back_with_diagnostics() -> None:
     application = backtest_setting_registry.get("group_test")
 
     resolved = resolve_group_settings(
         application,
-        local_values={"engine": "qlib", "money_unit_policy": "minor_units"},
+        local_values={"engine": "rqalpha", "money_unit_policy": "minor_units"},
         group_values={"group-1": {}},
         group_ids=("group-1",),
     )
@@ -316,8 +314,33 @@ def test_disabled_engine_setting_falls_back_with_diagnostics() -> None:
     assert resolved["group-1"]["_setting_fallbacks"] == [{
         "setting_key": "money_unit_policy",
         "module": "accounting",
-        "engine": "qlib",
+        "engine": "rqalpha",
         "requested_value": "minor_units",
         "applied_value": "engine_native",
         "reason": "engine_disabled_value",
+    }]
+
+
+def test_execution_price_basis_dependencies_fall_back_with_diagnostics() -> None:
+    application = backtest_setting_registry.get("group_test")
+
+    resolved = resolve_group_settings(
+        application,
+        local_values={
+            "engine": "native",
+            "execution_timing": "same_bar",
+            "execution_price_basis": "open",
+        },
+        group_values={"group-1": {}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["execution_price_basis"] == "close"
+    assert resolved["group-1"]["_setting_fallbacks"] == [{
+        "setting_key": "execution_price_basis",
+        "module": "order_execution",
+        "engine": "native",
+        "requested_value": "open",
+        "applied_value": "close",
+        "reason": "incompatible_setting_value",
     }]
