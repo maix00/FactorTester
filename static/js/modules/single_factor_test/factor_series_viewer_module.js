@@ -311,8 +311,7 @@
             host.innerHTML = '';
             return;
         }
-        host.innerHTML = '<div class="factor-series-inline-title">产品</div>'
-            + '<label class="factor-series-field"><span>显示序列</span><select id="factor-series-product">'
+        host.innerHTML = '<label class="factor-series-field"><span>显示序列</span><select id="factor-series-product">'
             + state.lastSeries.map(function(item) {
                 var desc = item.desc && item.desc !== item.product ? ' · ' + item.desc : '';
                 return '<option value="' + escapeHtml(item.product) + '"' + (item.product === state.activeProduct ? ' selected' : '') + '>'

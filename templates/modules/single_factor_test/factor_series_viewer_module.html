@@ -1,5 +1,4 @@
 <div class="module" id="factor_series_viewer_module" style="margin-top:24px;">
-    <div class="section-title">因子序列查看</div>
     <div
         id="factor-series-viewer-root"
     >
@@ -18,12 +17,10 @@
         </div>
         <div id="factor-series-viewer-body" style="display:none;">
             <div id="factor-series-controls" class="factor-series-controls">
-                <div class="factor-series-control-title">产品</div>
                 <div class="factor-series-product-picker">
                     <button type="button" id="factor-series-products-btn" class="factor-series-secondary-action">选择产品</button>
                     <span id="factor-series-path-summary" class="factor-series-path-summary"></span>
                 </div>
-                <div class="factor-series-control-title">因子</div>
                 <label class="factor-series-field">
                     <span>因子</span>
                     <select id="factor-series-factor"><option value="">加载中...</option></select>
@@ -133,12 +130,6 @@
         border-radius: 8px;
         background: #fbfdff;
     }
-    .factor-series-control-title {
-        width: 100%;
-        margin: 2px 0 2px;
-        font-size: 12px;
-        color: #64748b;
-    }
     .factor-series-product-picker {
         display: flex;
         align-items: center;
@@ -188,11 +179,6 @@
     .factor-series-product-row {
         margin-top: 8px;
         max-width: 420px;
-    }
-    .factor-series-inline-title {
-        font-size: 12px;
-        color: #64748b;
-        margin: 0 0 4px;
     }
     .factor-series-path-summary {
         display: flex;
