@@ -30,8 +30,9 @@ def group_test_settings() -> ApplicationSettings:
             summary_keys=("start_date", "start_time", "end_date", "end_time", "timezone", "time_precision"),
         ),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
-        SettingTab("allocation", "分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
-        SettingTab("rebalance", "调仓", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
+        SettingTab("target_allocation", "目标分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
+        SettingTab("rebalance_trigger", "调仓触发", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
+        SettingTab("position_policy", "持仓政策", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 32),
         SettingTab("cost", "费用", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 40),
         SettingTab("liquidity", "流动性", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 50),
         SettingTab("margin", "保证金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 55),
@@ -122,8 +123,8 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_setting(SettingDefinition(
         "allocation_policy",
-        "组合分配",
-        "allocation",
+        "目标分配",
+        "target_allocation",
         "select",
         "inverse_volatility",
         ScopePolicy.GROUP_OVERRIDE,
@@ -137,7 +138,7 @@ def group_test_settings() -> ApplicationSettings:
     app.register_setting(SettingDefinition(
         "volatility_lookback",
         "波动率回看期数",
-        "allocation",
+        "target_allocation",
         "number",
         20,
         ScopePolicy.GROUP_OVERRIDE,
@@ -146,7 +147,7 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="波动率窗口: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "volatility_warmup", "等风险预热处理", "allocation", "select", "equal_notional",
+        "volatility_warmup", "等风险预热处理", "target_allocation", "select", "equal_notional",
         ScopePolicy.GROUP_OVERRIDE,
         options=(
             SettingOption("equal_notional", "预热期使用等市值并记录"),
@@ -154,19 +155,31 @@ def group_test_settings() -> ApplicationSettings:
         ),
     ))
     app.register_setting(SettingDefinition(
-        "rebalance_mode",
-        "调仓规则",
-        "rebalance",
+        "rebalance_trigger",
+        "触发规则",
+        "rebalance_trigger",
         "select",
         "on_factor_signal",
         ScopePolicy.GROUP_OVERRIDE,
         options=(
-            SettingOption("on_factor_signal", "按因子频率调仓"),
-            SettingOption("buy_and_hold", "买入持有"),
-            SettingOption("membership_change", "成员变化时调仓"),
-            SettingOption("scheduled", "按日历计划调仓"),
+            SettingOption("on_factor_signal", "因子信号事件"),
+            SettingOption("membership_change", "成员变化事件"),
+            SettingOption("scheduled", "日历计划事件"),
         ),
-        chip_template="调仓: {value}",
+        chip_template="触发: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "position_policy",
+        "仓位处理",
+        "position_policy",
+        "select",
+        "rebalance_to_target",
+        ScopePolicy.GROUP_OVERRIDE,
+        options=(
+            SettingOption("rebalance_to_target", "按目标调仓"),
+            SettingOption("buy_and_hold", "买入持有"),
+        ),
+        chip_template="持仓: {value}",
     ))
     app.register_setting(SettingDefinition(
         "fee_mode",

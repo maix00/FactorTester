@@ -16,7 +16,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "time", "capital", "allocation", "rebalance", "cost",
+        "engine", "factor", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
         "liquidity", "margin", "market_rules", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
@@ -24,7 +24,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "capital", "allocation", "rebalance", "cost", "liquidity", "margin",
+        "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "liquidity", "margin",
     ]
     assert index["defaults"]["engine"] == {
         "value": "native",
@@ -103,7 +103,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
             "initial_capital": 1_000_000.0,
             "allocation_policy": "inverse_volatility",
             "volatility_lookback": 20,
-            "rebalance_mode": "on_factor_signal",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
             "fee_mode": "market",
             "liquidity_mode": "volume_participation",
             "participation_rate": 0.1,
@@ -113,7 +114,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
             "combination-a:group-1": {
             },
             "combination-b:group-1": {
-                "rebalance_mode": "buy_and_hold",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "buy_and_hold",
                 "fee_mode": "none",
                 "liquidity_mode": "infinite",
                 "participation_rate": 1.0,
@@ -122,8 +124,9 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
         group_ids=("combination-a:group-1", "combination-b:group-1"),
     )
 
-    assert resolved["combination-a:group-1"]["rebalance_mode"] == "on_factor_signal"
-    assert resolved["combination-b:group-1"]["rebalance_mode"] == "buy_and_hold"
+    assert resolved["combination-a:group-1"]["rebalance_trigger"] == "on_factor_signal"
+    assert resolved["combination-b:group-1"]["rebalance_trigger"] == "on_factor_signal"
+    assert resolved["combination-b:group-1"]["position_policy"] == "buy_and_hold"
     assert resolved["combination-a:group-1"]["initial_capital"] == 1_000_000.0
 
 

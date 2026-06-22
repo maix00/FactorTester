@@ -171,7 +171,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
                 "groups": profile_groups,
                 "engine": engine,
                 "factor_mode": "precomputed",
-                "rebalance_mode": "on_factor_signal",
+                "rebalance_trigger": "on_factor_signal",
                 "initial_capital": local_values.get("initial_capital", 100000000),
             })
             assert status_code == 200, {

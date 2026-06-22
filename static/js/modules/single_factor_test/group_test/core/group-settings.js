@@ -928,7 +928,7 @@
             var countText = group.splitCount != null ? group.splitCount : '未设置';
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
                 + ' · 设置 ' + Object.keys(group).filter(function(key) {
-                    return ['fee_mode', 'rebalance_mode', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
+                    return ['fee_mode', 'rebalance_trigger', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
                 }).join(', '));
         });
         if (baseGroups.length > 8) {

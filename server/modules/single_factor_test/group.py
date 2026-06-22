@@ -121,6 +121,13 @@ def _resolve_flat_backtest_settings(
     groups: list[dict[str, Any]],
     ls_configs: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
+    def _with_internal_execution_fields(values: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(values)
+        trigger = str(enriched.get("rebalance_trigger") or "on_factor_signal")
+        carry_policy = str(enriched.get("position_policy") or "rebalance_to_target")
+        enriched["rebalance_mode"] = "buy_and_hold" if carry_policy == "buy_and_hold" else trigger
+        return enriched
+
     app = backtest_setting_registry.get("group_test")
     manifest = app.manifest()
     defaults = {
@@ -147,7 +154,7 @@ def _resolve_flat_backtest_settings(
         for key in defaults:
             if key in item:
                 values[key] = item[key]
-        resolved[group_id] = values
+        resolved[group_id] = _with_internal_execution_fields(values)
     return resolved
 
 

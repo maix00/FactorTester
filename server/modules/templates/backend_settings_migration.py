@@ -125,8 +125,19 @@ def _migrate_items(items: Any, backend_group_values: dict[str, dict[str, Any]], 
         existing_backend = backend_group_values.get(str(item.get("id") or ""))
         if isinstance(existing_backend, dict):
             backend.update(existing_backend)
+        if "rebalance_mode" in item:
+            backend.update(_split_legacy_rebalance_mode(item.get("rebalance_mode")))
+        if "rebalance_mode" in backend:
+            backend.update(_split_legacy_rebalance_mode(backend.get("rebalance_mode")))
+        backend.pop("rebalance_mode", None)
+        if item.get("rebalance_trigger") == "buy_and_hold" or backend.get("rebalance_trigger") == "buy_and_hold":
+            backend["rebalance_trigger"] = "on_factor_signal"
+            backend["position_policy"] = "buy_and_hold"
         item.update(backend)
         for key in list(item.keys()):
+            if key == "rebalance_mode":
+                item.pop(key, None)
+                continue
             if key in LEGACY_GROUP_KEYS:
                 item.pop(key, None)
                 continue
@@ -156,7 +167,7 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
             "daily": "scheduled",
             "scheduled": "scheduled",
         }
-        values["rebalance_mode"] = mapping.get(str(item.get("rebalanceMode") or ""), "on_factor_signal")
+        values.update(_split_legacy_rebalance_mode(mapping.get(str(item.get("rebalanceMode") or ""), "on_factor_signal")))
     if "liquidityMode" in item or "liquidityPercent" in item:
         mode = str(item.get("liquidityMode") or "")
         if mode in {"percent", "volume_participation"}:
@@ -169,6 +180,19 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
         else:
             values["liquidity_mode"] = "infinite"
     return values
+
+
+def _split_legacy_rebalance_mode(raw: Any) -> dict[str, str]:
+    value = str(raw or "on_factor_signal")
+    if value == "buy_and_hold":
+        return {
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "buy_and_hold",
+        }
+    return {
+        "rebalance_trigger": value,
+        "position_policy": "rebalance_to_target",
+    }
 
 
 def _set(values: dict[str, Any], key: str, value: Any) -> None:

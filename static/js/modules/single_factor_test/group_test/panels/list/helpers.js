@@ -154,8 +154,8 @@
         var values = GT.backendSettings && GT.backendSettings.groupOverrideValues
             ? GT.backendSettings.groupOverrideValues(node && node.id)
             : null;
-        var mode = values && values.rebalance_mode;
-        var map = { 'on_factor_signal': '按因子频率', 'buy_and_hold': '买入持有', 'membership_change': '成员变化', 'scheduled': '计划调仓' };
+        var mode = values && values.rebalance_trigger;
+        var map = { 'on_factor_signal': '因子信号事件', 'buy_and_hold': '买入持有', 'membership_change': '成员变化事件', 'scheduled': '日历计划事件' };
         return map[mode] || (mode || '—');
     }
 
