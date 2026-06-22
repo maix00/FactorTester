@@ -4,15 +4,14 @@
         id="factor-series-viewer-root"
         style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;"
     >
-        <div id="factor-series-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;cursor:pointer;user-select:none;">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span id="factor-series-triangle" style="font-size:12px;color:#64748b;display:inline-block;transition:transform .15s ease;width:12px;">▸</span>
-                <div>
-                    <div style="font-size:13px;font-weight:600;color:#1f2937;">产品序列 / 因子序列对比</div>
-                    <div style="font-size:12px;color:#64748b;margin-top:2px;">选择产品、合约或期限后查看因子值、价格、收益标签和事件对齐。</div>
-                </div>
+        <div id="factor-series-header" class="gt-backtest-setting-row factor-series-header-row" style="cursor:pointer;user-select:none;">
+            <div class="factor-series-header-title gt-backtest-setting-label">
+                <span id="factor-series-triangle" class="factor-series-triangle" aria-hidden="true">▸</span>
+                <span class="factor-series-title-text">产品序列 / 因子序列对比</span>
             </div>
-            <button type="button" id="factor-series-run-btn" class="factor-series-action">计算因子</button>
+            <div class="gt-backtest-setting-control">
+                <button type="button" id="factor-series-run-btn" class="factor-series-action">计算因子</button>
+            </div>
         </div>
         <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
             <div style="font-size:12px;color:#64748b;">从产品树选择产品或路径，再选择因子运行 factor.evaluate，显示原始因子信号序列。</div>
@@ -100,6 +99,53 @@
     .factor-series-controls .factor-series-field {
         min-width: 220px;
         flex: 0 1 280px;
+    }
+    #factor_series_viewer_module .gt-backtest-setting-row {
+        display: grid;
+        grid-template-columns: minmax(92px, 1fr) minmax(80px, 120px);
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #eef2f7;
+        font-size: 12px;
+        color: #334155;
+    }
+    #factor_series_viewer_module .gt-backtest-setting-label {
+        color: #64748b;
+        font-weight: 500;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    #factor_series_viewer_module .gt-backtest-setting-control {
+        min-width: 0;
+        justify-self: end;
+    }
+    #factor_series_viewer_module .factor-series-header-row {
+        margin-bottom: 4px;
+        padding-bottom: 0;
+    }
+    #factor_series_viewer_module .factor-series-header-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    #factor_series_viewer_module .factor-series-triangle {
+        color: #64748b;
+        font-size: 14px;
+        width: 14px;
+        display: inline-block;
+        line-height: 1;
+        transition: transform .15s ease;
+    }
+    #factor_series_viewer_module .factor-series-title-text {
+        color: #1f2937;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
     }
     .factor-series-action {
         height: 28px;
