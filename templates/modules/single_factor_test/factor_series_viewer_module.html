@@ -17,9 +17,56 @@
         </div>
         <div id="factor-series-viewer-body" style="display:none;margin-top:12px;border-top:1px solid #eef2f7;padding-top:12px;">
             <div style="font-size:12px;color:#64748b;">序列查看器将使用当前测试模块传入的 ProductPathSelection，并独立于 IC 结果 tabs 展示产品级时间序列。</div>
+            <div id="factor-series-controls" class="factor-series-controls"></div>
             <div id="factor-series-chart-container" style="width:100%;min-height:260px;margin-top:10px;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;"></div>
         </div>
     </div>
 </div>
+
+<style>
+    .factor-series-controls {
+        display: grid;
+        grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+        gap: 8px;
+        align-items: end;
+        margin-top: 10px;
+    }
+    .factor-series-field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        font-size: 12px;
+        color: #64748b;
+    }
+    .factor-series-field select {
+        height: 28px;
+        min-width: 0;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 12px;
+        padding: 0 8px;
+    }
+    .factor-series-action {
+        height: 28px;
+        border: 1px solid #2563eb;
+        border-radius: 6px;
+        background: #2563eb;
+        color: #fff;
+        font-size: 12px;
+        padding: 0 10px;
+        cursor: pointer;
+    }
+    @media (max-width: 900px) {
+        .factor-series-controls {
+            grid-template-columns: 1fr 1fr;
+        }
+        .factor-series-action {
+            width: 100%;
+        }
+    }
+</style>
 
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_viewer_module.js') }}"></script>

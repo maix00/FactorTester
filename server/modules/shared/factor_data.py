@@ -29,6 +29,7 @@ from .factor_data_helpers import (
     series_to_frontend,
 )
 from .price_data_helpers import to_epoch_ms
+from .factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 
 def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
@@ -38,6 +39,35 @@ def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
     if page_runtime.get_page_owner(page_uuid) != current_user():
         return None, (jsonify({'error': 'page_uuid 不属于当前用户'}), 403)
     return page_uuid, None
+
+
+def _request_product_path_selection_id(data: dict[str, Any]) -> str:
+    raw = data.get("product_path_selection")
+    if isinstance(raw, dict):
+        selection_id = (
+            raw.get("product_path_selection_id")
+            or raw.get("selection_id")
+            or raw.get("id")
+            or data.get("product_path_selection_id")
+        )
+    else:
+        selection_id = data.get("product_path_selection_id")
+    selection_id = str(selection_id or "").strip()
+    if not selection_id:
+        raise AssertionError("缺少 product_path_selection_id")
+    return selection_id
+
+
+def _get_or_create_selection_tester(data: dict[str, Any], *, page_uuid: str, caller: str):
+    selection_id = _request_product_path_selection_id(data)
+    try:
+        return get_factor_tester(selection_id, caller=caller, page_uuid=page_uuid)
+    except AssertionError:
+        return create_factor_tester_for_product_path_selection(
+            data,
+            selection_id,
+            page_uuid=page_uuid,
+        )
 
 
 @shared_bp.route('/api/factor_list')
@@ -89,14 +119,13 @@ def get_factor_series():
     page_uuid, error = _request_page_uuid(data)
     if error is not None:
         return error
-    submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     product_name        = data.get('product')
     try:
-        tester = get_factor_tester(
-            submission_id, caller='get_factor_series', page_uuid=page_uuid
+        tester = _get_or_create_selection_tester(
+            data, caller='get_factor_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         factors = factor_family.get_factors(
@@ -174,14 +203,13 @@ def get_return_series():
     page_uuid, error = _request_page_uuid(data)
     if error is not None:
         return error
-    submission_id       = data.get('submission_id')
     product_name        = data.get('product')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = get_factor_tester(
-            submission_id, caller='get_return_series', page_uuid=page_uuid
+        tester = _get_or_create_selection_tester(
+            data, caller='get_return_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         factors = factor_family.get_factors(
@@ -235,7 +263,6 @@ def get_price_series():
     page_uuid, error = _request_page_uuid(data)
     if error is not None:
         return error
-    submission_id       = data.get('submission_id')
     product_name        = data.get('product')
     products_list       = data.get('products') or []
     primary_product     = data.get('primary_product')
@@ -245,8 +272,8 @@ def get_price_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = get_factor_tester(
-            submission_id, caller='get_price_series', page_uuid=page_uuid
+        tester = _get_or_create_selection_tester(
+            data, caller='get_price_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         factors = factor_family.get_factors(
@@ -267,7 +294,10 @@ def get_price_series():
         primary_name = str(primary_product or product_names[0])
 
         assert factor_dates
-        factor_idx = pd.to_datetime(factor_dates, unit='ms')
+        if isinstance(factor_dates, list) and factor_dates and isinstance(factor_dates[0], str):
+            factor_idx = pd.to_datetime(factor_dates)
+        else:
+            factor_idx = pd.to_datetime(factor_dates, unit='ms')
         start_date = factor_idx.min().strftime('%Y-%m-%d')
         end_date   = factor_idx.max().strftime('%Y-%m-%d')
         required = (['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME'] if adjusted
@@ -364,7 +394,6 @@ def get_factor_distribution():
     page_uuid, error = _request_page_uuid(data)
     if error is not None:
         return error
-    submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
@@ -372,8 +401,8 @@ def get_factor_distribution():
     product_name        = data.get('product')    # 当前选中产品名，用于高亮
     try:
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
-        tester = get_factor_tester(
-            submission_id, caller='get_factor_distribution', page_uuid=page_uuid
+        tester = _get_or_create_selection_tester(
+            data, caller='get_factor_distribution', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
         factors = factor_family.get_factors(
