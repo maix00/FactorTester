@@ -14,6 +14,7 @@ PACKAGES = {
     "backtrader": "backtrader",
     "qlib": "pyqlib",
     "zipline": "zipline-reloaded",
+    "rqalpha": "rqalpha",
 }
 
 
@@ -32,16 +33,20 @@ def execute(request: WorkerRequest, progress=None) -> dict:
             from .runners.backtrader import run_target_weights
         elif request.engine == "qlib":
             from .runners.qlib import run_target_weights
-        else:
+        elif request.engine == "zipline":
             from .runners.zipline import run_target_weights
+        else:
+            raise NotImplementedError("RQAlpha target-weight runner is not implemented")
         return run_target_weights(request.payload)
     if request.operation == "run_group_strategy":
         if request.engine == "backtrader":
             from .runners.backtrader import run_group_strategy
         elif request.engine == "qlib":
             from .runners.qlib import run_group_strategy
-        else:
+        elif request.engine == "zipline":
             from .runners.zipline import run_group_strategy
+        else:
+            raise NotImplementedError("RQAlpha group-strategy runner is not implemented")
         return run_group_strategy(request.payload, progress=progress)
     raise ValueError(
         f"operation {request.operation!r} is not implemented for {request.engine}"

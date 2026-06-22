@@ -13,6 +13,7 @@ class Framework(str, Enum):
     BACKTRADER = "backtrader"
     QLIB = "qlib"
     ZIPLINE = "zipline"
+    RQALPHA = "rqalpha"
 
 
 class FrameworkFeature(str, Enum):
@@ -24,6 +25,11 @@ class FrameworkFeature(str, Enum):
     FUTURES_MARGIN = "futures_margin"
     DAILY_SETTLEMENT = "daily_settlement"
     CLOSE_TODAY_FEES = "close_today_fees"
+    MARKET_ORDERS = "market_orders"
+    LIMIT_ORDERS = "limit_orders"
+    VOLUME_LIMIT_MATCHING = "volume_limit_matching"
+    LOT_ROUNDING = "lot_rounding"
+    MINOR_UNIT_ACCOUNTING = "minor_unit_accounting"
 
 
 class UnsupportedFrameworkPlan(ValueError):
@@ -191,6 +197,25 @@ ZIPLINE_CAPABILITIES = FrameworkCapabilities(
     }),
 )
 
+RQALPHA_CAPABILITIES = FrameworkCapabilities(
+    Framework.RQALPHA,
+    native=frozenset({
+        FrameworkFeature.PRECOMPUTED_SIGNALS,
+        FrameworkFeature.TARGET_WEIGHTS,
+        FrameworkFeature.MARKET_ORDERS,
+        FrameworkFeature.LIMIT_ORDERS,
+        FrameworkFeature.LOT_ROUNDING,
+    }),
+    extension_points=frozenset({
+        FrameworkFeature.ISOLATED_MULTI_STRATEGY,
+        FrameworkFeature.FUTURES_MARGIN,
+        FrameworkFeature.DAILY_SETTLEMENT,
+        FrameworkFeature.CLOSE_TODAY_FEES,
+        FrameworkFeature.INCREMENTAL_FACTORS,
+        FrameworkFeature.VOLUME_LIMIT_MATCHING,
+    }),
+)
+
 
 def built_in_adapters() -> dict[Framework, FactorFrameworkAdapter]:
     return {
@@ -200,5 +225,6 @@ def built_in_adapters() -> dict[Framework, FactorFrameworkAdapter]:
             BACKTRADER_CAPABILITIES,
             QLIB_CAPABILITIES,
             ZIPLINE_CAPABILITIES,
+            RQALPHA_CAPABILITIES,
         )
     }

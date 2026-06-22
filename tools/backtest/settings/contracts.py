@@ -24,6 +24,22 @@ class TabMountPoint(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class SettingModule:
+    key: str
+    label: str
+    layer: str
+    order: int = 100
+    help_text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label or not self.layer:
+            raise ValueError("setting module requires key, label, and layer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class SettingOption:
     value: str
     label: str
@@ -37,16 +53,21 @@ class SettingDefinition:
     control_template: str
     default: Any
     scope_policy: ScopePolicy
+    module: str = ""
     options: tuple[SettingOption, ...] = ()
     minimum: float | None = None
     maximum: float | None = None
     step: float | None = None
     chip_template: str | None = None
     help_text: str = ""
+    engine_defaults: dict[str, Any] = field(default_factory=dict)
+    disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
             raise ValueError("setting definition requires key, label, tab, and template")
+        if not self.module:
+            raise ValueError("setting definition requires a backend module owner")
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -61,6 +82,7 @@ class ChipDefinition:
     category: str
     chip_template: str
     source_keys: tuple[str, ...]
+    module: str = ""
     order: int = 100
     inherit_from_root: bool = False
     value_resolvers: dict[str, str] = field(default_factory=dict)
@@ -69,6 +91,8 @@ class ChipDefinition:
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.category or not self.chip_template:
             raise ValueError("chip definition requires key, label, category, and template")
+        if not self.module:
+            raise ValueError("chip definition requires a backend module owner")
         if not self.source_keys:
             raise ValueError("chip definition requires at least one source key")
 

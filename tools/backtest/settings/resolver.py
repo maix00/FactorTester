@@ -29,6 +29,7 @@ def resolve_group_settings(
         raise ValueError("group settings contain unknown group ids")
 
     resolved: dict[str, dict[str, Any]] = {}
+    engine = str(local_values.get("engine", application.settings["engine"].default))
     for group_id in group_ids:
         overrides = group_values.get(group_id, {})
         values: dict[str, Any] = {}
@@ -43,7 +44,14 @@ def resolve_group_settings(
                 if definition.scope_policy == ScopePolicy.LOCAL_ONLY:
                     raise ValueError(f"local-only setting {key} cannot be overridden")
                 value = overrides[key]
+            if (
+                key not in local_values
+                and key not in overrides
+                and engine in definition.engine_defaults
+            ):
+                value = definition.engine_defaults[engine]
             _validate_value(definition, value)
+            _validate_engine_value(definition, value, engine)
             values[key] = value
         resolved[group_id] = values
     return resolved
@@ -59,3 +67,15 @@ def _validate_value(definition: SettingDefinition, value: Any) -> None:
             raise ValueError(f"setting {definition.key} is below minimum")
         if definition.maximum is not None and value > definition.maximum:
             raise ValueError(f"setting {definition.key} is above maximum")
+
+
+def _validate_engine_value(
+    definition: SettingDefinition,
+    value: Any,
+    engine: str,
+) -> None:
+    disabled = set(definition.disabled_values_by_engine.get(engine, ()))
+    if str(value) in disabled:
+        raise ValueError(
+            f"setting {definition.key}={value!r} is disabled for engine {engine}"
+        )

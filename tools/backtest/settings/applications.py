@@ -6,6 +6,7 @@ from .contracts import (
     ChipDefinition,
     ScopePolicy,
     SettingDefinition,
+    SettingModule,
     SettingOption,
     SettingTab,
     TabMountPoint,
@@ -15,6 +16,29 @@ from .registry import ApplicationSettings, BacktestSettingRegistry
 
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
+    for module in (
+        SettingModule("execution_engine", "执行引擎", "backtest", 10),
+        SettingModule("factor_execution", "因子执行", "factor", 20),
+        SettingModule("product_selection", "品种/路径选择", "product", 30),
+        SettingModule("run_window", "运行时间范围", "backtest", 40),
+        SettingModule("portfolio_capital", "组合资金", "portfolio", 50),
+        SettingModule("target_allocation", "目标分配", "strategy", 60),
+        SettingModule("rebalance_trigger", "调仓触发", "strategy", 70),
+        SettingModule("position_policy", "持仓政策", "strategy", 80),
+        SettingModule("group_strategy", "分组策略", "strategy", 90),
+        SettingModule("transaction_cost", "交易费用", "execution", 100),
+        SettingModule("slippage", "滑点", "execution", 110),
+        SettingModule("order_execution", "订单类型", "execution", 120),
+        SettingModule("order_matching", "撮合", "execution", 130),
+        SettingModule("order_sizing", "数量取整", "execution", 140),
+        SettingModule("liquidity", "流动性", "execution", 150),
+        SettingModule("margin", "保证金", "risk", 160),
+        SettingModule("market_rules", "市场规则", "market_data", 170),
+        SettingModule("accounting", "记账", "accounting", 180),
+        SettingModule("backtest_calendar", "回测时钟", "backtest", 190),
+        SettingModule("evaluation_range", "样本划分", "evaluation", 200),
+    ):
+        app.register_module(module)
     for tab in (
         SettingTab(
             "engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
@@ -51,6 +75,7 @@ def group_test_settings() -> ApplicationSettings:
             "identity",
             "{factorAlias}",
             ("factorAlias",),
+            module="factor_execution",
             order=10,
             inherit_from_root=True,
         ),
@@ -60,6 +85,7 @@ def group_test_settings() -> ApplicationSettings:
             "identity",
             "{testerLabel}",
             ("testerId",),
+            module="product_selection",
             order=20,
             inherit_from_root=True,
             value_resolvers={"testerLabel": "tester_label"},
@@ -71,6 +97,7 @@ def group_test_settings() -> ApplicationSettings:
             "identity",
             "{groupIndex}/{splitCount}",
             ("groupIndex", "splitCount"),
+            module="group_strategy",
             order=30,
             inherit_from_root=True,
         ),
@@ -80,6 +107,7 @@ def group_test_settings() -> ApplicationSettings:
             "derived",
             "📋 {productCount}品种 {expandSymbol}",
             ("productMask",),
+            module="product_selection",
             order=40,
             value_resolvers={
                 "productCount": "product_mask_count",
@@ -96,11 +124,13 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "native",
         ScopePolicy.LOCAL_ONLY,
+        module="execution_engine",
         options=(
             SettingOption("native", "Native 事件驱动回测工具"),
             SettingOption("backtrader", "Backtrader 事件驱动回测工具"),
             SettingOption("qlib", "Qlib 事件驱动回测工具"),
             SettingOption("zipline", "Zipline 事件驱动回测工具"),
+            SettingOption("rqalpha", "RQAlpha 事件驱动回测工具"),
         ),
         chip_template="引擎: {value}",
     ))
@@ -111,6 +141,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "auto",
         ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
         options=(
             SettingOption("auto", "自动选择"),
             SettingOption("precomputed", "预计算后按事件回放"),
@@ -120,27 +151,33 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_setting(SettingDefinition(
         "start_date", "开始日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         chip_template="开始: {value}",
     ))
     app.register_setting(SettingDefinition(
         "end_date", "结束日期", "time", "date", "", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         chip_template="结束: {value}",
     ))
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", "time", "time", "00:00", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         chip_template="开始时刻: {value}",
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", "time", "time", "23:59", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         chip_template="结束时刻: {value}",
     ))
     app.register_setting(SettingDefinition(
         "time_precision", "时间精度", "time", "select", "exact", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         options=(SettingOption("exact", "精确时间"), SettingOption("day", "天级")),
         chip_template="精度: {value}",
     ))
     app.register_setting(SettingDefinition(
         "timezone", "时区", "time", "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
+        module="run_window",
         options=(
             SettingOption("Asia/Shanghai", "Asia/Shanghai (UTC+8)"),
             SettingOption("UTC", "UTC"),
@@ -156,18 +193,20 @@ def group_test_settings() -> ApplicationSettings:
         "number",
         100_000_000.0,
         ScopePolicy.GROUP_OVERRIDE,
+        module="portfolio_capital",
         minimum=0.01,
         step=10_000.0,
         chip_template="资金: {value}",
     ))
     app.register_setting(SettingDefinition(
         "base_currency", "基础货币", "capital", "select", "CNY", ScopePolicy.GROUP_OVERRIDE,
+        module="portfolio_capital",
         options=(SettingOption("CNY", "CNY"), SettingOption("USD", "USD")),
         chip_template="币种: {value}",
     ))
     app.register_setting(SettingDefinition(
         "currency_conversion_fee_rate", "换汇佣金率", "capital", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.000001,
+        ScopePolicy.GROUP_OVERRIDE, module="portfolio_capital", minimum=0.0, step=0.000001,
     ))
     app.register_setting(SettingDefinition(
         "allocation_policy",
@@ -176,6 +215,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "inverse_volatility",
         ScopePolicy.GROUP_OVERRIDE,
+        module="target_allocation",
         options=(
             SettingOption("inverse_volatility", "等风险（波动率倒数）"),
             SettingOption("equal_notional", "等市值"),
@@ -190,6 +230,7 @@ def group_test_settings() -> ApplicationSettings:
         "number",
         20,
         ScopePolicy.GROUP_OVERRIDE,
+        module="target_allocation",
         minimum=2,
         step=1,
         chip_template="波动率窗口: {value}",
@@ -197,6 +238,7 @@ def group_test_settings() -> ApplicationSettings:
     app.register_setting(SettingDefinition(
         "volatility_warmup", "等风险预热处理", "target_allocation", "select", "equal_notional",
         ScopePolicy.GROUP_OVERRIDE,
+        module="target_allocation",
         options=(
             SettingOption("equal_notional", "预热期使用等市值并记录"),
             SettingOption("error", "数据不足即报错"),
@@ -209,6 +251,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "on_factor_signal",
         ScopePolicy.GROUP_OVERRIDE,
+        module="rebalance_trigger",
         options=(
             SettingOption("on_factor_signal", "因子信号事件"),
             SettingOption("membership_change", "成员变化事件"),
@@ -223,6 +266,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "rebalance_to_target",
         ScopePolicy.GROUP_OVERRIDE,
+        module="position_policy",
         options=(
             SettingOption("rebalance_to_target", "按目标调仓"),
             SettingOption("buy_and_hold", "买入持有"),
@@ -236,6 +280,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "market",
         ScopePolicy.GROUP_OVERRIDE,
+        module="transaction_cost",
         options=(
             SettingOption("none", "无费用"),
             SettingOption("market", "市场历史费率"),
@@ -245,12 +290,13 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_setting(SettingDefinition(
         "custom_fee_rate", "自定义成交费率", "cost", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.000001,
+        ScopePolicy.GROUP_OVERRIDE, module="transaction_cost", minimum=0.0, step=0.000001,
         chip_template="费率: {value}",
     ))
     app.register_setting(SettingDefinition(
         "slippage_mode", "滑点模型", "cost", "select", "none",
         ScopePolicy.GROUP_OVERRIDE,
+        module="slippage",
         options=(
             SettingOption("none", "零滑点"),
             SettingOption("fixed_bps", "固定基点"),
@@ -259,7 +305,7 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_setting(SettingDefinition(
         "slippage_bps", "固定滑点（基点）", "cost", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, minimum=0.0, step=0.1,
+        ScopePolicy.GROUP_OVERRIDE, module="slippage", minimum=0.0, step=0.1,
         chip_template="滑点bp: {value}",
     ))
     app.register_setting(SettingDefinition(
@@ -269,6 +315,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "market",
         ScopePolicy.GROUP_OVERRIDE,
+        module="order_execution",
         options=(
             SettingOption("market", "市价单"),
             SettingOption("limit", "限价单"),
@@ -282,6 +329,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "next_bar_full_fill",
         ScopePolicy.GROUP_OVERRIDE,
+        module="order_matching",
         options=(
             SettingOption("next_bar_full_fill", "下一 bar 全额成交"),
             SettingOption("bar_volume_limited", "按 bar 成交量限制"),
@@ -295,6 +343,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "floor_to_lot",
         ScopePolicy.GROUP_OVERRIDE,
+        module="order_sizing",
         options=(
             SettingOption("floor_to_lot", "按最小买入手数向下取整"),
             SettingOption("nearest_lot", "按最小买入手数四舍五入"),
@@ -308,6 +357,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "infinite",
         ScopePolicy.GROUP_OVERRIDE,
+        module="liquidity",
         options=(
             SettingOption("infinite", "无限流动性"),
             SettingOption("volume_participation", "成交量参与率"),
@@ -321,6 +371,7 @@ def group_test_settings() -> ApplicationSettings:
         "number",
         0.1,
         ScopePolicy.GROUP_OVERRIDE,
+        module="liquidity",
         minimum=0.0,
         maximum=1.0,
         step=0.01,
@@ -329,12 +380,13 @@ def group_test_settings() -> ApplicationSettings:
     app.register_setting(SettingDefinition(
         "margin_mode", "保证金约束", "margin", "select", "market",
         ScopePolicy.GROUP_OVERRIDE,
+        module="margin",
         options=(SettingOption("none", "关闭"), SettingOption("market", "市场保证金规则")),
         chip_template="保证金: {value}",
     ))
     app.register_setting(SettingDefinition(
         "collateral_fraction", "最大保证金占权益", "margin", "number", 1.0,
-        ScopePolicy.GROUP_OVERRIDE, minimum=0.01, maximum=1.0, step=0.01,
+        ScopePolicy.GROUP_OVERRIDE, module="margin", minimum=0.01, maximum=1.0, step=0.01,
         chip_template="保证金上限: {value}",
     ))
     app.register_setting(SettingDefinition(
@@ -344,6 +396,7 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "latest_available",
         ScopePolicy.LOCAL_ONLY,
+        module="market_rules",
         options=(
             SettingOption("latest_available", "使用最新规则并标记近似"),
             SettingOption("strict_historical", "缺失即报错"),
@@ -358,10 +411,16 @@ def group_test_settings() -> ApplicationSettings:
         "select",
         "minor_units",
         ScopePolicy.LOCAL_ONLY,
+        module="accounting",
         options=(
             SettingOption("minor_units", "内部按分制整数记账"),
             SettingOption("engine_native", "使用执行引擎原生金额精度"),
         ),
+        engine_defaults={"qlib": "engine_native", "rqalpha": "engine_native"},
+        disabled_values_by_engine={
+            "qlib": ("minor_units",),
+            "rqalpha": ("minor_units",),
+        },
         chip_template="金额精度: {value}",
     ))
     app.register_setting(SettingDefinition(
@@ -371,12 +430,14 @@ def group_test_settings() -> ApplicationSettings:
         "date",
         "",
         ScopePolicy.LOCAL_ONLY,
+        module="evaluation_range",
         chip_template="样本内截止: {value}",
         help_text="截止日期之后为样本外；留空表示全部为样本内。",
     ))
     app.register_setting(SettingDefinition(
         "calendar_frequency", "公共回测时钟", "calendar", "select", "auto",
         ScopePolicy.LOCAL_ONLY,
+        module="backtest_calendar",
         options=(
             SettingOption("auto", "按因子频率自动判断"),
             SettingOption("1min", "1 分钟"),

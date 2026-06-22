@@ -26,6 +26,7 @@ class EngineWorkerDispatcher:
             "backtrader": "GTHT-backtrader",
             "qlib": "GTHT-qlib",
             "zipline": "GTHT-zipline",
+            "rqalpha": "GTHT-rqalpha",
         }
 
     def dispatch(

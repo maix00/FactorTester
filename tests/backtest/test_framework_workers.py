@@ -57,6 +57,15 @@ def test_dispatcher_has_no_implicit_native_fallback() -> None:
         ))
 
 
+def test_rqalpha_worker_is_declared_without_native_fallback() -> None:
+    dispatcher = EngineWorkerDispatcher(environments={"rqalpha": "missing-rqalpha-env"})
+
+    with pytest.raises(WorkerExecutionError, match="missing-rqalpha-env|rqalpha"):
+        dispatcher.dispatch(WorkerRequest(
+            "request-1", "rqalpha", "run_group_strategy", {},
+        ))
+
+
 @pytest.mark.parametrize("engine", ["backtrader", "qlib", "zipline"])
 def test_framework_worker_health_and_multi_strategy_run(engine: str) -> None:
     dispatcher = EngineWorkerDispatcher()

@@ -38,6 +38,19 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["matching_model"]["value"] == "next_bar_full_fill"
     assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
     assert index["defaults"]["money_unit_policy"]["value"] == "minor_units"
+    assert index["defaults"]["money_unit_policy"]["engine_defaults"] == {
+        "qlib": "engine_native",
+        "rqalpha": "engine_native",
+    }
+    assert index["defaults"]["money_unit_policy"]["disabled_values_by_engine"] == {
+        "qlib": ["minor_units"],
+        "rqalpha": ["minor_units"],
+    }
+    assert all(item.get("module") for item in index["defaults"].values())
+    assert all(chip.get("module") for chip in index["chip_fields"])
+    assert {
+        chip["module"] for chip in index["chip_fields"]
+    } >= {"factor_execution", "product_selection", "group_strategy"}
     assert {chip["key"] for chip in index["chip_fields"]} >= {
         "factor_alias",
         "tester",
@@ -151,5 +164,30 @@ def test_local_only_setting_cannot_be_overridden_by_group() -> None:
             application,
             local_values={},
             group_values={"group-1": {"engine": "backtrader"}},
+            group_ids=("group-1",),
+        )
+
+
+def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
+    application = backtest_setting_registry.get("group_test")
+
+    resolved = resolve_group_settings(
+        application,
+        local_values={"engine": "qlib"},
+        group_values={"group-1": {}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["money_unit_policy"] == "engine_native"
+
+
+def test_disabled_engine_setting_is_rejected_instead_of_ignored() -> None:
+    application = backtest_setting_registry.get("group_test")
+
+    with pytest.raises(ValueError, match="money_unit_policy"):
+        resolve_group_settings(
+            application,
+            local_values={"engine": "qlib", "money_unit_policy": "minor_units"},
+            group_values={"group-1": {}},
             group_ids=("group-1",),
         )

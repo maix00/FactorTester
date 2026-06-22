@@ -188,6 +188,7 @@ def execute_group_plan(
         "backtrader": "Backtrader",
         "qlib": "Qlib",
         "zipline": "Zipline",
+        "rqalpha": "RQAlpha",
     }.get(engine, engine)
     if progress is not None:
         progress(
@@ -210,7 +211,7 @@ def execute_group_plan(
 
     if engine == "native":
         result = run_native_group_strategy(payload, progress=_event_progress)
-    elif engine in {"backtrader", "qlib", "zipline"}:
+    elif engine in {"backtrader", "qlib", "zipline", "rqalpha"}:
         result = EngineWorkerDispatcher().dispatch(
             WorkerRequest(payload["run_id"], engine, "run_group_strategy", payload),
             timeout_seconds=600,
