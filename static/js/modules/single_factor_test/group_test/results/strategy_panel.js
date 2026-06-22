@@ -81,9 +81,7 @@
     }
 
     function _pushRunSettingRows(rows, data) {
-        var settings = data && data.backtest_settings || {};
-        var groups = settings.groups || {};
-        var parts = _runSettingParts(groups, settings.engine || (data.engine_result && data.engine_result.engine) || '');
+        var parts = _silentDefaultParts(data && data.silent_default_settings);
         if (parts.length) {
             rows.push({
                 type: '当前运行配置',
@@ -120,68 +118,17 @@
         return map[key] || key;
     }
 
-    function _uniqueValues(settingsByGroup, key) {
-        var values = {};
-        Object.keys(settingsByGroup || {}).forEach(function(groupId) {
-            var item = settingsByGroup[groupId] || {};
-            if (groupId.indexOf('long-short:') === 0) return;
-            if (item[key] === undefined || item[key] === null || item[key] === '') return;
-            values[String(item[key])] = true;
-        });
-        return Object.keys(values);
-    }
-
-    function _formatUnique(settingsByGroup, key, labels) {
-        var values = _uniqueValues(settingsByGroup, key);
-        if (!values.length) return '';
-        if (values.length === 1) return _valueLabel(labels || {}, values[0]);
-        return values.map(function(value) { return _valueLabel(labels || {}, value); }).join(' / ');
-    }
-
-    function _runSettingParts(groups, engine) {
-        if (!groups || !Object.keys(groups).length) return [];
-        var parts = [];
-        function item(label, value) {
-            if (!value) return;
-            parts.push({ label: label, value: value });
-        }
-        item('引擎', _valueLabel({
-            native: 'Native',
-            backtrader: 'Backtrader',
-            qlib: 'Qlib',
-            zipline: 'Zipline',
-            rqalpha: 'RQAlpha',
-        }, engine));
-        item('目标分配', _formatUnique(groups, 'allocation_policy', {
-            inverse_volatility: '等风险',
-            equal_notional: '等市值',
-            equal_margin: '等保证金',
-        }));
-        item('触发', _formatUnique(groups, 'rebalance_trigger', {
-            on_factor_signal: '因子信号事件',
-            membership_change: '成员变化事件',
-            scheduled: '日历计划',
-        }));
-        item('持仓', _formatUnique(groups, 'position_policy', {
-            rebalance_to_target: '按目标调仓',
-            buy_and_hold: '买入持有',
-        }));
-        item('费用', _formatUnique(groups, 'fee_mode', {
-            none: '无费用',
-            market: '市场费率',
-            custom: '自定义费率',
-        }));
-        item('保证金', _formatUnique(groups, 'margin_mode', {
-            none: '无保证金约束',
-            market: '市场保证金',
-        }));
-        var liquidity = _formatUnique(groups, 'liquidity_mode', {
-            infinite: '无限流动性',
-            volume_participation: '成交量参与率',
-        });
-        var participation = _formatUnique(groups, 'participation_rate', {});
-        item('流动性', liquidity + (liquidity === '成交量参与率' && participation ? ' ' + participation : ''));
-        return parts;
+    function _silentDefaultParts(items) {
+        if (!Array.isArray(items)) return [];
+        return items.map(function(item) {
+            if (!item) return null;
+            var label = String(item.label || item.setting_key || item.module || '设置');
+            var value = item.value !== undefined && item.value !== null
+                ? String(item.value)
+                : String(item.applied_value !== undefined ? item.applied_value : '');
+            if (!value) return null;
+            return { label: label, value: value };
+        }).filter(Boolean);
     }
 
     function _rowHtml(row) {

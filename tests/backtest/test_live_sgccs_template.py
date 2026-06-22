@@ -76,13 +76,18 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert "time_data" not in snapshot
     assert "backendBacktestSettings" not in snapshot["local_settings"]
     assert "dates" not in snapshot["local_settings"]
+    start_date = os.environ.get("LIVE_SGCCS_START_DATE", local_values["start_date"])
+    end_date = os.environ.get("LIVE_SGCCS_END_DATE", local_values["end_date"])
+    start_time = os.environ.get("LIVE_SGCCS_START_TIME", local_values["start_time"])
+    end_time = os.environ.get("LIVE_SGCCS_END_TIME", local_values["end_time"])
+
     response = client.post("/set_time_range", json={
         "factor_family_alias": FACTOR_FAMILY,
         "page_uuid": page_uuid,
-        "start_date": local_values["start_date"],
-        "start_time": local_values["start_time"],
-        "end_date": local_values["end_date"],
-        "end_time": local_values["end_time"],
+        "start_date": start_date,
+        "start_time": start_time,
+        "end_date": end_date,
+        "end_time": end_time,
         "timezone": local_values.get("timezone", "Asia/Shanghai"),
         "time_precision": local_values.get("time_precision", "exact"),
     })
@@ -125,10 +130,10 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "ls_configs": long_short_configs,
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,
-        "start_date": local_values["start_date"],
-        "end_date": local_values["end_date"],
-        "start_time": local_values["start_time"],
-        "end_time": local_values["end_time"],
+        "start_date": start_date,
+        "end_date": end_date,
+        "start_time": start_time,
+        "end_time": end_time,
         "precision": local_values.get("time_precision", "exact"),
         "timezone": local_values.get("timezone", "Asia/Shanghai"),
         "initial_capital": local_values.get("initial_capital", 100000000),

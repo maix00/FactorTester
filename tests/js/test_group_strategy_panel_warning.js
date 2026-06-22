@@ -50,6 +50,20 @@ assert.match(fallbackBody, /minor_units/);
 assert.match(fallbackBody, /engine_native/);
 
 GT.results.strategyPanel.update(false, [], {
+  silent_default_settings: [{
+    setting_key: 'execution_timing',
+    label: '执行',
+    value: 'next_bar',
+  }],
+});
+
+const defaultSettingsBody = document.getElementById('gt-strategy-body').innerHTML;
+assert.match(defaultSettingsBody, /当前运行配置/);
+assert.match(defaultSettingsBody, /默认/);
+assert.match(defaultSettingsBody, /执行/);
+assert.match(defaultSettingsBody, /next_bar/);
+
+GT.results.strategyPanel.update(false, [], {
   engine_result: { engine: 'native' },
   backtest_settings: {
     engine: 'native',
@@ -68,13 +82,9 @@ GT.results.strategyPanel.update(false, [], {
 });
 
 const settingsBody = document.getElementById('gt-strategy-body').innerHTML;
-assert.match(settingsBody, /当前运行配置/);
-assert.match(settingsBody, /默认/);
-assert.match(settingsBody, /Native/);
-assert.match(settingsBody, /等风险/);
-assert.match(settingsBody, /按目标调仓/);
-assert.match(settingsBody, /市场费率/);
-assert.match(settingsBody, /市场保证金/);
-assert.match(settingsBody, /成交量参与率 0.02/);
+assert.doesNotMatch(settingsBody, /当前运行配置/);
+assert.doesNotMatch(settingsBody, /Native/);
+assert.doesNotMatch(settingsBody, /等风险/);
+assert.doesNotMatch(settingsBody, /成交量参与率 0.02/);
 
 console.log('PASS: group strategy panel shows capital warning');
