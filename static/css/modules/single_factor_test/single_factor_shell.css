@@ -56,6 +56,7 @@
 .single-factor-body .settings-drawer-overlay {
     align-items: center;
     box-sizing: border-box;
+    display: none;
     justify-content: center;
     padding: 24px;
 }
