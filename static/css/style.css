@@ -104,10 +104,20 @@ input[type="text"]:focus {
     display: inline-block;
     line-height: 1;
     color: #64748b;
+    width: 14px;
+    text-align: center;
+    transform-origin: 50% 50%;
 }
 
 .gt-section-title-strip-spaced {
     margin-top: 12px;
+}
+
+.gt-section-title-strip .gt-section-title-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    white-space: nowrap;
 }
 
 button {

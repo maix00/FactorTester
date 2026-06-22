@@ -388,7 +388,7 @@
             var openState = !!open;
             body.style.display = openState ? '' : 'none';
             if (triangle) {
-                triangle.style.transform = openState ? 'rotate(90deg)' : 'rotate(0deg)';
+                triangle.style.transform = openState ? 'rotate(0deg)' : 'rotate(-90deg)';
             }
             if (openState) render();
         }
