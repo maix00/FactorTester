@@ -204,6 +204,20 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             for engine, body in profile_results.items()
         }
         assert traces["native"] == traces["backtrader"] == traces["qlib"] == traces["zipline"], profile
+        equity_curves = {
+            engine: {
+                group["group_id"]: group["total_equity"] for group in body["groups"]
+            }
+            for engine, body in profile_results.items()
+        }
+        assert equity_curves["native"] == equity_curves["backtrader"] == equity_curves["qlib"] == equity_curves["zipline"], profile
+        final_values = {
+            engine: {
+                group["group_id"]: group["total_equity"][-1] for group in body["groups"]
+            }
+            for engine, body in profile_results.items()
+        }
+        assert final_values["native"] == final_values["backtrader"] == final_values["qlib"] == final_values["zipline"], profile
         if long_short_configs:
             ls_group = next(
                 group for group in profile_results["native"]["groups"]
