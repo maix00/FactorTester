@@ -23,9 +23,16 @@
 
     function escapeHTML(str) { return GT.escapeHTML(str); }
 
-    // ── Chip badge style ──
-    var CHIP_STYLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
-    var CHIP_STYLE_PLAIN = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+    // ── Chip badge class marker; visual styling is centralized in CSS. ──
+    var CHIP_STYLE = '';
+    var CHIP_STYLE_PLAIN = '';
+
+    function renderChipHtml(labelOrText, value) {
+        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
+            return GT.backendSettings.renderChipHtml(labelOrText, value);
+        }
+        return escapeHTML(value === undefined ? labelOrText : (labelOrText + ': ' + value));
+    }
 
     /** Get products list for a tester from window.submissions (cached) */
     function testerProducts(testerId) {
@@ -266,11 +273,11 @@
         var html = '<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;">';
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
-            var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
+            var s = chip.style || CHIP_STYLE_PLAIN;
             if (chip.clickable) {
-                html += '<span class="unified-backend-chip" data-chip-action="' + escapeHTML(chip.action || '') + '" data-gid="' + escapeHTML(g.id) + '" data-chip-label="' + escapeHTML(chip.label) + '" style="' + s + '">' + chip.html + '</span>';
+                html += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + escapeHTML(chip.action || '') + '" data-gid="' + escapeHTML(g.id) + '" data-chip-label="' + escapeHTML(chip.label) + '" style="' + s + '">' + chip.html + '</span>';
             } else {
-                html += '<span style="' + s + '">' + chip.html + '</span>';
+                html += '<span class="gt-backend-chip" style="' + s + '">' + chip.html + '</span>';
             }
         }
         html += '</span>';
@@ -297,6 +304,7 @@
         escapeHTML: escapeHTML,
         CHIP_STYLE: CHIP_STYLE,
         CHIP_STYLE_PLAIN: CHIP_STYLE_PLAIN,
+        renderChipHtml: renderChipHtml,
         testerProducts: testerProducts,
         testerLabel: testerLabel,
         dgName: dgName,

@@ -171,11 +171,10 @@
             type: '当前运行配置',
             status: '默认',
             detailHtml: '<div class="gt-strategy-chip-list">' + parts.map(function(part) {
-                return '<span class="gt-strategy-chip"><span class="gt-strategy-chip-label">'
-                    + GT.escapeHTML(part.label)
-                    + '</span><span class="gt-strategy-chip-value">'
-                    + GT.escapeHTML(part.value)
-                    + '</span></span>';
+                var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                    ? GT.backendSettings.renderChipHtml(part.label, part.value)
+                    : (GT.escapeHTML(part.label) + ': ' + GT.escapeHTML(part.value));
+                return '<span class="gt-backend-chip">' + chipHtml + '</span>';
             }).join('') + '</div>',
         });
     }

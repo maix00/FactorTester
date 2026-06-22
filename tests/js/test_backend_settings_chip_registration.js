@@ -2,6 +2,10 @@ const { assert, MockElement, resetGroupTest, load } = require('./group_test_harn
 
 const GT = resetGroupTest();
 
+function chipPlainText(chip) {
+  return String(chip.html || '').replace(/<[^>]+>/g, '');
+}
+
 function domElement(id) {
   const element = new MockElement(id);
   element.childNodes = [];
@@ -57,6 +61,7 @@ const indexManifest = {
       scope_policy: 'group_override',
       chip_template: '参与率: {value}',
       options: [],
+      visible_when: { liquidity_mode: ['volume_participation'] },
     },
     initial_capital: {
       value: 100000000,
@@ -141,8 +146,9 @@ return GT.backendSettings.init().then(() => {
   });
 
   const configChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'config');
-  assert.ok(configChips.some((chip) => chip.html === '流动性: 成交量参与率'));
-  assert.ok(configChips.some((chip) => chip.html === '参与率: 0.02'));
+  assert.ok(configChips.some((chip) => chipPlainText(chip) === '流动性成交量参与率'));
+  assert.ok(configChips.some((chip) => chipPlainText(chip) === '参与率0.02'));
+  assert.ok(configChips.every((chip) => chip.html.indexOf('gt-backend-chip-value') >= 0));
 
   GT.backendSettings.applyFlatSnapshot({
     group_settings: {
@@ -157,10 +163,10 @@ return GT.backendSettings.init().then(() => {
   assert.equal(mountedConfigChips.length, 0);
 
   const identityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'identity');
-  assert.ok(identityChips.some((chip) => chip.html === 'FactorChipOrder'));
+  assert.ok(identityChips.some((chip) => chipPlainText(chip) === 'FactorChipOrder'));
 
   const derivedChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(childId), 'derived');
-  assert.ok(derivedChips.some((chip) => chip.html.indexOf('1品种') >= 0 && chip.clickable));
+  assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('1品种') >= 0 && chip.clickable));
 
   const flat = GT.backendSettings.flattenGroupForSnapshot(GT.groupSettings.groups.get(baseId));
   assert.equal(flat.engine, undefined);
@@ -171,6 +177,20 @@ return GT.backendSettings.init().then(() => {
   assert.equal(runPayload.engine, undefined);
   assert.equal(runPayload.initial_capital, undefined);
   assert.equal(runPayload.liquidity_mode, 'volume_participation');
+
+  const hiddenDependentId = GT.groupSettings.groups.add({
+    id: 'hidden-dependent-group',
+    name: 'Hidden Dependent',
+    testerId: 'tester-chip-order',
+    factorAlias: 'FactorChipOrder',
+    splitCount: 5,
+    groupIndex: 2,
+    liquidity_mode: 'infinite',
+    participation_rate: 0.02,
+  });
+  const hiddenPayload = GT.backendSettings.groupPayloadForRun(GT.groupSettings.groups.get(hiddenDependentId));
+  assert.equal(hiddenPayload.liquidity_mode, undefined);
+  assert.equal(hiddenPayload.participation_rate, undefined);
 
   console.log('PASS: backend settings owns field and chip registration');
 });

@@ -37,6 +37,24 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["order_type"]["value"] == "market"
     assert index["defaults"]["matching_model"]["value"] == "next_bar_full_fill"
     assert index["defaults"]["quantity_rounding_policy"]["value"] == "floor_to_lot"
+    assert index["defaults"]["volatility_lookback"]["visible_when"] == {
+        "allocation_policy": ["inverse_volatility"],
+    }
+    assert index["defaults"]["volatility_warmup"]["visible_when"] == {
+        "allocation_policy": ["inverse_volatility"],
+    }
+    assert index["defaults"]["custom_fee_rate"]["visible_when"] == {
+        "fee_mode": ["custom"],
+    }
+    assert index["defaults"]["slippage_bps"]["visible_when"] == {
+        "slippage_mode": ["fixed_bps"],
+    }
+    assert index["defaults"]["participation_rate"]["visible_when"] == {
+        "liquidity_mode": ["volume_participation"],
+    }
+    assert index["defaults"]["collateral_fraction"]["visible_when"] == {
+        "margin_mode": ["market"],
+    }
     assert index["defaults"]["money_unit_policy"]["value"] == "minor_units"
     assert index["defaults"]["money_unit_policy"]["engine_defaults"] == {
         "qlib": "engine_native",

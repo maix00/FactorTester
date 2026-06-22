@@ -234,6 +234,7 @@ def group_test_settings() -> ApplicationSettings:
         minimum=2,
         step=1,
         chip_template="波动率窗口: {value}",
+        visible_when={"allocation_policy": ("inverse_volatility",)},
     ))
     app.register_setting(SettingDefinition(
         "volatility_warmup", "等风险预热处理", "target_allocation", "select", "equal_notional",
@@ -243,6 +244,7 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("equal_notional", "预热期使用等市值并记录"),
             SettingOption("error", "数据不足即报错"),
         ),
+        visible_when={"allocation_policy": ("inverse_volatility",)},
     ))
     app.register_setting(SettingDefinition(
         "rebalance_trigger",
@@ -292,6 +294,7 @@ def group_test_settings() -> ApplicationSettings:
         "custom_fee_rate", "自定义成交费率", "cost", "number", 0.0,
         ScopePolicy.GROUP_OVERRIDE, module="transaction_cost", minimum=0.0, step=0.000001,
         chip_template="费率: {value}",
+        visible_when={"fee_mode": ("custom",)},
     ))
     app.register_setting(SettingDefinition(
         "slippage_mode", "滑点模型", "cost", "select", "none",
@@ -307,6 +310,7 @@ def group_test_settings() -> ApplicationSettings:
         "slippage_bps", "固定滑点（基点）", "cost", "number", 0.0,
         ScopePolicy.GROUP_OVERRIDE, module="slippage", minimum=0.0, step=0.1,
         chip_template="滑点bp: {value}",
+        visible_when={"slippage_mode": ("fixed_bps",)},
     ))
     app.register_setting(SettingDefinition(
         "order_type",
@@ -376,6 +380,7 @@ def group_test_settings() -> ApplicationSettings:
         maximum=1.0,
         step=0.01,
         chip_template="参与率: {value}",
+        visible_when={"liquidity_mode": ("volume_participation",)},
     ))
     app.register_setting(SettingDefinition(
         "margin_mode", "保证金约束", "margin", "select", "market",
@@ -388,6 +393,7 @@ def group_test_settings() -> ApplicationSettings:
         "collateral_fraction", "最大保证金占权益", "margin", "number", 1.0,
         ScopePolicy.GROUP_OVERRIDE, module="margin", minimum=0.01, maximum=1.0, step=0.01,
         chip_template="保证金上限: {value}",
+        visible_when={"margin_mode": ("market",)},
     ))
     app.register_setting(SettingDefinition(
         "market_rule_fallback",

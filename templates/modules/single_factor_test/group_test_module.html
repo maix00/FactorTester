@@ -828,6 +828,48 @@
         font-size: 12px;
         line-height: 1.2;
     }
+    #group_test_module .gt-backtest-settings-chooser-intro {
+        color: #667085;
+        font-size: 11px;
+        line-height: 1.45;
+        margin-bottom: 8px;
+    }
+    #group_test_module .gt-backtest-settings-chooser-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        padding: 6px 0;
+        border-top: 1px solid #eef2f7;
+        color: #344054;
+        cursor: pointer;
+        font-size: 12px;
+    }
+    #group_test_module .gt-backtest-settings-chooser-row input[type="checkbox"] {
+        margin-top: 2px;
+        width: 13px;
+        height: 13px;
+        flex: 0 0 auto;
+    }
+    #group_test_module .gt-backtest-settings-chooser-body {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+    #group_test_module .gt-backtest-settings-chooser-title {
+        color: #1f2937;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.25;
+    }
+    #group_test_module .gt-backtest-settings-chooser-defaults {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 0;
+    }
 
     /* Submission tabs in selector bar */
     #group_test_module .gt-submission-tab {
@@ -895,13 +937,7 @@
     #group_test_module .gt-strategy-detail-cell {
         color: #344054;
     }
-    #group_test_module .gt-strategy-chip-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px 6px;
-        align-items: center;
-    }
-    #group_test_module .gt-strategy-chip {
+    #group_test_module .gt-backend-chip {
         display: inline-flex;
         align-items: baseline;
         gap: 4px;
@@ -912,16 +948,34 @@
         background: #f8fafc;
         color: #344054;
         font-size: 11px;
+        font-weight: 500;
         line-height: 1.55;
         white-space: nowrap;
     }
-    #group_test_module .gt-strategy-chip-label {
+    #group_test_module .gt-backend-chip.is-primary {
+        border-color: #c7d2fe;
+        background: #eef2ff;
+    }
+    #group_test_module .gt-backend-chip.is-muted {
+        background: #f1f5f9;
+        color: #64748b;
+    }
+    #group_test_module .gt-backend-chip.unified-backend-chip {
+        cursor: pointer;
+    }
+    #group_test_module .gt-backend-chip-label {
         color: #667085;
         font-weight: 500;
     }
-    #group_test_module .gt-strategy-chip-value {
+    #group_test_module .gt-backend-chip-value {
         color: #1d2939;
         font-weight: 600;
+    }
+    #group_test_module .gt-strategy-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px 6px;
+        align-items: center;
     }
 
     /* ── Snapshot 矩阵表格 ── */

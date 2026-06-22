@@ -80,6 +80,10 @@ class ApplicationSettings:
                     "module": setting.module,
                     "chip_template": setting.chip_template,
                     "engine_defaults": dict(setting.engine_defaults),
+                    "visible_when": {
+                        key: list(values)
+                        for key, values in setting.visible_when.items()
+                    },
                     "disabled_values_by_engine": {
                         engine: list(values)
                         for engine, values in setting.disabled_values_by_engine.items()

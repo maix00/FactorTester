@@ -98,6 +98,25 @@
         return template.replace('{value}', displayValue(setting, value));
     }
 
+    function chipParts(labelOrText, value) {
+        if (value !== undefined && value !== null && value !== '') {
+            return { label: String(labelOrText || ''), value: String(value) };
+        }
+        var text = String(labelOrText == null ? '' : labelOrText).trim();
+        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2] && /^[A-Za-z0-9_\u4e00-\u9fa5 \-]+$/.test(match[1])) {
+            return { label: match[1], value: match[2] };
+        }
+        return { label: '', value: text };
+    }
+
+    function renderChipHtml(labelOrText, value) {
+        var parts = chipParts(labelOrText, value);
+        if (!parts.label) return '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+        return '<span class="gt-backend-chip-label">' + escapeHTML(parts.label) + '</span>'
+            + '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+    }
+
     function valuesEqual(left, right) {
         if (left === right) return true;
         if (left === undefined && right === null) return true;
@@ -258,8 +277,11 @@
     function defaultsForTab(tabKey) {
         var out = [];
         var defaults = state.index && state.index.defaults || {};
+        var values = effectiveLocalValues();
         Object.keys(defaults).forEach(function(key) {
-            if (defaults[key].tab_key === tabKey) out.push({ key: key, value: defaults[key].value });
+            if (defaults[key].tab_key === tabKey && settingVisibleForValues(defaults[key], values)) {
+                out.push({ key: key, value: defaults[key].value });
+            }
         });
         return out;
     }
@@ -301,6 +323,28 @@
         return values;
     }
 
+    function effectiveValuesForNode(node) {
+        var values = effectiveLocalValues();
+        Object.keys((node && node.value) || node || {}).forEach(function(key) {
+            values[key] = ((node && node.value) || node)[key];
+        });
+        return values;
+    }
+
+    function settingVisibleForValues(setting, values) {
+        var visibleWhen = setting && setting.visible_when;
+        if (!visibleWhen || !Object.keys(visibleWhen).length) return true;
+        return Object.keys(visibleWhen).every(function(depKey) {
+            var allowed = visibleWhen[depKey] || [];
+            return allowed.map(String).indexOf(String(values[depKey])) >= 0;
+        });
+    }
+
+    function settingVisible(setting, mount) {
+        var node = mount === GROUP ? activeNode() : null;
+        return settingVisibleForValues(setting, effectiveValuesForNode(node));
+    }
+
     function writeValue(setting, mount, value) {
         if (mount === GROUP) {
             var node = activeNode();
@@ -317,14 +361,12 @@
 
     function chip(text, muted) {
         var node = document.createElement('span');
-        node.textContent = text;
-        node.style.cssText = 'padding:3px 7px;border-radius:999px;font-size:11px;' + (
-            muted ? 'background:#f1f5f9;color:#64748b;' : 'background:#eef2ff;color:#3730a3;'
-        );
+        node.className = 'gt-backend-chip' + (muted ? ' is-muted' : '');
+        node.innerHTML = renderChipHtml(text);
         return node;
     }
 
-    function makeControl(setting, mount, rerenderChips) {
+    function makeControl(setting, mount, rerenderAfterChange) {
         var control;
         if (setting.control_template === 'select') {
             control = document.createElement('select');
@@ -348,7 +390,7 @@
         control.disabled = mount === GROUP && !state.activeGroup;
         control.addEventListener('change', function() {
             writeValue(setting, mount, setting.control_template === 'number' ? Number(control.value) : control.value);
-            rerenderChips();
+            rerenderAfterChange();
         });
         return control;
     }
@@ -367,6 +409,7 @@
             chips.innerHTML = '';
             (manifest.settings || []).forEach(function(setting) {
                 if (!setting.chip_template) return;
+                if (!settingVisible(setting, mount)) return;
                 if (mount === GROUP) {
                     var node = activeNode();
                     if (!node || !Object.prototype.hasOwnProperty.call(node.value, setting.key)) return;
@@ -377,6 +420,7 @@
         }
 
         (manifest.settings || []).forEach(function(setting) {
+            if (!settingVisible(setting, mount)) return;
             var row = document.createElement('label');
             row.className = 'gt-backtest-setting-row';
             var title = document.createElement('span');
@@ -384,7 +428,9 @@
             title.className = 'gt-backtest-setting-label';
             var controlWrap = document.createElement('span');
             controlWrap.className = 'gt-backtest-setting-control';
-            controlWrap.appendChild(makeControl(setting, mount, renderChips));
+            controlWrap.appendChild(makeControl(setting, mount, function() {
+                renderManifest(manifest, mount, container);
+            }));
             row.appendChild(title);
             row.appendChild(controlWrap);
             grid.appendChild(row);
@@ -424,23 +470,24 @@
     function renderChooser(mount, container) {
         container.innerHTML = '';
         var intro = document.createElement('div');
+        intro.className = 'gt-backtest-settings-chooser-intro';
         intro.textContent = '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。';
-        intro.style.cssText = 'font-size:12px;color:#64748b;margin-bottom:10px;';
         container.appendChild(intro);
         availableTabs(mount).forEach(function(tab) {
             var row = document.createElement('label');
-            row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-top:1px solid #eef2f7;';
+            row.className = 'gt-backtest-settings-chooser-row';
             var checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = isMounted(mount, tab.key);
             checkbox.addEventListener('change', function() { toggleMounted(mount, tab.key, checkbox.checked); });
             var body = document.createElement('div');
+            body.className = 'gt-backtest-settings-chooser-body';
             var title = document.createElement('div');
             title.textContent = tab.label;
-            title.style.fontWeight = '600';
+            title.className = 'gt-backtest-settings-chooser-title';
             body.appendChild(title);
             var defaults = document.createElement('div');
-            defaults.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;';
+            defaults.className = 'gt-backtest-settings-chooser-defaults';
             defaultsForTab(tab.key).forEach(function(item) {
                 defaults.appendChild(chip(item.key + ': ' + item.value, true));
             });
@@ -591,6 +638,7 @@
     function backendSettingChips(group) {
         if (!group) return [];
         var defaults = state.index && state.index.defaults || {};
+        var values = effectiveValuesForNode(group);
         return Object.keys(defaults).filter(function(key) {
             return Object.prototype.hasOwnProperty.call(group, key);
         }).map(function(key) {
@@ -599,12 +647,13 @@
             var setting = state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
             if (scope !== 'group_override' && scope !== 'group_only') return null;
+            if (!settingVisibleForValues(setting, values)) return null;
             if (settingIsShownInMountedTab(GROUP, key)) return null;
             if (defaults[key] && valuesEqual(value, defaults[key].value)) return null;
             if (!setting.chip_template) return null;
             return {
                 label: 'backtest-' + key,
-                html: escapeHTML(chipText(setting, value)),
+                html: renderChipHtml(chipText(setting, value)),
                 category: 'config',
                 style: null,
             };
@@ -637,7 +686,7 @@
             }
             chips.push({
                 label: def.key,
-                html: renderChipTemplate(def.chip_template, group, source, def.value_resolvers || {}),
+                html: renderChipHtml(renderChipTemplate(def.chip_template, group, source, def.value_resolvers || {})),
                 category: def.category,
                 clickable: !!def.clickable,
                 action: def.key === 'tester' ? 'tester-products' : (def.key === 'product_mask' ? 'toggle-product-mask' : ''),
@@ -798,10 +847,12 @@
         var source = group || {};
         var out = {};
         var defaults = state.index && state.index.defaults || {};
+        var values = effectiveValuesForNode(source);
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
             if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
             if (def.scope_policy === 'local_only') return;
+            if (!settingVisibleForValues(def, values)) return;
             if (source[key] === '' || source[key] === null || source[key] === undefined) return;
             if (valuesEqual(source[key], def.value)) return;
             out[key] = source[key];
@@ -825,9 +876,11 @@
     function collectLocalSettings() {
         var out = {};
         var defaults = state.index && state.index.defaults || {};
+        var values = effectiveLocalValues();
         Object.keys(state.localValues || {}).forEach(function(key) {
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
+            if (!settingVisibleForValues(def, values)) return;
             if (state.localValues[key] === '' || state.localValues[key] === null || state.localValues[key] === undefined) return;
             if (valuesEqual(state.localValues[key], def.value)) return;
             out[key] = state.localValues[key];
@@ -894,6 +947,7 @@
         syncPageTimeDefaults: syncPageTimeDefaults,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,
+        renderChipHtml: renderChipHtml,
         toggleProductMask: toggleProductMask,
         isProductMaskExpanded: isProductMaskExpanded,
         _state: state,
