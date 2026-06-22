@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any
+import threading
 import uuid
 
 import numpy as np
@@ -13,6 +14,7 @@ from tools.data.types import DataColumn, DataIndex
 
 from ..workers import EngineWorkerDispatcher, WorkerRequest
 from ..workers.runners.native import run_group_strategy as run_native_group_strategy
+from ..cancellation import BacktestCancelled
 
 
 def execute_group_plan(
@@ -23,10 +25,17 @@ def execute_group_plan(
     initial_capital: float,
     long_short_configs: list[Mapping[str, Any]] | None = None,
     progress: Callable[[str, str, int, int, Mapping[str, Any]], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Build raw membership input once; strategy targets remain engine-owned."""
 
+    def _check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise BacktestCancelled()
+
+    _check_cancelled()
     plans = group_tester.build_batch_execution_plans()
+    _check_cancelled()
     if len(plans) != 1:
         raise ValueError(
             f"event backtest requires one unified plan, received {len(plans)} plans"
@@ -68,12 +77,38 @@ def execute_group_plan(
         })
         strategy_configs.append(values)
         settings_by_strategy[group_id] = values
+    owner_index_by_group_id = {
+        str(owner.get("group_id") or ""): index
+        for index, owner in enumerate(plan.group_owner)
+        if owner.get("group_id")
+    }
+
+    def _resolve_ls_leg_indices(legs: Any, label: str, position: int) -> tuple[int, ...]:
+        result: list[int] = []
+        for leg in legs or ():
+            if not isinstance(leg, Mapping):
+                continue
+            group_id = str(leg.get("group_id") or leg.get("groupId") or "")
+            if group_id:
+                if group_id not in owner_index_by_group_id:
+                    raise ValueError(
+                        f"Long-Short #{position + 1} {label} group_id={group_id!r} "
+                        "is not part of this run"
+                    )
+                result.append(owner_index_by_group_id[group_id])
+                continue
+            if "group" in leg:
+                result.append(int(leg["group"]))
+        return tuple(result)
+
     for position, config in enumerate(long_short_configs or []):
-        long_indices = tuple(int(leg["group"]) for leg in config.get("long") or ())
-        short_indices = tuple(int(leg["group"]) for leg in config.get("short") or ())
+        long_indices = _resolve_ls_leg_indices(config.get("long"), "long", position)
+        short_indices = _resolve_ls_leg_indices(config.get("short"), "short", position)
         source_index = long_indices[0] if long_indices else -1
         if source_index < 0 or source_index >= len(plan.group_owner):
             raise ValueError(f"Long-Short #{position + 1} has no valid long group")
+        if any(index < 0 or index >= len(plan.group_owner) for index in short_indices):
+            raise ValueError(f"Long-Short #{position + 1} has no valid short group")
         source_group_id = str(plan.group_owner[source_index].get("group_id") or "")
         values = dict(settings_by_group[source_group_id])
         strategy_id = f"long-short:{position + 1}"
@@ -157,6 +192,7 @@ def execute_group_plan(
             {"engine": engine},
         )
     def _event_progress(completed, total, timestamp) -> None:
+        _check_cancelled()
         if progress is not None:
             progress(
                 "event_replay",
@@ -177,6 +213,7 @@ def execute_group_plan(
                 int(item["total"]),
                 pd.Timestamp(item["event_timestamp"]),
             ),
+            cancel_event=cancel_event,
         ).result
     else:
         raise ValueError(f"unsupported backtest engine: {engine}")

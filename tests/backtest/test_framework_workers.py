@@ -155,6 +155,19 @@ def test_framework_worker_streams_event_time_progress() -> None:
     assert events[-1]["event_timestamp"].startswith("2024-01-03")
 
 
+def test_framework_progress_is_bounded_for_long_replays() -> None:
+    from tools.backtest.workers.runners.common import should_report_progress
+
+    checkpoints = [
+        completed for completed in range(1, 10_001)
+        if should_report_progress(completed, 10_000)
+    ]
+
+    assert checkpoints[0] == 1
+    assert checkpoints[-1] == 10_000
+    assert len(checkpoints) <= 102
+
+
 def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
     from tools.backtest.workers.runners.native import run_group_strategy as run_native
 
@@ -358,3 +371,94 @@ def test_framework_fee_and_slippage_plugins_are_consistent(
         for engine, result in results.items()
     }
     assert max(final_values.values()) - min(final_values.values()) < 1.0, final_values
+
+
+def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+
+    timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 5)]
+    payload = {
+        "timestamps": timestamps,
+        "instruments": ["asset-a", "asset-b"],
+        "prices": {"asset-a": [100.0] * 4, "asset-b": [100.0] * 4},
+        "membership": [
+            [[True, False]],
+            [[True, False]],
+            [[False, True]],
+            [[False, True]],
+        ],
+        "signal_updates": [[True], [False], [True], [False]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "multipliers": [[1.0, 1.0]] * 4,
+            "lot_sizes": [[1.0, 1.0]] * 4,
+            "margin_ratios": [[1.0, 1.0]] * 4,
+        },
+        "strategy_configs": [{
+            "strategy_id": "group-1",
+            "allocation_policy": "equal_notional",
+            "rebalance_mode": "on_factor_signal",
+            "fee_rate": 0.001,
+        }],
+    }
+    dispatcher = EngineWorkerDispatcher()
+    results = {
+        engine: dispatcher.dispatch(WorkerRequest(
+            f"net-fee-{engine}", engine, "run_group_strategy", payload
+        )).result
+        for engine in ("backtrader", "qlib", "zipline")
+    }
+    results["native"] = run_native(payload)
+
+    assert all(
+        result["target_trace"]["group-1"] == {
+            "2024-01-01T00:00:00": {"asset-a": 1.0},
+            "2024-01-03T00:00:00": {"asset-b": 1.0},
+        }
+        for result in results.values()
+    )
+    positions = {
+        engine: result["portfolios"]["group-1"]["positions"]
+        for engine, result in results.items()
+    }
+    assert positions == {
+        engine: {"asset-a": 0.0, "asset-b": 997.0}
+        for engine in results
+    }
+    position_curves = {
+        engine: result["portfolios"]["group-1"]["position_curve"]
+        for engine, result in results.items()
+    }
+    assert position_curves == {
+        engine: position_curves["native"]
+        for engine in results
+    }
+    equity_curves = {
+        engine: result["portfolios"]["group-1"]["equity_curve"]
+        for engine, result in results.items()
+    }
+    assert equity_curves == {
+        engine: equity_curves["native"]
+        for engine in results
+    }
+    execution_traces = {
+        engine: result["execution_trace"]["group-1"]
+        for engine, result in results.items()
+    }
+    assert execution_traces == {
+        engine: execution_traces["native"]
+        for engine in results
+    }
+    rebalance_trace = execution_traces["native"]["2024-01-04T00:00:00"]
+    assert rebalance_trace["delta"] == {"asset-a": -999.0, "asset-b": 997.0}
+    assert rebalance_trace["target_size"] == {"asset-a": 0.0, "asset-b": 997.0}
+    assert rebalance_trace["cash_available_after_sells"] == pytest.approx(99_800.2)
+    assert rebalance_trace["buy_cost_with_fee"] == pytest.approx(99_799.7)
+    final_values = {
+        engine: result["portfolios"]["group-1"]["final_value"]
+        for engine, result in results.items()
+    }
+    assert final_values == {
+        engine: final_values["native"]
+        for engine in results
+    }

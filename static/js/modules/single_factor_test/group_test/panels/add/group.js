@@ -388,20 +388,6 @@
             var comboKey = _addGroupBatchKey(testerId, alias, splitCount);
             var letter = comboLetters[comboKey] || 'A';
 
-            var REG = window.GT_CONFIG_REGISTRY;
-            var GS = GT.groupSettings;
-            var feeMode = (REG && REG.hasDirty()) ? REG.getDirty('feeMode', draft.feeMode || GS.getFieldDefault('feeMode')) : (draft.feeMode || GS.getFieldDefault('feeMode'));
-            // Read dirty workspace for feeMap (populated by overlay's "写入暂存")
-            var dirtyFeeMap = (REG && REG.hasDirty()) ? REG.getDirty('feeMap') : null;
-            var feeMap = null;
-            if (feeMode === 'per_product' || feeMode === 'custom') {
-                feeMap = (dirtyFeeMap && Object.keys(dirtyFeeMap).length > 0) ? dirtyFeeMap : null;
-            }
-            var feeRate = (REG && REG.hasDirty()) ? REG.getDirty('feeRate', draft.feeRate) : draft.feeRate;
-            var feeSensitivity = (REG && REG.hasDirty()) ? REG.getDirty('feeSensitivity', draft.feeSensitivity) : draft.feeSensitivity;
-            var useCloseToday = (REG && REG.hasDirty()) ? REG.getDirty('useCloseToday', draft.useCloseToday) : draft.useCloseToday;
-            var liquidityMode = (REG && REG.hasDirty()) ? REG.getDirty('liquidityMode', draft.liquidityMode || GS.getFieldDefault('liquidityMode')) : (draft.liquidityMode || GS.getFieldDefault('liquidityMode'));
-            var liquidityPercent = (REG && REG.hasDirty()) ? REG.getDirty('liquidityPercent', draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent')) : (draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent'));
             if (allGroups) {
                 for (var gi = 1; gi <= splitCount; gi++) {
                     var names = _makeNames(testerId, alias, splitCount, gi, letter);
@@ -414,14 +400,6 @@
                             splitCount: splitCount,
                             groupIndex: gi,
                             isAllGroups: false,
-                            feeMode: feeMode,
-                            feeRate: feeRate,
-                            feeMap: feeMap,
-                            feeSensitivity: feeSensitivity,
-                            useCloseToday: useCloseToday,
-                            rebalanceMode: draft.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-                            liquidityMode: liquidityMode,
-                            liquidityPercent: liquidityPercent,
                         });
                         added++;
                     } catch (err) { /* skip dup */ }
@@ -437,14 +415,6 @@
                         splitCount: splitCount,
                         groupIndex: groupIndex,
                         isAllGroups: false,
-                        feeMode: feeMode,
-                        feeRate: feeRate,
-                        feeMap: feeMap,
-                        feeSensitivity: feeSensitivity,
-                        useCloseToday: useCloseToday,
-                        rebalanceMode: draft.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-                        liquidityMode: liquidityMode,
-                        liquidityPercent: liquidityPercent,
                     });
                     added++;
                 } catch (err) { /* skip dup */ }
@@ -502,10 +472,6 @@
                     allGroups: true,
                     groupIndex: 1,
                     selectedFactors: [],
-                    feeMode: 'none',
-                    rebalanceMode: 'each_period',
-                    liquidityMode: 'infinite',
-                    liquidityPercent: 100
                 };
             },
             onSubmit: function(draft, helpers) {

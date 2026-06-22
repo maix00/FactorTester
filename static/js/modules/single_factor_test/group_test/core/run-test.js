@@ -107,11 +107,12 @@
     /**
      * 批量分组测试 POST（SSE 流式）
      */
-    runTest.postBatchGroupTest = function(payload, onEvent) {
+    runTest.postBatchGroupTest = function(payload, onEvent, signal) {
         return fetch('/run_group_test_stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: signal
         }).then(async function(res) {
             if (!res.ok) {
                 throw new Error('HTTP ' + res.status);
@@ -161,6 +162,7 @@
     runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
+        var cancelBtn = document.getElementById('cancel_group_test_btn');
 
         var REG = window.GT_CONFIG_REGISTRY;
         if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
@@ -190,7 +192,12 @@
             }
             return out;
         }
-        var runGroups = allStoredGroups.map(_resolvedGroupForRun);
+        var runGroups = allStoredGroups.map(_resolvedGroupForRun).map(function(group) {
+            if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+                return Object.assign({}, group, GT.backendSettings.flattenGroupForSnapshot(group));
+            }
+            return group;
+        });
         // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
         var groupIdToIndex = {};
         for (var ai = 0; ai < runGroups.length; ai++) {
@@ -215,8 +222,8 @@
             flatLSConfigs.push({
                 name: lsName,
                 key: lsName,
-                long: [{ group: longIdx - 1, weight: 1.0 }],
-                short: [{ group: shortIdx - 1, weight: 1.0 }]
+                long: [{ group_id: String(ls.longGroupId), group: longIdx - 1, weight: 1.0 }],
+                short: [{ group_id: String(ls.shortGroupId), group: shortIdx - 1, weight: 1.0 }]
             });
         }
 
@@ -246,11 +253,38 @@
             flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
-            factor_family_alias: window.factorFamilyAlias || '',
-            backtest_settings: GT.backendSettings && typeof GT.backendSettings.collect === 'function'
-                ? GT.backendSettings.collect()
-                : {}
+            factor_family_alias: window.factorFamilyAlias || ''
         });
+        var runToken = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        var abortController = new AbortController();
+        bulkPayload.run_token = runToken;
+        runTest._activeRun = { token: runToken, controller: abortController };
+        if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.onclick = async function() {
+                if (!runTest._activeRun || runTest._activeRun.token !== runToken) return;
+                cancelBtn.disabled = true;
+                if (statusSpan) {
+                    statusSpan.textContent = '正在取消测试...';
+                    statusSpan.style.color = '#b45309';
+                }
+                try {
+                    await fetch('/cancel_group_test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            run_token: runToken,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    });
+                } finally {
+                    abortController.abort();
+                }
+            };
+        }
 
         try {
             // ── 多行并行进度条 ──
@@ -268,29 +302,36 @@
             }
             progressContainer.innerHTML = '';
 
-            var replayProgress = document.createElement('div');
-            replayProgress.style.cssText = 'display:none;margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;';
-            replayProgress.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#334155;">'
-                + '<strong>交易账本回放</strong><span data-replay-label>等待事件回放</span></div>'
-                + '<div style="height:7px;margin-top:6px;border-radius:999px;background:#e2e8f0;overflow:hidden;">'
-                + '<div data-replay-fill style="height:100%;width:0;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .18s ease;"></div></div>';
-            progressContainer.appendChild(replayProgress);
+            var batchProgressHost = document.createElement('div');
+            progressContainer.appendChild(batchProgressHost);
 
+            var replayProgress = document.createElement('div');
+            replayProgress.className = 'gt-progress-track';
+            replayProgress.style.cssText = 'display:none;margin-top:10px;';
+            replayProgress.innerHTML = '<div style="display:flex;align-items:center;gap:8px;width:100%;">'
+                + '<span data-replay-phase style="flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">交易账本回放</span>'
+                + '<span data-replay-count style="flex:0 0 auto;font-size:12px;color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">0/0</span>'
+                + '<span style="flex:0 0 24px;width:24px;height:22px;"></span></div>'
+                + '<div style="width:100%;margin-top:6px;"><div style="display:block;background:#e2e8f0;border-radius:999px;height:7px;overflow:hidden;">'
+                + '<div data-replay-fill style="display:block;height:100%;width:0;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .18s ease;border-radius:999px;"></div></div></div>'
+                + '<div data-replay-label style="margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">等待事件回放</div>';
             function updateReplayProgress(payload) {
                 var completed = Number(payload.completed || 0);
                 var total = Number(payload.total || 0);
                 var percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
                 replayProgress.style.display = 'block';
                 replayProgress.querySelector('[data-replay-fill]').style.width = percent.toFixed(2) + '%';
+                replayProgress.querySelector('[data-replay-count]').textContent = completed + '/' + total;
                 replayProgress.querySelector('[data-replay-label]').textContent =
-                    (payload.event_timestamp || payload.message || '') + ' · ' + completed + '/' + total;
+                    (payload.event_timestamp || payload.message || '');
             }
 
             var pendingGlobalProgress = [];
 
             var batchMgr = GT.groupSettings.runGroupBatch.createManager({
-                progressContainer: progressContainer,
+                progressContainer: batchProgressHost,
             });
+            progressContainer.appendChild(replayProgress);
 
             markProgressRowsDone = function(done, message) {
                 batchMgr.markAllDone(done, message);
@@ -347,7 +388,7 @@
                         batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
                 }
-            });
+            }, abortController.signal);
 
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
@@ -384,12 +425,21 @@
             }
         } catch (e) {
             console.error('[runGroupTest] error:', e);
-            markProgressRowsDone(false, e.message || '未知错误');
+            var wasCancelled = e && e.name === 'AbortError';
+            markProgressRowsDone(false, wasCancelled ? '测试已取消' : (e.message || '未知错误'));
             if (statusSpan) {
-                statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
-                statusSpan.style.color = '#d40000';
+                statusSpan.innerHTML = wasCancelled ? '已取消测试' : ('✗ ' + (e.message || '未知错误'));
+                statusSpan.style.color = wasCancelled ? '#b45309' : '#d40000';
             }
         } finally {
+            if (runTest._activeRun && runTest._activeRun.token === runToken) {
+                runTest._activeRun = null;
+            }
+            if (cancelBtn) {
+                cancelBtn.style.display = 'none';
+                cancelBtn.disabled = false;
+                cancelBtn.onclick = null;
+            }
             if (runBtn) {
                 runBtn.disabled = false;
                 runBtn.style.display = '';

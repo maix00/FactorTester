@@ -93,6 +93,11 @@
     /* ───── Data loading ───── */
 
     function _getActiveSubmissionId() {
+        var c = GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+        var grossData = c ? c.getLastGrossData() : null;
+        if (grossData && grossData.length > 0 && grossData[0] && grossData[0].submission_id) {
+            return grossData[0].submission_id;
+        }
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && typeof sel.getFirstSubmissionId === 'function') {
             return sel.getFirstSubmissionId();

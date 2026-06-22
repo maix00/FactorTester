@@ -15,13 +15,16 @@ from zipline.finance.transaction import Transaction
 from .common import (
     market_rule_diagnostics,
     capacity_limited_deltas,
+    execution_trace_entry,
     execution_price,
     parse_group_strategy_input,
     parse_target_weight_input,
+    position_value_snapshot,
     rebalance_mode,
     target_quantities,
     target_rows,
     valuation_price,
+    should_report_progress,
 )
 
 
@@ -64,15 +67,19 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
             if pending is not None:
                 value = float(ledger.portfolio.portfolio_value)
                 desired = target_quantities(request, index, pending, value, strategy)
-                deltas = capacity_limited_deltas(
+                deltas = _zipline_executable_deltas(
                     request,
                     index,
                     strategy,
                     desired,
                     {
-                        instrument: ledger.position_tracker.positions[asset].amount
+                        instrument: (
+                            ledger.position_tracker.positions[asset].amount
+                            if asset in ledger.position_tracker.positions else 0.0
+                        )
                         for instrument, asset in assets.items()
                     },
+                    float(ledger.portfolio.cash),
                 )
                 for sell_first in (True, False):
                     for instrument, delta in deltas.items():
@@ -146,6 +153,9 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         transaction_number = 0
         equity_curve = {}
         position_curve = {}
+        notional_curve = {}
+        margin_curve = {}
+        execution_trace = {}
         for row, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, row, instrument)
@@ -166,7 +176,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     float(ledger.portfolio.portfolio_value),
                     strategy,
                 )
-                deltas = capacity_limited_deltas(
+                deltas = _zipline_executable_deltas(
                     request,
                     row,
                     strategy,
@@ -175,6 +185,22 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                         instrument: ledger.position_tracker.positions[asset].amount
                         for instrument, asset in assets.items()
                     },
+                    float(ledger.portfolio.cash),
+                )
+                current_positions = {
+                    instrument: (
+                        ledger.position_tracker.positions[asset].amount
+                        if asset in ledger.position_tracker.positions else 0.0
+                    )
+                    for instrument, asset in assets.items()
+                }
+                execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                    request,
+                    row,
+                    strategy,
+                    current_positions,
+                    deltas,
+                    float(ledger.portfolio.cash),
                 )
                 for sell_first in (True, False):
                     for instrument, delta in deltas.items():
@@ -205,6 +231,12 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 )
                 for instrument, asset in assets.items()
             }
+            notional_values, margin_values = position_value_snapshot(
+                request, row, strategy, position_curve[timestamp.isoformat()]
+            )
+            notional_curve[timestamp.isoformat()] = notional_values
+            if margin_values is not None:
+                margin_curve[timestamp.isoformat()] = margin_values
             pending = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -212,7 +244,11 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
-            if progress is not None and strategy_position == 0:
+            if (
+                progress is not None
+                and strategy_position == 0
+                and should_report_progress(row + 1, len(request.timestamps))
+            ):
                 progress(row + 1, len(request.timestamps), timestamp)
         portfolio = ledger.portfolio
         portfolios[calculator.strategy_id] = {
@@ -227,13 +263,61 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             },
             "equity_curve": equity_curve,
             "position_curve": position_curve,
+            "notional_curve": notional_curve,
+            "margin_curve": margin_curve,
+            "execution_trace": execution_trace,
         }
     return {
         "engine": "zipline",
         "portfolios": portfolios,
         "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "execution_trace": {
+            strategy_id: portfolio.get("execution_trace", {})
+            for strategy_id, portfolio in portfolios.items()
+        },
         "strategy_diagnostics": {
             item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
             for item in calculators
         },
     }
+
+
+def _zipline_executable_deltas(
+    request,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+    cash: float,
+) -> dict[str, float]:
+    deltas = capacity_limited_deltas(request, row, strategy, desired, current)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    available = float(cash)
+    buy_cost = 0.0
+    for instrument, delta in deltas.items():
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            available += notional - notional * fee_rate
+        else:
+            buy_cost += notional * (1.0 + fee_rate)
+    if buy_cost <= max(available, 0.0) + 1e-9:
+        return deltas
+    if buy_cost <= 0.0 or available <= 0.0:
+        return {
+            instrument: (delta if delta < 0 else 0.0)
+            for instrument, delta in deltas.items()
+        }
+    scale = available / buy_cost
+    adjusted = dict(deltas)
+    for position_index, instrument in enumerate(request.instruments):
+        delta = adjusted.get(instrument, 0.0)
+        if delta <= 0:
+            continue
+        lot_size = request.lot_sizes[row][position_index]
+        adjusted[instrument] = float(
+            int((delta * scale) / lot_size + 1e-12) * lot_size
+        )
+    return adjusted

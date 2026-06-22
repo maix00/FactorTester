@@ -34,31 +34,63 @@
             + groupText;
     }
 
-    function _formatCapitalNotice(data) {
-        if (!data || (!data.capital_warning && !data.market_rule_warning)) return '';
-        var parts = [];
+    function _formatMissingProducts(batch) {
+        var products = Array.isArray(batch && batch.missing_products)
+            ? batch.missing_products.filter(Boolean)
+            : [];
+        if (!products.length) return '';
+        var total = Number(batch.missing_product_count || products.length);
+        var sample = products.slice(0, 8).join('、');
+        if (total > products.length || products.length > 8) sample += ' 等';
+        return '触发品种：' + sample + '（' + total + ' 个品种存在非头部缺 bar/交易时段差异）';
+    }
+
+    function _pushCapitalRows(rows, data) {
+        if (!data) return;
         if (data.capital_warning) {
-            parts.push('<div style="font-weight:600;margin-bottom:4px;">⚠️ ' + GT.escapeHTML(data.capital_warning) + '</div>');
+            rows.push({
+                type: '资金约束',
+                status: '提示',
+                detail: data.capital_warning,
+            });
         }
         if (data.market_rule_warning) {
-            parts.push('<div style="font-weight:600;margin-bottom:4px;color:#92400e;">市场规则近似 · '
-                + GT.escapeHTML(data.market_rule_warning) + '</div>');
+            rows.push({
+                type: '市场规则',
+                status: '近似',
+                detail: data.market_rule_warning,
+            });
         }
         var diag = data.capital_diagnostics || {};
+        var details = [];
         if (diag.blocked_group_count !== undefined && diag.blocked_group_count !== null) {
-            parts.push('<div>未开仓组数：' + GT.escapeHTML(String(diag.blocked_group_count)) + '</div>');
+            details.push('未开仓组数：' + String(diag.blocked_group_count));
         }
         var blocked = Array.isArray(diag.blocked_groups) ? diag.blocked_groups : [];
         if (blocked.length > 0) {
             var sample = blocked[0];
             var sampleParts = [];
-            if (sample.group_name) sampleParts.push('组 ' + GT.escapeHTML(String(sample.group_name)));
-            if (sample.cheapest_product_name) sampleParts.push('最便宜品种 ' + GT.escapeHTML(String(sample.cheapest_product_name)));
-            if (sample.cheapest_required_capital !== undefined) sampleParts.push('需求约 ' + GT.escapeHTML(String(Math.round(Number(sample.cheapest_required_capital)))));
-            if (sample.budget_per_product !== undefined) sampleParts.push('预算约 ' + GT.escapeHTML(String(Math.round(Number(sample.budget_per_product)))));
-            if (sampleParts.length) parts.push('<div>' + sampleParts.join('，') + '</div>');
+            if (sample.group_name) sampleParts.push('组 ' + String(sample.group_name));
+            if (sample.cheapest_product_name) sampleParts.push('最便宜品种 ' + String(sample.cheapest_product_name));
+            if (sample.cheapest_required_capital !== undefined) sampleParts.push('需求约 ' + String(Math.round(Number(sample.cheapest_required_capital))));
+            if (sample.budget_per_product !== undefined) sampleParts.push('预算约 ' + String(Math.round(Number(sample.budget_per_product))));
+            if (sampleParts.length) details.push(sampleParts.join('，'));
         }
-        return parts.join('');
+        if (details.length) {
+            rows.push({
+                type: '资金约束',
+                status: '诊断',
+                detail: details.join('；'),
+            });
+        }
+    }
+
+    function _rowHtml(row) {
+        return '<tr class="gt-strategy-row">'
+            + '<td>' + GT.escapeHTML(row.type || '') + '</td>'
+            + '<td>' + GT.escapeHTML(row.status || '') + '</td>'
+            + '<td>' + (row.detailHtml || GT.escapeHTML(row.detail || '')) + '</td>'
+            + '</tr>';
     }
 
     function render(multiSessionActive, usedMode, multiSessionBatches, capitalWarningData) {
@@ -69,36 +101,45 @@
         var body = document.getElementById('gt-strategy-body');
         if (!layer || !head || !body) return;
 
-        var capitalNoticeHtml = _formatCapitalNotice(capitalWarningData);
-        if (!multiSessionActive && !capitalNoticeHtml) {
-            hide(layer, status, notice, head, body);
-            return;
-        }
-
+        var rows = [];
+        var hasMultiSession = !!multiSessionActive;
         var modeLabel = MODE_LABELS[usedMode] || usedMode || '当前再平衡模式';
         var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
             ? multiSessionBatches
             : [{ index: 0, tester_alias: '当前测试器', factor_alias: '当前因子', n_groups: null }];
-
-        layer.style.display = '';
-        if (status) status.textContent = '检测到 ' + batches.length + ' 个 MultiSession batch';
-        if (notice) {
-            if (capitalNoticeHtml) {
-                notice.innerHTML = capitalNoticeHtml;
-                notice.style.display = 'block';
-            } else {
-                notice.innerHTML = '';
-                notice.style.display = 'none';
+        if (hasMultiSession) {
+            for (var bi = 0; bi < batches.length; bi++) {
+                var batch = batches[bi];
+                var productText = _formatMissingProducts(batch);
+                var detail = '后端按 MultiSession 处理：仅对当期有信号的品种交易和再平衡，无信号品种持仓保持不动。';
+                if (productText) detail += ' ' + productText;
+                rows.push({
+                    type: batches.length > 1 ? (batchLabel(batch) || 'MultiSession 批次') : '多交易时段',
+                    status: modeLabel,
+                    detail: detail,
+                });
             }
         }
-        head.innerHTML = '<tr><th>Batch</th><th>当前模式</th><th>处理方式</th></tr>';
-        body.innerHTML = batches.map(function(batch) {
-            return '<tr class="gt-strategy-row">'
-                + '<td class="gt-strategy-cell-running">' + GT.escapeHTML(batchLabel(batch) || 'MultiSession batch') + '</td>'
-                + '<td>' + GT.escapeHTML(modeLabel) + '</td>'
-                + '<td>该 batch 含不同交易时段的品种；后端按 MultiSession 处理：仅对当期有信号的品种交易和再平衡，无信号品种持仓保持不动。</td>'
-                + '</tr>';
-        }).join('');
+        _pushCapitalRows(rows, capitalWarningData);
+        if (!rows.length) {
+            hide(layer, status, notice, head, body);
+            return;
+        }
+
+        layer.style.display = '';
+        if (status) {
+            status.textContent = !hasMultiSession
+                ? ''
+                : batches.length > 1
+                ? ('检测到 ' + batches.length + ' 个 MultiSession 批次')
+                : '多交易时段处理已启用';
+        }
+        if (notice) {
+            notice.innerHTML = '';
+            notice.style.display = 'none';
+        }
+        head.innerHTML = '<tr><th>类型</th><th>状态</th><th>说明</th></tr>';
+        body.innerHTML = rows.map(_rowHtml).join('');
     }
 
     // 从 app.js 桥接：由 applyGroupTestResult 调用

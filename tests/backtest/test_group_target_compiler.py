@@ -107,3 +107,67 @@ def test_long_short_is_a_peer_strategy_with_signed_target_weights() -> None:
     targets = payload["strategies"][0]["targets"]
     assert targets[index[0].isoformat()] == {"A": 0.5, "B": -0.5}
     assert targets[index[-1].isoformat()] == {"A": -0.5, "B": 0.5}
+
+
+def test_long_short_skips_empty_leg_rebalances_with_diagnostics() -> None:
+    index = pd.date_range("2026-01-01", periods=2, freq="D")
+    membership = np.asarray([
+        [[True, False], [False, False]],
+        [[True, False], [False, True]],
+    ])
+
+    payload = compile_group_target_payload(
+        timestamps=index,
+        instruments=("A", "B"),
+        membership=membership,
+        prices=np.asarray([[100.0, 100.0], [101.0, 99.0]]),
+        signal_updates=np.ones((2, 2), dtype=bool),
+        strategy_configs=({
+            "strategy_id": "long-short",
+            "strategy_kind": "long_short",
+            "long_indices": [0],
+            "short_indices": [1],
+            "allocation_policy": "equal_notional",
+            "rebalance_mode": "on_factor_signal",
+        },),
+        initial_cash=1_000_000,
+    )
+
+    strategy = payload["strategies"][0]
+    assert index[0].isoformat() not in strategy["targets"]
+    assert strategy["targets"][index[1].isoformat()] == {"A": 0.5, "B": -0.5}
+    assert strategy["diagnostics"]["long_short_empty_leg_count"] == 1
+    assert strategy["diagnostics"]["long_short_empty_legs"][0] == {
+        "timestamp": index[0].isoformat(),
+        "long_count": 1,
+        "short_count": 0,
+    }
+
+
+def test_long_short_nets_realized_membership_overlap() -> None:
+    index = pd.date_range("2026-01-01", periods=1, freq="D")
+    membership = np.asarray([
+        [[True, True, False], [False, True, True]],
+    ])
+
+    payload = compile_group_target_payload(
+        timestamps=index,
+        instruments=("A", "B", "C"),
+        membership=membership,
+        prices=np.asarray([[100.0, 100.0, 100.0]]),
+        signal_updates=np.ones((1, 2), dtype=bool),
+        strategy_configs=({
+            "strategy_id": "long-short",
+            "strategy_kind": "long_short",
+            "long_indices": [0],
+            "short_indices": [1],
+            "allocation_policy": "equal_notional",
+            "rebalance_mode": "on_factor_signal",
+        },),
+        initial_cash=1_000_000,
+    )
+
+    strategy = payload["strategies"][0]
+    assert strategy["targets"][index[0].isoformat()] == {"A": 0.5, "C": -0.5}
+    assert strategy["diagnostics"]["long_short_overlap_count"] == 1
+    assert strategy["diagnostics"]["long_short_overlaps"][0]["instruments"] == ["B"]

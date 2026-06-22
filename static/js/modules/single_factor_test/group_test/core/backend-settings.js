@@ -12,8 +12,8 @@
         tabRequests: Object.create(null),
         mountedTabs: { 'local-settings': [], 'group-settings': [] },
         localValues: Object.create(null),
-        groupValues: Object.create(null),
         activeGroup: null,
+        activeLocalTab: null,
         groupTabsAttached: false,
         settingDefs: Object.create(null),
         chipsRegistered: false,
@@ -32,6 +32,93 @@
 
     function availableTabs(mount) {
         return state.index && state.index.tab_lists ? (state.index.tab_lists[mount] || []) : [];
+    }
+
+    function tabExists(mount, tabKey) {
+        return availableTabs(mount).some(function(tab) { return tab.key === tabKey; });
+    }
+
+    function ensureMounted(mount, tabKey) {
+        if (!tabKey || !tabExists(mount, tabKey)) return;
+        var tabs = state.mountedTabs[mount];
+        if (tabs.indexOf(tabKey) < 0) tabs.push(tabKey);
+    }
+
+    function settingTab(key) {
+        var def = state.index && state.index.defaults && state.index.defaults[key];
+        return def ? def.tab_key : null;
+    }
+
+    function settingKeysForTab(tabKey) {
+        var defaults = state.index && state.index.defaults || {};
+        return Object.keys(defaults).filter(function(key) {
+            return defaults[key] && defaults[key].tab_key === tabKey;
+        });
+    }
+
+    function tabMeta(tabKey) {
+        var tabs = []
+            .concat(availableTabs(LOCAL))
+            .concat(availableTabs(GROUP));
+        for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].key === tabKey) return tabs[i];
+        }
+        return null;
+    }
+
+    function formatTemplate(template, values) {
+        return String(template || '').replace(/\{([^}]+)\}/g, function(_, key) {
+            return values[key] === undefined || values[key] === null ? '' : String(values[key]);
+        }).replace(/\s+/g, ' ').trim();
+    }
+
+    function summaryTabs() {
+        return availableTabs(LOCAL).filter(function(tab) {
+            return !!tab.summary_template;
+        });
+    }
+
+    function summaryOverrides(values) {
+        values = values || state.localValues || {};
+        return summaryTabs().map(function(tab) {
+            var keys = Array.isArray(tab.summary_keys) && tab.summary_keys.length
+                ? tab.summary_keys
+                : settingKeysForTab(tab.key);
+            var hasAny = keys.some(function(key) {
+                return Object.prototype.hasOwnProperty.call(values, key)
+                    && values[key] !== ''
+                    && values[key] !== null
+                    && values[key] !== undefined;
+            });
+            if (!hasAny) return null;
+            return {
+                tab: tab,
+                text: formatTemplate(tab.summary_template, effectiveLocalValues()),
+            };
+        }).filter(Boolean);
+    }
+
+    function clearTabOverrides(mount, tabKey) {
+        var keys = settingKeysForTab(tabKey);
+        if (!keys.length) return;
+        if (mount === LOCAL) {
+            keys.forEach(function(key) { delete state.localValues[key]; });
+            return;
+        }
+        var groups = GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
+            ? GT.groupSettings.groups.getAll()
+            : [];
+        groups.forEach(function(group) {
+            var patch = {};
+            keys.forEach(function(key) { patch[key] = undefined; });
+            try { GT.groupSettings.groups.update(group.id, patch); } catch (error) {}
+        });
+    }
+
+    function mountTabsForSnapshotValues(mount, values) {
+        Object.keys(values || {}).forEach(function(key) {
+            ensureMounted(mount, settingTab(key));
+        });
     }
 
     function tabURL(tabKey) {
@@ -65,16 +152,25 @@
         return out;
     }
 
-    function groupStore() {
+    function activeNode() {
         if (!state.activeGroup) return null;
-        if (!state.groupValues[state.activeGroup]) state.groupValues[state.activeGroup] = Object.create(null);
-        return state.groupValues[state.activeGroup];
+        var groups = GT.groupSettings && GT.groupSettings.groups;
+        var lsConfigs = GT.groupSettings && GT.groupSettings.lsConfigs;
+        if (groups && groups.get) {
+            var group = groups.get(state.activeGroup);
+            if (group) return { kind: 'group', value: group };
+        }
+        if (lsConfigs && lsConfigs.get) {
+            var ls = lsConfigs.get(state.activeGroup);
+            if (ls) return { kind: 'ls', value: ls };
+        }
+        return null;
     }
 
     function effectiveValue(setting, mount) {
-        var groups = groupStore();
-        if (mount === GROUP && groups && Object.prototype.hasOwnProperty.call(groups, setting.key)) {
-            return groups[setting.key];
+        var node = activeNode();
+        if (mount === GROUP && node && Object.prototype.hasOwnProperty.call(node.value, setting.key)) {
+            return node.value[setting.key];
         }
         if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
             return state.localValues[setting.key];
@@ -82,13 +178,28 @@
         return state.index.defaults[setting.key].value;
     }
 
+    function effectiveLocalValues() {
+        var values = Object.create(null);
+        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
+            values[key] = state.index.defaults[key].value;
+        });
+        Object.keys(state.localValues || {}).forEach(function(key) {
+            values[key] = state.localValues[key];
+        });
+        return values;
+    }
+
     function writeValue(setting, mount, value) {
         if (mount === GROUP) {
-            var groups = groupStore();
-            if (!groups) throw new Error('编辑组合设置前必须选择组合');
-            groups[setting.key] = value;
+            var node = activeNode();
+            if (!node) throw new Error('编辑组合设置前必须选择组合');
+            var patch = {};
+            patch[setting.key] = value;
+            if (node.kind === 'group') GT.groupSettings.groups.update(state.activeGroup, patch);
+            else GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
         } else {
             state.localValues[setting.key] = value;
+            renderLocalSettingChips();
         }
     }
 
@@ -111,9 +222,10 @@
                 option.textContent = item.label;
                 control.appendChild(option);
             });
-        } else if (setting.control_template === 'number' || setting.control_template === 'date') {
+        } else if (setting.control_template === 'number' || setting.control_template === 'date' || setting.control_template === 'time') {
             control = document.createElement('input');
             control.type = setting.control_template;
+            if (setting.control_template === 'time') control.step = '60';
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
@@ -144,8 +256,8 @@
             (manifest.settings || []).forEach(function(setting) {
                 if (!setting.chip_template) return;
                 if (mount === GROUP) {
-                    var values = groupStore();
-                    if (!values || !Object.prototype.hasOwnProperty.call(values, setting.key)) return;
+                    var node = activeNode();
+                    if (!node || !Object.prototype.hasOwnProperty.call(node.value, setting.key)) return;
                 }
                 chips.appendChild(chip(
                     setting.chip_template.replace('{value}', String(effectiveValue(setting, mount))),
@@ -189,7 +301,10 @@
         var tabs = state.mountedTabs[mount];
         var index = tabs.indexOf(tabKey);
         if (enabled && index < 0) tabs.push(tabKey);
-        if (!enabled && index >= 0) tabs.splice(index, 1);
+        if (!enabled && index >= 0) {
+            tabs.splice(index, 1);
+            clearTabOverrides(mount, tabKey);
+        }
         if (mount === LOCAL) renderLocalTabs();
         if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
     }
@@ -226,19 +341,64 @@
 
     function localHost() { return document.getElementById('gt-backtest-local-host'); }
 
+    function localChipRow() { return document.getElementById('gt-local-settings-chip-row'); }
+
+    function renderLocalSettingChips() {
+        var row = document.getElementById('gt-local-settings-chip-row');
+        if (!row) return;
+        row.innerHTML = '';
+        if (!state.index) {
+            row.style.display = 'none';
+            return;
+        }
+        var missing = [];
+        (state.mountedTabs[LOCAL] || []).forEach(function(tabKey) {
+            var manifest = state.tabCache[tabKey];
+            if (!manifest) {
+                missing.push(tabKey);
+                return;
+            }
+            (manifest.settings || []).forEach(function(setting) {
+                if (!setting.chip_template) return;
+                var value = effectiveValue(setting, LOCAL);
+                if (value === undefined || value === null || value === '') return;
+                var chipNode = chip(setting.chip_template.replace('{value}', String(value)), false);
+                chipNode.setAttribute('data-backtest-local-chip', setting.key);
+                chipNode.title = '打开' + ((manifest.tab && manifest.tab.label) || setting.tab_key || tabKey);
+                chipNode.style.cursor = 'pointer';
+                chipNode.addEventListener('click', function() { openLocal(tabKey); });
+                row.appendChild(chipNode);
+            });
+        });
+        row.style.display = row.childNodes.length ? 'flex' : 'none';
+        missing.forEach(function(tabKey) {
+            loadTab(tabKey).then(function() {
+                renderLocalSettingChips();
+            }).catch(function(error) {
+                console.error('[backend-settings] local chip load failed:', tabKey, error);
+            });
+        });
+    }
+
     function deactivateLocal() {
         var host = localHost();
         if (host) host.style.display = 'none';
+        state.activeLocalTab = null;
         document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
             button.classList.remove('active');
         });
     }
 
     function openLocal(tabKey) {
+        var host = localHost();
+        if (state.activeLocalTab === tabKey && host && host.style.display !== 'none') {
+            deactivateLocal();
+            return;
+        }
         document.querySelectorAll('[data-local-settings-tab-panel]').forEach(function(panel) { panel.style.display = 'none'; });
         document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
-        var host = localHost();
         host.style.display = '';
+        state.activeLocalTab = tabKey;
         document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
             button.classList.toggle('active', button.getAttribute('data-backtest-local-tab') === tabKey);
         });
@@ -267,6 +427,7 @@
         manage.setAttribute('data-backtest-local-tab', '__manage__');
         manage.addEventListener('click', function() { openLocal('__manage__'); });
         bar.appendChild(manage);
+        renderLocalSettingChips();
     }
 
     function setActiveGroupFromUI() {
@@ -318,14 +479,16 @@
             category: 'config',
             name: 'backend-backtest-settings',
             getChips: function(group) {
-                var values = group && state.groupValues[String(group.id)];
-                if (!values) return [];
-                return Object.keys(values).map(function(key) {
+                if (!group) return [];
+                var defaults = state.index && state.index.defaults || {};
+                return Object.keys(defaults).filter(function(key) {
+                    return Object.prototype.hasOwnProperty.call(group, key);
+                }).map(function(key) {
                     var setting = state.settingDefs[key];
-                    if (!setting || !setting.chip_template) return null;
+                    var template = setting && setting.chip_template ? setting.chip_template : (key + ': {value}');
                     return {
                         label: 'backtest-' + key,
-                        html: setting.chip_template.replace('{value}', String(values[key])),
+                        html: template.replace('{value}', String(group[key])),
                     };
                 }).filter(Boolean);
             },
@@ -338,11 +501,7 @@
         var pageUuid = encodeURIComponent(window._pageUuid || '');
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
-            Object.keys(index.defaults || {}).forEach(function(key) {
-                if (!Object.prototype.hasOwnProperty.call(state.localValues, key)) {
-                    state.localValues[key] = index.defaults[key].value;
-                }
-            });
+            registerBackendFields(index);
             var defaults = index.default_mounted_tabs || {};
             [LOCAL, GROUP].forEach(function(mount) {
                 if (!state.mountedTabs[mount].length && Array.isArray(defaults[mount])) {
@@ -356,46 +515,136 @@
         });
     }
 
+    function registerBackendFields(index) {
+        var api = GT.groupSettings;
+        if (!api || typeof api.registerField !== 'function') return;
+        Object.keys(index.defaults || {}).forEach(function(key) {
+            var item = index.defaults[key] || {};
+            var type = 'any';
+            if (typeof item.value === 'number') type = 'number';
+            else if (typeof item.value === 'boolean') type = 'boolean';
+            else if (typeof item.value === 'string') type = 'string';
+            api.registerField({
+                key: key,
+                type: type,
+                default: item.value,
+            });
+        });
+    }
+
     function apply(snapshot) {
         snapshot = snapshot || {};
-        [LOCAL, GROUP].forEach(function(mount) {
-            state.mountedTabs[mount] = Array.isArray(snapshot.mounted_tabs && snapshot.mounted_tabs[mount])
-                ? snapshot.mounted_tabs[mount].slice()
-                : [];
-        });
-        state.localValues = Object.assign(Object.create(null), snapshot.local_values || {});
-        state.groupValues = Object.assign(Object.create(null), snapshot.group_values || {});
+        var snapshotValues = Object.assign({}, snapshot || {});
+        state.localValues = snapshotValues;
+        mountTabsForSnapshotValues(LOCAL, snapshotValues);
         renderLocalTabs();
         if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
     }
 
-    function registerSnapshot() {
-        if (!GT.localSettings || state.snapshotRegistered) return;
-        state.snapshotRegistered = true;
-        GT.localSettings.register({
-            key: 'backendBacktestSettings',
-            order: 90,
-            collect: collect,
-            apply: apply,
-            summarize: function() { return null; },
+    function syncAppliedTimeRange() {
+        var values = effectiveLocalValues();
+        if (!values.start_date || !values.end_date) return Promise.resolve(null);
+        var timePayload = {
+            factor_family_alias: window.factorFamilyAlias || window._sftCurrentFactorId || '',
+            page_uuid: window._pageUuid || '',
+            start_date: values.start_date || '',
+            start_time: values.start_time || '09:00',
+            end_date: values.end_date || '',
+            end_time: values.end_time || '15:00',
+            timezone: values.timezone || 'Asia/Shanghai',
+            time_precision: values.time_precision || 'exact',
+            is_trading_day: false,
+            is_cn_futures_day: false,
+            is_cn_futures_night: false,
+        };
+        if (typeof window.applySharedRuntimeTimeRange === 'function') {
+            window.applySharedRuntimeTimeRange(timePayload);
+        }
+        return fetch('/set_time_range', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(timePayload),
+        }).then(function(response) {
+            return response.json().catch(function() { return {}; });
+        }).then(function(data) {
+            if (data.page_uuid) {
+                if (typeof window.rememberSingleFactorPageUuid === 'function') {
+                    window.rememberSingleFactorPageUuid(data.page_uuid);
+                } else {
+                    window._pageUuid = data.page_uuid;
+                }
+            }
+            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
+                detail: {
+                    start_date: values.start_date,
+                    start_time: values.start_time,
+                    end_date: values.end_date,
+                    end_time: values.end_time,
+                },
+            }));
+            return data;
         });
     }
 
-    function collect() {
-        return JSON.parse(JSON.stringify({
-            application: state.application,
-            mounted_tabs: state.mountedTabs,
-            local_values: state.localValues,
-            group_values: state.groupValues,
-        }));
+    function applyFlatSnapshot(snapshot) {
+        var groupSettings = snapshot && snapshot.group_settings ? snapshot.group_settings : snapshot;
+        var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
+        var localSource = snapshot && snapshot.local_settings ? snapshot.local_settings : {};
+        var local = {};
+        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
+            var def = state.index.defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (Object.prototype.hasOwnProperty.call(localSource, key)) local[key] = localSource[key];
+        });
+        state.localValues = local;
+        mountTabsForSnapshotValues(LOCAL, local);
+        groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
+            mountTabsForSnapshotValues(GROUP, item || {});
+        });
+        renderLocalTabs();
+        if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+        return syncAppliedTimeRange();
     }
 
+    function flattenGroupForSnapshot(group) {
+        var source = group || {};
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
+            if (source[key] === def.value) return;
+            out[key] = source[key];
+        });
+        return out;
+    }
+
+    function collectLocalSettings() {
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(state.localValues || {}).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (state.localValues[key] === def.value) return;
+            out[key] = state.localValues[key];
+        });
+        return out;
+    }
+
+    function registerSnapshot() {
+        state.snapshotRegistered = true;
+    }
+
+    function collect() { return collectLocalSettings(); }
+
     function runPayload() {
-        var values = state.localValues || {};
+        var values = effectiveLocalValues();
         var calendar = String(values.calendar_frequency || 'auto');
         return {
             start_date: values.start_date,
             end_date: values.end_date,
+            start_time: values.start_time,
+            end_time: values.end_time,
             precision: values.time_precision || 'exact',
             timezone: values.timezone || 'Asia/Shanghai',
             initial_capital: values.initial_capital,
@@ -406,13 +655,38 @@
         };
     }
 
+    function groupOverrideValues(groupId) {
+        var groups = GT.groupSettings && GT.groupSettings.groups;
+        var group = groups && groups.get ? groups.get(groupId) : null;
+        return group ? Object.assign({}, group) : null;
+    }
+
+    function syncPageTimeDefaults() {
+        var pageUuid = encodeURIComponent(window._pageUuid || '');
+        return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
+            state.index = index;
+            renderLocalTabs();
+            return index;
+        });
+    }
+
+    document.addEventListener('pageTimeRangeChanged', function() {
+        syncPageTimeDefaults().catch(function(error) {
+            console.error('[backend-settings] sync page time failed:', error);
+        });
+    });
+
     GT.backendSettings = {
         init: init,
         attachGroupTabs: attachGroupTabs,
         deactivateLocal: deactivateLocal,
+        applyFlatSnapshot: applyFlatSnapshot,
+        flattenGroupForSnapshot: flattenGroupForSnapshot,
+        collectLocalSettings: collectLocalSettings,
         registerSnapshot: registerSnapshot,
-        collect: collect,
         runPayload: runPayload,
+        groupOverrideValues: groupOverrideValues,
+        syncPageTimeDefaults: syncPageTimeDefaults,
         _state: state,
     };
 })();

@@ -163,10 +163,26 @@
         var prevChangeBtn = document.getElementById('snapshot-prev-change-btn');
         var nextChangeBtn = document.getElementById('snapshot-next-change-btn');
 
-        if (prevBtn) prevBtn.textContent = '◀ 前一事件';
-        if (nextBtn) nextBtn.textContent = '后一事件 ▶';
-        if (prevChangeBtn) prevChangeBtn.textContent = '◀ 前一变化';
-        if (nextChangeBtn) nextChangeBtn.textContent = '后一变化 ▶';
+        if (prevBtn) {
+            prevBtn.textContent = '◀';
+            prevBtn.title = '前一事件组';
+            prevBtn.setAttribute('aria-label', '前一事件组');
+        }
+        if (nextBtn) {
+            nextBtn.textContent = '▶';
+            nextBtn.title = '后一事件组';
+            nextBtn.setAttribute('aria-label', '后一事件组');
+        }
+        if (prevChangeBtn) {
+            prevChangeBtn.textContent = '◁';
+            prevChangeBtn.title = '前一持仓变化';
+            prevChangeBtn.setAttribute('aria-label', '前一持仓变化');
+        }
+        if (nextChangeBtn) {
+            nextChangeBtn.textContent = '▷';
+            nextChangeBtn.title = '后一持仓变化';
+            nextChangeBtn.setAttribute('aria-label', '后一持仓变化');
+        }
 
         if (!data) {
             [prevBtn, nextBtn, prevChangeBtn, nextChangeBtn].forEach(function(btn) {
@@ -364,9 +380,9 @@
         var parts = [];
         var statusLabels = {
             entering: '新增',
-            increasing: '增加',
-            decreasing: '减少',
-            exiting: '退出',
+            increasing: '增持',
+            decreasing: '减持',
+            exiting: '清仓',
             pending_exit: '待卖',
             holding: '持有',
             selected: '选中',
@@ -400,6 +416,9 @@
         if (cell.quantity !== null && cell.quantity !== undefined && (Math.abs(Number(cell.quantity)) > 1e-12 || Math.abs(Number(cell.amount || 0)) > 1e-12)) {
             meta.push('持仓 ' + _formatQuantity(cell.quantity));
             if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount, currency));
+            if (cell.margin_amount !== null && cell.margin_amount !== undefined) {
+                meta.push('保证金 ' + _formatAmount(cell.margin_amount, currency));
+            }
         } else if (cell.pre_rebalance_amount !== null && cell.pre_rebalance_amount !== undefined
             && cell.post_rebalance_amount !== null && cell.post_rebalance_amount !== undefined
             && cell.end_amount !== null && cell.end_amount !== undefined) {
@@ -434,6 +453,9 @@
         if (cell.delta_amount !== null && cell.delta_amount !== undefined) {
             deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount, currency));
         }
+        if (cell.delta_margin_amount !== null && cell.delta_margin_amount !== undefined) {
+            deltaParts.push('保证金 ' + _formatSignedAmount(cell.delta_margin_amount, currency));
+        }
         if (deltaParts.length) {
             var direction = cell.change_direction || 'flat';
             parts.push('<div class="snapshot-cell-delta snapshot-delta-' + _escape(direction) + '">' + deltaParts.join(' · ') + '</div>');
@@ -447,6 +469,41 @@
         var matrices = _snapshotPayload && Array.isArray(_snapshotPayload.matrices) ? _snapshotPayload.matrices : [];
         if (matrices.length <= 1) {
             toggleEl.innerHTML = '';
+            return;
+        }
+        var keys = {};
+        matrices.forEach(function(matrix) { keys[matrix.key] = true; });
+        var hasEventPairToggle = keys.positions_contracts && keys.positions_products
+            && keys.targets_contracts && keys.targets_products;
+        if (hasEventPairToggle) {
+            var current = _snapshotMatrixKey || 'positions_contracts';
+            var mode = current.indexOf('targets_') === 0 ? 'targets' : 'positions';
+            var level = current.indexOf('_products') > 0 ? 'products' : 'contracts';
+            var pairHtml = '<div class="snapshot-matrix-switch snapshot-matrix-switch-paired" role="group">';
+            pairHtml += '<div class="snapshot-toggle-group" aria-label="矩阵类型">';
+            pairHtml += '<button type="button" class="snapshot-matrix-switch-btn' + (mode === 'positions' ? ' active' : '') + '" data-toggle-mode="positions">实际持仓</button>';
+            pairHtml += '<button type="button" class="snapshot-matrix-switch-btn' + (mode === 'targets' ? ' active' : '') + '" data-toggle-mode="targets">策略目标</button>';
+            pairHtml += '</div><div class="snapshot-toggle-group" aria-label="展示层级">';
+            pairHtml += '<button type="button" class="snapshot-matrix-switch-btn' + (level === 'contracts' ? ' active' : '') + '" data-toggle-level="contracts">合约</button>';
+            pairHtml += '<button type="button" class="snapshot-matrix-switch-btn' + (level === 'products' ? ' active' : '') + '" data-toggle-level="products">品种</button>';
+            pairHtml += '</div></div>';
+            toggleEl.innerHTML = pairHtml;
+            var modeButtons = toggleEl.querySelectorAll('[data-toggle-mode]');
+            var levelButtons = toggleEl.querySelectorAll('[data-toggle-level]');
+            function applyPair(nextMode, nextLevel) {
+                _snapshotMatrixKey = nextMode + '_' + nextLevel;
+                renderGroupSnapshot(_snapshotPayload, _snapshotPayload.timestamp_ms);
+            }
+            for (var mi = 0; mi < modeButtons.length; mi++) {
+                modeButtons[mi].onclick = function(evt) {
+                    applyPair(evt.currentTarget.getAttribute('data-toggle-mode') || mode, level);
+                };
+            }
+            for (var li = 0; li < levelButtons.length; li++) {
+                levelButtons[li].onclick = function(evt) {
+                    applyPair(mode, evt.currentTarget.getAttribute('data-toggle-level') || level);
+                };
+            }
             return;
         }
         var html = '<div class="snapshot-matrix-switch" role="tablist">';
@@ -481,6 +538,14 @@
             var count = col.count !== undefined && col.count !== null ? Number(col.count) : null;
             var countLabel = col.count_label || ('持仓品种数(' + (count !== null && isFinite(count) ? count : 0) + ')');
             html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
+            if (Array.isArray(col.events) && col.events.length) {
+                html += '<div class="snapshot-col-events">';
+                col.events.forEach(function(event) {
+                    var eventType = event.type ? ' snapshot-event-' + String(event.type).toLowerCase() : '';
+                    html += '<span class="snapshot-col-event' + _escape(eventType) + '">' + _escape(event.label || event.type || '') + '</span>';
+                });
+                html += '</div>';
+            }
             if (count !== null && isFinite(count)) {
                 html += '<div class="snapshot-col-count-label">' + _escape(countLabel) + '</div>';
             }
@@ -541,6 +606,14 @@
             var totalProdCount = summary.total_prod_count !== undefined ? summary.total_prod_count : 0;
             var avgTurnover = summary.avg_turnover !== undefined ? summary.avg_turnover : 0;
             var statsHtml = '';
+            if (data.event_type || data.event_label) {
+                var eventText = data.event_label || data.event_type || '';
+                var eventType = data.event_type ? ' <span style="color:#64748b;">(' + _escape(data.event_type) + ')</span>' : '';
+                statsHtml += '<div style="margin-bottom:8px;padding:8px 10px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:6px;line-height:1.5;">'
+                    + '<b>事件：</b>' + _escape(eventText) + eventType
+                    + '。本切片展示该事件发生后各组合的持仓、现金和变化。'
+                    + '</div>';
+            }
             if (data.capital_warning) {
                 statsHtml += '<div style="margin-bottom:8px;padding:8px 10px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:6px;line-height:1.5;">'
                     + '⚠️ ' + _escape(data.capital_warning)

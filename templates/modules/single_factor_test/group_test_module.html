@@ -1,13 +1,14 @@
 <div class="module" id="group_test_module" style="margin-top:24px;">
     <style>
-        #group_test_module.gt-hide-config-chips .unified-config-chip-group {
-            display: none !important;
-        }
     </style>
     <div class="section-title">分组测试</div>
 
     <div class="group-test-layer" id="gt-layer-backtest-settings">
         <div id="gt-local-settings-tab-bar"></div>
+        <div
+            id="gt-local-settings-chip-row"
+            style="display:none;gap:6px;flex-wrap:wrap;margin-top:6px;"
+        ></div>
         <div
             id="gt-backtest-local-host"
             data-application="group_test"
@@ -24,8 +25,8 @@
         <span style="font-weight:600;font-size:14px;color:#1f2937;">📦 分组组合设置</span>
         <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
-            <button id="gt-toggle-config-chips" type="button" class="btn btn-outline-secondary btn-sm">隐藏设置标签</button>
             <span id="group_test_status" style="font-size:12px;color:#888;"></span>
+            <button id="cancel_group_test_btn" class="btn btn-outline-danger btn-sm" style="display:none;">取消测试</button>
             <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
         </div>
     </div>
@@ -407,10 +408,16 @@
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
             <div style="display:flex;align-items:center;gap:8px;">
-                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一时刻">◀ 前一时刻</button>
-                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一时刻">后一时刻 ▶</button>
-                <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一个持仓发生变化的时刻">◀ 前一变化</button>
-                <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一个持仓发生变化的时刻">后一变化 ▶</button>
+                <div class="snapshot-nav-group" title="事件组：TARGET / FILL / BAR_CLOSE 的相邻事件">
+                    <span class="snapshot-nav-label">事件组</span>
+                    <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一事件组" aria-label="前一事件组">◀</button>
+                    <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一事件组" aria-label="后一事件组">▶</button>
+                </div>
+                <div class="snapshot-nav-group" title="持仓变化：跳转到至少一个组合持仓发生变化的成交事件">
+                    <span class="snapshot-nav-label">持仓变化</span>
+                    <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一持仓变化" aria-label="前一持仓变化">◁</button>
+                    <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一持仓变化" aria-label="后一持仓变化">▷</button>
+                </div>
                 <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -999,6 +1006,21 @@
         color: #0f4c81;
         font-weight: 600;
     }
+    #group_test_module .snapshot-matrix-switch-paired {
+        gap: 12px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+    #group_test_module .snapshot-toggle-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        background: #fff;
+    }
     #group_test_module .snapshot-batch-section {
         margin-bottom: 20px;
         border: 1px solid #e5e7eb;
@@ -1026,6 +1048,33 @@
         font-size: 10px;
         line-height: 1.2;
         color: #98a2b3;
+    }
+    #group_test_module .snapshot-col-events {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 3px;
+        margin-top: 3px;
+    }
+    #group_test_module .snapshot-col-event {
+        display: inline-flex;
+        align-items: center;
+        min-height: 16px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #eef2f7;
+        color: #334155;
+        font-size: 10px;
+        line-height: 1.2;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-event-fill {
+        background: #e8f5ee;
+        color: #166534;
+    }
+    #group_test_module .snapshot-event-target {
+        background: #eff6ff;
+        color: #1d4ed8;
     }
     #group_test_module .snapshot-ls-section {
         border-color: #c7d2e0;
@@ -1066,6 +1115,29 @@
         padding: 5px 10px;
         cursor: pointer;
         font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-nav-btn {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        text-align: center;
+        font-size: 13px;
+    }
+    #group_test_module .snapshot-nav-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 3px 2px 7px;
+        border: 1px solid #e4e7ec;
+        border-radius: 6px;
+        background: #f8fafc;
+    }
+    #group_test_module .snapshot-nav-label {
+        color: #475467;
+        font-size: 11px;
+        font-weight: 600;
         line-height: 1;
         white-space: nowrap;
     }
@@ -1143,19 +1215,64 @@
     var _loaded = false;
 
     function _loadAllScripts() {
-        // 并行 fetch 所有脚本内容，然后按顺序拼成一个 inline script 执行
-        // 既保证并行下载速度，又保证 DOM 顺序执行
-        return Promise.all(urls.map(function(src) {
-            return fetch(src).then(function(r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
-                return r.text();
+        var fetchFn = (typeof window.fetch === 'function') ? window.fetch.bind(window) : null;
+        function loadViaXHR(src) {
+            return new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', src, true);
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText || '');
+                    else reject(new Error('HTTP ' + xhr.status + ' for ' + src));
+                };
+                xhr.onerror = function() { reject(new Error('Network error for ' + src)); };
+                xhr.send();
             });
-        })).then(function(contents) {
-            var combined = contents.join('\n');
+        }
+        function loadText(src) {
+            if (fetchFn) {
+                return fetchFn(src).then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
+                    return r.text();
+                }).catch(function() {
+                    return loadViaXHR(src);
+                });
+            }
+            return loadViaXHR(src);
+        }
+        function runInline(src, text) {
             var s = document.createElement('script');
-            s.textContent = combined;
+            s.textContent = text + '\n//# sourceURL=' + src;
             document.body.appendChild(s);
+        }
+        function runExternal(src) {
+            return new Promise(function(resolve, reject) {
+                var s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = function() { reject(new Error('script load failed for ' + src)); };
+                document.body.appendChild(s);
+            });
+        }
+        var chain = Promise.resolve();
+        urls.forEach(function(src) {
+            chain = chain.then(function() {
+                return loadText(src).then(function(text) {
+                    runInline(src, text);
+                }).catch(function() {
+                    return runExternal(src);
+                });
+            });
+        });
+        return chain.then(function() {
             console.log('[GT lazy] all ' + urls.length + ' scripts loaded and executed');
+        }).catch(function(err) {
+            console.error('[GT lazy] failed to load deferred scripts', err);
+            var status = document.getElementById('group_test_status');
+            if (status) {
+                status.textContent = '分组设置脚本加载失败: ' + (err && err.message ? err.message : err);
+                status.style.color = '#d40000';
+            }
+            throw err;
         });
     }
 

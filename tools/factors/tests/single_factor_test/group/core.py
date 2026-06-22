@@ -102,8 +102,10 @@ def _emit_progress(phase: str, message: str, **extra) -> None:
                 if bl:
                     extra.setdefault('product_coverage_batch_label', bl)
             cb(phase, message, extra)
-        except Exception:
-            pass
+        except Exception as exc:
+            from tools.backtest.cancellation import BacktestCancelled
+            if isinstance(exc, BacktestCancelled):
+                raise
 
 
 _TARGET_REBUILD_MAX_ITERATIONS = 8
@@ -174,6 +176,8 @@ class GroupSharedInputs:
     T: int
     P: int
     multi_session_active: bool
+    multi_session_missing_products: list[str]
+    multi_session_missing_count: int
 
 
 @dataclass(slots=True)
@@ -433,6 +437,7 @@ def _prepare_group_shared_inputs(
         )
     table_src = table_src.loc[signal_index]
     returns_src = returns_src.loc[signal_index]
+    raw_signal_count = int(len(signal_index))
 
     if calendar_index is not None and len(calendar_index) > 0:
         common_index = pd.Index(calendar_index)
@@ -442,6 +447,25 @@ def _prepare_group_shared_inputs(
     else:
         common_index = signal_index
         signal_update_mask = np.ones(len(common_index), dtype=bool)
+    signal_update_count = int(np.count_nonzero(signal_update_mask))
+    calendar_count = int(len(common_index))
+    _emit_progress(
+        "signal_sequence",
+        (
+            f"{factor.alias} 信号序列：原始 {raw_signal_count} 点，"
+            f"公共时钟 {calendar_count} 点，实际更新 {signal_update_count} 点"
+        ),
+        completed=signal_update_count,
+        total=max(calendar_count, 1),
+        raw_signal_count=raw_signal_count,
+        calendar_count=calendar_count,
+        signal_update_count=signal_update_count,
+        calendar_expansion_ratio=(
+            float(calendar_count) / float(max(raw_signal_count, 1))
+        ),
+        first_signal=str(signal_index[0]) if raw_signal_count else "",
+        last_signal=str(signal_index[-1]) if raw_signal_count else "",
+    )
 
     all_cols = list(table_src.columns)
     ret_cols = list(returns_src.columns)
@@ -578,6 +602,7 @@ def _prepare_group_shared_inputs(
     present_filled[:, ~col_has_any_present] = True
     mixed_mask = signal_update_mask & np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
     multi_session_active = bool(mixed_mask.any())
+    missing_names: list[str] = []
     if multi_session_active:
         after_head_missing = (~present_np) & (~head_missing)
         missing_cols = np.where(np.any(after_head_missing, axis=0))[0]
@@ -608,6 +633,8 @@ def _prepare_group_shared_inputs(
         T=T,
         P=P,
         multi_session_active=multi_session_active,
+        multi_session_missing_products=missing_names,
+        multi_session_missing_count=len(missing_names),
     )
 
 
@@ -905,9 +932,15 @@ def _resolve_group_trade_specs(
                 if fname in VALID_FEE_FIELDS:
                     fields[fname] = float(fval)
 
-    # ── Time-varying specs via date-range query (if index_list provided) ──
+    full_index = pd.DatetimeIndex(index_list) if index_list is not None else pd.DatetimeIndex([])
+
+    # ── Time-varying specs via date-range query.
+    # latest_available intentionally does not query a full historical panel:
+    # until a dedicated historical provider is connected, the current product
+    # object / latest local snapshot is the explicit as-of source and is
+    # broadcast across the evaluation range.
     db_time_specs: dict[str, pd.DataFrame] = {}
-    if index_list is not None and len(index_list) > 0:
+    if market_rule_fallback == "strict_historical" and len(full_index) > 0:
         _spec_field_names = (
             "multiplier", "min_tick", "min_trade_quantity", "long_margin_ratio",
             "open_ratio", "open_fixed", "close_ratio", "close_fixed",
@@ -915,19 +948,18 @@ def _resolve_group_trade_specs(
         )
         try:
             from sources.OpenCTP.fields import get_products_specs_over_date_range
+            trading_days = pd.DatetimeIndex(full_index.normalize().unique()).sort_values()
             db_time_specs = get_products_specs_over_date_range(
                 products=list(valid_cols),
-                trading_days=index_list,
+                trading_days=trading_days,
                 fields=list(_spec_field_names),
             )
         except Exception as exc:
-            if market_rule_fallback == "strict_historical":
-                raise RuntimeError(
-                    f"历史市场规则查询失败，strict_historical 不允许回退: {exc}"
-                ) from exc
-            db_time_specs = {}
+            raise RuntimeError(
+                f"历史市场规则查询失败，strict_historical 不允许回退: {exc}"
+            ) from exc
 
-    T = len(index_list) if index_list is not None else 1
+    T = len(full_index) if len(full_index) else 1
 
     # ── Compute product-level defaults for fallback ──
     half_fee = float(fee) / 2.0
@@ -1002,9 +1034,27 @@ def _resolve_group_trade_specs(
     def _build_mat(field: str, per_product_defaults: list[float], default_fallback: float = 0.0) -> np.ndarray:
         """Resolve historical rules under an explicit, observable fallback policy."""
         df = db_time_specs.get(field)
+        if market_rule_fallback == "latest_available":
+            mat = np.broadcast_to(
+                np.asarray(per_product_defaults, dtype=float).reshape(1, P), (T, P)
+            ).copy()
+            rule_provenance[field] = {
+                "effective_at": 0,
+                "as_of_latest": int(mat.size),
+                "configured_default": 0,
+            }
+            return mat
+        if market_rule_fallback == "configured_default":
+            mat = np.full((T, P), float(default_fallback), dtype=float)
+            rule_provenance[field] = {
+                "effective_at": 0,
+                "as_of_latest": 0,
+                "configured_default": int(mat.size),
+            }
+            return mat
         if df is not None and not df.empty:
-            idx = pd.DatetimeIndex(index_list) if index_list is not None else pd.DatetimeIndex([])
-            mat = df.reindex(index=idx).to_numpy(dtype=float)
+            day_index = full_index.normalize() if len(full_index) else pd.DatetimeIndex([])
+            mat = df.reindex(index=day_index).to_numpy(dtype=float)
             if mat.shape != (T, P):
                 raise ValueError(
                     f"历史市场规则 {field} shape={mat.shape}，期望 {(T, P)}"
@@ -1023,7 +1073,7 @@ def _resolve_group_trade_specs(
         if market_rule_fallback == "strict_historical":
             row, column = np.argwhere(missing)[0]
             product_name = getattr(valid_cols[int(column)], "name", str(valid_cols[int(column)]))
-            timestamp = pd.DatetimeIndex(index_list)[int(row)] if index_list is not None else row
+            timestamp = full_index[int(row)] if len(full_index) else row
             raise ValueError(
                 f"缺少历史市场规则 field={field}, product={product_name}, timestamp={timestamp}"
             )

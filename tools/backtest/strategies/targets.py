@@ -60,6 +60,8 @@ class GroupTargetCalculator:
         self._previous_prices: np.ndarray | None = None
         self.target_trace: dict[str, dict[str, float]] = {}
         self.fallback_events: list[dict[str, Any]] = []
+        self.empty_leg_events: list[dict[str, Any]] = []
+        self.overlap_events: list[dict[str, Any]] = []
 
     def update(
         self,
@@ -91,10 +93,29 @@ class GroupTargetCalculator:
                 return None
             long_selected = np.any(members[list(self.long_indices)], axis=0)
             short_selected = np.any(members[list(self.short_indices)], axis=0)
-            if np.any(long_selected & short_selected):
-                raise ValueError(f"Long-Short legs overlap at {timestamp.isoformat()}")
+            overlap = long_selected & short_selected
+            if np.any(overlap):
+                self.overlap_events.append({
+                    "timestamp": pd.Timestamp(timestamp).isoformat(),
+                    "overlap_count": int(np.count_nonzero(overlap)),
+                    "instruments": [
+                        instrument for instrument, is_overlap in zip(
+                            self.instruments, overlap, strict=True
+                        )
+                        if bool(is_overlap)
+                    ],
+                })
+                long_selected = long_selected & ~overlap
+                short_selected = short_selected & ~overlap
             selected = long_selected | short_selected
             if not self.rebalance.should_rebalance(timestamp, selected):
+                return None
+            if not np.any(long_selected) or not np.any(short_selected):
+                self.empty_leg_events.append({
+                    "timestamp": pd.Timestamp(timestamp).isoformat(),
+                    "long_count": int(np.count_nonzero(long_selected)),
+                    "short_count": int(np.count_nonzero(short_selected)),
+                })
                 return None
             weights = self._allocate(timestamp, long_selected, margin_ratios, 0.5, "long")
             weights -= self._allocate(timestamp, short_selected, margin_ratios, 0.5, "short")
@@ -161,6 +182,10 @@ class GroupTargetCalculator:
         return {
             "volatility_warmup_fallback_count": len(self.fallback_events),
             "volatility_warmup_fallbacks": self.fallback_events,
+            "long_short_empty_leg_count": len(self.empty_leg_events),
+            "long_short_empty_legs": self.empty_leg_events,
+            "long_short_overlap_count": len(self.overlap_events),
+            "long_short_overlaps": self.overlap_events,
             "last_volatilities": self.estimator.snapshot(),
         }
 
@@ -349,6 +374,8 @@ def _compile_long_short_strategy(
     )
     targets = {}
     fallback_events = []
+    empty_leg_events = []
+    overlap_events = []
     previous_prices = None
     active_indices = long_indices + short_indices
     for row, timestamp in enumerate(index):
@@ -362,10 +389,29 @@ def _compile_long_short_strategy(
             continue
         long_selected = np.any(memberships[row, long_indices, :], axis=0)
         short_selected = np.any(memberships[row, short_indices, :], axis=0)
-        if np.any(long_selected & short_selected):
-            raise ValueError(f"Long-Short legs overlap at {timestamp.isoformat()}")
+        overlap = long_selected & short_selected
+        if np.any(overlap):
+            overlap_events.append({
+                "timestamp": timestamp.isoformat(),
+                "overlap_count": int(np.count_nonzero(overlap)),
+                "instruments": [
+                    instrument for instrument, is_overlap in zip(
+                        instruments, overlap, strict=True
+                    )
+                    if bool(is_overlap)
+                ],
+            })
+            long_selected = long_selected & ~overlap
+            short_selected = short_selected & ~overlap
         active = long_selected | short_selected
         if not rebalance.should_rebalance(timestamp, active):
+            continue
+        if not np.any(long_selected) or not np.any(short_selected):
+            empty_leg_events.append({
+                "timestamp": timestamp.isoformat(),
+                "long_count": int(np.count_nonzero(long_selected)),
+                "short_count": int(np.count_nonzero(short_selected)),
+            })
             continue
         volatilities = estimator.snapshot()
         margin = dict(zip(instruments, margin_ratios[row], strict=True))
@@ -412,6 +458,10 @@ def _compile_long_short_strategy(
         "diagnostics": {
             "volatility_warmup_fallback_count": len(fallback_events),
             "volatility_warmup_fallbacks": fallback_events,
+            "long_short_empty_leg_count": len(empty_leg_events),
+            "long_short_empty_legs": empty_leg_events,
+            "long_short_overlap_count": len(overlap_events),
+            "long_short_overlaps": overlap_events,
             "last_volatilities": estimator.snapshot(),
         },
     }

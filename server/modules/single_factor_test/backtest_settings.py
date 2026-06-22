@@ -22,6 +22,8 @@ def get_backtest_setting_application(application: str):
         start, end, _start_calc = current_time
         manifest["defaults"]["start_date"]["value"] = _date_value(start)
         manifest["defaults"]["end_date"]["value"] = _date_value(end)
+        manifest["defaults"]["start_time"]["value"] = _time_value(start)
+        manifest["defaults"]["end_time"]["value"] = _time_value(end)
     return jsonify({"success": True, **manifest})
 
 
@@ -37,3 +39,8 @@ def get_backtest_setting_tab(application: str, tab_key: str):
 def _date_value(value) -> str:
     timestamp = getattr(value, "ts", value)
     return timestamp.strftime("%Y-%m-%d")
+
+
+def _time_value(value) -> str:
+    timestamp = getattr(value, "ts", value)
+    return timestamp.strftime("%H:%M")

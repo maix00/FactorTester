@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import threading
 from dataclasses import dataclass
 
 from tools.data.types import DataFreq
@@ -8,6 +9,7 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
 from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+from tools.factors.FactorTester import FactorTester
 
 
 class _FakeFactor:
@@ -192,3 +194,33 @@ def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monke
     assert [spec.factor_alias for spec in tester.specs] == ["FactorA", "FactorB"]
     assert [spec.simulation_index for spec in tester.specs] == [0, 0]
     assert [spec.signal_membership_np.shape[1] for spec in tester.specs] == [1, 1]
+
+
+def test_group_calendar_auto_preserves_factor_signal_events() -> None:
+    tester = FactorTester.__new__(FactorTester)
+    factor = _FakeFactor()
+    factor.alias = "SparseSignal"
+    factor.freq = DataFreq.MIN1
+    factor._expr = object()
+    tester.factors = [factor]
+    tester.group_calendar_freq = "auto"
+    tester.products = ["P"]
+    tester._results_lock = threading.RLock()
+    tester.results = {
+        factor: FactorRunResult(factor=factor)
+    }
+    sparse_index = pd.to_datetime([
+        "2024-01-01 09:00",
+        "2024-01-01 09:07",
+        "2024-01-01 09:30",
+    ])
+    tester.results[factor].table = pd.DataFrame({"P": [1.0, 2.0, 3.0]}, index=sparse_index)
+    tester.results[factor].returns = pd.DataFrame({"P": [0.01, 0.02, 0.03]}, index=sparse_index)
+
+    auto_index = tester.build_group_calendar_index(["SparseSignal"], requested_calendar_freq="auto")
+    dense_index = tester.build_group_calendar_index(["SparseSignal"], requested_calendar_freq=DataFreq.MIN1)
+
+    assert list(auto_index) == list(sparse_index)
+    assert len(dense_index) == 31
+    assert dense_index[0] == sparse_index[0]
+    assert dense_index[-1] == sparse_index[-1]

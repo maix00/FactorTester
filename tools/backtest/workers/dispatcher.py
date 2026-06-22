@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 
 from .contracts import WorkerRequest, WorkerResponse
+from ..cancellation import BacktestCancelled
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -32,6 +34,7 @@ class EngineWorkerDispatcher:
         *,
         timeout_seconds: float = 120.0,
         progress: Callable[[dict], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> WorkerResponse:
         try:
             environment = self.environments[request.engine]
@@ -48,8 +51,9 @@ class EngineWorkerDispatcher:
                     json.dumps(request.to_dict()),
                     timeout_seconds,
                     progress,
+                    cancel_event,
                 )
-                if progress is not None
+                if progress is not None or cancel_event is not None
                 else subprocess.run(
                     command,
                     cwd=REPO_ROOT,
@@ -82,7 +86,7 @@ class EngineWorkerDispatcher:
         return response
 
     @staticmethod
-    def _run_streaming(command, request_json, timeout_seconds, progress):
+    def _run_streaming(command, request_json, timeout_seconds, progress, cancel_event):
         process = subprocess.Popen(
             command,
             cwd=REPO_ROOT,
@@ -103,7 +107,8 @@ class EngineWorkerDispatcher:
             for line in process.stderr:
                 if line.startswith("GTHT_PROGRESS "):
                     try:
-                        progress(json.loads(line[len("GTHT_PROGRESS "):]))
+                        if progress is not None:
+                            progress(json.loads(line[len("GTHT_PROGRESS "):]))
                     except (json.JSONDecodeError, TypeError, ValueError):
                         stderr_parts.append(line)
                 else:
@@ -116,12 +121,28 @@ class EngineWorkerDispatcher:
         assert process.stdin is not None
         process.stdin.write(request_json)
         process.stdin.close()
-        try:
-            returncode = process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            raise
+        deadline = time.monotonic() + timeout_seconds
+        while process.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                process.terminate()
+                try:
+                    process.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                stdout_thread.join(timeout=1.0)
+                stderr_thread.join(timeout=1.0)
+                raise BacktestCancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(command, timeout_seconds)
+            try:
+                process.wait(timeout=min(0.1, remaining))
+            except subprocess.TimeoutExpired:
+                continue
+        returncode = int(process.returncode or 0)
         stdout_thread.join()
         stderr_thread.join()
         return subprocess.CompletedProcess(

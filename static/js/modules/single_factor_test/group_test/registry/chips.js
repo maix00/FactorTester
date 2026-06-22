@@ -339,13 +339,8 @@
      * Called by registry.js when a panel is registered.
      */
     function bridgeConfigPanel(def) {
-        if (def.panel && typeof def.panel.getChips === 'function') {
-            registerChipProvider({
-                category: CHIP_CATEGORY.CONFIG,
-                name: 'config-' + def.name,
-                getChips: def.panel.getChips
-            });
-        }
+        // Backtest-setting chips are generated exclusively from the backend
+        // settings manifest by core/backend-settings.js.
     }
 
     // ── Attach to GT_CONFIG_REGISTRY ──

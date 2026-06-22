@@ -384,14 +384,23 @@ class FactorTester(UniqueNameObject):
         return self.resolve_group_calendar_freq_from_factor_freqs(factor_freqs, setting)
 
     def build_group_calendar_index(self, factor_aliases: List[str], requested_calendar_freq: Optional[Any] = None) -> pd.Index:
-        """Build a dense shared signal calendar for group testing within this tester."""
+        """Build the shared event calendar for group testing.
+
+        Auto mode preserves each factor's own signal timestamps and merges them
+        into an event union.  A dense date_range is only built when the user
+        explicitly requests a common calendar frequency.
+        """
         from typing import cast
         from tools.factors.tests.single_factor_test.group.core import (
             align_table_for_group,
             get_factor_table_for_group,
         )
 
-        calendar_freq = self.resolve_group_calendar_freq(factor_aliases, requested_calendar_freq)
+        explicit_dense_calendar = requested_calendar_freq not in (None, '', 'auto', 'AUTO')
+        calendar_freq = (
+            self.resolve_group_calendar_freq(factor_aliases, requested_calendar_freq)
+            if explicit_dense_calendar else None
+        )
         indices: list[pd.DatetimeIndex] = []
 
         for factor_alias in factor_aliases:
@@ -416,6 +425,8 @@ class FactorTester(UniqueNameObject):
         merged = self.merge_group_calendar_indices(indices)
         if len(merged) == 0:
             return merged
+        if not explicit_dense_calendar:
+            return pd.DatetimeIndex(merged).sort_values()
         merged_idx = pd.DatetimeIndex(merged).sort_values()
         start = merged_idx[0]
         end = merged_idx[-1]

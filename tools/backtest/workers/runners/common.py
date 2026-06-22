@@ -12,6 +12,14 @@ import pandas as pd
 from ...strategies.targets import GroupTargetCalculator
 
 
+def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
+    """Bound progress transport cost without changing event replay semantics."""
+    if total <= 0 or completed <= 1 or completed >= total:
+        return True
+    stride = max(1, int(np.ceil(total / max(max_updates, 1))))
+    return completed % stride == 0
+
+
 @dataclass(frozen=True, slots=True)
 class TargetWeightInput:
     timestamps: tuple[pd.Timestamp, ...]
@@ -164,6 +172,30 @@ def valuation_price(request: TargetWeightInput, row: int, instrument: str) -> fl
     return request.prices[instrument][row] * request.multipliers[row][position]
 
 
+def position_value_snapshot(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    positions: Mapping[str, float],
+) -> tuple[dict[str, float], dict[str, float] | None]:
+    """Return notional and optional margin-occupied values for positions."""
+    notional = {
+        instrument: float(quantity) * valuation_price(request, row, instrument)
+        for instrument, quantity in positions.items()
+    }
+    if str(strategy.get("margin_mode") or "none") == "none":
+        return notional, None
+    margin = {}
+    for position, instrument in enumerate(request.instruments):
+        quantity = float(positions.get(instrument, 0.0))
+        margin[instrument] = (
+            abs(quantity)
+            * valuation_price(request, row, instrument)
+            * float(request.margin_ratios[row][position])
+        )
+    return notional, margin
+
+
 def execution_price(
     base_price: float,
     signed_quantity: float,
@@ -203,6 +235,48 @@ def capacity_limited_deltas(
             abs(delta), request.volumes[instrument][row] * rate
         )
         for instrument, delta in deltas.items()
+    }
+
+
+def execution_trace_entry(
+    request: TargetWeightInput,
+    row: int,
+    strategy: Mapping[str, Any],
+    current: Mapping[str, float],
+    deltas: Mapping[str, float],
+    cash: float,
+) -> dict[str, Any]:
+    """Describe the fee-aware executable target produced inside one event."""
+    def clean(value: float) -> float:
+        value = float(value)
+        if abs(value) <= 1e-12:
+            return 0.0
+        return round(value, 10)
+
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    sell_proceeds_after_fee = 0.0
+    buy_cost_with_fee = 0.0
+    clean_deltas: dict[str, float] = {}
+    target_size: dict[str, float] = {}
+    for instrument in request.instruments:
+        delta = float(deltas.get(instrument, 0.0))
+        clean_deltas[instrument] = clean(delta)
+        target_size[instrument] = clean(float(current.get(instrument, 0.0)) + delta)
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            sell_proceeds_after_fee += notional * (1.0 - fee_rate)
+        else:
+            buy_cost_with_fee += notional * (1.0 + fee_rate)
+    return {
+        "delta": clean_deltas,
+        "target_size": target_size,
+        "cash_before": clean(cash),
+        "cash_available_after_sells": clean(float(cash) + sell_proceeds_after_fee),
+        "buy_cost_with_fee": clean(buy_cost_with_fee),
+        "fee_rate": clean(fee_rate),
     }
 
 

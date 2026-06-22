@@ -113,6 +113,7 @@
                     console.error('[SnapshotRegistry] summarize failed for:', entry.key, e);
                 }
             }
+            html += _summarizeBackendBacktestSettings(snapshot);
             return html;
         },
 
@@ -197,6 +198,51 @@
         var d = dateValue || '';
         var t = timeValue || '';
         return (d && t) ? (d + ' ' + t) : (d || t || '未设置');
+    }
+
+    function _summarizeBackendBacktestSettings(snapshot) {
+        var local = snapshot && snapshot.local_settings;
+        var html = '';
+        if (!local) return html;
+        var index = window.GroupTest && window.GroupTest.backendSettings && window.GroupTest.backendSettings._state
+            ? window.GroupTest.backendSettings._state.index
+            : null;
+        if (index && index.defaults && index.tab_lists) {
+            var values = {};
+            Object.keys(index.defaults).forEach(function(key) {
+                values[key] = index.defaults[key].value;
+            });
+            Object.keys(local).forEach(function(key) { values[key] = local[key]; });
+            (index.tab_lists['local-settings'] || []).forEach(function(tab) {
+                if (!tab.summary_template) return;
+                var keys = Array.isArray(tab.summary_keys) && tab.summary_keys.length
+                    ? tab.summary_keys
+                    : Object.keys(index.defaults).filter(function(key) {
+                        return index.defaults[key].tab_key === tab.key;
+                    });
+                if (!keys.some(function(key) { return Object.prototype.hasOwnProperty.call(local, key); })) return;
+                var text = String(tab.summary_template).replace(/\{([^}]+)\}/g, function(_, key) {
+                    return values[key] === undefined || values[key] === null ? '' : String(values[key]);
+                }).replace(/\s+/g, ' ').trim();
+                html += _buildSummaryRow(tab.label || tab.key, 'local_settings', text, '⚙️');
+            });
+        }
+        var mounted = [];
+        var summarized = {};
+        if (index && index.defaults && index.tab_lists) {
+            (index.tab_lists['local-settings'] || []).forEach(function(tab) {
+                if (!tab.summary_template) return;
+                (tab.summary_keys || []).forEach(function(key) { summarized[key] = true; });
+            });
+        }
+        var keys = Object.keys(local).filter(function(key) { return !summarized[key]; });
+        if ((Array.isArray(mounted) && mounted.length) || keys.length) {
+            var parts = [];
+            if (Array.isArray(mounted) && mounted.length) parts.push('显示页签: ' + mounted.join(', '));
+            if (keys.length) parts.push('显式字段: ' + keys.join(', '));
+            html += _buildSummaryRow('回测设置', 'local_settings', parts, '⚙️');
+        }
+        return html;
     }
 
     function _normalizeSubmissionForTemplate(s) {
@@ -285,95 +331,7 @@
     // 注册 6 个内置模块（order 控制 apply 顺序）
     // ═══════════════════════════════════════════════════════════════════════
 
-    // ── 1. time_data (order=10, 最先：影响 tester 创建) ──
-    SnapshotRegistry.register({
-        key: 'time_data',
-        order: 10,
-        label: '时间范围',
-        icon: '📅',
-        collect: function() {
-            var sY = document.getElementById('start_year');
-            var sM = document.getElementById('start_month');
-            var sD = document.getElementById('start_day');
-            var sH = document.getElementById('start_hour');
-            var sMin = document.getElementById('start_minute');
-            var eY = document.getElementById('end_year');
-            var eM = document.getElementById('end_month');
-            var eD = document.getElementById('end_day');
-            var eH = document.getElementById('end_hour');
-            var eMin = document.getElementById('end_minute');
-            var isTd = document.getElementById('is_trading_day');
-            var isCfd = document.getElementById('is_cn_futures_day');
-            var isCfn = document.getElementById('is_cn_futures_night');
-            var tz = document.getElementById('timezone_input');
-            var pad = function(n) { return (parseInt(n) < 10 ? '0' : '') + parseInt(n); };
-            return {
-                start_date: sY ? sY.value + '-' + pad(sM?.value||1) + '-' + pad(sD?.value||1) : '',
-                start_time: sH ? pad(sH?.value||9) + ':' + pad(sMin?.value||0) : '09:00',
-                end_date: eY ? (eY.value||(sY?sY.value:'')) + '-' + pad(eM?.value||1) + '-' + pad(eD?.value||1) : '',
-                end_time: eH ? pad(eH?.value||15) + ':' + pad(eMin?.value||0) : '15:00',
-                is_trading_day: isTd ? isTd.checked : false,
-                is_cn_futures_day: isCfd ? isCfd.checked : false,
-                is_cn_futures_night: isCfn ? isCfn.checked : false,
-                timezone: tz ? tz.value : 'Asia/Shanghai',
-                start: '', end: ''
-            };
-        },
-        apply: async function(td) {
-            var setVal = function(id, val) { var el = document.getElementById(id); if (el && val !== null && val !== undefined) el.value = val; };
-            if (td.start_date) { var parts = td.start_date.split('-'); setVal('start_year', parts[0]); setVal('start_month', parts[1]); setVal('start_day', parts[2]); }
-            if (td.start_time) { var parts = td.start_time.split(':'); setVal('start_hour', parts[0]); setVal('start_minute', parts[1]); }
-            if (td.end_date) { var parts = td.end_date.split('-'); setVal('end_year', parts[0]); setVal('end_month', parts[1]); setVal('end_day', parts[2]); }
-            if (td.end_time) { var parts = td.end_time.split(':'); setVal('end_hour', parts[0]); setVal('end_minute', parts[1]); }
-            setVal('timezone_input', td.timezone);
-            var isTdCb = document.getElementById('is_trading_day');
-            var isCfdCb = document.getElementById('is_cn_futures_day');
-            var isCfnCb = document.getElementById('is_cn_futures_night');
-            if (isTdCb) isTdCb.checked = !!td.is_trading_day;
-            if (isCfdCb) isCfdCb.checked = !!td.is_cn_futures_day;
-            if (isCfnCb) isCfnCb.checked = !!td.is_cn_futures_night;
-            var timeDisabled = !!(td.is_trading_day || td.is_cn_futures_day || td.is_cn_futures_night);
-            [document.getElementById('start_hour'), document.getElementById('start_minute'),
-             document.getElementById('end_hour'), document.getElementById('end_minute')].forEach(function(el) {
-                if (el) { el.disabled = timeDisabled; el.style.background = timeDisabled ? '#ccc' : '#eee'; }
-            });
-            var currentSettingsSpan = document.getElementById('current_settings');
-            if (currentSettingsSpan) {
-                var padFn = function(n) { n = parseInt(n); return n < 10 ? '0' + n : String(n); };
-                var sy = document.getElementById('start_year')?.value || '';
-                var sm = padFn(document.getElementById('start_month')?.value || 1);
-                var sd = padFn(document.getElementById('start_day')?.value || 1);
-                var sh = padFn(document.getElementById('start_hour')?.value || 0);
-                var smin = padFn(document.getElementById('start_minute')?.value || 0);
-                var ey = document.getElementById('end_year')?.value || '';
-                var em = padFn(document.getElementById('end_month')?.value || 1);
-                var ed = padFn(document.getElementById('end_day')?.value || 1);
-                var eh = padFn(document.getElementById('end_hour')?.value || 0);
-                var emin = padFn(document.getElementById('end_minute')?.value || 0);
-                var suffix = td.is_trading_day ? ' (交易日)' : (td.is_cn_futures_day ? ' (期货日盘)' : (td.is_cn_futures_night ? ' (期货夜盘)' : ''));
-                currentSettingsSpan.innerText = '起始时间: ' + sy + '-' + sm + '-' + sd + ' ' + sh + ':' + smin + ', 终末时间: ' + ey + '-' + em + '-' + ed + ' ' + eh + ':' + emin + suffix;
-            }
-            if (typeof updateTimeSummary === 'function') updateTimeSummary();
-            try {
-                var resp = await fetch('/set_time_range', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ factor_family_alias: FF_ALIAS, page_uuid: window._pageUuid || '', start_date: td.start_date || '', start_time: td.start_time || '09:00', end_date: td.end_date || '', end_time: td.end_time || '15:00', is_trading_day: td.is_trading_day || false, is_cn_futures_day: td.is_cn_futures_day || false, is_cn_futures_night: td.is_cn_futures_night || false, timezone: td.timezone || 'Asia/Shanghai' })
-                });
-                var data = await resp.json();
-                if (data.page_uuid) window._pageUuid = data.page_uuid;
-            } catch (e) { console.error('恢复时间范围失败:', e); }
-        },
-        summarize: function(td) {
-            var mode = td.is_trading_day ? '交易日' : (td.is_cn_futures_day ? '期货日盘' : (td.is_cn_futures_night ? '期货夜盘' : '自然时间'));
-            return [
-                '起始: ' + _formatDateTime(td.start_date, td.start_time),
-                '终止: ' + _formatDateTime(td.end_date, td.end_time),
-                '时区: ' + (td.timezone || 'Asia/Shanghai') + ' · ' + mode
-            ];
-        }
-    });
-
-    // ── 2. params_list (order=20, 在 time_data 之后) ──
+    // ── 1. params_list (order=20) ──
     SnapshotRegistry.register({
         key: 'params_list',
         order: 20,
@@ -614,6 +572,9 @@
                         console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                     }
                     console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups, ' + remappedCount + ' remapped');
+                    if (GT.backendSettings && typeof GT.backendSettings.applyFlatSnapshot === 'function') {
+                        GT.backendSettings.applyFlatSnapshot((ctx && ctx.snapshot) || { group_settings: working });
+                    }
                     if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
                         GT.tabs.mountTab('list');
                     }
@@ -627,12 +588,16 @@
         if (LS) {
             SnapshotRegistry.register({
                 key: LS.key,
-                order: LS.order,
+                order: 15,
                 label: LS.label,
                 icon: LS.icon,
                 collect: LS.collect,
-                apply: function(localSettings) {
-                    var result = LS.apply(_deepClone(localSettings) || {});
+                apply: async function(localSettings) {
+                    var working = _deepClone(localSettings) || {};
+                    if (GT.backendSettings && typeof GT.backendSettings.applyFlatSnapshot === 'function') {
+                        await GT.backendSettings.applyFlatSnapshot({ local_settings: working });
+                    }
+                    var result = LS.apply(working);
                     if (result.errors && result.errors.length > 0) {
                         console.warn('[global_template] local_settings apply warnings:', result.errors);
                     }
@@ -651,7 +616,16 @@
     async function collectSnapshot() {
         await _ensureGroupTestAdapters();
         _commitGroupConfigDirty();
-        return await SnapshotRegistry.collectAll();
+        var snapshot = await SnapshotRegistry.collectAll();
+        if (window.GroupTest && GroupTest.backendSettings && typeof GroupTest.backendSettings.collectLocalSettings === 'function') {
+            snapshot.local_settings = Object.assign(
+                {},
+                snapshot.local_settings || {},
+                GroupTest.backendSettings.collectLocalSettings()
+            );
+            if (!Object.keys(snapshot.local_settings).length) delete snapshot.local_settings;
+        }
+        return snapshot;
     }
 
     // ── 应用快照（通过注册表，按 order 顺序） ───────────────────────────
@@ -661,7 +635,7 @@
         await _ensureGroupTestAdapters();
 
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
-        var ctx = { tplId: tplId };
+        var ctx = { tplId: tplId, snapshot: snapshot };
 
         // 在 apply submissions 之后，构建 oldToNewTesterId 映射供 group_settings 使用
         // 这是跨注册项的依赖：group_settings(50) 依赖 submissions(30) 重映射后的 testerId

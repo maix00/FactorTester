@@ -30,239 +30,165 @@ from ...market_rules import (
 )
 from ...risk.margin import FuturesMarginConstraint
 from ...strategies.membership import MembershipAllocationStrategy
-from .common import market_rule_diagnostics, parse_target_weight_input
+from .common import (
+    capacity_limited_deltas,
+    execution_trace_entry,
+    execution_price,
+    market_rule_diagnostics,
+    parse_group_strategy_input,
+    parse_target_weight_input,
+    position_value_snapshot,
+    should_report_progress,
+    target_quantities,
+    valuation_price,
+)
 
 
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    strategy_configs = tuple(payload.get("strategy_configs", ()))
-    request = parse_target_weight_input({
-        **dict(payload),
-        "strategies": [
-            {"strategy_id": str(config.get("strategy_id") or ""), "targets": {}}
-            for config in strategy_configs
-        ],
-    })
-    membership = np.asarray(payload.get("membership"), dtype=bool)
-    market = MarketState()
-    adjusted = np.asarray([
-        [
-            request.prices[name][row] * request.multipliers[row][column]
-            for column, name in enumerate(request.instruments)
-        ]
-        for row in range(len(request.timestamps))
-    ])
-    source = ReplayEventSource(
-        request.timestamps,
-        [
-            MarketSlice({
-                name: ProductPrice(
-                    name,
-                    adjusted[row, column],
-                    (
-                        {"VOLUME": request.volumes[name][row]}
-                        if request.volumes is not None else {}
-                    ),
-                )
-                for column, name in enumerate(request.instruments)
-            })
-            for row in range(len(request.timestamps))
-        ],
-        topic=EventTopic.MARKET_SLICE_CLOSED,
-    )
-    margin_by_timestamp = {
-        timestamp: dict(zip(request.instruments, row, strict=True))
-        for timestamp, row in zip(
-            request.timestamps,
-            request.margin_ratios,
-            strict=True,
-        )
-    }
-    factors = []
-    lanes = []
-    venues = []
-    strategies = []
-    rule_usages: dict[str, RuleUsageJournal] = {}
-    if payload.get("signal_updates") is None:
-        raise ValueError("native group strategy requires an explicit signal-update mask")
-    signal_updates = np.asarray(payload["signal_updates"], dtype=bool)
-    if signal_updates.shape != membership.shape[:2]:
-        raise ValueError("signal-update mask must match membership time/strategy axes")
-    for position, config in enumerate(strategy_configs):
-        strategy_id = str(config["strategy_id"])
-        portfolio_id = f"{strategy_id}:portfolio"
-        factor_alias = f"membership:{strategy_id}"
-        if str(config.get("strategy_kind") or "group") == "long_short":
-            long_indices = tuple(int(value) for value in config.get("long_indices", ()))
-            short_indices = tuple(int(value) for value in config.get("short_indices", ()))
-            factor_values = (
-                np.any(membership[:, long_indices, :], axis=1).astype(float)
-                - np.any(membership[:, short_indices, :], axis=1).astype(float)
-            )
-            active_mask = np.any(
-                signal_updates[:, long_indices + short_indices], axis=1
-            )
-        else:
-            membership_index = int(config.get("membership_index", position))
-            factor_values = membership[:, membership_index, :].astype(float)
-            active_mask = signal_updates[:, membership_index]
-        factors.append(PrecomputedFactorPublisher(
-            factor_alias,
-            pd.DataFrame(
-                factor_values,
-                index=request.timestamps,
-                columns=request.instruments,
-            ),
-        ))
-        strategy = MembershipAllocationStrategy(
-            factor_alias=factor_alias,
-            strategy_id=strategy_id,
-            portfolio_id=portfolio_id,
-            instruments=request.instruments,
-            market=market,
-            config=config,
-            margin_ratios=margin_by_timestamp,
-            active_timestamps=frozenset(
-                timestamp
-                for row, timestamp in enumerate(request.timestamps)
-                if active_mask[row]
-            ),
-        )
-        ledger = Ledger(
-            portfolio_id,
-            request.instruments,
-            round(float(config.get("initial_capital") or request.initial_cash) * 100),
-            CashAccounting(point_values={name: 1.0 for name in request.instruments}),
-            valuation_prices=market.prices,
-        )
-        usage = RuleUsageJournal()
-        rule_usages[strategy_id] = usage
-        contract_history = {
-            name: [
-                (
-                    timestamp,
-                    ContractRule(1.0, request.lot_sizes[row][column], 1e-12),
-                )
-                for row, timestamp in enumerate(request.timestamps)
-            ]
-            for column, name in enumerate(request.instruments)
-        }
-        sizer = ProviderContractSizer(
-            market,
-            TemporalRuleProvider(contract_history),
-            RuleFallbackPolicy.STRICT_HISTORICAL,
-            usage,
-        )
-        intent_policy = None
-        if str(config.get("margin_mode") or "none") != "none":
-            margin_history = {
-                name: [
-                    (timestamp, request.margin_ratios[row][column])
-                    for row, timestamp in enumerate(request.timestamps)
-                ]
-                for column, name in enumerate(request.instruments)
+    request, memberships, updates, calculators = parse_group_strategy_input(payload)
+    portfolios = {}
+    for strategy_position, (strategy, calculator) in enumerate(
+        zip(request.strategies, calculators, strict=True)
+    ):
+        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
+        cash = strategy_cash
+        positions = {instrument: 0.0 for instrument in request.instruments}
+        pending = None
+        equity_curve = {}
+        position_curve = {}
+        notional_curve = {}
+        margin_curve = {}
+        execution_trace = {}
+        for row, timestamp in enumerate(request.timestamps):
+            current_prices = {
+                instrument: valuation_price(request, row, instrument)
+                for instrument in request.instruments
             }
-            intent_policy = FuturesMarginConstraint(
-                ledger,
-                TemporalRuleProvider(margin_history),
-                RuleFallbackPolicy.STRICT_HISTORICAL,
-                usage,
-                collateral_fraction=float(config.get("collateral_fraction") or 1.0),
-                reject_instead_of_scale=str(config.get("margin_mode")) == "reject",
-            ).on_portfolio_intent
-        lanes.append(StrategyLane(
-            strategy,
-            ledger,
-            OrderManager(ledger, sizer),
-            intent_policy=intent_policy,
-        ))
-        fee_rate = float(config.get("fee_rate") or 0.0)
-        fee_history = {
-            name: [(timestamp, FeeSchedule(notional_rate=fee_rate))]
-            for name in request.instruments
-            for timestamp in request.timestamps[:1]
-        }
-        def _fill_price(order, quote, quantity, config=config):
-            mode = str(config.get("slippage_mode") or "none")
-            if mode == "none":
-                return quote.price
-            if mode == "fixed_bps":
-                bps = float(config.get("slippage_bps") or 0.0)
-                direction = 1.0 if order.side.value == "buy" else -1.0
-                return quote.price * (1.0 + direction * bps / 10_000.0)
-            raise ValueError(f"unsupported slippage mode: {mode}")
-
-        def _capacity(order, quote, config=config):
-            mode = str(config.get("liquidity_mode") or "infinite")
-            if mode == "infinite":
-                return float("inf")
-            if mode == "volume_participation":
-                return float(quote.fields["VOLUME"]) * float(
-                    config.get("participation_rate") or 0.0
-                )
-            raise ValueError(f"unsupported liquidity mode: {mode}")
-
-        broker = NextBarBroker(
-            {portfolio_id},
-            commission_model=ProviderCommissionModel(
-                TemporalRuleProvider(fee_history),
-                RuleFallbackPolicy.STRICT_HISTORICAL,
-                usage,
-            ),
-            capacity=_capacity,
-            fill_price=_fill_price,
-        )
-        venues.append(ExecutionVenue(
-            frozenset({portfolio_id}),
-            broker.on_order_submitted,
-            on_market_slice=broker.on_market_slice,
-        ))
-        strategies.append(strategy)
-    result = BacktestRunner(
-        BacktestPlan(RunIdentity(str(payload.get("run_id") or "native-group")), pd.DatetimeIndex(request.timestamps), request.instruments),
-        market_source=source,
-        market=market,
-        factors=tuple(factors),
-        lanes=tuple(lanes),
-        venues=tuple(venues),
-        progress=(
-            lambda item: progress(
-                item.completed,
-                item.total,
-                request.timestamps[min(item.completed, len(request.timestamps)) - 1],
+            portfolio_value = cash + sum(
+                positions[instrument] * current_prices[instrument]
+                for instrument in request.instruments
             )
-            if progress is not None and item.phase == "event_replay" and item.completed
-            else None
-        ),
-    ).run()
-    portfolios = {
-        portfolio.strategy_id: {
-            "initial_value": portfolio.snapshots[0].equity_minor / 100.0 if portfolio.snapshots else request.initial_cash,
-            "final_value": portfolio.final_snapshot.equity_minor / 100.0,
-            "positions": dict(portfolio.final_snapshot.positions),
-            "equity_curve": {
-                snapshot.timestamp.isoformat(): snapshot.equity_minor / 100.0
-                for snapshot in portfolio.snapshots
-            },
-            "position_curve": {
-                snapshot.timestamp.isoformat(): dict(snapshot.positions)
-                for snapshot in portfolio.snapshots
-            },
+            if pending is not None:
+                desired = target_quantities(
+                    request, row, pending, portfolio_value, strategy
+                )
+                deltas = _native_executable_deltas(
+                    request,
+                    row,
+                    strategy,
+                    desired,
+                    positions,
+                    cash,
+                )
+                execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                    request, row, strategy, positions, deltas, cash
+                )
+                for sell_first in (True, False):
+                    for instrument, delta in deltas.items():
+                        if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
+                            continue
+                        fill_price = execution_price(
+                            current_prices[instrument], delta, strategy
+                        )
+                        trade_value = abs(delta) * fill_price
+                        fee = trade_value * float(strategy.get("fee_rate") or 0.0)
+                        cash -= delta * fill_price + fee
+                        positions[instrument] += delta
+                portfolio_value = cash + sum(
+                    positions[instrument] * current_prices[instrument]
+                    for instrument in request.instruments
+                )
+            equity_curve[timestamp.isoformat()] = float(portfolio_value)
+            position_curve[timestamp.isoformat()] = dict(positions)
+            notional_values, margin_values = position_value_snapshot(
+                request, row, strategy, positions
+            )
+            notional_curve[timestamp.isoformat()] = notional_values
+            if margin_values is not None:
+                margin_curve[timestamp.isoformat()] = margin_values
+            pending = calculator.update(
+                timestamp,
+                np.asarray([
+                    request.prices[name][row] for name in request.instruments
+                ]),
+                memberships[row],
+                updates[row],
+                np.asarray(request.margin_ratios[row]),
+            )
+            if (
+                progress is not None
+                and strategy_position == 0
+                and should_report_progress(row + 1, len(request.timestamps))
+            ):
+                progress(row + 1, len(request.timestamps), timestamp)
+        portfolios[calculator.strategy_id] = {
+            "initial_value": strategy_cash,
+            "final_value": float(
+                cash + sum(
+                    positions[instrument]
+                    * valuation_price(request, len(request.timestamps) - 1, instrument)
+                    for instrument in request.instruments
+                )
+            ),
+            "positions": positions,
+            "equity_curve": equity_curve,
+            "position_curve": position_curve,
+            "notional_curve": notional_curve,
+            "margin_curve": margin_curve,
+            "execution_trace": execution_trace,
         }
-        for portfolio in result.portfolios.values()
-    }
     return {
         "engine": "native",
         "portfolios": portfolios,
-        "target_trace": {strategy.strategy_id: strategy.target_trace for strategy in strategies},
-        "strategy_diagnostics": {
-            strategy.strategy_id: {
-                **strategy.diagnostics,
-                **market_rule_diagnostics(payload),
-                "runtime_rule_approximation_count": rule_usages[
-                    strategy.strategy_id
-                ].approximation_count,
-            }
-            for strategy in strategies
+        "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "execution_trace": {
+            strategy_id: portfolio.get("execution_trace", {})
+            for strategy_id, portfolio in portfolios.items()
         },
-        "event_count": result.event_count,
+        "strategy_diagnostics": {
+            item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
+            for item in calculators
+        },
+        "event_count": len(request.timestamps),
     }
+
+
+def _native_executable_deltas(
+    request,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+    cash: float,
+) -> dict[str, float]:
+    deltas = capacity_limited_deltas(request, row, strategy, desired, current)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    available = float(cash)
+    buy_cost = 0.0
+    for instrument, delta in deltas.items():
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            available += notional - notional * fee_rate
+        else:
+            buy_cost += notional * (1.0 + fee_rate)
+    if buy_cost <= max(available, 0.0) + 1e-9:
+        return deltas
+    if buy_cost <= 0.0 or available <= 0.0:
+        return {
+            instrument: (delta if delta < 0 else 0.0)
+            for instrument, delta in deltas.items()
+        }
+    scale = available / buy_cost
+    adjusted = dict(deltas)
+    for position, instrument in enumerate(request.instruments):
+        delta = adjusted.get(instrument, 0.0)
+        if delta <= 0:
+            continue
+        lot_size = request.lot_sizes[row][position]
+        adjusted[instrument] = float(
+            int((delta * scale) / lot_size + 1e-12) * lot_size
+        )
+    return adjusted

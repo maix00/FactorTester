@@ -20,7 +20,15 @@ def group_test_settings() -> ApplicationSettings:
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 12),
-        SettingTab("time", "时间范围", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
+        SettingTab(
+            "time",
+            "时间范围",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            15,
+            summary_template="{start_date} {start_time} → {end_date} {end_time} · {timezone} · {time_precision}",
+            summary_keys=("start_date", "start_time", "end_date", "end_time", "timezone", "time_precision"),
+        ),
         SettingTab("capital", "资金", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 20),
         SettingTab("allocation", "分配", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 25),
         SettingTab("rebalance", "调仓", (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS), "settings-grid", 30),
@@ -70,8 +78,17 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="结束: {value}",
     ))
     app.register_setting(SettingDefinition(
+        "start_time", "开始时间", "time", "time", "00:00", ScopePolicy.LOCAL_ONLY,
+        chip_template="开始时刻: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "end_time", "结束时间", "time", "time", "23:59", ScopePolicy.LOCAL_ONLY,
+        chip_template="结束时刻: {value}",
+    ))
+    app.register_setting(SettingDefinition(
         "time_precision", "时间精度", "time", "select", "exact", ScopePolicy.LOCAL_ONLY,
         options=(SettingOption("exact", "精确时间"), SettingOption("day", "天级")),
+        chip_template="精度: {value}",
     ))
     app.register_setting(SettingDefinition(
         "timezone", "时区", "time", "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
@@ -81,6 +98,7 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("America/New_York", "America/New_York"),
             SettingOption("Europe/London", "Europe/London"),
         ),
+        chip_template="时区: {value}",
     ))
     app.register_setting(SettingDefinition(
         "initial_capital",

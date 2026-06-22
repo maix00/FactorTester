@@ -117,12 +117,60 @@ execution is advertised. The native event runtime executes all strategies in
 one run; product-overlap batches are an input optimization and do not create
 separate native backtests.
 
+Only vectorizable inputs may be prepared before replay: factor signal events,
+membership matrices, prices, market-rule matrices, and signal-update masks.
+Target weights are strategy intent produced inside each framework's event/bar
+lifecycle. They are recorded as `target_trace` for comparison, not supplied as a
+precomputed execution input.
+
+Order generation follows the common target-order contract used by Backtrader,
+Zipline/Quantopian-style APIs, Qlib, and LEAN: a strategy first emits target
+weights/positions for the current event, then the framework execution layer
+turns the net difference from current holdings into orders/fills. Same-event
+buy and sell intent for the same instrument is netted before fees and slippage.
+Sell-side proceeds after fees increase available cash before buy-side sizing;
+if fees, slippage, margin, lot size, or liquidity make the full target
+unaffordable, the resulting fill/position is reduced while the target trace
+remains the original strategy intent.
+
 ### Group and Long-Short are peer strategies
 
 Quantile group and Long-Short definitions compile to independent strategy lanes
 with their own strategy/portfolio identities. They share market and factor
 actors and participate in the same run and progress stream. Long-Short is not a
 post-processing subtraction of two completed group equity curves.
+
+`group` itself is only one backtest strategy family. A group test may expand one
+factor signal into many concrete group strategies. Long-Short is a
+strategy-composition strategy: it references existing strategy identities as
+long-leg and short-leg sources, then produces a new independently accounted
+strategy lane. In the current group-test implementation, those referenced
+source strategies are group-strategy lanes and their membership lanes are the
+canonical signal input. The general contract remains strategy-to-strategy so a
+future non-group strategy can expose target streams to the same Long-Short
+composer without changing frontend semantics.
+
+Long-Short target semantics follow the common factor-research convention used by
+Alphalens: a dollar-neutral portfolio has equal absolute long and short
+exposure and fixed gross exposure. In this project each Long-Short strategy
+therefore allocates 50% gross exposure to its long leg and 50% gross exposure to
+its short leg before execution-layer contract sizing, margin, fees, slippage,
+and capacity are applied.
+
+Framework adapters may calculate target weights in their own lifecycle
+callbacks, but their behavior must be identical:
+
+- long and short source strategy ids must be distinct and present in the same
+  run;
+- if realized membership overlaps after product remapping or derived-group
+  masking, overlapping instruments are netted out of both legs for that
+  timestamp and the overlap is recorded as a diagnostic;
+- if either leg is empty at a rebalance timestamp, no new Long-Short target is
+  emitted for that timestamp and the event is recorded as a diagnostic;
+- if both legs are non-empty, each leg is allocated independently with the same
+  allocation policy, then the short-leg weights are negated;
+- native, Backtrader, Qlib, and Zipline runs must publish the same target trace
+  for the same membership signal, rebalance policy, and allocation settings.
 
 ## Consequences
 

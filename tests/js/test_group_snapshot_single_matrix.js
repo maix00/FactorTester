@@ -102,12 +102,31 @@ assert.match(body, /买入费 7\.00<\/div><div class="snapshot-summary-fees">卖
 assert.match(body, /总资产<\/span>/);
 assert.doesNotMatch(body, /总资产<\/span><span class="snapshot-product-desc">/);
 assert.match(body, /新增/);
-assert.match(body, /增加/);
-assert.match(body, /减少/);
+assert.match(body, /增持/);
+assert.match(body, /减持/);
 assert.match(body, /待卖/);
 assert.match(body, /已选中/);
 assert.match(body, /持仓品种数\(1\)/);
 assert.match(stats, /一手资金需求/);
 assert.match(stats, /总体流动统计/);
+
+GT.results.snapshot.renderGroupSnapshot({
+  default_matrix_key: 'positions_contracts',
+  matrices: [
+    { key: 'positions_contracts', label: '实际持仓 · 合约', columns: [], rows: [], cells: [] },
+    { key: 'positions_products', label: '实际持仓 · 品种', columns: [], rows: [], cells: [] },
+    { key: 'targets_contracts', label: '策略目标 · 合约', columns: [], rows: [], cells: [] },
+    { key: 'targets_products', label: '策略目标 · 品种', columns: [], rows: [], cells: [] },
+  ],
+  all_timestamps_ms: [1710000000000],
+  display_timezone: 'Asia/Shanghai',
+  summary: {},
+}, 1710000000000);
+const pairedToggle = document.getElementById('snapshot_matrix_toggle').innerHTML;
+assert.match(pairedToggle, /实际持仓/);
+assert.match(pairedToggle, /策略目标/);
+assert.match(pairedToggle, /合约/);
+assert.match(pairedToggle, /品种/);
+assert.doesNotMatch(pairedToggle, /实际持仓 · 合约/);
 
 console.log('PASS: group snapshot renders matrix toggle and matrix table');

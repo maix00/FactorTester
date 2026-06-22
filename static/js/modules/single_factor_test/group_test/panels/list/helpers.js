@@ -140,24 +140,27 @@
     }
 
     function derivedFeeDisplay(node) {
-        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
+        var values = GT.backendSettings && GT.backendSettings.groupOverrideValues
+            ? GT.backendSettings.groupOverrideValues(node && node.id)
+            : null;
+        var mode = values && values.fee_mode;
         if (mode === 'none' || !mode) return '—';
-        if (mode === 'uniform' || mode === 'fixed') return (node.feeRate != null) ? Number(node.feeRate).toFixed(6) : '—';
-        if (mode === 'per_product') { var m1 = node.feeMap || {}; return '按品种(' + Object.keys(m1).length + ')'; }
-        if (mode === 'custom') { var m2 = node.feeMap || {}; return '自定义(' + Object.keys(m2).length + ')'; }
+        if (mode === 'market') return '市场规则';
+        if (mode === 'custom') return values.custom_fee_rate != null ? Number(values.custom_fee_rate).toFixed(6) : '自定义';
         return mode;
     }
 
     function derivedRebalanceLabel(node) {
-        var mode = node.rebalanceMode || null;
-        var map = { 'each_period': '每期', 'buy_and_hold': '持仓不动', 'recycle': '退出补新' };
+        var values = GT.backendSettings && GT.backendSettings.groupOverrideValues
+            ? GT.backendSettings.groupOverrideValues(node && node.id)
+            : null;
+        var mode = values && values.rebalance_mode;
+        var map = { 'on_factor_signal': '按因子频率', 'buy_and_hold': '买入持有', 'membership_change': '成员变化', 'scheduled': '计划调仓' };
         return map[mode] || (mode || '—');
     }
 
     function derivedCloseTodayLabel(node) {
-        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
-        if (mode === 'none' || mode === 'fixed') return '—';
-        return node.useCloseToday ? '平今' : '平昨';
+        return '—';
     }
 
     function rebalanceLabel(mode) {

@@ -42,11 +42,30 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert template["name"] == "2026-06-02 07:20:47"
     snapshot = template["snapshot"]
 
-    time_data = snapshot["time_data"]
+    local_values = snapshot["local_settings"]
+    assert {
+        "start_date": local_values["start_date"],
+        "end_date": local_values["end_date"],
+        "start_time": local_values["start_time"],
+        "end_time": local_values["end_time"],
+    } == {
+        "start_date": "2026-01-01",
+        "end_date": "2026-01-31",
+        "start_time": "09:00",
+        "end_time": "15:00",
+    }
+    assert "time_data" not in snapshot
+    assert "backendBacktestSettings" not in snapshot["local_settings"]
+    assert "dates" not in snapshot["local_settings"]
     response = client.post("/set_time_range", json={
         "factor_family_alias": FACTOR_FAMILY,
         "page_uuid": page_uuid,
-        **time_data,
+        "start_date": local_values["start_date"],
+        "start_time": local_values["start_time"],
+        "end_date": local_values["end_date"],
+        "end_time": local_values["end_time"],
+        "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        "time_precision": local_values.get("time_precision", "exact"),
     })
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["success"]
@@ -73,23 +92,29 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         tester_ids[submission["id"]] = new_id
 
     groups = _resolve_groups(snapshot["group_settings"]["groups"], tester_ids)
-    local = snapshot["local_settings"]
-    dates = local["dates"]
-    capital = local["initialCapital"]
-    calendar = local["calendarFreq"]
+    long_short_configs = _resolve_ls_configs(
+        snapshot["group_settings"].get("lsConfigs", []),
+        groups,
+    )
+    if os.environ.get("LIVE_SGCCS_LONG_SHORT") == "1":
+        if not long_short_configs:
+            long_group, short_group = _default_ls_pair(groups)
+            long_short_configs = [_runtime_ls_config(long_group, short_group)]
     base_payload = {
         "groups": groups,
         "flatCount": len(groups),
-        "ls_configs": snapshot["group_settings"].get("lsConfigs", []),
+        "ls_configs": long_short_configs,
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,
-        "start_date": dates["startDate"],
-        "end_date": dates["endDate"],
-        "precision": dates["precision"],
-        "timezone": dates["tz"],
-        "initial_capital": capital["initialCapital"],
-        "auto_group_calendar_freq": calendar["autoGroupCalendarFreq"],
-        "group_calendar_freq": calendar["groupCalendarFreq"],
+        "start_date": local_values["start_date"],
+        "end_date": local_values["end_date"],
+        "start_time": local_values["start_time"],
+        "end_time": local_values["end_time"],
+        "precision": local_values.get("time_precision", "exact"),
+        "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        "initial_capital": local_values.get("initial_capital", 100000000),
+        "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
+        "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
         "_group_factor_params_list": snapshot["params_list"],
         "_group_owner_username": USERNAME,
     }
@@ -121,19 +146,14 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     for profile, profile_settings in profiles.items():
         results[profile] = {}
         for engine in ("native", "backtrader", "qlib", "zipline"):
+            profile_groups = [{**group, **profile_settings} for group in groups]
             response = client.post("/run_group_test", json={
                 **base_payload,
-                "backtest_settings": {
-                    "application": "group_test",
-                    "local_values": {
-                        "engine": engine,
-                        "factor_mode": "precomputed",
-                        "rebalance_mode": "on_factor_signal",
-                        "initial_capital": capital["initialCapital"],
-                        **profile_settings,
-                    },
-                    "group_values": {},
-                },
+                "groups": profile_groups,
+                "engine": engine,
+                "factor_mode": "precomputed",
+                "rebalance_mode": "on_factor_signal",
+                "initial_capital": local_values.get("initial_capital", 100000000),
             })
             body = response.get_json()
             assert response.status_code == 200, {
@@ -141,8 +161,10 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             }
             assert body["success"], body
             assert body["simulation_count"] == 1
-            assert len(body["groups"]) == 7
-            assert len(body["metrics"]) == 7
+            expected_strategy_count = 7 + len(long_short_configs)
+            assert len(body["groups"]) == expected_strategy_count
+            assert len(body["metrics"]) == expected_strategy_count
+            assert body["cross_entry_ls_count"] == len(long_short_configs)
             assert body["engine_result"]["engine"] == engine
             results[profile][engine] = body
 
@@ -164,6 +186,16 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             for engine, body in profile_results.items()
         }
         assert traces["native"] == traces["backtrader"] == traces["qlib"] == traces["zipline"], profile
+        if long_short_configs:
+            ls_group = next(
+                group for group in profile_results["native"]["groups"]
+                if group["is_ls"]
+            )
+            assert any(
+                any(weight > 0 for weight in target.values())
+                and any(weight < 0 for weight in target.values())
+                for target in ls_group["target_trace"].values()
+            )
 
     latest = results[next(reversed(results))]["zipline"]
     first_group = latest["groups"][0]
@@ -191,8 +223,10 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     snapshot_body = snapshot_response.get_json()
     assert snapshot_body["event_cursor"]
     assert [matrix["key"] for matrix in snapshot_body["matrices"]] == [
-        "positions", "targets",
+        "positions_contracts", "positions_products",
+        "targets_contracts", "targets_products",
     ]
+    assert snapshot_body["event_type"] in {"FILL", "REJECT"}
 
 
 def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict]:
@@ -213,3 +247,36 @@ def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict
         group["testerId"] = tester_ids[group["testerId"]]
         result.append(group)
     return result
+
+
+def _resolve_ls_configs(configs: list[dict], groups: list[dict]) -> list[dict]:
+    by_id = {str(group["id"]): group for group in groups}
+    resolved = []
+    for config in configs or []:
+        long_id = str(config.get("longGroupId") or "")
+        short_id = str(config.get("shortGroupId") or "")
+        if not long_id or not short_id:
+            resolved.append(config)
+            continue
+        resolved.append(_runtime_ls_config(by_id[long_id], by_id[short_id], config))
+    return resolved
+
+
+def _default_ls_pair(groups: list[dict]) -> tuple[dict, dict]:
+    flat_groups = [
+        group for group in groups
+        if not group.get("parentId") and group.get("groupIndex") is not None
+    ]
+    long_group = next(group for group in flat_groups if group.get("groupIndex") == 1)
+    short_group = next(group for group in flat_groups if group.get("groupIndex") == 5)
+    return long_group, short_group
+
+
+def _runtime_ls_config(long_group: dict, short_group: dict, source: dict | None = None) -> dict:
+    source = source or {}
+    return {
+        "id": source.get("id") or "live-ls-1",
+        "name": source.get("name") or f"SgCCS {long_group.get('shortAlias', '第1组')}/{short_group.get('shortAlias', '第5组')}",
+        "long": [{"group_id": long_group["id"], "weight": 1.0}],
+        "short": [{"group_id": short_group["id"], "weight": 1.0}],
+    }

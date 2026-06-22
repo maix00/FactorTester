@@ -20,6 +20,8 @@ from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHA
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from tools.products.AdjustableTermStructure import resolve_term_structure_product
 from tools.products.Product import Product
+from tools.products.product_utils import product_display_name
+from tools.backtest.settings import backtest_setting_registry
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, get_session_params
@@ -48,7 +50,9 @@ def _ensure_tester_factors_for_group(
     if not factor_family_alias:
         return
 
-    factor_family = get_factor_family_instance(str(factor_family_alias), username=username)
+    factor_family = get_factor_family_instance(
+        str(factor_family_alias), username=username, page_uuid=page_uuid
+    )
     if params_list is None:
         params_list = get_session_params(str(factor_family_alias), factor_family)
     factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
@@ -112,6 +116,41 @@ def _parse_nonnegative_rate(raw: Any, default: float = 0.0) -> float:
     return float(value)
 
 
+def _resolve_flat_backtest_settings(
+    payload: dict[str, Any],
+    groups: list[dict[str, Any]],
+    ls_configs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    app = backtest_setting_registry.get("group_test")
+    manifest = app.manifest()
+    defaults = {
+        key: item.get("value")
+        for key, item in (manifest.get("defaults") or {}).items()
+        if isinstance(item, dict)
+    }
+    local_values = {
+        key: payload[key]
+        for key in defaults
+        if key in payload
+    }
+    # Keep existing request aliases as local fields.
+    if "precision" in payload and "time_precision" not in local_values:
+        local_values["time_precision"] = payload["precision"]
+
+    resolved: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(list(groups) + list(ls_configs or [])):
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or f"group-{index}")
+        values = dict(defaults)
+        values.update(local_values)
+        for key in defaults:
+            if key in item:
+                values[key] = item[key]
+        resolved[group_id] = values
+    return resolved
+
+
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
     """Parse legacy group-test fee payload into engine inputs.
 
@@ -146,15 +185,30 @@ def _product_fee_rates_by_name(group_result: Any) -> dict[str, dict[str, float]]
 def _registered_product(product_name: str):
     if not product_name:
         return None
-    return resolve_term_structure_product(product_name)
+    product = resolve_term_structure_product(product_name)
+    if product is not None:
+        return product
+    try:
+        from sources.LocalCNFutures.CNFutures import CNFutures
+        if "." in str(product_name):
+            return CNFutures(str(product_name))
+    except Exception:
+        return None
+    return None
 
 
 def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]] | None = None, *, collapsed_from: str | None = None) -> dict[str, Any]:
     fee_rates = fee_rates or {}
     raw_name = getattr(product_ref, 'name', str(product_ref) if product_ref is not None else '')
     product = product_ref if isinstance(product_ref, Product) else _registered_product(raw_name) if product_ref else None
-    name = getattr(product, 'name', None) if product is not None else raw_name
-    display = _display_product_with_fee(product if product is not None else name, fee_rates)
+    if product is not None:
+        display = product_display_name(product)
+        fee_display = _display_product_with_fee(product, fee_rates)
+        if fee_display.get('fee'):
+            display['fee'] = fee_display.get('fee')
+    else:
+        display = _display_product_with_fee(raw_name, fee_rates)
+    name = display.get('name') or raw_name
     if collapsed_from and collapsed_from != name:
         display['source_name'] = collapsed_from
     return display
@@ -1117,7 +1171,7 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
-def _run_group_test_core(data: dict) -> tuple[bool, dict]:
+def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     """
     核心分组测试逻辑，可以被 /run_group_test (JSON) 和 /run_group_test_stream (SSE) 共享。
     
@@ -1128,7 +1182,13 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
     from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
-    from .backtest_runtime import resolve_request_settings
+    from tools.backtest.cancellation import BacktestCancelled
+
+    def _check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise BacktestCancelled()
+
+    _check_cancelled()
 
     flat_groups_raw = data.get('groups')
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
@@ -1160,6 +1220,10 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         currency_conversion_fee_rate = _parse_nonnegative_rate(data.get('currency_conversion_fee_rate'), 0.0)
     except ValueError as e:
         return False, {'success': False, 'error': str(e), 'status': 400}
+
+    resolved_backtest_settings = _resolve_flat_backtest_settings(data, flat_groups_raw, flat_ls_configs)
+    first_group_id = str(flat_groups_raw[0].get('id') or 'group-0')
+    common_backtest_settings = resolved_backtest_settings[first_group_id]
 
     # ── Build _FactorGroupTestGroup from flat groups array ──
     # Group by tester_id, then by factor_alias
@@ -1218,6 +1282,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                         f"tester_id={tid} factor_alias={fa}"
                     )
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
+                group_settings = resolved_backtest_settings.get(str(g.get('id') or '')) or common_backtest_settings
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
                     factor_alias=fa,
@@ -1226,14 +1291,18 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                     key=name,
                     name=name,
                     product_list=_product_list_from_group_payload(g),
-                    fee_mode=g.get('feeMode'),
-                    fee_rate=g.get('feeRate'),
+                    fee_mode=group_settings.get('fee_mode'),
+                    fee_rate=group_settings.get('custom_fee_rate'),
                     fee_modifications=g.get('feeModifications'),
-                    use_close_today=bool(g.get('useCloseToday')),
-                    rebalance_mode=g.get('rebalanceMode'),
-                    liquidity_mode=g.get('liquidityMode'),
-                    liquidity_percent=g.get('liquidityPercent'),
-                    margin_mode=g.get('marginMode'),
+                    use_close_today=False,
+                    rebalance_mode=group_settings.get('rebalance_mode'),
+                    liquidity_mode=group_settings.get('liquidity_mode'),
+                    liquidity_percent=(
+                        float(group_settings.get('participation_rate') or 0) * 100
+                        if group_settings.get('liquidity_mode') == 'volume_participation'
+                        else None
+                    ),
+                    margin_mode=group_settings.get('margin_mode'),
                     _id=str(g.get('id') or f'group-{len(all_flat_groups)}'),
                 )
                 offset = len(all_flat_groups)
@@ -1258,15 +1327,6 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             ),
             'status': 400,
         }
-
-    group_ids = [str(group.get('id') or f'group-{index}') for index, group in enumerate(flat_groups_raw)]
-    try:
-        resolved_backtest_settings = resolve_request_settings(
-            data.get('backtest_settings'), group_ids
-        )
-    except ValueError as exc:
-        return False, {'success': False, 'error': str(exc), 'status': 400}
-    common_backtest_settings = resolved_backtest_settings[group_ids[0]]
 
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
@@ -1352,31 +1412,34 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         )
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
-            requested_calendar_freq=effective_group_calendar_freq,
+            requested_calendar_freq=(
+                'auto' if auto_group_calendar_freq else effective_group_calendar_freq
+            ),
         )
         if len(tester_calendar) > 0:
             calendar_indices.append(tester_calendar)
     global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices) if tester0 else pd.Index([])
+    _core_emit_progress(
+        "signal_sequence",
+        (
+            f"公共信号时钟：{len(global_calendar_index)} 点，"
+            f"频率 {effective_group_calendar_freq}，因子频率数 {len(all_factor_freqs)}"
+        ),
+        completed=len(global_calendar_index),
+        total=max(len(global_calendar_index), 1),
+        calendar_count=len(global_calendar_index),
+        effective_group_calendar_freq=str(effective_group_calendar_freq),
+        factor_freq_count=len(all_factor_freqs),
+    )
 
-    # ── Fee: resolve per-spec from group fields ──
-    # Default: uniform fee=0, no closetoday
-    fee_uniform = 0.0
+    # ── Legacy matrix fee bridge: use backend-registered settings, not group fields.
+    fee_uniform = (
+        float(common_backtest_settings.get('custom_fee_rate') or 0.0)
+        if common_backtest_settings.get('fee_mode') == 'custom'
+        else 0.0
+    )
     fee_modifications = None
     use_closetoday = False
-    # Scan groups for fee config (first non-none uniform or per_product wins)
-    for g in flat_groups_raw:
-        fm = g.get('feeMode') or g.get('fee_mode')
-        if fm == 'uniform':
-            fee_uniform = float(g.get('feeRate', g.get('fee_rate', 0.0025)) or 0.0025)
-            break
-        elif fm == 'per_product':
-            fee_uniform = 0.0
-            fee_modifications = g.get('feeModifications') or g.get('fee_modifications') or None
-            break
-    for g in flat_groups_raw:
-        if g.get('useCloseToday') or g.get('use_closetoday'):
-            use_closetoday = True
-            break
 
     # ── Run FactorGroupTester ──
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
@@ -1404,6 +1467,16 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     )
     from tools.backtest.orchestration import execute_group_plan
 
+    _core_emit_progress(
+        "init",
+        "事件回测准备开始",
+        total=1,
+        total_batches=1,
+        total_entries=len(group_tester.specs),
+        total_groups=len(all_flat_groups) + len(flat_ls_configs),
+        phases=GROUP_TEST_PHASES,
+    )
+
     def _framework_progress(
         phase: str,
         message: str,
@@ -1411,6 +1484,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         total: int,
         extra: dict,
     ) -> None:
+        _check_cancelled()
         _core_emit_progress(
             phase,
             message,
@@ -1427,6 +1501,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             initial_capital=initial_capital,
             long_short_configs=flat_ls_configs,
             progress=_framework_progress,
+            cancel_event=cancel_event,
         )
         serialized_execution = _serialize_event_execution(
             execution,
@@ -1443,6 +1518,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                     "serialized_execution": serialized_execution,
                 },
             )
+    except BacktestCancelled:
+        raise
     except Exception as exc:
         import traceback as _traceback
         return False, {
@@ -1451,6 +1528,24 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             "traceback": _traceback.format_exc(),
             "status": 500,
         }
+    multi_session_entries = []
+    for position, entry in enumerate(group_tester.specs):
+        shared = entry.shared_inputs
+        if not bool(getattr(shared, "multi_session_active", False)):
+            continue
+        missing_products = [
+            str(value) for value in (getattr(shared, "multi_session_missing_products", []) or [])
+        ]
+        multi_session_entries.append({
+            "index": position,
+            "tester_alias": getattr(entry.tester, "alias", ""),
+            "factor_alias": getattr(entry.factor, "alias", ""),
+            "n_groups": int(getattr(entry, "n_groups", 0) or 0),
+            "missing_products": missing_products,
+            "missing_product_count": int(
+                getattr(shared, "multi_session_missing_count", len(missing_products)) or 0
+            ),
+        })
     first_owner = execution["group_owner"][0]
     return True, {
         "success": True,
@@ -1460,7 +1555,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         "multi_session_active": any(
             bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
         ),
-        "multi_session_entries": [],
+        "multi_session_entries": multi_session_entries,
         "rebalance_mode": "per_strategy",
         "submission_id": str(first_owner.get("submission_id") or ""),
         "factor_alias": str(first_owner.get("factor_alias") or ""),
@@ -1732,7 +1827,21 @@ def _event_group_snapshot(
             index for index, event in enumerate(events)
             if event["timestamp"] == target_timestamp
         ]
-        event_index = matching[-1]
+        # A chart click represents the bar timestamp, not a specific internal
+        # event. Prefer the actionable ledger state for that timestamp so the
+        # snapshot explains what changed, instead of defaulting to BAR_CLOSE
+        # where positions are usually unchanged from the immediately preceding
+        # fill event.
+        event_index = next(
+            (
+                index for index in matching
+                if events[index]["event_type"] in {"FILL", "REJECT"}
+            ),
+            next(
+                (index for index in matching if events[index]["event_type"] == "TARGET"),
+                matching[-1],
+            ),
+        )
     selected_event = events[event_index]
     previous_event = events[event_index - 1] if event_index > 0 else None
     current = selected_event["timestamp"]
@@ -1743,54 +1852,268 @@ def _event_group_snapshot(
         for instrument in positions
     })
 
-    columns = []
-    position_cells = [[] for _ in instruments]
-    target_cells = [[] for _ in instruments]
-    total_changed = 0
-    for owner in owners:
-        strategy_id = str(owner.get("group_id") or "")
-        portfolio = portfolios[strategy_id]
-        now = selected_event["positions"].get(strategy_id, {})
-        before = (
-            previous_event["positions"].get(strategy_id, {})
-            if previous_event is not None else {}
-        )
-        active_count = sum(abs(float(value)) > 1e-12 for value in now.values())
-        columns.append({
-            "label": str(owner.get("group_name") or strategy_id),
-            "count": active_count,
-        })
-        weights = selected_event["targets"].get(strategy_id, {})
-        for row, instrument in enumerate(instruments):
-            quantity = float(now.get(instrument, 0.0))
-            old_quantity = float(before.get(instrument, 0.0))
-            delta = quantity - old_quantity
-            if abs(delta) > 1e-12:
-                total_changed += 1
-            status = (
-                "entering" if abs(old_quantity) <= 1e-12 and abs(quantity) > 1e-12
-                else "exiting" if abs(old_quantity) > 1e-12 and abs(quantity) <= 1e-12
-                else "increasing" if abs(quantity) > abs(old_quantity) + 1e-12
-                else "decreasing" if abs(quantity) + 1e-12 < abs(old_quantity)
-                else "holding" if abs(quantity) > 1e-12 else "absent"
+    def _instrument_parent_name(instrument: str) -> str:
+        product = resolve_term_structure_product(instrument)
+        if product is None:
+            product = _cn_futures_contract_parent(instrument)
+        return str(getattr(product, "name", None) or instrument)
+
+    def _position_status(quantity: float, old_quantity: float) -> str:
+        delta = quantity - old_quantity
+        if abs(old_quantity) <= 1e-12 and abs(quantity) > 1e-12:
+            return "entering"
+        if abs(old_quantity) > 1e-12 and abs(quantity) <= 1e-12:
+            return "exiting"
+        if abs(quantity) > abs(old_quantity) + 1e-12:
+            return "increasing"
+        if abs(quantity) + 1e-12 < abs(old_quantity):
+            return "decreasing"
+        if abs(quantity) > 1e-12:
+            return "holding"
+        return "absent"
+
+    def _position_cell(instrument: str, quantity: float, old_quantity: float) -> dict[str, Any]:
+        delta = quantity - old_quantity
+        return {
+            "status": _position_status(quantity, old_quantity),
+            "product": _snapshot_product_display(instrument),
+            "quantity": quantity,
+            "previous_quantity": old_quantity,
+            "delta_quantity": delta,
+            "change_direction": "increase" if delta > 0 else "decrease" if delta < 0 else "flat",
+            "currency": "CNY",
+        }
+
+    def _target_cell(instrument: str, weight: float) -> dict[str, Any]:
+        return {
+            "status": "selected" if abs(weight) > 1e-12 else "absent",
+            "product": _snapshot_product_display(instrument),
+            "selected": abs(weight) > 1e-12,
+            "open_reason": f"目标权重 {weight:.4%}" if abs(weight) > 1e-12 else None,
+            "currency": "CNY",
+        }
+
+    def _collapse_names(names: list[str]) -> list[str]:
+        return sorted({_instrument_parent_name(name) for name in names})
+
+    def _aggregate_position_maps(values: dict[str, float]) -> dict[str, float]:
+        collapsed: dict[str, float] = {}
+        for instrument, value in values.items():
+            parent = _instrument_parent_name(instrument)
+            collapsed[parent] = collapsed.get(parent, 0.0) + float(value)
+        return collapsed
+
+    def _previous_event_values_from_current_curve(
+        current_values: dict[str, float],
+        current_positions: dict[str, float],
+        previous_positions: dict[str, float],
+        *,
+        absolute: bool = False,
+    ) -> dict[str, float]:
+        previous_values: dict[str, float] = {}
+        for instrument, current_value in current_values.items():
+            quantity = float(current_positions.get(instrument, 0.0))
+            previous_quantity = float(previous_positions.get(instrument, 0.0))
+            if abs(quantity) <= 1e-12:
+                previous_values[instrument] = 0.0
+                continue
+            if absolute:
+                previous_values[instrument] = abs(previous_quantity) * (abs(float(current_value)) / abs(quantity))
+            else:
+                previous_values[instrument] = previous_quantity * (float(current_value) / quantity)
+        for instrument, previous_quantity in previous_positions.items():
+            if instrument not in previous_values and abs(float(previous_quantity)) > 1e-12:
+                previous_values[instrument] = 0.0
+        return previous_values
+
+    def _build_position_matrix(
+        key: str,
+        label: str,
+        names: list[str],
+        *,
+        collapse_products: bool = False,
+    ) -> tuple[dict[str, Any], int]:
+        rows = _collapse_names(names) if collapse_products else names
+        matrix_columns = []
+        matrix_cells = [[] for _ in rows]
+        total_row = []
+        cash_row = []
+        changed_count = 0
+        for owner in owners:
+            strategy_id = str(owner.get("group_id") or "")
+            portfolio = portfolios[strategy_id]
+            now = selected_event["positions"].get(strategy_id, {})
+            before = (
+                previous_event["positions"].get(strategy_id, {})
+                if previous_event is not None else {}
             )
-            position_cells[row].append({
-                "status": status,
-                "product": {"name": instrument},
-                "quantity": quantity,
-                "delta_quantity": delta,
-                "change_direction": "up" if delta > 0 else "down" if delta < 0 else "flat",
-                "currency": "CNY",
+            current_notional = (
+                (portfolio.get("notional_curve") or {}).get(selected_event["timestamp"].isoformat(), {})
+            )
+            previous_notional = (
+                (portfolio.get("notional_curve") or {}).get(previous_event["timestamp"].isoformat(), {})
+                if previous_event is not None else {}
+            )
+            current_margin = (
+                (portfolio.get("margin_curve") or {}).get(selected_event["timestamp"].isoformat(), {})
+            )
+            previous_margin = (
+                (portfolio.get("margin_curve") or {}).get(previous_event["timestamp"].isoformat(), {})
+                if previous_event is not None else {}
+            )
+            if previous_event is not None and previous_event["timestamp"] == selected_event["timestamp"]:
+                previous_notional = _previous_event_values_from_current_curve(
+                    current_notional, now, before
+                )
+                previous_margin = _previous_event_values_from_current_curve(
+                    current_margin, now, before, absolute=True
+                )
+            if collapse_products:
+                now_values = _aggregate_position_maps(now)
+                before_values = _aggregate_position_maps(before)
+                current_notional_values = _aggregate_position_maps(current_notional)
+                previous_notional_values = _aggregate_position_maps(previous_notional)
+                current_margin_values = _aggregate_position_maps(current_margin)
+                previous_margin_values = _aggregate_position_maps(previous_margin)
+            else:
+                now_values = {name: float(now.get(name, 0.0)) for name in rows}
+                before_values = {name: float(before.get(name, 0.0)) for name in rows}
+                current_notional_values = {name: float(current_notional.get(name, 0.0)) for name in rows}
+                previous_notional_values = {name: float(previous_notional.get(name, 0.0)) for name in rows}
+                current_margin_values = {name: float(current_margin.get(name, 0.0)) for name in rows}
+                previous_margin_values = {name: float(previous_margin.get(name, 0.0)) for name in rows}
+            active_count = sum(abs(float(value)) > 1e-12 for value in now_values.values())
+            column_events = []
+            if selected_event["event_type"] == "TARGET":
+                if selected_event["targets"].get(strategy_id):
+                    column_events.append({"type": "TARGET", "label": "目标更新"})
+            elif selected_event["event_type"] in {"FILL", "REJECT"}:
+                changed_here = any(
+                    abs(float(now_values.get(row_name, 0.0)) - float(before_values.get(row_name, 0.0))) > 1e-12
+                    for row_name in rows
+                )
+                column_events.append({
+                    "type": selected_event["event_type"],
+                    "label": "成交后" if changed_here else "无成交",
+                })
+            else:
+                column_events.append({"type": selected_event["event_type"], "label": "收盘持有"})
+            matrix_columns.append({
+                "label": str(owner.get("group_name") or strategy_id),
+                "count": active_count,
+                "events": column_events,
             })
-            weight = float(weights.get(instrument, 0.0))
-            target_cells[row].append({
-                "status": "selected" if abs(weight) > 1e-12 else "absent",
-                "product": {"name": instrument},
-                "selected": abs(weight) > 1e-12,
-                "open_reason": f"目标权重 {weight:.4%}" if abs(weight) > 1e-12 else None,
+            equity_curve = portfolio.get("equity_curve") or {}
+            equity_now = float(equity_curve.get(selected_event["timestamp"].isoformat(), 0.0) or 0.0)
+            equity_before = (
+                float(equity_curve.get(previous_event["timestamp"].isoformat(), equity_now) or equity_now)
+                if previous_event is not None else equity_now
+            )
+            margin_now = sum(float(value) for value in current_margin_values.values()) if current_margin else 0.0
+            margin_before = sum(float(value) for value in previous_margin_values.values()) if previous_margin else 0.0
+            notional_now = sum(float(value) for value in current_notional_values.values())
+            notional_before = sum(float(value) for value in previous_notional_values.values())
+            cash_now = equity_now - margin_now if current_margin else equity_now - notional_now
+            cash_before = equity_before - margin_before if current_margin else equity_before - notional_before
+            total_row.append({
+                "status": "increasing" if equity_now > equity_before + 1e-12 else "decreasing" if equity_now + 1e-12 < equity_before else "holding",
+                "product": {"name": "总资产"},
                 "currency": "CNY",
+                "quantity": None,
+                "amount": round(equity_now, 2),
+                "previous_amount": round(equity_before, 2),
+                "delta_amount": round(equity_now - equity_before, 2),
+                "margin_amount": round(margin_now, 2) if current_margin else None,
+                "previous_margin_amount": round(margin_before, 2) if current_margin else None,
+                "delta_margin_amount": round(margin_now - margin_before, 2) if current_margin else None,
+                "change_direction": "increase" if equity_now > equity_before + 1e-12 else "decrease" if equity_now + 1e-12 < equity_before else "flat",
             })
-    rows = [{"name": instrument} for instrument in instruments]
+            cash_row.append({
+                "status": "increasing" if cash_now > cash_before + 1e-12 else "decreasing" if cash_now + 1e-12 < cash_before else "holding",
+                "product": {"name": "现金"},
+                "currency": "CNY",
+                "quantity": None,
+                "amount": round(cash_now, 2),
+                "previous_amount": round(cash_before, 2),
+                "delta_amount": round(cash_now - cash_before, 2),
+                "change_direction": "increase" if cash_now > cash_before + 1e-12 else "decrease" if cash_now + 1e-12 < cash_before else "flat",
+            })
+            for row, instrument in enumerate(rows):
+                quantity = float(now_values.get(instrument, 0.0))
+                old_quantity = float(before_values.get(instrument, 0.0))
+                delta = quantity - old_quantity
+                if abs(delta) > 1e-12:
+                    changed_count += 1
+                cell = _position_cell(instrument, quantity, old_quantity)
+                notional = float(current_notional_values.get(instrument, 0.0))
+                old_notional = float(previous_notional_values.get(instrument, 0.0))
+                cell["amount"] = round(notional, 2)
+                cell["previous_amount"] = round(old_notional, 2)
+                cell["delta_amount"] = round(notional - old_notional, 2)
+                if current_margin:
+                    margin = float(current_margin_values.get(instrument, 0.0))
+                    old_margin = float(previous_margin_values.get(instrument, 0.0))
+                    cell["margin_amount"] = round(margin, 2)
+                    cell["previous_margin_amount"] = round(old_margin, 2)
+                    cell["delta_margin_amount"] = round(margin - old_margin, 2)
+                matrix_cells[row].append(cell)
+        return {
+            "key": key,
+            "label": label,
+            "columns": matrix_columns,
+            "rows": [{"name": "总资产"}, {"name": "现金"}] + [
+                _snapshot_product_display(instrument) for instrument in rows
+            ],
+            "cells": [total_row, cash_row] + matrix_cells,
+        }, changed_count
+
+    def _build_target_matrix(
+        key: str,
+        label: str,
+        names: list[str],
+        *,
+        collapse_products: bool = False,
+    ) -> dict[str, Any]:
+        rows = _collapse_names(names) if collapse_products else names
+        matrix_columns = []
+        matrix_cells = [[] for _ in rows]
+        for owner in owners:
+            strategy_id = str(owner.get("group_id") or "")
+            weights = selected_event["targets"].get(strategy_id, {})
+            if collapse_products:
+                weight_values: dict[str, float] = {}
+                for instrument, weight in weights.items():
+                    parent = _instrument_parent_name(instrument)
+                    weight_values[parent] = weight_values.get(parent, 0.0) + float(weight)
+            else:
+                weight_values = {name: float(weights.get(name, 0.0)) for name in rows}
+            selected_count = sum(abs(float(value)) > 1e-12 for value in weight_values.values())
+            matrix_columns.append({
+                "label": str(owner.get("group_name") or strategy_id),
+                "count": selected_count,
+            })
+            for row, instrument in enumerate(rows):
+                matrix_cells[row].append(_target_cell(instrument, float(weight_values.get(instrument, 0.0))))
+        return {
+            "key": key,
+            "label": label,
+            "columns": matrix_columns,
+            "rows": [_snapshot_product_display(instrument) for instrument in rows],
+            "cells": matrix_cells,
+        }
+
+    positions_contracts, total_changed = _build_position_matrix(
+        "positions_contracts", "实际持仓 · 合约", instruments, collapse_products=False
+    )
+    positions_products, _ = _build_position_matrix(
+        "positions_products", "实际持仓 · 品种", instruments, collapse_products=True
+    )
+    targets_contracts = _build_target_matrix(
+        "targets_contracts", "策略目标 · 合约", instruments, collapse_products=False
+    )
+    targets_products = _build_target_matrix(
+        "targets_products", "策略目标 · 品种", instruments, collapse_products=True
+    )
     all_ms = [int(timestamp.timestamp() * 1000) for timestamp in timestamps]
     change_indices = [
         index for index, event in enumerate(events) if event["event_type"] in {"FILL", "REJECT"}
@@ -1806,10 +2129,12 @@ def _event_group_snapshot(
         "run_id": execution.get("run_id"),
         "engine": engine_result.get("engine"),
         "matrices": [
-            {"key": "positions", "label": "实际持仓", "columns": columns, "rows": rows, "cells": position_cells},
-            {"key": "targets", "label": "策略目标", "columns": columns, "rows": rows, "cells": target_cells},
+            positions_contracts,
+            positions_products,
+            targets_contracts,
+            targets_products,
         ],
-        "default_matrix_key": "positions",
+        "default_matrix_key": "positions_contracts",
         "timestamp_ms": int(current.timestamp() * 1000),
         "event_cursor": selected_event["cursor"],
         "event_type": selected_event["event_type"],
@@ -1834,7 +2159,7 @@ def _event_group_snapshot(
         "summary": {
             "avg_turnover": 0.0,
             "total_changed": total_changed,
-            "total_prod_count": sum(column["count"] for column in columns),
+            "total_prod_count": sum(column["count"] for column in positions_contracts["columns"]),
         },
     }
 
@@ -2030,6 +2355,21 @@ def get_tester_session_info():
 #  SSE 流式端点
 # ═══════════════════════════════════════════════════
 
+@sft_bp.route('/cancel_group_test', methods=['POST'])
+def cancel_group_test():
+    from server.services import backtest_runs
+
+    data = request.get_json(silent=True) or {}
+    run_token = str(data.get('run_token') or '')
+    page_uuid = str(data.get('page_uuid') or '')
+    if not run_token or not page_uuid:
+        return jsonify({'success': False, 'error': '缺少 run_token 或 page_uuid'}), 400
+    try:
+        cancelled = backtest_runs.cancel(run_token, page_uuid, str(current_user() or ''))
+    except PermissionError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 403
+    return jsonify({'success': True, 'cancelled': cancelled})
+
 @sft_bp.route('/run_group_test_stream', methods=['POST'])
 def run_group_test_stream():
     """SSE 流式分组测试——推送 batch/membership/simulate 进度 + 最终结果。"""
@@ -2042,6 +2382,9 @@ def run_group_test_stream():
         register_group_progress,
         unregister_group_progress,
     )
+    from server.services import backtest_runs
+    from tools.backtest.cancellation import BacktestCancelled
+    import uuid
 
     data = request.get_json(silent=True) or {}
 
@@ -2055,6 +2398,14 @@ def run_group_test_stream():
 
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
+    owner = str(current_user() or '')
+    if not page_uuid or runtime_state.get_page_owner(page_uuid) != owner:
+        return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+    run_token = str(data.get('run_token') or uuid.uuid4().hex)
+    try:
+        active_run = backtest_runs.register(run_token, page_uuid, owner)
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
     factor_family_alias = ''
     if page_uuid:
         try:
@@ -2070,15 +2421,17 @@ def run_group_test_stream():
         try:
             factor_family = get_factor_family_instance(
                 factor_family_alias,
-                username=current_user(),
+                username=owner,
+                page_uuid=page_uuid,
             )
             data = dict(data)
-            data['_group_owner_username'] = current_user()
+            data['_group_owner_username'] = owner
             data['_group_factor_params_list'] = get_session_params(
                 factor_family_alias,
                 factor_family,
             )
         except Exception as exc:
+            backtest_runs.finish(run_token)
             def _early_factor_err():
                 yield f"event: error\ndata: {_json.dumps({'success': False, 'error': f'准备分组测试因子参数失败: {exc}'}, default=str)}\n\n"
             return Response(_early_factor_err(), mimetype='text/event-stream',
@@ -2112,6 +2465,8 @@ def run_group_test_stream():
             last_progress_by_batch: dict[int, dict[str, int]] = {}
 
             def _progress_bridge(phase: str, message: str, extra: dict):
+                if active_run.cancelled.is_set():
+                    raise BacktestCancelled()
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
@@ -2166,7 +2521,9 @@ def run_group_test_stream():
 
             register_group_progress(_progress_bridge)
 
-            success, result = _run_group_test_core(data)
+            success, result = _run_group_test_core(
+                data, cancel_event=active_run.cancelled
+            )
             if success:
                 registry.emit_result(result)
             else:
@@ -2174,12 +2531,15 @@ def run_group_test_stream():
                     result.get('error', '未知错误'),
                     traceback=result.get('traceback', ''),
                 )
+        except BacktestCancelled as exc:
+            emitter.emit_error(str(exc), cancelled=True, run_token=run_token)
         except Exception as e:
             import traceback as _tb
             registry.emit_error(str(e), traceback=_tb.format_exc())
         finally:
             unregister_group_progress()
             registry.cleanup()
+            backtest_runs.finish(run_token)
             emitter.close()
 
     threading.Thread(target=_compute_and_emit, daemon=True).start()

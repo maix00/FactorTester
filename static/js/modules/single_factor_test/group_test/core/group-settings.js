@@ -828,9 +828,42 @@
      */
     function _settingsSnapshot() {
         return {
-            groups: _groupsGetAll(),
-            lsConfigs: _lsConfigsGetAll(),
+            groups: _groupsGetAll().map(_settingsGroupSnapshot),
+            lsConfigs: _lsConfigsGetAll().map(_settingsLongShortSnapshot),
         };
+    }
+
+    function _copyKeys(source, keys) {
+        var out = {};
+        keys.forEach(function(key) {
+            if (source[key] !== undefined) out[key] = _deepCopy(source[key]);
+        });
+        return out;
+    }
+
+    function _settingsGroupSnapshot(group) {
+        var out = _copyKeys(group || {}, [
+            'id', 'name', 'parentId', 'testerId', 'factorAlias', 'splitCount',
+            'groupIndex', 'isAllGroups', 'needsRegenerate', 'startDate', 'endDate',
+            'shortAlias', 'overrides', '_expanded', 'productMask',
+        ]);
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(group || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
+    }
+
+    function _settingsLongShortSnapshot(config) {
+        var out = _copyKeys(config || {}, [
+            'id', 'name', 'shortAlias', 'longGroupId', 'shortGroupId',
+            'needsRegenerate', 'metadata',
+        ]);
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(config || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
     }
 
     /**
@@ -893,10 +926,10 @@
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
             var countText = group.splitCount != null ? group.splitCount : '未设置';
-            var feeText = group.feeMode || api.getFieldDefault('feeMode');
-            var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
-                + ' · 费率 ' + feeText + ' · 再平衡 ' + rebalanceText);
+                + ' · 设置 ' + Object.keys(group).filter(function(key) {
+                    return ['fee_mode', 'rebalance_mode', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
+                }).join(', '));
         });
         if (baseGroups.length > 8) {
             lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');

@@ -62,6 +62,7 @@ class MembershipAllocationStrategy:
         self._previous_prices: dict[str, float] | None = None
         self.target_trace: dict[str, dict[str, float]] = {}
         self.fallback_events: list[dict[str, object]] = []
+        self.empty_leg_events: list[dict[str, object]] = []
 
     def on_factor_signal(
         self, event: EventEnvelope, runtime: EventRuntime
@@ -90,6 +91,8 @@ class MembershipAllocationStrategy:
             weights = self._allocate_long_short(
                 event.timestamp, signed_membership, volatilities
             )
+            if weights is None:
+                return None
         else:
             weights = self._allocate(
                 event.timestamp, selected, volatilities, gross_exposure=1.0
@@ -149,14 +152,16 @@ class MembershipAllocationStrategy:
         timestamp: pd.Timestamp,
         signed_membership: np.ndarray,
         volatilities: Mapping[str, float],
-    ) -> np.ndarray:
+    ) -> np.ndarray | None:
         long_selected = signed_membership > 0
         short_selected = signed_membership < 0
         if not np.any(long_selected) or not np.any(short_selected):
-            raise ValueError(
-                f"Long-Short strategy {self.strategy_id} has an empty leg at "
-                f"{timestamp.isoformat()}"
-            )
+            self.empty_leg_events.append({
+                "timestamp": pd.Timestamp(timestamp).isoformat(),
+                "long_count": int(np.count_nonzero(long_selected)),
+                "short_count": int(np.count_nonzero(short_selected)),
+            })
+            return None
         return self._allocate(
             timestamp, long_selected, volatilities, gross_exposure=0.5, leg="long"
         ) - self._allocate(
@@ -168,6 +173,8 @@ class MembershipAllocationStrategy:
         return {
             "volatility_warmup_fallback_count": len(self.fallback_events),
             "volatility_warmup_fallbacks": self.fallback_events,
+            "long_short_empty_leg_count": len(self.empty_leg_events),
+            "long_short_empty_legs": self.empty_leg_events,
             "last_volatilities": self.estimator.snapshot(),
         }
 

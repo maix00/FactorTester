@@ -435,12 +435,6 @@
                     groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
                     productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
                 };
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
-                 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
-                    if (src[key] !== undefined && src[key] !== null) {
-                        clone[key] = (typeof src[key] === 'object') ? JSON.parse(JSON.stringify(src[key])) : src[key];
-                    }
-                });
                 try {
                     var newId = groups.add(clone);
                     created.push(newId);

@@ -206,6 +206,8 @@ def unregister_page(page_uuid: str) -> None:
     page_uuid = str(page_uuid).strip()
     if not page_uuid:
         return
+    from server.services.backtest_runs import cancel_page
+    cancel_page(page_uuid)
     clear_page_factor_testers(page_uuid, delete=True)
     from server.services.factor_registry import unregister_page as _unreg_page
     _unreg_page(page_uuid)

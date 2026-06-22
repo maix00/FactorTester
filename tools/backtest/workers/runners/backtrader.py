@@ -10,12 +10,17 @@ import numpy as np
 import pandas as pd
 
 from .common import (
+    capacity_limited_deltas,
+    execution_trace_entry,
+    execution_price,
     market_rule_diagnostics,
     parse_group_strategy_input,
     parse_target_weight_input,
+    position_value_snapshot,
     target_quantities,
     target_rows,
     valuation_price,
+    should_report_progress,
 )
 
 
@@ -27,6 +32,9 @@ class _TargetWeightStrategy(bt.Strategy):
         self.equity_curve = []
         self._open_orders = {}
         self.position_curve = {}
+        self.notional_curve = {}
+        self.margin_curve = {}
+        self.execution_trace = {}
 
     def notify_order(self, order) -> None:
         if not order.alive() and self._open_orders.get(order.data._name) is order:
@@ -39,6 +47,15 @@ class _TargetWeightStrategy(bt.Strategy):
         self.position_curve[timestamp.isoformat()] = {
             data._name: float(self.getposition(data).size) for data in self.datas
         }
+        notional_values, margin_values = position_value_snapshot(
+            self.p.request,
+            row,
+            self.p.strategy_config,
+            self.position_curve[timestamp.isoformat()],
+        )
+        self.notional_curve[timestamp.isoformat()] = notional_values
+        if margin_values is not None:
+            self.margin_curve[timestamp.isoformat()] = margin_values
         if self._pending_targets is not None:
             quantities = target_quantities(
                 self.p.request,
@@ -47,11 +64,36 @@ class _TargetWeightStrategy(bt.Strategy):
                 float(self.broker.getvalue()),
                 self.p.strategy_config,
             )
-            for data in self.datas:
-                self.order_target_size(
-                    data=data,
-                    target=float(quantities[data._name]),
-                )
+            targets = _backtrader_executable_target_sizes(
+                self.p.request,
+                row,
+                self.p.strategy_config,
+                quantities,
+                {data._name: float(self.getposition(data).size) for data in self.datas},
+                float(self.broker.getcash()),
+            )
+            current_positions = {
+                data._name: float(self.getposition(data).size) for data in self.datas
+            }
+            self.execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                self.p.request,
+                row,
+                self.p.strategy_config,
+                current_positions,
+                {
+                    name: float(targets[name]) - float(current_positions.get(name, 0.0))
+                    for name in targets
+                },
+                float(self.broker.getcash()),
+            )
+            for sell_first in (True, False):
+                for data in self.datas:
+                    name = data._name
+                    current = float(self.getposition(data).size)
+                    delta = targets[name] - current
+                    if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
+                        continue
+                    self.order_target_size(data=data, target=float(targets[name]))
         self._pending_targets = self.p.target_sequence[row]
 
 
@@ -70,6 +112,9 @@ class _GroupMembershipStrategy(bt.Strategy):
         self.equity_curve = []
         self._open_orders = {}
         self.position_curve = {}
+        self.notional_curve = {}
+        self.margin_curve = {}
+        self.execution_trace = {}
 
     def notify_order(self, order) -> None:
         if not order.alive() and self._open_orders.get(order.data._name) is order:
@@ -82,6 +127,15 @@ class _GroupMembershipStrategy(bt.Strategy):
         self.position_curve[timestamp.isoformat()] = {
             data._name: float(self.getposition(data).size) for data in self.datas
         }
+        notional_values, margin_values = position_value_snapshot(
+            self.p.request,
+            row,
+            self.p.strategy_config,
+            self.position_curve[timestamp.isoformat()],
+        )
+        self.notional_curve[timestamp.isoformat()] = notional_values
+        if margin_values is not None:
+            self.margin_curve[timestamp.isoformat()] = margin_values
         target = self.p.calculator.update(
             timestamp,
             np.asarray([
@@ -100,16 +154,47 @@ class _GroupMembershipStrategy(bt.Strategy):
                 float(self.broker.getvalue()),
                 self.p.strategy_config,
             )
-            for data in self.datas:
-                previous = self._open_orders.pop(data._name, None)
-                if previous is not None and previous.alive():
-                    self.cancel(previous)
-                order = self.order_target_size(
-                    data=data, target=float(quantities[data._name])
-                )
-                if order is not None:
-                    self._open_orders[data._name] = order
-        if self.p.progress_callback is not None:
+            targets = _backtrader_executable_target_sizes(
+                self.p.request,
+                row,
+                self.p.strategy_config,
+                quantities,
+                {data._name: float(self.getposition(data).size) for data in self.datas},
+                float(self.broker.getcash()),
+            )
+            current_positions = {
+                data._name: float(self.getposition(data).size) for data in self.datas
+            }
+            trace_timestamp = self.p.request.timestamps[
+                min(row + 1, len(self.p.request.timestamps) - 1)
+            ]
+            self.execution_trace[trace_timestamp.isoformat()] = execution_trace_entry(
+                self.p.request,
+                row,
+                self.p.strategy_config,
+                current_positions,
+                {
+                    name: float(targets[name]) - float(current_positions.get(name, 0.0))
+                    for name in targets
+                },
+                float(self.broker.getcash()),
+            )
+            for sell_first in (True, False):
+                for data in self.datas:
+                    name = data._name
+                    previous = self._open_orders.pop(name, None)
+                    if previous is not None and previous.alive():
+                        self.cancel(previous)
+                    current = float(self.getposition(data).size)
+                    delta = targets[name] - current
+                    if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
+                        continue
+                    order = self.order_target_size(data=data, target=float(targets[name]))
+                    if order is not None:
+                        self._open_orders[name] = order
+        if self.p.progress_callback is not None and should_report_progress(
+            row + 1, len(self.p.request.timestamps)
+        ):
             self.p.progress_callback(row + 1, len(self.p.request.timestamps), timestamp)
 
 
@@ -181,6 +266,9 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
             },
             "equity_curve": dict(instance.equity_curve),
             "position_curve": dict(instance.position_curve),
+            "notional_curve": dict(instance.notional_curve),
+            "margin_curve": dict(instance.margin_curve),
+            "execution_trace": dict(instance.execution_trace),
         }
     return {"engine": "backtrader", "portfolios": portfolios}
 
@@ -251,13 +339,65 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             },
             "equity_curve": dict(instance.equity_curve),
             "position_curve": dict(instance.position_curve),
+            "notional_curve": dict(instance.notional_curve),
+            "margin_curve": dict(instance.margin_curve),
+            "execution_trace": dict(instance.execution_trace),
         }
     return {
         "engine": "backtrader",
         "portfolios": portfolios,
         "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "execution_trace": {
+            strategy_id: portfolio.get("execution_trace", {})
+            for strategy_id, portfolio in portfolios.items()
+        },
         "strategy_diagnostics": {
             item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
             for item in calculators
         },
+    }
+
+
+def _backtrader_executable_target_sizes(
+    request,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+    cash: float,
+) -> dict[str, float]:
+    deltas = capacity_limited_deltas(request, row, strategy, desired, current)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    available = float(cash)
+    buy_cost = 0.0
+    for instrument, delta in deltas.items():
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            available += notional - notional * fee_rate
+        else:
+            buy_cost += notional * (1.0 + fee_rate)
+    if buy_cost > max(available, 0.0) + 1e-9:
+        if buy_cost <= 0.0 or available <= 0.0:
+            deltas = {
+                instrument: (delta if delta < 0 else 0.0)
+                for instrument, delta in deltas.items()
+            }
+        else:
+            scale = available / buy_cost
+            adjusted = dict(deltas)
+            for position, instrument in enumerate(request.instruments):
+                delta = adjusted.get(instrument, 0.0)
+                if delta <= 0:
+                    continue
+                lot_size = request.lot_sizes[row][position]
+                adjusted[instrument] = float(
+                    int((delta * scale) / lot_size + 1e-12) * lot_size
+                )
+            deltas = adjusted
+    return {
+        instrument: float(current.get(instrument, 0.0)) + float(deltas.get(instrument, 0.0))
+        for instrument in request.instruments
     }

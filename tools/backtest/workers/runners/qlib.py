@@ -12,13 +12,16 @@ from qlib.backtest.position import Position
 from .common import (
     market_rule_diagnostics,
     capacity_limited_deltas,
+    execution_trace_entry,
     execution_price,
     parse_group_strategy_input,
     parse_target_weight_input,
+    position_value_snapshot,
     rebalance_mode,
     target_quantities,
     target_rows,
     valuation_price,
+    should_report_progress,
 )
 
 
@@ -83,7 +86,10 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
         portfolios[strategy["strategy_id"]] = {
             "initial_value": strategy_cash,
             "final_value": float(position.calculate_value()),
-            "positions": position.get_stock_amount_dict(),
+            "positions": {
+                instrument: float(position.get_stock_amount(instrument))
+                for instrument in request.instruments
+            },
             "equity_curve": equity_curve,
             "position_curve": position_curve,
         }
@@ -101,6 +107,9 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         pending = None
         equity_curve = {}
         position_curve = {}
+        notional_curve = {}
+        margin_curve = {}
+        execution_trace = {}
         for row, timestamp in enumerate(request.timestamps):
             current_prices = {
                 instrument: valuation_price(request, row, instrument)
@@ -120,12 +129,19 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     strategy=strategy,
                     request=request,
                     row=row,
+                    execution_trace=execution_trace,
                 )
             equity_curve[timestamp.isoformat()] = float(position.calculate_value())
             position_curve[timestamp.isoformat()] = {
                 instrument: float(position.get_stock_amount(instrument))
                 for instrument in request.instruments
             }
+            notional_values, margin_values = position_value_snapshot(
+                request, row, strategy, position_curve[timestamp.isoformat()]
+            )
+            notional_curve[timestamp.isoformat()] = notional_values
+            if margin_values is not None:
+                margin_curve[timestamp.isoformat()] = margin_values
             pending = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -133,19 +149,33 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 updates[row],
                 np.asarray(request.margin_ratios[row]),
             )
-            if progress is not None and strategy_position == 0:
+            if (
+                progress is not None
+                and strategy_position == 0
+                and should_report_progress(row + 1, len(request.timestamps))
+            ):
                 progress(row + 1, len(request.timestamps), timestamp)
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
             "final_value": float(position.calculate_value()),
-            "positions": position.get_stock_amount_dict(),
+            "positions": {
+                instrument: float(position.get_stock_amount(instrument))
+                for instrument in request.instruments
+            },
             "equity_curve": equity_curve,
             "position_curve": position_curve,
+            "notional_curve": notional_curve,
+            "margin_curve": margin_curve,
+            "execution_trace": execution_trace,
         }
     return {
         "engine": "qlib",
         "portfolios": portfolios,
         "target_trace": {item.strategy_id: item.target_trace for item in calculators},
+        "execution_trace": {
+            strategy_id: portfolio.get("execution_trace", {})
+            for strategy_id, portfolio in portfolios.items()
+        },
         "strategy_diagnostics": {
             item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
             for item in calculators
@@ -163,18 +193,30 @@ def _rebalance(
     strategy: Mapping[str, Any],
     request=None,
     row: int | None = None,
+    execution_trace: dict | None = None,
 ) -> None:
     raw_deltas = {
         instrument: float(quantities.get(instrument, 0.0)) - position.get_stock_amount(instrument)
         for instrument in prices
     }
-    deltas = raw_deltas if request is None else capacity_limited_deltas(
+    current = {instrument: position.get_stock_amount(instrument) for instrument in prices}
+    deltas = raw_deltas if request is None else _qlib_executable_deltas(
         request,
         int(row),
         strategy,
         quantities,
-        {instrument: position.get_stock_amount(instrument) for instrument in prices},
+        current,
+        float(position.position.get("cash", 0.0)),
     )
+    if request is not None and row is not None and execution_trace is not None:
+        execution_trace[timestamp.isoformat()] = execution_trace_entry(
+            request,
+            int(row),
+            strategy,
+            current,
+            deltas,
+            float(position.position.get("cash", 0.0)),
+        )
     for direction in (Order.SELL, Order.BUY):
         for instrument, delta in deltas.items():
             if abs(delta) <= 1e-12 or (delta < 0) != (direction == Order.SELL):
@@ -186,3 +228,44 @@ def _rebalance(
             position.update_order(
                 order, trade_value, trade_value * fee_rate, fill_price
             )
+
+
+def _qlib_executable_deltas(
+    request,
+    row: int,
+    strategy: Mapping[str, Any],
+    desired: Mapping[str, float],
+    current: Mapping[str, float],
+    cash: float,
+) -> dict[str, float]:
+    deltas = capacity_limited_deltas(request, row, strategy, desired, current)
+    fee_rate = float(strategy.get("fee_rate") or 0.0)
+    available = float(cash)
+    buy_cost = 0.0
+    for instrument, delta in deltas.items():
+        if abs(delta) <= 1e-12:
+            continue
+        price = execution_price(valuation_price(request, row, instrument), delta, strategy)
+        notional = abs(delta) * price
+        if delta < 0:
+            available += notional - notional * fee_rate
+        else:
+            buy_cost += notional * (1.0 + fee_rate)
+    if buy_cost <= max(available, 0.0) + 1e-9:
+        return deltas
+    if buy_cost <= 0.0 or available <= 0.0:
+        return {
+            instrument: (delta if delta < 0 else 0.0)
+            for instrument, delta in deltas.items()
+        }
+    scale = available / buy_cost
+    adjusted = dict(deltas)
+    for position_index, instrument in enumerate(request.instruments):
+        delta = adjusted.get(instrument, 0.0)
+        if delta <= 0:
+            continue
+        lot_size = request.lot_sizes[row][position_index]
+        adjusted[instrument] = float(
+            int((delta * scale) / lot_size + 1e-12) * lot_size
+        )
+    return adjusted

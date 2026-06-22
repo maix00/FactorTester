@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from flask import Flask
+import pandas as pd
 
 from server.modules.single_factor_test import sft_bp
 from tools.backtest.settings import backtest_setting_registry, resolve_group_settings
@@ -49,6 +50,32 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert tab.status_code == 200
     assert len(tab.get_json()["settings"]) == 1
     assert missing.status_code == 404
+
+
+def test_setting_manifest_uses_page_exact_time_as_run_default(monkeypatch) -> None:
+    from server.modules.single_factor_test import backtest_settings as routes
+    from tools.data.types import DataTime
+
+    app = Flask(__name__)
+    app.register_blueprint(sft_bp)
+    monkeypatch.setattr(
+        routes.page_runtime,
+        "get_current_time",
+        lambda page_uuid: (
+            DataTime(pd.Timestamp("2024-01-02 09:01", tz="Asia/Shanghai")),
+            DataTime(pd.Timestamp("2026-05-31 15:00", tz="Asia/Shanghai")),
+            None,
+        ),
+    )
+
+    payload = app.test_client().get(
+        "/api/backtest/settings/group_test?page_uuid=page-1"
+    ).get_json()
+
+    assert payload["defaults"]["start_date"]["value"] == "2024-01-02"
+    assert payload["defaults"]["start_time"]["value"] == "09:01"
+    assert payload["defaults"]["end_date"]["value"] == "2026-05-31"
+    assert payload["defaults"]["end_time"]["value"] == "15:00"
 
 
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:

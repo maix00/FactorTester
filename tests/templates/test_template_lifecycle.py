@@ -27,15 +27,11 @@ from server.modules.templates.summary import build_snapshot_summary
 def _make_minimal_snapshot(*, submissions=None, base_groups=None, name="测试模板"):
     """构造一个最小但合法的快照，用于测试保存/加载。"""
     snap = {
-        "time_data": {
+        "local_settings": {
             "start_date": "2024-01-01",
             "start_time": "09:00",
             "end_date": "2024-12-31",
             "end_time": "15:00",
-            "is_trading_day": False,
-            "is_cn_futures_day": False,
-            "is_cn_futures_night": False,
-            "timezone": "Asia/Shanghai",
         },
         "params_list": [{"window": "20", "factor_type": "MmRet"}],
         "submissions": submissions or [],
@@ -85,11 +81,6 @@ def _make_base_group(tester_id: str, name: str = "G1", factor_alias: str = "Retu
         "groupCount": group_count,
         "groupIndex": group_index,
         "isAllGroups": False,
-        "feeMode": "none",
-        "feeRate": None,
-        "feeMap": None,
-        "useCloseToday": False,
-        "rebalanceMode": "each_period",
         "needsRegenerate": True,
         "startDate": None,
         "endDate": None,
@@ -206,7 +197,7 @@ class TestTemplateStorageLifecycle:
         assert found is not None
         assert found["name"] == "完整快照模板"
         snap = found["snapshot"]
-        assert snap["time_data"]["start_date"] == "2024-01-01"
+        assert snap["local_settings"]["start_date"] == "2024-01-01"
         assert len(snap["submissions"]) == 1
         assert snap["group_settings"]["groups"][0]["testerId"] == "t1"
 
@@ -685,6 +676,6 @@ class TestApplySnapshotFullFlow:
         assert bg["name"] == "测试分组"
         assert bg["factorAlias"] == "Return"
         assert bg["groupCount"] == 5
-        # 其他字段未被篡改
-        assert bg["feeMode"] == "none"
-        assert bg["rebalanceMode"] == "each_period"
+        # 回测执行设置不再保存在 group 结构字段中
+        assert "feeMode" not in bg
+        assert "rebalanceMode" not in bg

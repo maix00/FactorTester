@@ -117,7 +117,13 @@
         const eh = pad(endHour.value), emin = pad(endMinute.value);
         const isTradingDay = isTradingDayCheck.checked;
 
-        currentSettingsSpan.innerText = `起始时间: ${sy}-${sm}-${sd} ${sh}:${smin}, 终末时间: ${ey}-${em}-${ed} ${eh}:${emin}${isTradingDay ? ' (交易日)' : ''}`;
+        const modeSuffix = isTradingDay ? ' (交易日)' : (isCnFuturesDayCheck.checked ? ' (期货日盘)' : (isCnFuturesNightCheck.checked ? ' (期货夜盘)' : ''));
+        const summaryText = `起始时间: ${sy}-${sm}-${sd} ${sh}:${smin}, 终末时间: ${ey}-${em}-${ed} ${eh}:${emin}${modeSuffix}`;
+        currentSettingsSpan.innerText = summaryText;
+        const summarySpan = document.getElementById('time-summary-text');
+        if (summarySpan) {
+            summarySpan.innerText = `${sy}-${sm}-${sd} ${sh}:${smin} → ${ey}-${em}-${ed} ${eh}:${emin}${modeSuffix}`;
+        }
 
         // 验证起始时间 <= 终末时间
         const startDt = new Date(`${sy}-${sm}-${sd}T${sh}:${smin}:00`);
@@ -154,6 +160,28 @@
     }
 
     window.getSharedRuntimeTimeRange = getSharedRuntimeTimeRange;
+    window.refreshSharedRuntimeTimeRangeSummary = updateCurrentSettings;
+
+    window.applySharedRuntimeTimeRange = function(timeData, options) {
+        const td = timeData || {};
+        const sd = (td.start_date || '').split('-');
+        const ed = (td.end_date || '').split('-');
+        const st = (td.start_time || '').split(':');
+        const et = (td.end_time || '').split(':');
+        if (sd.length === 3) { startYear.value = sd[0]; startMonth.value = pad(sd[1]); startDay.value = pad(sd[2]); }
+        if (ed.length === 3) { endYear.value = ed[0]; endMonth.value = pad(ed[1]); endDay.value = pad(ed[2]); }
+        if (st.length === 2) { startHour.value = pad(st[0]); startMinute.value = pad(st[1]); }
+        if (et.length === 2) { endHour.value = pad(et[0]); endMinute.value = pad(et[1]); }
+        if (td.timezone != null) timezoneInput.value = td.timezone;
+        if (td.is_trading_day != null) isTradingDayCheck.checked = !!td.is_trading_day;
+        if (td.is_cn_futures_day != null) isCnFuturesDayCheck.checked = !!td.is_cn_futures_day;
+        if (td.is_cn_futures_night != null) isCnFuturesNightCheck.checked = !!td.is_cn_futures_night;
+        setTimeInputsDisabled(!!(isTradingDayCheck.checked || isCnFuturesDayCheck.checked || isCnFuturesNightCheck.checked));
+        updateCurrentSettings();
+        if (options && options.persist) {
+            persistTimeRange(getSharedRuntimeTimeRange());
+        }
+    };
 
     // ---------- 交易日/期货切换 ----------
     function toggleTradingDay() {
@@ -239,6 +267,14 @@
                 if (res.change_factor_tester) {
                     msg += '，正在更新因子测试中...';
                 }
+                document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
+                    detail: {
+                        start_date: data.start_date,
+                        start_time: data.start_time,
+                        end_date: data.end_date,
+                        end_time: data.end_time
+                    }
+                }));
                 statusSpan.innerText = msg;
                 statusSpan.style.color = '#28a745';
                 // 自动退出抽屉
