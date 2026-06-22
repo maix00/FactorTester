@@ -33,7 +33,9 @@ def resolve_group_settings(
     for group_id in group_ids:
         overrides = group_values.get(group_id, {})
         values: dict[str, Any] = {}
+        setting_fallbacks: list[dict[str, Any]] = []
         for key, definition in application.settings.items():
+            user_provided = key in local_values or key in overrides
             if (
                 definition.scope_policy == ScopePolicy.GROUP_ONLY
                 and key in local_values
@@ -51,8 +53,17 @@ def resolve_group_settings(
             ):
                 value = definition.engine_defaults[engine]
             _validate_value(definition, value)
-            _validate_engine_value(definition, value, engine)
+            value, fallback = _resolve_engine_value(
+                definition,
+                value,
+                engine,
+                user_provided=user_provided,
+            )
+            if fallback is not None:
+                setting_fallbacks.append(fallback)
             values[key] = value
+        if setting_fallbacks:
+            values["_setting_fallbacks"] = setting_fallbacks
         resolved[group_id] = values
     return resolved
 
@@ -69,13 +80,28 @@ def _validate_value(definition: SettingDefinition, value: Any) -> None:
             raise ValueError(f"setting {definition.key} is above maximum")
 
 
-def _validate_engine_value(
+def _resolve_engine_value(
     definition: SettingDefinition,
     value: Any,
     engine: str,
-) -> None:
+    *,
+    user_provided: bool,
+) -> tuple[Any, dict[str, Any] | None]:
     disabled = set(definition.disabled_values_by_engine.get(engine, ()))
-    if str(value) in disabled:
+    if str(value) not in disabled:
+        return value, None
+    fallback = definition.engine_defaults.get(engine, definition.default)
+    _validate_value(definition, fallback)
+    if str(fallback) in disabled:
         raise ValueError(
-            f"setting {definition.key}={value!r} is disabled for engine {engine}"
+            f"setting {definition.key} has no executable default for engine {engine}"
         )
+    diagnostic = {
+        "setting_key": definition.key,
+        "module": definition.module,
+        "engine": engine,
+        "requested_value": value,
+        "applied_value": fallback,
+        "reason": "engine_disabled_value",
+    } if user_provided else None
+    return fallback, diagnostic

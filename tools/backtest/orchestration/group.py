@@ -183,6 +183,16 @@ def execute_group_plan(
             name: volume_values[:, column].tolist()
             for column, name in enumerate(plan.trade_product_names)
         }
+    setting_fallbacks = [
+        {
+            **dict(item),
+            "strategy_id": str(config.get("strategy_id") or ""),
+            "display_name": str(config.get("display_name") or config.get("strategy_id") or ""),
+        }
+        for config in strategy_configs
+        for item in (config.get("_setting_fallbacks") or [])
+        if isinstance(item, Mapping)
+    ]
     engine_label = {
         "native": "Native",
         "backtrader": "Backtrader",
@@ -191,6 +201,14 @@ def execute_group_plan(
         "rqalpha": "RQAlpha",
     }.get(engine, engine)
     if progress is not None:
+        if setting_fallbacks:
+            progress(
+                "init",
+                f"{engine_label} 已替换 {len(setting_fallbacks)} 个不适用于当前引擎的设置",
+                0,
+                1,
+                {"engine": engine, "setting_fallbacks": setting_fallbacks},
+            )
         progress(
             "framework_execution",
             f"{engine_label} 开始计算策略 target 并执行事件回测",

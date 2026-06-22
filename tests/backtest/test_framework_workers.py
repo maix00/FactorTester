@@ -66,6 +66,41 @@ def test_rqalpha_worker_is_declared_without_native_fallback() -> None:
         ))
 
 
+def test_native_group_strategy_reports_setting_fallback_diagnostics() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy
+
+    payload = {
+        "timestamps": ["2024-01-01T00:00:00", "2024-01-02T00:00:00"],
+        "instruments": ["asset-a"],
+        "prices": {"asset-a": [100.0, 100.0]},
+        "membership": [[[True]], [[True]]],
+        "signal_updates": [[True], [True]],
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "margin_ratios": [[1.0], [1.0]],
+            "multipliers": [[1.0], [1.0]],
+            "lot_sizes": [[1.0], [1.0]],
+        },
+        "strategy_configs": [_strategy_settings(
+            strategy_id="group-1",
+            allocation_policy="equal_notional",
+            _setting_fallbacks=[{
+                "setting_key": "money_unit_policy",
+                "module": "accounting",
+                "engine": "qlib",
+                "requested_value": "minor_units",
+                "applied_value": "engine_native",
+                "reason": "engine_disabled_value",
+            }],
+        )],
+    }
+
+    result = run_group_strategy(payload)
+
+    assert result["strategy_diagnostics"]["group-1"]["setting_fallback_count"] == 1
+    assert result["strategy_diagnostics"]["group-1"]["setting_fallbacks"][0]["module"] == "accounting"
+
+
 @pytest.mark.parametrize("engine", ["backtrader", "qlib", "zipline"])
 def test_framework_worker_health_and_multi_strategy_run(engine: str) -> None:
     dispatcher = EngineWorkerDispatcher()

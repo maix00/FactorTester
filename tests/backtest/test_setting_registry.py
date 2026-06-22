@@ -181,13 +181,22 @@ def test_engine_owned_default_replaces_disabled_money_unit_policy() -> None:
     assert resolved["group-1"]["money_unit_policy"] == "engine_native"
 
 
-def test_disabled_engine_setting_is_rejected_instead_of_ignored() -> None:
+def test_disabled_engine_setting_falls_back_with_diagnostics() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    with pytest.raises(ValueError, match="money_unit_policy"):
-        resolve_group_settings(
-            application,
-            local_values={"engine": "qlib", "money_unit_policy": "minor_units"},
-            group_values={"group-1": {}},
-            group_ids=("group-1",),
-        )
+    resolved = resolve_group_settings(
+        application,
+        local_values={"engine": "qlib", "money_unit_policy": "minor_units"},
+        group_values={"group-1": {}},
+        group_ids=("group-1",),
+    )
+
+    assert resolved["group-1"]["money_unit_policy"] == "engine_native"
+    assert resolved["group-1"]["_setting_fallbacks"] == [{
+        "setting_key": "money_unit_policy",
+        "module": "accounting",
+        "engine": "qlib",
+        "requested_value": "minor_units",
+        "applied_value": "engine_native",
+        "reason": "engine_disabled_value",
+    }]

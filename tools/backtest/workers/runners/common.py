@@ -332,3 +332,13 @@ def market_rule_diagnostics(payload: Mapping[str, Any]) -> dict[str, Any]:
         "market_rule_approximation_count": approximation_count,
         "market_rule_provenance": provenance,
     }
+
+
+def setting_fallback_diagnostics(strategy: Mapping[str, Any]) -> dict[str, Any]:
+    fallbacks = strategy.get("_setting_fallbacks") or []
+    if not isinstance(fallbacks, list) or not fallbacks:
+        return {}
+    return {
+        "setting_fallback_count": len(fallbacks),
+        "setting_fallbacks": fallbacks,
+    }

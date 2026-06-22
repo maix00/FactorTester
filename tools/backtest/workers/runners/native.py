@@ -38,6 +38,7 @@ from .common import (
     parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
+    setting_fallback_diagnostics,
     should_report_progress,
     target_quantities,
     valuation_price,
@@ -146,8 +147,12 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             for strategy_id, portfolio in portfolios.items()
         },
         "strategy_diagnostics": {
-            item.strategy_id: {**item.diagnostics, **market_rule_diagnostics(payload)}
-            for item in calculators
+            item.strategy_id: {
+                **item.diagnostics,
+                **market_rule_diagnostics(payload),
+                **setting_fallback_diagnostics(strategy),
+            }
+            for item, strategy in zip(calculators, request.strategies, strict=True)
         },
         "event_count": len(request.timestamps),
     }
