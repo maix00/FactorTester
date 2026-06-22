@@ -149,6 +149,38 @@ def test_runtime_window_supplies_run_defaults_without_flat_frontend_values() -> 
     assert settings["allocation_policy"] == "inverse_volatility"
 
 
+def test_runtime_window_builds_explicit_start_and_end_datetimes() -> None:
+    from server.modules.single_factor_test.group import _runtime_datetimes
+
+    start_dt, end_dt = _runtime_datetimes({
+        "_runtime_window": {
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-31",
+            "start_time": "09:00",
+            "end_time": "15:00",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+    })
+
+    assert start_dt.is_set
+    assert end_dt.is_set
+    assert start_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-01 09:00"
+    assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
+
+
+def test_runtime_window_reports_missing_dates_before_dataindex_slice() -> None:
+    from server.modules.single_factor_test.group import _runtime_datetimes
+
+    with pytest.raises(ValueError, match="运行时间范围缺失: start_date, end_date"):
+        _runtime_datetimes({
+            "_runtime_window": {
+                "time_precision": "exact",
+                "timezone": "Asia/Shanghai",
+            },
+        })
+
+
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:
     app = Flask(__name__)
     app.register_blueprint(sft_bp)

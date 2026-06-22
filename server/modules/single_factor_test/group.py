@@ -169,6 +169,44 @@ def _resolve_flat_backtest_settings(
     )
 
 
+def _runtime_time_value(payload: dict[str, Any], key: str, default: Any = None) -> Any:
+    runtime_window = payload.get("_runtime_window")
+    if isinstance(runtime_window, dict) and runtime_window.get(key) not in (None, ""):
+        return runtime_window[key]
+    return payload.get(key, default)
+
+
+def _runtime_datetimes(payload: dict[str, Any]):
+    from tools.data.types import DataTime
+
+    precision = (
+        _runtime_time_value(payload, "precision")
+        or _runtime_time_value(payload, "time_precision")
+        or "exact"
+    )
+    timezone = _runtime_time_value(payload, "timezone")
+    start_payload = {
+        "date": _runtime_time_value(payload, "start_date"),
+        "time": _runtime_time_value(payload, "start_time"),
+        "timezone": timezone,
+    }
+    end_payload = {
+        "date": _runtime_time_value(payload, "end_date"),
+        "time": _runtime_time_value(payload, "end_time"),
+        "timezone": timezone,
+    }
+    start_dt = DataTime.from_dict(start_payload, precision=precision)
+    end_dt = DataTime.from_dict(end_payload, precision=precision)
+    missing = []
+    if not start_dt.is_set:
+        missing.append("start_date")
+    if not end_dt.is_set:
+        missing.append("end_date")
+    if missing:
+        raise ValueError("运行时间范围缺失: " + ", ".join(missing))
+    return start_dt, end_dt
+
+
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
     """Parse legacy group-test fee payload into engine inputs.
 
@@ -1295,27 +1333,10 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"ls_configs={len(flat_ls_configs)}"
     )
 
-    from tools.data.types import DataTime
-
-    runtime_window = data.get("_runtime_window") if isinstance(data.get("_runtime_window"), dict) else {}
-    time_source = dict(runtime_window)
-    for key in (
-        "start_date",
-        "start_time",
-        "end_date",
-        "end_time",
-        "timezone",
-        "time_precision",
-        "precision",
-    ):
-        if key in data:
-            time_source[key] = data[key]
-    precision = time_source.get("precision") or time_source.get("time_precision") or "exact"
-    start_dt = DataTime.from_dict(time_source, precision=precision)
-    end_data = dict(time_source)
-    end_data["date"] = end_data.pop("end_date", end_data.pop("date", None))
-    end_data["time"] = end_data.pop("end_time", end_data.pop("time", None))
-    end_dt = DataTime.from_dict(end_data, precision=precision)
+    try:
+        start_dt, end_dt = _runtime_datetimes(data)
+    except ValueError as exc:
+        return False, {'success': False, 'error': str(exc), 'status': 400}
 
     try:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
