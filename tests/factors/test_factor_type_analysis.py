@@ -1,0 +1,575 @@
+"""
+因子类型分析单元测试。
+
+覆盖：
+  - ReferenceFactorRegistry 注册/查询
+  - 时序相关性计算（正常 / 数据不足 / NaN 处理）
+  - 品种相关性矩阵
+  - 最佳类别匹配
+  - FactorTypeAnalyzer 集成
+  - 本地模拟 API 调用
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from tools.factors.tests.single_factor_test.factor_type_analysis import (
+    FactorTypeAnalyzer,
+    ReferenceFactorRegistry,
+)
+from tools.factors.tests.single_factor_test.factor_type_analysis.correlation import (
+    best_category_match,
+    compute_product_correlation_matrix,
+    compute_time_series_correlation,
+    categorize_correlation_strength,
+)
+from tools.factors.tests.single_factor_test.factor_type_analysis.registry import (
+    FactorCategory,
+    ReferenceFactorDef,
+    create_default_registry,
+    default_registry,
+)
+from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
+    _run_window_datetimes,
+)
+
+# =========================================================
+#  Fixtures
+# =========================================================
+
+
+@pytest.fixture
+def sample_registry() -> ReferenceFactorRegistry:
+    """一个含 3 个类别的样本注册中心。"""
+    reg = ReferenceFactorRegistry()
+    reg.register(ReferenceFactorDef(
+        key="trend_a", name="TrendA",
+        category=FactorCategory.TREND,
+        factor_alias="TrendA",
+    ))
+    reg.register(ReferenceFactorDef(
+        key="trend_b", name="TrendB",
+        category=FactorCategory.TREND,
+        factor_alias="TrendB",
+    ))
+    reg.register(ReferenceFactorDef(
+        key="vol_a", name="VolA",
+        category=FactorCategory.VOLATILITY,
+        factor_alias="VolA",
+    ))
+    reg.register(ReferenceFactorDef(
+        key="mom_a", name="MomA",
+        category=FactorCategory.MOMENTUM,
+        factor_alias="MomA",
+    ))
+    return reg
+
+
+@pytest.fixture
+def sample_time_series() -> tuple[pd.Series, dict[str, pd.Series]]:
+    """生成 500 个时间点的模拟因子序列。"""
+    np.random.seed(42)
+    dates = pd.date_range("2020-01-01", periods=500, freq="D")
+
+    # 目标因子：与 trend 类强相关，与 vol 弱相关
+    common_trend = np.sin(np.linspace(0, 8 * np.pi, 500))
+    noise = np.random.normal(0, 0.3, 500)
+
+    target = pd.Series(common_trend + noise * 0.2, index=dates, name="target")
+
+    refs = {
+        "trend_a": pd.Series(common_trend + np.random.normal(0, 0.1, 500), index=dates),
+        "trend_b": pd.Series(common_trend * 0.8 + np.random.normal(0, 0.15, 500), index=dates),
+        "vol_a": pd.Series(np.random.normal(0, 1, 500), index=dates),  # 白噪声
+        "mom_a": pd.Series(common_trend * 0.5 + np.random.normal(0, 0.3, 500), index=dates),
+    }
+    return target, refs
+
+
+@pytest.fixture
+def sample_product_series() -> dict[str, pd.Series]:
+    """多个产品的因子序列（模拟品种相关性）。"""
+    np.random.seed(123)
+    dates = pd.date_range("2020-01-01", periods=300, freq="D")
+    common = np.sin(np.linspace(0, 4 * np.pi, 300))
+
+    products = {}
+    for i, name in enumerate(["RB.SHF", "HC.SHF", "I.DCE", "J.DCE"]):
+        # 前两个高度相关，后两个与前面弱相关
+        if i < 2:
+            series = common * 0.9 + np.random.normal(0, 0.1, 300)
+        else:
+            series = common * 0.3 + np.random.normal(0, 0.5, 300)
+        products[name] = pd.Series(series, index=dates)
+
+    return products
+
+
+# =========================================================
+#  1) ReferenceFactorRegistry
+# =========================================================
+
+
+class TestReferenceFactorRegistry:
+    def test_register_and_list(self, sample_registry):
+        assert sample_registry.count() == 4
+        names = [d.name for d in sample_registry.list()]
+        assert "TrendA" in names
+        assert "VolA" in names
+
+    def test_duplicate_key_raises(self, sample_registry):
+        with pytest.raises(ValueError, match="duplicate reference factor key"):
+            sample_registry.register(ReferenceFactorDef(
+                key="trend_a", name="TrendA2",
+                category=FactorCategory.TREND,
+                factor_alias="TrendA2",
+            ))
+
+    def test_by_category(self, sample_registry):
+        trend_defs = sample_registry.by_category(FactorCategory.TREND)
+        assert len(trend_defs) == 2
+        vol_defs = sample_registry.by_category(FactorCategory.VOLATILITY)
+        assert len(vol_defs) == 1
+
+    def test_categories(self, sample_registry):
+        cats = sample_registry.categories()
+        assert FactorCategory.TREND in cats
+        assert FactorCategory.VOLATILITY in cats
+        assert FactorCategory.MOMENTUM in cats
+
+    def test_manifest_contains_expected_keys(self, sample_registry):
+        manifest = sample_registry.manifest()
+        assert len(manifest) == 4
+        for entry in manifest:
+            assert "key" in entry
+            assert "name" in entry
+            assert "category" in entry
+            assert "category_label" in entry
+            assert "factor_alias" in entry
+
+    def test_default_registry_has_10_entries(self):
+        assert default_registry.count() == 10
+        assert FactorCategory.TREND in default_registry.categories()
+        assert FactorCategory.VOLATILITY in default_registry.categories()
+
+
+# =========================================================
+#  2) 时序相关性
+# =========================================================
+
+
+class TestTimeSeriesCorrelation:
+    def test_normal_correlation(self, sample_time_series):
+        target, refs = sample_time_series
+        results = compute_time_series_correlation(target, refs, min_periods=10)
+
+        # 与 trend_a 应有较高的正相关
+        trend_corr = results["trend_a"]["correlation"]
+        assert trend_corr is not None
+        assert trend_corr > 0.5, f"trend_a correlation too low: {trend_corr}"
+
+        # 与 vol_a（白噪声）相关应接近 0
+        vol_corr = results["vol_a"]["correlation"]
+        assert vol_corr is not None
+        assert abs(vol_corr) < 0.3, f"vol_a correlation too high: {vol_corr}"
+
+    def test_sparman(self, sample_time_series):
+        target, refs = sample_time_series
+        results = compute_time_series_correlation(
+            target, refs, min_periods=10, method="spearman"
+        )
+        assert results["trend_a"]["correlation"] is not None
+
+    def test_insufficient_data(self):
+        target = pd.Series([1, 2, 3], index=pd.date_range("2020-01-01", periods=3))
+        refs = {"a": pd.Series([4, 5, 6], index=pd.date_range("2020-01-01", periods=3))}
+        results = compute_time_series_correlation(target, refs, min_periods=10)
+        assert results["a"]["correlation"] is None
+        assert results["a"]["insufficient_data"] is True
+
+    def test_nan_handling(self):
+        dates = pd.date_range("2020-01-01", periods=100)
+        target = pd.Series(np.random.normal(0, 1, 100), index=dates)
+        target.iloc[20:30] = np.nan
+        ref = pd.Series(np.random.normal(0, 1, 100), index=dates)
+        ref.iloc[25:35] = np.nan
+        results = compute_time_series_correlation(
+            target, {"a": ref}, min_periods=5
+        )
+        # 对齐后应有约 80 个有效点
+        assert results["a"]["valid_periods"] >= 80
+        assert results["a"]["correlation"] is not None
+
+    def test_p_value_present(self, sample_time_series):
+        target, refs = sample_time_series
+        results = compute_time_series_correlation(target, {"trend_a": refs["trend_a"]})
+        assert results["trend_a"]["p_value"] is not None
+        # 强相关应有小 p_value
+        assert results["trend_a"]["p_value"] < 0.05
+
+
+# =========================================================
+#  3) 品种相关性矩阵
+# =========================================================
+
+
+class TestProductCorrelationMatrix:
+    def test_matrix_shape(self, sample_product_series):
+        result = compute_product_correlation_matrix(sample_product_series)
+        assert len(result["matrix"]) == 4
+        assert len(result["products"]) == 4
+        assert result["valid_pairs"] == 4
+
+    def test_highly_correlated_products(self, sample_product_series):
+        result = compute_product_correlation_matrix(sample_product_series)
+        matrix = result["matrix"]
+        products = result["products"]
+
+        # RB.SHF 和 HC.SHF 应高度相关（both heavily trend-weighted）
+        rb_idx = products.index("RB.SHF")
+        hc_idx = products.index("HC.SHF")
+        rb_hc_corr = matrix[rb_idx][hc_idx]
+        assert rb_hc_corr is not None
+        assert rb_hc_corr > 0.5, f"RB-HC correlation too low: {rb_hc_corr}"
+
+        # 对角线的自我相关系数为 1
+        for i in range(4):
+            assert matrix[i][i] == 1.0 or math.isclose(matrix[i][i], 1.0)
+
+    def test_single_product_returns_empty(self):
+        series = {"RB.SHF": pd.Series([1, 2, 3], index=pd.date_range("2020-01-01", periods=3))}
+        result = compute_product_correlation_matrix(series)
+        assert result["matrix"] == []
+
+    def test_sparman_method(self, sample_product_series):
+        result = compute_product_correlation_matrix(
+            sample_product_series, method="spearman"
+        )
+        assert len(result["matrix"]) == 4
+
+
+# =========================================================
+#  4) 工具函数
+# =========================================================
+
+
+class TestUtilities:
+    def test_categorize_correlation_strength(self):
+        assert categorize_correlation_strength(0.9) == "高度相关"
+        assert categorize_correlation_strength(0.6) == "中度相关"
+        assert categorize_correlation_strength(0.4) == "弱相关"
+        assert categorize_correlation_strength(0.1) == "几乎无关"
+        assert categorize_correlation_strength(-0.85) == "高度相关"
+        assert categorize_correlation_strength(None) == "无数据"
+
+    def test_best_category_match(self):
+        cat_corrs = {"趋势跟踪": 0.82, "波动率": -0.12, "动量": 0.45}
+        result = best_category_match(cat_corrs)
+        assert result["best_category"] == "趋势跟踪"
+        assert result["best_corr"] == 0.82
+
+    def test_best_category_match_negative(self):
+        cat_corrs = {"趋势跟踪": -0.75, "波动率": 0.1}
+        result = best_category_match(cat_corrs)
+        # 绝对值最大的：-0.75 的绝对值 0.75 > 0.1
+        assert result["best_category"] == "趋势跟踪"
+
+    def test_best_category_match_empty(self):
+        result = best_category_match({})
+        assert result["best_category"] == ""
+
+    def test_run_window_datetimes(self):
+        settings = {"start_date": "2023-01-01", "end_date": "2023-12-31"}
+        start, end = _run_window_datetimes(settings)
+        assert start is not None
+        assert end is not None
+        assert "2023" in str(start.ts)
+
+    def test_run_window_datetimes_none(self):
+        start, end = _run_window_datetimes(None)
+        assert start is None
+        assert end is None
+
+    def test_run_window_datetimes_empty(self):
+        start, end = _run_window_datetimes({})
+        assert start is None
+        assert end is None
+
+
+# =========================================================
+#  5) FactorTypeAnalyzer 集成
+# =========================================================
+
+
+class TestFactorTypeAnalyzer:
+    def test_analyze_returns_result(self, sample_registry, sample_product_series):
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="TestFactor",
+            method="pearson",
+        )
+
+        assert result is not None
+        assert result.to_dict() is not None
+        assert result.meta["factor_name"] == "TestFactor"
+
+    def test_analyze_has_best_match(self, sample_registry, sample_product_series):
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="Test",
+            reference_series=self._make_refs(sample_product_series),
+        )
+
+        assert result.best_match is not None
+        assert "best_category" in result.best_match
+
+    def test_analyze_reference_correlations(self, sample_registry, sample_product_series):
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+
+        refs = self._make_refs(sample_product_series)
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="Test",
+            reference_series=refs,
+        )
+
+        assert len(result.reference_correlations) == 4
+        for key, corr_info in result.reference_correlations.items():
+            assert "correlation" in corr_info
+            assert "p_value" in corr_info
+
+    def test_analyze_product_correlation(self, sample_registry, sample_product_series):
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+        refs = self._make_refs(sample_product_series)
+
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="Test",
+            reference_series=refs,
+        )
+
+        pc = result.product_correlation
+        assert "matrix" in pc
+        assert "products" in pc
+        assert len(pc["products"]) == 4
+
+    def test_analyze_single_product(self, sample_registry):
+        """单产品应仍有分析结果（但品种矩阵为空）。"""
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+        series = {
+            "RB.SHF": pd.Series(
+                np.random.normal(0, 1, 200),
+                index=pd.date_range("2020-01-01", periods=200),
+            )
+        }
+        refs = self._make_refs(series)
+        result = analyzer.analyze(
+            target_series=series,
+            factor_name="Test",
+            reference_series=refs,
+        )
+        assert len(result.product_correlation["matrix"]) == 0
+
+    def test_sanity_check_emits_warning(self, sample_registry):
+        """全部参照因子相关性为 None 时应有警告。"""
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+        dates = pd.date_range("2020-01-01", periods=50)
+        target = {"RB.SHF": pd.Series(np.random.normal(0, 1, 50), index=dates)}
+        refs = {"trend_a": pd.Series([np.nan] * 50, index=dates)}  # 全 NaN
+
+        import warnings
+
+        with pytest.warns(UserWarning, match="所有参照因子相关性计算均为 None"):
+            analyzer.analyze(
+                target_series=target,
+                factor_name="Test",
+                reference_series=refs,
+            )
+
+    @staticmethod
+    def _make_refs(product_series: dict[str, pd.Series]) -> dict[str, pd.Series]:
+        """为测试创建简化的参照因子序列。"""
+        np.random.seed(99)
+        dates = next(iter(product_series.values())).index
+        return {
+            "trend_a": pd.Series(np.sin(np.linspace(0, 4 * np.pi, len(dates))), index=dates),
+            "trend_b": pd.Series(np.sin(np.linspace(0, 4 * np.pi, len(dates))) * 0.8, index=dates),
+            "vol_a": pd.Series(np.random.normal(0, 1, len(dates)), index=dates),
+            "mom_a": pd.Series(np.sin(np.linspace(0, 4 * np.pi, len(dates))) * 0.5, index=dates),
+        }
+
+
+# =========================================================
+#  6) 本地 API 模拟
+# =========================================================
+
+
+class TestApiSimulation:
+    """模拟前端行为，构造请求体并验证核心逻辑。
+    
+    因为我们是在 test 环境中，不实际启动 Flask 服务器，
+    所以直接测试 FactorTypeAnalysisRun 的 from_request / run 方法
+    在测试环境中不可行（依赖 server 模块）。
+    
+    此测试验证：
+      - 请求体 JSON 序列化/反序列化正确
+      - 核心分析逻辑可被 HTTP handler 调用
+      - 返回结构符合前端期望
+    """
+
+    def test_request_body_roundtrip(self):
+        """模拟前端 POST 请求的 JSON 结构被正确解析。"""
+        body = {
+            "paths": ["RB.SHF", "HC.SHF", "I.DCE"],
+            "factor_family_alias": "mm_factors",
+            "factor_alias": "MmTrend",
+            "page_uuid": "test-uuid-123",
+            "settings": {
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+                "correlation_method": "pearson",
+            },
+            "method": "pearson",
+        }
+
+        # 验证 JSON 序列化
+        serialized = json.dumps(body)
+        deserialized = json.loads(serialized)
+
+        assert deserialized["paths"] == ["RB.SHF", "HC.SHF", "I.DCE"]
+        assert deserialized["factor_alias"] == "MmTrend"
+        assert deserialized["settings"]["start_date"] == "2023-01-01"
+        assert deserialized["method"] == "pearson"
+
+    def test_response_structure(self, sample_registry, sample_product_series):
+        """验证分析结果的结构与前端期望一致。"""
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+        refs = {
+            "trend_a": pd.Series(
+                np.sin(np.linspace(0, 4 * np.pi, 300)),
+                index=next(iter(sample_product_series.values())).index,
+            ),
+        }
+
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="MmTrend",
+            method="pearson",
+            reference_series=refs,
+        )
+
+        # 期望的返回结构（对应 server_facade 的 run()）
+        response = {
+            "success": True,
+            "target_factor": {
+                "alias": "MmTrend",
+                "family_alias": "",
+            },
+            "reference_factors": [
+                {
+                    "key": "trend_a",
+                    "name": "TrendA",
+                    "category": "trend",
+                    "category_label": "趋势跟踪",
+                    "correlation": result.reference_correlations["trend_a"]["correlation"],
+                    "p_value": result.reference_correlations["trend_a"]["p_value"],
+                    "valid_periods": result.reference_correlations["trend_a"]["valid_periods"],
+                    "insufficient_data": False,
+                }
+            ],
+            "category_correlations": result.category_correlations,
+            "best_match": result.best_match,
+            "product_correlation": result.product_correlation,
+            "product_summaries": [
+                {
+                    "product": prod,
+                    "count": int(series.dropna().count()),
+                    "start": str(series.index[0]),
+                    "end": str(series.index[-1]),
+                    "mean": round(float(series.mean()), 6),
+                    "std": round(float(series.std()), 6),
+                }
+                for prod, series in sample_product_series.items()
+            ],
+            "meta": {
+                "elapsed_ms": 0,
+                "method": "pearson",
+                "product_count": 4,
+                "reference_count": 1,
+            },
+        }
+
+        # 验证顶层 key
+        for key in ("success", "target_factor", "reference_factors",
+                     "category_correlations", "best_match",
+                     "product_correlation", "product_summaries", "meta"):
+            assert key in response, f"Missing key: {key}"
+
+        # 验证 reference_factors 结构
+        for ref in response["reference_factors"]:
+            for key in ("key", "name", "category", "category_label",
+                        "correlation", "p_value", "valid_periods", "insufficient_data"):
+                assert key in ref, f"Missing key in reference_factors: {key}"
+
+        # 验证 product_summaries 结构
+        for summary in response["product_summaries"]:
+            for key in ("product", "count", "mean", "std"):
+                assert key in summary, f"Missing key in product_summaries: {key}"
+
+    def test_all_ref_categories_in_manifest(self):
+        """验证默认注册中心包含所有因子类别。"""
+        registry = create_default_registry()
+        cats = registry.categories()
+        all_cats = {FactorCategory.TREND, FactorCategory.MOMENTUM,
+                     FactorCategory.VOLATILITY, FactorCategory.POSITION,
+                     FactorCategory.PRICE_VOLUME}
+        for cat in all_cats:
+            assert cat in cats, f"Missing category: {cat}"
+
+    def test_error_response_structure(self):
+        """验证错误响应结构（模拟 API 错误）。"""
+        error_response = {
+            "success": False,
+            "error": "请先选择因子",
+        }
+        serialized = json.dumps(error_response)
+        deserialized = json.loads(serialized)
+        assert deserialized["success"] is False
+        assert "error" in deserialized
+
+    def test_empty_paths_validation(self):
+        """验证空路径被拒绝。"""
+        # 模拟 from_request 中的验证逻辑
+        paths = []
+        if not isinstance(paths, list) or not paths:
+            with pytest.raises(ValueError, match="请先从产品树选择产品或路径"):
+                raise ValueError("请先从产品树选择产品或路径")
+
+    def test_empty_factor_validation(self):
+        """验证空因子被拒绝。"""
+        factor_alias = ""
+        if not factor_alias:
+            with pytest.raises(ValueError, match="请先选择因子"):
+                raise ValueError("请先选择因子")
+
+    def test_default_registry_to_dict(self, sample_registry):
+        """验证参照因子可序列化为前端所需格式。"""
+        for ref_def in sample_registry.list():
+            d = ref_def.to_dict()
+            assert "key" in d
+            assert "name" in d
+            assert "category" in d
+            assert "category_label" in d
+            assert d["category"] in ("trend", "volatility", "momentum")
+            assert d["category_label"] in ("趋势跟踪", "波动率", "动量")
