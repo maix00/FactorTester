@@ -102,7 +102,7 @@
     }
 
     function escapeHTML(str) {
-        if (GT.escapeHTML) return GT.escapeHTML(str);
+        if (GT.escapeHTML) return GT.escapeHTML(str == null ? '' : String(str));
         return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
@@ -428,7 +428,8 @@
         return true;
     }
 
-    function chipSourceGroup(group, chipDef) {
+    function chipSourceGroup(group, chipDef, options) {
+        if (options && options.useOwnValues) return group;
         return chipDef && chipDef.inherit_from_root ? resolveRootGroup(group) : group;
     }
 
@@ -597,6 +598,47 @@
         return settingVisibleForValues(setting, effectiveValuesForNode(node));
     }
 
+    function hasMaterializableDefault(key) {
+        var defaults = state.index && state.index.defaults || {};
+        var def = defaults[key];
+        if (!def) return false;
+        var scope = def.scope_policy;
+        if (scope !== 'group_override' && scope !== 'group_only') return false;
+        return def.value !== undefined && def.value !== null && def.value !== '';
+    }
+
+    function materializeChildDefaultsForChangedKeys(parentId, keys, options) {
+        options = options || {};
+        if (!parentId || !GT.groupSettings || !GT.groupSettings.groups) return;
+        var groups = GT.groupSettings.groups;
+        if (!groups.getChildren || !groups.update) return;
+        var parent = groups.get(parentId);
+        if (!parent) return;
+        var skipIds = {};
+        (options.skipIds || []).forEach(function(id) {
+            if (id) skipIds[String(id)] = true;
+        });
+        var children = groups.getChildren(parentId) || [];
+        (children || []).forEach(function(child) {
+            if (!child || !child.id) return;
+            if (skipIds[String(child.id)]) return;
+            var patch = {};
+            (keys || []).forEach(function(key) {
+                if (!hasMaterializableDefault(key)) return;
+                if (!hasUsableValue(parent, key)) return;
+                if (hasUsableValue(child, key)) return;
+                var def = state.index.defaults[key];
+                if (valuesEqual(parent[key], def.value)) return;
+                patch[key] = def.value;
+            });
+            if (Object.keys(patch).length) {
+                patch.needsRegenerate = true;
+                try { groups.update(child.id, patch); }
+                catch (error) { console.warn('[backend-settings] materialize child defaults failed:', error); }
+            }
+        });
+    }
+
     function writeValue(setting, mount, value) {
         if (mount === GROUP) {
             var node = activeNode();
@@ -608,8 +650,12 @@
                     ? GT.modes.getEditContext()
                     : null;
                 var targets = ctx && Array.isArray(ctx.groups) && ctx.groups.length > 1 ? ctx.groups : [node.value];
+                var selectedIds = targets.map(function(group) { return group && group.id; }).filter(Boolean);
                 targets.forEach(function(group) {
-                    if (group && group.id) GT.groupSettings.groups.update(group.id, patch);
+                    if (group && group.id) {
+                        GT.groupSettings.groups.update(group.id, patch);
+                        materializeChildDefaultsForChangedKeys(group.id, [setting.key], { skipIds: selectedIds });
+                    }
                 });
             } else {
                 GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
@@ -1262,6 +1308,14 @@
         return state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
     }
 
+    function parentFieldDiffers(group, key, value) {
+        var source = group && group.value ? group.value : group;
+        if (!source || !source.parentId || !GT.groupSettings || !GT.groupSettings.groups || !GT.groupSettings.groups.get) return false;
+        var parent = GT.groupSettings.groups.get(source.parentId);
+        if (!parent || !hasUsableValue(parent, key)) return false;
+        return !valuesEqual(parent[key], value);
+    }
+
     function configSettingKeys() {
         var defaults = state.index && state.index.defaults || {};
         return Object.keys(defaults).filter(function(key) {
@@ -1315,8 +1369,9 @@
             var localValue = effectiveLocalValues()[key];
             var differsFromLocal = !valuesEqual(value, localValue);
             var differsFromDefault = defaults[key] && !valuesEqual(value, defaults[key].value);
-            if (!differsFromLocal && !differsFromDefault) return null;
-            if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault) return null;
+            var differsFromParent = parentFieldDiffers(group, key, value);
+            if (!differsFromLocal && !differsFromDefault && !differsFromParent) return null;
+            if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault && !differsFromParent) return null;
             if (!setting.chip_template) return null;
             return {
                 label: 'backtest-' + key,
@@ -1327,7 +1382,7 @@
         }).filter(Boolean);
     }
 
-    function manifestChips(group, categories) {
+    function manifestChips(group, categories, options) {
         if (!group || !state.index) return [];
         var filter = null;
         if (categories) {
@@ -1337,7 +1392,7 @@
         var chips = [];
         (state.index.chip_fields || []).forEach(function(def) {
             if (filter && !filter[def.category]) return;
-            var source = chipSourceGroup(group, def);
+            var source = chipSourceGroup(group, def, options);
             if (!source) return;
             var missing = (def.source_keys || []).some(function(key) {
                 return source[key] === undefined || source[key] === null || source[key] === '';
@@ -1347,7 +1402,6 @@
                 var ownMask = group.productMask || {};
                 if (!group.parentId || Object.keys(ownMask).length === 0) return;
                 var products = nodeProducts(group);
-                if (!products.length) return;
                 var parent = GT.groupSettings && GT.groupSettings.groups ? GT.groupSettings.groups.get(group.parentId) : null;
                 if (parent && sameProductNames(nodeProducts(parent), products)) return;
             }
@@ -1363,8 +1417,8 @@
         return chips;
     }
 
-    function getAllChips(group, categories) {
-        var chips = manifestChips(group, categories);
+    function getAllChips(group, categories, options) {
+        var chips = manifestChips(group, categories, options);
         if (!categories || categories === 'config' || (Array.isArray(categories) && categories.indexOf('config') >= 0)) {
             chips = chips.concat(backendSettingChips(group));
         }
@@ -1375,8 +1429,37 @@
         if (!group || !group.parentId || !GT.groupSettings || !GT.groupSettings.groups) return [];
         var parent = GT.groupSettings.groups.get(group.parentId);
         var base = {};
-        getAllChips(parent, ['config', 'derived']).forEach(function(chip) { base[chip.label] = chip.html; });
-        return getAllChips(group, ['config', 'derived']).filter(function(chip) {
+        var categories = ['identity', 'config', 'derived'];
+        var options = { useOwnValues: true };
+        getAllChips(parent, categories, options).forEach(function(chip) { base[chip.label] = chip.html; });
+        var childChips = getAllChips(group, categories, options);
+        var childChipLabels = {};
+        childChips.forEach(function(chip) { childChipLabels[chip.label] = true; });
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            if (childChipLabels['backtest-' + key]) return;
+            var def = defaults[key];
+            if (!def || !def.chip_template) return;
+            var scope = def.scope_policy;
+            if (scope !== 'group_override' && scope !== 'group_only') return;
+            var parentHasValue = hasUsableValue(parent, key);
+            if (!parentHasValue || hasUsableValue(group, key)) return;
+            var childValue = def.value;
+            var parentValue = parent[key];
+            if (childValue === undefined || childValue === null || childValue === '') return;
+            if (valuesEqual(childValue, parentValue)) return;
+            var values = effectiveValuesForNode(group);
+            values[key] = childValue;
+            if (!settingVisibleForValues(def, values)) return;
+            childChips.push({
+                label: 'backtest-' + key,
+                html: renderChipHtml(chipText(settingDef(key), childValue)),
+                category: 'config',
+                style: null,
+            });
+            childChipLabels['backtest-' + key] = true;
+        });
+        return childChips.filter(function(chip) {
             return base[chip.label] !== chip.html;
         });
     }
@@ -1575,7 +1658,7 @@
             if (def.scope_policy === 'local_only') return;
             if (!settingVisibleForValues(def, values)) return;
             if (source[key] === '' || source[key] === null || source[key] === undefined) return;
-            if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key])) return;
+            if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key]) && !parentFieldDiffers(source, key, source[key])) return;
             if (def.scope_policy !== 'group_override' && valuesEqual(source[key], def.value)) return;
             out[key] = key === 'product_path_selection' ? compactProductPathSelection(source[key]) : source[key];
         });
@@ -1666,7 +1749,7 @@
             if (!hasUsableValue(source, key)) return;
             if (!settingVisibleForValues(def, values)) return;
             var value = source[key];
-            if (def.scope_policy === 'group_override' && valuesEqual(value, localValues[key])) return;
+            if (def.scope_policy === 'group_override' && valuesEqual(value, localValues[key]) && !parentFieldDiffers(source, key, value)) return;
             out[key] = value;
         });
         return out;
@@ -1729,6 +1812,7 @@
         flattenGroupForSnapshot: flattenGroupForSnapshot,
         groupPayloadForRun: groupPayloadForRun,
         collectLocalSettings: collectLocalSettings,
+        materializeChildDefaultsForChangedKeys: materializeChildDefaultsForChangedKeys,
         registerSnapshot: registerSnapshot,
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,

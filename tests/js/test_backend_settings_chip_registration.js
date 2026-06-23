@@ -158,7 +158,7 @@ const indexManifest = {
       key: 'factor_alias',
       label: '因子',
       category: 'identity',
-      chip_template: '{factorAlias}',
+      chip_template: '因子: {factorAlias}',
       source_keys: ['factorAlias'],
       order: 10,
       inherit_from_root: true,
@@ -169,7 +169,7 @@ const indexManifest = {
       key: 'product_path_selection',
       label: '产品路径',
       category: 'identity',
-      chip_template: '{productPathSelectionLabel}',
+      chip_template: '产品路径: {productPathSelectionLabel}',
       source_keys: ['product_path_selection'],
       order: 20,
       inherit_from_root: true,
@@ -182,7 +182,7 @@ const indexManifest = {
       key: 'product_mask',
       label: '品种范围',
       category: 'derived',
-      chip_template: '📋 {productCount}品种 {expandSymbol}',
+      chip_template: '品种范围: {productCount}品种 {expandSymbol}',
       source_keys: ['productMask'],
       order: 40,
       inherit_from_root: false,
@@ -191,6 +191,17 @@ const indexManifest = {
         expandSymbol: 'product_mask_expand_symbol',
       },
       clickable: true,
+    },
+    {
+      key: 'group_index',
+      label: '分组序号',
+      category: 'identity',
+      chip_template: '分组: {groupIndex}/{splitCount}',
+      source_keys: ['groupIndex', 'splitCount'],
+      order: 30,
+      inherit_from_root: true,
+      value_resolvers: {},
+      clickable: false,
     },
   ],
   tab_url_template: '/api/backtest/settings/group_test/tabs/{tab_key}',
@@ -355,11 +366,57 @@ return GT.backendSettings.init().then(async () => {
     parentId: baseId,
     productMask: { IF: true },
   });
+  const maskOnlyChildId = GT.groupSettings.groups.add({
+    id: 'chip-order-mask-child',
+    name: 'Mask Child',
+    parentId: baseId,
+    productMask: { IF: true },
+  });
+  const selectedSkipChildId = GT.groupSettings.groups.add({
+    id: 'chip-order-selected-child',
+    name: 'Selected Child',
+    parentId: baseId,
+    productMask: { IF: true },
+  });
 
   const configChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'config');
   assert.ok(configChips.some((chip) => chipPlainText(chip) === '流动性成交量参与率'));
   assert.ok(configChips.some((chip) => chipPlainText(chip) === '参与率0.02'));
   assert.ok(configChips.every((chip) => chip.html.indexOf('gt-backend-chip-value') >= 0));
+  GT.groupSettings.groups.update(childId, {
+    product_path_selection: {
+      product_path_selection_id: 'tester-child-path',
+      label: '子路径',
+      products: [{ name: 'IC', desc: '中证' }],
+    },
+    factorAlias: 'FactorChild',
+    splitCount: 7,
+    groupIndex: 2,
+  });
+  let overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(childId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('因子FactorChild'));
+  assert.ok(overrideTexts.includes('产品路径子路径'));
+  assert.ok(overrideTexts.includes('分组2/7'));
+  GT.groupSettings.groups.update(baseId, { factorAlias: 'FactorParentChanged' });
+  overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(childId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('因子FactorChild'));
+  GT.groupSettings.groups.update(baseId, {
+    product_path_selection: {
+      product_path_selection_id: 'tester-rb-only',
+      label: '父路径变更',
+      products: [{ name: 'RB', desc: '螺纹钢' }],
+    },
+  });
+  GT.backendSettings.materializeChildDefaultsForChangedKeys(baseId, ['liquidity_mode'], { skipIds: [selectedSkipChildId] });
+  assert.equal(GT.groupSettings.groups.get(maskOnlyChildId).liquidity_mode, 'infinite');
+  assert.equal(GT.groupSettings.groups.get(selectedSkipChildId).liquidity_mode, null);
+  assert.equal(
+    GT.backendSettings.groupPayloadForRun(GT.groupSettings.groups.get(maskOnlyChildId)).liquidity_mode,
+    'infinite',
+  );
+  overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(maskOnlyChildId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('品种范围0品种 ▸'));
+  assert.ok(overrideTexts.includes('流动性无限流动性'));
 
   await GT.backendSettings.applyFlatSnapshot({
     group_settings: {
@@ -374,7 +431,7 @@ return GT.backendSettings.init().then(async () => {
   assert.ok(mountedConfigChips.some((chip) => chipPlainText(chip) === '流动性成交量参与率'));
 
   const identityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'identity');
-  assert.ok(identityChips.some((chip) => chipPlainText(chip) === 'FactorChipOrder'));
+  assert.ok(identityChips.some((chip) => chipPlainText(chip) === '因子FactorParentChanged'));
 
   const compactSnapshot = {
     group_settings: {
@@ -394,14 +451,14 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(compactSnapshot.group_settings.groups[0].product_path_selection.product_group, '中国期货日盘');
   GT.groupSettings.groups.add(compactSnapshot.group_settings.groups[0]);
   const compactIdentityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get('compact-product-group'), 'identity');
-  assert.ok(compactIdentityChips.some((chip) => chipPlainText(chip) === '中国期货日盘 · 产品组'));
+  assert.ok(compactIdentityChips.some((chip) => chipPlainText(chip) === '产品路径中国期货日盘 · 产品组'));
   await GT.backendSettings.resolveSnapshotProductPathReferences({
     group_settings: { groups: [{ product_path_selection: { product_path_selection_id: 'pg-day' } }] },
   });
   assert.equal(productGroupResolveCalls, 1);
 
   const derivedChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(childId), 'derived');
-  assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('1品种') >= 0 && chip.clickable));
+  assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('0品种') >= 0 && chip.clickable));
 
   const flat = GT.backendSettings.flattenGroupForSnapshot(GT.groupSettings.groups.get(baseId));
   assert.equal(flat.engine, undefined);

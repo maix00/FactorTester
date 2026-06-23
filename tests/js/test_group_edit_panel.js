@@ -84,6 +84,12 @@ GT.groupSettings.groups.add({
   parentId: 'base-a1',
   productMask: { IF: true },
 });
+GT.groupSettings.groups.add({
+  id: 'derived-a1-child',
+  name: '二级派生',
+  parentId: 'derived-a1',
+  productMask: { IF: true },
+});
 GT.groupSettings.addGroupBatch.rebuildFromGroups();
 
 GT.tabs.enterEditMode(['base-a1']);
@@ -174,6 +180,20 @@ GT.tabs.enterEditMode(['base-a1', 'derived-a1']);
 GT.tabs.mountTab('edit-group');
 assert.match(document.getElementById('edit-group').innerHTML, /将修改 2 个对象/);
 assert.doesNotMatch(document.getElementById('edit-group').innerHTML, /edit-group-index/);
+GT.groupSettings.groups.update('derived-a1', {
+  splitCount: 6,
+  factorAlias: 'FactorB',
+  shortAlias: '',
+  name: '',
+});
+GT.panels.edit.group.applyEditPatchForSelection(
+  [GT.groupSettings.groups.get('base-a1')],
+  { splitCount: 8 },
+  { allowGroupIndex: false },
+);
+assert.equal(GT.groupSettings.groups.get('base-a1').splitCount, 8);
+assert.equal(GT.groupSettings.groups.get('derived-a1').splitCount, 6);
+assert.equal(GT.groupSettings.groups.get('derived-a1-child').splitCount, 6);
 GT.panels.edit.group.applyEditPatchForSelection(
   [GT.groupSettings.groups.get('base-a1'), GT.groupSettings.groups.get('derived-a1')],
   { splitCount: 7 },
@@ -181,6 +201,14 @@ GT.panels.edit.group.applyEditPatchForSelection(
 );
 assert.equal(GT.groupSettings.groups.get('base-a1').splitCount, 7);
 assert.equal(GT.groupSettings.groups.get('derived-a1').splitCount, 7);
+assert.equal(GT.groupSettings.groups.get('derived-a1-child').splitCount, 6);
+GT.panels.edit.group.applyEditPatchForSelection(
+  [GT.groupSettings.groups.get('derived-a1'), GT.groupSettings.groups.get('derived-a1-child')],
+  { splitCount: 9 },
+  { allowGroupIndex: false },
+);
+assert.equal(GT.groupSettings.groups.get('derived-a1').splitCount, 9);
+assert.equal(GT.groupSettings.groups.get('derived-a1-child').splitCount, 9);
 
 GT.tabs.enterEditMode(['base-a1', 'base-c1', 'derived-a1']);
 GT.tabs.mountTab('edit-group');

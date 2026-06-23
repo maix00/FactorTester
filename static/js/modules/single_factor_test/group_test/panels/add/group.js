@@ -768,6 +768,8 @@
     function _applyEditPatchToGroups(targetGroups, rawPatch, options) {
         options = options || {};
         var targets = (targetGroups || []).filter(function(group) { return group && group.id; });
+        var selectedIds = {};
+        targets.forEach(function(group) { selectedIds[String(group.id)] = true; });
         var allowGroupIndex = !!options.allowGroupIndex;
         var structurePatchKeys = {
             product_path_selection: rawPatch.product_path_selection !== undefined,
@@ -776,10 +778,37 @@
             groupIndex: rawPatch.groupIndex !== undefined && allowGroupIndex,
         };
         var touched = {};
+        function materializeUnselectedChildren(parent, changedKeys) {
+            if (!parent || !parent.id || !GT.groupSettings.groups.getChildren) return;
+            var children = GT.groupSettings.groups.getChildren(parent.id) || [];
+            children.forEach(function(child) {
+                if (!child || !child.id || selectedIds[String(child.id)]) return;
+                var patch = {};
+                if (changedKeys.product_path_selection && !child.product_path_selection && parent.product_path_selection) {
+                    patch.product_path_selection = parent.product_path_selection;
+                }
+                if (changedKeys.factorAlias && !child.factorAlias && parent.factorAlias) {
+                    patch.factorAlias = parent.factorAlias;
+                }
+                if (changedKeys.splitCount && (child.splitCount === undefined || child.splitCount === null || child.splitCount === '') && parent.splitCount !== undefined && parent.splitCount !== null) {
+                    patch.splitCount = parent.splitCount;
+                }
+                if (changedKeys.groupIndex && (child.groupIndex === undefined || child.groupIndex === null || child.groupIndex === '') && parent.groupIndex !== undefined && parent.groupIndex !== null) {
+                    patch.groupIndex = parent.groupIndex;
+                }
+                if (Object.keys(patch).length) {
+                    patch.shortAlias = '';
+                    patch.name = '';
+                    patch.needsRegenerate = true;
+                    GT.groupSettings.groups.update(child.id, patch);
+                }
+            });
+        }
         function applyToTarget(target, inheritedValues) {
             if (!target || !target.id || touched[target.id]) return;
             touched[target.id] = true;
             var current = GT.groupSettings.groups.get(target.id) || target;
+            materializeUnselectedChildren(current, structurePatchKeys);
             var nextSelection = inheritedValues && inheritedValues.product_path_selection !== undefined
                 ? inheritedValues.product_path_selection
                 : (rawPatch.product_path_selection !== undefined ? rawPatch.product_path_selection : current.product_path_selection);
@@ -816,19 +845,19 @@
                 shortAlias: names.shortAlias,
                 needsRegenerate: true,
             });
-            var descendants = GT.groupSettings.groups.getDescendants
-                ? GT.groupSettings.groups.getDescendants(current.id)
-                : [];
             var inherited = {
                 product_path_selection: nextSelection,
                 factorAlias: nextFactor,
                 splitCount: nextSplit,
                 groupIndex: nextIndex,
             };
-            for (var di = 0; di < descendants.length; di++) {
-                if (descendants[di] === current.id) continue;
-                applyToTarget({ id: descendants[di] }, inherited);
-            }
+            targets.forEach(function(candidate) {
+                if (!candidate || !candidate.id || candidate.id === current.id) return;
+                var latest = GT.groupSettings.groups.get(candidate.id) || candidate;
+                if (latest && latest.parentId === current.id) {
+                    applyToTarget(latest, inherited);
+                }
+            });
         }
         for (var gi = 0; gi < targets.length; gi++) {
             applyToTarget(targets[gi], null);
