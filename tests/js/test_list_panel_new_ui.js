@@ -121,6 +121,14 @@ return GT.backendSettings.init().then(() => {
     id: 'base-list',
     name: 'List',
     testerId: 'tester-list',
+    product_path_selection: {
+      product_path_selection_id: 'pps-list',
+      label: '测试路径',
+      products: [
+        { name: 'IF', desc: '沪深300' },
+        { name: 'IH', desc: '上证50' },
+      ],
+    },
     factorAlias: 'FactorList',
     splitCount: 5,
     groupIndex: 1,

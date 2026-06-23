@@ -156,6 +156,59 @@
         return { name: fullName, shortAlias: shortAlias };
     }
 
+    function _comboLetterForEdit(groupId, selection, factorAlias, splitCount) {
+        var selectionId = _selectionId(selection);
+        var comboKey = _addGroupBatchKey(selectionId, factorAlias, splitCount);
+        var existing = GT.groupSettings.groups.getAll();
+        var extractLetter = GT.groupSettings.groups.extractLetter;
+        for (var i = 0; i < existing.length; i++) {
+            var group = existing[i];
+            if (!group || group.id === groupId || group.parentId) continue;
+            if (_comboKeyForGroup(group) === comboKey) {
+                var existingLetter = extractLetter ? extractLetter(group.shortAlias) : null;
+                if (existingLetter) return existingLetter;
+            }
+        }
+        var usedLetters = {};
+        for (var j = 0; j < existing.length; j++) {
+            var other = existing[j];
+            if (!other || other.id === groupId || other.parentId) continue;
+            var letter = extractLetter ? extractLetter(other.shortAlias) : null;
+            if (letter) usedLetters[letter] = true;
+        }
+        var nextIdx = 1;
+        while (usedLetters[_colLetter(nextIdx)]) nextIdx++;
+        return _colLetter(nextIdx);
+    }
+
+    function _makeEditNames(groupId, selection, factorAlias, splitCount, groupIndex) {
+        var selectionLabel = _selectionLabel(selection) || '产品路径选择';
+        var letter = _comboLetterForEdit(groupId, selection, factorAlias, splitCount);
+        var fullName = selectionLabel + '_' + factorAlias + '_' + splitCount + '组_' + '第' + groupIndex + '组';
+        var shortAlias = letter + groupIndex;
+        var comboKey = _addGroupBatchKey(_selectionId(selection), factorAlias, splitCount);
+        var existing = GT.groupSettings.groups.getAll();
+        var usedSuffixes = {};
+        var hasSameIndex = false;
+        for (var i = 0; i < existing.length; i++) {
+            var item = existing[i];
+            if (!item || item.id === groupId || item.parentId) continue;
+            if (_comboKeyForGroup(item) !== comboKey) continue;
+            if (Number(item.groupIndex) === Number(groupIndex)) hasSameIndex = true;
+            var sa = item.shortAlias || '';
+            if (sa.length > shortAlias.length && sa.lastIndexOf(shortAlias, 0) === 0) {
+                var ch = sa.charAt(shortAlias.length);
+                if (ch >= 'a' && ch <= 'z') usedSuffixes[ch] = true;
+            }
+        }
+        if (hasSameIndex || Object.keys(usedSuffixes).length > 0) {
+            var sfx = 'a'.charCodeAt(0);
+            while (usedSuffixes[String.fromCharCode(sfx)]) sfx++;
+            shortAlias += String.fromCharCode(sfx);
+        }
+        return { name: fullName, shortAlias: shortAlias };
+    }
+
     // ── Render ──
     //
     // Master-inspired two-column layout:
@@ -495,6 +548,262 @@
         refresh: refresh,
         render: render,
         submitAddBatches: submitAddBatches,
+    };
+
+    function _selectedEditGroup() {
+        var ctx = GT.modes && GT.modes.getEditContext ? GT.modes.getEditContext() : null;
+        return ctx && ctx.groups && ctx.groups.length === 1 ? ctx.groups[0] : null;
+    }
+
+    function _selectedEditGroups() {
+        var ctx = GT.modes && GT.modes.getEditContext ? GT.modes.getEditContext() : null;
+        return ctx && ctx.groups ? ctx.groups.filter(function(group) { return !!group; }) : [];
+    }
+
+    function _selectedEditBaseGroups() {
+        return _selectedEditGroups().filter(function(group) { return group && !group.parentId; });
+    }
+
+    function _commonEditValue(groups, key) {
+        if (!groups.length) return null;
+        var first = key === 'product_path_selection' ? _selectionId(groups[0][key]) : groups[0][key];
+        for (var i = 1; i < groups.length; i++) {
+            var value = key === 'product_path_selection' ? _selectionId(groups[i][key]) : groups[i][key];
+            if (String(value || '') !== String(first || '')) return null;
+        }
+        return groups[0][key];
+    }
+
+    function _renderEditGroup(container) {
+        var selectedGroups = _selectedEditGroups();
+        var groups = _selectedEditBaseGroups();
+        if (!groups.length) {
+            container.innerHTML = '<div style="padding:16px;color:#64748b;font-size:12px;">请选择至少一个基础组进行修改。</div>';
+            return;
+        }
+        var group = groups[0];
+        var isSingle = groups.length === 1;
+        var derivedSelectedCount = selectedGroups.length - groups.length;
+        var selections = _currentSelections();
+        var factors = window.factorList || [];
+        var commonSelection = _commonEditValue(groups, 'product_path_selection');
+        var currentSelectionId = commonSelection ? _selectionId(commonSelection) : '';
+        var commonFactor = _commonEditValue(groups, 'factorAlias');
+        var factorAlias = commonFactor || '';
+        var groupIndex = Number(group.groupIndex || 1);
+        var commonSplit = _commonEditValue(groups, 'splitCount');
+        var splitCount = Number(commonSplit || groupIndex || 1);
+
+        var html = '';
+        html += '<div style="display:grid;grid-template-columns:minmax(180px,220px) minmax(280px,1fr);gap:12px;align-items:start;">';
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:6px;max-height:440px;overflow:auto;">';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 8px;">';
+        html += '<span style="font-size:12px;font-weight:700;color:#475467;">产品路径</span>';
+        html += '<button type="button" id="edit-manage-product-paths" style="height:22px;padding:0 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:11px;cursor:pointer;">管理</button>';
+        html += '</div>';
+        if (selections.length === 0) {
+            html += '<div style="color:#888;font-size:12px;padding:8px;line-height:1.6;">暂无产品路径组。请先进入产品路径设置新增、导入或指定默认路径组。</div>';
+        } else {
+            for (var si = 0; si < selections.length; si++) {
+                var selection = selections[si];
+                var selectionId = _selectionId(selection);
+                var label = _selectionLabel(selection) || ('产品路径 #' + selectionId);
+                var paths = selection.selected_paths || selection.paths || [];
+                var subMeta = selection.product_group_template_id || selection.path_id || (paths.length + ' 路径');
+                var isActive = !!currentSelectionId && selectionId === currentSelectionId;
+                html += '<button type="button" class="edit-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
+                    + ' style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;'
+                    + 'border:1px solid ' + (isActive ? '#9cc7f2' : 'transparent') + ';'
+                    + 'background:' + (isActive ? '#e7f1ff' : 'transparent') + ';'
+                    + 'border-radius:6px;padding:7px 8px;margin-bottom:4px;'
+                    + 'text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
+                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</span>'
+                    + '<small style="color:#667085;font-size:11px;">' + escapeHTML(subMeta) + '</small>'
+                    + '</button>';
+            }
+        }
+        html += '</div>';
+
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;">';
+        html += '<div style="font-size:12px;font-weight:700;color:#475467;margin-bottom:10px;">分组参数' + (isSingle && !derivedSelectedCount ? '' : ' · 将修改 ' + groups.length + ' 个基础组') + '</div>';
+        html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
+        html += '<span style="font-size:13px;color:#333;">分组数</span>';
+        html += '<input type="number" id="edit-group-count" value="' + splitCount + '" min="1" step="1"'
+            + ' style="width:78px;padding:5px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;text-align:center;"'
+            + ' title="分组数量">';
+        html += '<span style="font-size:13px;color:#555;">组</span>';
+        if (isSingle) {
+            html += '<span style="font-size:13px;color:#98a2b3;">/</span>';
+            html += '<span style="font-size:13px;color:#555;">分组序号</span>';
+            html += '<input type="number" id="edit-group-index" value="' + groupIndex + '" min="1" step="1"'
+                + ' style="width:78px;padding:5px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;text-align:center;"'
+                + ' title="分组序号（从1开始）">';
+            html += '<span style="font-size:13px;color:#555;">组</span>';
+        } else {
+            html += '<span style="font-size:12px;color:#98a2b3;">多选时不批量修改分组序号</span>';
+        }
+        html += '</div>';
+        if (derivedSelectedCount > 0) {
+            html += '<div style="margin-top:8px;font-size:12px;color:#64748b;line-height:1.5;">已同时选中 ' + derivedSelectedCount + ' 个派生组；结构修改会通过其所属基础组应用到派生子树。</div>';
+        }
+
+        html += '<div style="border-top:1px solid #eef2f7;margin:12px 0;"></div>';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
+        html += '<div style="font-size:13px;font-weight:600;color:#333;">选择因子 <span style="color:red;">*</span></div>';
+        html += '<span style="font-size:11px;color:#667085;">单组选中修改一次只对应一个因子</span>';
+        html += '</div>';
+        html += '<div style="max-height:340px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+        if (factors.length === 0) {
+            html += '<div style="color:#888;font-size:12px;padding:16px;text-align:center;">暂无因子数据</div>';
+        } else {
+            for (var fi = 0; fi < factors.length; fi++) {
+                var alias = factors[fi].alias || factors[fi].name || '';
+                var isSelected = !!factorAlias && alias === factorAlias;
+                html += '<div class="edit-factor-row" data-factor-alias="' + escapeHTML(alias) + '"'
+                    + ' style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;'
+                    + (isSelected ? 'background:#e8f4fd;' : '')
+                    + 'border-bottom:1px solid #f0f2f5;font-size:13px;">';
+                html += '<input type="radio" name="edit-factor-radio" class="edit-factor-radio" data-factor-alias="' + escapeHTML(alias) + '"'
+                    + (isSelected ? ' checked' : '')
+                    + ' style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">';
+                html += '<span style="flex:1;">' + escapeHTML(alias) + '</span>';
+                html += '<span style="font-size:11px;color:' + (isSelected ? '#0078d4' : '#ccc') + ';">' + (isSelected ? '✓' : '') + '</span>';
+                html += '</div>';
+            }
+        }
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+
+        container.innerHTML = html;
+
+        function applyEditPatch(rawPatch) {
+            try {
+                var structurePatchKeys = {
+                    product_path_selection: rawPatch.product_path_selection !== undefined,
+                    factorAlias: rawPatch.factorAlias !== undefined,
+                    splitCount: rawPatch.splitCount !== undefined,
+                    groupIndex: rawPatch.groupIndex !== undefined && isSingle,
+                };
+                for (var gi = 0; gi < groups.length; gi++) {
+                    var target = GT.groupSettings.groups.get(groups[gi].id) || groups[gi];
+                    var nextSelection = rawPatch.product_path_selection !== undefined ? rawPatch.product_path_selection : target.product_path_selection;
+                    var nextFactor = rawPatch.factorAlias !== undefined ? rawPatch.factorAlias : target.factorAlias;
+                    var nextSplit = rawPatch.splitCount !== undefined ? Number(rawPatch.splitCount) : Number(target.splitCount || 1);
+                    var nextIndex = (rawPatch.groupIndex !== undefined && isSingle) ? Number(rawPatch.groupIndex) : Number(target.groupIndex || 1);
+                    if (!nextSplit || nextSplit < 1) nextSplit = 1;
+                    if (!nextIndex || nextIndex < 1) nextIndex = 1;
+                    if (nextIndex > nextSplit) nextSplit = nextIndex;
+                    var names = _makeEditNames(target.id, nextSelection, nextFactor, nextSplit, nextIndex);
+                    GT.groupSettings.groups.update(target.id, {
+                        product_path_selection: nextSelection,
+                        factorAlias: nextFactor,
+                        splitCount: nextSplit,
+                        groupIndex: nextIndex,
+                        name: names.name,
+                        shortAlias: names.shortAlias,
+                        needsRegenerate: true,
+                    });
+                    var descendants = GT.groupSettings.groups.getDescendants
+                        ? GT.groupSettings.groups.getDescendants(target.id)
+                        : [];
+                    for (var di = 0; di < descendants.length; di++) {
+                        var childPatch = { needsRegenerate: true };
+                        if (structurePatchKeys.product_path_selection) childPatch.product_path_selection = nextSelection;
+                        if (structurePatchKeys.factorAlias) childPatch.factorAlias = nextFactor;
+                        if (structurePatchKeys.splitCount) childPatch.splitCount = nextSplit;
+                        if (structurePatchKeys.groupIndex) childPatch.groupIndex = nextIndex;
+                        childPatch.shortAlias = '';
+                        childPatch.name = '';
+                        GT.groupSettings.groups.update(descendants[di].id, childPatch);
+                    }
+                }
+                if (GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.rebuildFromGroups) {
+                    GT.groupSettings.addGroupBatch.rebuildFromGroups();
+                } else if (GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.ensure) {
+                    var latest = GT.groupSettings.groups.get(groups[0].id) || groups[0];
+                    GT.groupSettings.addGroupBatch.ensure(_selectionId(latest.product_path_selection), latest.factorAlias, latest.splitCount);
+                }
+                _renderEditGroup(container);
+            } catch (error) {
+                alert('修改失败: ' + error.message);
+            }
+        }
+
+        container.querySelectorAll('.edit-product-path-selection-nav-btn').forEach(function(button) {
+            button.addEventListener('click', function() {
+                var selectionId = this.getAttribute('data-selection-id');
+                applyEditPatch({ product_path_selection: _findSelection(selectionId) });
+            });
+        });
+        var managePathsBtn = $('edit-manage-product-paths');
+        if (managePathsBtn) {
+            managePathsBtn.addEventListener('click', function() {
+                if (GT.backendSettings && typeof GT.backendSettings.openLocalTab === 'function') {
+                    GT.backendSettings.openLocalTab('product_path_selection');
+                }
+            });
+        }
+
+        var input = $('edit-group-count');
+        if (input) {
+            input.addEventListener('blur', function() {
+                var value = parseInt(this.value, 10);
+                if (isNaN(value) || value < 1) value = 1;
+                applyEditPatch({ splitCount: value });
+            });
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') this.blur();
+            });
+        }
+        var indexInput = $('edit-group-index');
+        if (indexInput) {
+            indexInput.addEventListener('blur', function() {
+                var value = parseInt(this.value, 10);
+                if (isNaN(value) || value < 1) value = 1;
+                applyEditPatch({ groupIndex: value });
+            });
+            indexInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') this.blur();
+            });
+        }
+        container.querySelectorAll('.edit-factor-row').forEach(function(row) {
+            row.addEventListener('click', function(e) {
+                var alias = this.getAttribute('data-factor-alias');
+                if (!alias) return;
+                applyEditPatch({ factorAlias: alias });
+            });
+        });
+        container.querySelectorAll('.edit-factor-radio').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+                var alias = this.getAttribute('data-factor-alias');
+                if (!alias) return;
+                applyEditPatch({ factorAlias: alias });
+            });
+        });
+    }
+
+    var _editMounted = false;
+    function mountEdit() {
+        _editMounted = true;
+        var container = $('edit-group');
+        if (!container) return;
+        _renderEditGroup(container);
+    }
+    function unmountEdit() { _editMounted = false; }
+    function refreshEdit() {
+        if (_editMounted) {
+            var container = $('edit-group');
+            if (container) _renderEditGroup(container);
+        }
+    }
+
+    GT.panels.edit = GT.panels.edit || {};
+    GT.panels.edit.group = {
+        mount: mountEdit,
+        unmount: unmountEdit,
+        refresh: refreshEdit,
+        render: refreshEdit,
     };
 
     // ── Register add flow to GT.modes ──

@@ -129,6 +129,54 @@
         _batches = {};
     }
 
+    function _letterFromShortAlias(shortAlias) {
+        if (!shortAlias) return '';
+        var match = String(shortAlias).match(/^([A-Z]+)/);
+        return match ? match[1] : '';
+    }
+
+    function _addGroupBatchRebuildFromGroups() {
+        var groupsApi = GT.groupSettings && GT.groupSettings.groups;
+        var groups = groupsApi && groupsApi.getAll ? groupsApi.getAll() : [];
+        var roots = groups.filter(function(group) { return group && !group.parentId; });
+        roots.sort(function(a, b) {
+            var la = _letterFromShortAlias(a.shortAlias);
+            var lb = _letterFromShortAlias(b.shortAlias);
+            if (la && lb && la !== lb) return la < lb ? -1 : 1;
+            if (la && !lb) return -1;
+            if (!la && lb) return 1;
+            return String(a.id || '').localeCompare(String(b.id || ''));
+        });
+        _batches = {};
+        var seen = {};
+        for (var i = 0; i < roots.length; i++) {
+            var group = roots[i];
+            var selectionId = _selectionId(group.product_path_selection);
+            var key = _addGroupBatchKey(selectionId, group.factorAlias, group.splitCount);
+            if (seen[key]) continue;
+            seen[key] = true;
+            var number = Object.keys(_batches).length + 1;
+            _batches[key] = {
+                number: number,
+                name: _letterFromShortAlias(group.shortAlias) || _colLetter(number),
+                product_path_selection_id: selectionId || '',
+                factor: group.factorAlias || '',
+                n_groups: group.splitCount || 0
+            };
+        }
+        return _addGroupBatchGetAll();
+    }
+
+    function _colLetter(n) {
+        var s = '';
+        while (n > 0) {
+            n--;
+            s = String.fromCharCode(65 + (n % 26)) + s;
+            n = Math.floor(n / 26);
+        }
+        return s;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Export to GT.groupSettings.addGroupBatch
     // ═══════════════════════════════════════════════════════════════
@@ -143,6 +191,7 @@
         update: _addGroupBatchUpdate,
         remove: _addGroupBatchRemove,
         forGroup: _addGroupBatchForGroup,
+        rebuildFromGroups: _addGroupBatchRebuildFromGroups,
         _reset: _addGroupBatchReset,
     };
 

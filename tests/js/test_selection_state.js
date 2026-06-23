@@ -8,8 +8,14 @@ GT.groupSettings.groups.add({
   id: 'base-select',
   name: 'Select',
   testerId: 'tester-select',
+  product_path_selection: {
+    product_path_selection_id: 'pps-select',
+    label: '选择测试路径',
+    products: [{ name: 'IF' }],
+  },
   factorAlias: 'FactorSelect',
   splitCount: 2,
+  groupIndex: 1,
 });
 GT.groupSettings.groups.add({
   id: 'derived-select',
@@ -23,7 +29,7 @@ GT.events.on('selectionChanged', () => { eventCount += 1; });
 GT.panels.list.selection.add('derived-select');
 assert.strictEqual(GT.panels.list.selection.getFirst(), 'derived-select');
 assert.strictEqual(GT.panels.list.selection.getFirstBaseGroup().id, 'base-select');
-assert.strictEqual(GT.panels.list.selection.getFirstSubmissionId(), 'tester-select');
+assert.strictEqual(GT.panels.list.selection.getFirstProductPathSelectionId(), 'pps-select');
 assert.strictEqual(GT.panels.list.selection.getFirstFactorAlias(), 'FactorSelect');
 assert.strictEqual(eventCount, 1);
 

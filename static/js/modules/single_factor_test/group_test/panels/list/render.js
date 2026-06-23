@@ -363,7 +363,7 @@
             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml('产品路径', selectionLabel) + '</span>';
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
             h += '</span>';
-            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
+            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" title="删除批次" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑</button>';
             h += '</div>';
 
             if (isExpanded && !isCollapsed) {
@@ -426,7 +426,7 @@
                         }
                         h += '</span>';
                     }
-                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" title="删除基础组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
                     h += '</div>';
                     h += _renderDerivedTreeForBase(bg.id, expandedBatches, showFullChips);
                 }
@@ -533,7 +533,7 @@
             }
             h += '</span>';
         }
-        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" title="删除派生组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
         h += '</div>';
 
         if (prodExpanded && products.length > 0) {

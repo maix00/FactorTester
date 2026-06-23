@@ -32,6 +32,7 @@
         LIST: 1,
         ADD: 2,
         CONFIG: 3,
+        EDIT: 4,
     };
 
     var GT_PANEL_REGISTRY = [];
@@ -253,7 +254,7 @@
         _currentTab = 'list';
         _renderTabActions();
         _renderTabBar();
-        mountTab('list');
+        mountTab(_currentTab);
     }
 
     function _exitEditMode() {
@@ -274,7 +275,7 @@
 
     function _visibleCategories() {
         if (M.isMode('list')) return [TAB_CATEGORY.LIST];
-        if (M.isMode('edit')) return [TAB_CATEGORY.LIST, TAB_CATEGORY.CONFIG];
+        if (M.isMode('edit')) return [TAB_CATEGORY.LIST, TAB_CATEGORY.EDIT, TAB_CATEGORY.CONFIG];
         if (M.isMode('add')) return [TAB_CATEGORY.ADD, TAB_CATEGORY.CONFIG];
         return [TAB_CATEGORY.LIST];
     }
@@ -352,6 +353,18 @@
                 name: 'add-group', label: '新建分组', containerId: 'add-group',
                 category: TAB_CATEGORY.ADD, panel: P.add.group,
                 visible: function() { return M.isAddFlow('group'); }
+            });
+        }
+        if (P.edit && P.edit.group) {
+            registerPanel({
+                name: 'edit-group', label: '修改分组', containerId: 'edit-group',
+                category: TAB_CATEGORY.EDIT, panel: P.edit.group,
+                visible: function() {
+                    var ctx = M.getEditContext ? M.getEditContext() : { groups: [] };
+                    return ctx.groups && ctx.groups.some(function(group) {
+                        return group && !group.parentId;
+                    });
+                }
             });
         }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
