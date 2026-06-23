@@ -19,6 +19,35 @@
     var _templateListRequest = null;
     var _templateDetailCache = {};
 
+    function requestJSON(url, options) {
+        options = options || {};
+        var headers = Object.assign({
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        }, options.headers || {});
+        return fetch(url, Object.assign({}, options, {
+            headers: headers,
+            credentials: 'same-origin',
+        })).then(function(resp) {
+            var contentType = resp.headers.get('content-type') || '';
+            if (contentType.indexOf('application/json') < 0) {
+                return resp.text().then(function(text) {
+                    var hint = text && text.trim().charAt(0) === '<'
+                        ? '接口返回了 HTML，可能登录已失效'
+                        : '接口未返回 JSON';
+                    throw new Error(hint + ' (HTTP ' + resp.status + ')');
+                });
+            }
+            return resp.json().then(function(data) {
+                if (!resp.ok || data.success === false) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                return data;
+            });
+        });
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Snapshot Registry — 统一管理所有可保存/恢复的配置模块
     // ═══════════════════════════════════════════════════════════════════════
@@ -471,16 +500,14 @@
         statusEl.textContent = '保存中...';
         statusEl.style.color = '#0078d4';
         try {
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS), {
+            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name: name,
                     ff_alias: FF_ALIAS,
                     snapshot: snapshot
                 })
             });
-            const data = await resp.json();
             if (data.success) {
                 statusEl.textContent = '✓ 已保存: ' + name;
                 statusEl.style.color = '#28a745';
@@ -511,8 +538,7 @@
         const listEl = document.getElementById('global-tpl-list');
         if (!listEl) return;
         try {
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
-            const data = await resp.json();
+            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
             if (!data.success || !data.templates || data.templates.length === 0) {
                 listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px;">暂无已保存的模板</div>';
                 return;
@@ -597,10 +623,9 @@
 
     function fetchTemplateDetail(tplId) {
         if (_templateDetailCache[tplId]) return _templateDetailCache[tplId];
-        _templateDetailCache[tplId] = fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId)
-            .then(function(resp) { return resp.json(); })
+        _templateDetailCache[tplId] = requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId)
             .then(function(data) {
-                if (!data.success || !data.template) {
+                if (!data.template) {
                     throw new Error(data.error || '模板不存在');
                 }
                 return data.template;
@@ -620,12 +645,10 @@
         statusEl.style.color = '#7a4b00';
         try {
             const snapshot = await collectSnapshot();
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
+            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ snapshot: snapshot })
             });
-            const data = await resp.json();
             if (data.success) {
                 delete _templateDetailCache[tplId];
                 statusEl.textContent = '✓ 已覆盖: ' + (tplName || tplId);
@@ -667,8 +690,7 @@
         if (!confirm('确定要删除此模板吗？')) return;
         const statusEl = document.getElementById('global-tpl-load-status');
         try {
-            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
-            const data = await resp.json();
+            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
             if (data.success) {
                 delete _templateDetailCache[tplId];
                 statusEl.textContent = '✓ 已删除';

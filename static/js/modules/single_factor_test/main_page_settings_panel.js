@@ -81,10 +81,10 @@
             + '<span class="gt-backend-chip-value">' + escapeHtml(parts.value) + '</span>';
     }
 
-    function makeChip(tabKey, text) {
+    function makeChip(tabKey, label, value) {
         var chip = document.createElement('span');
         chip.className = 'gt-backend-chip';
-        chip.innerHTML = renderChipHtml(text);
+        chip.innerHTML = renderChipHtml(label, value);
         chip.title = '打开' + ((tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey);
         chip.style.cursor = 'pointer';
         chip.addEventListener('click', function() { openTab(tabKey); });
@@ -129,43 +129,34 @@
         drawer.classList.remove('open');
     }
 
-    function paramSummaryText() {
+    function paramSummaryValue() {
         var tbody = document.getElementById('factor_table_body');
         var rows = tbody ? Array.from(tbody.querySelectorAll('tr')).filter(function(row) {
             return row.id !== 'add_row' && row.style.display !== 'none';
         }) : [];
-        var settingCount = 0;
-        var module = document.getElementById('parameter_module');
-        if (module) {
-            try {
-                settingCount = (JSON.parse(module.getAttribute('data-param-aliases') || '[]') || []).length;
-            } catch (error) {
-                settingCount = 0;
-            }
-        }
-        return '参数: 已设置' + rows.length + '/设置数' + settingCount;
+        return '已设置' + rows.length;
     }
 
-    function timeSummaryText() {
+    function timeSummaryValue() {
         var src = document.getElementById('time-summary-text');
         var text = src ? (src.textContent || '').trim() : '';
-        if (!text || text === '加载中…') return '时间: 默认';
-        return '时间: ' + text;
+        if (!text || text === '加载中…') return '默认';
+        return text;
     }
 
-    function templateSummaryText() {
+    function templateSummaryValue() {
         var status = document.getElementById('global-tpl-load-status');
         var text = status ? (status.textContent || '').trim() : '';
-        return text ? '模板: ' + text.replace(/^✓\s*/, '') : '模板: 无';
+        return text ? text.replace(/^✓\s*/, '') : '无';
     }
 
-    function chipTextForTab(tabKey) {
-        if (tabKey === 'setting_template') return templateSummaryText();
-        if (tabKey === 'parameters') return paramSummaryText();
-        if (tabKey === 'time') return timeSummaryText();
+    function chipPartsForTab(tabKey) {
+        if (tabKey === 'setting_template') return { label: '模板', value: templateSummaryValue() };
+        if (tabKey === 'parameters') return { label: '参数组合', value: paramSummaryValue() };
+        if (tabKey === 'time') return { label: '时间', value: timeSummaryValue() };
         var key = settingKeysForTab(tabKey)[0];
         var def = key ? defaults()[key] : null;
-        return ((def && def.label) || (tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey) + ': 无';
+        return { label: (def && def.label) || (tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey, value: '无' };
     }
 
     function renderChips() {
@@ -173,7 +164,8 @@
         if (!row) return;
         row.innerHTML = '';
         state.mountedTabs.forEach(function(tabKey) {
-            row.appendChild(makeChip(tabKey, chipTextForTab(tabKey)));
+            var parts = chipPartsForTab(tabKey);
+            row.appendChild(makeChip(tabKey, parts.label, parts.value));
         });
     }
 
@@ -181,10 +173,6 @@
         var bar = document.getElementById('single-factor-page-settings-tabs');
         if (!bar) return;
         bar.innerHTML = '';
-        var title = document.createElement('span');
-        title.className = 'backend-settings-panel-title';
-        title.textContent = '因子家族测试设置';
-        bar.appendChild(title);
         state.mountedTabs.forEach(function(tabKey) {
             var meta = tabMeta(tabKey);
             var btn = document.createElement('button');
@@ -192,7 +180,7 @@
             btn.textContent = meta ? meta.label : tabKey;
             btn.className = state.activeTab === tabKey ? 'active' : '';
             btn.addEventListener('click', function() {
-                openTab(state.activeTab === tabKey ? null : tabKey);
+                openTab(tabKey);
             });
             bar.appendChild(btn);
         });
