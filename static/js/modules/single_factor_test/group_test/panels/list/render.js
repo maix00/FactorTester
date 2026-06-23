@@ -237,29 +237,27 @@
 
             for (var i = 0; i < items.length; i++) {
                 var item = items[i];
+                var longDg = H.getGroup(item.longGroupId);
+                var shortDg = H.getGroup(item.shortGroupId);
+                var longLabel = longDg
+                    ? (H.deriveShortAlias(longDg) || longDg.shortAlias || longDg.name || item.longGroupId)
+                    : (item.longGroupId || '—');
+                var shortLabel = shortDg
+                    ? (H.deriveShortAlias(shortDg) || shortDg.shortAlias || shortDg.name || item.shortGroupId)
+                    : (item.shortGroupId || '—');
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + H.escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;">';
 
-                h += '<td style="padding:6px 8px;white-space:nowrap;">';
-                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + H.escapeHTML(item.shortAlias || item.name) + '</span>';
-                h += '</td>';
-
-                h += '<td style="padding:2px 4px;width:100%;">';
-                var longDg = H.getGroup(item.longGroupId);
-                var shortDg = H.getGroup(item.shortGroupId);
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#3b82f6;font-weight:600;margin-right:4px;">📈</span>';
-                if (longDg) h += H.renderAllChipsForGroup(longDg);
-                h += '</div>';
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#8b5cf6;font-weight:600;margin-right:4px;">📉</span>';
-                if (shortDg) h += H.renderAllChipsForGroup(shortDg);
-                h += '</div>';
+                h += '<td style="padding:6px 8px;width:100%;white-space:nowrap;">';
+                h += '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#4338ca;font-size:13px;">';
+                h += '<span style="font-size:11px;font-weight:700;color:#6366f1;">LS</span>';
+                h += '<span>' + H.escapeHTML(longLabel) + '/' + H.escapeHTML(shortLabel) + '</span>';
+                h += '</span>';
                 h += '</td>';
 
                 h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
-                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:1px 5px;font-size:13px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">🔄</button>';
-                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:2px 7px;font-size:12px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">交换</button>';
+                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:2px 7px;font-size:12px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">删除</button>';
                 h += '</td></tr>';
             }
             h += '</tbody></table>';

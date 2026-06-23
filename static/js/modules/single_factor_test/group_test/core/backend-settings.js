@@ -980,17 +980,30 @@
 
     function openLocal(tabKey) {
         var host = localHost();
-        if (state.activeLocalTab === tabKey && host && host.style.display !== 'none') {
-            deactivateLocal();
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
+            if (state.activeLocalTab === tabKey && host && host.style.display !== 'none') {
+                deactivateLocal();
+                return;
+            }
+        }
+        var toggleResult = window.BackendSettingsPanel && window.BackendSettingsPanel.toggleContent
+            ? window.BackendSettingsPanel.toggleContent({
+                key: tabKey,
+                host: host,
+                getActiveKey: function() { return state.activeLocalTab; },
+                setActiveKey: function(value) { state.activeLocalTab = value; },
+                buttonSelector: '[data-backtest-local-tab]',
+                buttonKeyAttribute: 'data-backtest-local-tab',
+                panelSelector: '[data-local-settings-tab-panel]',
+                panelKeyAttribute: 'data-local-settings-tab-panel',
+                beforeOpen: function() {
+                    document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
+                },
+            })
+            : { opened: true };
+        if (!toggleResult.opened) {
             return;
         }
-        document.querySelectorAll('[data-local-settings-tab-panel]').forEach(function(panel) { panel.style.display = 'none'; });
-        document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
-        host.style.display = '';
-        state.activeLocalTab = tabKey;
-        document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
-            button.classList.toggle('active', button.getAttribute('data-backtest-local-tab') === tabKey);
-        });
         if (tabKey === '__manage__') renderChooser(LOCAL, host);
         else activateTab(tabKey, LOCAL, host).catch(function(error) { console.error(error); });
     }

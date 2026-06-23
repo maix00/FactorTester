@@ -237,14 +237,32 @@
     }
 
     function openTab(tabKey) {
-        state.activeTab = tabKey || null;
-        Object.keys(state.containers).forEach(function(key) {
-            state.containers[key].style.display = key === state.activeTab ? '' : 'none';
-        });
         var host = document.getElementById('single-factor-page-settings-host');
-        if (host) host.style.display = state.activeTab ? '' : 'none';
+        var toggleResult = window.BackendSettingsPanel && typeof window.BackendSettingsPanel.toggleContent === 'function'
+            ? window.BackendSettingsPanel.toggleContent({
+                key: tabKey,
+                host: host,
+                getActiveKey: function() { return state.activeTab; },
+                setActiveKey: function(value) { state.activeTab = value; },
+                buttonSelector: '#single-factor-page-settings-tabs button',
+                panelSelector: '[data-page-settings-tab-panel]',
+                panelKeyAttribute: 'data-page-settings-tab-panel',
+                onClose: function() {
+                    renderTabs();
+                    renderChips();
+                },
+            })
+            : { opened: true };
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
+            state.activeTab = tabKey || null;
+            Object.keys(state.containers).forEach(function(key) {
+                state.containers[key].style.display = key === state.activeTab ? '' : 'none';
+            });
+            if (host) host.style.display = state.activeTab ? '' : 'none';
+        }
         renderTabs();
         renderChips();
+        if (!toggleResult.opened) return;
         if (tabKey === 'setting_template') {
             if (typeof window._loadGlobalTemplateList === 'function') {
                 window._loadGlobalTemplateList();

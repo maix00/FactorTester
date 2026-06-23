@@ -482,6 +482,7 @@
             var button = document.createElement('button');
             button.type = 'button';
             button.textContent = tab.label;
+            button.setAttribute('data-factor-series-tab-key', tab.key);
             button.className = state.activeTab === tab.key ? 'active' : '';
             button.addEventListener('click', function() { openTab(tab.key); });
             bar.appendChild(button);
@@ -489,6 +490,7 @@
         var manage = document.createElement('button');
         manage.type = 'button';
         manage.textContent = '+ 设置';
+        manage.setAttribute('data-factor-series-tab-key', '__manage__');
         manage.className = state.activeTab === '__manage__' ? 'active' : '';
         manage.addEventListener('click', function() { openTab('__manage__'); });
         bar.appendChild(manage);
@@ -643,14 +645,35 @@
     function openTab(tabKey) {
         var host = document.getElementById('factor-series-settings-host');
         if (!host) return;
-        if (state.activeTab === tabKey && host.style.display !== 'none') {
-            state.activeTab = null;
-            host.style.display = 'none';
+        var toggleResult = window.BackendSettingsPanel && typeof window.BackendSettingsPanel.toggleContent === 'function'
+            ? window.BackendSettingsPanel.toggleContent({
+                key: tabKey,
+                host: host,
+                getActiveKey: function() { return state.activeTab; },
+                setActiveKey: function(value) { state.activeTab = value; },
+                buttonSelector: '#factor-series-settings-tab-bar [data-factor-series-tab-key], #factor-series-settings-chip-row [data-factor-series-tab-key]',
+                buttonKeyAttribute: 'data-factor-series-tab-key',
+                onClose: function() {
+                    renderTabBar();
+                    renderSettingChips();
+                },
+            })
+            : { opened: true };
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
+            if (state.activeTab === tabKey && host.style.display !== 'none') {
+                state.activeTab = null;
+                host.style.display = 'none';
+                renderTabBar();
+                return;
+            }
+            state.activeTab = tabKey;
+            host.style.display = '';
+        }
+        if (!toggleResult.opened) {
             renderTabBar();
+            renderSettingChips();
             return;
         }
-        state.activeTab = tabKey;
-        host.style.display = '';
         renderTabBar();
         if (tabKey === '__manage__') {
             renderChooser();
