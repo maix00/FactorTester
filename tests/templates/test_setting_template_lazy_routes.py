@@ -1,5 +1,6 @@
 from flask import Flask
 
+from server.modules.products import product_group_routes
 from server.modules.templates import setting_snapshot_routes as routes
 from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
 
@@ -57,6 +58,28 @@ def test_template_detail_loads_only_requested_template(monkeypatch):
     assert payload["template"]["snapshot"]["params_list"] == [{"N": 2}]
     assert len(calls) == 1
     assert calls[0][0][2] == "tpl-2"
+
+
+def test_product_group_resolve_returns_only_requested_ids(monkeypatch):
+    monkeypatch.setattr(product_group_routes, "require_user", lambda: "alice")
+    monkeypatch.setattr(
+        product_group_routes,
+        "load_product_groups",
+        lambda username: [
+            {"id": "pg-day", "name": "中国期货日盘", "paths": ["Day"]},
+            {"id": "pg-night", "name": "中国期货夜盘", "paths": ["Night"]},
+        ],
+    )
+    app = Flask(__name__)
+
+    with app.test_request_context("/api/product-groups/resolve", method="POST", json={"ids": ["pg-day"]}):
+        response = product_group_routes.resolve_product_groups.__wrapped__()
+
+    payload = response.get_json()
+    assert payload == {
+        "success": True,
+        "groups": [{"id": "pg-day", "name": "中国期货日盘", "paths": ["Day"]}],
+    }
 
 
 def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():

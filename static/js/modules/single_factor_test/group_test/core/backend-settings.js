@@ -25,6 +25,7 @@
         productPathTreeSelected: [],
         productPathDraftPaths: [],
         productPathTreeSizer: null,
+        productPathSelectionResolveRequests: Object.create(null),
     };
 
     function requestJSON(url) {
@@ -199,6 +200,66 @@
         }).filter(Boolean);
     }
 
+    function findProductPathSelectionById(selectionIdValue) {
+        var sid = String(selectionIdValue || '');
+        if (!sid) return null;
+        for (var i = 0; i < state.productPathSelections.length; i++) {
+            if (selectionId(state.productPathSelections[i]) === sid) return state.productPathSelections[i];
+        }
+        return null;
+    }
+
+    function resolveProductPathSelectionReference(selection) {
+        if (!selection || typeof selection !== 'object') return selection;
+        var paths = selection.paths || selection.selected_paths || [];
+        if (Array.isArray(paths) && paths.length) return selection;
+        return findProductPathSelectionById(selectionId(selection)) || selection;
+    }
+
+    function resolveSnapshotProductPathReferences(groupSettings, local) {
+        local = local || {};
+        if (local.product_path_selection) {
+            local.product_path_selection = resolveProductPathSelectionReference(local.product_path_selection);
+        }
+        var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
+        groups.forEach(function(group) {
+            if (group && group.product_path_selection) {
+                group.product_path_selection = resolveProductPathSelectionReference(group.product_path_selection);
+            }
+        });
+        var lsConfigs = groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : [];
+        lsConfigs.forEach(function(config) {
+            if (config && config.product_path_selection) {
+                config.product_path_selection = resolveProductPathSelectionReference(config.product_path_selection);
+            }
+        });
+    }
+
+    function resolveSnapshotProductPathReferencesAsync(snapshot) {
+        snapshot = snapshot || {};
+        var groupSettings = snapshot.group_settings ? snapshot.group_settings : snapshot;
+        var local = snapshot.local_settings || {};
+        var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
+        var lsConfigs = groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : [];
+        var items = [local].concat(groups).concat(lsConfigs);
+        var ids = [];
+        items.forEach(function(item) {
+            var selection = item && item.product_path_selection;
+            if (selection && typeof selection === 'object' && selectionId(selection) && !selection.product_group && !selection.label && !selection.product_group_template_id && !(Array.isArray(selection.paths) && selection.paths.length)) {
+                ids.push(selectionId(selection));
+            }
+        });
+        var ready = ids.length ? resolveProductPathSelectionsByIds(ids) : Promise.resolve(state.productPathSelections);
+        return ready.catch(function(error) {
+            console.warn('[backend-settings] product path selection resolve failed:', error);
+            return state.productPathSelections;
+        }).then(function() {
+            resolveSnapshotProductPathReferences(groupSettings, local);
+            return snapshot;
+        });
+    }
+
+
     function productPathSelectionLabel(selection) {
         if (!selection) return '';
         var label = selection.product_group || selection.label || selection.name || selectionId(selection);
@@ -227,14 +288,73 @@
         };
     }
 
+    function mergeProductPathSelections(selections) {
+        (selections || []).forEach(function(selection) {
+            var id = selectionId(selection);
+            if (!id) return;
+            var existingIndex = -1;
+            for (var i = 0; i < state.productPathSelections.length; i++) {
+                if (selectionId(state.productPathSelections[i]) === id) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            if (existingIndex >= 0) state.productPathSelections[existingIndex] = selection;
+            else state.productPathSelections.push(selection);
+        });
+        if (selections && selections.length) {
+            document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+        }
+    }
+
+    function resolveProductPathSelectionsByIds(ids) {
+        ids = (ids || []).map(function(id) { return String(id || '').trim(); }).filter(Boolean);
+        var unique = [];
+        ids.forEach(function(id) {
+            if (unique.indexOf(id) < 0 && !findProductPathSelectionById(id) && !state.productPathSelectionResolveRequests[id]) unique.push(id);
+        });
+        var pending = ids
+            .map(function(id) { return state.productPathSelectionResolveRequests[id]; })
+            .filter(Boolean);
+        if (!unique.length) {
+            return (pending.length ? Promise.all(pending) : Promise.resolve()).then(function() {
+                return state.productPathSelections;
+            });
+        }
+        var request = fetch('/api/product-groups/resolve', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ ids: unique }),
+        }).then(function(response) {
+            return response.json().catch(function() { return {}; }).then(function(payload) {
+                if (!response.ok || payload.success === false) {
+                    throw new Error(payload.error || ('HTTP ' + response.status));
+                }
+                mergeProductPathSelections((payload.groups || []).map(productGroupToSelection));
+                return state.productPathSelections;
+            });
+        }).finally(function() {
+            unique.forEach(function(id) { delete state.productPathSelectionResolveRequests[id]; });
+        });
+        unique.forEach(function(id) { state.productPathSelectionResolveRequests[id] = request; });
+        return Promise.all(pending.concat([request])).then(function() {
+            return state.productPathSelections;
+        });
+    }
+
     function loadProductPathSelections(force) {
         if (state.productPathSelectionsLoaded && !force) {
             return Promise.resolve(state.productPathSelections);
         }
         return requestJSON('/api/product-groups').then(function(payload) {
-            state.productPathSelections = (payload.groups || []).map(productGroupToSelection);
+            state.productPathSelections = [];
+            mergeProductPathSelections((payload.groups || []).map(productGroupToSelection));
             state.productPathSelectionsLoaded = true;
-            document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
             return state.productPathSelections;
         });
     }
@@ -1429,14 +1549,17 @@
         state.mountedTabs[LOCAL] = [];
         state.mountedTabs[GROUP] = [];
         deactivateLocal();
-        mountTabsForSnapshotValues(LOCAL, local);
-        groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
-            mountTabsForSnapshotValues(GROUP, item || {});
+        return resolveSnapshotProductPathReferencesAsync({ group_settings: groupSettings, local_settings: local }).then(function() {
+            mountTabsForSnapshotValues(LOCAL, local);
+            groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
+                mountTabsForSnapshotValues(GROUP, item || {});
+            });
+            clearLoadedLocalEchoOverrides(local);
+            renderLocalTabs();
+            if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+            if (GT.events && GT.events.emit) GT.events.emit('groupsChanged');
+            return syncAppliedTimeRange();
         });
-        clearLoadedLocalEchoOverrides(local);
-        renderLocalTabs();
-        if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
-        return syncAppliedTimeRange();
     }
 
     function clearLoadedLocalEchoOverrides(local) {
@@ -1624,6 +1747,7 @@
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,
         compactProductPathSelection: compactProductPathSelection,
+        resolveSnapshotProductPathReferences: resolveSnapshotProductPathReferencesAsync,
         syncPageTimeDefaults: syncPageTimeDefaults,
         registerLocalDefaultProvider: registerLocalDefaultProvider,
         copyLocalDefaultsFromProvider: copyLocalDefaultsFromProvider,

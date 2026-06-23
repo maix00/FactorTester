@@ -473,15 +473,18 @@
                 label: base.label,
                 icon: base.icon,
                 collect: base.collect,
-                apply: function(gs, ctx) {
+                apply: async function(gs, ctx) {
                     var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
+                    if (GT.backendSettings && typeof GT.backendSettings.resolveSnapshotProductPathReferences === 'function') {
+                        await GT.backendSettings.resolveSnapshotProductPathReferences({ group_settings: working });
+                    }
                     var applyResult = base.apply(working);
                     if (applyResult.errors && applyResult.errors.length > 0) {
                         console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                     }
                     console.log('[global_template] group_settings applied: ' + (applyResult.applied ? applyResult.applied.groups : '?') + ' groups');
                     if (GT.backendSettings && typeof GT.backendSettings.applyFlatSnapshot === 'function') {
-                        GT.backendSettings.applyFlatSnapshot((ctx && ctx.snapshot) || { group_settings: working });
+                        await GT.backendSettings.applyFlatSnapshot((ctx && ctx.snapshot) || { group_settings: working });
                     }
                     if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
                         GT.tabs.mountTab('list');

@@ -166,6 +166,19 @@ const indexManifest = {
       clickable: false,
     },
     {
+      key: 'product_path_selection',
+      label: '产品路径',
+      category: 'identity',
+      chip_template: '{productPathSelectionLabel}',
+      source_keys: ['product_path_selection'],
+      order: 20,
+      inherit_from_root: true,
+      value_resolvers: {
+        productPathSelectionLabel: 'product_path_selection_label',
+      },
+      clickable: true,
+    },
+    {
       key: 'product_mask',
       label: '品种范围',
       category: 'derived',
@@ -183,11 +196,36 @@ const indexManifest = {
   tab_url_template: '/api/backtest/settings/group_test/tabs/{tab_key}',
 };
 
+let productGroupListCalls = 0;
+let productGroupResolveCalls = 0;
+
 global.fetch = (url) => Promise.resolve({
   ok: true,
   json: () => {
     if (String(url).indexOf('/set_time_range') >= 0) {
       return Promise.resolve({ ok: true, page_uuid: 'page-1' });
+    }
+    if (String(url).indexOf('/api/product-groups/resolve') >= 0) {
+      productGroupResolveCalls += 1;
+      return Promise.resolve({
+        groups: [{
+          id: 'pg-day',
+          name: '中国期货日盘',
+          paths: ['Product/Futures/CNFutures/日夜盘/日盘'],
+          products: [{ name: 'AP.CZC', desc: '苹果' }],
+        }],
+      });
+    }
+    if (String(url).indexOf('/api/product-groups') >= 0) {
+      productGroupListCalls += 1;
+      return Promise.resolve({
+        groups: [{
+          id: 'pg-day',
+          name: '中国期货日盘',
+          paths: ['Product/Futures/CNFutures/日夜盘/日盘'],
+          products: [{ name: 'AP.CZC', desc: '苹果' }],
+        }],
+      });
     }
     if (String(url).indexOf('/tabs/time') >= 0) {
       return Promise.resolve({
@@ -249,7 +287,7 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(GT.backendSettings.collectLocalSettings().start_date, undefined);
   assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2025-05-06');
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       start_date: '2024-01-02',
       end_date: '2024-01-31',
@@ -314,7 +352,7 @@ return GT.backendSettings.init().then(async () => {
   assert.ok(configChips.some((chip) => chipPlainText(chip) === '参与率0.02'));
   assert.ok(configChips.every((chip) => chip.html.indexOf('gt-backend-chip-value') >= 0));
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     group_settings: {
       groups: [{
         id: baseId,
@@ -328,6 +366,30 @@ return GT.backendSettings.init().then(async () => {
 
   const identityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'identity');
   assert.ok(identityChips.some((chip) => chipPlainText(chip) === 'FactorChipOrder'));
+
+  const compactSnapshot = {
+    group_settings: {
+      groups: [{
+        id: 'compact-product-group',
+        name: 'Compact Product Group',
+        product_path_selection: { product_path_selection_id: 'pg-day' },
+        factorAlias: 'FactorChipOrder',
+        splitCount: 5,
+        groupIndex: 1,
+      }],
+    },
+  };
+  await GT.backendSettings.resolveSnapshotProductPathReferences(compactSnapshot);
+  assert.equal(productGroupResolveCalls, 1);
+  assert.equal(productGroupListCalls, 0);
+  assert.equal(compactSnapshot.group_settings.groups[0].product_path_selection.product_group, '中国期货日盘');
+  GT.groupSettings.groups.add(compactSnapshot.group_settings.groups[0]);
+  const compactIdentityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get('compact-product-group'), 'identity');
+  assert.ok(compactIdentityChips.some((chip) => chipPlainText(chip) === '中国期货日盘 · 产品组'));
+  await GT.backendSettings.resolveSnapshotProductPathReferences({
+    group_settings: { groups: [{ product_path_selection: { product_path_selection_id: 'pg-day' } }] },
+  });
+  assert.equal(productGroupResolveCalls, 1);
 
   const derivedChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(childId), 'derived');
   assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('1品种') >= 0 && chip.clickable));
@@ -356,7 +418,7 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(hiddenPayload.liquidity_mode, undefined);
   assert.equal(hiddenPayload.participation_rate, undefined);
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       allocation_policy: 'equal_notional',
     },
@@ -391,7 +453,7 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(tradingDayPayload._runtime_window.timezone, '');
   assert.deepEqual(GT.backendSettings._state.mountedTabs['local-settings'], ['time']);
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       allocation_policy: 'equal_notional',
     },
