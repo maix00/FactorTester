@@ -48,6 +48,41 @@
         });
     }
 
+    function setTransientStatus(el, text, color, delayMs) {
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = color || '#64748b';
+        if (el._clearTimer) clearTimeout(el._clearTimer);
+        if (text) {
+            el._clearTimer = setTimeout(function() {
+                if (el.textContent === text) el.textContent = '';
+            }, delayMs || 2600);
+        }
+    }
+
+    function templateStatusEl() {
+        return document.getElementById('global-tpl-save-status');
+    }
+
+    function rememberLoadedTemplateName(name) {
+        window._currentSingleFactorTemplateName = name || '';
+        document.dispatchEvent(new CustomEvent('singleFactorTemplateChanged', {
+            detail: { name: window._currentSingleFactorTemplateName },
+        }));
+    }
+
+    function restoreScrollAfter(work) {
+        var scrollX = window.scrollX;
+        var scrollY = window.scrollY;
+        return Promise.resolve()
+            .then(work)
+            .finally(function() {
+                requestAnimationFrame(function() {
+                    window.scrollTo(scrollX, scrollY);
+                });
+            });
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Snapshot Registry — 统一管理所有可保存/恢复的配置模块
     // ═══════════════════════════════════════════════════════════════════════
@@ -488,7 +523,7 @@
     // ── 保存模板 ──────────────────────────────────────────────────────────
     async function saveTemplate() {
         const nameInput = document.getElementById('global-tpl-save-name');
-        const statusEl = document.getElementById('global-tpl-save-status');
+        const statusEl = templateStatusEl();
         let name = (nameInput?.value || '').trim();
         if (!name) {
             // 默认使用当前时间戳
@@ -497,29 +532,28 @@
         }
         const snapshot = await collectSnapshot();
 
-        statusEl.textContent = '保存中...';
-        statusEl.style.color = '#0078d4';
+        setTransientStatus(statusEl, '保存中...', '#0078d4', 60000);
         try {
-            const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS), {
-                method: 'POST',
-                body: JSON.stringify({
-                    name: name,
-                    ff_alias: FF_ALIAS,
-                    snapshot: snapshot
-                })
+            const data = await restoreScrollAfter(function() {
+                return requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS), {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name: name,
+                        ff_alias: FF_ALIAS,
+                        snapshot: snapshot
+                    })
+                });
             });
             if (data.success) {
-                statusEl.textContent = '✓ 已保存: ' + name;
-                statusEl.style.color = '#28a745';
+                rememberLoadedTemplateName(name);
+                setTransientStatus(statusEl, '已保存', '#28a745');
                 if (nameInput) nameInput.value = '';
-                await loadTemplateList();
+                await restoreScrollAfter(loadTemplateList);
             } else {
-                statusEl.textContent = '✗ 保存失败: ' + (data.error || '未知错误');
-                statusEl.style.color = '#d40000';
+                setTransientStatus(statusEl, '保存失败', '#d40000');
             }
         } catch (e) {
-            statusEl.textContent = '✗ 网络错误: ' + e.message;
-            statusEl.style.color = '#d40000';
+            setTransientStatus(statusEl, '网络错误', '#d40000');
         }
     }
 
@@ -540,7 +574,7 @@
         try {
             const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS));
             if (!data.success || !data.templates || data.templates.length === 0) {
-                listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px;">暂无已保存的模板</div>';
+                listEl.innerHTML = '<div class="global-template-empty">暂无已保存的模板</div>';
                 return;
             }
             let html = '';
@@ -550,50 +584,22 @@
                 html += `
                 <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
                     <div class="tpl-row-header" data-tpl-id="${tplId}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;gap:8px;">
-                        <div class="tpl-name-area" style="flex:1;min-width:0;cursor:pointer;">
+                        <div class="tpl-name-area" style="flex:1;min-width:0;">
                             <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
-                            <div style="font-size:11px;color:#888;">${escapeHtml(tpl.ff_alias || '')}</div>
                         </div>
-                        <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;cursor:pointer;">▼</span>
+                        <button class="btn btn-sm global-tpl-summary-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#475569;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">摘要</button>
                         <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
                         <button class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
                         <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
-                    <div class="tpl-row-detail" data-loaded="false" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
-                        <div style="font-size:11px;color:#999;padding:4px 0;">展开后加载详情</div>
-                    </div>
                 </div>`;
             });
             listEl.innerHTML = html;
-            // 展开/收起：点击名称区域或展开图标
-            listEl.querySelectorAll('.tpl-row-header').forEach(function(header) {
-                var nameArea = header.querySelector('.tpl-name-area');
-                var expandIcon = header.querySelector('.tpl-expand-icon');
-                async function toggleDetail(e) {
-                    if (e) e.stopPropagation();
-                    var detail = header.nextElementSibling;
-                    if (detail.style.display === 'none') {
-                        detail.style.display = 'block';
-                        expandIcon.style.transform = 'rotate(180deg)';
-                        if (detail.getAttribute('data-loaded') !== 'true') {
-                            detail.innerHTML = '<div style="font-size:11px;color:#888;padding:4px 0;">加载中...</div>';
-                            try {
-                                var template = await fetchTemplateDetail(header.getAttribute('data-tpl-id'));
-                                await _ensureGroupTestAdapters();
-                            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
-                                detail.innerHTML = summaryHtml || '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
-                                detail.setAttribute('data-loaded', 'true');
-                            } catch (err) {
-                                detail.innerHTML = '<div style="font-size:11px;color:#d40000;padding:4px 0;">详情加载失败: ' + escapeHtml(err.message) + '</div>';
-                            }
-                        }
-                    } else {
-                        detail.style.display = 'none';
-                        expandIcon.style.transform = 'rotate(0deg)';
-                    }
-                }
-                if (nameArea) nameArea.addEventListener('click', toggleDetail);
-                if (expandIcon) expandIcon.addEventListener('click', toggleDetail);
+            listEl.querySelectorAll('.global-tpl-summary-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    showTemplateSummary(this.getAttribute('data-tpl-id'));
+                });
             });
             // 绑定加载按钮（阻止冒泡，避免触发展开/收起）
             listEl.querySelectorAll('.global-tpl-load-btn').forEach(btn => {
@@ -637,12 +643,57 @@
         return _templateDetailCache[tplId];
     }
 
+    function ensureSummaryOverlay() {
+        var overlay = document.getElementById('global-tpl-summary-overlay');
+        if (overlay) return overlay;
+        overlay = document.createElement('div');
+        overlay.id = 'global-tpl-summary-overlay';
+        overlay.className = 'global-template-summary-overlay';
+        overlay.innerHTML = ''
+            + '<div class="global-template-summary-panel">'
+            + '<div class="global-template-summary-header">'
+            + '<strong id="global-tpl-summary-title">模板摘要</strong>'
+            + '<button type="button" id="global-tpl-summary-close">关闭</button>'
+            + '</div>'
+            + '<div id="global-tpl-summary-body" class="global-template-summary-body"></div>'
+            + '</div>';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function(event) {
+            if (event.target === overlay || event.target.id === 'global-tpl-summary-close') {
+                overlay.style.display = 'none';
+            }
+        });
+        return overlay;
+    }
+
+    async function showTemplateSummary(tplId) {
+        var scrollX = window.scrollX;
+        var scrollY = window.scrollY;
+        var overlay = ensureSummaryOverlay();
+        var title = document.getElementById('global-tpl-summary-title');
+        var body = document.getElementById('global-tpl-summary-body');
+        overlay.style.display = 'flex';
+        requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
+        if (title) title.textContent = '模板摘要';
+        if (body) body.innerHTML = '<div class="global-template-empty">加载中...</div>';
+        try {
+            var template = await fetchTemplateDetail(tplId);
+            await _ensureGroupTestAdapters();
+            if (title) title.textContent = template.name || '模板摘要';
+            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
+            if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
+        } catch (error) {
+            if (body) body.innerHTML = '<div class="global-template-empty" style="color:#d40000;">摘要加载失败: ' + escapeHtml(error.message) + '</div>';
+        } finally {
+            requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
+        }
+    }
+
     // ── 覆盖已有模板 ──────────────────────────────────────────────────────
     async function overwriteTemplate(tplId, tplName) {
         if (!confirm('用当前设置覆盖模板「' + (tplName || tplId) + '」？')) return;
-        const statusEl = document.getElementById('global-tpl-load-status');
-        statusEl.textContent = '覆盖中...';
-        statusEl.style.color = '#7a4b00';
+        const statusEl = templateStatusEl();
+        setTransientStatus(statusEl, '覆盖中...', '#7a4b00', 60000);
         try {
             const snapshot = await collectSnapshot();
             const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
@@ -651,58 +702,53 @@
             });
             if (data.success) {
                 delete _templateDetailCache[tplId];
-                statusEl.textContent = '✓ 已覆盖: ' + (tplName || tplId);
-                statusEl.style.color = '#28a745';
+                setTransientStatus(statusEl, '已覆盖', '#28a745');
                 await loadTemplateList();
             } else {
-                statusEl.textContent = '✗ 覆盖失败: ' + (data.error || '未知错误');
-                statusEl.style.color = '#d40000';
+                setTransientStatus(statusEl, '覆盖失败', '#d40000');
             }
         } catch (e) {
-            statusEl.textContent = '✗ 网络错误: ' + e.message;
-            statusEl.style.color = '#d40000';
+            setTransientStatus(statusEl, '网络错误', '#d40000');
         }
     }
 
     // ── 加载单个模板 ──────────────────────────────────────────────────────
     async function loadTemplate(tplId) {
-        const statusEl = document.getElementById('global-tpl-load-status');
-        statusEl.textContent = '加载中...';
-        statusEl.style.color = '#0078d4';
+        const statusEl = templateStatusEl();
+        setTransientStatus(statusEl, '加载中...', '#0078d4', 60000);
         try {
+            const scrollX = window.scrollX;
+            const scrollY = window.scrollY;
             const template = await fetchTemplateDetail(tplId);
             await applySnapshot(template.snapshot, tplId);
-            statusEl.textContent = '✓ 已加载: ' + template.name;
-            statusEl.style.color = '#28a745';
+            rememberLoadedTemplateName(template.name);
+            requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
+            setTransientStatus(statusEl, '已加载', '#28a745');
             // 关闭抽屉
             const drawer = document.getElementById('global-tpl-drawer');
             if (drawer) drawer.classList.remove('open');
             const badge = document.getElementById('user-badge');
             if (badge) badge.style.display = '';
         } catch (e) {
-            statusEl.textContent = '✗ 网络错误: ' + e.message;
-            statusEl.style.color = '#d40000';
+            setTransientStatus(statusEl, '网络错误', '#d40000');
         }
     }
 
     // ── 删除模板 ──────────────────────────────────────────────────────────
     async function deleteTemplate(tplId) {
         if (!confirm('确定要删除此模板吗？')) return;
-        const statusEl = document.getElementById('global-tpl-load-status');
+        const statusEl = templateStatusEl();
         try {
             const data = await requestJSON(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
             if (data.success) {
                 delete _templateDetailCache[tplId];
-                statusEl.textContent = '✓ 已删除';
-                statusEl.style.color = '#28a745';
+                setTransientStatus(statusEl, '已删除', '#28a745');
                 await loadTemplateList();
             } else {
-                statusEl.textContent = '✗ 删除失败: ' + (data.error || '未知错误');
-                statusEl.style.color = '#d40000';
+                setTransientStatus(statusEl, '删除失败', '#d40000');
             }
         } catch (e) {
-            statusEl.textContent = '✗ 网络错误: ' + e.message;
-            statusEl.style.color = '#d40000';
+            setTransientStatus(statusEl, '网络错误', '#d40000');
         }
     }
 

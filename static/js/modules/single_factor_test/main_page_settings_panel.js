@@ -108,7 +108,14 @@
         if (!panel || !state.containers[tabKey]) return;
         if (tabKey === 'parameters') {
             var parameterModule = panel.querySelector('#parameter_module');
-            if (parameterModule) state.containers[tabKey].appendChild(parameterModule);
+            if (parameterModule) {
+                parameterModule.classList.add('single-factor-page-embedded-params');
+                Array.from(parameterModule.children).forEach(function(child) {
+                    if (child.classList && child.classList.contains('section-title')) return;
+                    if (child.classList && child.classList.contains('param-hint')) return;
+                    state.containers[tabKey].appendChild(child);
+                });
+            }
             drawer.style.display = 'none';
             drawer.classList.remove('open');
             return;
@@ -137,26 +144,42 @@
         return '已设置' + rows.length;
     }
 
-    function timeSummaryValue() {
-        var src = document.getElementById('time-summary-text');
-        var text = src ? (src.textContent || '').trim() : '';
-        if (!text || text === '加载中…') return '默认';
-        return text;
+    function templateSummaryValue() {
+        return window._currentSingleFactorTemplateName || '无';
     }
 
-    function templateSummaryValue() {
-        var status = document.getElementById('global-tpl-load-status');
-        var text = status ? (status.textContent || '').trim() : '';
-        return text ? text.replace(/^✓\s*/, '') : '无';
+    function displayValue(setting, value) {
+        if (setting && Array.isArray(setting.options)) {
+            for (var i = 0; i < setting.options.length; i++) {
+                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
+            }
+        }
+        return value === undefined || value === null || value === '' ? '默认' : String(value);
+    }
+
+    function settingChipParts(setting) {
+        if (!setting || !setting.chip_template) return null;
+        var value = displayValue(setting, effectiveValue(setting.key));
+        var text = String(setting.chip_template).replace('{value}', value);
+        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2]) return { label: match[1], value: match[2] };
+        return { label: setting.label || setting.key, value: value };
+    }
+
+    function registeredTabChipParts(tabKey) {
+        var values = {};
+        Object.keys(defaults()).forEach(function(key) { values[key] = effectiveValue(key); });
+        return settingKeysForTab(tabKey).map(function(key) {
+            var setting = Object.assign({ key: key }, defaults()[key] || {});
+            if (!settingVisibleForValues(setting, values)) return null;
+            return settingChipParts(setting);
+        }).filter(Boolean);
     }
 
     function chipPartsForTab(tabKey) {
-        if (tabKey === 'setting_template') return { label: '模板', value: templateSummaryValue() };
-        if (tabKey === 'parameters') return { label: '参数组合', value: paramSummaryValue() };
-        if (tabKey === 'time') return { label: '时间', value: timeSummaryValue() };
-        var key = settingKeysForTab(tabKey)[0];
-        var def = key ? defaults()[key] : null;
-        return { label: (def && def.label) || (tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey, value: '无' };
+        if (tabKey === 'setting_template') return [{ label: '模板', value: templateSummaryValue() }];
+        if (tabKey === 'parameters') return [{ label: '参数组合', value: paramSummaryValue() }];
+        return registeredTabChipParts(tabKey);
     }
 
     function renderChips() {
@@ -164,8 +187,9 @@
         if (!row) return;
         row.innerHTML = '';
         state.mountedTabs.forEach(function(tabKey) {
-            var parts = chipPartsForTab(tabKey);
-            row.appendChild(makeChip(tabKey, parts.label, parts.value));
+            chipPartsForTab(tabKey).forEach(function(parts) {
+                row.appendChild(makeChip(tabKey, parts.label, parts.value));
+            });
         });
     }
 
@@ -268,13 +292,19 @@
         });
     }
 
-    function settingVisible(setting) {
+    function settingVisibleForValues(setting, values) {
         var visibleWhen = setting && setting.visible_when || {};
         return Object.keys(visibleWhen).every(function(key) {
             var allowed = visibleWhen[key];
             if (!Array.isArray(allowed)) allowed = [allowed];
-            return allowed.map(String).indexOf(String(effectiveValue(key))) >= 0;
+            return allowed.map(String).indexOf(String(values[key])) >= 0;
         });
+    }
+
+    function settingVisible(setting) {
+        var values = {};
+        Object.keys(defaults()).forEach(function(key) { values[key] = effectiveValue(key); });
+        return settingVisibleForValues(setting, values);
     }
 
     function makeSettingControl(setting) {
@@ -304,7 +334,7 @@
         clearTimeout(state.timeSyncTimer);
         state.timeSyncTimer = setTimeout(function() {
             persistRegisteredTimeRange();
-        }, 180);
+        }, 1000);
     }
 
     function persistRegisteredTimeRange() {
@@ -387,11 +417,12 @@
     }
 
     function observeSummaries() {
-        ['global-tpl-load-status', 'time-summary-text', 'factor_table_body'].forEach(function(id) {
+        ['global-tpl-save-status', 'time-summary-text', 'factor_table_body'].forEach(function(id) {
             var node = document.getElementById(id);
             if (!node || !window.MutationObserver) return;
             new MutationObserver(renderChips).observe(node, { childList: true, characterData: true, subtree: true });
         });
+        document.addEventListener('singleFactorTemplateChanged', renderChips);
     }
 
     function init() {

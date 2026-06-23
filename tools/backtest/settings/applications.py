@@ -36,20 +36,20 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
 def register_run_window_base(app: ApplicationSettings, *, tab: str = "time") -> None:
     app.register_setting(SettingDefinition(
         "start_date", "开始日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
-        module="run_window", chip_template="开始: {value}",
+        module="run_window", chip_template="开始日期: {value}",
     ))
     app.register_setting(SettingDefinition(
         "end_date", "结束日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
-        module="run_window", chip_template="结束: {value}",
+        module="run_window", chip_template="结束日期: {value}",
     ))
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", ScopePolicy.LOCAL_ONLY,
-        module="run_window", chip_template="开始时刻: {value}",
+        module="run_window", chip_template="开始时间: {value}",
         visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", ScopePolicy.LOCAL_ONLY,
-        module="run_window", chip_template="结束时刻: {value}",
+        module="run_window", chip_template="结束时间: {value}",
         visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
@@ -59,7 +59,7 @@ def register_run_window_base(app: ApplicationSettings, *, tab: str = "time") -> 
             SettingOption("exact", "精确时间"),
             SettingOption("trading_day", "交易日"),
         ),
-        chip_template="精度: {value}",
+        chip_template="时间精度: {value}",
     ))
     app.register_setting(SettingDefinition(
         "timezone", "时区", tab, "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
