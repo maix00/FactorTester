@@ -30,6 +30,15 @@
         return div;
     }
 
+    function escapeHTML(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function selectedFactor() {
         var name = state.values.factor || state.values.factor_name || '';
         var alias = state.values.factor_alias || '';
@@ -95,6 +104,50 @@
         if (utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
         if (!selection) return '';
         return selection.product_group || selection.label || selection.name || selection.product_path_selection_id || '';
+    }
+
+    function settingMeta(key) {
+        return state.manifest && state.manifest.defaults && state.manifest.defaults[key] || null;
+    }
+
+    function effectiveValue(key) {
+        if (Object.prototype.hasOwnProperty.call(state.values, key)) return state.values[key];
+        var meta = settingMeta(key);
+        return meta ? meta.value : undefined;
+    }
+
+    function settingVisible(setting, values) {
+        return window.BackendSettingsPanel.settingVisibleForValues(setting, values || state.values || {});
+    }
+
+    function displaySettingValue(setting, value) {
+        if (setting && setting.key === 'factor') {
+            var factor = selectedFactor();
+            return factor ? factor.alias || factor.name || '' : '无';
+        }
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
+    }
+
+    function settingChipParts(setting) {
+        if (!setting || !setting.chip_template) return null;
+        if (!settingVisible(setting, state.values || {})) return null;
+        var value = displaySettingValue(setting, effectiveValue(setting.key));
+        var text = String(setting.chip_template).replace('{value}', value);
+        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2]) return { label: match[1], value: match[2] };
+        return { label: setting.label || setting.key, value: value };
+    }
+
+    function renderChipHtml(labelOrText, value) {
+        var text = value === undefined || value === null || value === ''
+            ? String(labelOrText == null ? '' : labelOrText)
+            : String(labelOrText == null ? '' : labelOrText) + ': ' + String(value);
+        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2]) {
+            return '<span class="gt-backend-chip-label">' + escapeHTML(match[1]) + '</span>'
+                + '<span class="gt-backend-chip-value">' + escapeHTML(match[2]) + '</span>';
+        }
+        return '<span class="gt-backend-chip-value">' + escapeHTML(text) + '</span>';
     }
 
     // =========================================================
@@ -302,25 +355,17 @@
 
     function renderSettingChips() {
         if (!state.manifest) return;
-        var chips = state.manifest.chip_fields || [];
+        var defaults = state.manifest.defaults || {};
         var row = document.getElementById('factor-type-analysis-chip-row');
         if (!row) return;
         row.innerHTML = '';
-        chips.forEach(function (chip) {
-            var keys = chip.source_keys || [];
-            var parts = [];
-            keys.forEach(function (k) {
-                var v = state.values[k];
-                if (k === 'product_path_selection') v = displayProductLabel();
-                if (v !== undefined && v !== null && v !== '') {
-                    parts.push({ key: k, value: v });
-                }
-            });
-            if (!parts.length) return;
-            var label = chip.label + ': ' + parts.map(function (p) { return p.value; }).join(' · ');
+        Object.keys(defaults).forEach(function (key) {
+            var setting = Object.assign({ key: key }, defaults[key] || {});
+            var parts = settingChipParts(setting);
+            if (!parts) return;
             var span = document.createElement('span');
-            span.className = 'backend-chip';
-            span.textContent = label;
+            span.className = 'gt-backend-chip unified-backend-chip';
+            span.innerHTML = renderChipHtml(parts.label, parts.value);
             row.appendChild(span);
         });
     }

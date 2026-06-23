@@ -11,6 +11,8 @@
     let icSettingValues = {};
     let icActiveSettingsTab = null;
     let icMountedSettingsTabs = ['product_path_selection'];
+    let icSharedProductPathSelections = [];
+    let icSharedProductPathSelectionsLoaded = false;
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
     let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
@@ -48,7 +50,7 @@
 
     function selectionLabel(selection) {
         const utils = window.ProductPathSelectionUtils;
-        if (utils && utils.selectionLabel) return utils.selectionLabel(selection);
+        if (utils && utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
         return selection ? (selection.product_group || selection.label || selection.name || selectionId(selection)) : '';
     }
 
@@ -57,16 +59,70 @@
         return icProductPathSelections.find(selection => selectionId(selection) === target) || null;
     }
 
-    function sharedProductPathSettings() {
-        return window.GroupTest && window.GroupTest.backendSettings ? window.GroupTest.backendSettings : null;
-    }
-
     function defaultProductPathSelection() {
-        const settings = sharedProductPathSettings();
-        if (settings && typeof settings.getDefaultProductPathSelection === 'function') {
-            return settings.getDefaultProductPathSelection();
+        if (window.SingleFactorGlobalSettings && typeof window.SingleFactorGlobalSettings.getDefaultValues === 'function') {
+            const selectionField = productPathCandidateSerialization().selection_field || 'product_path_selection';
+            const values = window.SingleFactorGlobalSettings.getDefaultValues([selectionField]);
+            if (values && values[selectionField]) return values[selectionField];
         }
         return icProductPathSelections[0] || null;
+    }
+
+    function pageProductPathCandidates() {
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return [];
+        const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
+        const values = window.SingleFactorGlobalSettings.getDefaultValues([candidatesField]);
+        return Array.isArray(values[candidatesField]) ? values[candidatesField] : [];
+    }
+
+    function productPathCandidateSerialization() {
+        const def = icSettingsManifest && icSettingsManifest.defaults ? icSettingsManifest.defaults.product_path_candidates : null;
+        return def && def.serialization || {};
+    }
+
+    function productGroupToSelection(group) {
+        if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.productGroupToSelection === 'function') {
+            return window.ProductPathSelectionUtils.productGroupToSelection(group);
+        }
+        group = group || {};
+        const id = String(group.id || group.name || '');
+        return {
+            id,
+            product_path_selection_id: id,
+            product_group_template_id: String(group.id || ''),
+            path_id: String(group.id || ''),
+            product_group: group.name || '',
+            label: group.name || '',
+            paths: (group.paths || []).slice(),
+            selected_paths: (group.paths || []).slice(),
+            products: [],
+            product_groups: [],
+        };
+    }
+
+    async function loadSharedProductPathSelections(force) {
+        if (icSharedProductPathSelectionsLoaded && !force) return icSharedProductPathSelections;
+        const candidates = pageProductPathCandidates();
+        if (candidates.length) {
+            mergeICProductPathCandidates(candidates);
+        } else {
+            const response = await fetch('/api/product-groups', { headers: { Accept: 'application/json' } });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || ('HTTP ' + response.status));
+            }
+            mergeICProductPathCandidates((payload.groups || []).map(productGroupToSelection));
+        }
+        icSharedProductPathSelectionsLoaded = true;
+        return icSharedProductPathSelections;
+    }
+
+    function mergeICProductPathCandidates(selections) {
+        const utils = window.ProductPathSelectionUtils || {};
+        const merged = icSharedProductPathSelections.concat(Array.isArray(selections) ? selections : []);
+        icSharedProductPathSelections = utils.dedupe ? utils.dedupe(merged) : merged;
+        icSettingValues.product_path_candidates = icSharedProductPathSelections.slice();
+        return icSharedProductPathSelections;
     }
 
     function syncDefaultProductPathSelection() {
@@ -105,29 +161,20 @@
     }
 
     function displaySettingValue(setting, value) {
-        if (value === undefined || value === null || value === '') return '无';
-        if (setting && Array.isArray(setting.options)) {
-            const option = setting.options.find(item => String(item.value) === String(value));
-            if (option) return option.label;
-        }
         if (setting && setting.key === 'product_path_selection') {
             const current = defaultProductPathSelection() || icProductPathSelections[0] || null;
-            return current ? selectionLabel(current) : '无';
+            return window.BackendSettingsPanel.displaySettingValue(setting, current);
         }
         if (setting && setting.key === 'factor') {
             if (factorList.length) return factorList.map(f => f.alias || f.name || '').filter(Boolean).join(' / ');
             return factorFamilyAlias || '无';
         }
-        return String(value);
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     function settingVisible(setting) {
         const values = Object.assign({}, icSettingValues);
-        const visibleWhen = setting && setting.visible_when || {};
-        return Object.keys(visibleWhen).every(key => {
-            const allowed = Array.isArray(visibleWhen[key]) ? visibleWhen[key] : [visibleWhen[key]];
-            return allowed.map(String).indexOf(String(values[key])) >= 0;
-        });
+        return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
     }
 
     function settingChipText(setting, value) {
@@ -163,7 +210,34 @@
         Object.keys(data.defaults || {}).forEach(key => {
             icSettingValues[key] = data.defaults[key].value;
         });
+        applyGlobalICDefaults();
         return data;
+    }
+
+    function applyGlobalICDefaults() {
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return false;
+        const sharedKeys = (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || [];
+        const values = window.SingleFactorGlobalSettings.getDefaultValues(sharedKeys);
+        const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
+        const selectionField = productPathCandidateSerialization().selection_field || 'product_path_selection';
+        let changed = false;
+        if (Array.isArray(values[candidatesField]) && values[candidatesField].length) {
+            const before = icSharedProductPathSelections.length;
+            mergeICProductPathCandidates(values[candidatesField]);
+            if (icSharedProductPathSelections.length !== before) changed = true;
+        }
+        ['data_source', 'frequency'].forEach(key => {
+            if (!Object.prototype.hasOwnProperty.call(icSettingValues, key)) return;
+            if (values[key] === undefined || values[key] === null || values[key] === '') return;
+            if (String(icSettingValues[key]) === String(values[key])) return;
+            icSettingValues[key] = values[key];
+            changed = true;
+        });
+        if (values[selectionField] && !icProductPathSelections.length) {
+            icProductPathSelections = [values[selectionField]];
+            changed = true;
+        }
+        return changed;
     }
 
     function enabledResultTabs(manifest) {
@@ -173,10 +247,7 @@
         Object.keys(icSettingValues || {}).forEach(key => { values[key] = icSettingValues[key]; });
         return (manifest && manifest.result_tabs || []).filter(tab => {
             const requires = tab.requires || {};
-            return Object.keys(requires).every(key => {
-                const allowed = requires[key] || [];
-                return allowed.map(String).indexOf(String(values[key])) >= 0;
-            });
+            return window.BackendSettingsPanel.matchesConditions(requires, values);
         });
     }
 
@@ -201,32 +272,37 @@
             settingsByTab[meta.tab_key].push({ key, meta });
         });
         function renderChooser() {
-            let html = '<div class="backend-settings-chooser-intro">选择要挂载到 IC 测试的设置。未挂载项使用后端默认值。</div>';
-            tabs.forEach(tab => {
+            if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+            window.BackendSettingsPanel.renderChooser({
+                host: contentHost,
+                tabs,
+                mountedTabs: icMountedSettingsTabs,
+                introText: '选择要挂载到 IC 测试的设置。未挂载项使用后端默认值。',
+                isVisible: function(tab) {
+                    return !!(settingsByTab[tab.key] || []).length;
+                },
+                defaultsForTab: function(tab) {
                 const rows = settingsByTab[tab.key] || [];
-                if (!rows.length) return;
-                html += '<label class="backend-settings-chooser-row">';
-                html += '<input type="checkbox" data-ic-toggle-tab="' + escapeHTML(tab.key) + '"' + (isTabMounted(tab.key) ? ' checked' : '') + '>';
-                html += '<span class="backend-settings-chooser-body">';
-                html += '<span class="backend-settings-chooser-title">' + escapeHTML(tab.label || tab.key) + '</span>';
-                html += '<span class="backend-settings-chooser-defaults">';
-                rows.forEach(row => {
+                    return rows.map(row => {
                     const setting = Object.assign({ key: row.key }, row.meta || {});
-                    if (!setting.chip_template) return;
+                        if (!setting.chip_template) return null;
                     const value = setting.key === 'product_path_selection'
                         ? displaySettingValue(setting, defaultProductPathSelection())
                         : displaySettingValue(setting, icSettingValues[row.key]);
-                    html += '<span class="gt-backend-chip is-muted">' + renderChipHtml(settingChipText(setting, value)) + '</span>';
-                });
-                html += '</span></span></label>';
-            });
-            contentHost.innerHTML = html;
-            contentHost.querySelectorAll('[data-ic-toggle-tab]').forEach(input => {
-                input.addEventListener('change', function() {
-                    const tabKey = this.getAttribute('data-ic-toggle-tab');
+                        return { setting, value };
+                    }).filter(Boolean);
+                },
+                renderChip: function(item) {
+                    const chip = document.createElement('span');
+                    chip.className = 'gt-backend-chip is-muted';
+                    chip.innerHTML = renderChipHtml(settingChipText(item.setting, item.value));
+                    return chip;
+                },
+                onToggle: function(tab, enabled) {
+                    const tabKey = tab.key;
                     const index = icMountedSettingsTabs.indexOf(tabKey);
-                    if (this.checked && index < 0) icMountedSettingsTabs.push(tabKey);
-                    if (!this.checked && index >= 0) {
+                    if (enabled && index < 0) icMountedSettingsTabs.push(tabKey);
+                    if (!enabled && index >= 0) {
                         icMountedSettingsTabs.splice(index, 1);
                         resetTabValues(tabKey, defaults);
                         if (icActiveSettingsTab === tabKey) icActiveSettingsTab = '__manage__';
@@ -234,7 +310,7 @@
                     icActiveSettingsTab = '__manage__';
                     if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
                     else renderICSettingsPanel(manifest);
-                });
+                },
             });
         }
         host.innerHTML = ''
@@ -281,6 +357,10 @@
                 renderChooser();
                 return;
             }
+            if (tabKey === 'product_path_selection') {
+                renderICProductPathSelectionTab();
+                return;
+            }
             if (!tab || !rows.length || !isTabMounted(tabKey)) {
                 contentHost.innerHTML = '';
                 return;
@@ -295,21 +375,10 @@
                 html += '<label class="gt-backtest-setting-row">';
                 html += '<span class="gt-backtest-setting-label">' + escapeHTML(meta.label || row.key) + '</span>';
                 html += '<span class="gt-backtest-setting-control">';
-                if (meta.key === 'product_path_selection' || meta.control_template === 'custom') {
-                    if (meta.key === 'product_path_selection') {
-                        html += '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-                            + '<span class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;flex:1 1 160px;">'
-                            + escapeHTML(displaySettingValue(meta, value))
-                            + '</span>'
-                            + '<button type="button" class="gt-backend-chip unified-backend-chip" data-ic-open-product-path-settings style="border:1px solid #cbd5e1;background:#fff;cursor:pointer;">'
-                            + renderChipHtml('管理产品路径')
-                            + '</button>'
-                            + '</span>';
-                    } else {
-                        html += '<span class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;">'
-                            + escapeHTML(displaySettingValue(meta, value))
-                            + '</span>';
-                    }
+                if (meta.control_template === 'custom') {
+                    html += '<span class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;">'
+                        + escapeHTML(displaySettingValue(meta, value))
+                        + '</span>';
                 } else if ((meta.options || []).length || meta.control_template === 'select') {
                     html += '<select data-ic-setting="' + row.key + '">';
                     (meta.options || []).forEach(option => {
@@ -339,14 +408,68 @@
                     else renderICSettingsPanel(manifest);
                 });
             });
-            contentHost.querySelectorAll('[data-ic-open-product-path-settings]').forEach(button => {
-                button.addEventListener('click', function(event) {
-                    event.preventDefault();
-                    const settings = sharedProductPathSettings();
-                    if (settings && typeof settings.openLocalTab === 'function') {
-                        settings.openLocalTab('product_path_selection');
-                    }
+        }
+
+        function renderICProductPathSelectionTab() {
+            const current = icProductPathSelections[0] || null;
+            const pageDefault = defaultProductPathSelection();
+            contentHost.innerHTML = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row">'
+                + '<span class="gt-backtest-setting-label">当前IC产品路径</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', current ? selectionLabel(current) : '无') + '</span></span>'
+                + '</div>'
+                + '<div class="gt-backtest-setting-row">'
+                + '<span class="gt-backtest-setting-label">页面默认</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', pageDefault ? selectionLabel(pageDefault) : '无') + '</span></span>'
+                + '</div>'
+                + '<div style="font-size:12px;color:#64748b;">正在加载页面产品路径列表...</div>'
+                + '</div>';
+            loadSharedProductPathSelections(false).then(selections => {
+                if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
+                    contentHost.textContent = '产品路径设置组件未加载';
+                    return;
+                }
+                const extraRows = [];
+                if (pageDefault) {
+                    extraRows.push({
+                        label: '页面默认',
+                        html: '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+                            + '<span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', selectionLabel(pageDefault)) + '</span>'
+                            + '<button type="button" class="btn btn-sm btn-outline-primary" data-ic-use-shared-default>用于IC测试</button>'
+                            + '</span>',
+                    });
+                }
+                window.ProductPathSelectionUtils.renderSelectionSettingsTab({
+                    host: contentHost,
+                    prefix: 'ic-pps',
+                    selections,
+                    currentSelection: current,
+                    currentLabel: '当前IC产品路径',
+                    setDefaultLabel: '用于IC测试',
+                    manualTitle: 'IC现场路径组',
+                    createLabel: '新增到IC候选列表',
+                    createDefaultLabel: '新增并用于IC测试',
+                    escapeHTML,
+                    extraRows,
+                    onSetDefault: function(selection) {
+                        icProductPathSelections = selection ? [selection] : [];
+                        window.renderICTabs(icProductPathSelections);
+                    },
+                    onCreate: function(selection, meta) {
+                        mergeICProductPathCandidates([selection]);
+                        if (meta && meta.setAsDefault) icProductPathSelections = [selection];
+                        window.renderICTabs(icProductPathSelections);
+                    },
                 });
+                contentHost.querySelectorAll('[data-ic-use-shared-default]').forEach(button => {
+                    button.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        icProductPathSelections = pageDefault ? [pageDefault] : [];
+                        window.renderICTabs(icProductPathSelections);
+                    });
+                });
+            }).catch(error => {
+                contentHost.innerHTML = '<div style="font-size:12px;color:#b91c1c;">加载失败：' + escapeHTML(error.message || error) + '</div>';
             });
         }
 
@@ -1835,6 +1958,17 @@
                 console.error('[IC] refresh product path selection failed:', error);
             });
         } else if (!icProductPathSelections.length) {
+            renderICSettingsPanel(icSettingsManifest);
+        }
+    });
+
+    document.addEventListener('singleFactorGlobalSettingsChanged', function() {
+        const changed = applyGlobalICDefaults() || syncDefaultProductPathSelection();
+        if (changed) {
+            window.renderICTabs(icProductPathSelections).catch(function(error) {
+                console.error('[IC] refresh global defaults failed:', error);
+            });
+        } else {
             renderICSettingsPanel(icSettingsManifest);
         }
     });

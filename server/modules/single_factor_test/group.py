@@ -1484,6 +1484,12 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     )
 
     local_settings = _payload_local_settings(data)
+    data_source = str(local_settings.get('data_source') or '').strip()
+    frequency = str(local_settings.get('frequency') or '').strip()
+    if data_source and data_source != 'auto':
+        return False, {'success': False, 'error': f'当前分组测试不支持数据源 {data_source}，请使用自动', 'status': 400}
+    if frequency and frequency != 'auto':
+        return False, {'success': False, 'error': f'当前分组测试不支持数据频率 {frequency}，请使用自动', 'status': 400}
     try:
         initial_capital = _parse_initial_capital(local_settings.get('initial_capital'))
         base_currency = _parse_currency_code(local_settings.get('base_currency'))

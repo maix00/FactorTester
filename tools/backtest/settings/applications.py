@@ -22,6 +22,9 @@ RUN_WINDOW_KEYS = (
     "timezone",
     "time_precision",
 )
+PRODUCT_PATH_SELECTION_KEYS = ("product_path_selection",)
+PRODUCT_PATH_CANDIDATE_KEYS = ("product_path_candidates",)
+MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
 
 def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "factor") -> None:
@@ -132,6 +135,44 @@ def register_product_path_selection_base(
     ))
 
 
+def register_product_path_candidate_list_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "product_path_selection",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "product_path_candidates",
+        "产品路径候选列表",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="product_selection",
+        chip_template="产品路径候选: {value}",
+        help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场路径组。",
+        serialization={
+            "kind": "product_path_candidate_list",
+            "item_kind": "product_path_selection",
+            "shared_page_field": "product_path_candidates",
+            "selection_field": "product_path_selection",
+            "product_group_source": "user_product_group_templates",
+            "manual_candidate_source": "runtime_manual_path_group",
+            "fallback_policy": (
+                "copy_page_candidates",
+                "load_user_product_groups_when_page_empty",
+            ),
+            "mutation_scope": {
+                "page": "page_candidates_only",
+                "module": "module_candidates_only",
+            },
+            "persist_manual_candidates": False,
+            "dedupe_product_groups": True,
+            "allow_duplicate_manual_candidates": True,
+        },
+    ))
+
+
 def register_market_data_base(app: ApplicationSettings, *, include_price_type: bool) -> None:
     app.register_setting(SettingDefinition(
         "data_source",
@@ -180,7 +221,10 @@ def single_factor_page_settings() -> ApplicationSettings:
     for module in (
         SettingModule("setting_template", "因子家族设置模板", "page", 10),
         SettingModule("factor_parameters", "参数设置", "factor", 20),
-        SettingModule("run_window", "时间范围", "time", 30),
+        SettingModule("product_selection", "产品路径", "product", 30),
+        SettingModule("market_data_source", "数据源", "market_data", 40),
+        SettingModule("market_data_frequency", "数据频率", "market_data", 50),
+        SettingModule("run_window", "时间范围", "time", 60),
     ):
         app.register_module(module)
     for tab in (
@@ -201,11 +245,32 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab(
+            "product_path_selection",
+            "产品路径",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            30,
+        ),
+        SettingTab(
+            "data_source",
+            "数据源",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            40,
+        ),
+        SettingTab(
+            "frequency",
+            "数据频率",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            50,
+        ),
+        SettingTab(
             "time",
             "时间范围",
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
-            30,
+            60,
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
@@ -231,13 +296,16 @@ def single_factor_page_settings() -> ApplicationSettings:
         module="factor_parameters",
         chip_template="参数: {value}",
     ))
+    register_product_path_candidate_list_base(app)
+    register_product_path_selection_base(app)
+    register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     return app
 
 
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("execution_engine", "执行引擎", "backtest", 10),
         SettingModule("factor_execution", "因子执行", "factor", 20),
@@ -368,6 +436,7 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="引擎: {value}",
     ))
     register_factor_execution_base(app)
+    register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
@@ -684,11 +753,13 @@ def group_test_settings() -> ApplicationSettings:
 
 def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("factor_execution", "因子执行", "factor", 10),
         SettingModule("product_selection", "品种/路径选择", "product", 20),
         SettingModule("run_window", "运行时间范围", "backtest", 30),
+        SettingModule("market_data_source", "数据源", "market_data", 35),
+        SettingModule("market_data_frequency", "数据频率", "market_data", 36),
         SettingModule("return_frequency", "收益率频率", "analysis", 40),
         SettingModule("return_definition", "收益率定义", "analysis", 50),
         SettingModule("ic_delay", "IC Delay", "analysis", 60),
@@ -715,6 +786,8 @@ def ic_test_settings() -> ApplicationSettings:
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
+        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 35),
+        SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 36),
         SettingTab("return_frequency", "收益率频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
         SettingTab("delay", "Delay", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
         SettingTab("ic_method", "IC 类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 55),
@@ -747,7 +820,9 @@ def ic_test_settings() -> ApplicationSettings:
     ):
         app.register_chip_field(chip)
     register_factor_execution_base(app)
+    register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
+    register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(
         "return_frequency_mode",
@@ -903,7 +978,7 @@ def ic_test_settings() -> ApplicationSettings:
 
 def factor_evaluation_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_evaluation")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
         SettingModule("run_window", "计算时间范围", "time", 20),
@@ -956,6 +1031,7 @@ def factor_evaluation_settings() -> ApplicationSettings:
         chip_template="产品路径: {value}",
         help_text="从后端注册的产品树选择一个产品或产品路径。",
     ))
+    register_product_path_candidate_list_base(app, tab="product")
     register_market_data_base(app, include_price_type=True)
     app.register_setting(SettingDefinition(
         "factor",
@@ -973,10 +1049,12 @@ def factor_evaluation_settings() -> ApplicationSettings:
 def factor_type_analysis_settings() -> ApplicationSettings:
     """因子类型分析的 settings 注册（用于产品序列下方的平行模块）。"""
     app = ApplicationSettings("factor_type_analysis")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
         SettingModule("run_window", "计算时间范围", "time", 20),
+        SettingModule("market_data_source", "数据源", "market_data", 25),
+        SettingModule("market_data_frequency", "数据频率", "market_data", 26),
         SettingModule("factor_execution", "因子选择", "factor", 30),
         SettingModule("analysis_method", "分析方法", "method", 40),
     ):
@@ -999,6 +1077,8 @@ def factor_type_analysis_settings() -> ApplicationSettings:
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
+        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 25),
+        SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 26),
         SettingTab(
             "factor",
             "因子",
@@ -1018,7 +1098,9 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     ):
         app.register_tab(tab)
     register_run_window_base(app)
+    register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
+    register_market_data_base(app, include_price_type=False)
     app.register_setting(SettingDefinition(
         "factor",
         "因子",

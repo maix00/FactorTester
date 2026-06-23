@@ -79,8 +79,105 @@
         return { opened: !!key, key: key || null };
     }
 
+    function renderChooser(options) {
+        options = options || {};
+        var host = resolveElement(options.host);
+        if (!host) return;
+        host.innerHTML = '';
+        var introText = options.introText || '选择要挂载的设置。未挂载项继续使用默认值。';
+        if (introText) {
+            var intro = document.createElement('div');
+            intro.className = options.introClassName || 'backend-settings-chooser-intro';
+            intro.textContent = introText;
+            host.appendChild(intro);
+        }
+        var tabs = Array.isArray(options.tabs) ? options.tabs : [];
+        var mountedTabs = Array.isArray(options.mountedTabs) ? options.mountedTabs : [];
+        var isVisible = typeof options.isVisible === 'function' ? options.isVisible : function() { return true; };
+        var defaultsForTab = typeof options.defaultsForTab === 'function' ? options.defaultsForTab : function() { return []; };
+        var onToggle = typeof options.onToggle === 'function' ? options.onToggle : function() {};
+        var renderChip = typeof options.renderChip === 'function'
+            ? options.renderChip
+            : function(item) {
+                var span = document.createElement('span');
+                span.className = 'gt-backend-chip is-muted';
+                span.textContent = item && item.text || '';
+                return span;
+            };
+
+        tabs.filter(isVisible).forEach(function(tab) {
+            var row = document.createElement('label');
+            row.className = options.rowClassName || 'backend-settings-chooser-row';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = mountedTabs.indexOf(tab.key) >= 0;
+            input.addEventListener('change', function() { onToggle(tab, input.checked); });
+            var body = document.createElement('div');
+            body.className = options.bodyClassName || 'backend-settings-chooser-body';
+            var title = document.createElement('div');
+            title.className = options.titleClassName || 'backend-settings-chooser-title';
+            title.textContent = tab.label || tab.key;
+            var defaults = document.createElement('div');
+            defaults.className = options.defaultsClassName || 'backend-settings-chooser-defaults';
+            defaultsForTab(tab).forEach(function(item) {
+                var chip = renderChip(item, tab);
+                if (chip) defaults.appendChild(chip);
+            });
+            body.appendChild(title);
+            body.appendChild(defaults);
+            row.appendChild(input);
+            row.appendChild(body);
+            host.appendChild(row);
+        });
+    }
+
+    function matchesConditions(conditions, values) {
+        conditions = conditions || {};
+        values = values || {};
+        return Object.keys(conditions).every(function(key) {
+            var allowed = conditions[key];
+            if (!Array.isArray(allowed)) allowed = [allowed];
+            return allowed.map(String).indexOf(String(values[key])) >= 0;
+        });
+    }
+
+    function settingVisibleForValues(setting, values) {
+        return matchesConditions((setting && setting.visible_when) || {}, values);
+    }
+
+    function displaySettingValue(setting, value) {
+        var serializationKind = setting && setting.serialization && setting.serialization.kind;
+        if (setting && Array.isArray(setting.options)) {
+            for (var i = 0; i < setting.options.length; i++) {
+                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
+            }
+        }
+        if (value === undefined || value === null || value === '') {
+            if (serializationKind === 'product_path_selection') return '无';
+            return '无';
+        }
+        if (serializationKind === 'product_path_candidate_list') {
+            return (Array.isArray(value) ? value.length : 0) + '项';
+        }
+        if (serializationKind === 'product_path_selection' && value && typeof value === 'object') {
+            var pps = window.ProductPathSelectionUtils;
+            if (pps && typeof pps.selectionDisplayLabel === 'function') return pps.selectionDisplayLabel(value);
+        }
+        if (Array.isArray(value)) return '未注册显示格式';
+        if (value && typeof value === 'object') {
+            return '未注册显示格式';
+        }
+        var template = setting && setting.control_template;
+        if (!template || template === 'custom') return '未注册显示格式';
+        return String(value);
+    }
+
     window.BackendSettingsPanel = {
         toggleMountedTab: toggleMountedTab,
         toggleContent: toggleContent,
+        renderChooser: renderChooser,
+        matchesConditions: matchesConditions,
+        settingVisibleForValues: settingVisibleForValues,
+        displaySettingValue: displaySettingValue,
     };
 })();

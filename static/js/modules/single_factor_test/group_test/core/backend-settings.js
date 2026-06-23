@@ -21,10 +21,6 @@
         localDefaultProviders: Object.create(null),
         productPathSelections: [],
         productPathSelectionsLoaded: false,
-        productPathTree: null,
-        productPathTreeSelected: [],
-        productPathDraftPaths: [],
-        productPathTreeSizer: null,
         productPathSelectionResolveRequests: Object.create(null),
     };
 
@@ -89,16 +85,7 @@
     }
 
     function displayValue(setting, value) {
-        if (value === undefined || value === null || value === '') return '无';
-        if (setting && setting.key === 'product_path_selection' && typeof value === 'object') {
-            return productPathSelectionLabel(value) || selectionId(value) || '无';
-        }
-        if (setting && Array.isArray(setting.options)) {
-            for (var i = 0; i < setting.options.length; i++) {
-                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
-            }
-        }
-        return String(value);
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     function escapeHTML(str) {
@@ -135,6 +122,10 @@
         if (left === undefined && right === null) return true;
         if (left === null && right === undefined) return true;
         if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right);
+        if ((left && typeof left === 'object') || (right && typeof right === 'object')) {
+            try { return JSON.stringify(left || null) === JSON.stringify(right || null); }
+            catch (error) { return false; }
+        }
         return String(left) === String(right);
     }
 
@@ -262,6 +253,8 @@
 
     function productPathSelectionLabel(selection) {
         if (!selection) return '';
+        var utils = window.ProductPathSelectionUtils || {};
+        if (utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
         var label = selection.product_group || selection.label || selection.name || selectionId(selection);
         if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
         if (selection.path_id) return label + ' · 路径组';
@@ -305,6 +298,19 @@
         if (selections && selections.length) {
             document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
         }
+    }
+
+    function removeProductPathSelection(id) {
+        id = String(id || '');
+        state.productPathSelections = state.productPathSelections.filter(function(item) {
+            return selectionId(item) !== id;
+        });
+        if (selectionId(state.localValues.product_path_selection) === id) setDefaultProductPathSelection(null);
+        document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+    }
+
+    function isManualProductPathSelection(selection) {
+        return selection && (selection.source_type === 'runtime_manual_path_group' || !(selection.product_group_template_id || selection.product_group || selection.product_group_name || selection.path_id));
     }
 
     function resolveProductPathSelectionsByIds(ids) {
@@ -351,12 +357,27 @@
         if (state.productPathSelectionsLoaded && !force) {
             return Promise.resolve(state.productPathSelections);
         }
+        var pageCandidates = pageProductPathCandidates();
+        if (pageCandidates.length) {
+            state.productPathSelections = [];
+            mergeProductPathSelections(pageCandidates);
+            state.productPathSelectionsLoaded = true;
+            return Promise.resolve(state.productPathSelections);
+        }
         return requestJSON('/api/product-groups').then(function(payload) {
             state.productPathSelections = [];
             mergeProductPathSelections((payload.groups || []).map(productGroupToSelection));
             state.productPathSelectionsLoaded = true;
             return state.productPathSelections;
         });
+    }
+
+    function pageProductPathCandidates() {
+        var serialization = candidateListSerialization();
+        var field = serialization.shared_page_field || 'product_path_candidates';
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return [];
+        var values = window.SingleFactorGlobalSettings.getDefaultValues([field]);
+        return Array.isArray(values[field]) ? values[field] : [];
     }
 
     function setDefaultProductPathSelection(selection) {
@@ -366,42 +387,9 @@
         document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
     }
 
-    function positivePaths(paths) {
-        return (paths || []).filter(function(path) { return String(path || '').charAt(0) !== '-'; });
-    }
-
-    function exclusionsCoveredBy(paths, positive) {
-        return (paths || []).filter(function(path) {
-            path = String(path || '');
-            if (path.charAt(0) !== '-') return false;
-            var leafPath = path.substring(1);
-            return (positive || []).some(function(includedPath) {
-                return leafPath === includedPath || leafPath.indexOf(includedPath + '/') === 0;
-            });
-        });
-    }
-
-    function negativeProductPath(parentPath, productName) {
-        var basePath = String(parentPath || '').slice(-10) === '/_products'
-            ? String(parentPath || '')
-            : String(parentPath || '') + '/_products';
-        return '-' + basePath + '/' + productName;
-    }
-
-    function addProductPathDraftPaths(paths, negative) {
-        var next = state.productPathDraftPaths.slice();
-        (paths || []).forEach(function(path) {
-            path = String(path || '').trim();
-            if (!path) return;
-            if (negative && path.charAt(0) !== '-') path = '-' + path;
-            if (!negative && path.charAt(0) === '-') path = path.substring(1);
-            if (next.indexOf(path) < 0) next.push(path);
-        });
-        state.productPathDraftPaths = next;
-    }
-
-    function removeProductPathDraftPath(path) {
-        state.productPathDraftPaths = state.productPathDraftPaths.filter(function(item) { return item !== path; });
+    function candidateListSerialization() {
+        var def = settingDef('product_path_candidates') || {};
+        return def.serialization || {};
     }
 
     function nodeProducts(group, seen) {
@@ -585,12 +573,7 @@
         var meta = setting && setting.key && state.index && state.index.defaults
             ? state.index.defaults[setting.key]
             : null;
-        var visibleWhen = (setting && setting.visible_when) || (meta && meta.visible_when);
-        if (!visibleWhen || !Object.keys(visibleWhen).length) return true;
-        return Object.keys(visibleWhen).every(function(depKey) {
-            var allowed = visibleWhen[depKey] || [];
-            return allowed.map(String).indexOf(String(values[depKey])) >= 0;
-        });
+        return window.BackendSettingsPanel.settingVisibleForValues(Object.assign({}, meta || {}, setting || {}), values);
     }
 
     function settingVisible(setting, mount) {
@@ -712,281 +695,50 @@
         return control;
     }
 
-    function mountProductPathTree(container) {
-        var treeEl = container.querySelector('#gt-pps-tree');
-        if (!treeEl || !window.ProductSelector || !window.jQuery) return;
-        treeEl.style.fontSize = '11px';
-        treeEl.style.lineHeight = '1.35';
-        window.ProductSelector.createTree(window.jQuery(treeEl), {
-            onInit: function(tree) {
-                state.productPathTree = tree;
-            },
-            onSelect: function(paths) {
-                state.productPathTreeSelected = paths || [];
-            },
-        });
-        if (typeof window.setupResizableTreeContainer === 'function') {
-            if (state.productPathTreeSizer && typeof state.productPathTreeSizer.destroy === 'function') {
-                state.productPathTreeSizer.destroy();
-            }
-            state.productPathTreeSizer = window.setupResizableTreeContainer({
-                outerElement: container.querySelector('#gt-pps-tree-panel'),
-                innerElement: treeEl,
-                minWidth: 240,
-                initialWidth: 320,
-                minHeight: 180,
-                initialHeight: 300,
-                maxWidth: 'min(52vw, 620px)',
-                maxWidthFallback: 620,
-                resizeDirection: 'both',
-                desktopMediaQuery: '(max-width: 960px)',
-                mobileInnerMaxHeight: '360px',
-            });
-        } else {
-            treeEl.style.boxSizing = 'border-box';
-            treeEl.style.minWidth = '240px';
-            treeEl.style.minHeight = '180px';
-            treeEl.style.maxWidth = 'min(52vw, 620px)';
-            treeEl.style.resize = 'both';
-            treeEl.style.overflow = 'auto';
-        }
-    }
-
-    function renderProductPathDraft(container) {
-        var target = container.querySelector('#gt-pps-draft-paths');
-        if (!target) return;
-        var paths = state.productPathDraftPaths || [];
-        if (!paths.length) {
-            target.innerHTML = '<div style="padding:12px;color:#888;font-size:12px;line-height:1.6;">从左侧产品树勾选路径后，点击“正新增”或“负新增”。正新增路径下的单个产品也可以在展开后做负新增。</div>';
-            return;
-        }
-        var html = '';
-        html += '<div style="padding:7px 9px;border-bottom:1px solid #eef2f7;font-size:12px;font-weight:700;color:#475467;">当前路径规则 <span style="font-weight:500;color:#94a3b8;">' + paths.length + '</span></div>';
-        paths.forEach(function(path) {
-            var negative = String(path).charAt(0) === '-';
-            var clean = negative ? String(path).substring(1) : String(path);
-            html += '<div style="border-bottom:1px solid #f1f5f9;">';
-            html += '<div style="display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:6px;align-items:start;padding:6px 8px;">';
-            html += '<span style="display:inline-flex;align-items:center;justify-content:center;width:19px;height:18px;border-radius:4px;background:' + (negative ? '#fef2f2' : '#ecfdf3') + ';color:' + (negative ? '#b42318' : '#166534') + ';font-weight:700;font-size:12px;">' + (negative ? '-' : '+') + '</span>';
-            html += '<span style="font-family:monospace;font-size:11px;color:#334155;word-break:break-all;line-height:1.35;">' + escapeHTML(clean) + '</span>';
-            if (negative) {
-                html += '<span></span>';
-            } else {
-                html += '<button type="button" data-gt-pps-show-products="' + escapeHTML(clean) + '" style="height:22px;padding:0 7px;border:1px solid #dbeafe;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:11px;cursor:pointer;">产品</button>';
-            }
-            html += '<button type="button" data-gt-pps-remove-path="' + escapeHTML(path) + '" style="height:22px;padding:0 7px;border:1px solid #fecaca;border-radius:4px;background:#fff5f5;color:#b91c1c;font-size:11px;cursor:pointer;">移除</button>';
-            html += '</div>';
-            html += '<div data-gt-pps-products-for="' + escapeHTML(clean) + '" style="display:none;padding:0 8px 7px 36px;"></div>';
-            html += '</div>';
-        });
-        target.innerHTML = html;
-        target.querySelectorAll('[data-gt-pps-remove-path]').forEach(function(button) {
-            button.addEventListener('click', function() {
-                removeProductPathDraftPath(this.getAttribute('data-gt-pps-remove-path'));
-                renderProductPathDraft(container);
-            });
-        });
-        target.querySelectorAll('[data-gt-pps-show-products]').forEach(function(button) {
-            button.addEventListener('click', function() {
-                var path = this.getAttribute('data-gt-pps-show-products');
-                renderPathProductsForExclusion(container, path);
-            });
-        });
-    }
-
-    function renderPathProductsForExclusion(container, path) {
-        var slot = null;
-        container.querySelectorAll('[data-gt-pps-products-for]').forEach(function(node) {
-            if (node.getAttribute('data-gt-pps-products-for') === path) slot = node;
-        });
-        if (!slot) return;
-        if (slot.style.display !== 'none' && slot.innerHTML) {
-            slot.style.display = 'none';
-            return;
-        }
-        slot.style.display = '';
-        slot.innerHTML = '<div style="font-size:11px;color:#888;padding:5px 0;">加载产品...</div>';
-        fetch('/get_products?path=' + encodeURIComponent(path), { headers: { Accept: 'application/json' } })
-            .then(function(response) { return response.json().catch(function() { return []; }); })
-            .then(function(products) {
-                var html = '';
-                (products || []).forEach(function(product) {
-                    var name = product.product_name || product.title || product.name || '';
-                    if (!name) return;
-                    var exclusion = negativeProductPath(path, name);
-                    var excluded = state.productPathDraftPaths.indexOf(exclusion) >= 0;
-                    html += '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:4px 0;border-top:1px solid #f1f5f9;">';
-                    html += '<span style="min-width:0;font-size:11px;color:#475467;"><b style="font-family:monospace;color:#334155;">' + escapeHTML(name) + '</b>' + (product.desc ? ' <span style="color:#94a3b8;">' + escapeHTML(product.desc) + '</span>' : '') + '</span>';
-                    html += '<button type="button" data-gt-pps-exclude-product="' + escapeHTML(exclusion) + '" style="height:22px;padding:0 7px;border:1px solid ' + (excluded ? '#bfdbfe' : '#fecaca') + ';border-radius:4px;background:' + (excluded ? '#eff6ff' : '#fef2f2') + ';color:' + (excluded ? '#1d4ed8' : '#b42318') + ';font-size:11px;cursor:pointer;">' + (excluded ? '已排除' : '负新增') + '</button>';
-                    html += '</div>';
-                });
-                slot.innerHTML = html || '<div style="font-size:11px;color:#888;padding:5px 0;">无产品</div>';
-                slot.querySelectorAll('[data-gt-pps-exclude-product]').forEach(function(button) {
-                    button.addEventListener('click', function() {
-                        addProductPathDraftPaths([this.getAttribute('data-gt-pps-exclude-product')], true);
-                        renderProductPathDraft(container);
-                        renderPathProductsForExclusion(container, path);
-                    });
-                });
-            }).catch(function() {
-                slot.innerHTML = '<div style="font-size:11px;color:#d92d20;padding:5px 0;">产品加载失败</div>';
-            });
-    }
-
     function renderProductPathSelectionManager(container) {
         container.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载产品路径...</div>';
         loadProductPathSelections().then(function(selections) {
-            var currentId = selectionId(state.localValues.product_path_selection);
-            var html = '';
-            html += '<div style="display:flex;flex-direction:column;gap:12px;">';
-            html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">';
-            html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #eef2f7;">';
-            html += '<span style="font-size:12px;font-weight:700;color:#334155;">已加载产品路径组</span>';
-            html += '<span style="font-size:11px;color:#94a3b8;">' + selections.length + '</span>';
-            html += '</div>';
-            html += '<div style="max-height:170px;overflow:auto;">';
-            if (!selections.length) {
-                html += '<div style="padding:14px;color:#888;font-size:12px;">暂无产品路径组，请在下方新增。</div>';
+            if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
+                container.textContent = '产品路径设置组件未加载';
+                return;
             }
-            selections.forEach(function(selection) {
-                var id = selectionId(selection);
-                var active = id && id === currentId;
-                var label = productPathSelectionLabel(selection);
-                var pathCount = (selection.paths || selection.selected_paths || []).length;
-                var productCount = productPathSelectionProducts(selection).length;
-                html += '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:7px 8px;border-bottom:1px solid #f1f5f9;background:' + (active ? '#eff6ff' : '#fff') + ';">';
-                html += '<button type="button" data-gt-pps-open="' + escapeHTML(id) + '" style="min-width:0;text-align:left;border:none;background:transparent;padding:0;cursor:pointer;">';
-                html += '<div style="font-size:12px;font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</div>';
-                html += '<div style="font-size:11px;color:#64748b;margin-top:1px;">' + pathCount + ' 路径 · ' + productCount + ' 产品' + (active ? ' · 默认' : '') + '</div>';
-                html += '</button>';
-                html += '<button type="button" data-gt-pps-default="' + escapeHTML(id) + '" class="gt-backend-chip" style="border:1px solid #cbd5e1;background:#fff;cursor:pointer;">' + renderChipHtml(active ? '默认' : '设为默认') + '</button>';
-                html += '<button type="button" data-gt-pps-delete="' + escapeHTML(id) + '" style="height:24px;padding:0 7px;border:1px solid #fecaca;border-radius:4px;background:#fff5f5;color:#b91c1c;font-size:11px;cursor:pointer;">删除</button>';
-                html += '</div>';
-            });
-            html += '</div></div>';
-            html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:10px;min-width:0;">';
-            html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">';
-            html += '<span style="font-size:12px;font-weight:700;color:#334155;">现场新增路径组</span>';
-            html += '<span id="gt-pps-status" style="font-size:12px;color:#64748b;"></span>';
-            html += '</div>';
-            html += '<input id="gt-pps-new-name" type="text" placeholder="路径组名称" style="width:100%;box-sizing:border-box;height:30px;margin-bottom:8px;padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;">';
-            html += '<div style="display:grid;grid-template-columns:auto minmax(280px,1fr);gap:10px;align-items:start;min-width:0;">';
-            html += '<div id="gt-pps-tree-panel" style="min-width:0;">';
-            html += '<div style="display:flex;gap:6px;margin-bottom:6px;">';
-            html += '<button type="button" id="gt-pps-add-positive" style="height:26px;padding:0 9px;border:1px solid #bbf7d0;border-radius:4px;background:#f0fdf4;color:#166534;font-size:12px;cursor:pointer;">+ 正新增</button>';
-            html += '<button type="button" id="gt-pps-add-negative" style="height:26px;padding:0 9px;border:1px solid #fecaca;border-radius:4px;background:#fef2f2;color:#b42318;font-size:12px;cursor:pointer;">- 负新增</button>';
-            html += '</div>';
-            html += '<div id="gt-pps-tree" class="product-tree-scrollbox" style="width:320px;height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:6px;padding:6px;background:#fff;font-size:11px;line-height:1.35;"></div>';
-            html += '</div>';
-            html += '<div style="min-width:0;">';
-            html += '<div id="gt-pps-draft-paths" style="height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></div>';
-            html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;">';
-            html += '<button type="button" id="gt-pps-clear-draft" style="height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:12px;cursor:pointer;">清空</button>';
-            html += '<button type="button" id="gt-pps-create" style="height:28px;padding:0 12px;border:1px solid #bfdbfe;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;">新增</button>';
-            html += '<button type="button" id="gt-pps-create-default" style="height:28px;padding:0 12px;border:none;border-radius:4px;background:#2563eb;color:#fff;font-size:12px;cursor:pointer;">新增并设为默认</button>';
-            html += '</div>';
-            html += '</div></div></div></div>';
-            container.innerHTML = html;
-
-            container.querySelectorAll('[data-gt-pps-open]').forEach(function(button) {
-                button.addEventListener('click', function() {
-                    var id = this.getAttribute('data-gt-pps-open');
-                    var selected = state.productPathSelections.filter(function(item) { return selectionId(item) === id; })[0] || null;
+            window.ProductPathSelectionUtils.renderSelectionSettingsTab({
+                host: container,
+                prefix: 'gt-pps',
+                selections: selections,
+                currentSelection: state.localValues.product_path_selection,
+                currentLabel: '当前默认',
+                manualTitle: '现场新增路径组',
+                createLabel: '新增',
+                createDefaultLabel: '新增并设为默认',
+                escapeHTML: escapeHTML,
+                productCount: productPathSelectionProducts,
+                allowRemove: isManualProductPathSelection,
+                onOpen: function(selected) {
                     if (!selected || !GT.overlays || !GT.overlays.productPathSelectionProducts) return;
                     GT.overlays.productPathSelectionProducts.open(
                         productPathSelectionLabel(selected),
                         productPathSelectionProducts(selected),
                         selected
                     );
-                });
-            });
-            container.querySelectorAll('[data-gt-pps-default]').forEach(function(button) {
-                button.addEventListener('click', function() {
-                    var id = this.getAttribute('data-gt-pps-default');
-                    var selected = state.productPathSelections.filter(function(item) { return selectionId(item) === id; })[0] || null;
+                },
+                onSetDefault: function(selected) {
                     setDefaultProductPathSelection(selected);
                     renderProductPathSelectionManager(container);
-                });
+                },
+                onRemove: function(selected) {
+                    var id = selectionId(selected);
+                    var name = productPathSelectionLabel(selected);
+                    if (!name || !confirm('移除现场产品路径组 "' + name + '"？')) return;
+                    removeProductPathSelection(id);
+                    renderProductPathSelectionManager(container);
+                },
+                onCreate: function(selection, meta) {
+                    mergeProductPathSelections([selection]);
+                    if (meta && meta.setAsDefault) setDefaultProductPathSelection(selection);
+                    renderProductPathSelectionManager(container);
+                },
             });
-            container.querySelectorAll('[data-gt-pps-delete]').forEach(function(button) {
-                button.addEventListener('click', function() {
-                    var id = this.getAttribute('data-gt-pps-delete');
-                    var selected = state.productPathSelections.filter(function(item) { return selectionId(item) === id; })[0] || null;
-                    var name = selected && productPathSelectionLabel(selected);
-                    if (!name || !confirm('删除产品路径组 "' + name + '"？')) return;
-                    fetch('/api/product-groups/' + encodeURIComponent(name), { method: 'DELETE' })
-                        .then(function(response) { return response.json().catch(function() { return {}; }); })
-                        .then(function(payload) {
-                            if (payload.success === false) throw new Error(payload.error || '删除失败');
-                            if (selectionId(state.localValues.product_path_selection) === id) setDefaultProductPathSelection(null);
-                            return loadProductPathSelections(true);
-                        })
-                        .then(function() { renderProductPathSelectionManager(container); })
-                        .catch(function(error) { alert(error.message || error); });
-                });
-            });
-            var createBtn = document.getElementById('gt-pps-create');
-            var createDefaultBtn = document.getElementById('gt-pps-create-default');
-            renderProductPathDraft(container);
-            mountProductPathTree(container);
-            var addPositiveBtn = document.getElementById('gt-pps-add-positive');
-            if (addPositiveBtn) {
-                addPositiveBtn.addEventListener('click', function() {
-                    addProductPathDraftPaths(state.productPathTreeSelected, false);
-                    state.productPathDraftPaths = positivePaths(state.productPathDraftPaths)
-                        .concat(exclusionsCoveredBy(state.productPathDraftPaths, positivePaths(state.productPathDraftPaths)));
-                    renderProductPathDraft(container);
-                });
-            }
-            var addNegativeBtn = document.getElementById('gt-pps-add-negative');
-            if (addNegativeBtn) {
-                addNegativeBtn.addEventListener('click', function() {
-                    addProductPathDraftPaths(state.productPathTreeSelected, true);
-                    renderProductPathDraft(container);
-                });
-            }
-            var clearDraftBtn = document.getElementById('gt-pps-clear-draft');
-            if (clearDraftBtn) {
-                clearDraftBtn.addEventListener('click', function() {
-                    state.productPathDraftPaths = [];
-                    renderProductPathDraft(container);
-                });
-            }
-            function createProductPathGroup(setAsDefault) {
-                    var nameInput = document.getElementById('gt-pps-new-name');
-                    var status = document.getElementById('gt-pps-status');
-                    var name = nameInput ? nameInput.value.trim() : '';
-                    var paths = state.productPathDraftPaths.slice();
-                    if (!name || !paths.length) {
-                        if (status) status.textContent = '请填写名称和路径';
-                        return;
-                    }
-                    fetch('/api/product-groups', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                        body: JSON.stringify({ name: name, paths: paths }),
-                    }).then(function(response) {
-                        return response.json().catch(function() { return {}; }).then(function(payload) {
-                            if (!response.ok || payload.success === false) throw new Error(payload.error || '新增失败');
-                            return payload;
-                        });
-                    }).then(function(payload) {
-                        var selection = productGroupToSelection(payload.group || {});
-                        if (setAsDefault) setDefaultProductPathSelection(selection);
-                        return loadProductPathSelections(true);
-                    }).then(function() {
-                        state.productPathDraftPaths = [];
-                        renderProductPathSelectionManager(container);
-                    }).catch(function(error) {
-                        if (status) status.textContent = error.message || String(error);
-                    });
-            }
-            if (createBtn) {
-                createBtn.addEventListener('click', function() { createProductPathGroup(false); });
-            }
-            if (createDefaultBtn) {
-                createDefaultBtn.addEventListener('click', function() { createProductPathGroup(true); });
-            }
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
         });
@@ -1114,33 +866,20 @@
     }
 
     function renderChooser(mount, container) {
-        container.innerHTML = '';
-        var intro = document.createElement('div');
-        intro.className = 'backend-settings-chooser-intro gt-backtest-settings-chooser-intro';
-        intro.textContent = '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。';
-        container.appendChild(intro);
-        availableTabs(mount).forEach(function(tab) {
-            var row = document.createElement('label');
-            row.className = 'backend-settings-chooser-row gt-backtest-settings-chooser-row';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = isMounted(mount, tab.key);
-            checkbox.addEventListener('change', function() { toggleMounted(mount, tab.key, checkbox.checked); });
-            var body = document.createElement('div');
-            body.className = 'backend-settings-chooser-body gt-backtest-settings-chooser-body';
-            var title = document.createElement('div');
-            title.textContent = tab.label;
-            title.className = 'backend-settings-chooser-title gt-backtest-settings-chooser-title';
-            body.appendChild(title);
-            var defaults = document.createElement('div');
-            defaults.className = 'backend-settings-chooser-defaults gt-backtest-settings-chooser-defaults';
-            defaultsForTab(tab.key).forEach(function(item) {
-                defaults.appendChild(chip(item.label + ': ' + item.value, true));
-            });
-            body.appendChild(defaults);
-            row.appendChild(checkbox);
-            row.appendChild(body);
-            container.appendChild(row);
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+        window.BackendSettingsPanel.renderChooser({
+            host: container,
+            tabs: availableTabs(mount),
+            mountedTabs: state.mountedTabs[mount],
+            introText: '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。',
+            introClassName: 'backend-settings-chooser-intro gt-backtest-settings-chooser-intro',
+            rowClassName: 'backend-settings-chooser-row gt-backtest-settings-chooser-row',
+            bodyClassName: 'backend-settings-chooser-body gt-backtest-settings-chooser-body',
+            titleClassName: 'backend-settings-chooser-title gt-backtest-settings-chooser-title',
+            defaultsClassName: 'backend-settings-chooser-defaults gt-backtest-settings-chooser-defaults',
+            defaultsForTab: function(tab) { return defaultsForTab(tab.key); },
+            renderChip: function(item) { return chip(item.label + ': ' + item.value, true); },
+            onToggle: function(tab, enabled) { toggleMounted(mount, tab.key, enabled); },
         });
     }
 
@@ -1481,6 +1220,7 @@
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
             copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
+            copyLocalDefaultsFromProvider('page_shared_defaults', { skipUserValues: true });
             registerBackendFields(index);
             var defaults = index.default_mounted_tabs || {};
             [LOCAL, GROUP].forEach(function(mount) {
@@ -1499,6 +1239,12 @@
         registerLocalDefaultProvider('page_time_range', function() {
             if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return null;
             return window.SingleFactorGlobalSettings.getDefaultValues(RUN_WINDOW_KEYS);
+        });
+        registerLocalDefaultProvider('page_shared_defaults', function() {
+            if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return null;
+            return window.SingleFactorGlobalSettings.getDefaultValues(
+                (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || []
+            );
         });
     }
 
@@ -1700,6 +1446,13 @@
         return values;
     }
 
+    function pageSharedDefaultValues() {
+        var provider = state.localDefaultProviders && state.localDefaultProviders.page_shared_defaults;
+        var values = typeof provider === 'function' ? provider() : null;
+        if (!values || typeof values !== 'object') return {};
+        return values;
+    }
+
     function shouldUsePageRunWindowForLocalSettings() {
         return !RUN_WINDOW_KEYS.some(function(key) {
             return Object.prototype.hasOwnProperty.call(state.localValues || {}, key);
@@ -1730,6 +1483,19 @@
             var value = normalizeControlValue(def, pageWindow[key]);
             if (value === '' || value === null || value === undefined) return;
             var visibilityValues = Object.assign({}, values, pageWindow, out);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            out[key] = value;
+        });
+        Object.keys(pageSharedDefaultValues()).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection' || RUN_WINDOW_KEYS.indexOf(key) >= 0) return;
+            if (Object.prototype.hasOwnProperty.call(out, key)) return;
+            if (Object.prototype.hasOwnProperty.call(state.localValues || {}, key)) return;
+            var value = normalizeControlValue(def, pageSharedDefaultValues()[key]);
+            if (value === '' || value === null || value === undefined) return;
+            var visibilityValues = Object.assign({}, values, out);
             visibilityValues[key] = value;
             if (!settingVisibleForValues(def, visibilityValues)) return;
             out[key] = value;
@@ -1794,6 +1560,13 @@
         return Promise.resolve(state.index);
     }
 
+    function syncPageSharedDefaults() {
+        copyLocalDefaultsFromProvider('page_shared_defaults', { skipUserValues: true });
+        renderLocalTabs();
+        renderLocalSettingChips();
+        return Promise.resolve(state.index);
+    }
+
     document.addEventListener('timeRangeDefaultLoaded', function() {
         copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
     });
@@ -1801,6 +1574,14 @@
     document.addEventListener('pageTimeRangeChanged', function() {
         syncPageTimeDefaults().catch(function(error) {
             console.error('[backend-settings] sync page time failed:', error);
+        });
+    });
+
+    document.addEventListener('singleFactorGlobalSettingsChanged', function() {
+        syncPageSharedDefaults().then(function() {
+            document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+        }).catch(function(error) {
+            console.error('[backend-settings] sync page shared defaults failed:', error);
         });
     });
 
@@ -1819,13 +1600,17 @@
         compactProductPathSelection: compactProductPathSelection,
         resolveSnapshotProductPathReferences: resolveSnapshotProductPathReferencesAsync,
         syncPageTimeDefaults: syncPageTimeDefaults,
+        syncPageSharedDefaults: syncPageSharedDefaults,
         registerLocalDefaultProvider: registerLocalDefaultProvider,
         copyLocalDefaultsFromProvider: copyLocalDefaultsFromProvider,
         applyLocalDefaultValues: applyLocalDefaultValues,
         openLocalTab: openLocalTab,
         loadProductPathSelections: loadProductPathSelections,
         getProductPathSelections: function() { return state.productPathSelections.slice(); },
-        getDefaultProductPathSelection: function() { return state.localValues.product_path_selection || null; },
+        getDefaultProductPathSelection: function() {
+            var def = settingDef('product_path_selection') || {};
+            return state.localValues.product_path_selection || def.value || null;
+        },
         setDefaultProductPathSelection: setDefaultProductPathSelection,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,

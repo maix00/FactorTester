@@ -153,6 +153,12 @@ def _parse_ic_params(data: dict) -> Tuple[
     ic_decay_lags = data.get('ic_decay_lags', None)
     rolling_window = data.get('rolling_window', None)
     settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
+    data_source = str(settings.get('data_source') or '').strip()
+    frequency = str(settings.get('frequency') or '').strip()
+    if data_source and data_source != 'auto':
+        errors.append(f'当前 IC 测试不支持数据源 {data_source}，请使用自动')
+    if frequency and frequency != 'auto':
+        errors.append(f'当前 IC 测试不支持数据频率 {frequency}，请使用自动')
     ic_correlation = str(data.get('ic_correlation') or settings.get('ic_correlation') or 'rank')
     if ic_correlation not in ('rank', 'pearson', 'both'):
         errors.append(f'ic_correlation 非法: {ic_correlation}')

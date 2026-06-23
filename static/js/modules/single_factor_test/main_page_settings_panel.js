@@ -9,6 +9,8 @@
         tabCache: Object.create(null),
         containers: {},
         timeSyncTimer: null,
+        productPathSelections: [],
+        productPathSelectionsLoaded: false,
     };
 
     function escapeHtml(value) {
@@ -166,13 +168,74 @@
         return window._currentSingleFactorTemplateName || '无';
     }
 
-    function displayValue(setting, value) {
-        if (setting && Array.isArray(setting.options)) {
-            for (var i = 0; i < setting.options.length; i++) {
-                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
-            }
+    function productPathSelectionId(selection) {
+        if (!selection) return '';
+        if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.selectionId === 'function') {
+            return window.ProductPathSelectionUtils.selectionId(selection);
         }
-        return value === undefined || value === null || value === '' ? '默认' : String(value);
+        return String(selection.product_path_selection_id || selection.selection_id || selection.id || '');
+    }
+
+    function productPathSelectionLabel(selection) {
+        if (!selection) return '无';
+        if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.selectionDisplayLabel === 'function') {
+            return window.ProductPathSelectionUtils.selectionDisplayLabel(selection);
+        }
+        var label = selection.product_group || selection.label || selection.name || productPathSelectionId(selection);
+        if (!label) return '无';
+        if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
+        if (selection.path_id || selection.paths || selection.selected_paths) return label + ' · 路径组';
+        return label;
+    }
+
+    function productGroupToSelection(group) {
+        if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.productGroupToSelection === 'function') {
+            return window.ProductPathSelectionUtils.productGroupToSelection(group);
+        }
+        group = group || {};
+        return {
+            id: String(group.id || group.name || ''),
+            product_path_selection_id: String(group.id || group.name || ''),
+            product_group_template_id: String(group.id || ''),
+            path_id: String(group.id || ''),
+            product_group: group.name || '',
+            label: group.name || '',
+            paths: (group.paths || []).slice(),
+            selected_paths: (group.paths || []).slice(),
+            products: [],
+            product_groups: [],
+        };
+    }
+
+    function loadProductPathSelections(force) {
+        if (state.productPathSelectionsLoaded && !force) return Promise.resolve(state.productPathSelections);
+        return requestJSON('/api/product-groups').then(function(payload) {
+            setProductPathCandidates((payload.groups || []).map(productGroupToSelection), { silent: false });
+            state.productPathSelectionsLoaded = true;
+            return state.productPathSelections;
+        });
+    }
+
+    function productPathCandidates() {
+        var value = state.values.product_path_candidates;
+        return Array.isArray(value) ? value : [];
+    }
+
+    function setProductPathCandidates(selections, options) {
+        options = options || {};
+        var utils = window.ProductPathSelectionUtils || {};
+        var list = Array.isArray(selections) ? selections.slice() : [];
+        if (utils.dedupe) list = utils.dedupe(list);
+        state.productPathSelections = list;
+        state.values.product_path_candidates = list;
+        if (!options.silent) {
+            renderChips();
+            broadcastGlobalSettingsChanged();
+        }
+    }
+
+    function displayValue(setting, value) {
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     function settingChipParts(setting) {
@@ -315,6 +378,14 @@
         }
         if (tabKey === 'time') {
             renderRegisteredTimeTab();
+            return;
+        }
+        if (tabKey === 'product_path_selection') {
+            renderProductPathSelectionTab();
+            return;
+        }
+        if (tabMeta(tabKey) && state.containers[tabKey] && state.containers[tabKey].childNodes.length === 0) {
+            renderRegisteredSettingsTab(tabKey);
         }
     }
 
@@ -352,12 +423,7 @@
     }
 
     function settingVisibleForValues(setting, values) {
-        var visibleWhen = setting && setting.visible_when || {};
-        return Object.keys(visibleWhen).every(function(key) {
-            var allowed = visibleWhen[key];
-            if (!Array.isArray(allowed)) allowed = [allowed];
-            return allowed.map(String).indexOf(String(values[key])) >= 0;
-        });
+        return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
     }
 
     function settingVisible(setting) {
@@ -383,10 +449,23 @@
         control.addEventListener('change', function() {
             state.values[setting.key] = control.value;
             if (setting.key === 'time_precision') renderRegisteredTimeTab({ keepValues: true });
-            syncRegisteredTimeRange();
+            if (['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'].indexOf(setting.key) >= 0) {
+                syncRegisteredTimeRange();
+            }
             renderChips();
+            broadcastGlobalSettingsChanged();
         });
         return control;
+    }
+
+    function broadcastGlobalSettingsChanged() {
+        document.dispatchEvent(new CustomEvent('singleFactorGlobalSettingsChanged', {
+            detail: {
+                values: window.SingleFactorGlobalSettings
+                    ? window.SingleFactorGlobalSettings.getDefaultValues(sharedGlobalDefaultKeys())
+                    : {},
+            },
+        }));
     }
 
     function toggleMounted(tabKey, enabled) {
@@ -418,38 +497,30 @@
     function renderChooser() {
         var container = ensurePanel('__manage__');
         if (!container || !state.manifest) return;
-        container.innerHTML = '';
-        var intro = document.createElement('div');
-        intro.className = 'backend-settings-chooser-intro';
-        intro.textContent = '选择可作为各测试模块全局默认值的设置。';
-        container.appendChild(intro);
-        tabs().filter(function(tab) {
-            return tabHasSharedGlobalDefaults(tab.key);
-        }).forEach(function(tab) {
-            var row = document.createElement('label');
-            row.className = 'backend-settings-chooser-row';
-            var input = document.createElement('input');
-            input.type = 'checkbox';
-            input.checked = state.mountedTabs.indexOf(tab.key) >= 0;
-            input.addEventListener('change', function() { toggleMounted(tab.key, input.checked); });
-            var body = document.createElement('div');
-            body.className = 'backend-settings-chooser-body';
-            var title = document.createElement('div');
-            title.className = 'backend-settings-chooser-title';
-            title.textContent = tab.label;
-            var defaultsRow = document.createElement('div');
-            defaultsRow.className = 'backend-settings-chooser-defaults';
-            var allowed = sharedGlobalDefaultKeySet();
-            settingKeysForTab(tab.key).forEach(function(key) {
-                if (!allowed[key]) return;
-                var setting = Object.assign({ key: key }, defaults()[key] || {});
-                defaultsRow.appendChild(makeChip(tab.key, setting.label || key, displayValue(setting, effectiveValue(key))));
-            });
-            body.appendChild(title);
-            body.appendChild(defaultsRow);
-            row.appendChild(input);
-            row.appendChild(body);
-            container.appendChild(row);
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+        var allowed = sharedGlobalDefaultKeySet();
+        window.BackendSettingsPanel.renderChooser({
+            host: container,
+            tabs: tabs(),
+            mountedTabs: state.mountedTabs,
+            introText: '选择可作为各测试模块全局默认值的设置。',
+            isVisible: function(tab) { return tabHasSharedGlobalDefaults(tab.key); },
+            defaultsForTab: function(tab) {
+                return settingKeysForTab(tab.key).map(function(key) {
+                    if (!allowed[key]) return null;
+                    var setting = Object.assign({ key: key }, defaults()[key] || {});
+                    return {
+                        tabKey: tab.key,
+                        setting: setting,
+                        label: setting.label || key,
+                        value: displayValue(setting, effectiveValue(key)),
+                    };
+                }).filter(Boolean);
+            },
+            renderChip: function(item) {
+                return makeChip(item.tabKey, item.label, item.value);
+            },
+            onToggle: function(tab, enabled) { toggleMounted(tab.key, enabled); },
         });
     }
 
@@ -484,6 +555,7 @@
         }
         window._confirmedTimeData = payload;
         document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', { detail: payload }));
+        broadcastGlobalSettingsChanged();
         if (status) {
             status.textContent = '已更新';
             status.style.color = '#16a34a';
@@ -520,6 +592,74 @@
             status.className = 'single-factor-page-settings-status';
             container.appendChild(grid);
             container.appendChild(status);
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    function renderRegisteredSettingsTab(tabKey) {
+        var container = state.containers[tabKey];
+        if (!container) return;
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
+        loadTab(tabKey).then(function(manifest) {
+            container.innerHTML = '';
+            var grid = document.createElement('div');
+            grid.className = 'backend-settings-grid';
+            (manifest.settings || []).forEach(function(setting) {
+                if (!settingVisible(setting)) return;
+                var row = document.createElement('label');
+                row.className = 'gt-backtest-setting-row';
+                var label = document.createElement('span');
+                label.className = 'gt-backtest-setting-label';
+                label.textContent = setting.label;
+                var controlWrap = document.createElement('span');
+                controlWrap.className = 'gt-backtest-setting-control';
+                controlWrap.appendChild(makeSettingControl(setting));
+                row.appendChild(label);
+                row.appendChild(controlWrap);
+                grid.appendChild(row);
+            });
+            container.appendChild(grid);
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    function setProductPathDefault(selection) {
+        if (selection) state.values.product_path_selection = selection;
+        else delete state.values.product_path_selection;
+        renderChips();
+        renderProductPathSelectionTab();
+        broadcastGlobalSettingsChanged();
+    }
+
+    function renderProductPathSelectionTab() {
+        var container = state.containers.product_path_selection;
+        if (!container) return;
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载产品路径...</span>';
+        loadProductPathSelections(false).then(function(selections) {
+            if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
+                container.textContent = '产品路径设置组件未加载';
+                return;
+            }
+            window.ProductPathSelectionUtils.renderSelectionSettingsTab({
+                host: container,
+                prefix: 'page-pps',
+                selections: selections,
+                currentSelection: effectiveValue('product_path_selection'),
+                currentLabel: '页面默认',
+                manualTitle: '页面现场路径组',
+                createLabel: '新增到页面候选列表',
+                createDefaultLabel: '新增并设为默认',
+                escapeHTML: escapeHtml,
+                onSetDefault: setProductPathDefault,
+                onCreate: function(selection, meta) {
+                    setProductPathCandidates(productPathCandidates().concat([selection]));
+                    if (meta && meta.setAsDefault) state.values.product_path_selection = selection;
+                    renderProductPathSelectionTab();
+                    broadcastGlobalSettingsChanged();
+                },
+            });
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
         });

@@ -16,12 +16,15 @@
     {% include 'modules/shared/time_range_module.html' %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/backend_settings_panel.css') }}">
     <script src="{{ url_for('static', filename='js/modules/shared/backend_settings_panel.js') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/time_window_settings.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/product_path_settings.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/main_page_settings_panel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/global_template_module.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/submission_bus.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/modules/single_factor_test/product_path_selection_state.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/submission_context.js') }}"></script>
     <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_library_helper.js') }}"></script>
     {% include 'modules/single_factor_test/factor_series_viewer_module.html' %}

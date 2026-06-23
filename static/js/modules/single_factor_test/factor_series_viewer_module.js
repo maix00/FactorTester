@@ -148,20 +148,10 @@
     }
 
     function settingVisibleForValues(setting, values) {
-        var visibleWhen = setting && setting.visible_when || {};
-        return Object.keys(visibleWhen).every(function(key) {
-            var allowed = visibleWhen[key];
-            if (!Array.isArray(allowed)) allowed = [allowed];
-            return allowed.map(String).indexOf(String(values[key])) >= 0;
-        });
+        return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
     }
 
     function displayValue(setting, value) {
-        if (setting && Array.isArray(setting.options)) {
-            for (var i = 0; i < setting.options.length; i++) {
-                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
-            }
-        }
         if (setting && setting.key === 'product') {
             return productLabel() || '无';
         }
@@ -169,7 +159,7 @@
             var factor = selectedFactor();
             return factor ? factor.alias || factor.name || '' : '无';
         }
-        return value === undefined || value === null || value === '' ? '自动' : String(value);
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     function chipParts(labelOrText, value) {
@@ -594,24 +584,28 @@
     function renderChooser() {
         var host = document.getElementById('factor-series-settings-host');
         if (!host || !state.manifest) return;
-        host.innerHTML = '';
-        var intro = document.createElement('div');
-        intro.className = 'backend-settings-chooser-intro';
-        intro.textContent = '选择要挂载到此栏的设置。未挂载项继续使用下列默认值。';
-        host.appendChild(intro);
         var tabs = state.manifest.tab_lists && state.manifest.tab_lists[LOCAL] || [];
-        tabs.forEach(function(tab) {
-            var row = document.createElement('label');
-            row.className = 'backend-settings-chooser-row';
-            var input = document.createElement('input');
-            input.type = 'checkbox';
-            input.checked = state.mountedTabs.indexOf(tab.key) >= 0;
-            input.addEventListener('change', function() {
-                if (!window.BackendSettingsPanel) return;
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+        window.BackendSettingsPanel.renderChooser({
+            host: host,
+            tabs: tabs,
+            mountedTabs: state.mountedTabs,
+            introText: '选择要挂载到此栏的设置。未挂载项继续使用下列默认值。',
+            defaultsForTab: function(tab) {
+                return settingKeysForTab(tab.key).map(function(key) {
+                    var setting = Object.assign({ key: key }, defaults()[key] || {});
+                    if (!setting.chip_template) return null;
+                    return { setting: setting, tabKey: tab.key };
+                }).filter(Boolean);
+            },
+            renderChip: function(item) {
+                return makeChip(item.setting, item.setting.value, item.tabKey, true);
+            },
+            onToggle: function(tab, enabled) {
                 window.BackendSettingsPanel.toggleMountedTab({
                     mountedTabs: state.mountedTabs,
                     tabKey: tab.key,
-                    enabled: input.checked,
+                    enabled: enabled,
                     clearTabValues: function(tabKey) {
                         settingKeysForTab(tabKey).forEach(function(key) { delete state.values[key]; });
                     },
@@ -621,24 +615,7 @@
                         renderResultChips();
                     },
                 });
-            });
-            var body = document.createElement('div');
-            body.className = 'backend-settings-chooser-body';
-            var title = document.createElement('div');
-            title.className = 'backend-settings-chooser-title';
-            title.textContent = tab.label;
-            body.appendChild(title);
-            var defaultsRow = document.createElement('div');
-            defaultsRow.className = 'backend-settings-chooser-defaults';
-            settingKeysForTab(tab.key).forEach(function(key) {
-                var setting = Object.assign({ key: key }, defaults()[key] || {});
-                if (!setting.chip_template) return;
-                defaultsRow.appendChild(makeChip(setting, setting.value, tab.key, true));
-            });
-            body.appendChild(defaultsRow);
-            row.appendChild(input);
-            row.appendChild(body);
-            host.appendChild(row);
+            },
         });
     }
 
