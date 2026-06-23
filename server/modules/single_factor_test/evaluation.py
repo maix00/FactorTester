@@ -20,6 +20,7 @@ from server.modules.shared.submission_model import ProductPathSelection
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, get_session_params
 from tools.data.types import DataTime
+from tools.data.types import finest_index
 
 
 @dataclass(slots=True)
@@ -113,6 +114,7 @@ class FactorEvaluation:
             if series.empty:
                 continue
             series = clip_series_by_tester_range(series, tester)
+            series = self._clip_series_by_run_window(series, start_dt, end_dt)
             dates_out, values = series_to_frontend(
                 series,
                 factor.freq is not None and factor.freq.is_day_multiple(),
@@ -167,6 +169,35 @@ class FactorEvaluation:
         start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
         end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
         return DataTime(ts=start), DataTime(ts=end)
+
+    @staticmethod
+    def _clip_series_by_run_window(
+        series: pd.Series,
+        start_dt: DataTime | None,
+        end_dt: DataTime | None,
+    ) -> pd.Series:
+        if series.empty or start_dt is None or end_dt is None:
+            return series
+        if start_dt.precision != "exact" and end_dt.precision != "exact":
+            return series
+        idx = finest_index(series.index) if isinstance(series.index, pd.MultiIndex) else pd.DatetimeIndex(series.index)
+
+        def _align(ts: pd.Timestamp, index: pd.DatetimeIndex) -> pd.Timestamp:
+            tz = getattr(index, "tz", None)
+            if tz is not None and ts.tzinfo is None:
+                return ts.tz_localize(tz)
+            if tz is None and ts.tzinfo is not None:
+                return ts.tz_convert(None)
+            return ts
+
+        mask = pd.Series(True, index=series.index)
+        if start_dt.ts is not None:
+            start = _align(pd.Timestamp(start_dt.ts), idx)
+            mask &= idx >= start
+        if end_dt.ts is not None:
+            end = _align(pd.Timestamp(end_dt.ts), idx)
+            mask &= idx <= end
+        return series.loc[mask.to_numpy()]
 
     @staticmethod
     def _returns_payload(result: Any, product: Any, factor: Any, tester: Any) -> dict[str, Any] | None:

@@ -198,6 +198,12 @@
         var node = document.createElement('span');
         node.className = 'gt-backend-chip factor-series-settings-chip';
         node.innerHTML = renderChipHtml(chipText(setting, value));
+        node.setAttribute('data-factor-series-tab-key', setting.tab_key || '');
+        node.title = '打开' + (tabMeta(setting.tab_key) && tabMeta(setting.tab_key).label || setting.tab_key || '设置');
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', function() {
+            if (setting.tab_key) openTab(setting.tab_key);
+        });
         return node;
     }
 
@@ -220,7 +226,21 @@
         return desc && desc !== name ? name + ' · ' + desc : name;
     }
 
+    function runWindowValues() {
+        return {
+            start_date: effectiveValue('start_date') || '',
+            end_date: effectiveValue('end_date') || '',
+            start_time: effectiveValue('start_time') || '',
+            end_time: effectiveValue('end_time') || '',
+            time_precision: effectiveValue('time_precision') || 'exact',
+            timezone: effectiveValue('timezone') || '',
+        };
+    }
+
     function runWindowPayload() {
+        if (window.BacktestTimeWindowSettings) {
+            return window.BacktestTimeWindowSettings.payloadFromValues(runWindowValues());
+        }
         var precision = effectiveValue('time_precision') || 'exact';
         var tradingDayMode = precision === 'trading_day';
         return {
@@ -234,6 +254,9 @@
     }
 
     function runWindowBoundsMs() {
+        if (window.BacktestTimeWindowSettings) {
+            return window.BacktestTimeWindowSettings.boundsMs(runWindowValues());
+        }
         var payload = runWindowPayload();
         if (!payload.start_date || !payload.end_date) return { start: null, end: null };
         var startText = payload.start_date + (payload.time_precision === 'trading_day' ? 'T00:00:00' : ('T' + (payload.start_time || '00:00')));
@@ -288,6 +311,38 @@
             settingKeysForTab(tabKey).forEach(function(key) { keys[key] = true; });
         });
         return keys;
+    }
+
+    function applyPageTimeDefaults(options) {
+        if (!window.BacktestTimeWindowSettings) return false;
+        var values = window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues();
+        if (!values) return false;
+        options = options || {};
+        var timeKeys = ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'];
+        if (options.blockOnAnyTimeValue && timeKeys.some(function(key) {
+            return Object.prototype.hasOwnProperty.call(state.values, key) && state.values[key] !== '';
+        })) {
+            return false;
+        }
+        var changed = false;
+        timeKeys.forEach(function(key) {
+            if (!Object.prototype.hasOwnProperty.call(defaults(), key)) return;
+            var value = values[key];
+            if (value === undefined || value === null || value === '') return;
+            if (state.values[key] === value) return;
+            state.values[key] = value;
+            changed = true;
+        });
+        return changed;
+    }
+
+    function effectiveSettingsForRun() {
+        var out = {};
+        Object.keys(defaults()).forEach(function(key) {
+            out[key] = effectiveValue(key);
+        });
+        Object.assign(out, runWindowPayload());
+        return out;
     }
 
     function renderSettingChips() {
@@ -1246,7 +1301,7 @@
                     factor_family_alias: currentFactorFamilyAlias(),
                     factor_alias: factor.alias || factor.name,
                     page_uuid: window._pageUuid || '',
-                    settings: Object.assign({}, state.values),
+                    settings: effectiveSettingsForRun(),
                 }),
             });
             state.lastSeries = Array.isArray(data.series) ? data.series : [];
@@ -1273,6 +1328,7 @@
 
     async function render() {
         await loadManifest();
+        applyPageTimeDefaults({ blockOnAnyTimeValue: false });
         await loadFactors();
         renderTabBar();
         renderSettingChips();
@@ -1311,6 +1367,20 @@
                 runEvaluate();
             });
         }
+        document.addEventListener('timeRangeDefaultLoaded', function() {
+            if (applyPageTimeDefaults({ blockOnAnyTimeValue: true })) {
+                renderSettingChips();
+                renderResultChips();
+                if (state.activeTab === 'time') refreshActiveTab();
+            }
+        });
+        document.addEventListener('pageTimeRangeChanged', function() {
+            if (applyPageTimeDefaults({ blockOnAnyTimeValue: false })) {
+                renderSettingChips();
+                renderResultChips();
+                if (state.activeTab === 'time') refreshActiveTab();
+            }
+        });
     }
 
     window.FactorSeriesViewer = {

@@ -952,17 +952,8 @@
     function registerBuiltInDefaultProviders() {
         if (state.localDefaultProviders.page_time_range) return;
         registerLocalDefaultProvider('page_time_range', function() {
-            if (typeof window.getSharedRuntimeTimeRange !== 'function') return null;
-            var source = window.getSharedRuntimeTimeRange();
-            if (!source) return null;
-            return {
-                start_date: source.start_date || '',
-                end_date: source.end_date || '',
-                start_time: source.start_time || '',
-                end_time: source.end_time || '',
-                timezone: source.timezone || '',
-                time_precision: source.is_trading_day ? 'trading_day' : 'exact',
-            };
+            if (!window.BacktestTimeWindowSettings) return null;
+            return window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues();
         });
     }
 
