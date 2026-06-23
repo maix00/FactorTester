@@ -16,6 +16,14 @@
     background: #fafbfc;
 }
 
+.backend-settings-panel-title {
+    flex: 1 1 180px;
+    min-width: 150px;
+    color: #111827;
+    font-size: 13px;
+    font-weight: 700;
+}
+
 .backend-settings-tab-bar button {
     height: 28px;
     padding: 0 10px;
@@ -61,12 +69,17 @@
 
 .single-factor-page-settings-panel {
     min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 .single-factor-page-settings-panel .module {
     box-shadow: none !important;
     border-radius: 0 !important;
     padding: 8px 0 !important;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .single-factor-page-settings-panel .section-title {
@@ -79,6 +92,30 @@
 .single-factor-page-settings-panel .setting-summary-row {
     font-size: 12px;
     margin-bottom: 8px;
+}
+
+.single-factor-page-settings-panel input,
+.single-factor-page-settings-panel select,
+.single-factor-page-settings-panel textarea {
+    max-width: 100%;
+}
+
+.backend-settings-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.single-factor-page-settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.single-factor-page-settings-status {
+    color: #64748b;
+    font-size: 12px;
 }
 
 .backend-settings-chooser-intro {

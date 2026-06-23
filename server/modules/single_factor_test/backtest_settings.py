@@ -29,6 +29,10 @@ def get_backtest_setting_application(application: str):
             defaults["start_time"]["value"] = _time_value(start)
         if "end_time" in defaults:
             defaults["end_time"]["value"] = _time_value(end)
+        if "time_precision" in defaults:
+            defaults["time_precision"]["value"] = getattr(start, "precision", "exact") or "exact"
+        if "timezone" in defaults:
+            defaults["timezone"]["value"] = _timezone_value(start)
     return jsonify({"success": True, **manifest})
 
 
@@ -49,3 +53,15 @@ def _date_value(value) -> str:
 def _time_value(value) -> str:
     timestamp = getattr(value, "ts", value)
     return timestamp.strftime("%H:%M")
+
+
+def _timezone_value(value) -> str:
+    precision = getattr(value, "precision", "exact")
+    if precision == "trading_day":
+        return ""
+    tz = getattr(value, "tz", None)
+    if tz:
+        return str(tz)
+    timestamp = getattr(value, "ts", value)
+    tzinfo = getattr(timestamp, "tzinfo", None)
+    return str(tzinfo) if tzinfo else "Asia/Shanghai"

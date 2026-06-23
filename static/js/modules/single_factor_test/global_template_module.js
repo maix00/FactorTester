@@ -720,4 +720,5 @@
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;
     window._applySnapshot = applySnapshot;
+    window._loadGlobalTemplateList = loadTemplateList;
 })();

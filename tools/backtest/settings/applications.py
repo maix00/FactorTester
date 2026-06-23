@@ -148,7 +148,7 @@ def single_factor_page_settings() -> ApplicationSettings:
     for tab in (
         SettingTab(
             "setting_template",
-            "因子家族设置模板",
+            "模板",
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
             10,

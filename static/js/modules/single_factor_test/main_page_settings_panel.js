@@ -5,7 +5,10 @@
         manifest: null,
         mountedTabs: [],
         activeTab: null,
+        values: Object.create(null),
+        tabCache: Object.create(null),
         containers: {},
+        timeSyncTimer: null,
     };
 
     function escapeHtml(value) {
@@ -44,6 +47,12 @@
 
     function defaults() {
         return state.manifest && state.manifest.defaults ? state.manifest.defaults : {};
+    }
+
+    function effectiveValue(key) {
+        if (Object.prototype.hasOwnProperty.call(state.values, key)) return state.values[key];
+        var def = defaults()[key];
+        return def ? def.value : '';
     }
 
     function settingKeysForTab(tabKey) {
@@ -97,6 +106,18 @@
         var drawer = document.getElementById(drawerId);
         var panel = drawer && drawer.querySelector('.settings-drawer-panel');
         if (!panel || !state.containers[tabKey]) return;
+        if (tabKey === 'parameters') {
+            var parameterModule = panel.querySelector('#parameter_module');
+            if (parameterModule) state.containers[tabKey].appendChild(parameterModule);
+            drawer.style.display = 'none';
+            drawer.classList.remove('open');
+            return;
+        }
+        if (tabKey === 'time') {
+            drawer.style.display = 'none';
+            drawer.classList.remove('open');
+            return;
+        }
         Array.from(panel.children).forEach(function(child) {
             if (child.classList && child.classList.contains('drawer-close-btn')) {
                 child.style.display = 'none';
@@ -160,6 +181,10 @@
         var bar = document.getElementById('single-factor-page-settings-tabs');
         if (!bar) return;
         bar.innerHTML = '';
+        var title = document.createElement('span');
+        title.className = 'backend-settings-panel-title';
+        title.textContent = '因子家族测试设置';
+        bar.appendChild(title);
         state.mountedTabs.forEach(function(tabKey) {
             var meta = tabMeta(tabKey);
             var btn = document.createElement('button');
@@ -208,11 +233,169 @@
         if (host) host.style.display = state.activeTab ? '' : 'none';
         renderTabs();
         renderChips();
-        if (tabKey === 'parameters' && window.MathJax && window.MathJax.typesetPromise) {
-            window.MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean)).then(function() {
-                if (window.fitMathJaxToContainer) window.fitMathJaxToContainer(document.getElementById('pm-math-block'));
-            });
+        if (tabKey === 'setting_template') {
+            if (typeof window._loadGlobalTemplateList === 'function') {
+                window._loadGlobalTemplateList();
+            } else {
+                setTimeout(function() {
+                    if (typeof window._loadGlobalTemplateList === 'function') window._loadGlobalTemplateList();
+                }, 50);
+            }
         }
+        if (tabKey === 'time') {
+            renderRegisteredTimeTab();
+        }
+    }
+
+    function tabURL(tabKey) {
+        return state.manifest.tab_url_template.replace('{tab_key}', encodeURIComponent(tabKey));
+    }
+
+    function loadTab(tabKey) {
+        if (state.tabCache[tabKey]) return Promise.resolve(state.tabCache[tabKey]);
+        return requestJSON(tabURL(tabKey)).then(function(manifest) {
+            state.tabCache[tabKey] = manifest;
+            return manifest;
+        });
+    }
+
+    function optionHtml(value, label, selected) {
+        return '<option value="' + escapeHtml(value) + '"' + (String(value) === String(selected) ? ' selected' : '') + '>'
+            + escapeHtml(label)
+            + '</option>';
+    }
+
+    function currentTimeValues() {
+        if (window.BacktestTimeWindowSettings && typeof window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues === 'function') {
+            var runtime = window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues();
+            if (runtime) return runtime;
+        }
+        return {};
+    }
+
+    function syncTimeDefaultsFromPage() {
+        var values = currentTimeValues();
+        ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'].forEach(function(key) {
+            if (values[key] !== undefined && values[key] !== null) state.values[key] = values[key];
+        });
+    }
+
+    function settingVisible(setting) {
+        var visibleWhen = setting && setting.visible_when || {};
+        return Object.keys(visibleWhen).every(function(key) {
+            var allowed = visibleWhen[key];
+            if (!Array.isArray(allowed)) allowed = [allowed];
+            return allowed.map(String).indexOf(String(effectiveValue(key))) >= 0;
+        });
+    }
+
+    function makeSettingControl(setting) {
+        var control = setting.control_template === 'select' ? document.createElement('select') : document.createElement('input');
+        if (control.tagName === 'SELECT') {
+            (setting.options || []).forEach(function(option) {
+                control.insertAdjacentHTML('beforeend', optionHtml(option.value, option.label, effectiveValue(setting.key)));
+            });
+        } else {
+            control.type = setting.control_template === 'date' || setting.control_template === 'time' || setting.control_template === 'number'
+                ? setting.control_template : 'text';
+            if (setting.step != null) control.step = String(setting.step);
+            if (setting.minimum != null) control.min = String(setting.minimum);
+            if (setting.maximum != null) control.max = String(setting.maximum);
+            control.value = effectiveValue(setting.key) || '';
+        }
+        control.addEventListener('change', function() {
+            state.values[setting.key] = control.value;
+            if (setting.key === 'time_precision') renderRegisteredTimeTab({ keepValues: true });
+            syncRegisteredTimeRange();
+            renderChips();
+        });
+        return control;
+    }
+
+    function syncRegisteredTimeRange() {
+        clearTimeout(state.timeSyncTimer);
+        state.timeSyncTimer = setTimeout(function() {
+            persistRegisteredTimeRange();
+        }, 180);
+    }
+
+    function persistRegisteredTimeRange() {
+        var precision = effectiveValue('time_precision') || 'exact';
+        var payload = {
+            page_uuid: window._pageUuid || '',
+            factor_family_alias: window.factorFamilyAlias || window._sftCurrentFactorId || '',
+            start_date: effectiveValue('start_date') || '',
+            end_date: effectiveValue('end_date') || '',
+            start_time: precision === 'trading_day' ? '00:00' : (effectiveValue('start_time') || '00:00'),
+            end_time: precision === 'trading_day' ? '00:00' : (effectiveValue('end_time') || '23:59'),
+            timezone: precision === 'trading_day' ? 'UTC' : (effectiveValue('timezone') || 'Asia/Shanghai'),
+            is_trading_day: precision === 'trading_day',
+            is_cn_futures_day: false,
+            is_cn_futures_night: false,
+        };
+        var status = document.getElementById('single-factor-page-time-status');
+        if (status) {
+            status.textContent = '正在同步页面默认时间范围...';
+            status.style.color = '#2563eb';
+        }
+        fetch('/set_time_range', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }).then(function(res) { return res.json(); }).then(function(data) {
+            if (!data.success) throw new Error(data.error || '保存失败');
+            if (data.page_uuid && typeof window.rememberSingleFactorPageUuid === 'function') {
+                window.rememberSingleFactorPageUuid(data.page_uuid);
+            }
+            if (typeof window.applySharedRuntimeTimeRange === 'function') {
+                window.applySharedRuntimeTimeRange(payload, { persist: false });
+            }
+            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', { detail: payload }));
+            if (status) {
+                status.textContent = '已同步';
+                status.style.color = '#16a34a';
+            }
+            renderChips();
+        }).catch(function(error) {
+            if (status) {
+                status.textContent = error.message;
+                status.style.color = '#dc2626';
+            }
+        });
+    }
+
+    function renderRegisteredTimeTab(options) {
+        var container = state.containers.time;
+        if (!container) return;
+        options = options || {};
+        if (!options.keepValues) syncTimeDefaultsFromPage();
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
+        loadTab('time').then(function(manifest) {
+            container.innerHTML = '';
+            var grid = document.createElement('div');
+            grid.className = 'backend-settings-grid';
+            (manifest.settings || []).forEach(function(setting) {
+                if (!settingVisible(setting)) return;
+                var row = document.createElement('label');
+                row.className = 'gt-backtest-setting-row';
+                var label = document.createElement('span');
+                label.className = 'gt-backtest-setting-label';
+                label.textContent = setting.label;
+                var controlWrap = document.createElement('span');
+                controlWrap.className = 'gt-backtest-setting-control';
+                controlWrap.appendChild(makeSettingControl(setting));
+                row.appendChild(label);
+                row.appendChild(controlWrap);
+                grid.appendChild(row);
+            });
+            var status = document.createElement('span');
+            status.id = 'single-factor-page-time-status';
+            status.className = 'single-factor-page-settings-status';
+            container.appendChild(grid);
+            container.appendChild(status);
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
     }
 
     function observeSummaries() {
@@ -227,6 +410,10 @@
         requestJSON('/api/backtest/settings/' + APP).then(function(manifest) {
             state.manifest = manifest;
             state.mountedTabs = (manifest.default_mounted_tabs && manifest.default_mounted_tabs[LOCAL] || []).slice();
+            Object.keys(manifest.defaults || {}).forEach(function(key) {
+                state.values[key] = manifest.defaults[key].value;
+            });
+            syncTimeDefaultsFromPage();
             renderShell();
             observeSummaries();
             openTab(null);
