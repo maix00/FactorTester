@@ -162,7 +162,7 @@
         /** 遍历所有注册项生成摘要行 HTML */
         summarizeAll: function(snapshot) {
             if (!snapshot) return '';
-            var html = '';
+            var sections = [];
             for (var i = 0; i < _registry.length; i++) {
                 var entry = _registry[i];
                 var data = snapshot[entry.key];
@@ -172,13 +172,16 @@
                     var val = entry.summarize(data);
                     if (!val && val !== 0) continue;
                     if (Array.isArray(val) && val.length === 0) continue;
-                    html += _buildSummaryRow(entry.label, entry.key, val, entry.icon);
+                    sections.push(_buildSummarySection(entry.label, entry.key, val, entry.icon));
                 } catch (e) {
                     console.error('[SnapshotRegistry] summarize failed for:', entry.key, e);
                 }
             }
-            html += _summarizeBackendBacktestSettings(snapshot);
-            return html;
+            sections = sections.concat(_summarizeBackendBacktestSettings(snapshot));
+            if (!_registryByKey.group_settings && snapshot.group_settings) {
+                sections.push(_summarizeGroupSettingsSnapshot(snapshot.group_settings));
+            }
+            return _buildSummaryTabs(sections);
         },
 
         /** 获取所有已注册的 key 列表 */
@@ -205,35 +208,57 @@
         }
     }
 
-    /** 构建一条摘要行 HTML */
-    function _buildSummaryRow(label, key, value, icon) {
+    function _buildSummarySection(label, key, value, icon) {
+        return {
+            label: label || key || '设置',
+            key: key || ('summary_' + String(label || 'setting')),
+            icon: icon || '',
+            value: value,
+        };
+    }
+
+    function _buildSummaryTabs(sections) {
+        sections = (sections || []).filter(function(section) { return !!section; });
+        if (!sections.length) return '<div class="global-template-empty">无设置信息</div>';
+        var tabs = '';
+        var panels = '';
+        sections.forEach(function(section, index) {
+            var tabId = 'summary-tab-' + index;
+            var active = index === 0 ? ' active' : '';
+            tabs += '<button type="button" class="global-template-summary-tab' + active + '" data-summary-tab="' + tabId + '">'
+                + '<span class="global-template-summary-tab-icon">' + escapeHtml(section.icon || '') + '</span>'
+                + '<span>' + escapeHtml(section.label) + '</span>'
+                + '</button>';
+            panels += '<section class="global-template-summary-panel-body' + active + '" data-summary-panel="' + tabId + '">'
+                + '<div class="global-template-summary-section-title">'
+                + '<span>' + escapeHtml(section.icon || '') + '</span>'
+                + '<strong>' + escapeHtml(section.label) + '</strong>'
+                + '</div>'
+                + _buildSummaryValue(section.key, section.value)
+                + '</section>';
+        });
+        return '<div class="global-template-summary-tabs">' + tabs + '</div>'
+            + '<div class="global-template-summary-panels">' + panels + '</div>';
+    }
+
+    function _buildSummaryValue(key, value) {
         var chipKeys = { group_settings: 1 };
         var useChips = chipKeys.hasOwnProperty(key);
-        var valStr = '';
         if (Array.isArray(value)) {
-            valStr = value.map(function(v) {
+            return '<div class="global-template-summary-list">' + value.map(function(v) {
                 var safeVal = escapeHtml(String(v));
                 if (useChips) {
-                    // Split 'key=val, key2=val2' into individual chips
-                    var chips = safeVal.split(', ');
-                    return '<div style="display:flex;flex-wrap:wrap;gap:3px;padding:1px 0;">'
+                    var chips = safeVal.split(' · ');
+                    return '<div class="global-template-summary-chip-row">'
                         + chips.map(function(c) {
-                            return '<span style="display:inline-block;padding:1px 6px;font-size:10px;line-height:1.6;'
-                                + 'background:#eef2ff;color:#4338ca;border-radius:999px;white-space:nowrap;">'
-                                + c + '</span>';
+                            return '<span class="gt-backend-chip is-primary"><span class="gt-backend-chip-value">' + c + '</span></span>';
                         }).join('')
                         + '</div>';
                 }
-                return '<div style="font-size:11px;color:#555;padding:1px 0;">' + safeVal + '</div>';
-            }).join('');
-        } else {
-            valStr = '<span style="font-size:11px;color:#555;">' + escapeHtml(String(value)) + '</span>';
+                return '<div class="global-template-summary-line">' + safeVal + '</div>';
+            }).join('') + '</div>';
         }
-        return '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;border-bottom:1px dotted #e5e7eb;">'
-            + '<span style="font-size:12px;flex-shrink:0;min-width:18px;">' + (icon || '') + '</span>'
-            + '<span style="font-size:12px;font-weight:500;color:#333;flex-shrink:0;min-width:70px;">' + escapeHtml(label) + '</span>'
-            + '<span style="flex:1;min-width:0;">' + valStr + '</span>'
-            + '</div>';
+        return '<div class="global-template-summary-line">' + escapeHtml(String(value)) + '</div>';
     }
 
     function _deepClone(obj) {
@@ -266,8 +291,8 @@
 
     function _summarizeBackendBacktestSettings(snapshot) {
         var local = snapshot && snapshot.local_settings;
-        var html = '';
-        if (!local) return html;
+        var sections = [];
+        if (!local) return sections;
         var index = window.GroupTest && window.GroupTest.backendSettings && window.GroupTest.backendSettings._state
             ? window.GroupTest.backendSettings._state.index
             : null;
@@ -288,7 +313,7 @@
                 var text = String(tab.summary_template).replace(/\{([^}]+)\}/g, function(_, key) {
                     return values[key] === undefined || values[key] === null ? '' : String(values[key]);
                 }).replace(/\s+/g, ' ').trim();
-                html += _buildSummaryRow(tab.label || tab.key, 'local_settings', text, '⚙️');
+                sections.push(_buildSummarySection(tab.label || tab.key, 'local_settings', text, '⚙️'));
             });
         }
         var mounted = [];
@@ -304,9 +329,39 @@
             var parts = [];
             if (Array.isArray(mounted) && mounted.length) parts.push('显示页签: ' + mounted.join(', '));
             if (keys.length) parts.push('显式字段: ' + keys.join(', '));
-            html += _buildSummaryRow('回测设置', 'local_settings', parts, '⚙️');
+            sections.push(_buildSummarySection('回测设置', 'local_settings', parts, '⚙️'));
         }
-        return html;
+        return sections;
+    }
+
+    function _summarizeGroupSettingsSnapshot(groupSettings) {
+        if (!groupSettings) return '';
+        var groups = _asArray(groupSettings.groups);
+        var baseGroups = groups.filter(function(group) { return !group.parentId; });
+        var childGroups = groups.filter(function(group) { return !!group.parentId; });
+        var lsConfigs = _asArray(groupSettings.lsConfigs);
+        var lines = [];
+        lines.push('基础组 ' + baseGroups.length + ' 个 · 派生组 ' + childGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个');
+        baseGroups.slice(0, 8).forEach(function(group) {
+            var alias = group.shortAlias || group.name || group.id || '未命名组';
+            var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
+            var countText = group.splitCount != null ? group.splitCount : '未设置';
+            var settings = ['fee_mode', 'rebalance_trigger', 'position_policy', 'liquidity_mode', 'participation_rate']
+                .filter(function(key) { return Object.prototype.hasOwnProperty.call(group || {}, key); });
+            lines.push(alias + ' · 第' + indexText + '/' + countText + '组' + (settings.length ? ' · 设置 ' + settings.join(', ') : ''));
+        });
+        if (baseGroups.length > 8) {
+            lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
+        }
+        childGroups.slice(0, 4).forEach(function(group) {
+            lines.push('子组 ' + (group.shortAlias || group.name || group.id || '未命名子组')
+                + ' · 父节点 ' + (group.parentId || '未设置'));
+        });
+        lsConfigs.slice(0, 4).forEach(function(config) {
+            lines.push('Long-Short ' + (config.shortAlias || config.name || config.id || '未命名 Long-Short')
+                + ' · Long ' + (config.longGroupId || '未设置') + ' · Short ' + (config.shortGroupId || '未设置'));
+        });
+        return _buildSummarySection('分组测试', 'group_settings', lines, '🧪');
     }
 
     function _hasOwn(obj, key) {
@@ -691,9 +746,29 @@
             if (title) title.textContent = template.name || '模板摘要';
             var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
             if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
+            bindTemplateSummaryTabs(body);
         } catch (error) {
             if (body) body.innerHTML = '<div class="global-template-empty" style="color:#d40000;">摘要加载失败: ' + escapeHtml(error.message) + '</div>';
         }
+    }
+
+    function bindTemplateSummaryTabs(body) {
+        if (!body) return;
+        var tabs = Array.prototype.slice.call(body.querySelectorAll('.global-template-summary-tab'));
+        var panels = Array.prototype.slice.call(body.querySelectorAll('.global-template-summary-panel-body'));
+        tabs.forEach(function(tab) {
+            tab.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var key = tab.getAttribute('data-summary-tab');
+                tabs.forEach(function(item) {
+                    item.classList.toggle('active', item === tab);
+                });
+                panels.forEach(function(panel) {
+                    panel.classList.toggle('active', panel.getAttribute('data-summary-panel') === key);
+                });
+            });
+        });
     }
 
     // ── 覆盖已有模板 ──────────────────────────────────────────────────────
