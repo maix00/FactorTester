@@ -93,6 +93,7 @@ class ApplicationSettings:
             },
             "defaults": {
                 key: {
+                    "order": index,
                     "value": setting.default,
                     "label": setting.label,
                     "control_template": setting.control_template,
@@ -115,7 +116,7 @@ class ApplicationSettings:
                         for option in setting.options
                     ],
                 }
-                for key, setting in self.settings.items()
+                for index, (key, setting) in enumerate(self.settings.items(), start=1)
             },
             "chip_fields": [
                 chip.to_dict()

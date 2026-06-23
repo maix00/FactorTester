@@ -132,6 +132,11 @@
         return null;
     }
 
+    function orderedMountedTabs() {
+        var tabs = state.manifest && state.manifest.tab_lists ? (state.manifest.tab_lists[LOCAL] || []) : [];
+        return window.BackendSettingsPanel.sortTabsByOrder(state.mountedTabs, tabs);
+    }
+
     function settingKeysForTab(tabKey) {
         var out = [];
         var defs = defaults();
@@ -300,7 +305,7 @@
 
     function mountedSettingKeys() {
         var keys = {};
-        state.mountedTabs.forEach(function(tabKey) {
+        orderedMountedTabs().forEach(function(tabKey) {
             settingKeysForTab(tabKey).forEach(function(key) { keys[key] = true; });
         });
         return keys;
@@ -342,7 +347,7 @@
         var row = document.getElementById('factor-series-settings-chip-row');
         if (!row || !state.manifest) return;
         row.innerHTML = '';
-        state.mountedTabs.forEach(function(tabKey) {
+        orderedMountedTabs().forEach(function(tabKey) {
             var manifest = state.tabCache[tabKey];
             if (!manifest) {
                 loadTab(tabKey).then(renderSettingChips).catch(function() {});

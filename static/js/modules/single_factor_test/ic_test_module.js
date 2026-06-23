@@ -271,6 +271,16 @@
             if (!settingsByTab[meta.tab_key]) settingsByTab[meta.tab_key] = [];
             settingsByTab[meta.tab_key].push({ key, meta });
         });
+        Object.keys(settingsByTab).forEach(tabKey => {
+            settingsByTab[tabKey].sort((a, b) => {
+                const ao = window.BackendSettingsPanel.settingDisplayOrder(a.meta);
+                const bo = window.BackendSettingsPanel.settingDisplayOrder(b.meta);
+                if (ao == null && bo == null) return 0;
+                if (ao == null) return 1;
+                if (bo == null) return -1;
+                return ao - bo;
+            });
+        });
         function renderChooser() {
             if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
             window.BackendSettingsPanel.renderChooser({
@@ -282,14 +292,7 @@
                     return !!(settingsByTab[tab.key] || []).length;
                 },
                 defaultsForTab: function(tab) {
-                const rows = (settingsByTab[tab.key] || []).slice().sort((a, b) => {
-                    const ao = window.BackendSettingsPanel.settingDisplayOrder(a.meta);
-                    const bo = window.BackendSettingsPanel.settingDisplayOrder(b.meta);
-                    if (ao == null && bo == null) return 0;
-                    if (ao == null) return 1;
-                    if (bo == null) return -1;
-                    return ao - bo;
-                });
+                const rows = settingsByTab[tab.key] || [];
                     return rows.map(row => {
                     const setting = Object.assign({ key: row.key }, row.meta || {});
                         if (!setting.chip_template) return null;

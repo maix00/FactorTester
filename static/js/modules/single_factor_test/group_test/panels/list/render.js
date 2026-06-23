@@ -361,7 +361,7 @@
             }
             h += '<span class="gt-backend-chip unified-backend-chip">' + H.renderChipHtml('因子', batch.factorAlias || '无') + '</span>';
             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml('产品路径', selectionLabel) + '</span>';
-            h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
+            h += '<span class="gt-backend-chip unified-backend-chip">' + H.renderChipHtml('分组数', batch.splitCount || '无') + '</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" title="删除批次" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑</button>';
             h += '</div>';

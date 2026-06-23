@@ -147,7 +147,9 @@
 
     function settingDisplayOrder(setting) {
         var order = setting && setting.serialization && setting.serialization.display_order;
-        return order == null ? null : Number(order);
+        if (order != null) return Number(order);
+        if (setting && setting.order != null) return Number(setting.order);
+        return null;
     }
 
     function sortSettingKeysByDisplayOrder(keys, defaults) {
@@ -159,6 +161,21 @@
             if (ao == null) return 1;
             if (bo == null) return -1;
             return ao - bo;
+        });
+    }
+
+    function sortTabsByOrder(tabKeys, tabs) {
+        var tabMap = {};
+        (Array.isArray(tabs) ? tabs : []).forEach(function(tab) {
+            if (tab && tab.key) tabMap[tab.key] = tab;
+        });
+        return (Array.isArray(tabKeys) ? tabKeys.slice() : []).sort(function(a, b) {
+            var ao = tabMap[a] && tabMap[a].order;
+            var bo = tabMap[b] && tabMap[b].order;
+            if (ao == null && bo == null) return 0;
+            if (ao == null) return 1;
+            if (bo == null) return -1;
+            return Number(ao) - Number(bo);
         });
     }
 
@@ -207,6 +224,7 @@
         settingVisibleForValues: settingVisibleForValues,
         settingDisplayOrder: settingDisplayOrder,
         sortSettingKeysByDisplayOrder: sortSettingKeysByDisplayOrder,
+        sortTabsByOrder: sortTabsByOrder,
         displaySettingValue: displaySettingValue,
     };
 })();

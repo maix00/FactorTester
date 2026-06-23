@@ -56,20 +56,24 @@ def register_run_window_base(
     app.register_setting(SettingDefinition(
         "start_date", "开始日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="开始日期: {value}",
+        serialization={"display_order": 10},
     ))
     app.register_setting(SettingDefinition(
         "end_date", "结束日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="结束日期: {value}",
+        serialization={"display_order": 20},
     ))
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
         visible_when={"time_precision": ("exact",)},
+        serialization={"display_order": 40},
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
         visible_when={"time_precision": ("exact",)},
+        serialization={"display_order": 50},
     ))
     app.register_setting(SettingDefinition(
         "time_precision", "时间精度", tab, "select", "exact", scope_policy,
@@ -79,6 +83,7 @@ def register_run_window_base(
             SettingOption("trading_day", "交易日"),
         ),
         chip_template="时间精度: {value}",
+        serialization={"display_order": 30},
     ))
     app.register_setting(SettingDefinition(
         "timezone", "时区", tab, "select", "Asia/Shanghai", scope_policy,
@@ -91,6 +96,7 @@ def register_run_window_base(
         ),
         chip_template="时区: {value}",
         visible_when={"time_precision": ("exact",)},
+        serialization={"display_order": 60},
     ))
 
 
@@ -245,6 +251,7 @@ def register_market_data_base(app: ApplicationSettings, *, include_price_type: b
         module="market_data_source",
         options=(SettingOption("", "自动"),),
         chip_template="数据源: {value}",
+        serialization={"display_order": 10},
     ))
     app.register_setting(SettingDefinition(
         "frequency",
@@ -256,6 +263,7 @@ def register_market_data_base(app: ApplicationSettings, *, include_price_type: b
         module="market_data_frequency",
         options=(SettingOption("", "自动"),),
         chip_template="频率: {value}",
+        serialization={"display_order": 20},
     ))
     if include_price_type:
         app.register_setting(SettingDefinition(
@@ -274,6 +282,7 @@ def register_market_data_base(app: ApplicationSettings, *, include_price_type: b
             ),
             chip_template="价格: {value}",
             help_text="行业常见价格处理包括复权、原始价格、简单移动平均和指数移动平均。",
+            serialization={"display_order": 30},
         ))
 
 
@@ -446,13 +455,23 @@ def group_test_settings() -> ApplicationSettings:
             clickable=True,
         ),
         ChipDefinition(
+            "split_count",
+            "分组数",
+            "identity",
+            "分组数: {splitCount}",
+            ("splitCount",),
+            module="group_strategy",
+            order=30,
+            inherit_from_root=True,
+        ),
+        ChipDefinition(
             "group_index",
             "分组序号",
             "identity",
-            "分组: {groupIndex}/{splitCount}",
-            ("groupIndex", "splitCount"),
+            "分组序号: {groupIndex}",
+            ("groupIndex",),
             module="group_strategy",
-            order=30,
+            order=31,
             inherit_from_root=True,
         ),
         ChipDefinition(

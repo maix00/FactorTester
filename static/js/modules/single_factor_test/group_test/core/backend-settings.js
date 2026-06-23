@@ -62,6 +62,11 @@
         return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
     }
 
+    function orderedMountedTabs(mount) {
+        var tabs = state.index && state.index.tab_lists ? (state.index.tab_lists[mount] || []) : [];
+        return window.BackendSettingsPanel.sortTabsByOrder(state.mountedTabs[mount] || [], tabs);
+    }
+
     function settingIsShownInMountedTab(mount, key) {
         var meta = state.index && state.index.defaults && state.index.defaults[key];
         var tabKey = meta && meta.tab_key;
@@ -897,7 +902,7 @@
             return;
         }
         var missing = [];
-        (state.mountedTabs[LOCAL] || []).forEach(function(tabKey) {
+        orderedMountedTabs(LOCAL).forEach(function(tabKey) {
             var manifest = state.tabCache[tabKey];
             if (!manifest) {
                 missing.push(tabKey);
@@ -1058,11 +1063,12 @@
 
     function configSettingKeys() {
         var defaults = state.index && state.index.defaults || {};
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
             return (scope === 'group_override' || scope === 'group_only') && !!setting.chip_template;
         });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
     }
 
     function effectiveSettingValueForGroup(group, key) {
@@ -1097,9 +1103,10 @@
         if (!group) return [];
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveValuesForNode(group);
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             return Object.prototype.hasOwnProperty.call(group, key);
-        }).map(function(key) {
+        });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults).map(function(key) {
             var value = group[key];
             if (value === undefined || value === null || value === '') return null;
             var setting = settingDef(key);

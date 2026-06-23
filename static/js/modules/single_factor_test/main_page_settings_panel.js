@@ -47,6 +47,10 @@
         return null;
     }
 
+    function orderedMountedTabs() {
+        return window.BackendSettingsPanel.sortTabsByOrder(state.mountedTabs, tabs());
+    }
+
     function defaults() {
         return state.manifest && state.manifest.defaults ? state.manifest.defaults : {};
     }
@@ -258,7 +262,7 @@
         var row = document.getElementById('single-factor-page-settings-chips');
         if (!row) return;
         row.innerHTML = '';
-        state.mountedTabs.forEach(function(tabKey) {
+        orderedMountedTabs().forEach(function(tabKey) {
             chipPartsForTab(tabKey).forEach(function(parts) {
                 row.appendChild(makeChip(tabKey, parts.label, parts.value));
             });
@@ -269,7 +273,7 @@
         var bar = document.getElementById('single-factor-page-settings-tabs');
         if (!bar) return;
         bar.innerHTML = '';
-        state.mountedTabs.forEach(function(tabKey) {
+        orderedMountedTabs().forEach(function(tabKey) {
             var meta = tabMeta(tabKey);
             var btn = document.createElement('button');
             btn.type = 'button';
