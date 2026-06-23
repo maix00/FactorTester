@@ -802,12 +802,9 @@
         const statusEl = templateStatusEl();
         setTransientStatus(statusEl, '加载中...', '#0078d4', 60000);
         try {
-            const scrollX = window.scrollX;
-            const scrollY = window.scrollY;
             const template = await fetchTemplateDetail(tplId);
             await applySnapshot(template.snapshot, tplId);
             rememberLoadedTemplateName(template.name);
-            requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
             setTransientStatus(statusEl, '已加载', '#28a745');
             // 关闭抽屉
             const drawer = document.getElementById('global-tpl-drawer');

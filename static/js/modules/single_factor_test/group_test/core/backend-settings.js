@@ -1825,6 +1825,8 @@
         openLocalTab: openLocalTab,
         loadProductPathSelections: loadProductPathSelections,
         getProductPathSelections: function() { return state.productPathSelections.slice(); },
+        getDefaultProductPathSelection: function() { return state.localValues.product_path_selection || null; },
+        setDefaultProductPathSelection: setDefaultProductPathSelection,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,
         configSettingKeys: configSettingKeys,

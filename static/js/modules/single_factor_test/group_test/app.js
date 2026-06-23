@@ -222,10 +222,9 @@
             };
             sectionHeader.addEventListener('click', sectionHeader._toggleHandler);
 
-            // Expand section now that everything is ready
+            // Expand section now that everything is ready, without moving the page.
             layerTabs.classList.remove('gt-collapsed');
             sectionToggle.style.transform = 'rotate(0deg)';
-            setTimeout(function() { layerTabs.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
         }
 
         var panelContainer = document.getElementById('gt-panel-container');
