@@ -114,6 +114,7 @@
                     market_rule_approximation_count: data.market_rule_approximation_count,
                     setting_fallback_warning: data.setting_fallback_warning,
                     setting_fallbacks: data.setting_fallbacks,
+                    silent_default_settings: data.silent_default_settings,
                     backtest_settings: data.backtest_settings,
                     engine_result: data.engine_result,
                 }

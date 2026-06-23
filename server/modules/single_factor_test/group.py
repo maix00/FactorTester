@@ -26,6 +26,9 @@ from tools.backtest.settings import backtest_setting_registry
 from tools.backtest.settings.resolver import resolve_group_settings
 from tools.backtest.settings.strategy_fields import (
     ALLOCATION_POLICY,
+    EXECUTION_DELAY_BARS,
+    EXECUTION_PRICE_BASIS,
+    EXECUTION_TIMING,
     POSITION_POLICY,
     REBALANCE_TRIGGER,
 )
@@ -40,6 +43,14 @@ _log = logging.getLogger(__name__)
 
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
+_SILENT_DEFAULT_SETTING_KEYS = (
+    ALLOCATION_POLICY,
+    REBALANCE_TRIGGER,
+    POSITION_POLICY,
+    EXECUTION_TIMING,
+    EXECUTION_PRICE_BASIS,
+    EXECUTION_DELAY_BARS,
+)
 
 
 def _group_product_path_selection_id(group: dict[str, Any]) -> str:
@@ -221,6 +232,65 @@ def _resolve_flat_backtest_settings(
         group_values=group_values,
         group_ids=group_ids,
     )
+
+
+def _setting_value_label(definition, value: Any) -> str:
+    text = str(value)
+    for option in definition.options:
+        if str(option.value) == text:
+            return option.label
+    return text
+
+
+def _silent_default_settings_for_run(
+    payload: dict[str, Any],
+    groups: list[dict[str, Any]],
+    ls_configs: list[dict[str, Any]],
+    resolved: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Summarize strategy defaults applied because the sparse request omitted them."""
+
+    app = backtest_setting_registry.get("group_test")
+    explicit_local = set(payload)
+    explicit_by_group: dict[str, set[str]] = {}
+    for index, item in enumerate(list(groups) + list(ls_configs or [])):
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or f"group-{index}")
+        explicit_by_group[group_id] = set(item)
+
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for key in _SILENT_DEFAULT_SETTING_KEYS:
+        definition = app.settings.get(key)
+        if definition is None or key in explicit_local:
+            continue
+        applied_values = []
+        any_explicit_group = False
+        for group_id, values in resolved.items():
+            if key in explicit_by_group.get(group_id, set()):
+                any_explicit_group = True
+                continue
+            if key in values:
+                applied_values.append(values[key])
+        if any_explicit_group or not applied_values:
+            continue
+        first = applied_values[0]
+        if any(value != first for value in applied_values[1:]):
+            continue
+        value_label = _setting_value_label(definition, first)
+        dedupe_key = (definition.label, value_label)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        result.append({
+            "setting_key": key,
+            "label": definition.label,
+            "value": str(first),
+            "value_label": value_label,
+            "module": definition.module,
+        })
+    return result
 
 
 def _runtime_time_value(payload: dict[str, Any], key: str, default: Any = None) -> Any:
@@ -1768,6 +1838,12 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             "market_rule_fallback": common_backtest_settings["market_rule_fallback"],
             "groups": resolved_backtest_settings,
         },
+        "silent_default_settings": _silent_default_settings_for_run(
+            data,
+            flat_groups_raw,
+            flat_ls_configs,
+            resolved_backtest_settings,
+        ),
         "evaluation_window": {
             "start_ms": int(start_dt.ts.timestamp() * 1000),
             "end_ms": int(end_dt.ts.timestamp() * 1000),

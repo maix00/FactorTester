@@ -203,6 +203,49 @@ def test_runtime_window_supplies_run_defaults_without_flat_frontend_values() -> 
     assert settings["allocation_policy"] == "inverse_volatility"
 
 
+def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> None:
+    from server.modules.single_factor_test.group import (
+        _resolve_flat_backtest_settings,
+        _silent_default_settings_for_run,
+    )
+
+    payload = {
+        "_runtime_window": {
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-31",
+        },
+    }
+    groups = [{"id": "group-1"}]
+    resolved = _resolve_flat_backtest_settings(payload, groups, [])
+
+    defaults = _silent_default_settings_for_run(payload, groups, [], resolved)
+
+    by_key = {item["setting_key"]: item for item in defaults}
+    assert by_key["allocation_policy"]["value"] == "inverse_volatility"
+    assert by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
+    assert by_key["execution_timing"]["value"] == "next_bar"
+
+
+def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
+    from server.modules.single_factor_test.group import (
+        _resolve_flat_backtest_settings,
+        _silent_default_settings_for_run,
+    )
+
+    payload = {
+        "_runtime_window": {
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-31",
+        },
+    }
+    groups = [{"id": "group-1", "allocation_policy": "equal_notional"}]
+    resolved = _resolve_flat_backtest_settings(payload, groups, [])
+
+    defaults = _silent_default_settings_for_run(payload, groups, [], resolved)
+
+    assert "allocation_policy" not in {item["setting_key"] for item in defaults}
+
+
 def test_runtime_window_builds_explicit_start_and_end_datetimes() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 

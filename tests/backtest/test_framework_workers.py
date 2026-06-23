@@ -343,6 +343,71 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
     )
 
 
+def test_frameworks_preserve_equal_risk_and_equal_notional_equity_difference() -> None:
+    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+
+    dispatcher = EngineWorkerDispatcher()
+    timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 7)]
+    payload = {
+        "timestamps": timestamps,
+        "instruments": ["volatile", "stable"],
+        "prices": {
+            "volatile": [100.0, 110.0, 99.0, 118.8, 95.04, 123.552],
+            "stable": [100.0, 101.0, 102.01, 103.0301, 104.060401, 105.10100501],
+        },
+        "membership": [[[True, True], [True, True]]] * 6,
+        "signal_updates": [[True, True]] * 6,
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "margin_ratios": [[1.0, 1.0]] * 6,
+            "multipliers": [[1.0, 1.0]] * 6,
+            "lot_sizes": [[0.000001, 0.000001]] * 6,
+        },
+        "strategy_configs": [
+            _strategy_settings(
+                strategy_id="equal-risk",
+                allocation_policy="inverse_volatility",
+                volatility_lookback=2,
+                membership_index=0,
+                execution_timing="same_bar",
+            ),
+            _strategy_settings(
+                strategy_id="equal-notional",
+                allocation_policy="equal_notional",
+                membership_index=1,
+                execution_timing="same_bar",
+            ),
+        ],
+    }
+
+    results = {
+        engine: dispatcher.dispatch(WorkerRequest(
+            f"allocation-equity-{engine}", engine, "run_group_strategy", payload
+        )).result
+        for engine in ("backtrader", "qlib", "zipline")
+    }
+    results["native"] = run_native(payload)
+
+    assert {
+        engine: result["target_trace"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["target_trace"]
+        for engine in results
+    }
+    for engine, result in results.items():
+        risk_trace = result["target_trace"]["equal-risk"]
+        notional_trace = result["target_trace"]["equal-notional"]
+        assert risk_trace[timestamps[-1]] != notional_trace[timestamps[-1]]
+        risk_equity = result["portfolios"]["equal-risk"]["equity_curve"]
+        notional_equity = result["portfolios"]["equal-notional"]["equity_curve"]
+        assert risk_equity != notional_equity, engine
+        assert (
+            result["portfolios"]["equal-risk"]["final_value"]
+            != result["portfolios"]["equal-notional"]["final_value"]
+        ), engine
+
+
 @pytest.mark.parametrize("engine", ["native", "backtrader", "qlib", "zipline"])
 def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine: str) -> None:
     dispatcher = EngineWorkerDispatcher()

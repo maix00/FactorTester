@@ -54,6 +54,7 @@ GT.results.strategyPanel.update(false, [], {
     setting_key: 'execution_timing',
     label: '执行',
     value: 'next_bar',
+    value_label: '下一根K线',
   }],
 });
 
@@ -61,7 +62,7 @@ const defaultSettingsBody = document.getElementById('gt-strategy-body').innerHTM
 assert.match(defaultSettingsBody, /当前运行配置/);
 assert.match(defaultSettingsBody, /默认/);
 assert.match(defaultSettingsBody, /执行/);
-assert.match(defaultSettingsBody, /next_bar/);
+assert.match(defaultSettingsBody, /下一根K线/);
 
 GT.results.strategyPanel.update(false, [], {
   engine_result: { engine: 'native' },

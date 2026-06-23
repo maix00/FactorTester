@@ -123,7 +123,9 @@
         return items.map(function(item) {
             if (!item) return null;
             var label = String(item.label || item.setting_key || item.module || '设置');
-            var value = item.value !== undefined && item.value !== null
+            var value = item.value_label !== undefined && item.value_label !== null
+                ? String(item.value_label)
+                : item.value !== undefined && item.value !== null
                 ? String(item.value)
                 : String(item.applied_value !== undefined ? item.applied_value : '');
             if (!value) return null;
