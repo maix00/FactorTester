@@ -55,6 +55,32 @@
     font-size: 12px;
 }
 
+.single-factor-page-settings-shell {
+    margin: 12px 0;
+}
+
+.single-factor-page-settings-panel {
+    min-width: 0;
+}
+
+.single-factor-page-settings-panel .module {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 8px 0 !important;
+}
+
+.single-factor-page-settings-panel .section-title {
+    font-size: 13px !important;
+    line-height: 1.35;
+    margin: 0 0 8px !important;
+    padding-bottom: 6px !important;
+}
+
+.single-factor-page-settings-panel .setting-summary-row {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
 .backend-settings-chooser-intro {
     color: #667085;
     font-size: 11px;

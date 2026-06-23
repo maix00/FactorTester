@@ -94,12 +94,118 @@ def register_product_path_selection_base(
     ))
 
 
+def register_market_data_base(app: ApplicationSettings, *, include_price_type: bool) -> None:
+    app.register_setting(SettingDefinition(
+        "data_source",
+        "数据源",
+        "data_source",
+        "select",
+        "",
+        ScopePolicy.LOCAL_ONLY,
+        module="market_data_source",
+        options=(SettingOption("", "自动"),),
+        chip_template="数据源: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "frequency",
+        "频率",
+        "frequency",
+        "select",
+        "",
+        ScopePolicy.LOCAL_ONLY,
+        module="market_data_frequency",
+        options=(SettingOption("", "自动"),),
+        chip_template="频率: {value}",
+    ))
+    if include_price_type:
+        app.register_setting(SettingDefinition(
+            "price_type",
+            "价格类型",
+            "price_type",
+            "select",
+            "adjusted",
+            ScopePolicy.LOCAL_ONLY,
+            module="price_transform",
+            options=(
+                SettingOption("adjusted", "复权"),
+                SettingOption("raw", "原始"),
+                SettingOption("sma", "SMA 平滑"),
+                SettingOption("ema", "EMA 平滑"),
+            ),
+            chip_template="价格: {value}",
+            help_text="行业常见价格处理包括复权、原始价格、简单移动平均和指数移动平均。",
+        ))
+
+
+def single_factor_page_settings() -> ApplicationSettings:
+    app = ApplicationSettings("single_factor_page")
+    for module in (
+        SettingModule("setting_template", "因子家族设置模板", "page", 10),
+        SettingModule("factor_parameters", "参数设置", "factor", 20),
+        SettingModule("run_window", "时间范围", "time", 30),
+    ):
+        app.register_module(module)
+    for tab in (
+        SettingTab(
+            "setting_template",
+            "因子家族设置模板",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "custom",
+            10,
+            (TabMountPoint.LOCAL_SETTINGS,),
+        ),
+        SettingTab(
+            "parameters",
+            "参数设置",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "custom",
+            20,
+            (TabMountPoint.LOCAL_SETTINGS,),
+        ),
+        SettingTab(
+            "time",
+            "时间范围",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "custom",
+            30,
+            (TabMountPoint.LOCAL_SETTINGS,),
+            summary_template="{start_date} → {end_date} · {time_precision}",
+            summary_keys=("start_date", "end_date", "time_precision"),
+        ),
+    ):
+        app.register_tab(tab)
+    app.register_setting(SettingDefinition(
+        "setting_template",
+        "因子家族设置模板",
+        "setting_template",
+        "custom",
+        None,
+        ScopePolicy.LOCAL_ONLY,
+        module="setting_template",
+        chip_template="模板: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "parameter_sets",
+        "参数设置",
+        "parameters",
+        "custom",
+        None,
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_parameters",
+        chip_template="参数: {value}",
+    ))
+    register_run_window_base(app)
+    return app
+
+
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
     for module in (
         SettingModule("execution_engine", "执行引擎", "backtest", 10),
         SettingModule("factor_execution", "因子执行", "factor", 20),
         SettingModule("product_selection", "品种/路径选择", "product", 30),
+        SettingModule("market_data_source", "数据源", "market_data", 35),
+        SettingModule("market_data_frequency", "数据频率", "market_data", 36),
         SettingModule("run_window", "运行时间范围", "backtest", 40),
         SettingModule("portfolio_capital", "组合资金", "portfolio", 50),
         SettingModule("target_allocation", "目标分配", "strategy", 60),
@@ -132,12 +238,14 @@ def group_test_settings() -> ApplicationSettings:
             "settings-grid",
             13,
         ),
+        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 14),
+        SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
         SettingTab(
             "time",
             "时间范围",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
-            15,
+            16,
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
@@ -223,6 +331,7 @@ def group_test_settings() -> ApplicationSettings:
     ))
     register_factor_execution_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
+    register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(
         "initial_capital",
@@ -778,7 +887,6 @@ def factor_evaluation_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             20,
-            (TabMountPoint.LOCAL_SETTINGS,),
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
@@ -801,51 +909,13 @@ def factor_evaluation_settings() -> ApplicationSettings:
         "产品路径",
         "product",
         "select",
-        "",
+        None,
         ScopePolicy.LOCAL_ONLY,
         module="product_selection",
         chip_template="产品路径: {value}",
         help_text="从后端注册的产品树选择一个产品或产品路径。",
     ))
-    app.register_setting(SettingDefinition(
-        "data_source",
-        "数据源",
-        "data_source",
-        "select",
-        "",
-        ScopePolicy.LOCAL_ONLY,
-        module="market_data_source",
-        options=(SettingOption("", "自动"),),
-        chip_template="数据源: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "frequency",
-        "频率",
-        "frequency",
-        "select",
-        "",
-        ScopePolicy.LOCAL_ONLY,
-        module="market_data_frequency",
-        options=(SettingOption("", "自动"),),
-        chip_template="频率: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "price_type",
-        "价格类型",
-        "price_type",
-        "select",
-        "adjusted",
-        ScopePolicy.LOCAL_ONLY,
-        module="price_transform",
-        options=(
-            SettingOption("adjusted", "复权"),
-            SettingOption("raw", "原始"),
-            SettingOption("sma", "SMA 平滑"),
-            SettingOption("ema", "EMA 平滑"),
-        ),
-        chip_template="价格: {value}",
-        help_text="行业常见价格处理包括复权、原始价格、简单移动平均和指数移动平均。",
-    ))
+    register_market_data_base(app, include_price_type=True)
     app.register_setting(SettingDefinition(
         "factor",
         "因子",
@@ -860,6 +930,7 @@ def factor_evaluation_settings() -> ApplicationSettings:
 
 
 backtest_setting_registry = BacktestSettingRegistry()
+backtest_setting_registry.register(single_factor_page_settings())
 backtest_setting_registry.register(group_test_settings())
 backtest_setting_registry.register(ic_test_settings())
 backtest_setting_registry.register(factor_evaluation_settings())

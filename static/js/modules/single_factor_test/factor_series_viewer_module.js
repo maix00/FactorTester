@@ -163,11 +163,11 @@
             }
         }
         if (setting && setting.key === 'product') {
-            return productLabel();
+            return productLabel() || '无';
         }
         if (setting && setting.key === 'factor') {
             var factor = selectedFactor();
-            return factor ? factor.alias || factor.name || '' : '';
+            return factor ? factor.alias || factor.name || '' : '无';
         }
         return value === undefined || value === null || value === '' ? '自动' : String(value);
     }
@@ -376,6 +376,8 @@
             if (mountedKeys[key]) return;
             var setting = Object.assign({ key: key }, defaults()[key] || {});
             if (!setting.chip_template) return;
+            if (key === 'product' && !state.paths.length) return;
+            if (key === 'factor' && !selectedFactor()) return;
             row.appendChild(makeChip(setting, effectiveValue(key), setting.tab_key));
         });
     }
