@@ -228,6 +228,9 @@ global.getSharedRuntimeTimeRange = () => ({
   timezone: 'Asia/Shanghai',
   is_trading_day: false,
 });
+window.BacktestTimeWindowSettings = {
+  pageRuntimeTimeRangeValues: () => global.getSharedRuntimeTimeRange(),
+};
 
 return GT.backendSettings.init().then(async () => {
   load('panels/list/selection-state.js');
@@ -284,7 +287,13 @@ return GT.backendSettings.init().then(async () => {
   const baseId = GT.groupSettings.groups.add({
     id: 'chip-order-group',
     name: 'Chip Order Group',
-    testerId: 'tester-chip-order',
+    product_path_selection: {
+      product_path_selection_id: 'tester-chip-order',
+      products: [
+        { name: 'IF', desc: '股指' },
+        { name: 'RB', desc: '螺纹钢' },
+      ],
+    },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 1,
@@ -336,7 +345,7 @@ return GT.backendSettings.init().then(async () => {
   const hiddenDependentId = GT.groupSettings.groups.add({
     id: 'hidden-dependent-group',
     name: 'Hidden Dependent',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 2,
@@ -354,7 +363,7 @@ return GT.backendSettings.init().then(async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const sparseRunPayload = GT.backendSettings.runPayload();
-  assert.equal(sparseRunPayload.allocation_policy, 'equal_notional');
+  assert.equal(sparseRunPayload.local_settings.allocation_policy, 'equal_notional');
   assert.equal(sparseRunPayload.initial_capital, undefined);
   assert.equal(sparseRunPayload.base_currency, undefined);
   assert.equal(sparseRunPayload.currency_conversion_fee_rate, undefined);
@@ -391,7 +400,7 @@ return GT.backendSettings.init().then(async () => {
   const hiddenVolatilityId = GT.groupSettings.groups.add({
     id: 'hidden-volatility-group',
     name: 'Hidden Volatility',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 3,
@@ -406,7 +415,7 @@ return GT.backendSettings.init().then(async () => {
   const defaultPositionId = GT.groupSettings.groups.add({
     id: 'position-default-group',
     name: 'Position Default',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'PositionFactor',
     splitCount: 2,
     groupIndex: 1,
@@ -414,7 +423,7 @@ return GT.backendSettings.init().then(async () => {
   const buyHoldPositionId = GT.groupSettings.groups.add({
     id: 'position-buy-hold-group',
     name: 'Position Buy Hold',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'PositionFactor',
     splitCount: 2,
     groupIndex: 2,

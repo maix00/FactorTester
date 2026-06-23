@@ -163,6 +163,10 @@ def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch
         "tools.factors.FactorTester.FactorTester",
         _RuntimeTester,
     )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime._as_data_time",
+        lambda value: value,
+    )
 
     try:
         tester = create_factor_tester_from_request(
@@ -225,6 +229,10 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
         lambda: (_ for _ in ()).throw(RuntimeError("request context touched")),
     )
     monkeypatch.setattr("tools.factors.FactorTester.FactorTester", _RuntimeTester)
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime._as_data_time",
+        lambda value: value,
+    )
 
     try:
         tester = create_factor_tester_from_request(
@@ -245,6 +253,41 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
     finally:
         runtime_state.page_factor_testers = original_page_factor_testers
         runtime_state.page_time_store = original_time_store
+
+
+def test_product_path_selection_id_resolves_user_product_group_without_session(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
+
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user",
+        lambda: (_ for _ in ()).throw(RuntimeError("request context touched")),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.load_product_groups",
+        lambda username: [{
+            "id": "pg-day",
+            "name": "中国期货日盘",
+            "paths": ["Product/Futures/CNFutures/日夜盘/日盘"],
+            "product_names": ["AP.CZC"],
+        }] if username == "18717974771" else [],
+    )
+
+    selection = selection_for_product_path_selection(
+        {
+            "_group_owner_username": "18717974771",
+            "groups": [{
+                "id": "g1",
+                "product_path_selection": {"product_path_selection_id": "pg-day"},
+            }],
+        },
+        "pg-day",
+        page_uuid="page-a",
+    )
+
+    assert selection.selection_id == "pg-day"
+    assert selection.product_group == "中国期货日盘"
+    assert selection.selected_paths == ["Product/Futures/CNFutures/日夜盘/日盘"]
+    assert "AP.CZC" in [str(product.name) for product in selection.products]
 
 
 def test_product_path_selection_inherits_from_parent_group(monkeypatch):

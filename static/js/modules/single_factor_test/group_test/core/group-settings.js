@@ -848,9 +848,11 @@
     function _settingsGroupSnapshot(group) {
         var out = _copyKeys(group || {}, [
             'id', 'name', 'parentId', 'product_path_selection', 'factorAlias', 'splitCount',
-            'groupIndex', 'isAllGroups', 'needsRegenerate', 'startDate', 'endDate',
-            'shortAlias', 'overrides', '_expanded', 'productMask',
+            'groupIndex', 'isAllGroups', 'shortAlias', 'productMask',
         ]);
+        if (out.product_path_selection && GT.backendSettings && typeof GT.backendSettings.compactProductPathSelection === 'function') {
+            out.product_path_selection = GT.backendSettings.compactProductPathSelection(out.product_path_selection);
+        }
         if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
             var backendFields = GT.backendSettings.flattenGroupForSnapshot(group || {});
             Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });

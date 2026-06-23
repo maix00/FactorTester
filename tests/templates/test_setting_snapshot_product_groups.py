@@ -15,7 +15,7 @@ def _refresh_template_product_group_paths(template, groups):
     return module.refresh_template_product_group_paths(template, groups)
 
 
-def test_saved_product_group_submission_uses_latest_group_paths_on_load():
+def test_saved_product_group_submission_keeps_only_group_id_on_load():
     template = {
         "snapshot": {
             "group_settings": {
@@ -36,8 +36,7 @@ def test_saved_product_group_submission_uses_latest_group_paths_on_load():
     refreshed = _refresh_template_product_group_paths(template, groups)
 
     submission = refreshed["snapshot"]["group_settings"]["groups"][0]["product_path_selection"]
-    assert submission["paths"] == ["New/Metals", "-New/Metals/_products/RB.SHF"]
-    assert submission["selected_paths"] == ["New/Metals", "-New/Metals/_products/RB.SHF"]
+    assert submission == {"product_path_selection_id": "pg-metals"}
     assert template["snapshot"]["group_settings"]["groups"][0]["product_path_selection"]["paths"] == ["Old/Metals"]
 
 

@@ -351,6 +351,16 @@ def test_group_time_windows_form_envelope_only_without_local_time_window() -> No
     assert end_dt.ts.strftime("%Y-%m-%d") == "2025-02-15"
 
 
+def test_group_signal_window_override_accepts_exact_precision_without_date_boundary() -> None:
+    from server.modules.single_factor_test.group import _group_has_signal_window_override
+
+    assert _group_has_signal_window_override({
+        "time_precision": "exact",
+    }) is True
+    assert _group_has_signal_window_override({"start_date": "2025-01-01"}) is True
+    assert _group_has_signal_window_override({"end_date": "2025-01-31"}) is True
+
+
 def test_local_settings_builds_explicit_start_and_end_datetimes() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 

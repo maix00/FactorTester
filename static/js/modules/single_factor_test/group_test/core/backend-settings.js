@@ -157,6 +157,38 @@
         return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
     }
 
+    function compactProductPathSelection(selection) {
+        var id = selectionId(selection);
+        if (!selection || !id) return null;
+        var def = settingDef('product_path_selection') || {};
+        var serialization = def.serialization || {};
+        var idKeys = serialization.id_keys || ['product_path_selection_id', 'selection_id', 'id'];
+        var referenceKeys = serialization.product_group_reference_keys || ['product_group_template_id', 'path_id'];
+        var sourceType = serialization.product_group_source_type || 'user_product_group_template';
+        var manualPathKeys = serialization.manual_path_keys || ['paths', 'selected_paths'];
+        var productGroupId = '';
+        referenceKeys.forEach(function(key) {
+            if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+        });
+        if (!productGroupId && selection.source_type === sourceType) {
+            idKeys.forEach(function(key) {
+                if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+            });
+        }
+        if (productGroupId) {
+            return { product_path_selection_id: productGroupId };
+        }
+        var paths = [];
+        manualPathKeys.forEach(function(key) {
+            if (!paths.length && Array.isArray(selection[key])) paths = selection[key];
+        });
+        var compact = { product_path_selection_id: id };
+        if (Array.isArray(paths) && paths.length) {
+            compact.paths = paths.map(function(path) { return String(path || '').trim(); }).filter(Boolean);
+        }
+        return compact;
+    }
+
     function productPathSelectionProducts(selection) {
         var raw = selection && ((Array.isArray(selection.products) && selection.products.length)
             ? selection.products
@@ -1460,7 +1492,7 @@
             if (source[key] === '' || source[key] === null || source[key] === undefined) return;
             if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key])) return;
             if (def.scope_policy !== 'group_override' && valuesEqual(source[key], def.value)) return;
-            out[key] = source[key];
+            out[key] = key === 'product_path_selection' ? compactProductPathSelection(source[key]) : source[key];
         });
         return out;
     }
@@ -1591,6 +1623,7 @@
         registerSnapshot: registerSnapshot,
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,
+        compactProductPathSelection: compactProductPathSelection,
         syncPageTimeDefaults: syncPageTimeDefaults,
         registerLocalDefaultProvider: registerLocalDefaultProvider,
         copyLocalDefaultsFromProvider: copyLocalDefaultsFromProvider,

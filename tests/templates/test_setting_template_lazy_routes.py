@@ -118,16 +118,7 @@ def test_snapshot_migration_moves_submissions_to_product_path_selections_with_gr
     assert "submissions" not in snapshot
     assert "product_path_selections" not in snapshot
     assert snapshot["group_settings"]["groups"][0]["product_path_selection"] == {
-        "id": "pg-metals",
         "product_path_selection_id": "pg-metals",
-        "selected_paths": ["A/Path", "B/Path"],
-        "paths": ["A/Path", "B/Path"],
-        "label": "Metals",
-        "product_group": "Metals Template",
-        "product_group_template_id": "pg-metals",
-        "path_id": "pg-metals",
-        "source_type": "user_product_group_template",
-        "source_key": "pg-metals",
     }
     assert "testerId" not in snapshot["group_settings"]["groups"][0]
 
@@ -173,11 +164,11 @@ def test_snapshot_migration_normalizes_existing_product_path_selection_fields():
     )
 
     assert changed is True
-    assert snapshot["local_settings"]["product_path_selection"]["path_id"] == "pg-local"
-    assert snapshot["local_settings"]["product_path_selection"]["selected_paths"] == ["A/Path", "B/Path"]
+    assert snapshot["local_settings"]["product_path_selection"] == {
+        "product_path_selection_id": "pg-local",
+    }
     selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
-    assert selection["product_group_template_id"] == "pg-group"
-    assert selection["paths"] == ["C/Path", "D/Path"]
+    assert selection == {"product_path_selection_id": "pg-group"}
 
 
 def test_snapshot_migration_relinks_existing_selection_to_matching_product_group():
@@ -204,12 +195,7 @@ def test_snapshot_migration_relinks_existing_selection_to_matching_product_group
 
     assert changed is True
     selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
-    assert selection["id"] == "pg-day"
-    assert selection["product_path_selection_id"] == "pg-day"
-    assert selection["product_group_template_id"] == "pg-day"
-    assert selection["path_id"] == "pg-day"
-    assert selection["product_group"] == "中国期货日盘"
-    assert selection["source_type"] == "user_product_group_template"
+    assert selection == {"product_path_selection_id": "pg-day"}
 
 
 def test_snapshot_migration_materializes_parent_product_path_selection_on_derived_groups():
@@ -239,5 +225,6 @@ def test_snapshot_migration_materializes_parent_product_path_selection_on_derive
     assert changed is True
     child = snapshot["group_settings"]["groups"][1]
     assert "testerId" not in child
-    assert child["product_path_selection"]["path_id"] == "pg-parent"
-    assert child["product_path_selection"]["paths"] == ["Parent/Path"]
+    assert child["product_path_selection"] == {
+        "product_path_selection_id": "pg-parent",
+    }

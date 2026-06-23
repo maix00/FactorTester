@@ -96,6 +96,30 @@ def register_product_path_selection_base(
         module="product_selection",
         chip_template="产品路径: {value}",
         help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
+        serialization={
+            "kind": "product_path_selection",
+            "product_group_reference_keys": (
+                "product_group_template_id",
+                "path_id",
+            ),
+            "product_group_source_type": "user_product_group_template",
+            "id_keys": (
+                "product_path_selection_id",
+                "selection_id",
+                "id",
+            ),
+            "manual_path_keys": (
+                "paths",
+                "selected_paths",
+            ),
+            "product_group_fields": (
+                "product_path_selection_id",
+            ),
+            "manual_fields": (
+                "product_path_selection_id",
+                "paths",
+            ),
+        },
     ))
 
 

@@ -101,21 +101,10 @@ def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: l
             or ("user_product_group_template" if template_id else "manual_selection")
         )
         selection = {
-            "id": selection_id,
             "product_path_selection_id": selection_id,
-            "selected_paths": paths,
-            "paths": list(paths),
-            "label": str(item.get("label") or ""),
-            "product_group": product_group,
-            "product_group_template_id": template_id,
-            "path_id": template_id,
-            "source_type": source_type,
-            "source_key": str(item.get("source_key") or template_id or selection_id),
         }
-        if item.get("product_count") not in (None, ""):
-            selection["product_count"] = item.get("product_count")
-        if item.get("products"):
-            selection["products"] = item.get("products")
+        if not template_id and paths:
+            selection["paths"] = list(paths)
         selections[selection_id] = selection
         if original_selection_id and original_selection_id != selection_id:
             selections[original_selection_id] = selection
@@ -172,35 +161,39 @@ def _inherit_group_product_path_selections(groups: Any) -> None:
 def _normalize_product_path_selection(selection: Any, product_groups: list[dict[str, Any]] | None = None) -> None:
     if not isinstance(selection, dict):
         return
+    selection_id = str(
+        selection.get("product_path_selection_id")
+        or selection.get("selection_id")
+        or selection.get("id")
+        or selection.get("product_group_template_id")
+        or selection.get("path_id")
+        or selection.get("template_id")
+        or ""
+    ).strip()
     template_id = str(
         selection.get("product_group_template_id")
         or selection.get("path_id")
         or selection.get("template_id")
         or ""
-    )
+    ).strip()
+    is_product_group_ref = bool(template_id)
     if template_id:
-        selection["product_group_template_id"] = template_id
-        selection["path_id"] = template_id
+        selection_id = template_id
+    normalized_paths: list[str] = []
     paths = selection.get("paths") or selection.get("selected_paths")
     if isinstance(paths, list):
-        canonical = _canonical_paths(paths)
-        selection["paths"] = list(canonical)
-        selection["selected_paths"] = list(canonical)
-        matched_group = _match_product_group(canonical, selection, product_groups or [])
+        normalized_paths = _canonical_paths(paths)
+        matched_group = _match_product_group(normalized_paths, selection, product_groups or [])
         if matched_group:
             template_id = str(matched_group.get("id") or "").strip()
-            product_group = str(matched_group.get("name") or "").strip()
             if template_id:
-                selection["id"] = template_id
-                selection["product_path_selection_id"] = template_id
-                selection["product_group_template_id"] = template_id
-                selection["path_id"] = template_id
-                selection["source_key"] = template_id
-                selection["source_type"] = "user_product_group_template"
-            if product_group:
-                selection["product_group"] = product_group
-                if not selection.get("label"):
-                    selection["label"] = product_group
+                selection_id = template_id
+                is_product_group_ref = True
+    if selection_id:
+        selection.clear()
+        selection["product_path_selection_id"] = selection_id
+        if normalized_paths and not is_product_group_ref:
+            selection["paths"] = list(normalized_paths)
 
 
 def _remove_legacy_group_tester_ids(groups: Any) -> None:

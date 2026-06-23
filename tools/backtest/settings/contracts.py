@@ -63,6 +63,7 @@ class SettingDefinition:
     engine_defaults: dict[str, Any] = field(default_factory=dict)
     disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
     visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    serialization: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:

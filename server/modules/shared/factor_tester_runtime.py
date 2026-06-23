@@ -7,8 +7,9 @@ from typing import Any
 import pandas as pd
 
 import server.services.page_runtime as runtime_state
+from server.modules.products.product_group_store import load_product_groups, product_group_to_path_selection
 from server.modules.shared.submission_model import ProductPathSelection
-from server.services.session_runtime import current_user_obj
+from server.services.session_runtime import current_user, current_user_obj
 from tools.data.types import DataTime
 
 
@@ -27,15 +28,32 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
     """Resolve the product universe carried by a test request."""
     raw = data.get("product_path_selection")
     if isinstance(raw, dict):
-        return ProductPathSelection.from_paths(
-            str(
-                raw.get("product_path_selection_id")
-                or raw.get("selection_id")
-                or data.get("product_path_selection_id")
-                or data.get("selection_id")
+        selection_id = str(
+            raw.get("product_path_selection_id")
+            or raw.get("selection_id")
+            or data.get("product_path_selection_id")
+            or data.get("selection_id")
+            or raw.get("id")
+            or ""
+        )
+        raw_paths = list(raw.get("selected_paths") or raw.get("paths") or [])
+        if selection_id and not raw_paths:
+            username = str(
+                data.get("_group_owner_username")
+                or data.get("owner_username")
+                or current_user()
                 or ""
-            ),
-            list(raw.get("selected_paths") or raw.get("paths") or []),
+            )
+            for group in load_product_groups(username):
+                if str(group.get("id") or "") == selection_id:
+                    return product_group_to_path_selection(
+                        group,
+                        selection_id=selection_id,
+                        page_uuid=page_uuid,
+                    )
+        return ProductPathSelection.from_paths(
+            selection_id,
+            raw_paths,
             label=str(raw.get("label") or raw.get("name") or ""),
             product_group=str(raw.get("product_group") or ""),
             product_group_template_id=str(raw.get("product_group_template_id") or raw.get("path_id") or raw.get("template_id") or ""),
@@ -68,6 +86,22 @@ def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPa
             page_uuid=page_uuid,
         )
 
+    selection_id = str(data.get("product_path_selection_id") or data.get("selection_id") or "")
+    if selection_id:
+        username = str(
+            data.get("_group_owner_username")
+            or data.get("owner_username")
+            or current_user()
+            or ""
+        )
+        for group in load_product_groups(username):
+            if str(group.get("id") or "") == selection_id:
+                return product_group_to_path_selection(
+                    group,
+                    selection_id=selection_id,
+                    page_uuid=page_uuid,
+                )
+
     raise AssertionError("测试配置缺少产品组设置")
 
 
@@ -84,14 +118,22 @@ def selection_for_product_path_selection(
         raw = selections.get(sid)
         if isinstance(raw, dict):
             return selection_from_request(
-                {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid},
+                {
+                    **data,
+                    **raw,
+                    "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid,
+                },
                 page_uuid=page_uuid,
             )
     if isinstance(selections, list):
         for raw in selections:
             if isinstance(raw, dict) and str(raw.get("product_path_selection_id") or raw.get("selection_id") or raw.get("id") or "") == sid:
                 return selection_from_request(
-                    {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid},
+                    {
+                        **data,
+                        **raw,
+                        "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("selection_id") or sid,
+                    },
                     page_uuid=page_uuid,
                 )
     groups = data.get("groups")
@@ -127,7 +169,11 @@ def selection_for_product_path_selection(
                 continue
             if isinstance(raw, dict):
                 return selection_from_request(
-                    {**raw, "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("id") or sid},
+                    {
+                        **data,
+                        **raw,
+                        "product_path_selection_id": raw.get("product_path_selection_id") or raw.get("id") or sid,
+                    },
                     page_uuid=page_uuid,
                 )
     return selection_from_request({**data, "product_path_selection_id": sid}, page_uuid=page_uuid)

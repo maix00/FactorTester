@@ -26,12 +26,12 @@ global.fetch = () => Promise.resolve({
     default_mounted_tabs: { 'local-settings': [], 'group-settings': [] },
     defaults: {
       engine: { key: 'engine', value: 'native', tab_key: 'engine', scope_policy: 'local_only' },
-      start_date: { key: 'start_date', value: '2026-01-01', tab_key: 'time', scope_policy: 'local_only' },
-      end_date: { key: 'end_date', value: '2026-01-31', tab_key: 'time', scope_policy: 'local_only' },
-      start_time: { key: 'start_time', value: '09:00', tab_key: 'time', scope_policy: 'local_only' },
-      end_time: { key: 'end_time', value: '15:00', tab_key: 'time', scope_policy: 'local_only' },
-      timezone: { key: 'timezone', value: 'Asia/Shanghai', tab_key: 'time', scope_policy: 'local_only' },
-      time_precision: { key: 'time_precision', value: 'exact', tab_key: 'time', scope_policy: 'local_only' },
+      start_date: { key: 'start_date', value: '2026-01-01', tab_key: 'time', scope_policy: 'group_override' },
+      end_date: { key: 'end_date', value: '2026-01-31', tab_key: 'time', scope_policy: 'group_override' },
+      start_time: { key: 'start_time', value: '09:00', tab_key: 'time', scope_policy: 'group_override' },
+      end_time: { key: 'end_time', value: '15:00', tab_key: 'time', scope_policy: 'group_override' },
+      timezone: { key: 'timezone', value: 'Asia/Shanghai', tab_key: 'time', scope_policy: 'group_override' },
+      time_precision: { key: 'time_precision', value: 'exact', tab_key: 'time', scope_policy: 'group_override' },
       calendar_frequency: { key: 'calendar_frequency', value: 'auto', tab_key: 'calendar', scope_policy: 'local_only' },
       initial_capital: { key: 'initial_capital', value: 100000000, tab_key: 'capital', scope_policy: 'group_override' },
       allocation_policy: { key: 'allocation_policy', value: 'inverse_volatility', tab_key: 'target_allocation', scope_policy: 'group_override' },
@@ -100,6 +100,46 @@ return GT.backendSettings.init().then(() => {
   const inheritedPayload = GT.backendSettings.groupPayloadForRun(inheritedGroup);
   assert.equal(inheritedPayload.allocation_policy, undefined);
   assert.equal(inheritedPayload.volatility_lookback, undefined);
+
+  const explicitSignalWindow = {
+    id: 'g-time-explicit',
+    name: 'TimeExplicit',
+    factorAlias: 'FactorRun',
+    splitCount: 5,
+    groupIndex: 3,
+    start_time: '00:00',
+    end_time: '23:59',
+    time_precision: 'exact',
+    timezone: 'Asia/Shanghai',
+    start_date: '2026-01-10',
+    end_date: '2026-01-20',
+  };
+  const explicitSignalPayload = GT.backendSettings.groupPayloadForRun(explicitSignalWindow);
+  assert.equal(explicitSignalPayload.start_date, '2026-01-10');
+  assert.equal(explicitSignalPayload.end_date, '2026-01-20');
+  assert.equal(explicitSignalPayload.start_time, '00:00');
+  assert.equal(explicitSignalPayload.end_time, '23:59');
+  assert.equal(explicitSignalPayload.time_precision, undefined);
+
+  assert.deepEqual(
+    GT.backendSettings.compactProductPathSelection({
+      product_path_selection_id: 'runtime-pg',
+      product_group_template_id: 'pg-template',
+      label: '中国期货日盘',
+      paths: ['Product/Futures/CNFutures/日夜盘/日盘'],
+      products: [{ name: 'AP.CZC', desc: '苹果' }],
+    }),
+    { product_path_selection_id: 'pg-template' },
+  );
+  assert.deepEqual(
+    GT.backendSettings.compactProductPathSelection({
+      product_path_selection_id: 'manual-paths',
+      label: '现场路径组',
+      paths: ['A/Path', '-A/Path/_products/X.SHF'],
+      products: [{ name: 'Y.SHF', desc: '测试' }],
+    }),
+    { product_path_selection_id: 'manual-paths', paths: ['A/Path', '-A/Path/_products/X.SHF'] },
+  );
 
   console.log('PASS: backend settings run payload uses effective local and group values');
 });

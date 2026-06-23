@@ -93,6 +93,7 @@ class ApplicationSettings:
                     "module": setting.module,
                     "chip_template": setting.chip_template,
                     "engine_defaults": dict(setting.engine_defaults),
+                    "serialization": dict(setting.serialization),
                     "visible_when": {
                         key: list(values)
                         for key, values in setting.visible_when.items()
