@@ -359,7 +359,7 @@
             if (batchLetter) {
                 h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
             }
-            h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.factorAlias) + '</span>';
+            h += '<span class="gt-backend-chip unified-backend-chip">' + H.renderChipHtml('因子', batch.factorAlias || '无') + '</span>';
             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml('产品路径', selectionLabel) + '</span>';
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
             h += '</span>';

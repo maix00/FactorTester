@@ -24,6 +24,8 @@ RUN_WINDOW_KEYS = (
 )
 PRODUCT_PATH_SELECTION_KEYS = ("product_path_selection",)
 PRODUCT_PATH_CANDIDATE_KEYS = ("product_path_candidates",)
+FACTOR_SELECTION_KEYS = ("factor",)
+FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
 
@@ -110,6 +112,7 @@ def register_product_path_selection_base(
         help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
         serialization={
             "kind": "product_path_selection",
+            "display_order": 20,
             "product_group_reference_keys": (
                 "product_group_template_id",
                 "path_id",
@@ -153,6 +156,7 @@ def register_product_path_candidate_list_base(
         help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场路径组。",
         serialization={
             "kind": "product_path_candidate_list",
+            "display_order": 10,
             "item_kind": "product_path_selection",
             "shared_page_field": "product_path_candidates",
             "selection_field": "product_path_selection",
@@ -169,6 +173,63 @@ def register_product_path_candidate_list_base(
             "persist_manual_candidates": False,
             "dedupe_product_groups": True,
             "allow_duplicate_manual_candidates": True,
+        },
+    ))
+
+
+def register_factor_candidate_list_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "factor_candidates",
+        "因子候选列表",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子候选: {value}",
+        help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场因子。",
+        serialization={
+            "kind": "factor_candidate_list",
+            "display_order": 10,
+            "item_kind": "factor",
+            "shared_page_field": "factor_candidates",
+            "selection_field": "factor",
+            "id_keys": ("alias", "name", "factor_alias"),
+            "label_keys": ("alias", "name", "label"),
+            "mutation_scope": {
+                "page": "page_candidates_only",
+                "module": "module_candidates_only",
+            },
+        },
+    ))
+
+
+def register_factor_selection_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "factor",
+        "因子",
+        tab,
+        "select",
+        "",
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子: {value}",
+        serialization={
+            "kind": "factor_selection",
+            "display_order": 20,
+            "candidate_field": "factor_candidates",
+            "id_keys": ("alias", "name", "factor_alias"),
+            "label_keys": ("alias", "name", "label"),
         },
     ))
 
@@ -218,9 +279,10 @@ def register_market_data_base(app: ApplicationSettings, *, include_price_type: b
 
 def single_factor_page_settings() -> ApplicationSettings:
     app = ApplicationSettings("single_factor_page")
+    app.register_accepted_global_default_keys(*FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS, *RUN_WINDOW_KEYS)
     for module in (
         SettingModule("setting_template", "因子家族设置模板", "page", 10),
-        SettingModule("factor_parameters", "参数设置", "factor", 20),
+        SettingModule("factor_execution", "因子设置", "factor", 20),
         SettingModule("product_selection", "产品路径", "product", 30),
         SettingModule("market_data_source", "数据源", "market_data", 40),
         SettingModule("market_data_frequency", "数据频率", "market_data", 50),
@@ -242,7 +304,6 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
             20,
-            (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab(
             "product_path_selection",
@@ -286,16 +347,8 @@ def single_factor_page_settings() -> ApplicationSettings:
         module="setting_template",
         chip_template="模板: {value}",
     ))
-    app.register_setting(SettingDefinition(
-        "parameter_sets",
-        "参数设置",
-        "parameters",
-        "custom",
-        None,
-        ScopePolicy.LOCAL_ONLY,
-        module="factor_parameters",
-        chip_template="参数: {value}",
-    ))
+    register_factor_candidate_list_base(app, tab="parameters")
+    register_factor_selection_base(app, tab="parameters")
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
     register_market_data_base(app, include_price_type=False)
@@ -305,7 +358,7 @@ def single_factor_page_settings() -> ApplicationSettings:
 
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("execution_engine", "执行引擎", "backtest", 10),
         SettingModule("factor_execution", "因子执行", "factor", 20),
@@ -436,6 +489,8 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="引擎: {value}",
     ))
     register_factor_execution_base(app)
+    register_factor_candidate_list_base(app)
+    register_factor_selection_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_market_data_base(app, include_price_type=False)
@@ -753,7 +808,7 @@ def group_test_settings() -> ApplicationSettings:
 
 def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("factor_execution", "因子执行", "factor", 10),
         SettingModule("product_selection", "品种/路径选择", "product", 20),
@@ -820,6 +875,8 @@ def ic_test_settings() -> ApplicationSettings:
     ):
         app.register_chip_field(chip)
     register_factor_execution_base(app)
+    register_factor_candidate_list_base(app)
+    register_factor_selection_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
     register_market_data_base(app, include_price_type=False)
@@ -978,7 +1035,7 @@ def ic_test_settings() -> ApplicationSettings:
 
 def factor_evaluation_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_evaluation")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
         SettingModule("run_window", "计算时间范围", "time", 20),
@@ -1033,23 +1090,15 @@ def factor_evaluation_settings() -> ApplicationSettings:
     ))
     register_product_path_candidate_list_base(app, tab="product")
     register_market_data_base(app, include_price_type=True)
-    app.register_setting(SettingDefinition(
-        "factor",
-        "因子",
-        "factor",
-        "select",
-        "",
-        ScopePolicy.LOCAL_ONLY,
-        module="factor_execution",
-        chip_template="因子: {value}",
-    ))
+    register_factor_candidate_list_base(app)
+    register_factor_selection_base(app)
     return app
 
 
 def factor_type_analysis_settings() -> ApplicationSettings:
     """因子类型分析的 settings 注册（用于产品序列下方的平行模块）。"""
     app = ApplicationSettings("factor_type_analysis")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
         SettingModule("run_window", "计算时间范围", "time", 20),
@@ -1101,16 +1150,8 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
     register_market_data_base(app, include_price_type=False)
-    app.register_setting(SettingDefinition(
-        "factor",
-        "因子",
-        "factor",
-        "select",
-        "",
-        ScopePolicy.LOCAL_ONLY,
-        module="factor_execution",
-        chip_template="因子: {value}",
-    ))
+    register_factor_candidate_list_base(app)
+    register_factor_selection_base(app)
     app.register_setting(SettingDefinition(
         "correlation_method",
         "相关性方法",

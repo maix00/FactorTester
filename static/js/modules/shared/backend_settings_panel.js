@@ -145,6 +145,23 @@
         return matchesConditions((setting && setting.visible_when) || {}, values);
     }
 
+    function settingDisplayOrder(setting) {
+        var order = setting && setting.serialization && setting.serialization.display_order;
+        return order == null ? null : Number(order);
+    }
+
+    function sortSettingKeysByDisplayOrder(keys, defaults) {
+        defaults = defaults || {};
+        return (Array.isArray(keys) ? keys.slice() : []).sort(function(a, b) {
+            var ao = settingDisplayOrder(defaults[a]);
+            var bo = settingDisplayOrder(defaults[b]);
+            if (ao == null && bo == null) return 0;
+            if (ao == null) return 1;
+            if (bo == null) return -1;
+            return ao - bo;
+        });
+    }
+
     function displaySettingValue(setting, value) {
         var serializationKind = setting && setting.serialization && setting.serialization.kind;
         if (setting && Array.isArray(setting.options)) {
@@ -159,9 +176,19 @@
         if (serializationKind === 'product_path_candidate_list') {
             return (Array.isArray(value) ? value.length : 0) + '项';
         }
+        if (serializationKind === 'factor_candidate_list') {
+            return (Array.isArray(value) ? value.length : 0) + '项';
+        }
         if (serializationKind === 'product_path_selection' && value && typeof value === 'object') {
             var pps = window.ProductPathSelectionUtils;
             if (pps && typeof pps.selectionDisplayLabel === 'function') return pps.selectionDisplayLabel(value);
+        }
+        if (serializationKind === 'factor_selection' && value && typeof value === 'object') {
+            var labelKeys = setting && setting.serialization && setting.serialization.label_keys || ['alias', 'name', 'label'];
+            for (var j = 0; j < labelKeys.length; j++) {
+                var label = value[labelKeys[j]];
+                if (label !== undefined && label !== null && label !== '') return String(label);
+            }
         }
         if (Array.isArray(value)) return '未注册显示格式';
         if (value && typeof value === 'object') {
@@ -178,6 +205,8 @@
         renderChooser: renderChooser,
         matchesConditions: matchesConditions,
         settingVisibleForValues: settingVisibleForValues,
+        settingDisplayOrder: settingDisplayOrder,
+        sortSettingKeysByDisplayOrder: sortSettingKeysByDisplayOrder,
         displaySettingValue: displaySettingValue,
     };
 })();

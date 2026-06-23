@@ -282,7 +282,14 @@
                     return !!(settingsByTab[tab.key] || []).length;
                 },
                 defaultsForTab: function(tab) {
-                const rows = settingsByTab[tab.key] || [];
+                const rows = (settingsByTab[tab.key] || []).slice().sort((a, b) => {
+                    const ao = window.BackendSettingsPanel.settingDisplayOrder(a.meta);
+                    const bo = window.BackendSettingsPanel.settingDisplayOrder(b.meta);
+                    if (ao == null && bo == null) return 0;
+                    if (ao == null) return 1;
+                    if (bo == null) return -1;
+                    return ao - bo;
+                });
                     return rows.map(row => {
                     const setting = Object.assign({ key: row.key }, row.meta || {});
                         if (!setting.chip_template) return null;

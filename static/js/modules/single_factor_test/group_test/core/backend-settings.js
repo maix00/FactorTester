@@ -56,9 +56,10 @@
 
     function settingKeysForTab(tabKey) {
         var defaults = state.index && state.index.defaults || {};
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             return defaults[key] && defaults[key].tab_key === tabKey;
         });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
     }
 
     function settingIsShownInMountedTab(mount, key) {

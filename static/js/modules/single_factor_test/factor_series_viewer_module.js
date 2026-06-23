@@ -138,7 +138,7 @@
         Object.keys(defs).forEach(function(key) {
             if (defs[key] && defs[key].tab_key === tabKey) out.push(key);
         });
-        return out;
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(out, defs);
     }
 
     function effectiveValue(key) {
@@ -389,32 +389,6 @@
         return state.manifest.tab_url_template.replace('{tab_key}', encodeURIComponent(tabKey));
     }
 
-    function factorsFromParamTable() {
-        var tbody = document.getElementById('factor_table_body');
-        if (!tbody) return [];
-        return Array.from(tbody.querySelectorAll('tr')).filter(function(row) {
-            return row.id !== 'add_row' && row.style.display !== 'none';
-        }).map(function(row) {
-            var firstCell = row.querySelector('td:first-child');
-            var alias = firstCell ? (firstCell.textContent || '').trim() : '';
-            if (!alias) return null;
-            return { alias: alias, name: alias, source: 'params_table' };
-        }).filter(Boolean);
-    }
-
-    function syncFactorsFromParamTable() {
-        var rows = factorsFromParamTable();
-        if (!rows.length) return false;
-        state.factors = rows;
-        window.factorList = rows;
-        var current = effectiveValue('factor');
-        var exists = rows.some(function(factor) {
-            return String(factor.alias || factor.name || '') === String(current);
-        });
-        if (!exists) state.values.factor = rows[0].alias || rows[0].name || '';
-        return true;
-    }
-
     function loadTab(tabKey) {
         if (state.tabCache[tabKey]) return Promise.resolve(state.tabCache[tabKey]);
         return requestJSON(tabURL(tabKey)).then(function(manifest) {
@@ -424,7 +398,6 @@
     }
 
     async function loadFactors() {
-        if (syncFactorsFromParamTable()) return state.factors;
         if (state.factors.length || state.loadingFactors) return state.factors;
         state.loadingFactors = true;
         try {
@@ -448,7 +421,6 @@
     }
 
     function selectedFactor() {
-        syncFactorsFromParamTable();
         var alias = effectiveValue('factor');
         if (!alias) return null;
         return state.factors.find(function(factor) {
@@ -657,9 +629,7 @@
             return;
         }
         host.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载...</span>';
-        if (tabKey === 'factor') syncFactorsFromParamTable();
         loadTab(tabKey).then(function(manifest) {
-            if (tabKey === 'factor') syncFactorsFromParamTable();
             renderManifestTab(manifest);
             renderSettingChips();
         }).catch(function(error) {

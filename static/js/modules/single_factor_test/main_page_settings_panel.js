@@ -75,7 +75,7 @@
         Object.keys(defs).forEach(function(key) {
             if (defs[key] && defs[key].tab_key === tabKey) out.push(key);
         });
-        return out;
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(out, defs);
     }
 
     function tabHasSharedGlobalDefaults(tabKey) {
@@ -154,14 +154,6 @@
         });
         drawer.style.display = 'none';
         drawer.classList.remove('open');
-    }
-
-    function paramSummaryValue() {
-        var tbody = document.getElementById('factor_table_body');
-        var rows = tbody ? Array.from(tbody.querySelectorAll('tr')).filter(function(row) {
-            return row.id !== 'add_row' && row.style.display !== 'none';
-        }) : [];
-        return '已设置' + rows.length;
     }
 
     function templateSummaryValue() {
@@ -259,7 +251,6 @@
 
     function chipPartsForTab(tabKey) {
         if (tabKey === 'setting_template') return [{ label: '模板', value: templateSummaryValue() }];
-        if (tabKey === 'parameters') return [{ label: '参数组合', value: paramSummaryValue() }];
         return registeredTabChipParts(tabKey);
     }
 
@@ -666,12 +657,26 @@
     }
 
     function observeSummaries() {
-        ['global-tpl-save-status', 'time-summary-text', 'factor_table_body'].forEach(function(id) {
+        ['global-tpl-save-status', 'time-summary-text'].forEach(function(id) {
             var node = document.getElementById(id);
             if (!node || !window.MutationObserver) return;
             new MutationObserver(renderChips).observe(node, { childList: true, characterData: true, subtree: true });
         });
         document.addEventListener('singleFactorTemplateChanged', renderChips);
+        document.addEventListener('singleFactorFactorCandidatesChanged', function(event) {
+            var candidates = event && event.detail && Array.isArray(event.detail.candidates)
+                ? event.detail.candidates.slice()
+                : [];
+            state.values.factor_candidates = candidates;
+            var current = state.values.factor || '';
+            var exists = candidates.some(function(item) {
+                return String(item.alias || item.name || '') === String(current);
+            });
+            state.values.factor = exists ? current : (candidates[0] ? (candidates[0].alias || candidates[0].name || '') : '');
+            renderTabs();
+            renderChips();
+            broadcastGlobalSettingsChanged();
+        });
     }
 
     function init() {

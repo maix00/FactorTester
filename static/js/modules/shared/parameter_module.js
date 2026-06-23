@@ -419,6 +419,18 @@
                 tableBody.insertBefore(addRow, tableBody.firstChild);
             }
             if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+            document.dispatchEvent(new CustomEvent('singleFactorFactorCandidatesChanged', {
+                detail: {
+                    candidates: (Array.isArray(rows) ? rows : []).map(function(row) {
+                        return {
+                            alias: row.factor_alias || '',
+                            name: row.factor_alias || '',
+                            index: row.index,
+                            source: 'parameter_module',
+                        };
+                    }).filter(function(item) { return !!item.alias; }),
+                },
+            }));
         }
 
         window._renderParamFactorRows = renderFactorRows;

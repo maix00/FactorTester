@@ -359,7 +359,7 @@
         var row = document.getElementById('factor-type-analysis-chip-row');
         if (!row) return;
         row.innerHTML = '';
-        Object.keys(defaults).forEach(function (key) {
+        window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(Object.keys(defaults), defaults).forEach(function (key) {
             var setting = Object.assign({ key: key }, defaults[key] || {});
             var parts = settingChipParts(setting);
             if (!parts) return;
