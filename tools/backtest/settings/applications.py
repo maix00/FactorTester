@@ -756,10 +756,11 @@ def factor_evaluation_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_evaluation")
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
-        SettingModule("market_data_source", "数据源", "market_data", 20),
-        SettingModule("market_data_frequency", "价格频率", "market_data", 30),
-        SettingModule("price_transform", "价格处理", "market_data", 40),
-        SettingModule("factor_execution", "因子选择", "factor", 50),
+        SettingModule("run_window", "计算时间范围", "time", 20),
+        SettingModule("market_data_source", "数据源", "market_data", 30),
+        SettingModule("market_data_frequency", "价格频率", "market_data", 40),
+        SettingModule("price_transform", "价格处理", "market_data", 50),
+        SettingModule("factor_execution", "因子选择", "factor", 60),
     ):
         app.register_module(module)
     for tab in (
@@ -771,19 +772,30 @@ def factor_evaluation_settings() -> ApplicationSettings:
             10,
             (TabMountPoint.LOCAL_SETTINGS,),
         ),
-        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 20),
-        SettingTab("frequency", "频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 30),
-        SettingTab("price_type", "价格类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
+        SettingTab(
+            "time",
+            "时间范围",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            20,
+            (TabMountPoint.LOCAL_SETTINGS,),
+            summary_template="{start_date} → {end_date} · {time_precision}",
+            summary_keys=("start_date", "end_date", "time_precision"),
+        ),
+        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 30),
+        SettingTab("frequency", "频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 40),
+        SettingTab("price_type", "价格类型", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 50),
         SettingTab(
             "factor",
             "因子",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
-            50,
+            60,
             (TabMountPoint.LOCAL_SETTINGS,),
         ),
     ):
         app.register_tab(tab)
+    register_run_window_base(app)
     app.register_setting(SettingDefinition(
         "product",
         "产品路径",

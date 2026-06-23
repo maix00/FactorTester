@@ -19,6 +19,7 @@ from server.modules.shared.submission_helpers import product_attrs
 from server.modules.shared.submission_model import ProductPathSelection
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, get_session_params
+from tools.data.types import DataTime
 
 
 @dataclass(slots=True)
@@ -64,9 +65,12 @@ class FactorEvaluation:
 
     def run(self) -> dict[str, Any]:
         started_at = time.time()
+        start_dt, end_dt = self._run_window_datetimes()
         tester = create_factor_tester_for_run(
             self.selection,
             page_uuid=self.page_uuid,
+            start_dt=start_dt,
+            end_dt=end_dt,
             user=current_user_obj(),
         )
         factor_family = get_factor_family_instance(
@@ -144,6 +148,25 @@ class FactorEvaluation:
                 "product_count": len(series_items),
             },
         }
+
+    def _run_window_datetimes(self) -> tuple[DataTime | None, DataTime | None]:
+        settings = self.settings or {}
+        start_date = str(settings.get("start_date") or "").strip()
+        end_date = str(settings.get("end_date") or "").strip()
+        if not start_date or not end_date:
+            return None, None
+        precision = str(settings.get("time_precision") or "exact")
+        if precision == "trading_day":
+            timezone = str(settings.get("timezone") or "UTC")
+            start = pd.Timestamp(start_date).tz_localize(timezone)
+            end = pd.Timestamp(end_date).tz_localize(timezone)
+            return DataTime(ts=start, precision="trading_day"), DataTime(ts=end, precision="trading_day")
+        timezone = str(settings.get("timezone") or "Asia/Shanghai")
+        start_time = str(settings.get("start_time") or "00:00")
+        end_time = str(settings.get("end_time") or "23:59")
+        start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
+        end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
+        return DataTime(ts=start), DataTime(ts=end)
 
     @staticmethod
     def _returns_payload(result: Any, product: Any, factor: Any, tester: Any) -> dict[str, Any] | None:

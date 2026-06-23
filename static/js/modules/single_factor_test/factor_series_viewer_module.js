@@ -147,6 +147,15 @@
         return meta ? meta.value : '';
     }
 
+    function settingVisibleForValues(setting, values) {
+        var visibleWhen = setting && setting.visible_when || {};
+        return Object.keys(visibleWhen).every(function(key) {
+            var allowed = visibleWhen[key];
+            if (!Array.isArray(allowed)) allowed = [allowed];
+            return allowed.map(String).indexOf(String(values[key])) >= 0;
+        });
+    }
+
     function displayValue(setting, value) {
         if (setting && Array.isArray(setting.options)) {
             for (var i = 0; i < setting.options.length; i++) {
@@ -209,6 +218,68 @@
         var name = state.currentProduct.name || state.activeProduct || '';
         var desc = state.currentProduct.desc || '';
         return desc && desc !== name ? name + ' · ' + desc : name;
+    }
+
+    function runWindowPayload() {
+        var precision = effectiveValue('time_precision') || 'exact';
+        var tradingDayMode = precision === 'trading_day';
+        return {
+            start_date: effectiveValue('start_date') || '',
+            end_date: effectiveValue('end_date') || '',
+            start_time: tradingDayMode ? '' : (effectiveValue('start_time') || '00:00'),
+            end_time: tradingDayMode ? '' : (effectiveValue('end_time') || '23:59'),
+            time_precision: precision,
+            timezone: tradingDayMode ? '' : (effectiveValue('timezone') || 'Asia/Shanghai'),
+        };
+    }
+
+    function runWindowBoundsMs() {
+        var payload = runWindowPayload();
+        if (!payload.start_date || !payload.end_date) return { start: null, end: null };
+        var startText = payload.start_date + (payload.time_precision === 'trading_day' ? 'T00:00:00' : ('T' + (payload.start_time || '00:00')));
+        var endText = payload.end_date + (payload.time_precision === 'trading_day' ? 'T23:59:59.999' : ('T' + (payload.end_time || '23:59')));
+        var start = new Date(startText).getTime();
+        var end = new Date(endText).getTime();
+        return {
+            start: Number.isFinite(start) ? start : null,
+            end: Number.isFinite(end) ? end : null,
+        };
+    }
+
+    function filterRowsByRunWindow(rows) {
+        var bounds = runWindowBoundsMs();
+        if (bounds.start == null && bounds.end == null) return rows || [];
+        return (rows || []).filter(function(row) {
+            var ts = row && row.timestamp;
+            return ts != null
+                && (bounds.start == null || ts >= bounds.start)
+                && (bounds.end == null || ts <= bounds.end);
+        });
+    }
+
+    function filterPointsByRunWindow(points) {
+        var bounds = runWindowBoundsMs();
+        if (bounds.start == null && bounds.end == null) return points || [];
+        return (points || []).filter(function(point) {
+            var ts = point && point[0];
+            return ts != null
+                && (bounds.start == null || ts >= bounds.start)
+                && (bounds.end == null || ts <= bounds.end);
+        });
+    }
+
+    function contractOverlapsRunWindow(contract) {
+        var bounds = runWindowBoundsMs();
+        var start = contract && (contract.start_ts || pointTime(contract.start));
+        var end = contract && (contract.end_ts || pointTime(contract.end));
+        if (bounds.start == null && bounds.end == null) return true;
+        if (start == null || end == null) return true;
+        return (bounds.start == null || end >= bounds.start) && (bounds.end == null || start <= bounds.end);
+    }
+
+    function showChartLoading(text) {
+        var chart = document.getElementById('factor-series-chart-container');
+        if (chart) chart.innerHTML = message(text || '正在加载...');
     }
 
     function mountedSettingKeys() {
@@ -376,7 +447,10 @@
         var host = document.getElementById('factor-series-settings-host');
         if (!host) return;
         host.innerHTML = '';
+        var values = {};
+        Object.keys(defaults()).forEach(function(key) { values[key] = effectiveValue(key); });
         (manifest.settings || []).forEach(function(setting) {
+            if (!settingVisibleForValues(setting, values)) return;
             var row = document.createElement('label');
             row.className = 'factor-series-setting-row';
             if (setting.key === 'product') row.className += ' factor-series-setting-row-wide';
@@ -408,7 +482,15 @@
             setTimeout(mountProductTree, 0);
             return wrap;
         }
-        var control = document.createElement('select');
+        var control = setting.control_template === 'select' ? document.createElement('select') : document.createElement('input');
+        if (control.tagName !== 'SELECT') {
+            control.type = setting.control_template === 'date' || setting.control_template === 'time' || setting.control_template === 'number'
+                ? setting.control_template : 'text';
+            if (setting.step != null) control.step = String(setting.step);
+            if (setting.minimum != null) control.min = String(setting.minimum);
+            if (setting.maximum != null) control.max = String(setting.maximum);
+            control.value = effectiveValue(setting.key) || '';
+        }
         if (setting.key === 'factor') {
             if (!state.factors.length) {
                 control.insertAdjacentHTML(
@@ -426,19 +508,22 @@
                 var label = value + (factor.freq ? ' · ' + factor.freq : '');
                 control.insertAdjacentHTML('beforeend', optionHtml(value, label, effectiveValue(setting.key)));
             });
-        } else {
+        } else if (control.tagName === 'SELECT') {
             (setting.options || []).forEach(function(option) {
                 control.insertAdjacentHTML('beforeend', optionHtml(option.value, option.label, effectiveValue(setting.key)));
             });
         }
         control.addEventListener('change', function() {
             writeValue(setting.key, control.value);
+            if (setting.key === 'time_precision') refreshActiveTab();
             if (setting.key === 'data_source') writeValue('frequency', '');
             if (setting.key === 'frequency') writeValue('data_source', '');
-            if (state.currentProduct && (setting.key === 'data_source' || setting.key === 'frequency' || setting.key === 'price_type')) {
-                loadPriceDataForCurrentProduct().then(function(priceData) {
-                    drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
-                }).catch(showResultError);
+            if (state.currentProduct && (
+                setting.key === 'data_source' || setting.key === 'frequency' || setting.key === 'price_type'
+                || setting.key === 'start_date' || setting.key === 'end_date' || setting.key === 'start_time'
+                || setting.key === 'end_time' || setting.key === 'timezone' || setting.key === 'time_precision'
+            )) {
+                activateSeriesProduct(state.activeProduct);
             }
         });
         return control;
@@ -567,9 +652,9 @@
             state.currentProduct = productMetaForName(state.activeProduct, item);
             state.selectionKind = state.selectionKind || 'product';
             var title = document.getElementById('factor-series-chart-title');
-            if (title) title.textContent = displayProductLabel() || '— 请选择产品路径 —';
+            if (title) title.textContent = '因子序列';
             var selectedSummary = document.getElementById('factor-series-product-selected-summary');
-            if (selectedSummary) selectedSummary.textContent = displayProductLabel();
+            if (selectedSummary) selectedSummary.textContent = '';
         }
     }
 
@@ -655,9 +740,9 @@
         writeValue('product', String(node.key));
         var label = productLabel();
         var title = document.getElementById('factor-series-chart-title');
-        if (title) title.textContent = label || '— 请选择产品路径 —';
+        if (title) title.textContent = '因子序列';
         var selectedSummary = document.getElementById('factor-series-product-selected-summary');
-        if (selectedSummary) selectedSummary.textContent = label ? ('已选择产品路径：' + label) : '已选择产品路径';
+        if (selectedSummary) selectedSummary.textContent = '';
         var termContainer = document.getElementById('factor-series-term-table-container');
         if (termContainer) termContainer.style.display = 'none';
         var chart = document.getElementById('factor-series-chart-container');
@@ -708,11 +793,12 @@
     function renderTermTableRows(container, tbody, contracts) {
         if (!container || !tbody) return;
         tbody.innerHTML = '';
-        if (!contracts.length) {
+        var visibleContracts = (contracts || []).filter(contractOverlapsRunWindow);
+        if (!visibleContracts.length) {
             container.style.display = 'none';
             return;
         }
-        contracts.forEach(function(c) {
+        visibleContracts.forEach(function(c) {
             var tr = document.createElement('tr');
             var contractCell = c.has_data
                 ? '<a href="/products?contract_uid=' + encodeURIComponent(c.uid) + '" title="查看合约信息">' + escapeHtml(c.contract) + '</a>'
@@ -720,9 +806,39 @@
             tr.innerHTML = '<td>' + contractCell + '</td>'
                 + '<td>' + escapeHtml(c.start || c.start_ts || '') + '</td>'
                 + '<td>' + escapeHtml(c.end || c.end_ts || '') + '</td>';
+            tr.addEventListener('click', function(event) {
+                if (event.target && event.target.tagName === 'A') event.preventDefault();
+                highlightContractRange(c);
+            });
             tbody.appendChild(tr);
         });
         container.style.display = 'block';
+    }
+
+    function highlightContractRange(contract) {
+        if (!state.chart || !state.chart.xAxis || !state.chart.xAxis[0] || !contract) return;
+        var axis = state.chart.xAxis[0];
+        try { axis.removePlotBand('factor-series-selected-contract'); } catch (err) {}
+        var from = contract.start_ts || pointTime(contract.start);
+        var to = contract.end_ts || pointTime(contract.end);
+        if (from == null || to == null) return;
+        var min = axis.min;
+        var max = axis.max;
+        var fullyVisible = min != null && max != null && from >= min && to <= max;
+        if (!fullyVisible && typeof axis.setExtremes === 'function') {
+            axis.setExtremes(from, to, true, false, { trigger: 'factor-series-contract-range' });
+        }
+        axis.addPlotBand({
+            id: 'factor-series-selected-contract',
+            from: from,
+            to: to,
+            color: 'rgba(37,99,235,0.08)',
+            label: {
+                text: (contract.contract || '') + ' · ' + (contract.start || '') + ' → ' + (contract.end || ''),
+                style: { color: '#1d4ed8', fontSize: '11px', fontWeight: '600' },
+            },
+            zIndex: 3,
+        });
     }
 
     async function loadTermTable(productName) {
@@ -733,7 +849,11 @@
         tbody.innerHTML = '';
         if (!productName) return;
         try {
-            var data = await requestJSON('/api/get_contracts?product=' + encodeURIComponent(normalizeProductForContractApi(productName)));
+            var windowPayload = runWindowPayload();
+            var query = new URLSearchParams({ product: normalizeProductForContractApi(productName) });
+            if (windowPayload.start_date) query.set('start_date', windowPayload.start_date);
+            if (windowPayload.end_date) query.set('end_date', windowPayload.end_date);
+            var data = await requestJSON('/api/get_contracts?' + query.toString());
             state.currentContracts = Array.isArray(data.contracts) ? data.contracts : [];
             renderTermTableRows(container, tbody, state.currentContracts);
         } catch (err) {
@@ -759,6 +879,7 @@
             freq: effectiveValue('frequency') || '',
             data_source: effectiveValue('data_source') || null,
         };
+        Object.assign(reqBody, runWindowPayload());
         if (product.contract_uid || product.product_type === 'contract') {
             reqBody.contract_uid = product.contract_uid || product.name;
             reqBody.adjusted = false;
@@ -834,6 +955,7 @@
     function activateSeriesProduct(productName) {
         var item = state.lastSeries.find(function(series) { return series.product === productName; }) || null;
         setActiveProduct(productName, item);
+        showChartLoading('正在加载 ' + displayProductLabel() + '...');
         loadTermTable(productName);
         return loadPriceDataForCurrentProduct().then(function(priceData) {
             drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
@@ -898,10 +1020,10 @@
             container.innerHTML = message('Highcharts 未加载，无法显示图表。', true);
             return;
         }
-        var rows = priceData && Array.isArray(priceData.data) ? priceData.data.slice().sort(function(a, b) {
+        var rows = priceData && Array.isArray(priceData.data) ? filterRowsByRunWindow(priceData.data).slice().sort(function(a, b) {
             return (a.timestamp || 0) - (b.timestamp || 0);
         }) : [];
-        var factorData = factorPoints(item);
+        var factorData = filterPointsByRunWindow(factorPoints(item));
         if (!rows.length && !factorData.length) {
             container.innerHTML = message('没有可显示的价格或因子序列。', true);
             return;
@@ -938,7 +1060,6 @@
             height: hasOi ? '44%' : '50%',
             lineWidth: 2,
             resize: { enabled: true },
-            plotBands: plotBands,
         }, {
             labels: { align: 'right', x: -3 },
             title: { text: '' },
@@ -1034,6 +1155,7 @@
                 },
             },
             ordinal: true,
+            plotBands: plotBands,
         };
         state.chart = window.Highcharts.stockChart(container, {
             chart: { animation: false, height: Math.max(520, Math.floor(container.getBoundingClientRect().height || 520)) },
