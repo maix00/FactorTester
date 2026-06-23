@@ -1,0 +1,56 @@
+.backend-settings-shell {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.backend-settings-tab-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #eef2f7;
+    background: #fafbfc;
+}
+
+.backend-settings-tab-bar button {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.backend-settings-tab-bar button.active {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 700;
+}
+
+.backend-settings-chip-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 7px 12px;
+    min-height: 36px;
+    box-sizing: border-box;
+}
+
+.backend-settings-chip-row:empty {
+    display: none;
+}
+
+.backend-settings-host {
+    padding: 8px 12px;
+    border-top: 1px solid #eef2f7;
+    font-size: 12px;
+}

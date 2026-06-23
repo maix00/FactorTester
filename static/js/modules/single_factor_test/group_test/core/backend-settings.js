@@ -375,7 +375,8 @@
                 control.appendChild(option);
             });
         } else if (setting.control_template === 'date') {
-            control = makeDateControl(setting, mount);
+            control = document.createElement('input');
+            control.type = 'date';
         } else if (setting.control_template === 'number' || setting.control_template === 'time') {
             control = document.createElement('input');
             control.type = setting.control_template;
@@ -397,122 +398,6 @@
             rerenderAfterChange();
         });
         return control;
-    }
-
-    function makeDateControl(setting, mount) {
-        var wrap = document.createElement('span');
-        wrap.className = 'gt-backtest-date-control';
-        wrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
-        var year = makeDatePart('year', '年', 4, '72px');
-        var month = makeDatePart('month', '月', 2, '46px');
-        var day = makeDatePart('day', '日', 2, '46px');
-        wrap.appendChild(year);
-        wrap.appendChild(dateSep('-'));
-        wrap.appendChild(month);
-        wrap.appendChild(dateSep('-'));
-        wrap.appendChild(day);
-
-        function setValue(value) {
-            var parts = parseDateParts(value);
-            year.value = parts.year;
-            month.value = parts.month;
-            day.value = parts.day;
-        }
-
-        function getValue() {
-            var y = sanitizeDigits(year.value).slice(-4);
-            var m = padDatePart(sanitizeDigits(month.value), 2);
-            var d = padDatePart(sanitizeDigits(day.value), 2);
-            if (y.length !== 4 || !m || !d) return '';
-            return y + '-' + m + '-' + d;
-        }
-
-        function normalizePart(part) {
-            part.value = sanitizeDigits(part.value).slice(part === year ? -4 : -2);
-            if (part === year) {
-                if (part.value.length === 4) {
-                    var y = clampNumber(part.value, 1900, 2100);
-                    part.value = String(y);
-                }
-                return;
-            }
-            if (part === month) {
-                part.value = padDatePart(clampNumber(part.value, 1, 12), 2);
-                normalizeDay();
-                return;
-            }
-            normalizeDay();
-        }
-
-        function normalizeDay() {
-            var y = parseInt(year.value, 10);
-            var m = parseInt(month.value, 10);
-            var maxDay = window.DateUtils && y && m ? window.DateUtils.getMaxDay(y, m) : 31;
-            day.value = padDatePart(clampNumber(day.value, 1, maxDay), 2);
-        }
-
-        [year, month, day].forEach(function(part) {
-            part.addEventListener('focus', function() { this.select(); });
-            part.addEventListener('input', function() {
-                this.value = sanitizeDigits(this.value).slice(this === year ? -4 : -2);
-            });
-            part.addEventListener('blur', function() {
-                normalizePart(this);
-                dispatchControlChange(wrap);
-            });
-            part.addEventListener('change', function() {
-                normalizePart(this);
-                dispatchControlChange(wrap);
-            });
-        });
-
-        Object.defineProperty(wrap, 'value', {
-            get: getValue,
-            set: setValue,
-        });
-        Object.defineProperty(wrap, 'disabled', {
-            get: function() { return year.disabled && month.disabled && day.disabled; },
-            set: function(disabled) {
-                [year, month, day].forEach(function(part) { part.disabled = !!disabled; });
-            },
-        });
-        wrap.value = effectiveValue(setting, mount);
-        return wrap;
-    }
-
-    function dispatchControlChange(control) {
-        if (!control) return;
-        if (typeof Event === 'function' && typeof control.dispatchEvent === 'function') {
-            control.dispatchEvent(new Event('change', { bubbles: true }));
-            return;
-        }
-        var listeners = control.listeners && control.listeners.change;
-        if (Array.isArray(listeners)) {
-            listeners.forEach(function(listener) {
-                listener.call(control, { type: 'change', target: control });
-            });
-        }
-    }
-
-    function makeDatePart(part, placeholder, maxLength, width) {
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.inputMode = 'numeric';
-        input.setAttribute('data-date-part', part);
-        input.placeholder = placeholder;
-        input.style.cssText = 'width:' + width + ';text-align:center;padding:5px 6px;border:1px solid #d8dee4;border-radius:6px;font-size:12px;';
-        input.min = part === 'year' ? '1900' : '1';
-        input.max = part === 'year' ? '2100' : (part === 'month' ? '12' : '31');
-        input.step = '1';
-        input.setAttribute('maxlength', String(maxLength));
-        return input;
-    }
-
-    function dateSep(text) {
-        var sep = document.createElement('span');
-        sep.textContent = text;
-        sep.style.cssText = 'color:#94a3b8;font-size:12px;';
-        return sep;
     }
 
     function parseDateParts(value) {
@@ -594,8 +479,10 @@
             row.appendChild(controlWrap);
             grid.appendChild(row);
         });
-        renderChips();
-        container.appendChild(chips);
+        if (mount !== LOCAL) {
+            renderChips();
+            container.appendChild(chips);
+        }
         container.appendChild(grid);
     }
 
@@ -733,7 +620,7 @@
             if (!isMounted(LOCAL, tab.key)) return;
             var button = document.createElement('button');
             button.type = 'button';
-            button.className = 'btn btn-sm btn-outline-secondary';
+            button.className = '';
             button.textContent = tab.label;
             button.setAttribute('data-backtest-local-tab', tab.key);
             button.addEventListener('click', function() { openLocal(tab.key); });
@@ -741,7 +628,7 @@
         });
         var manage = document.createElement('button');
         manage.type = 'button';
-        manage.className = 'btn btn-sm btn-outline-secondary';
+        manage.className = '';
         manage.textContent = '+ 回测设置';
         manage.setAttribute('data-backtest-local-tab', '__manage__');
         manage.addEventListener('click', function() { openLocal('__manage__'); });

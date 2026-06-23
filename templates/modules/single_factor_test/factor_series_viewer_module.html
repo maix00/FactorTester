@@ -22,10 +22,10 @@
             </div>
         </div>
         <div id="factor-series-viewer-body" style="display:none;">
-            <div id="factor-series-settings-shell" class="factor-series-settings-shell">
-                <div id="factor-series-settings-tab-bar" class="factor-series-settings-tab-bar"></div>
-                <div id="factor-series-settings-chip-row" class="factor-series-settings-chip-row"></div>
-                <div id="factor-series-settings-host" class="factor-series-settings-host" style="display:none;"></div>
+            <div id="factor-series-settings-shell" class="factor-series-settings-shell backend-settings-shell">
+                <div id="factor-series-settings-tab-bar" class="factor-series-settings-tab-bar backend-settings-tab-bar"></div>
+                <div id="factor-series-settings-chip-row" class="factor-series-settings-chip-row backend-settings-chip-row"></div>
+                <div id="factor-series-settings-host" class="factor-series-settings-host backend-settings-host" style="display:none;"></div>
             </div>
             <div id="factor-series-result-panel" class="factor-series-result-panel">
                 <div class="factor-series-result-header">
@@ -161,54 +161,11 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .factor-series-settings-shell,
     .factor-series-result-panel {
         border: 1px solid #e5e7eb;
         border-radius: 8px;
         background: #fff;
         overflow: hidden;
-    }
-    .factor-series-settings-tab-bar {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-        align-items: center;
-        min-height: 36px;
-        padding: 6px 12px;
-        border-bottom: 1px solid #eef2f7;
-        background: #fafbfc;
-    }
-    .factor-series-settings-tab-bar button {
-        height: 28px;
-        padding: 0 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #fff;
-        color: #475569;
-        font-size: 12px;
-        cursor: pointer;
-    }
-    .factor-series-settings-tab-bar button.active {
-        border-color: #2563eb;
-        background: #eff6ff;
-        color: #1d4ed8;
-        font-weight: 700;
-    }
-    .factor-series-settings-chip-row {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-        padding: 7px 12px;
-        min-height: 36px;
-        box-sizing: border-box;
-    }
-    .factor-series-settings-chip-row:empty {
-        display: none;
-    }
-    .factor-series-settings-host {
-        padding: 8px 12px;
-        border-top: 1px solid #eef2f7;
-        font-size: 12px;
     }
     .factor-series-setting-row {
         display: grid;

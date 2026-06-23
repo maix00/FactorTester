@@ -3,16 +3,18 @@
     </style>
     <div class="section-title">分组测试</div>
 
-    <div class="group-test-layer" id="gt-layer-backtest-settings">
-        <div id="gt-local-settings-tab-bar"></div>
+    <div class="group-test-layer gt-backtest-settings-shell backend-settings-shell" id="gt-layer-backtest-settings">
+        <div id="gt-local-settings-tab-bar" class="gt-backtest-settings-tab-bar backend-settings-tab-bar"></div>
         <div
             id="gt-local-settings-chip-row"
-            style="display:none;gap:6px;flex-wrap:wrap;margin-top:6px;"
+            class="gt-backtest-settings-chip-row backend-settings-chip-row"
+            style="display:none;"
         ></div>
         <div
             id="gt-backtest-local-host"
             data-application="group_test"
-            style="display:none;margin-top:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"
+            class="gt-backtest-settings-host backend-settings-host"
+            style="display:none;"
         ></div>
     </div>
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -779,8 +781,7 @@
         color: #0f4c81;
         font-weight: 600;
     }
-    #group_test_module #gt-tab-actions .btn,
-    #group_test_module #gt-local-settings-tab-bar .btn {
+    #group_test_module #gt-tab-actions .btn {
         min-height: 28px;
         line-height: 1;
         display: inline-flex;
@@ -797,12 +798,12 @@
     }
     #group_test_module .gt-backtest-setting-row {
         display: grid;
-        grid-template-columns: minmax(92px, 132px) minmax(150px, 1fr);
+        grid-template-columns: minmax(90px, 0.35fr) minmax(160px, 0.65fr);
         align-items: center;
-        gap: 8px;
-        padding: 6px 0;
-        border-bottom: 1px solid #eef2f7;
-        font-size: 12px;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 11px;
         color: #334155;
     }
     #group_test_module .gt-backtest-setting-row:last-child {
@@ -810,7 +811,6 @@
     }
     #group_test_module .gt-backtest-setting-label {
         color: #64748b;
-        font-weight: 500;
         white-space: nowrap;
     }
     #group_test_module .gt-backtest-setting-control {
@@ -819,14 +819,13 @@
     #group_test_module .gt-backtest-setting-control select,
     #group_test_module .gt-backtest-setting-control input {
         width: 100%;
-        min-height: 28px;
-        padding: 4px 8px;
-        border: 1px solid #d0d5dd;
-        border-radius: 4px;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
         background: #fff;
         color: #1f2937;
-        font-size: 12px;
-        line-height: 1.2;
+        font-size: 11px;
     }
     #group_test_module .gt-backtest-settings-chooser-intro {
         color: #667085;

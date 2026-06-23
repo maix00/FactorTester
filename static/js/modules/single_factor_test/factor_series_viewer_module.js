@@ -194,16 +194,19 @@
         return template.replace('{value}', displayValue(setting, value));
     }
 
-    function makeChip(setting, value) {
+    function makeChip(setting, value, explicitTabKey) {
+        var tabKey = explicitTabKey || setting.tab_key || setting.tab || '';
         var node = document.createElement('span');
         node.className = 'gt-backend-chip factor-series-settings-chip';
         node.innerHTML = renderChipHtml(chipText(setting, value));
-        node.setAttribute('data-factor-series-tab-key', setting.tab_key || '');
-        node.title = '打开' + (tabMeta(setting.tab_key) && tabMeta(setting.tab_key).label || setting.tab_key || '设置');
-        node.style.cursor = 'pointer';
-        node.addEventListener('click', function() {
-            if (setting.tab_key) openTab(setting.tab_key);
-        });
+        node.setAttribute('data-factor-series-tab-key', tabKey);
+        if (tabKey) {
+            node.title = '打开' + (tabMeta(tabKey) && tabMeta(tabKey).label || tabKey);
+            node.style.cursor = 'pointer';
+            node.addEventListener('click', function() {
+                openTab(tabKey);
+            });
+        }
         return node;
     }
 
@@ -359,7 +362,7 @@
                 var value = effectiveValue(setting.key);
                 if (setting.key === 'product' && !state.paths.length) return;
                 if (setting.key === 'factor' && !selectedFactor()) return;
-                row.appendChild(makeChip(setting, value));
+                row.appendChild(makeChip(setting, value, tabKey));
             });
         });
     }
@@ -373,7 +376,7 @@
             if (mountedKeys[key]) return;
             var setting = Object.assign({ key: key }, defaults()[key] || {});
             if (!setting.chip_template) return;
-            row.appendChild(makeChip(setting, effectiveValue(key)));
+            row.appendChild(makeChip(setting, effectiveValue(key), setting.tab_key));
         });
     }
 
