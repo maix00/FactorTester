@@ -1184,11 +1184,33 @@ def build_flat_membership_from_groups(
     slices: list[np.ndarray] = []
     group_info: list[dict] = []
 
+    def _apply_group_signal_window(group: Any, mask_1g: np.ndarray, shared: Any) -> np.ndarray:
+        start_dt = getattr(group, "signal_start_dt", None)
+        end_dt = getattr(group, "signal_end_dt", None)
+        if start_dt is None and end_dt is None:
+            return mask_1g
+        index_list = getattr(shared, "index_list", None)
+        if index_list is None:
+            return mask_1g
+        time_mask = DataIndex(pd.Index(index_list)).slice_by_datatime(start_dt, end_dt)
+        time_mask = np.asarray(time_mask, dtype=bool)
+        if time_mask.shape[0] != mask_1g.shape[0]:
+            raise ValueError(
+                f"group signal window mask length mismatch: mask={time_mask.shape[0]} "
+                f"membership={mask_1g.shape[0]} group={getattr(group, 'name', '')}"
+            )
+        clipped = mask_1g.copy()
+        clipped[~time_mask, :, :] = False
+        return clipped
+
     for gi, group in enumerate(groups):
         triple = group.triple_key
+        shared = shared_inputs_by_triple.get(triple)
         base_membership = memberships_by_triple.get(triple)
         if base_membership is None:
             raise ValueError(f"Missing base membership for triple {triple}")
+        if shared is None:
+            raise ValueError(f"Missing shared inputs for triple {triple}")
         valid_cols = signal_valid_cols_by_triple.get(triple) or []
         if not list(valid_cols):
             valid_cols = list(first_valid_cols)
@@ -1215,6 +1237,7 @@ def build_flat_membership_from_groups(
             if selected_idx:
                 sel = np.asarray(selected_idx, dtype=int)
                 mask_1g[:, 0, sel] = source_row[:, sel]
+            mask_1g = _apply_group_signal_window(group, mask_1g, shared)
             slices.append(mask_1g)
             group_info.append({
                 'group_index': group.group_index,
@@ -1231,10 +1254,13 @@ def build_flat_membership_from_groups(
                 'liquidity_mode': group.liquidity_mode,
                 'liquidity_percent': group.liquidity_percent,
                 'margin_mode': group.margin_mode,
+                'signal_start_dt': group.signal_start_dt,
+                'signal_end_dt': group.signal_end_dt,
             })
         else:
             # Identity group: copy the row directly
             mask_1g = source_row[:, np.newaxis, :].copy()  # (T, 1, P)
+            mask_1g = _apply_group_signal_window(group, mask_1g, shared)
             slices.append(mask_1g)
             group_info.append({
                 'group_index': group.group_index,
@@ -1251,6 +1277,8 @@ def build_flat_membership_from_groups(
                 'liquidity_mode': group.liquidity_mode,
                 'liquidity_percent': group.liquidity_percent,
                 'margin_mode': group.margin_mode,
+                'signal_start_dt': group.signal_start_dt,
+                'signal_end_dt': group.signal_end_dt,
             })
         _emit_progress("flat_membership", f"展开分组隶属度 {gi+1}/{len(groups)}",
                        completed=gi + 1, total=len(groups))

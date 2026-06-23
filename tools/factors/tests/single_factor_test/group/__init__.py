@@ -59,6 +59,9 @@ class _FactorGroupTestGroup:
         Liquidity percentage override for this group.
     margin_mode : str | None
         Margin mode override for this group.
+    signal_start_dt, signal_end_dt
+        Optional per-group signal window. This only masks this group's
+        membership signal; it does not redefine the global replay window.
     """
 
     # ── Identity ──
@@ -82,6 +85,8 @@ class _FactorGroupTestGroup:
     liquidity_mode: Optional[str] = None
     liquidity_percent: Optional[float] = None
     margin_mode: Optional[str] = None
+    signal_start_dt: Optional[object] = None
+    signal_end_dt: Optional[object] = None
 
     # ── Display ──
     _id: Optional[str] = field(default=None, compare=False, repr=False)
@@ -109,6 +114,8 @@ class _FactorGroupTestGroup:
             'liquidity_mode': self.liquidity_mode,
             'liquidity_percent': self.liquidity_percent,
             'margin_mode': self.margin_mode,
+            'signal_start_dt': self.signal_start_dt,
+            'signal_end_dt': self.signal_end_dt,
             '_id': self._id,
         }
 

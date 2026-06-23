@@ -194,26 +194,21 @@ def _resolve_flat_backtest_settings(
 ) -> dict[str, dict[str, Any]]:
     app = backtest_setting_registry.get("group_test")
     setting_keys = set(app.settings)
-    runtime_window = payload.get("_runtime_window")
-    runtime_defaults = runtime_window if isinstance(runtime_window, dict) else {}
-    local_values = {
-        key: payload[key]
-        for key in setting_keys
-        if key in payload
-    }
-    for source_key, target_key in (
-        ("start_date", "start_date"),
-        ("end_date", "end_date"),
-        ("start_time", "start_time"),
-        ("end_time", "end_time"),
-        ("time_precision", "time_precision"),
-        ("timezone", "timezone"),
-    ):
-        if target_key not in local_values and source_key in runtime_defaults:
-            local_values[target_key] = runtime_defaults[source_key]
-    # Keep existing request aliases as local fields.
-    if "precision" in payload and "time_precision" not in local_values:
-        local_values["time_precision"] = payload["precision"]
+    raw_local_settings = payload.get("local_settings")
+    top_level_setting_keys = setting_keys.intersection(payload)
+    if top_level_setting_keys:
+        raise ValueError(
+            "registered settings must be nested under local_settings, "
+            f"not top-level: {sorted(top_level_setting_keys)}"
+        )
+    if isinstance(raw_local_settings, dict):
+        local_values = {
+            key: raw_local_settings[key]
+            for key in setting_keys
+            if key in raw_local_settings
+        }
+    else:
+        local_values = {}
 
     group_ids: list[str] = []
     group_values: dict[str, dict[str, Any]] = {}
@@ -234,6 +229,11 @@ def _resolve_flat_backtest_settings(
     )
 
 
+def _payload_local_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    local_settings = payload.get("local_settings")
+    return local_settings if isinstance(local_settings, dict) else {}
+
+
 def _setting_value_label(definition, value: Any) -> str:
     text = str(value)
     for option in definition.options:
@@ -251,7 +251,8 @@ def _silent_default_settings_for_run(
     """Summarize strategy defaults applied because the sparse request omitted them."""
 
     app = backtest_setting_registry.get("group_test")
-    explicit_local = set(payload)
+    local_settings = _payload_local_settings(payload)
+    explicit_local = set(local_settings) if local_settings else set(payload)
     explicit_by_group: dict[str, set[str]] = {}
     for index, item in enumerate(list(groups) + list(ls_configs or [])):
         if not isinstance(item, dict):
@@ -294,10 +295,10 @@ def _silent_default_settings_for_run(
 
 
 def _runtime_time_value(payload: dict[str, Any], key: str, default: Any = None) -> Any:
-    runtime_window = payload.get("_runtime_window")
-    if isinstance(runtime_window, dict) and runtime_window.get(key) not in (None, ""):
-        return runtime_window[key]
-    return payload.get(key, default)
+    local_settings = _payload_local_settings(payload)
+    if local_settings.get(key) not in (None, ""):
+        return local_settings[key]
+    return default
 
 
 def _runtime_datetimes(payload: dict[str, Any]):
@@ -329,6 +330,39 @@ def _runtime_datetimes(payload: dict[str, Any]):
     if missing:
         raise ValueError("运行时间范围缺失: " + ", ".join(missing))
     return start_dt, end_dt
+
+
+def _settings_datetimes(settings: dict[str, Any]):
+    return _runtime_datetimes({"local_settings": settings})
+
+
+def _has_run_window_values(settings: dict[str, Any]) -> bool:
+    return bool(settings.get("start_date") and settings.get("end_date"))
+
+
+def _resolve_run_datetimes(
+    local_settings: dict[str, Any],
+    resolved_settings: dict[str, dict[str, Any]],
+):
+    if _has_run_window_values(local_settings):
+        return _settings_datetimes(local_settings)
+    windows = []
+    for settings in resolved_settings.values():
+        if not _has_run_window_values(settings):
+            continue
+        windows.append(_settings_datetimes(settings))
+    if not windows:
+        return _settings_datetimes(local_settings)
+    start_dt = min((window[0] for window in windows), key=lambda item: item.sort_key())
+    end_dt = max((window[1] for window in windows), key=lambda item: item.sort_key())
+    return start_dt, end_dt
+
+
+def _group_has_signal_window_override(group: dict[str, Any]) -> bool:
+    return any(
+        key in group and group.get(key) not in (None, "")
+        for key in ("start_date", "end_date", "start_time", "end_time", "time_precision", "timezone")
+    )
 
 
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
@@ -1460,21 +1494,21 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"ls_configs={len(flat_ls_configs)}"
     )
 
+    local_settings = _payload_local_settings(data)
     try:
-        start_dt, end_dt = _runtime_datetimes(data)
-    except ValueError as exc:
-        return False, {'success': False, 'error': str(exc), 'status': 400}
-
-    try:
-        initial_capital = _parse_initial_capital(data.get('initial_capital'))
-        base_currency = _parse_currency_code(data.get('base_currency'))
-        currency_conversion_fee_rate = _parse_nonnegative_rate(data.get('currency_conversion_fee_rate'), 0.0)
+        initial_capital = _parse_initial_capital(local_settings.get('initial_capital'))
+        base_currency = _parse_currency_code(local_settings.get('base_currency'))
+        currency_conversion_fee_rate = _parse_nonnegative_rate(local_settings.get('currency_conversion_fee_rate'), 0.0)
     except ValueError as e:
         return False, {'success': False, 'error': str(e), 'status': 400}
 
     resolved_backtest_settings = _resolve_flat_backtest_settings(data, flat_groups_raw, flat_ls_configs)
     first_group_id = str(flat_groups_raw[0].get('id') or 'group-0')
     common_backtest_settings = resolved_backtest_settings[first_group_id]
+    try:
+        start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
+    except ValueError as exc:
+        return False, {'success': False, 'error': str(exc), 'status': 400}
 
     # ── Build _FactorGroupTestGroup from flat groups array ──
     # Group by product_path_selection_id, then by factor_alias.
@@ -1534,6 +1568,13 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     )
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
                 group_settings = resolved_backtest_settings.get(str(g.get('id') or '')) or common_backtest_settings
+                signal_start_dt = None
+                signal_end_dt = None
+                if _group_has_signal_window_override(g):
+                    try:
+                        signal_start_dt, signal_end_dt = _settings_datetimes(group_settings)
+                    except ValueError as exc:
+                        raise ValueError(f"{name} 的因子信号时间范围无效: {exc}") from exc
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
                     factor_alias=fa,
@@ -1555,6 +1596,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                         else None
                     ),
                     margin_mode=group_settings.get('margin_mode'),
+                    signal_start_dt=signal_start_dt,
+                    signal_end_dt=signal_end_dt,
                     _id=str(g.get('id') or f'group-{len(all_flat_groups)}'),
                 )
                 offset = len(all_flat_groups)

@@ -132,6 +132,14 @@ class DataTime:
         """仅时间部分 "HH:MM"。"""
         return self.ts.strftime("%H:%M") if self.ts is not None else None
 
+    def sort_key(self) -> Optional[pd.Timestamp]:
+        """Timezone-normalized timestamp key for ordering DataTime objects."""
+        if self.ts is None:
+            return None
+        if self.ts.tzinfo is not None:
+            return self.ts.tz_convert("UTC").tz_localize(None)
+        return self.ts
+
     # ── 序列化 ────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:

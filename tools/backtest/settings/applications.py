@@ -33,27 +33,32 @@ def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "fact
     ))
 
 
-def register_run_window_base(app: ApplicationSettings, *, tab: str = "time") -> None:
+def register_run_window_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "time",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
     app.register_setting(SettingDefinition(
-        "start_date", "开始日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
+        "start_date", "开始日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="开始日期: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "end_date", "结束日期", tab, "date", "", ScopePolicy.LOCAL_ONLY,
+        "end_date", "结束日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="结束日期: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "start_time", "开始时间", tab, "time", "00:00", ScopePolicy.LOCAL_ONLY,
+        "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
         visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
-        "end_time", "结束时间", tab, "time", "23:59", ScopePolicy.LOCAL_ONLY,
+        "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
         visible_when={"time_precision": ("exact",)},
     ))
     app.register_setting(SettingDefinition(
-        "time_precision", "时间精度", tab, "select", "exact", ScopePolicy.LOCAL_ONLY,
+        "time_precision", "时间精度", tab, "select", "exact", scope_policy,
         module="run_window",
         options=(
             SettingOption("exact", "精确时间"),
@@ -62,7 +67,7 @@ def register_run_window_base(app: ApplicationSettings, *, tab: str = "time") -> 
         chip_template="时间精度: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "timezone", "时区", tab, "select", "Asia/Shanghai", ScopePolicy.LOCAL_ONLY,
+        "timezone", "时区", tab, "select", "Asia/Shanghai", scope_policy,
         module="run_window",
         options=(
             SettingOption("Asia/Shanghai", "Asia/Shanghai (UTC+8)"),
@@ -243,7 +248,7 @@ def group_test_settings() -> ApplicationSettings:
         SettingTab(
             "time",
             "时间范围",
-            (TabMountPoint.LOCAL_SETTINGS,),
+            (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
             "settings-grid",
             16,
             summary_template="{start_date} → {end_date} · {time_precision}",
@@ -332,7 +337,7 @@ def group_test_settings() -> ApplicationSettings:
     register_factor_execution_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_market_data_base(app, include_price_type=False)
-    register_run_window_base(app)
+    register_run_window_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     app.register_setting(SettingDefinition(
         "initial_capital",
         "初始资金",

@@ -137,6 +137,11 @@
         return String(left) === String(right);
     }
 
+    function hasUsableValue(source, key) {
+        if (!source || !Object.prototype.hasOwnProperty.call(source, key)) return false;
+        return source[key] !== undefined && source[key] !== null && source[key] !== '';
+    }
+
     function resolveRootGroup(group) {
         var current = group;
         var seen = {};
@@ -394,7 +399,7 @@
 
     function effectiveValue(setting, mount) {
         var node = activeNode();
-        if (mount === GROUP && node && Object.prototype.hasOwnProperty.call(node.value, setting.key)) {
+        if (mount === GROUP && node && hasUsableValue(node.value, setting.key)) {
             return node.value[setting.key];
         }
         if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
@@ -417,7 +422,8 @@
     function effectiveValuesForNode(node) {
         var values = effectiveLocalValues();
         Object.keys((node && node.value) || node || {}).forEach(function(key) {
-            values[key] = ((node && node.value) || node)[key];
+            var source = (node && node.value) || node;
+            if (hasUsableValue(source, key)) values[key] = source[key];
         });
         return values;
     }
@@ -1106,7 +1112,7 @@
 
     function effectiveSettingValueForGroup(group, key) {
         var source = group && group.value ? group.value : group;
-        if (source && Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+        if (hasUsableValue(source, key)) return source[key];
         if (source && source.parentId && GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) {
             var inherited = GT.groupSettings.groups.resolveRootField(source, key);
             if (inherited !== undefined && inherited !== null && inherited !== '') return inherited;
@@ -1395,9 +1401,49 @@
         groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
             mountTabsForSnapshotValues(GROUP, item || {});
         });
+        clearLoadedLocalEchoOverrides(local);
         renderLocalTabs();
         if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
         return syncAppliedTimeRange();
+    }
+
+    function clearLoadedLocalEchoOverrides(local) {
+        var defaults = state.index && state.index.defaults || {};
+        var clearKeys = Object.keys(defaults).filter(function(key) {
+            var def = defaults[key];
+            return def && def.scope_policy !== 'group_only' && def.scope_policy !== 'local_only';
+        });
+        if (!clearKeys.length || !GT.groupSettings) return;
+        function patchFor(item) {
+            var patch = {};
+            clearKeys.forEach(function(key) {
+                if (!Object.prototype.hasOwnProperty.call(item || {}, key)) return;
+                if (valuesEqual(item[key], local[key])) patch[key] = null;
+            });
+            Object.keys(defaults).forEach(function(key) {
+                var def = defaults[key];
+                if (def && def.scope_policy === 'local_only' && Object.prototype.hasOwnProperty.call(item || {}, key)) {
+                    patch[key] = null;
+                }
+            });
+            return patch;
+        }
+        if (GT.groupSettings.groups && GT.groupSettings.groups.getAll && GT.groupSettings.groups.update) {
+            GT.groupSettings.groups.getAll().forEach(function(group) {
+                var patch = patchFor(group);
+                if (Object.keys(patch).length) {
+                    try { GT.groupSettings.groups.update(group.id, patch); } catch (error) { console.warn('[backend-settings] clear group echo override failed:', error); }
+                }
+            });
+        }
+        if (GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.getAll && GT.groupSettings.lsConfigs.update) {
+            GT.groupSettings.lsConfigs.getAll().forEach(function(config) {
+                var patch = patchFor(config);
+                if (Object.keys(patch).length) {
+                    try { GT.groupSettings.lsConfigs.update(config.id, patch); } catch (error) { console.warn('[backend-settings] clear ls echo override failed:', error); }
+                }
+            });
+        }
     }
 
     function flattenGroupForSnapshot(group) {
@@ -1429,7 +1475,7 @@
     }
 
     function groupPayloadForRun(group) {
-        return Object.assign(stripRegisteredSettings(group), effectiveGroupSettingsForRun(group));
+        return Object.assign(stripRegisteredSettings(group), groupOverridesForRun(group));
     }
 
     function collectLocalSettings() {
@@ -1463,16 +1509,19 @@
         return out;
     }
 
-    function effectiveGroupSettingsForRun(group) {
+    function groupOverridesForRun(group) {
         var out = {};
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveValuesForNode(group);
+        var localValues = effectiveLocalValues();
+        var source = group && group.value ? group.value : group || {};
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
             if (!def || def.scope_policy === 'local_only') return;
+            if (!hasUsableValue(source, key)) return;
             if (!settingVisibleForValues(def, values)) return;
-            var value = effectiveSettingValueForGroup(group, key);
-            if (value === '' || value === null || value === undefined) return;
+            var value = source[key];
+            if (def.scope_policy === 'group_override' && valuesEqual(value, localValues[key])) return;
             out[key] = value;
         });
         return out;
@@ -1489,7 +1538,9 @@
         var calendar = String(values.calendar_frequency || 'auto');
         var precision = values.time_precision || 'exact';
         var tradingDayMode = precision === 'trading_day';
-        return Object.assign({}, effectiveLocalSettingsForRun(), {
+        var localSettings = effectiveLocalSettingsForRun();
+        return {
+            local_settings: localSettings,
             _runtime_window: {
                 start_date: values.start_date,
                 end_date: values.end_date,
@@ -1500,7 +1551,7 @@
             },
             auto_group_calendar_freq: calendar === 'auto',
             group_calendar_freq: calendar === 'auto' ? null : calendar,
-        });
+        };
     }
 
     function groupOverrideValues(groupId) {

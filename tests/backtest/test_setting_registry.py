@@ -16,7 +16,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "product_path_selection", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
+        "engine", "factor", "product_path_selection", "data_source", "frequency", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
         "order", "liquidity", "margin", "market_rules", "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
@@ -24,12 +24,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
+        "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
+    assert index["defaults"]["start_date"]["scope_policy"] == "group_override"
     assert index["defaults"]["engine"]["options"][0] == {
         "value": "native",
         "label": "Native 事件驱动回测工具",
@@ -176,12 +177,12 @@ def test_setting_manifest_uses_page_exact_time_as_run_default(monkeypatch) -> No
     }
 
 
-def test_runtime_window_supplies_run_defaults_without_flat_frontend_values() -> None:
+def test_local_settings_supplies_run_defaults_without_flat_frontend_values() -> None:
     from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
 
     resolved = _resolve_flat_backtest_settings(
         {
-            "_runtime_window": {
+            "local_settings": {
                 "start_date": "2026-01-01",
                 "end_date": "2026-01-31",
                 "start_time": "09:00",
@@ -210,7 +211,7 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
     )
 
     payload = {
-        "_runtime_window": {
+        "local_settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
         },
@@ -233,7 +234,7 @@ def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
     )
 
     payload = {
-        "_runtime_window": {
+        "local_settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
         },
@@ -246,11 +247,115 @@ def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
     assert "allocation_policy" not in {item["setting_key"] for item in defaults}
 
 
-def test_runtime_window_builds_explicit_start_and_end_datetimes() -> None:
+def test_local_settings_dict_is_the_only_run_local_settings_source() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    resolved = _resolve_flat_backtest_settings(
+        {
+            "local_settings": {
+                "allocation_policy": "equal_notional",
+                "initial_capital": 12_345_678,
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-31",
+            },
+        },
+        [{"id": "group-1"}],
+        [],
+    )
+
+    settings = resolved["group-1"]
+    assert settings["allocation_policy"] == "equal_notional"
+    assert settings["initial_capital"] == 12_345_678
+
+
+def test_new_run_payload_rejects_top_level_registered_settings() -> None:
+    from server.modules.single_factor_test.group import _resolve_flat_backtest_settings
+
+    with pytest.raises(ValueError, match="registered settings must be nested"):
+        _resolve_flat_backtest_settings(
+            {
+                "local_settings": {
+                    "allocation_policy": "equal_notional",
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-01-31",
+                },
+                "allocation_policy": "inverse_volatility",
+            },
+            [{"id": "group-1"}],
+            [],
+        )
+
+
+def test_runtime_datetime_reads_time_values_from_local_settings() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
     start_dt, end_dt = _runtime_datetimes({
-        "_runtime_window": {
+        "local_settings": {
+            "start_date": "2025-02-03",
+            "end_date": "2025-02-28",
+            "start_time": "10:15",
+            "end_time": "14:45",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+    })
+
+    assert start_dt.is_set
+    assert end_dt.is_set
+    assert start_dt.ts.strftime("%Y-%m-%d %H:%M") == "2025-02-03 10:15"
+    assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2025-02-28 14:45"
+
+
+def test_local_time_window_takes_precedence_over_group_envelope() -> None:
+    from server.modules.single_factor_test.group import _resolve_run_datetimes
+
+    start_dt, end_dt = _resolve_run_datetimes(
+        {
+            "start_date": "2025-02-01",
+            "end_date": "2025-02-28",
+            "time_precision": "trading_day",
+        },
+        {
+            "group-1": {
+                "start_date": "2025-01-01",
+                "end_date": "2025-03-31",
+                "time_precision": "trading_day",
+            },
+        },
+    )
+
+    assert start_dt.ts.strftime("%Y-%m-%d") == "2025-02-01"
+    assert end_dt.ts.strftime("%Y-%m-%d") == "2025-02-28"
+
+
+def test_group_time_windows_form_envelope_only_without_local_time_window() -> None:
+    from server.modules.single_factor_test.group import _resolve_run_datetimes
+
+    start_dt, end_dt = _resolve_run_datetimes(
+        {},
+        {
+            "group-1": {
+                "start_date": "2025-01-15",
+                "end_date": "2025-02-15",
+                "time_precision": "trading_day",
+            },
+            "group-2": {
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-31",
+                "time_precision": "trading_day",
+            },
+        },
+    )
+
+    assert start_dt.ts.strftime("%Y-%m-%d") == "2025-01-01"
+    assert end_dt.ts.strftime("%Y-%m-%d") == "2025-02-15"
+
+
+def test_local_settings_builds_explicit_start_and_end_datetimes() -> None:
+    from server.modules.single_factor_test.group import _runtime_datetimes
+
+    start_dt, end_dt = _runtime_datetimes({
+        "local_settings": {
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
             "start_time": "09:00",
@@ -266,14 +371,14 @@ def test_runtime_window_builds_explicit_start_and_end_datetimes() -> None:
     assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
 
 
-def test_runtime_window_builds_trading_day_datetimes_without_time_or_timezone() -> None:
+def test_local_settings_builds_trading_day_datetimes_without_time_or_timezone() -> None:
     from server.modules.single_factor_test.group import (
         _resolve_flat_backtest_settings,
         _runtime_datetimes,
     )
 
     payload = {
-        "_runtime_window": {
+        "local_settings": {
             "start_date": "2025-04-01",
             "end_date": "2025-04-30",
             "start_time": "11:23",
@@ -300,7 +405,7 @@ def test_legacy_day_precision_is_rejected() -> None:
     with pytest.raises(ValueError, match="invalid value for time_precision"):
         _resolve_flat_backtest_settings(
             {
-                "_runtime_window": {
+                "local_settings": {
                     "start_date": "2025-04-01",
                     "end_date": "2025-04-30",
                     "time_precision": "day",
@@ -311,12 +416,12 @@ def test_legacy_day_precision_is_rejected() -> None:
         )
 
 
-def test_runtime_window_reports_missing_dates_before_dataindex_slice() -> None:
+def test_local_settings_reports_missing_dates_before_dataindex_slice() -> None:
     from server.modules.single_factor_test.group import _runtime_datetimes
 
     with pytest.raises(ValueError, match="运行时间范围缺失: start_date, end_date"):
         _runtime_datetimes({
-            "_runtime_window": {
+            "local_settings": {
                 "time_precision": "exact",
                 "timezone": "Asia/Shanghai",
             },

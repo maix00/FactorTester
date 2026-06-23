@@ -63,6 +63,14 @@ def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:
     return mask
 
 
+def _has_subday_component(values: pd.DatetimeIndex) -> bool:
+    values = pd.DatetimeIndex(values)
+    if len(values) == 0:
+        return False
+    naive = values.tz_localize(None) if values.tz is not None else values
+    return bool((naive != naive.normalize()).any())
+
+
 class DataIndex:
     """时间索引管理器 — 封装 DatetimeIndex / MultiIndex（纯时间层）的操作。
 
@@ -384,9 +392,22 @@ class DataIndex:
             end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
-            # 守卫：exact 精度要求日内索引（通过信号名推断频率，检查是否日倍数）
+            # 守卫：exact 精度要求信号索引有日内分量。显式日级信号层拒绝；
+            # 对普通 DatetimeIndex，不能只按相邻间隔判断，因为每天 09:00
+            # 一根的序列间隔也是 DAY1，但语义仍是 exact 时间点。
             sig_freq = self.freq
-            if sig_freq is not None and sig_freq.is_day_multiple():
+            explicit_day_level = bool(
+                self.signal_name
+                and _SIGNAL_PREFIX in str(self.signal_name)
+                and _is_day_level_name(str(self.signal_name))
+            )
+            inferred_day_without_subday = (
+                not self.signal_name
+                and sig_freq is not None
+                and sig_freq.is_day_multiple()
+                and not _has_subday_component(self.signal_index)
+            )
+            if explicit_day_level or inferred_day_without_subday:
                 raise ValueError(
                     f"slice_by_datatime: exact precision requires intraday signal_index, "
                     f"but signal_name='{self.signal_name}' has freq={sig_freq} "

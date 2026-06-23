@@ -71,17 +71,35 @@ return GT.backendSettings.init().then(() => {
   };
 
   const runPayload = GT.backendSettings.runPayload();
-  assert.equal(runPayload.initial_capital, 123456);
-  assert.equal(runPayload.allocation_policy, 'equal_notional');
-  assert.equal(runPayload.rebalance_trigger, 'membership_change');
+  assert.deepEqual(runPayload.local_settings.initial_capital, 123456);
+  assert.deepEqual(runPayload.local_settings.allocation_policy, 'equal_notional');
+  assert.equal(runPayload.initial_capital, undefined);
+  assert.equal(runPayload.allocation_policy, undefined);
+  assert.equal(runPayload.rebalance_trigger, undefined);
   assert.equal(runPayload.volatility_lookback, undefined);
+  assert.equal(runPayload._runtime_window.start_date, '2026-01-01');
+  assert.equal(runPayload._runtime_window.end_date, '2026-01-31');
 
   const groupPayload = GT.backendSettings.groupPayloadForRun(group);
-  assert.equal(groupPayload.initial_capital, 123456);
   assert.equal(groupPayload.allocation_policy, 'inverse_volatility');
   assert.equal(groupPayload.volatility_lookback, 7);
-  assert.equal(groupPayload.rebalance_trigger, 'membership_change');
+  assert.equal(groupPayload.initial_capital, undefined);
+  assert.equal(groupPayload.rebalance_trigger, undefined);
   assert.equal(groupPayload.product_path_selection.product_path_selection_id, 'pps-run');
+
+  const inheritedGroup = {
+    id: 'g-inherit',
+    name: 'Inherit',
+    product_path_selection: { product_path_selection_id: 'pps-run-2', label: '路径2' },
+    factorAlias: 'FactorRun',
+    splitCount: 5,
+    groupIndex: 2,
+    allocation_policy: 'equal_notional',
+    volatility_lookback: 99,
+  };
+  const inheritedPayload = GT.backendSettings.groupPayloadForRun(inheritedGroup);
+  assert.equal(inheritedPayload.allocation_policy, undefined);
+  assert.equal(inheritedPayload.volatility_lookback, undefined);
 
   console.log('PASS: backend settings run payload uses effective local and group values');
 });
