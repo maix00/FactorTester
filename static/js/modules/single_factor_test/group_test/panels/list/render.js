@@ -274,6 +274,17 @@
             : [];
     }
 
+    function _chipOwnedByBatch(chip, group, batch) {
+        if (!chip) return false;
+        if (chip.label === 'factor_alias') return true;
+        if (chip.label !== 'product_path_selection' && chip.label !== 'backtest-product_path_selection') return false;
+        var groupSelection = group && group.product_path_selection;
+        if (!groupSelection) return true;
+        var groupId = H.selectionId ? H.selectionId(groupSelection) : '';
+        var batchId = batch && batch.product_path_selection_id || '';
+        return String(groupId || '') === String(batchId || '');
+    }
+
     function _batchDiffConfigKeys(batch) {
         if (!GT.backendSettings || typeof GT.backendSettings.configSettingKeys !== 'function') return {};
         if (!batch || !Array.isArray(batch.items) || batch.items.length < 2) return {};
@@ -335,7 +346,8 @@
                 }
             }
 
-            var selectionLabel = H.productPathSelectionLabel(batch.product_path_selection);
+            var selection = batch.product_path_selection;
+            var selectionLabel = H.productPathSelectionLabel(selection);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
             var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
@@ -350,7 +362,7 @@
                 h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
             }
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.factorAlias) + '</span>';
-            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml(selectionLabel) + '</span>';
+            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml('产品路径', selectionLabel) + '</span>';
             h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
@@ -377,7 +389,7 @@
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
-                        if (chip.label === 'factor_alias' || chip.label === 'product_path_selection') continue;
+                        if (_chipOwnedByBatch(chip, bg, batch)) continue;
                         if (chip.clickable) {
                             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {
@@ -392,6 +404,7 @@
                         for (ci = 0; ci < allChips.length; ci++) {
                             chip = allChips[ci];
                             if (chip.category !== 'config') continue;
+                            if (_chipOwnedByBatch(chip, bg, batch)) continue;
                             renderedConfigLabels[chip.label] = true;
                             configChips.push(chip);
                         }

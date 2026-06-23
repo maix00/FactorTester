@@ -155,12 +155,7 @@
                 var group = GT.groupSettings.groups && GT.groupSettings.groups.get(groupId);
                 if (!group) return;
                 if (action === 'product-path-selection-products' && GT.overlays && GT.overlays.productPathSelectionProducts) {
-                    var root = group;
-                    while (root && root.parentId) {
-                        root = GT.groupSettings.groups.get(root.parentId);
-                        if (!root) break;
-                    }
-                    var selection = root && H.nodeProductPathSelection(root);
+                    var selection = H.nodeProductPathSelection(group);
                     var products = H.productPathSelectionProducts(selection);
                     var label = H.productPathSelectionLabel(selection);
                     GT.overlays.productPathSelectionProducts.open(label, products, selection);

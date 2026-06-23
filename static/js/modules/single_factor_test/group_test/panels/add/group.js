@@ -47,6 +47,9 @@
         groups.forEach(function(group) {
             if (group && group.product_path_selection) selections.push(group.product_path_selection);
         });
+        if (GT.backendSettings && typeof GT.backendSettings.getProductPathSelections === 'function') {
+            selections = selections.concat(GT.backendSettings.getProductPathSelections());
+        }
         var local = GT.backendSettings && GT.backendSettings._state && GT.backendSettings._state.localValues
             ? GT.backendSettings._state.localValues.product_path_selection
             : null;
@@ -179,9 +182,12 @@
         // LEFT COLUMN: Tester navigation (master-style)
         // ─────────────────────────────────────────────────────────
         html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:6px;max-height:440px;overflow:auto;">';
-        html += '<div style="font-size:12px;font-weight:700;color:#475467;padding:4px 6px 8px;">产品路径选择</div>';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 8px;">';
+        html += '<span style="font-size:12px;font-weight:700;color:#475467;">产品路径</span>';
+        html += '<button type="button" id="add-manage-product-paths" style="height:22px;padding:0 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:11px;cursor:pointer;">管理</button>';
+        html += '</div>';
         if (selections.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:8px;">暂无产品路径选择</div>';
+            html += '<div style="color:#888;font-size:12px;padding:8px;line-height:1.6;">暂无产品路径组。请先进入产品路径设置新增、导入或指定默认路径组。</div>';
         } else {
             for (var i = 0; i < selections.length; i++) {
                 var selection = selections[i];
@@ -292,6 +298,14 @@
                 var selectionId = this.getAttribute('data-selection-id');
                 GT.tabs.updateAddDraft({ product_path_selection: _findSelection(selectionId) });
                 render();
+            });
+        }
+        var managePathsBtn = $('add-manage-product-paths');
+        if (managePathsBtn) {
+            managePathsBtn.addEventListener('click', function() {
+                if (GT.backendSettings && typeof GT.backendSettings.openLocalTab === 'function') {
+                    GT.backendSettings.openLocalTab('product_path_selection');
+                }
             });
         }
 
@@ -455,6 +469,13 @@
             return;
         }
         render();
+        if (GT.backendSettings && typeof GT.backendSettings.loadProductPathSelections === 'function') {
+            GT.backendSettings.loadProductPathSelections().then(function() {
+                if (_mounted) render();
+            }).catch(function(error) {
+                console.error('[group add] load product paths failed:', error);
+            });
+        }
     }
 
     function unmount() {
@@ -483,9 +504,12 @@
             priority: 0,
             condition: function() { return true; },
             buildDraft: function() {
+                var local = GT.backendSettings && GT.backendSettings._state && GT.backendSettings._state.localValues
+                    ? GT.backendSettings._state.localValues.product_path_selection
+                    : null;
                 return {
                     addFlow: 'group',
-                    product_path_selection: null,
+                    product_path_selection: local || null,
                     splitCount: 5,
                     allGroups: true,
                     groupIndex: 1,
@@ -499,6 +523,17 @@
             defaultTab: 'add-group'
         });
     }
+
+    document.addEventListener('groupTestProductPathSelectionsChanged', function() {
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
+        if (draft && draft.addFlow === 'group' && !draft.product_path_selection) {
+            var local = GT.backendSettings && GT.backendSettings._state && GT.backendSettings._state.localValues
+                ? GT.backendSettings._state.localValues.product_path_selection
+                : null;
+            if (local) GT.tabs.updateAddDraft({ product_path_selection: local });
+        }
+        if (_mounted) render();
+    });
 
     GT.log('panels.add.group loaded');
 })();

@@ -83,7 +83,7 @@ def register_product_path_selection_base(
 ) -> None:
     app.register_setting(SettingDefinition(
         "product_path_selection",
-        "产品路径选择",
+        "产品路径",
         tab,
         "select",
         None,
@@ -233,7 +233,7 @@ def group_test_settings() -> ApplicationSettings:
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 12),
         SettingTab(
             "product_path_selection",
-            "产品路径选择",
+            "产品路径",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             13,
@@ -490,15 +490,16 @@ def group_test_settings() -> ApplicationSettings:
     ))
     app.register_setting(SettingDefinition(
         "execution_delay_bars",
-        "执行延迟",
+        "执行延迟 bar 数",
         "order",
         "number",
         1,
         ScopePolicy.GROUP_OVERRIDE,
         module="order_execution",
-        minimum=0,
+        minimum=1,
         step=1,
-        chip_template="延迟: {value}bar",
+        chip_template="延迟: {value} 根 bar",
+        help_text="仅在“下一 bar 执行”时生效；1 表示信号产生后的下一根 bar 执行。",
         visible_when={"execution_timing": ("next_bar",)},
     ))
     app.register_setting(SettingDefinition(
@@ -661,7 +662,7 @@ def ic_test_settings() -> ApplicationSettings:
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
         SettingTab(
             "product_path_selection",
-            "产品路径选择",
+            "产品路径",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             20,

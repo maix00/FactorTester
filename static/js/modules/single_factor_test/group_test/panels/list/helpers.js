@@ -312,6 +312,7 @@
         CHIP_STYLE: CHIP_STYLE,
         CHIP_STYLE_PLAIN: CHIP_STYLE_PLAIN,
         renderChipHtml: renderChipHtml,
+        selectionId: selectionId,
         productPathSelectionProducts: productPathSelectionProducts,
         productPathSelectionLabel: productPathSelectionLabel,
         dgName: dgName,
