@@ -66,8 +66,10 @@ def run_ic_for_factor(
     factor_list: List[Factor],
 ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run CrossSectionIC and return IC stats, FE/RE intermediates, and their source mask."""
-    ic_family = CrossSectionIC()
-    ic_factor = ic_family.get_factor(**params)
+    ic_family_cls = params.get('_ic_family_cls') or CrossSectionIC
+    clean_params = {k: v for k, v in params.items() if not str(k).startswith('_')}
+    ic_family = ic_family_cls()
+    ic_factor = ic_family.get_factor(**clean_params)
     ic_factor.clear()
 
     try:

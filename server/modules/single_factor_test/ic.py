@@ -17,8 +17,11 @@ from flask import Response, jsonify, request
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.CrossSectionIC import CrossSectionIC
+from tools.factors.tests.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
+from tools.data.types import DataTime
 
 from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
@@ -26,7 +29,7 @@ from server.services.factor_registry import get_factor_family_instance
 from server.services.page_runtime import get_page_owner
 from server.services.session_runtime import current_user, current_user_obj, get_session_params
 from server.services.sse_progress import SSEProgressEmitter
-from server.modules.shared.factor_tester_runtime import create_factor_tester_from_request
+from server.modules.shared.factor_tester_runtime import selection_from_request, create_factor_tester_for_run
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -78,6 +81,42 @@ def _is_term_contract_product(product: Any) -> bool:
 # 参数解析（共享）
 # ═══════════════════════════════════════════════════════════════
 
+def _run_window_datetimes(
+    settings: dict[str, Any] | None,
+) -> tuple[DataTime | None, DataTime | None]:
+    if not settings:
+        return None, None
+    start_date = str(settings.get("start_date") or "").strip()
+    end_date = str(settings.get("end_date") or "").strip()
+    if not start_date or not end_date:
+        return None, None
+    precision = str(settings.get("time_precision") or "exact")
+    if precision == "trading_day":
+        return (
+            DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
+            DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
+        )
+    timezone = str(settings.get("timezone") or "Asia/Shanghai")
+    start_time = str(settings.get("start_time") or "00:00")
+    end_time = str(settings.get("end_time") or "23:59")
+    start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
+    end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
+    return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
+
+
+def _create_ic_tester_from_request(data: dict[str, Any], *, page_uuid: str, user: Any | None = None):
+    selection = selection_from_request(data, page_uuid=page_uuid)
+    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    start_dt, end_dt = _run_window_datetimes(settings)
+    return create_factor_tester_for_run(
+        selection,
+        page_uuid=page_uuid,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        user=user,
+    )
+
+
 def _parse_ic_params(data: dict) -> Tuple[
     str,                    # product_path_selection_id
     str,                    # factor_family_alias
@@ -87,6 +126,8 @@ def _parse_ic_params(data: dict) -> Tuple[
     int | float | None,     # rolling_window
     List[int],              # ic_lags
     int,                    # primary_ic_lag
+    str,                    # ic_correlation
+    FactorNextPeriodReturns, # returns column
 ]:
     """从 request JSON 中解析所有 IC 测试参数并校验。"""
     errors: List[str] = []
@@ -111,6 +152,22 @@ def _parse_ic_params(data: dict) -> Tuple[
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
     rolling_window = data.get('rolling_window', None)
+    settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
+    ic_correlation = str(data.get('ic_correlation') or settings.get('ic_correlation') or 'rank')
+    if ic_correlation not in ('rank', 'pearson', 'both'):
+        errors.append(f'ic_correlation 非法: {ic_correlation}')
+
+    return_price_basis = str(data.get('return_price_basis') or settings.get('return_price_basis') or 'next_open_to_open_adjusted')
+    returns_col_map = {
+        'next_open_to_open': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
+        'next_open_to_open_adjusted': FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
+        'next_close_to_close': FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE,
+        'next_close_to_close_adjusted': FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED,
+    }
+    returns_col = returns_col_map.get(return_price_basis)
+    if returns_col is None:
+        errors.append(f'return_price_basis 非法: {return_price_basis}')
+        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
 
     ic_lag_raw = data.get('ic_lag', data.get('lag', 0))
     ic_lags_raw = data.get('ic_lags', None)
@@ -140,6 +197,7 @@ def _parse_ic_params(data: dict) -> Tuple[
     return (
         product_path_selection_id, factor_family_alias, factor_alias_return_freq,
         paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
+        ic_correlation, returns_col,
     )
 
 
@@ -150,8 +208,10 @@ def _parse_ic_params(data: dict) -> Tuple[
 class _ICComputeResult:
     """IC 计算结果的中间状态。"""
     def __init__(self):
-        self.series_by_factor_lag: Dict[Factor, Dict[int, pd.Series]] = {}
-        self.stats_by_factor_lag: Dict[Factor, Dict[int, pd.Series]] = {}
+        self.series_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
+        self.stats_by_column_lag: Dict[str, Dict[int, pd.Series]] = {}
+        self.factor_by_column: Dict[str, Factor] = {}
+        self.method_by_column: Dict[str, str] = {}
         self.selected_product_names: List[str] = []
 
 
@@ -163,11 +223,15 @@ def _merge_ic_result(
     primary_ic_lag: int,
 ):
     """将一组 IC 结果合并到 compute 中。"""
-    lag_i = int(key[-1])
+    lag_i = int(key[-3])
+    method = str(key[-2])
+    display_alias = str(key[-1])
     factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
     for factor in factor_list:
-        compute.series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
-        compute.stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+        compute.series_by_column_lag.setdefault(display_alias, {})[lag_i] = ic_series.copy()
+        compute.stats_by_column_lag.setdefault(display_alias, {})[lag_i] = stats.copy()
+        compute.factor_by_column[display_alias] = factor
+        compute.method_by_column[display_alias] = method
         if lag_i == primary_ic_lag:
             r = tester._get_result(factor)
             r.ic_series = ic_series.copy()
@@ -269,7 +333,7 @@ def _compute_ic_groups(
 
 def _build_ic_response(
     tester: Any,
-    factors: List[Factor],
+    display_columns: List[str],
     all_products: list,
     compute: _ICComputeResult,
     paths_hash: str,
@@ -303,8 +367,8 @@ def _build_ic_response(
 
     # ── IC stats 表 ──
     ic_stats_all = pd.DataFrame({
-        f.alias: (tester.results[f].ic_stats if f in tester.results else pd.Series(dtype=float))
-        for f in factors
+        col: compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float))
+        for col in display_columns
     })
     # 排除内部传递的 acf_vals（仅用于前端 autocorr 复用，不展示在 stats 表）
     ic_stats_all = ic_stats_all.drop(index='acf_vals', errors='ignore')
@@ -320,9 +384,8 @@ def _build_ic_response(
     # ── IC decay ──
     ic_decay_results: Dict[str, List[dict]] = {}
     if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
-        for factor in factors:
-            base_ic = (tester.results[factor].ic_series if factor in tester.results
-                       else pd.Series(dtype=float)).dropna()
+        for col in display_columns:
+            base_ic = compute.series_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float)).dropna()
             decay_list: List[dict] = []
             for lag in ic_decay_lags:
                 try:
@@ -347,7 +410,7 @@ def _build_ic_response(
                         'lag': lag_i, 'mean': None, 'std': None,
                         'ir': None, 't_stat': None, 'n': 0,
                     })
-            ic_decay_results[factor.alias] = decay_list
+            ic_decay_results[col] = decay_list
 
     # ── products 列表 — 所有因子共享，提到循环外只构建一次 ──
     final_products = resolved_products if resolved_products else all_products
@@ -369,9 +432,11 @@ def _build_ic_response(
         'factors': [],
     }
 
-    for factor in factors:
-        ic_s = (tester.results[factor].ic_series if factor in tester.results
-                else pd.Series(dtype=float)).dropna()
+    for col in display_columns:
+        factor = compute.factor_by_column.get(col)
+        if factor is None:
+            continue
+        ic_s = compute.series_by_column_lag.get(col, {}).get(primary_ic_lag, pd.Series(dtype=float)).dropna()
         signal_ts = _extract_signal_index(ic_s.index) if len(ic_s) > 0 else pd.DatetimeIndex([])
         is_daily = factor.freq is not None and factor.freq.is_day_multiple()
         if is_daily:
@@ -386,7 +451,7 @@ def _build_ic_response(
         autocorr = None
         if len(ic_s) > 2:
             try:
-                cached_stats = tester.results[factor].ic_stats if factor in tester.results else None
+                cached_stats = compute.stats_by_column_lag.get(col, {}).get(primary_ic_lag)
                 acf_vals_list = cached_stats.get('acf_vals') if isinstance(cached_stats, pd.Series) else None
                 if acf_vals_list is not None and isinstance(acf_vals_list, list):
                     autocorr = [{'lag': i, 'ac': _safe_round(v)} for i, v in enumerate(acf_vals_list[1:], start=1)]
@@ -431,7 +496,9 @@ def _build_ic_response(
 
         factor_data: Dict[str, Any] = {
             'name': factor.name,
-            'alias': factor.alias,
+            'alias': col,
+            'factor_alias': factor.alias,
+            'ic_method': compute.method_by_column.get(col, 'rank'),
             'ic_series': {'dates': dates, 'values': vals},
             'autocorr': autocorr,
             'products': shared_products,
@@ -443,7 +510,7 @@ def _build_ic_response(
             lag_stats_dict: Dict[str, Dict[str, Any]] = {}
             for lag_i in ic_lags:
                 lag_series = (
-                    compute.series_by_factor_lag.get(factor, {}).get(lag_i, pd.Series(dtype=float)).dropna()
+                    compute.series_by_column_lag.get(col, {}).get(lag_i, pd.Series(dtype=float)).dropna()
                 )
                 lag_ts = (
                     _extract_signal_index(lag_series.index)
@@ -459,7 +526,7 @@ def _build_ic_response(
                     for v in lag_series.values.tolist()
                 ]
                 lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': lag_vals})
-                lag_stat_s = compute.stats_by_factor_lag.get(factor, {}).get(lag_i)
+                lag_stat_s = compute.stats_by_column_lag.get(col, {}).get(lag_i)
                 if isinstance(lag_stat_s, pd.Series):
                     lag_stats_dict[str(lag_i)] = {
                         str(k): _safe_round(v) for k, v in lag_stat_s.to_dict().items()
@@ -467,7 +534,7 @@ def _build_ic_response(
             factor_data['ic_series_by_lag'] = lag_series_list
             factor_data['ic_stats_by_lag'] = lag_stats_dict
         if ic_decay_results:
-            factor_data['ic_decay'] = ic_decay_results.get(factor.alias, [])
+            factor_data['ic_decay'] = ic_decay_results.get(col, [])
         if rolling_ic:
             factor_data['rolling_ic'] = rolling_ic
 
@@ -475,7 +542,7 @@ def _build_ic_response(
 
     # sync factors to tester
     existing = {f.alias for f in tester.factors}
-    for f in factors:
+    for f in compute.factor_by_column.values():
         if f.alias not in existing:
             tester.factors.append(f)
             existing.add(f.alias)
@@ -500,7 +567,7 @@ def _prepare_ic_compute(
     factor_family: Any,
     all_factors: List[Factor],
 ) -> Tuple[
-    List[Factor],           # factors
+    List[str],              # display columns
     str,                    # paths_hash
     list,                   # all_products
     Dict[tuple, List[Factor]],  # ic_param_map
@@ -511,10 +578,11 @@ def _prepare_ic_compute(
     int,                    # primary_ic_lag
 ]:
     """解析参数并构建 IC 分组映射。"""
-    (_, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
-     ic_lags, primary_ic_lag) = _parse_ic_params(data)
+    (product_path_selection_id, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
+     ic_lags, primary_ic_lag, ic_correlation, returns_col) = _parse_ic_params(data)
 
-    paths_hash = hashlib.md5(str(sorted(paths)).encode()).hexdigest()
+    paths_hash_source = paths if paths else [product_path_selection_id]
+    paths_hash = hashlib.md5(str(sorted(paths_hash_source)).encode()).hexdigest()
 
     matched_factors: List[Factor] = []
     for item in factor_alias_return_freq:
@@ -524,45 +592,62 @@ def _prepare_ic_compute(
     if not matched_factors:
         raise ValueError('没有找到匹配的因子，请检查收益率频率设置中的因子是否属于当前因子家族')
 
-    factors = matched_factors
     all_products = tester.products.copy()
-    returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
 
     ic_param_map: Dict[tuple, List[Factor]] = {}
     param_payloads: Dict[tuple, Dict[str, Any]] = {}
+    display_columns: List[str] = []
 
     shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
     next_returns_family = NextReturns()
-    for factor in factors:
+    methods = ['rank', 'pearson'] if ic_correlation == 'both' else [ic_correlation]
+    method_family = {
+        'rank': CrossSectionIC,
+        'pearson': CrossSectionPearsonIC,
+    }
+    method_label = {
+        'rank': 'Rank IC',
+        'pearson': 'Pearson IC',
+    }
+    for factor in matched_factors:
         effective_freq = factor.freq
         if effective_freq is None:
             raise ValueError(f'Factor {factor.alias}: 无法确定收益率频率')
-        for lag_i in ic_lags:
-            key = (
-                str(factor._structural_key()),
-                effective_freq.name,
-                shift,
-                returns_col.value.name,
-                lag_i,
-            )
-            if key not in ic_param_map:
-                returns_factor = next_returns_family.get_factor(
-                    SC=returns_col.value,
-                    RF=effective_freq.value,
-                    S=shift,
-                    **{'$F': effective_freq.value, '$Rev': '0'},
+        for method in methods:
+            display_alias = factor.alias if len(methods) == 1 else f"{factor.alias} · {method_label[method]}"
+            if display_alias not in display_columns:
+                display_columns.append(display_alias)
+            for lag_i in ic_lags:
+                key = (
+                    str(factor._structural_key()),
+                    effective_freq.name,
+                    shift,
+                    returns_col.value.name,
+                    lag_i,
+                    method,
+                    display_alias,
                 )
-                ic_param_map[key] = []
-                param_payloads[key] = {
-                    'FE': factor,
-                    'RE': returns_factor,
-                    'Lag': lag_i, '$F': effective_freq.value,
-                }
-            ic_param_map[key].append(factor)
+                if key not in ic_param_map:
+                    returns_factor = next_returns_family.get_factor(
+                        SC=returns_col.value,
+                        RF=effective_freq.value,
+                        S=shift,
+                        **{'$F': effective_freq.value, '$Rev': '0'},
+                    )
+                    ic_param_map[key] = []
+                    param_payloads[key] = {
+                        'FE': factor,
+                        'RE': returns_factor,
+                        'Lag': lag_i,
+                        '$F': effective_freq.value,
+                        '_ic_family_cls': method_family[method],
+                        '_ic_method': method,
+                    }
+                ic_param_map[key].append(factor)
 
     return (
-        factors, paths_hash, all_products, ic_param_map, param_payloads,
+        display_columns, paths_hash, all_products, ic_param_map, param_payloads,
         ic_decay_lags, rolling_window, ic_lags, primary_ic_lag,
     )
 
@@ -585,9 +670,9 @@ def run_ic_test():
     tester = None
 
     try:
-        (_, _, _, _, _, _, ic_lags, primary_ic_lag) = _parse_ic_params(data)
+        (_, _, _, _, _, _, ic_lags, primary_ic_lag, _, _) = _parse_ic_params(data)
 
-        tester = create_factor_tester_from_request(data, page_uuid=page_uuid, user=run_user)
+        tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
         factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
@@ -600,7 +685,7 @@ def run_ic_test():
         tester.sync_signal_index_replaced = None
         _token = _active_tester.set(tester)
 
-        (factors, paths_hash, all_products, ic_param_map, param_payloads,
+        (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
          ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
             _prepare_ic_compute(data, tester, factor_family, all_factors)
 
@@ -610,7 +695,7 @@ def run_ic_test():
             tester, param_items, param_payloads, primary_ic_lag,
         )
         response = _build_ic_response(
-            tester, factors, all_products, compute,
+            tester, display_columns, all_products, compute,
             paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
         )
         return Response(orjson.dumps(response, option=orjson.OPT_SERIALIZE_NUMPY), mimetype='application/json')
@@ -641,7 +726,7 @@ def run_ic_test_stream():
 
     # ── 在主线程中完成所有需要 context 的操作 ──
     try:
-        tester = create_factor_tester_from_request(data, page_uuid=page_uuid, user=run_user)
+        tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
         factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
         session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)
@@ -660,7 +745,7 @@ def run_ic_test_stream():
     def _compute_and_emit():
         _token = None
         try:
-            (factors, paths_hash, all_products, ic_param_map, param_payloads,
+            (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
              ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
                 _prepare_ic_compute(data, tester, factor_family, all_factors)
 
@@ -675,7 +760,7 @@ def run_ic_test_stream():
                 emitter=emitter,
             )
             response = _build_ic_response(
-                tester, factors, all_products, compute,
+                tester, display_columns, all_products, compute,
                 paths_hash, ic_lags, primary_ic_lag, ic_decay_lags, rolling_window,
             )
             emitter.emit_result(response)

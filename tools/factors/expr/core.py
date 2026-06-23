@@ -609,6 +609,11 @@ class FactorExpr:
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
         return _lazy()['CrossSectionalOp']('cs_spearman', self, other)
 
+    @factor_workspace
+    def cs_corr(self, other: 'FactorExpr') -> 'CrossSectionalOp':
+        """截面 Pearson 相关系数：self 与 other 逐时间点计算。"""
+        return _lazy()['CrossSectionalOp']('cs_corr', self, other)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1.5: 多元算子基类

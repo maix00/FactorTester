@@ -122,6 +122,65 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
 
 
+def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
+    from server.modules.single_factor_test.ic import _parse_ic_params, _prepare_ic_compute
+    from tools.factors.Parameters import FactorNextPeriodReturns
+
+    class FakeFreq:
+        name = "1min"
+        value = "1min"
+
+        def is_day_multiple(self):
+            return False
+
+    class FakeFactor:
+        alias = "F1"
+        name = "F1"
+        freq = FakeFreq()
+
+        def _structural_key(self):
+            return ("fake-factor", self.alias)
+
+    class FakeFamily:
+        def __init__(self, factor):
+            self.factor = factor
+
+        def get_factor_by_alias(self, alias):
+            return self.factor if alias == self.factor.alias else None
+
+    class FakeTester:
+        products = ["RB.SHF", "HC.SHF"]
+
+    data = {
+        "product_path_selection": {
+            "product_path_selection_id": "manual-black",
+            "paths": ["Product/Futures/CNFutures/黑色/RB.SHF"],
+        },
+        "factor_family_alias": "Family",
+        "factors": [{"alias": "F1", "return_freq": ""}],
+        "settings": {
+            "ic_correlation": "both",
+            "return_price_basis": "next_close_to_close_adjusted",
+        },
+    }
+
+    parsed = _parse_ic_params(data)
+    assert parsed[-2] == "both"
+    assert parsed[-1] is FactorNextPeriodReturns.THIS_CLOSE_TO_CLOSE_ADJUSTED
+
+    display_columns, _paths_hash, _products, ic_param_map, payloads, *_ = _prepare_ic_compute(
+        data,
+        FakeTester(),
+        FakeFamily(FakeFactor()),
+        [],
+    )
+
+    assert display_columns == ["F1 · Rank IC", "F1 · Pearson IC"]
+    assert {key[-2] for key in ic_param_map} == {"rank", "pearson"}
+    assert {key[3] for key in ic_param_map} == {"CLOSE_ADJUSTED"}
+    assert {payload["_ic_method"] for payload in payloads.values()} == {"rank", "pearson"}
+
+
 def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
     application = backtest_setting_registry.get("factor_type_analysis")
 

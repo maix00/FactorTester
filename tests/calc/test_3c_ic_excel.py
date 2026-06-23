@@ -32,7 +32,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.types import DataColumn
+from tools.data.types import DataColumn, DataTime
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester
@@ -170,7 +170,11 @@ def _resolve_series(table: pd.DataFrame, product) -> pd.Series:
 
 
 def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: pd.Timestamp, rf_minutes: int):
-    tester = FactorTester(products=products, time_range=(start, end))
+    tester = FactorTester(
+        products=products,
+        start_dt=DataTime(ts=start.tz_localize("Asia/Shanghai") if start.tzinfo is None else start),
+        end_dt=DataTime(ts=end.tz_localize("Asia/Shanghai") if end.tzinfo is None else end),
+    )
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
     factor.evaluate(products)
     next_returns = NextReturns().get_factor(

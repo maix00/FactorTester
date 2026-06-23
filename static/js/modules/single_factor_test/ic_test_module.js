@@ -1174,16 +1174,16 @@
         resultDiv.innerHTML = '';
 
         // 读取 IC 衰减和滚动窗口参数
-        const decayLagsInput = document.getElementById(`ic-decay-lags-${subId}`);
-        const rollingWinInput = document.getElementById(`ic-rolling-window-${subId}`);
         let ic_decay_lags = null;
         let rolling_window = null;
-        if (decayLagsInput && decayLagsInput.value.trim()) {
-            const parts = decayLagsInput.value.trim().split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+        const decaySetting = icSettingValues.ic_decay_lags;
+        const rollingSetting = icSettingValues.rolling_window;
+        if (decaySetting != null && String(decaySetting).trim()) {
+            const parts = String(decaySetting).trim().split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
             if (parts.length > 0) ic_decay_lags = parts;
         }
-        if (rollingWinInput && rollingWinInput.value.trim()) {
-            const w = parseInt(rollingWinInput.value.trim(), 10);
+        if (rollingSetting != null && String(rollingSetting).trim()) {
+            const w = parseInt(String(rollingSetting).trim(), 10);
             if (!isNaN(w) && w > 1) rolling_window = w;
         }
 
@@ -1212,6 +1212,11 @@
                 factors: selectedFactors,
                 ic_decay_lags: ic_decay_lags,
                 rolling_window: rolling_window,
+                ic_lag: icSettingValues.ic_lag,
+                ic_correlation: icSettingValues.ic_correlation,
+                return_frequency_mode: icSettingValues.return_frequency_mode,
+                return_price_basis: icSettingValues.return_price_basis,
+                settings: icSettingValues,
                 page_uuid: window._pageUuid || ''
             });
 
@@ -1487,7 +1492,7 @@
         if (!container) return;
         icProductPathSelections = Array.isArray(productPathSelections) ? productPathSelections.slice() : [];
         if (window.FactorSeriesViewer && typeof window.FactorSeriesViewer.setSelections === 'function') {
-            window.FactorSeriesViewer.setSelections(icProductPathSelections);
+            window.FactorSeriesViewer.setSelections({ product_path_selection: icProductPathSelections[0] || null });
         }
         if (icProductPathSelections.length === 0) {
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请在 IC 测试设置中选择产品路径。</div>';
@@ -1518,20 +1523,6 @@
                             <span id="ic-status-${subId}" class="ic-status"></span>
                         </div>
                         ${renderICResultTabs(subId, settingsManifest)}
-                        <!-- IC 衰减 & 滚动窗口 参数 -->
-                        <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
-                            <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
-                            <label style="font-size:12px; margin:0; white-space:nowrap;">
-                                IC衰减滞后期
-                                <input type="text" id="ic-decay-lags-${subId}" value="" placeholder="1,2,3,5,10,20"
-                                       style="width:110px; font-size:12px; padding:2px 6px; vertical-align:center; margin:0;" title="逗号分隔的滞后期数，计算各周期IC统计量">
-                            </label>
-                            <label style="font-size:12px; margin:0; white-space:nowrap;">
-                                滚动窗口
-                                <input type="number" id="ic-rolling-window-${subId}" value="" placeholder="如60"
-                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px; vertical-align:center;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
-                            </label>
-                        </div>
                         <div id="ic-result-${subId}"></div>
                         <div id="chart-container-${subId}" style="width:100%; margin-top:14px;"></div>
                     </div>

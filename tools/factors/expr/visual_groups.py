@@ -67,6 +67,7 @@ VISUAL_OPERATOR_GROUPS = [
         'more_label': '更多横截算子',
         'more_operators': [
             {'key': 'cs_spearman', 'label': 'Spearman', 'symbol': 'rho_s', 'desc': 'X.cs_spearman(Y)', 'arity': 2, 'slots': ['序列 X', '序列 Y']},
+            {'key': 'cs_corr', 'label': 'Pearson', 'symbol': 'rho', 'desc': 'X.cs_corr(Y)', 'arity': 2, 'slots': ['序列 X', '序列 Y']},
         ],
     },
     {

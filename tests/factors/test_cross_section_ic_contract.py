@@ -4,6 +4,7 @@ from typing import Any
 
 from tools.factors.FactorExpr import CrossSectionalOp, ShiftOp
 from tools.factors.tests.CrossSectionIC import CrossSectionIC
+from tools.factors.tests.CrossSectionPearsonIC import CrossSectionPearsonIC
 from tools.factors.tests.NextReturns import NextReturns
 
 
@@ -46,3 +47,9 @@ def test_cross_section_ic_outer_is_cs_spearman_against_shifted_re():
     # outer: FE.cs_spearman(RE.shift(-Lag))
     assert isinstance(expr, CrossSectionalOp)
     assert expr.op == "cs_spearman"
+
+
+def test_cross_section_pearson_ic_outer_is_cs_corr_against_shifted_re():
+    expr = CrossSectionPearsonIC.factor_expr()
+    assert isinstance(expr, CrossSectionalOp)
+    assert expr.op == "cs_corr"
