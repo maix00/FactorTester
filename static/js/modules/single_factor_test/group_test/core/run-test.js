@@ -134,7 +134,7 @@
         function _resolvedGroupForRun(group) {
             var out = Object.assign({}, group || {});
             if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
-                ['factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate', 'product_path_selection'].forEach(function(key) {
+                ['factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'product_path_selection'].forEach(function(key) {
                     var resolved = GT.groupSettings.groups.resolveRootField(out, key);
                     if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
                 });

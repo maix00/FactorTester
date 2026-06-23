@@ -1462,7 +1462,7 @@
             api.registerField({
                 key: key,
                 type: type,
-                default: item.value,
+                default: null,
             });
         });
         (index.chip_fields || []).forEach(function(chipDef) {

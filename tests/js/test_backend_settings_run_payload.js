@@ -54,6 +54,40 @@ load('core/group-settings.js');
 load('core/backend-settings.js');
 
 return GT.backendSettings.init().then(() => {
+  const restoredSnapshot = {
+    local_settings: {
+      start_date: '2025-01-02',
+      end_date: '2025-05-31',
+      start_time: '09:00',
+      end_time: '15:00',
+      timezone: 'Asia/Shanghai',
+      time_precision: 'exact',
+    },
+    group_settings: {
+      groups: [{
+        id: 'g-template',
+        name: 'Template Group',
+        product_path_selection: { product_path_selection_id: 'pps-template', label: '路径' },
+        factorAlias: 'FactorTemplate',
+        splitCount: 5,
+        groupIndex: 1,
+      }],
+      lsConfigs: [],
+    },
+  };
+  GT.groupSettings.settings.apply(restoredSnapshot.group_settings);
+  return GT.backendSettings.applyFlatSnapshot(restoredSnapshot).then(() => {
+    const restoredGroup = GT.groupSettings.groups.get('g-template');
+    assert.equal(Object.prototype.hasOwnProperty.call(restoredGroup, 'start_date'), true);
+    assert.equal(restoredGroup.start_date, null);
+    assert.equal(restoredGroup.end_date, null);
+    assert.deepEqual(GT.backendSettings._state.mountedTabs['group-settings'], []);
+    const restoredGroupPayload = GT.backendSettings.groupPayloadForRun(restoredGroup);
+    assert.equal(restoredGroupPayload.start_date, undefined);
+    assert.equal(restoredGroupPayload.end_date, undefined);
+    return GT.backendSettings.applyFlatSnapshot({ local_settings: {}, group_settings: { groups: [], lsConfigs: [] } });
+  });
+}).then(() => {
   GT.backendSettings._state.localValues.initial_capital = 123456;
   GT.backendSettings._state.localValues.allocation_policy = 'equal_notional';
   GT.backendSettings._state.localValues.volatility_lookback = 99;
