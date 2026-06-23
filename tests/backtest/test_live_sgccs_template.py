@@ -101,21 +101,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["success"]
 
-    tester_ids = {}
-    for index, submission in enumerate(snapshot["submissions"]):
-        new_id = f"live-sgccs-{index}"
-        response = client.post("/submit_selected_products", json={
-            "selected_paths": submission["selected_paths"],
-            "id_time": new_id,
-            "group_name": submission.get("product_group", ""),
-            "page_uuid": page_uuid,
-        })
-        assert response.status_code == 200, response.get_json()
-        body = response.get_json()
-        assert body["success"], body
-        tester_ids[submission["id"]] = new_id
-
-    groups = _resolve_groups(snapshot["group_settings"]["groups"], tester_ids)
+    groups = _resolve_groups(snapshot["group_settings"]["groups"], {})
     long_short_configs = _resolve_ls_configs(
         snapshot["group_settings"].get("lsConfigs", []),
         groups,
@@ -136,6 +122,14 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "end_time": end_time,
         "precision": local_values.get("time_precision", "exact"),
         "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        "_runtime_window": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "time_precision": local_values.get("time_precision", "exact"),
+            "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        },
         "initial_capital": local_values.get("initial_capital", 100000000),
         "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
         "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
@@ -237,7 +231,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     latest = results[next(reversed(results))]["zipline"]
     first_group = latest["groups"][0]
     detail = client.post("/get_group_detail", json={
-        "submission_id": first_group["submission_id"],
+        "product_path_selection_id": first_group["product_path_selection_id"],
         "group_index": first_group["group_index"],
         "page_uuid": page_uuid,
     })
@@ -245,14 +239,14 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert detail.get_json()["detail"]["return_series"]
 
     ranking = client.post("/get_group_ranking_detail", json={
-        "submission_id": first_group["submission_id"],
+        "product_path_selection_id": first_group["product_path_selection_id"],
         "page_uuid": page_uuid,
     })
     assert ranking.status_code == 200, ranking.get_json()
     assert ranking.get_json()["detail"]["adjacent_spreads"]
 
     snapshot_response = client.post("/get_group_snapshot", json={
-        "submission_id": first_group["submission_id"],
+        "product_path_selection_id": first_group["product_path_selection_id"],
         "timestamp_ms": first_group["timestamps"][-1],
         "page_uuid": page_uuid,
     })
@@ -264,6 +258,133 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "targets_contracts", "targets_products",
     ]
     assert snapshot_body["event_type"] in {"FILL", "REJECT"}
+
+
+def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data() -> None:
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = USERNAME
+        session["_sid"] = "live-sgccs-allocation-diff"
+
+    page = client.get(f"/single_factor_test?factor={FACTOR_FAMILY}&type=public")
+    assert page.status_code == 200
+    match = re.search(rb'window\._pageUuid\s*=\s*["\']([^"\']+)', page.data)
+    assert match, "single-factor page did not expose page_uuid"
+    page_uuid = match.group(1).decode()
+
+    template_response = client.get(
+        f"/api/single_factor_setting_templates/{FACTOR_FAMILY}/{TEMPLATE_ID}"
+    )
+    assert template_response.status_code == 200
+    template = template_response.get_json()["template"]
+    assert template["name"] == "2026-06-02 07:20:47"
+    snapshot = template["snapshot"]
+    local_values = snapshot["local_settings"]
+
+    response = client.post("/set_time_range", json={
+        "factor_family_alias": FACTOR_FAMILY,
+        "page_uuid": page_uuid,
+        "start_date": local_values["start_date"],
+        "start_time": local_values["start_time"],
+        "end_date": local_values["end_date"],
+        "end_time": local_values["end_time"],
+        "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        "time_precision": local_values.get("time_precision", "exact"),
+    })
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["success"]
+
+    response = client.post("/replace_params", json={
+        "factor_family_alias": FACTOR_FAMILY,
+        "params_list": snapshot["params_list"],
+    })
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["success"]
+
+    groups = [
+        group for group in _resolve_groups(snapshot["group_settings"]["groups"], {})
+        if not group.get("parentId") and int(group.get("groupIndex") or 0) == 1
+    ]
+    assert groups
+    group = groups[0]
+    base_payload = {
+        "groups": [group],
+        "flatCount": 1,
+        "ls_configs": [],
+        "page_uuid": page_uuid,
+        "factor_family_alias": FACTOR_FAMILY,
+        "_runtime_window": {
+            "start_date": local_values["start_date"],
+            "end_date": local_values["end_date"],
+            "start_time": local_values["start_time"],
+            "end_time": local_values["end_time"],
+            "time_precision": local_values.get("time_precision", "exact"),
+            "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        },
+        "initial_capital": local_values.get("initial_capital", 100000000),
+        "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
+        "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
+        "engine": "native",
+        "factor_mode": "precomputed",
+        "rebalance_trigger": "on_factor_signal",
+        "position_policy": "rebalance_to_target",
+        "execution_timing": "same_bar",
+        "fee_mode": "none",
+        "margin_mode": "none",
+        "liquidity_mode": "infinite",
+    }
+    profiles = {
+        "equal_notional": {"allocation_policy": "equal_notional"},
+        "equal_risk": {
+            "allocation_policy": "inverse_volatility",
+            "volatility_lookback": 20,
+            "volatility_warmup": "equal_notional",
+        },
+    }
+    results = {}
+    default_group = {
+        key: value for key, value in group.items()
+        if key not in {
+            "allocation_policy",
+            "volatility_lookback",
+            "volatility_warmup",
+            "rebalance_trigger",
+            "position_policy",
+            "execution_timing",
+            "execution_price_basis",
+            "execution_delay_bars",
+        }
+    }
+    status_code, default_body = _post_group_stream_result(
+        client, {**base_payload, "groups": [default_group]}
+    )
+    assert status_code == 200, {"body": default_body}
+    assert default_body["success"], default_body
+    defaults_by_key = {
+        item["setting_key"]: item
+        for item in default_body.get("silent_default_settings") or []
+    }
+    assert defaults_by_key["allocation_policy"]["value"] == "inverse_volatility"
+    assert defaults_by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
+
+    for name, overrides in profiles.items():
+        payload = {**base_payload, "groups": [{**group, **overrides}]}
+        status_code, body = _post_group_stream_result(client, payload)
+        assert status_code == 200, {"profile": name, "body": body}
+        assert body["success"], body
+        results[name] = body["groups"][0]
+
+    notional = results["equal_notional"]
+    risk = results["equal_risk"]
+    common_target_times = set(notional["target_trace"]) & set(risk["target_trace"])
+    assert any(
+        notional["target_trace"][timestamp] != risk["target_trace"][timestamp]
+        for timestamp in common_target_times
+    )
+    assert notional["total_equity"] != risk["total_equity"]
+    assert notional["total_equity"][-1] != risk["total_equity"][-1]
 
 
 def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict]:
@@ -281,7 +402,8 @@ def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict
                 if group.get(key) in (None, "") and parent.get(key) not in (None, ""):
                     group[key] = parent[key]
             parent = by_id.get(parent.get("parentId"))
-        group["testerId"] = tester_ids[group["testerId"]]
+        if group.get("testerId") in tester_ids:
+            group["testerId"] = tester_ids[group["testerId"]]
         result.append(group)
     return result
 
