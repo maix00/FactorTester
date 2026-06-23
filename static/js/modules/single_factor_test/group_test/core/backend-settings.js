@@ -1429,7 +1429,7 @@
     }
 
     function groupPayloadForRun(group) {
-        return Object.assign(stripRegisteredSettings(group), flattenGroupForSnapshot(group));
+        return Object.assign(stripRegisteredSettings(group), effectiveGroupSettingsForRun(group));
     }
 
     function collectLocalSettings() {
@@ -1447,6 +1447,37 @@
         return out;
     }
 
+    function effectiveLocalSettingsForRun() {
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        var values = effectiveLocalValues();
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection') return;
+            if (!settingVisibleForValues(def, values)) return;
+            var value = values[key];
+            if (value === '' || value === null || value === undefined) return;
+            out[key] = value;
+        });
+        return out;
+    }
+
+    function effectiveGroupSettingsForRun(group) {
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        var values = effectiveValuesForNode(group);
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'local_only') return;
+            if (!settingVisibleForValues(def, values)) return;
+            var value = effectiveSettingValueForGroup(group, key);
+            if (value === '' || value === null || value === undefined) return;
+            out[key] = value;
+        });
+        return out;
+    }
+
     function registerSnapshot() {
         state.snapshotRegistered = true;
     }
@@ -1458,7 +1489,7 @@
         var calendar = String(values.calendar_frequency || 'auto');
         var precision = values.time_precision || 'exact';
         var tradingDayMode = precision === 'trading_day';
-        return Object.assign({}, collectLocalSettings(), {
+        return Object.assign({}, effectiveLocalSettingsForRun(), {
             _runtime_window: {
                 start_date: values.start_date,
                 end_date: values.end_date,

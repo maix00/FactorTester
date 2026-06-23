@@ -132,6 +132,13 @@ base = patchBase({ product_path_selection: ppsB });
 assert.equal(base.shortAlias, 'B1');
 assert.match(base.name, /路径B_FactorA_5组_第1组/);
 assert.equal(GT.groupSettings.addGroupBatch.forGroup(base).name, 'B');
+GT.tabs.enterEditMode(['base-a1']);
+GT.tabs.mountTab('edit-group');
+{
+  const html = document.getElementById('edit-group').innerHTML;
+  assert.ok(html.indexOf('路径A') >= 0 && html.indexOf('路径B') >= 0);
+  assert.ok(html.indexOf('路径A') < html.indexOf('路径B'));
+}
 
 base = patchBase({ factorAlias: 'FactorB' });
 assert.equal(base.shortAlias, 'B1');

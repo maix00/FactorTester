@@ -117,6 +117,8 @@
         // 取消按钮 — mousedown 后直接退出，无需等 blur 刷新
         var cancelBtn = document.getElementById('gt-action-cancel');
         if (cancelBtn) cancelBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitAddMode(); });
+        var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
+        if (cancelEditBtn) cancelEditBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitEditMode(); });
 
         // 提交/保存 — mousedown 先 blur 聚焦输入框，等 blur 回调执行后再提交
         var submitBtn = document.getElementById('gt-action-submit');
@@ -193,6 +195,7 @@
                 html += iconButton('gt-action-edit-' + act.name, act.title || act.label || act.name, act.label, cls, act.style || '');
             }
             html += ' ' + iconButton('gt-action-save', '保存修改', '<i class="fas fa-save"></i>', 'btn-primary', '');
+            html += ' ' + iconButton('gt-action-cancel-edit', '取消编辑', '<i class="fas fa-times"></i>', 'btn-outline-secondary', '');
 
         } else {
             // list 模式 — 固定显示「新增分组」
@@ -353,6 +356,13 @@
                 name: 'add-group', label: '新建分组', containerId: 'add-group',
                 category: TAB_CATEGORY.ADD, panel: P.add.group,
                 visible: function() { return M.isAddFlow('group'); }
+            });
+        }
+        if (P.add && P.add.derived) {
+            registerPanel({
+                name: 'add-derived', label: '创建派生组', containerId: 'add-derived',
+                category: TAB_CATEGORY.ADD, panel: P.add.derived,
+                visible: function() { return M.isAddFlow('derived'); }
             });
         }
         if (P.edit && P.edit.group) {

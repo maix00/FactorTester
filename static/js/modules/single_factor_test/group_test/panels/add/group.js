@@ -40,20 +40,23 @@
 
     function _currentSelections() {
         var utils = window.ProductPathSelectionUtils || {};
-        var selections = [];
+        var loadedSelections = [];
+        var usedSelections = [];
+        if (GT.backendSettings && typeof GT.backendSettings.getProductPathSelections === 'function') {
+            loadedSelections = GT.backendSettings.getProductPathSelections();
+        }
         var groups = GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
             ? GT.groupSettings.groups.getAll()
             : [];
         groups.forEach(function(group) {
-            if (group && group.product_path_selection) selections.push(group.product_path_selection);
+            if (group && group.product_path_selection) usedSelections.push(group.product_path_selection);
         });
-        if (GT.backendSettings && typeof GT.backendSettings.getProductPathSelections === 'function') {
-            selections = selections.concat(GT.backendSettings.getProductPathSelections());
-        }
         var local = GT.backendSettings && GT.backendSettings._state && GT.backendSettings._state.localValues
             ? GT.backendSettings._state.localValues.product_path_selection
             : null;
+        var selections = (loadedSelections || []).slice();
         if (local) selections.push(local);
+        selections = selections.concat(usedSelections);
         return utils.dedupe ? utils.dedupe(selections) : selections;
     }
 
