@@ -18,6 +18,7 @@
     const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
     var _templateListRequest = null;
     var _templateDetailCache = {};
+    var _lastTemplatePointerScrollSnapshot = null;
 
     function requestJSON(url, options) {
         options = options || {};
@@ -81,6 +82,42 @@
                     window.scrollTo(scrollX, scrollY);
                 });
             });
+    }
+
+    function captureScrollSnapshot() {
+        var items = [];
+        try {
+            var nodes = Array.prototype.slice.call(document.querySelectorAll('body, html, #editor-body, .editor-body, .main-content, .content-area, .single-factor-main, .settings-drawer-panel, .single-factor-page-settings-panel, .global-template-list'));
+            nodes.forEach(function(node) {
+                if (!node) return;
+                items.push({ node: node, top: node.scrollTop || 0, left: node.scrollLeft || 0 });
+            });
+        } catch (e) {}
+        return {
+            x: window.scrollX,
+            y: window.scrollY,
+            items: items,
+        };
+    }
+
+    function restoreScrollSnapshot(snapshot) {
+        if (!snapshot) return;
+        window.scrollTo(snapshot.x, snapshot.y);
+        (snapshot.items || []).forEach(function(item) {
+            if (!item.node) return;
+            item.node.scrollTop = item.top;
+            item.node.scrollLeft = item.left;
+        });
+    }
+
+    function restoreScrollForAWhile(snapshot) {
+        [0, 1, 2, 4, 8, 16, 32, 80, 160, 320, 640].forEach(function(delay) {
+            setTimeout(function() {
+                requestAnimationFrame(function() {
+                    restoreScrollSnapshot(snapshot);
+                });
+            }, delay);
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -587,16 +624,27 @@
                         <div class="tpl-name-area" style="flex:1;min-width:0;">
                             <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
                         </div>
-                        <button class="btn btn-sm global-tpl-summary-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#475569;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">摘要</button>
-                        <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
-                        <button class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
-                        <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
+                        <button type="button" class="btn btn-sm global-tpl-summary-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#475569;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">摘要</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
+                        <button type="button" class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
+                        <button type="button" class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
                 </div>`;
             });
             listEl.innerHTML = html;
+            listEl.querySelectorAll('.global-tpl-summary-btn, .global-tpl-load-btn, .global-tpl-overwrite-btn, .global-tpl-delete-btn').forEach(btn => {
+                btn.addEventListener('pointerdown', function(e) {
+                    _lastTemplatePointerScrollSnapshot = captureScrollSnapshot();
+                    e.preventDefault();
+                });
+                btn.addEventListener('mousedown', function(e) {
+                    _lastTemplatePointerScrollSnapshot = captureScrollSnapshot();
+                    e.preventDefault();
+                });
+            });
             listEl.querySelectorAll('.global-tpl-summary-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
+                    e.preventDefault();
                     e.stopPropagation();
                     showTemplateSummary(this.getAttribute('data-tpl-id'));
                 });
@@ -604,6 +652,7 @@
             // 绑定加载按钮（阻止冒泡，避免触发展开/收起）
             listEl.querySelectorAll('.global-tpl-load-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
+                    e.preventDefault();
                     e.stopPropagation();
                     loadTemplate(this.getAttribute('data-tpl-id'));
                 });
@@ -611,6 +660,7 @@
             // 绑定覆盖按钮（用当前页面设置覆盖已有模板）
             listEl.querySelectorAll('.global-tpl-overwrite-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
+                    e.preventDefault();
                     e.stopPropagation();
                     overwriteTemplate(this.getAttribute('data-tpl-id'), this.getAttribute('data-tpl-name'));
                 });
@@ -618,6 +668,7 @@
             // 绑定删除按钮（阻止冒泡）
             listEl.querySelectorAll('.global-tpl-delete-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
+                    e.preventDefault();
                     e.stopPropagation();
                     deleteTemplate(this.getAttribute('data-tpl-id'));
                 });
@@ -667,13 +718,13 @@
     }
 
     async function showTemplateSummary(tplId) {
-        var scrollX = window.scrollX;
-        var scrollY = window.scrollY;
+        var scrollSnapshot = _lastTemplatePointerScrollSnapshot || captureScrollSnapshot();
+        _lastTemplatePointerScrollSnapshot = null;
         var overlay = ensureSummaryOverlay();
         var title = document.getElementById('global-tpl-summary-title');
         var body = document.getElementById('global-tpl-summary-body');
         overlay.style.display = 'flex';
-        requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
+        restoreScrollForAWhile(scrollSnapshot);
         if (title) title.textContent = '模板摘要';
         if (body) body.innerHTML = '<div class="global-template-empty">加载中...</div>';
         try {
@@ -685,7 +736,7 @@
         } catch (error) {
             if (body) body.innerHTML = '<div class="global-template-empty" style="color:#d40000;">摘要加载失败: ' + escapeHtml(error.message) + '</div>';
         } finally {
-            requestAnimationFrame(function() { window.scrollTo(scrollX, scrollY); });
+            restoreScrollForAWhile(scrollSnapshot);
         }
     }
 
