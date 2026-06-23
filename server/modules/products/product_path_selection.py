@@ -25,14 +25,36 @@ def canonicalize_selection_paths(raw_paths: list[str] | None) -> list[str]:
     return included + [f'-{path}' for path in excluded]
 
 
+def _collect_products_from_node(node) -> list:
+    if not isinstance(node, dict):
+        return [node] if node is not None else []
+    products = []
+    objects = node.get('$OBJECTS$')
+    if isinstance(objects, list):
+        products.extend(objects)
+    for key, value in node.items():
+        if key == '$OBJECTS$':
+            continue
+        if key == '$SUBCLASS$' and isinstance(value, dict):
+            for child in value.values():
+                products.extend(_collect_products_from_node(child))
+            continue
+        if isinstance(value, dict):
+            products.extend(_collect_products_from_node(value))
+    return products
+
+
 def _products_for_paths(paths: list[str], tree) -> list:
     products = []
+    seen: set[str] = set()
     for path in paths:
         node = find_node_by_path(tree, path.split('/'))
-        if isinstance(node, dict) and isinstance(node.get('$OBJECTS$'), list):
-            products.extend(node['$OBJECTS$'])
-        elif node is not None:
-            products.append(node)
+        for product in _collect_products_from_node(node):
+            key = str(product)
+            if key in seen:
+                continue
+            seen.add(key)
+            products.append(product)
     return products
 
 

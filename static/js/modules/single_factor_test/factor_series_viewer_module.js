@@ -9,6 +9,9 @@
         values: Object.create(null),
         factors: [],
         paths: [],
+        selectionKind: '',
+        currentPathLabel: '',
+        currentPathDesc: '',
         currentProduct: null,
         currentContracts: [],
         lastSeries: [],
@@ -190,7 +193,19 @@
     }
 
     function productLabel() {
+        if (state.selectionKind === 'path') {
+            var label = state.currentPathLabel || state.paths[0] || '';
+            var desc = state.currentPathDesc || '';
+            return desc && desc !== label ? label + ' · ' + desc : label;
+        }
         if (!state.currentProduct) return '';
+        var name = state.currentProduct.name || state.activeProduct || '';
+        var desc = state.currentProduct.desc || '';
+        return desc && desc !== name ? name + ' · ' + desc : name;
+    }
+
+    function displayProductLabel() {
+        if (!state.currentProduct) return productLabel();
         var name = state.currentProduct.name || state.activeProduct || '';
         var desc = state.currentProduct.desc || '';
         return desc && desc !== name ? name + ' · ' + desc : name;
@@ -216,7 +231,7 @@
             }
             (manifest.settings || []).forEach(function(setting) {
                 var value = effectiveValue(setting.key);
-                if (setting.key === 'product' && !state.currentProduct) return;
+                if (setting.key === 'product' && !state.paths.length) return;
                 if (setting.key === 'factor' && !selectedFactor()) return;
                 row.appendChild(makeChip(setting, value));
             });
@@ -494,23 +509,68 @@
         var summary = document.getElementById('factor-series-path-summary');
         if (!summary) return;
         if (!state.paths.length) {
-            summary.innerHTML = '<span style="color:#94a3b8;">未选择产品</span>';
+            summary.innerHTML = '<span style="color:#94a3b8;">未选择产品路径</span>';
             return;
         }
-        summary.innerHTML = state.paths.slice(0, 4).map(function(path) {
-            return '<span class="gt-backend-chip factor-series-path-chip">' + renderChipHtml(path) + '</span>';
-        }).join('');
+        var label = state.selectionKind === 'path' ? productLabel() : productLabel();
+        summary.innerHTML = '<span class="gt-backend-chip factor-series-path-chip">'
+            + renderChipHtml(state.selectionKind === 'path' ? '产品路径' : '产品', label || state.paths[0])
+            + '</span>';
     }
 
     function extractProductName(node) {
         if (!node || !node.key) return null;
         var data = node.data || {};
         if (data.product_name) return data.product_name;
+        if (node.folder || node.hasChildren && node.hasChildren()) return null;
         if (data.has_data === false) return null;
         var parts = String(node.key).split('/');
         var last = parts[parts.length - 1];
         if (last === '_products' || /^[0-9]+$/.test(last)) return null;
         return last;
+    }
+
+    function nodeLabel(node) {
+        if (!node) return '';
+        var title = String(node.title || '').trim();
+        if (title) return title;
+        var parts = String(node.key || '').split('/');
+        return parts[parts.length - 1] || '';
+    }
+
+    function nodeDesc(node) {
+        var data = node && node.data || {};
+        return String(data.desc || data.description || '').trim();
+    }
+
+    function nodeHasProducts(node) {
+        if (!node) return false;
+        var data = node.data || {};
+        if (data.has_data === true || data.product_name) return true;
+        if (Array.isArray(data.products) && data.products.length) return true;
+        if (Array.isArray(data._products) && data._products.length) return true;
+        var desc = nodeDesc(node);
+        return /[0-9]+\s*个产品/.test(desc) || !!node.folder;
+    }
+
+    function productMetaForName(name, item) {
+        var data = Object.assign({}, state.allProductsMap[name] || {});
+        if (item && item.desc && !data.desc) data.desc = item.desc;
+        if (!data.name) data.name = name;
+        if (!data.code) data.code = name;
+        return data;
+    }
+
+    function setActiveProduct(name, item) {
+        state.activeProduct = String(name || '');
+        if (state.activeProduct) {
+            state.currentProduct = productMetaForName(state.activeProduct, item);
+            state.selectionKind = state.selectionKind || 'product';
+            var title = document.getElementById('factor-series-chart-title');
+            if (title) title.textContent = displayProductLabel() || '— 请选择产品路径 —';
+            var selectedSummary = document.getElementById('factor-series-product-selected-summary');
+            if (selectedSummary) selectedSummary.textContent = displayProductLabel();
+        }
     }
 
     function mountProductTree() {
@@ -548,8 +608,11 @@
                 var node = data.node;
                 var nodeData = node ? node.data || {} : {};
                 var productName = extractProductName(node);
-                if (!productName || nodeData.has_data === false) return;
-                selectProduct(productName, nodeData, node.key);
+                if (productName && nodeData.has_data !== false) {
+                    selectProduct(productName, nodeData, node.key);
+                    return;
+                }
+                if (nodeHasProducts(node)) selectProductPath(node);
             },
         });
     }
@@ -567,22 +630,42 @@
     function selectProduct(name, nodeData, path) {
         var data = Object.assign({}, state.allProductsMap[name] || {}, nodeData || {});
         if (!data || !data.name) data = { name: name, code: name };
+        state.selectionKind = 'product';
+        state.currentPathLabel = '';
+        state.currentPathDesc = '';
         state.currentProduct = data;
         state.paths = [String(path || name)];
-        state.activeProduct = String(name);
+        setActiveProduct(name, data);
         writeValue('product', String(name));
-        var title = document.getElementById('factor-series-chart-title');
-        if (title) title.textContent = productLabel() || '— 请选择品种 —';
-        var selectedSummary = document.getElementById('factor-series-product-selected-summary');
-        if (selectedSummary) selectedSummary.textContent = productLabel();
         loadTermTable(data.name);
         loadPriceDataForCurrentProduct().then(function(priceData) {
             drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
         }).catch(showResultError);
     }
 
+    function selectProductPath(node) {
+        if (!node || !node.key) return;
+        state.selectionKind = 'path';
+        state.currentPathLabel = nodeLabel(node);
+        state.currentPathDesc = nodeDesc(node);
+        state.currentProduct = null;
+        state.currentContracts = [];
+        state.paths = [String(node.key)];
+        state.activeProduct = '';
+        writeValue('product', String(node.key));
+        var label = productLabel();
+        var title = document.getElementById('factor-series-chart-title');
+        if (title) title.textContent = label || '— 请选择产品路径 —';
+        var selectedSummary = document.getElementById('factor-series-product-selected-summary');
+        if (selectedSummary) selectedSummary.textContent = label ? ('已选择产品路径：' + label) : '已选择产品路径';
+        var termContainer = document.getElementById('factor-series-term-table-container');
+        if (termContainer) termContainer.style.display = 'none';
+        var chart = document.getElementById('factor-series-chart-container');
+        if (chart) chart.innerHTML = message('已选择产品路径，请点击计算因子。');
+    }
+
     function syncProductFromActiveTree() {
-        if (state.currentProduct && state.paths.length) return true;
+        if (state.paths.length) return true;
         var tree = state.tree;
         if (!tree && window.jQuery && window.jQuery.ui && window.jQuery.ui.fancytree) {
             try {
@@ -595,14 +678,20 @@
         if (!node) return false;
         var nodeData = node.data || {};
         var productName = extractProductName(node);
-        if (!productName || nodeData.has_data === false) return false;
-        selectProduct(productName, nodeData, node.key);
-        return true;
+        if (productName && nodeData.has_data !== false) {
+            selectProduct(productName, nodeData, node.key);
+            return true;
+        }
+        if (nodeHasProducts(node)) {
+            selectProductPath(node);
+            return true;
+        }
+        return false;
     }
 
     function showMissingProductState(chart, status) {
         openTab('product');
-        var text = '请先从产品树选择产品';
+        var text = '请先从产品树选择产品或产品路径';
         if (chart) chart.innerHTML = message(text + '。', true);
         if (status) status.textContent = text;
         showProgress();
@@ -658,6 +747,9 @@
     }
 
     async function loadPriceDataForCurrentProduct() {
+        if (!state.currentProduct && state.activeProduct) {
+            setActiveProduct(state.activeProduct, selectedSeriesItem());
+        }
         if (!state.currentProduct) return null;
         var product = state.currentProduct;
         var reqBody = {
@@ -709,6 +801,45 @@
         return state.lastSeries.find(function(series) { return series.product === state.activeProduct; }) || state.lastSeries[0] || null;
     }
 
+    function seriesItemLabel(item) {
+        if (!item) return '';
+        var desc = item.desc && item.desc !== item.product ? ' · ' + item.desc : '';
+        return String(item.product || '') + desc;
+    }
+
+    function filteredSeriesItems(query) {
+        var q = String(query || '').trim().toLowerCase();
+        if (!q) return state.lastSeries.slice();
+        return state.lastSeries.filter(function(item) {
+            return seriesItemLabel(item).toLowerCase().indexOf(q) >= 0;
+        });
+    }
+
+    function updateSeriesSelectOptions(select, query) {
+        if (!select) return false;
+        var items = filteredSeriesItems(query);
+        select.innerHTML = items.map(function(item) {
+            return '<option value="' + escapeHtml(item.product) + '"' + (item.product === state.activeProduct ? ' selected' : '') + '>'
+                + escapeHtml(seriesItemLabel(item))
+                + '</option>';
+        }).join('');
+        if (items.length && !items.some(function(item) { return item.product === state.activeProduct; })) {
+            state.activeProduct = items[0].product;
+            select.value = state.activeProduct;
+            return true;
+        }
+        return false;
+    }
+
+    function activateSeriesProduct(productName) {
+        var item = state.lastSeries.find(function(series) { return series.product === productName; }) || null;
+        setActiveProduct(productName, item);
+        loadTermTable(productName);
+        return loadPriceDataForCurrentProduct().then(function(priceData) {
+            drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
+        }).catch(showResultError);
+    }
+
     function renderProductChooser() {
         var host = document.getElementById('factor-series-product-row');
         if (!host) return;
@@ -716,22 +847,24 @@
             host.innerHTML = '';
             return;
         }
-        host.innerHTML = '<label class="factor-series-field"><span>显示序列</span><select id="factor-series-product">'
-            + state.lastSeries.map(function(item) {
-                var desc = item.desc && item.desc !== item.product ? ' · ' + item.desc : '';
-                return '<option value="' + escapeHtml(item.product) + '"' + (item.product === state.activeProduct ? ' selected' : '') + '>'
-                    + escapeHtml(item.product + desc)
-                    + '</option>';
-            }).join('')
-            + '</select></label>';
+        host.innerHTML = '<label class="factor-series-field factor-series-series-picker">'
+            + '<span>显示序列</span>'
+            + '<input id="factor-series-product-search" type="search" placeholder="按 alias / desc 检索">'
+            + '<select id="factor-series-product"></select>'
+            + '</label>';
         var select = document.getElementById('factor-series-product');
+        var search = document.getElementById('factor-series-product-search');
+        updateSeriesSelectOptions(select, '');
         if (select) {
             select.addEventListener('change', function() {
-                state.activeProduct = this.value;
-                loadTermTable(this.value);
-                loadPriceDataForCurrentProduct().then(function(priceData) {
-                    drawResultChart(priceData, selectedSeriesItem(), selectedFactor() || {});
-                }).catch(showResultError);
+                activateSeriesProduct(select.value);
+            });
+        }
+        if (search) {
+            search.addEventListener('input', function() {
+                if (updateSeriesSelectOptions(select, search.value) && select.value) {
+                    activateSeriesProduct(select.value);
+                }
             });
         }
     }
@@ -751,6 +884,10 @@
             if (t != null && v != null && !Number.isNaN(Number(v))) rows.push([t, v]);
         }
         return rows;
+    }
+
+    function chartBoostThreshold(points, isIntraday) {
+        return isIntraday && Array.isArray(points) && points.length > 5000 ? 500 : Number.MAX_SAFE_INTEGER;
     }
 
     function drawResultChart(priceData, item, factor) {
@@ -780,57 +917,170 @@
         var oi = hasOi && window.PriceDisplay && isFunction(window.PriceDisplay.toColumn)
             ? window.PriceDisplay.toColumn(rows, 'open_interest')
             : [];
+
+        var freqStr = priceData && priceData.freq ? String(priceData.freq) : '';
+        var isIntraday = freqStr.indexOf('MIN') === 0 || freqStr.indexOf('HOUR') === 0 || freqStr.indexOf('SEC') === 0;
+        var plotBands = [];
+        if (priceData && priceData.supports_term_structure && Array.isArray(priceData.contracts) && priceData.contracts.length) {
+            plotBands = priceData.contracts.map(function(contract, index) {
+                return {
+                    id: 'contract-' + index,
+                    from: contract.start_ts,
+                    to: contract.end_ts,
+                    color: 'rgba(100,149,237,0.04)',
+                };
+            });
+        }
+
         var yAxis = [{
             labels: { align: 'right', x: -3 },
-            title: { text: '价格' },
-            height: hasOi ? '48%' : '54%',
+            title: { text: '' },
+            height: hasOi ? '44%' : '50%',
+            lineWidth: 2,
             resize: { enabled: true },
+            plotBands: plotBands,
+        }, {
+            labels: { align: 'right', x: -3 },
+            title: { text: '' },
+            top: hasOi ? '49%' : '55%',
+            height: hasOi ? '20%' : '22%',
+            offset: 0,
             lineWidth: 2,
         }, {
             labels: { align: 'right', x: -3 },
-            title: { text: '因子' },
-            top: hasOi ? '52%' : '59%',
-            height: hasOi ? '22%' : '23%',
-            opposite: true,
-        }, {
-            labels: { align: 'right', x: -3 },
-            title: { text: '成交量' },
-            top: hasOi ? '77%' : '84%',
+            title: { text: '' },
+            top: hasOi ? '72%' : '80%',
             height: hasOi ? '10%' : '15%',
-            opposite: true,
+            offset: 0,
+            lineWidth: 2,
         }];
         var series = [];
         if (ohlc.length) {
-            series.push({ type: 'candlestick', name: priceData.product || '价格', data: ohlc, yAxis: 0, legendIndex: 10 });
+            series.push({
+                type: 'candlestick',
+                name: priceData.product || '价格',
+                data: ohlc,
+                yAxis: 0,
+                legendIndex: 10,
+                boostThreshold: chartBoostThreshold(ohlc, isIntraday),
+                tooltip: {
+                    pointFormat:
+                        '<span style="font-weight:bold">开盘</span> {point.open:.2f}<br/>' +
+                        '<span style="font-weight:bold">最高</span> {point.high:.2f}<br/>' +
+                        '<span style="font-weight:bold">最低</span> {point.low:.2f}<br/>' +
+                        '<span style="font-weight:bold">收盘</span> {point.close:.2f}'
+                },
+            });
         }
         if (factorData.length) {
-            series.push({ type: 'line', name: factor.alias || factor.name || '因子值', data: factorData, yAxis: 1, color: '#2563eb', legendIndex: 20, dataGrouping: { enabled: false } });
+            series.push({
+                type: 'line',
+                name: factor.alias || factor.name || '因子值',
+                data: factorData,
+                yAxis: 1,
+                color: '#2563eb',
+                legendIndex: 20,
+                dataGrouping: { enabled: false },
+                boostThreshold: chartBoostThreshold(factorData, isIntraday),
+                tooltip: { valueDecimals: 6 },
+            });
         }
         if (volume.length) {
-            series.push({ type: 'column', name: '成交量', data: volume, yAxis: 2, color: '#90CAF9', legendIndex: 30 });
+            series.push({
+                type: 'column',
+                name: '成交量',
+                data: volume,
+                yAxis: 2,
+                color: '#90CAF9',
+                legendIndex: 30,
+                boostThreshold: chartBoostThreshold(volume, isIntraday),
+                tooltip: { valueDecimals: 0 },
+            });
         }
         if (hasOi) {
             yAxis.push({
                 labels: { align: 'right', x: -3 },
-                title: { text: '持仓量' },
-                top: '90%',
-                height: '10%',
-                opposite: true,
+                title: { text: '' },
+                top: '85%',
+                height: '15%',
+                offset: 0,
+                lineWidth: 2,
             });
-            series.push({ type: 'line', name: '持仓量', data: oi, yAxis: 3, color: '#E91E63', legendIndex: 40 });
+            series.push({
+                type: 'line',
+                name: '持仓量',
+                data: oi,
+                yAxis: 3,
+                color: '#E91E63',
+                legendIndex: 40,
+                boostThreshold: chartBoostThreshold(oi, isIntraday),
+                tooltip: { valueDecimals: 0 },
+            });
         }
-        var title = productLabel() || (priceData && priceData.product) || '因子评估';
+        var title = displayProductLabel() || (priceData && priceData.product) || '因子评估';
+        var xAxisOptions = {
+            type: 'datetime',
+            labels: {
+                rotation: -45,
+                align: 'right',
+                style: { fontSize: '10px', color: '#64748b' },
+                formatter: function() {
+                    var d = new Date(this.value);
+                    var hh = String(d.getHours()).padStart(2, '0');
+                    var mm = String(d.getMinutes()).padStart(2, '0');
+                    var M = String(d.getMonth() + 1).padStart(2, '0');
+                    var dd = String(d.getDate()).padStart(2, '0');
+                    return isIntraday ? (hh + ':' + mm + '<br/>' + M + '-' + dd) : (M + '-' + dd);
+                },
+            },
+            ordinal: true,
+        };
         state.chart = window.Highcharts.stockChart(container, {
             chart: { animation: false, height: Math.max(520, Math.floor(container.getBoundingClientRect().height || 520)) },
             title: { text: title, style: { fontSize: '15px' } },
             subtitle: { text: (priceData ? ((priceData.adjusted ? '复权' : '原始') + ' · ' + priceData.freq + ' · ' + priceData.count + ' 条') : ''), style: { fontSize: '11px', color: '#888' } },
-            rangeSelector: { enabled: true },
+            rangeSelector: {
+                buttons: [
+                    { type: 'day', count: 3, text: '3天' },
+                    { type: 'week', count: 1, text: '1周' },
+                    { type: 'month', count: 1, text: '1月' },
+                    { type: 'month', count: 3, text: '3月' },
+                    { type: 'year', count: 1, text: '1年' },
+                    { type: 'all', text: '全部' },
+                ],
+                selected: 4,
+            },
             navigator: { enabled: true },
-            scrollbar: { enabled: true },
+            scrollbar: { enabled: false },
             legend: { enabled: true },
-            xAxis: { type: 'datetime', ordinal: true },
+            xAxis: xAxisOptions,
             yAxis: yAxis,
-            tooltip: { split: true, valueDecimals: 6 },
+            tooltip: {
+                shared: true,
+                useHTML: true,
+                formatter: function() {
+                    var d = new Date(this.x);
+                    var dateStr = isIntraday
+                        ? d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' '
+                            + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0')
+                        : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                    var s = '<b>' + dateStr + '</b>';
+                    (this.points || []).forEach(function(p) {
+                        if (p.series.type === 'candlestick') {
+                            s += '<br/><span style="font-weight:bold">开盘</span> ' + p.point.open.toFixed(2)
+                                + '<br/><span style="font-weight:bold">最高</span> ' + p.point.high.toFixed(2)
+                                + '<br/><span style="font-weight:bold">最低</span> ' + p.point.low.toFixed(2)
+                                + '<br/><span style="font-weight:bold">收盘</span> ' + p.point.close.toFixed(2);
+                        } else {
+                            var decimals = p.series.tooltipOptions && typeof p.series.tooltipOptions.valueDecimals === 'number'
+                                ? p.series.tooltipOptions.valueDecimals : 2;
+                            var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
+                            s += '<br/>' + p.series.name + ': ' + val;
+                        }
+                    });
+                    return s;
+                },
+            },
             series: series,
             credits: { enabled: false },
         });
@@ -878,7 +1128,9 @@
                 }),
             });
             state.lastSeries = Array.isArray(data.series) ? data.series : [];
-            state.activeProduct = state.lastSeries.length ? state.lastSeries[0].product : state.activeProduct;
+            if (state.lastSeries.length) {
+                setActiveProduct(state.lastSeries[0].product, state.lastSeries[0]);
+            }
             renderProductChooser();
             setProgress(70, '加载价格');
             var priceData = await loadPriceDataForCurrentProduct();

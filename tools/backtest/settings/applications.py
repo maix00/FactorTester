@@ -786,14 +786,14 @@ def factor_evaluation_settings() -> ApplicationSettings:
         app.register_tab(tab)
     app.register_setting(SettingDefinition(
         "product",
-        "产品",
+        "产品路径",
         "product",
         "select",
         "",
         ScopePolicy.LOCAL_ONLY,
         module="product_selection",
-        chip_template="产品: {value}",
-        help_text="从后端注册的产品树选择一个叶子产品。",
+        chip_template="产品路径: {value}",
+        help_text="从后端注册的产品树选择一个产品或产品路径。",
     ))
     app.register_setting(SettingDefinition(
         "data_source",
