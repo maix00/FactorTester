@@ -40,6 +40,33 @@
             : (selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '');
     }
 
+    function resolveProductPathSelection(selectionOrId) {
+        var selection = (typeof selectionOrId === 'object' && selectionOrId) ? selectionOrId : null;
+        var sid = selection ? selectionId(selection) : String(selectionOrId || '');
+        var loaded = GT.backendSettings && typeof GT.backendSettings.getProductPathSelections === 'function'
+            ? GT.backendSettings.getProductPathSelections()
+            : [];
+        if (!sid && !selection) return selection;
+        for (var i = 0; i < loaded.length; i++) {
+            if (selectionId(loaded[i]) === sid) return loaded[i];
+        }
+        if (selection) {
+            var templateId = String(selection.product_group_template_id || selection.path_id || '').trim();
+            var productGroup = String(selection.product_group || selection.product_group_name || selection.label || selection.name || '').trim();
+            var paths = selection.paths || selection.selected_paths || [];
+            var pathKey = Array.isArray(paths) ? paths.map(function(path) { return String(path || '').trim(); }).filter(Boolean).sort().join('|') : '';
+            for (var j = 0; j < loaded.length; j++) {
+                var candidate = loaded[j] || {};
+                if (templateId && String(candidate.product_group_template_id || candidate.path_id || candidate.id || candidate.product_path_selection_id || '') === templateId) return candidate;
+                if (productGroup && String(candidate.product_group || candidate.product_group_name || candidate.label || candidate.name || '') === productGroup) return candidate;
+                var candidatePaths = candidate.paths || candidate.selected_paths || [];
+                var candidatePathKey = Array.isArray(candidatePaths) ? candidatePaths.map(function(path) { return String(path || '').trim(); }).filter(Boolean).sort().join('|') : '';
+                if (pathKey && candidatePathKey && pathKey === candidatePathKey) return candidate;
+            }
+        }
+        return selection;
+    }
+
     function nodeProductPathSelection(node) {
         if (!node) return null;
         if (node.parentId) {
@@ -51,7 +78,7 @@
 
     /** Get products list from a product path selection (cached) */
     function productPathSelectionProducts(selectionOrId) {
-        var selection = (typeof selectionOrId === 'object' && selectionOrId) ? selectionOrId : null;
+        var selection = resolveProductPathSelection(selectionOrId);
         var sid = selection ? selectionId(selection) : String(selectionOrId || '');
         if (_productSelectionProductsCache[sid]) return _productSelectionProductsCache[sid];
         var utils = window.ProductPathSelectionUtils;
@@ -61,10 +88,18 @@
     }
 
     function productPathSelectionLabel(selectionOrId) {
-        var selection = (typeof selectionOrId === 'object' && selectionOrId) ? selectionOrId : null;
+        var selection = resolveProductPathSelection(selectionOrId);
         var sid = selection ? selectionId(selection) : String(selectionOrId || '');
         var utils = window.ProductPathSelectionUtils;
-        return selection && utils && utils.selectionLabel ? (utils.selectionLabel(selection) || '—') : (sid || '—');
+        if (selection && utils && utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection) || '—';
+        if (selection && utils && utils.selectionLabel) return utils.selectionLabel(selection) || '—';
+        if (selection) {
+            var label = selection.product_group || selection.label || selection.name || sid;
+            if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
+            if (selection.path_id) return label + ' · 路径组';
+            return label || '—';
+        }
+        return sid || '—';
     }
 
     function dgName(id) {

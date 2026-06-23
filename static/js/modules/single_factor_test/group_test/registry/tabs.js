@@ -166,7 +166,7 @@
             if (raw.indexOf('fa-times') >= 0) return '&times;';
             if (raw.indexOf('fa-save') >= 0) return '&#10003;';
             if (raw.indexOf('fa-copy') >= 0) return '&#10697;';
-            if (raw.indexOf('fa-trash') >= 0) return '&times;';
+            if (raw.indexOf('fa-trash') >= 0) return '&#128465;';
             if (raw.indexOf('fa-edit') >= 0 || raw.indexOf('fa-pencil') >= 0) return '&#9998;';
             return String(title || '') || raw;
         }
@@ -401,7 +401,7 @@
     // ── 批量删除 ──
     M.registerEditAction({
         name: 'delete',
-        label: '<span style="color:#d40000;font-weight:700;font-size:16px;line-height:1;">&times;</span>',
+        label: '<i class="fas fa-trash"></i>',
         title: '删除',
         priority: 50,
         condition: function(ctx) { return ctx.count > 0; },

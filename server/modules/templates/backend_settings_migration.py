@@ -39,8 +39,8 @@ def migrate_snapshot_backend_settings(
     if isinstance(group_settings, dict):
         _attach_product_path_selections_to_groups(group_settings, product_path_selections)
         _inherit_group_product_path_selections(group_settings.get("groups"))
-        _normalize_product_path_selection_fields(group_settings.get("groups"))
-        _normalize_product_path_selection_fields(group_settings.get("lsConfigs"))
+        _normalize_product_path_selection_fields(group_settings.get("groups"), product_groups or [])
+        _normalize_product_path_selection_fields(group_settings.get("lsConfigs"), product_groups or [])
         _remove_legacy_group_tester_ids(group_settings.get("groups"))
         _migrate_items(group_settings.get("groups"), backend_group_values, defaults, STRUCTURAL_GROUP_KEYS)
         _migrate_items(group_settings.get("lsConfigs"), backend_group_values, defaults, STRUCTURAL_LS_KEYS)
@@ -50,7 +50,7 @@ def migrate_snapshot_backend_settings(
     local_settings = migrated.get("local_settings")
     if not isinstance(local_settings, dict):
         local_settings = {}
-    _normalize_product_path_selection(local_settings.get("product_path_selection"))
+    _normalize_product_path_selection(local_settings.get("product_path_selection"), product_groups or [])
     for key in list(local_settings.keys()):
         if key in LEGACY_LOCAL_KEYS or key == "backendBacktestSettings":
             local_settings.pop(key, None)
@@ -74,15 +74,12 @@ def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: l
     for index, item in enumerate(raw_items if isinstance(raw_items, list) else []):
         if not isinstance(item, dict):
             continue
-        selection_id = str(
+        original_selection_id = str(
             item.get("product_path_selection_id")
             or item.get("selection_id")
             or item.get("id")
             or f"product-path-selection-{index + 1}"
         )
-        if selection_id in seen:
-            continue
-        seen.add(selection_id)
         paths = list(item.get("selected_paths") or item.get("paths") or [])
         paths = _canonical_paths(paths)
         matched_group = _match_product_group(paths, item, product_groups)
@@ -93,6 +90,12 @@ def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: l
             or (matched_group or {}).get("id")
             or ""
         )
+        selection_id = template_id or original_selection_id
+        if selection_id in seen:
+            if original_selection_id and original_selection_id not in selections and selection_id in selections:
+                selections[original_selection_id] = selections[selection_id]
+            continue
+        seen.add(selection_id)
         source_type = str(
             item.get("source_type")
             or ("user_product_group_template" if template_id else "manual_selection")
@@ -114,6 +117,8 @@ def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: l
         if item.get("products"):
             selection["products"] = item.get("products")
         selections[selection_id] = selection
+        if original_selection_id and original_selection_id != selection_id:
+            selections[original_selection_id] = selection
     snapshot.pop("submissions", None)
     snapshot.pop("product_path_selections", None)
     return selections
@@ -137,12 +142,12 @@ def _attach_product_path_selections_to_groups(
             group["product_path_selection"] = selection
 
 
-def _normalize_product_path_selection_fields(items: Any) -> None:
+def _normalize_product_path_selection_fields(items: Any, product_groups: list[dict[str, Any]]) -> None:
     if not isinstance(items, list):
         return
     for item in items:
         if isinstance(item, dict):
-            _normalize_product_path_selection(item.get("product_path_selection"))
+            _normalize_product_path_selection(item.get("product_path_selection"), product_groups)
 
 
 def _inherit_group_product_path_selections(groups: Any) -> None:
@@ -164,7 +169,7 @@ def _inherit_group_product_path_selections(groups: Any) -> None:
             group["product_path_selection"] = deepcopy(parent_selection)
 
 
-def _normalize_product_path_selection(selection: Any) -> None:
+def _normalize_product_path_selection(selection: Any, product_groups: list[dict[str, Any]] | None = None) -> None:
     if not isinstance(selection, dict):
         return
     template_id = str(
@@ -181,6 +186,21 @@ def _normalize_product_path_selection(selection: Any) -> None:
         canonical = _canonical_paths(paths)
         selection["paths"] = list(canonical)
         selection["selected_paths"] = list(canonical)
+        matched_group = _match_product_group(canonical, selection, product_groups or [])
+        if matched_group:
+            template_id = str(matched_group.get("id") or "").strip()
+            product_group = str(matched_group.get("name") or "").strip()
+            if template_id:
+                selection["id"] = template_id
+                selection["product_path_selection_id"] = template_id
+                selection["product_group_template_id"] = template_id
+                selection["path_id"] = template_id
+                selection["source_key"] = template_id
+                selection["source_type"] = "user_product_group_template"
+            if product_group:
+                selection["product_group"] = product_group
+                if not selection.get("label"):
+                    selection["label"] = product_group
 
 
 def _remove_legacy_group_tester_ids(groups: Any) -> None:

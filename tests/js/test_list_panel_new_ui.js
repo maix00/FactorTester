@@ -122,7 +122,9 @@ return GT.backendSettings.init().then(() => {
     name: 'List',
     testerId: 'tester-list',
     product_path_selection: {
-      product_path_selection_id: 'pps-list',
+      product_path_selection_id: 'pg-list',
+      product_group_template_id: 'pg-list',
+      product_group: '测试路径',
       label: '测试路径',
       products: [
         { name: 'IF', desc: '沪深300' },
@@ -147,6 +149,7 @@ return GT.backendSettings.init().then(() => {
   GT.panels.list.index.mount(container);
 
   assert.match(container.innerHTML, /FactorList/);
+  assert.match(container.innerHTML, /产品组/);
   assert.doesNotMatch(container.innerHTML, /rebalanceMode/);
   assert.match(container.innerHTML, /显示设置/);
   assert.doesNotMatch(container.innerHTML, /成员变化事件/);

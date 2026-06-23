@@ -71,6 +71,23 @@
         return selection ? (selection.product_group || selection.label || selection.name || _selectionId(selection)) : '';
     }
 
+    function _selectionSourceLabel(selection) {
+        var utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionSourceLabel) return utils.selectionSourceLabel(selection);
+        if (!selection) return '';
+        if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return '产品组';
+        if (selection.path_id) return '路径组';
+        return '现场';
+    }
+
+    function _selectionDisplayLabel(selection) {
+        var utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
+        var label = _selectionLabel(selection);
+        var source = _selectionSourceLabel(selection);
+        return source ? label + ' · ' + source : label;
+    }
+
     function _comboKeyForGroup(group) {
         return _addGroupBatchKey(_selectionId(group && group.product_path_selection), group && group.factorAlias, group && group.splitCount);
     }
@@ -245,9 +262,9 @@
             for (var i = 0; i < selections.length; i++) {
                 var selection = selections[i];
                 var selectionId = _selectionId(selection);
-                var label = _selectionLabel(selection) || ('产品路径 #' + selectionId);
+                var label = _selectionDisplayLabel(selection) || ('产品路径 #' + selectionId);
                 var paths = selection.selected_paths || selection.paths || [];
-                var subMeta = selection.product_group_template_id || selection.path_id || (paths.length + ' 路径');
+                var subMeta = _selectionSourceLabel(selection) || (paths.length + ' 路径');
                 var activeId = _selectionId(draft.product_path_selection);
                 var isActive = (activeId === selectionId);
                 html += '<button type="button" class="add-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
@@ -607,9 +624,9 @@
             for (var si = 0; si < selections.length; si++) {
                 var selection = selections[si];
                 var selectionId = _selectionId(selection);
-                var label = _selectionLabel(selection) || ('产品路径 #' + selectionId);
+                var label = _selectionDisplayLabel(selection) || ('产品路径 #' + selectionId);
                 var paths = selection.selected_paths || selection.paths || [];
-                var subMeta = selection.product_group_template_id || selection.path_id || (paths.length + ' 路径');
+                var subMeta = _selectionSourceLabel(selection) || (paths.length + ' 路径');
                 var isActive = !!currentSelectionId && selectionId === currentSelectionId;
                 html += '<button type="button" class="edit-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
                     + ' style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;'
@@ -708,6 +725,7 @@
                         ? GT.groupSettings.groups.getDescendants(target.id)
                         : [];
                     for (var di = 0; di < descendants.length; di++) {
+                        if (descendants[di] === target.id) continue;
                         var childPatch = { needsRegenerate: true };
                         if (structurePatchKeys.product_path_selection) childPatch.product_path_selection = nextSelection;
                         if (structurePatchKeys.factorAlias) childPatch.factorAlias = nextFactor;
@@ -715,7 +733,7 @@
                         if (structurePatchKeys.groupIndex) childPatch.groupIndex = nextIndex;
                         childPatch.shortAlias = '';
                         childPatch.name = '';
-                        GT.groupSettings.groups.update(descendants[di].id, childPatch);
+                        GT.groupSettings.groups.update(descendants[di], childPatch);
                     }
                 }
                 if (GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.rebuildFromGroups) {
@@ -789,6 +807,13 @@
         var container = $('edit-group');
         if (!container) return;
         _renderEditGroup(container);
+        if (GT.backendSettings && typeof GT.backendSettings.loadProductPathSelections === 'function') {
+            GT.backendSettings.loadProductPathSelections().then(function() {
+                if (_editMounted) _renderEditGroup(container);
+            }).catch(function(error) {
+                console.error('[group edit] load product paths failed:', error);
+            });
+        }
     }
     function unmountEdit() { _editMounted = false; }
     function refreshEdit() {

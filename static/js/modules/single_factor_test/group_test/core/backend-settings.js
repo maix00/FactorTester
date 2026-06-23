@@ -163,7 +163,11 @@
     }
 
     function productPathSelectionLabel(selection) {
-        return selection ? (selection.product_group || selection.label || selection.name || selectionId(selection)) : '';
+        if (!selection) return '';
+        var label = selection.product_group || selection.label || selection.name || selectionId(selection);
+        if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
+        if (selection.path_id) return label + ' · 路径组';
+        return label;
     }
 
     function productGroupToSelection(group) {

@@ -118,8 +118,8 @@ def test_snapshot_migration_moves_submissions_to_product_path_selections_with_gr
     assert "submissions" not in snapshot
     assert "product_path_selections" not in snapshot
     assert snapshot["group_settings"]["groups"][0]["product_path_selection"] == {
-        "id": "old-sub",
-        "product_path_selection_id": "old-sub",
+        "id": "pg-metals",
+        "product_path_selection_id": "pg-metals",
         "selected_paths": ["A/Path", "B/Path"],
         "paths": ["A/Path", "B/Path"],
         "label": "Metals",
@@ -178,6 +178,38 @@ def test_snapshot_migration_normalizes_existing_product_path_selection_fields():
     selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
     assert selection["product_group_template_id"] == "pg-group"
     assert selection["paths"] == ["C/Path", "D/Path"]
+
+
+def test_snapshot_migration_relinks_existing_selection_to_matching_product_group():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "product_path_selection": {
+                        "id": "old-selection",
+                        "product_path_selection_id": "old-selection",
+                        "label": "中国期货日盘",
+                        "paths": ["Futures/Day", "Futures/More"],
+                    },
+                }]
+            },
+        },
+        product_groups=[{
+            "id": "pg-day",
+            "name": "中国期货日盘",
+            "paths": ["Futures/More", "Futures/Day"],
+        }],
+    )
+
+    assert changed is True
+    selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
+    assert selection["id"] == "pg-day"
+    assert selection["product_path_selection_id"] == "pg-day"
+    assert selection["product_group_template_id"] == "pg-day"
+    assert selection["path_id"] == "pg-day"
+    assert selection["product_group"] == "中国期货日盘"
+    assert selection["source_type"] == "user_product_group_template"
 
 
 def test_snapshot_migration_materializes_parent_product_path_selection_on_derived_groups():
