@@ -89,6 +89,9 @@
 
     function displayValue(setting, value) {
         if (value === undefined || value === null || value === '') return '无';
+        if (setting && setting.key === 'product_path_selection' && typeof value === 'object') {
+            return productPathSelectionLabel(value) || selectionId(value) || '无';
+        }
         if (setting && Array.isArray(setting.options)) {
             for (var i = 0; i < setting.options.length; i++) {
                 if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
@@ -495,6 +498,8 @@
     function mountProductPathTree(container) {
         var treeEl = container.querySelector('#gt-pps-tree');
         if (!treeEl || !window.ProductSelector || !window.jQuery) return;
+        treeEl.style.fontSize = '11px';
+        treeEl.style.lineHeight = '1.35';
         window.ProductSelector.createTree(window.jQuery(treeEl), {
             onInit: function(tree) {
                 state.productPathTree = tree;
@@ -633,7 +638,7 @@
                 var pathCount = (selection.paths || selection.selected_paths || []).length;
                 var productCount = productPathSelectionProducts(selection).length;
                 html += '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:7px 8px;border-bottom:1px solid #f1f5f9;background:' + (active ? '#eff6ff' : '#fff') + ';">';
-                html += '<button type="button" data-gt-pps-default="' + escapeHTML(id) + '" style="min-width:0;text-align:left;border:none;background:transparent;padding:0;cursor:pointer;">';
+                html += '<button type="button" data-gt-pps-open="' + escapeHTML(id) + '" style="min-width:0;text-align:left;border:none;background:transparent;padding:0;cursor:pointer;">';
                 html += '<div style="font-size:12px;font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</div>';
                 html += '<div style="font-size:11px;color:#64748b;margin-top:1px;">' + pathCount + ' 路径 · ' + productCount + ' 产品' + (active ? ' · 默认' : '') + '</div>';
                 html += '</button>';
@@ -654,17 +659,30 @@
             html += '<button type="button" id="gt-pps-add-positive" style="height:26px;padding:0 9px;border:1px solid #bbf7d0;border-radius:4px;background:#f0fdf4;color:#166534;font-size:12px;cursor:pointer;">+ 正新增</button>';
             html += '<button type="button" id="gt-pps-add-negative" style="height:26px;padding:0 9px;border:1px solid #fecaca;border-radius:4px;background:#fef2f2;color:#b42318;font-size:12px;cursor:pointer;">- 负新增</button>';
             html += '</div>';
-            html += '<div id="gt-pps-tree" class="product-tree-scrollbox" style="width:320px;height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:6px;padding:6px;background:#fff;"></div>';
+            html += '<div id="gt-pps-tree" class="product-tree-scrollbox" style="width:320px;height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:6px;padding:6px;background:#fff;font-size:11px;line-height:1.35;"></div>';
             html += '</div>';
             html += '<div style="min-width:0;">';
             html += '<div id="gt-pps-draft-paths" style="height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></div>';
             html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;">';
             html += '<button type="button" id="gt-pps-clear-draft" style="height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:12px;cursor:pointer;">清空</button>';
-            html += '<button type="button" id="gt-pps-create" style="height:28px;padding:0 12px;border:none;border-radius:4px;background:#2563eb;color:#fff;font-size:12px;cursor:pointer;">新增并设为默认</button>';
+            html += '<button type="button" id="gt-pps-create" style="height:28px;padding:0 12px;border:1px solid #bfdbfe;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;">新增</button>';
+            html += '<button type="button" id="gt-pps-create-default" style="height:28px;padding:0 12px;border:none;border-radius:4px;background:#2563eb;color:#fff;font-size:12px;cursor:pointer;">新增并设为默认</button>';
             html += '</div>';
             html += '</div></div></div></div>';
             container.innerHTML = html;
 
+            container.querySelectorAll('[data-gt-pps-open]').forEach(function(button) {
+                button.addEventListener('click', function() {
+                    var id = this.getAttribute('data-gt-pps-open');
+                    var selected = state.productPathSelections.filter(function(item) { return selectionId(item) === id; })[0] || null;
+                    if (!selected || !GT.overlays || !GT.overlays.productPathSelectionProducts) return;
+                    GT.overlays.productPathSelectionProducts.open(
+                        productPathSelectionLabel(selected),
+                        productPathSelectionProducts(selected),
+                        selected
+                    );
+                });
+            });
             container.querySelectorAll('[data-gt-pps-default]').forEach(function(button) {
                 button.addEventListener('click', function() {
                     var id = this.getAttribute('data-gt-pps-default');
@@ -691,6 +709,7 @@
                 });
             });
             var createBtn = document.getElementById('gt-pps-create');
+            var createDefaultBtn = document.getElementById('gt-pps-create-default');
             renderProductPathDraft(container);
             mountProductPathTree(container);
             var addPositiveBtn = document.getElementById('gt-pps-add-positive');
@@ -716,8 +735,7 @@
                     renderProductPathDraft(container);
                 });
             }
-            if (createBtn) {
-                createBtn.addEventListener('click', function() {
+            function createProductPathGroup(setAsDefault) {
                     var nameInput = document.getElementById('gt-pps-new-name');
                     var status = document.getElementById('gt-pps-status');
                     var name = nameInput ? nameInput.value.trim() : '';
@@ -737,14 +755,20 @@
                         });
                     }).then(function(payload) {
                         var selection = productGroupToSelection(payload.group || {});
-                        setDefaultProductPathSelection(selection);
+                        if (setAsDefault) setDefaultProductPathSelection(selection);
                         return loadProductPathSelections(true);
                     }).then(function() {
+                        state.productPathDraftPaths = [];
                         renderProductPathSelectionManager(container);
                     }).catch(function(error) {
                         if (status) status.textContent = error.message || String(error);
                     });
-                });
+            }
+            if (createBtn) {
+                createBtn.addEventListener('click', function() { createProductPathGroup(false); });
+            }
+            if (createDefaultBtn) {
+                createDefaultBtn.addEventListener('click', function() { createProductPathGroup(true); });
             }
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
