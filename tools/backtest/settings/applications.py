@@ -970,8 +970,95 @@ def factor_evaluation_settings() -> ApplicationSettings:
     return app
 
 
+def factor_type_analysis_settings() -> ApplicationSettings:
+    """因子类型分析的 settings 注册（用于产品序列下方的平行模块）。"""
+    app = ApplicationSettings("factor_type_analysis")
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
+    for module in (
+        SettingModule("product_selection", "产品选择", "product", 10),
+        SettingModule("run_window", "计算时间范围", "time", 20),
+        SettingModule("factor_execution", "因子选择", "factor", 30),
+        SettingModule("analysis_method", "分析方法", "method", 40),
+    ):
+        app.register_module(module)
+    for tab in (
+        SettingTab(
+            "product",
+            "产品",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            10,
+            (TabMountPoint.LOCAL_SETTINGS,),
+        ),
+        SettingTab(
+            "time",
+            "时间范围",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            20,
+            summary_template="{start_date} → {end_date} · {time_precision}",
+            summary_keys=("start_date", "end_date", "time_precision"),
+        ),
+        SettingTab(
+            "factor",
+            "因子",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            30,
+            (TabMountPoint.LOCAL_SETTINGS,),
+        ),
+        SettingTab(
+            "method",
+            "分析方法",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            40,
+            (TabMountPoint.LOCAL_SETTINGS,),
+        ),
+    ):
+        app.register_tab(tab)
+    register_run_window_base(app)
+    app.register_setting(SettingDefinition(
+        "product",
+        "产品路径",
+        "product",
+        "select",
+        None,
+        ScopePolicy.LOCAL_ONLY,
+        module="product_selection",
+        chip_template="产品路径: {value}",
+        help_text="从后端注册的产品树选择一个产品或路径。",
+    ))
+    app.register_setting(SettingDefinition(
+        "factor",
+        "因子",
+        "factor",
+        "select",
+        "",
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
+        chip_template="因子: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "correlation_method",
+        "相关性方法",
+        "method",
+        "select",
+        "pearson",
+        ScopePolicy.LOCAL_ONLY,
+        module="analysis_method",
+        options=(
+            SettingOption("pearson", "Pearson（线性相关）"),
+            SettingOption("spearman", "Spearman（秩相关）"),
+        ),
+        chip_template="方法: {value}",
+    ))
+    return app
+
+
 backtest_setting_registry = BacktestSettingRegistry()
 backtest_setting_registry.register(single_factor_page_settings())
 backtest_setting_registry.register(group_test_settings())
 backtest_setting_registry.register(ic_test_settings())
 backtest_setting_registry.register(factor_evaluation_settings())
+backtest_setting_registry.register(factor_type_analysis_settings())
