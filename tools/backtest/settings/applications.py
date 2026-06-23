@@ -983,8 +983,8 @@ def factor_type_analysis_settings() -> ApplicationSettings:
         app.register_module(module)
     for tab in (
         SettingTab(
-            "product",
-            "产品",
+            "product_path_selection",
+            "产品路径",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             10,
@@ -1018,17 +1018,7 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     ):
         app.register_tab(tab)
     register_run_window_base(app)
-    app.register_setting(SettingDefinition(
-        "product",
-        "产品路径",
-        "product",
-        "select",
-        None,
-        ScopePolicy.LOCAL_ONLY,
-        module="product_selection",
-        chip_template="产品路径: {value}",
-        help_text="从后端注册的产品树选择一个产品或路径。",
-    ))
+    register_product_path_selection_base(app)
     app.register_setting(SettingDefinition(
         "factor",
         "因子",
@@ -1052,6 +1042,41 @@ def factor_type_analysis_settings() -> ApplicationSettings:
             SettingOption("spearman", "Spearman（秩相关）"),
         ),
         chip_template="方法: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "min_periods",
+        "最少有效期数",
+        "method",
+        "number",
+        30,
+        ScopePolicy.LOCAL_ONLY,
+        module="analysis_method",
+        minimum=2,
+        step=1,
+        chip_template="最少期数: {value}",
+        help_text="相关性计算所需的最少重叠时间点；低于该数量时标记为数据不足。",
+    ))
+    app.register_result_tab(ResultTabDefinition(
+        "type_overview",
+        "类型概览",
+        "analysis_method",
+        10,
+        default=True,
+        help_text="展示最接近的因子类型及按类别聚合的相关性。",
+    ))
+    app.register_result_tab(ResultTabDefinition(
+        "reference_factors",
+        "参照因子",
+        "analysis_method",
+        20,
+        help_text="展示待测因子与各参照因子的相关性。",
+    ))
+    app.register_result_tab(ResultTabDefinition(
+        "product_profiles",
+        "产品画像",
+        "product_selection",
+        30,
+        help_text="展示每个产品更接近哪些因子类型，以及每个类型下最相关的产品。",
     ))
     return app
 

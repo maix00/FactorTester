@@ -9,6 +9,7 @@ from .registry import ReferenceFactorRegistry, ReferenceFactorDef, FactorCategor
 from .correlation import (
     compute_time_series_correlation,
     compute_product_correlation_matrix,
+    product_category_profiles,
     categorize_correlation_strength,
     best_category_match,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "default_registry",
     "compute_time_series_correlation",
     "compute_product_correlation_matrix",
+    "product_category_profiles",
     "categorize_correlation_strength",
     "best_category_match",
     "FactorTypeAnalysisRun",

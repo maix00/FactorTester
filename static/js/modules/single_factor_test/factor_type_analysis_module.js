@@ -17,7 +17,6 @@
         values: {},
         lastResult: null,
         factors: [],
-        paths: [],
     };
 
     // =========================================================
@@ -45,15 +44,16 @@
 
     function getSelections() {
         return {
-            paths: state.paths || [],
+            product_path_selection: state.values.product_path_selection || null,
             factor: state.values.factor || state.values.factor_name || '',
             settings: state.values || {},
         };
     }
 
     function setSelections(data) {
-        if (data.paths) state.paths = data.paths;
+        if (data.product_path_selection) state.values.product_path_selection = data.product_path_selection;
         if (data.factor) state.values.factor = data.factor;
+        renderSettingChips();
     }
 
     function updateStatus(text) {
@@ -90,10 +90,11 @@
     }
 
     function displayProductLabel() {
-        var paths = state.paths || [];
-        if (paths.length === 1) return paths[0];
-        if (paths.length > 1) return paths[0] + ' +' + (paths.length - 1);
-        return '';
+        var selection = state.values.product_path_selection;
+        var utils = window.ProductPathSelectionUtils || {};
+        if (utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
+        if (!selection) return '';
+        return selection.product_group || selection.label || selection.name || selection.product_path_selection_id || '';
     }
 
     // =========================================================
@@ -236,6 +237,11 @@
     function renderSettingControl(s) {
         var val = state.values[s.key] !== undefined ? state.values[s.key] : s.default;
         var opts = s.options || [];
+        if (s.key === 'product_path_selection') {
+            return '<div class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;">'
+                + (displayProductLabel() || '尚未选择产品路径')
+                + '</div>';
+        }
         switch (s.control_template) {
             case 'select':
                 var html = '<select data-setting-key="' + s.key + '" class="backend-select">';
@@ -260,8 +266,8 @@
         if (s.key === 'factor') {
             return renderFactorPicker(s);
         }
-        if (s.key === 'product') {
-            return '<div style="font-size:12px;color:#64748b;">从左侧产品树选择产品。</div>';
+        if (s.key === 'product_path_selection') {
+            return '<div style="font-size:12px;color:#64748b;">从产品路径设置选择或管理产品路径。</div>';
         }
         return '<div style="font-size:12px;color:#64748b;">' + (s.key) + '</div>';
     }
@@ -305,6 +311,7 @@
             var parts = [];
             keys.forEach(function (k) {
                 var v = state.values[k];
+                if (k === 'product_path_selection') v = displayProductLabel();
                 if (v !== undefined && v !== null && v !== '') {
                     parts.push({ key: k, value: v });
                 }
@@ -323,24 +330,24 @@
     // =========================================================
 
     function syncProductFromActiveTree() {
-        // Try to get selections from product tree if available
-        if (typeof getActiveProductTreeSelection === 'function') {
-            var sel = getActiveProductTreeSelection();
-            if (sel && sel.paths) {
-                state.paths = sel.paths;
-                return;
-            }
-        }
-        // Fallback: try reading from the factor-evaluation module's state
         if (typeof window.FactorSeriesViewer !== 'undefined') {
             var fse = window.FactorSeriesViewer;
             if (typeof fse.getSelections === 'function') {
                 var sel2 = fse.getSelections();
-                if (sel2 && sel2.paths) {
-                    state.paths = sel2.paths;
+                if (sel2 && sel2.product_path_selection) {
+                    state.values.product_path_selection = sel2.product_path_selection;
                 }
             }
         }
+    }
+
+    function compactProductPathSelectionForRun(selection) {
+        var utils = window.ProductPathSelectionUtils || {};
+        var def = state.manifest && state.manifest.defaults && state.manifest.defaults.product_path_selection;
+        var serialization = def && def.serialization || {};
+        if (utils.compactSelection) return utils.compactSelection(selection, serialization);
+        if (!selection) return null;
+        return { product_path_selection_id: selection.product_path_selection_id || selection.selection_id || selection.id || '' };
     }
 
     async function runAnalysis() {
@@ -352,11 +359,11 @@
         showProgress();
         setProgress(5, '检查配置');
 
-        if (!state.paths || !state.paths.length) {
+        if (!state.values.product_path_selection) {
             syncProductFromActiveTree();
         }
-        if (!state.paths || !state.paths.length) {
-            panel.innerHTML = msg('请先从产品树选择产品。');
+        if (!state.values.product_path_selection) {
+            panel.innerHTML = msg('请先选择产品路径。');
             hideProgress();
             return;
         }
@@ -375,12 +382,13 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    paths: state.paths,
+                    product_path_selection: compactProductPathSelectionForRun(state.values.product_path_selection),
                     factor_family_alias: document.getElementById('factor_type_analysis_module').getAttribute('data-factor-family-alias') || '',
                     factor_alias: factor.alias || factor.name,
                     page_uuid: window._pageUuid || '',
                     settings: state.values || {},
                     method: state.values.correlation_method || 'pearson',
+                    min_periods: state.values.min_periods || 30,
                 }),
             });
             var result = await data.json();
@@ -419,13 +427,22 @@
         // 2) Reference factor table
         renderRefTable(result);
 
-        // 3) Category aggregation
+        // 3) Registered tests that were not run
+        renderSkippedRefs(result);
+
+        // 4) Category aggregation
         renderCategoryTable(result);
 
-        // 4) Product correlation matrix
+        // 5) Product correlation matrix
         renderProductMatrix(result);
 
-        // 5) Product summary
+        // 6) Product type profiles
+        renderProductProfiles(result);
+
+        // 7) Category product ranking
+        renderCategoryRankings(result);
+
+        // 8) Product summary
         renderProductSummary(result);
     }
 
@@ -505,6 +522,32 @@
         });
     }
 
+    function renderSkippedRefs(result) {
+        var el = document.getElementById('factor-type-analysis-skipped-ref-section');
+        var tbody = document.getElementById('factor-type-analysis-skipped-ref-table');
+        if (!el || !tbody) return;
+        var refs = result.skipped_reference_factors || [];
+        if (!refs.length) {
+            el.style.display = 'none';
+            return;
+        }
+        el.style.display = '';
+        tbody.innerHTML = '';
+        refs.forEach(function (r) {
+            var reason = r.reason || '';
+            if (reason === 'asset_class_not_applicable') reason = '不适用于当前产品域';
+            else if (reason.indexOf('requires_explicit_enable_or_data') === 0) reason = '需要显式启用或补充数据';
+            else if (reason === 'requires_explicit_enable') reason = '需要显式启用';
+            else if (reason === 'calculation_failed') reason = '计算失败';
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + (r.name || r.key || '') + '</td>'
+                + '<td>' + (r.category_label || r.category || '') + '</td>'
+                + '<td>' + reason + '</td>'
+                + '<td>' + (r.help_text || '') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+
     function corrStrengthLabel(corr) {
         var abs = Math.abs(corr);
         if (abs >= 0.8) return '高度相关';
@@ -577,6 +620,61 @@
                 + '<td>' + (s.std != null ? s.std.toFixed(6) : 'N/A') + '</td>';
             tbody.appendChild(tr);
         });
+    }
+
+    function renderProductProfiles(result) {
+        var el = document.getElementById('factor-type-analysis-product-profile-section');
+        var tbody = document.getElementById('factor-type-analysis-product-profile-table');
+        if (!el || !tbody) return;
+        var profiles = result.product_type_profiles || [];
+        if (!profiles.length) {
+            el.style.display = 'none';
+            return;
+        }
+        el.style.display = '';
+        tbody.innerHTML = '';
+        profiles.forEach(function (p) {
+            var topRefs = (p.reference_correlations || []).slice(0, 3).map(function (r) {
+                var corr = r.correlation != null ? Number(r.correlation).toFixed(4) : 'N/A';
+                return r.name + ' ' + corr;
+            }).join(' / ');
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + p.product + '</td>'
+                + '<td>' + (p.best_category || '无数据') + '</td>'
+                + '<td>' + (p.best_score != null ? Number(p.best_score).toFixed(4) : 'N/A') + '</td>'
+                + '<td>' + (topRefs || '—') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderCategoryRankings(result) {
+        var el = document.getElementById('factor-type-analysis-category-ranking-section');
+        var container = document.getElementById('factor-type-analysis-category-ranking');
+        if (!el || !container) return;
+        var rankings = result.category_product_rankings || {};
+        var categories = Object.keys(rankings);
+        if (!categories.length) {
+            el.style.display = 'none';
+            return;
+        }
+        el.style.display = '';
+        categories.sort(function (a, b) {
+            var av = rankings[a] && rankings[a][0] ? Math.abs(rankings[a][0].score || 0) : 0;
+            var bv = rankings[b] && rankings[b][0] ? Math.abs(rankings[b][0].score || 0) : 0;
+            return bv - av;
+        });
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;padding:8px;">';
+        categories.forEach(function (cat) {
+            html += '<div style="border:1px solid #edf2f7;border-radius:6px;overflow:hidden;background:#fff;">';
+            html += '<div style="font-size:12px;font-weight:600;color:#334155;background:#f8fafc;padding:6px 8px;">' + cat + '</div>';
+            html += '<table class="factor-type-analysis-data-table" style="font-size:11px;"><tbody>';
+            (rankings[cat] || []).slice(0, 8).forEach(function (row) {
+                html += '<tr><td>' + row.product + '</td><td>' + Number(row.score || 0).toFixed(4) + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
     }
 
     // =========================================================

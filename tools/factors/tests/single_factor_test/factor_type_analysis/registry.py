@@ -17,6 +17,14 @@ class FactorCategory(str, Enum):
     TREND = "trend"            # 趋势跟踪
     MOMENTUM = "momentum"      # 动量
     VOLATILITY = "volatility"  # 波动率
+    LOW_VOLATILITY = "low_volatility"  # 低波/防御
+    VALUE = "value"            # 价值/期限结构估值
+    CARRY = "carry"            # carry/展期收益
+    QUALITY = "quality"        # 质量
+    SIZE = "size"              # 规模
+    YIELD = "yield"            # 收益率
+    GROWTH = "growth"          # 成长
+    LIQUIDITY = "liquidity"    # 流动性
     POSITION = "position"      # 持仓量
     PRICE_VOLUME = "price_volume"  # 量价关系
     CUSTOM = "custom"          # 自定义
@@ -27,6 +35,14 @@ class FactorCategory(str, Enum):
             "trend": "趋势跟踪",
             "momentum": "动量",
             "volatility": "波动率",
+            "low_volatility": "低波/防御",
+            "value": "价值",
+            "carry": "Carry",
+            "quality": "质量",
+            "size": "规模",
+            "yield": "收益率",
+            "growth": "成长",
+            "liquidity": "流动性",
             "position": "持仓量",
             "price_volume": "量价关系",
             "custom": "自定义",
@@ -42,6 +58,9 @@ class ReferenceFactorDef:
     category: FactorCategory
     factor_alias: str
     factor_family_alias: str = ""
+    asset_classes: tuple[str, ...] = ("futures",)
+    enabled_by_default: bool = True
+    requires_data: tuple[str, ...] = ("price_volume",)
     help_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -52,6 +71,9 @@ class ReferenceFactorDef:
             "category_label": self.category.label_cn,
             "factor_alias": self.factor_alias,
             "factor_family_alias": self.factor_family_alias,
+            "asset_classes": list(self.asset_classes),
+            "enabled_by_default": self.enabled_by_default,
+            "requires_data": list(self.requires_data),
             "help_text": self.help_text,
         }
 
@@ -147,6 +169,30 @@ _DEFAULT_REFERENCE_FACTORS = [
         factor_alias="VlGK",
         help_text="波动率基准—GK波动率",
     ),
+    ReferenceFactorDef(
+        key="low_vol_inverse_realized", name="LowVolInv",
+        category=FactorCategory.LOW_VOLATILITY,
+        factor_alias="LowVolInv",
+        help_text="低波/防御基准—实现波动率的反向暴露",
+        enabled_by_default=False,
+    ),
+    # --- 价值 / Carry 类（期货里通常由期限结构或基差代理） ---
+    ReferenceFactorDef(
+        key="value_ts_spread", name="TsSpreadValue",
+        category=FactorCategory.VALUE,
+        factor_alias="TsSpreadValue",
+        help_text="价值基准—期限结构价差/相对便宜度；需要期限结构数据",
+        enabled_by_default=False,
+        requires_data=("term_structure",),
+    ),
+    ReferenceFactorDef(
+        key="carry_roll_yield", name="RollYieldCarry",
+        category=FactorCategory.CARRY,
+        factor_alias="RollYieldCarry",
+        help_text="Carry基准—展期收益/期限结构斜率；需要期限结构数据",
+        enabled_by_default=False,
+        requires_data=("term_structure",),
+    ),
     # --- 持仓量类 ---
     ReferenceFactorDef(
         key="pos_oi_chg_rat", name="OiChgRat",
@@ -172,6 +218,50 @@ _DEFAULT_REFERENCE_FACTORS = [
         category=FactorCategory.PRICE_VOLUME,
         factor_alias="VpVolPriceCorr",
         help_text="量价基准—量价相关性",
+    ),
+    ReferenceFactorDef(
+        key="liq_amihud_inverse", name="LiquidityInv",
+        category=FactorCategory.LIQUIDITY,
+        factor_alias="LiquidityInv",
+        help_text="流动性基准—交易冲击/非流动性的反向暴露",
+        enabled_by_default=False,
+    ),
+    # --- 股票/截面风格，保留注册但默认不对期货运行 ---
+    ReferenceFactorDef(
+        key="quality_profitability", name="QualityProfitability",
+        category=FactorCategory.QUALITY,
+        factor_alias="QualityProfitability",
+        asset_classes=("equity",),
+        enabled_by_default=False,
+        requires_data=("fundamental",),
+        help_text="股票质量基准—盈利能力/稳健性，期货默认不启用",
+    ),
+    ReferenceFactorDef(
+        key="size_market_cap", name="SizeMarketCap",
+        category=FactorCategory.SIZE,
+        factor_alias="SizeMarketCap",
+        asset_classes=("equity",),
+        enabled_by_default=False,
+        requires_data=("fundamental",),
+        help_text="股票规模基准—市值，期货默认不启用",
+    ),
+    ReferenceFactorDef(
+        key="yield_dividend", name="DividendYield",
+        category=FactorCategory.YIELD,
+        factor_alias="DividendYield",
+        asset_classes=("equity",),
+        enabled_by_default=False,
+        requires_data=("fundamental",),
+        help_text="股票收益率基准—股息率，期货默认不启用",
+    ),
+    ReferenceFactorDef(
+        key="growth_fundamental", name="GrowthFundamental",
+        category=FactorCategory.GROWTH,
+        factor_alias="GrowthFundamental",
+        asset_classes=("equity",),
+        enabled_by_default=False,
+        requires_data=("fundamental",),
+        help_text="股票成长基准—基本面成长，期货默认不启用",
     ),
 ]
 

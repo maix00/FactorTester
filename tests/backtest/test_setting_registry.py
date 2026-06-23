@@ -122,6 +122,33 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
 
 
+def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
+    application = backtest_setting_registry.get("factor_type_analysis")
+
+    index = application.manifest()
+    product_tab = application.tab_manifest("product_path_selection")
+    method_tab = application.tab_manifest("method")
+
+    assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
+        "product_path_selection", "time", "factor", "method",
+    ]
+    assert [setting["key"] for setting in product_tab["settings"]] == ["product_path_selection"]
+    assert index["defaults"]["product_path_selection"]["serialization"]["kind"] == "product_path_selection"
+    assert list(index["defaults"]["product_path_selection"]["serialization"]["manual_fields"]) == [
+        "product_path_selection_id",
+        "paths",
+    ]
+    assert [setting["key"] for setting in method_tab["settings"]] == [
+        "correlation_method",
+        "min_periods",
+    ]
+    assert [tab["key"] for tab in index["result_tabs"]] == [
+        "type_overview",
+        "reference_factors",
+        "product_profiles",
+    ]
+
+
 def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules() -> None:
     application = backtest_setting_registry.get("single_factor_page")
     index = application.manifest()

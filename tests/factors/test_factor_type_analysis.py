@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import tools.factors.tests.single_factor_test.factor_type_analysis.server_facade as server_facade
 from tools.factors.tests.single_factor_test.factor_type_analysis import (
     FactorTypeAnalyzer,
     ReferenceFactorRegistry,
@@ -28,6 +29,7 @@ from tools.factors.tests.single_factor_test.factor_type_analysis.correlation imp
     best_category_match,
     compute_product_correlation_matrix,
     compute_time_series_correlation,
+    product_category_profiles,
     categorize_correlation_strength,
 )
 from tools.factors.tests.single_factor_test.factor_type_analysis.registry import (
@@ -37,6 +39,9 @@ from tools.factors.tests.single_factor_test.factor_type_analysis.registry import
     default_registry,
 )
 from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
+    FactorTypeAnalysisRun,
+    _infer_asset_classes,
+    _reference_skip_reason,
     _run_window_datetimes,
 )
 
@@ -154,10 +159,20 @@ class TestReferenceFactorRegistry:
             assert "category_label" in entry
             assert "factor_alias" in entry
 
-    def test_default_registry_has_10_entries(self):
-        assert default_registry.count() == 10
+    def test_default_registry_has_core_and_extended_styles(self):
+        assert default_registry.count() >= 10
         assert FactorCategory.TREND in default_registry.categories()
         assert FactorCategory.VOLATILITY in default_registry.categories()
+        assert FactorCategory.VALUE in default_registry.categories()
+        assert FactorCategory.CARRY in default_registry.categories()
+        assert FactorCategory.QUALITY in default_registry.categories()
+
+    def test_default_registry_marks_data_dependent_styles_disabled(self):
+        disabled = [item for item in default_registry.list() if not item.enabled_by_default]
+        assert any(item.category == FactorCategory.CARRY for item in disabled)
+        assert any(item.category == FactorCategory.QUALITY for item in disabled)
+        for item in disabled:
+            assert item.help_text
 
 
 # =========================================================
@@ -286,11 +301,32 @@ class TestUtilities:
         assert result["best_category"] == ""
 
     def test_run_window_datetimes(self):
-        settings = {"start_date": "2023-01-01", "end_date": "2023-12-31"}
+        settings = {
+            "start_date": "2023-01-01",
+            "end_date": "2023-12-31",
+            "start_time": "09:00",
+            "end_time": "15:00",
+            "timezone": "Asia/Shanghai",
+            "time_precision": "exact",
+        }
         start, end = _run_window_datetimes(settings)
         assert start is not None
         assert end is not None
+        assert start.precision == "exact"
         assert "2023" in str(start.ts)
+
+    def test_run_window_datetimes_trading_day(self):
+        settings = {
+            "start_date": "2023-01-01",
+            "end_date": "2023-12-31",
+            "time_precision": "trading_day",
+            "timezone": "Asia/Shanghai",
+        }
+        start, end = _run_window_datetimes(settings)
+        assert start is not None
+        assert end is not None
+        assert start.precision == "trading_day"
+        assert start.ts.tzinfo is None
 
     def test_run_window_datetimes_none(self):
         start, end = _run_window_datetimes(None)
@@ -364,6 +400,25 @@ class TestFactorTypeAnalyzer:
         assert "products" in pc
         assert len(pc["products"]) == 4
 
+    def test_analyze_product_type_profiles(self, sample_registry, sample_product_series):
+        analyzer = FactorTypeAnalyzer(registry=sample_registry)
+        refs = self._make_refs(sample_product_series)
+
+        result = analyzer.analyze(
+            target_series=sample_product_series,
+            factor_name="Test",
+            reference_series=refs,
+            min_periods=10,
+        )
+
+        assert len(result.product_type_profiles) == 4
+        first = result.product_type_profiles[0]
+        assert "product" in first
+        assert "best_category" in first
+        assert "category_scores" in first
+        assert "reference_correlations" in first
+        assert "趋势跟踪" in result.category_product_rankings
+
     def test_analyze_single_product(self, sample_registry):
         """单产品应仍有分析结果（但品种矩阵为空）。"""
         analyzer = FactorTypeAnalyzer(registry=sample_registry)
@@ -431,7 +486,10 @@ class TestApiSimulation:
     def test_request_body_roundtrip(self):
         """模拟前端 POST 请求的 JSON 结构被正确解析。"""
         body = {
-            "paths": ["RB.SHF", "HC.SHF", "I.DCE"],
+            "product_path_selection": {
+                "product_path_selection_id": "manual-black",
+                "paths": ["Product/Futures/CNFutures/黑色/RB.SHF"],
+            },
             "factor_family_alias": "mm_factors",
             "factor_alias": "MmTrend",
             "page_uuid": "test-uuid-123",
@@ -447,10 +505,178 @@ class TestApiSimulation:
         serialized = json.dumps(body)
         deserialized = json.loads(serialized)
 
-        assert deserialized["paths"] == ["RB.SHF", "HC.SHF", "I.DCE"]
+        assert deserialized["product_path_selection"]["product_path_selection_id"] == "manual-black"
+        assert deserialized["product_path_selection"]["paths"] == ["Product/Futures/CNFutures/黑色/RB.SHF"]
         assert deserialized["factor_alias"] == "MmTrend"
         assert deserialized["settings"]["start_date"] == "2023-01-01"
         assert deserialized["method"] == "pearson"
+
+    def test_product_path_selection_infers_asset_domain_and_skip_reason(self):
+        selection = server_facade.ProductPathSelection(
+            selection_id="futures-path",
+            selected_paths=["Product/Futures/CNFutures/日夜盘/日盘"],
+        )
+        assert _infer_asset_classes(selection) == ("futures",)
+
+        equity_ref = ReferenceFactorDef(
+            key="quality",
+            name="Quality",
+            category=FactorCategory.QUALITY,
+            factor_alias="Quality",
+            asset_classes=("equity",),
+        )
+        assert _reference_skip_reason(equity_ref, ("futures",)) == "asset_class_not_applicable"
+
+        carry_ref = ReferenceFactorDef(
+            key="carry",
+            name="Carry",
+            category=FactorCategory.CARRY,
+            factor_alias="Carry",
+            enabled_by_default=False,
+            requires_data=("term_structure",),
+        )
+        assert _reference_skip_reason(carry_ref, ("futures",)) == "requires_explicit_enable_or_data:term_structure"
+
+    def test_run_from_request_parses_min_periods_and_paths(self, monkeypatch):
+        def fake_selection_from_request(data, *, page_uuid):
+            return server_facade.ProductPathSelection(
+                selection_id=data["product_path_selection"]["product_path_selection_id"],
+                selected_paths=list(data["product_path_selection"]["paths"]),
+                label="日盘",
+                page_uuid=page_uuid,
+            )
+
+        monkeypatch.setattr(server_facade, "selection_from_request", fake_selection_from_request)
+        body = {
+            "product_path_selection": {
+                "product_path_selection_id": "manual-day",
+                "paths": ["Product/Futures/CNFutures/日夜盘/日盘"],
+            },
+            "factor_family_alias": "SgCCS",
+            "factor_alias": "SgCCS|N:2m|$F:1m|$Rev",
+            "settings": {"min_periods": 12},
+            "method": "spearman",
+        }
+        run = FactorTypeAnalysisRun.from_request(body, page_uuid="page-1")
+        assert run.min_periods == 12
+        assert run.method == "spearman"
+        assert run.selection.selected_paths == ["Product/Futures/CNFutures/日夜盘/日盘"]
+
+    def test_run_simulates_frontend_request(self, monkeypatch):
+        """模拟前端提交到后端对象并完成一次完整类型分析。"""
+
+        class FakeProduct:
+            def __init__(self, name: str):
+                self.name = name
+                self.alias = name
+
+        class FakeFactor:
+            def __init__(self, alias: str):
+                self.alias = alias
+                self.name = alias
+
+        class FakeResult:
+            def __init__(self, table: pd.DataFrame):
+                self.func_table = table
+                self.table = pd.DataFrame()
+
+        class FakeTester:
+            def __init__(self):
+                self.products = [FakeProduct("RB.SHF"), FakeProduct("HC.SHF")]
+                self._factors = []
+                self.results = {}
+                self.start_date = None
+                self.end_date = None
+
+        dates = pd.date_range("2024-01-01", periods=80, freq="D")
+        trend = pd.Series(np.linspace(0, 1, len(dates)), index=dates)
+
+        def fake_create_factor_tester_for_run(*args, **kwargs):
+            return FakeTester()
+
+        def fake_current_user_obj():
+            return None
+
+        def fake_load_and_calc_factor(tester, factor_family_alias, factor_alias, page_uuid):
+            factor = FakeFactor(factor_alias)
+            tester._factors.append(factor)
+            if factor_alias == "TargetFactor":
+                data = {
+                    "RB.SHF": trend,
+                    "HC.SHF": trend * 0.9,
+                }
+            elif factor_alias == "TrendRef":
+                data = {
+                    "RB.SHF": trend,
+                    "HC.SHF": trend * 0.95,
+                }
+            else:
+                rng = np.random.default_rng(42)
+                data = {
+                    "RB.SHF": pd.Series(rng.normal(0, 1, len(dates)), index=dates),
+                    "HC.SHF": pd.Series(rng.normal(0, 1, len(dates)), index=dates),
+                }
+            tester.results[factor] = FakeResult(pd.DataFrame(data))
+            return factor
+
+        registry = ReferenceFactorRegistry()
+        registry.register(ReferenceFactorDef(
+            key="trend_ref",
+            name="TrendRef",
+            category=FactorCategory.TREND,
+            factor_alias="TrendRef",
+        ))
+        registry.register(ReferenceFactorDef(
+            key="vol_ref",
+            name="VolRef",
+            category=FactorCategory.VOLATILITY,
+            factor_alias="VolRef",
+        ))
+        registry.register(ReferenceFactorDef(
+            key="quality_ref",
+            name="QualityRef",
+            category=FactorCategory.QUALITY,
+            factor_alias="QualityRef",
+            asset_classes=("equity",),
+        ))
+
+        monkeypatch.setattr(server_facade, "create_factor_tester_for_run", fake_create_factor_tester_for_run)
+        monkeypatch.setattr(server_facade, "current_user_obj", fake_current_user_obj)
+        monkeypatch.setattr(server_facade, "_load_and_calc_factor", fake_load_and_calc_factor)
+        monkeypatch.setattr(server_facade, "default_registry", registry)
+        monkeypatch.setattr(server_facade, "selection_from_request", lambda data, *, page_uuid: server_facade.ProductPathSelection(
+            selection_id=data["product_path_selection"]["product_path_selection_id"],
+            selected_paths=list(data["product_path_selection"]["paths"]),
+            label="RB",
+            page_uuid=page_uuid,
+        ))
+
+        run = FactorTypeAnalysisRun.from_request({
+            "product_path_selection": {
+                "product_path_selection_id": "manual-rb",
+                "paths": ["Product/Futures/CNFutures/黑色/RB.SHF"],
+            },
+            "factor_family_alias": "Family",
+            "factor_alias": "TargetFactor",
+            "method": "pearson",
+            "settings": {"min_periods": 10},
+        }, page_uuid="page-1")
+        response = run.run()
+
+        assert response["success"] is True
+        assert response["meta"]["min_periods"] == 10
+        assert response["meta"]["asset_classes"] == ["futures"]
+        assert response["best_match"]["best_category"] == "趋势跟踪"
+        assert response["product_type_profiles"][0]["best_category"] == "趋势跟踪"
+        assert response["category_product_rankings"]["趋势跟踪"][0]["product"] in {"RB.SHF", "HC.SHF"}
+        assert response["skipped_reference_factors"] == [{
+            "key": "quality_ref",
+            "name": "QualityRef",
+            "category": "quality",
+            "category_label": "质量",
+            "reason": "asset_class_not_applicable",
+            "help_text": "",
+        }]
 
     def test_response_structure(self, sample_registry, sample_product_series):
         """验证分析结果的结构与前端期望一致。"""
@@ -488,9 +714,12 @@ class TestApiSimulation:
                     "insufficient_data": False,
                 }
             ],
+            "skipped_reference_factors": [],
             "category_correlations": result.category_correlations,
             "best_match": result.best_match,
             "product_correlation": result.product_correlation,
+            "product_type_profiles": result.product_type_profiles,
+            "category_product_rankings": result.category_product_rankings,
             "product_summaries": [
                 {
                     "product": prod,
@@ -505,6 +734,7 @@ class TestApiSimulation:
             "meta": {
                 "elapsed_ms": 0,
                 "method": "pearson",
+                "min_periods": 30,
                 "product_count": 4,
                 "reference_count": 1,
             },
@@ -512,8 +742,10 @@ class TestApiSimulation:
 
         # 验证顶层 key
         for key in ("success", "target_factor", "reference_factors",
+                     "skipped_reference_factors",
                      "category_correlations", "best_match",
-                     "product_correlation", "product_summaries", "meta"):
+                     "product_correlation", "product_type_profiles",
+                     "category_product_rankings", "product_summaries", "meta"):
             assert key in response, f"Missing key: {key}"
 
         # 验证 reference_factors 结构
@@ -533,7 +765,11 @@ class TestApiSimulation:
         cats = registry.categories()
         all_cats = {FactorCategory.TREND, FactorCategory.MOMENTUM,
                      FactorCategory.VOLATILITY, FactorCategory.POSITION,
-                     FactorCategory.PRICE_VOLUME}
+                     FactorCategory.PRICE_VOLUME, FactorCategory.VALUE,
+                     FactorCategory.CARRY, FactorCategory.LOW_VOLATILITY,
+                     FactorCategory.QUALITY, FactorCategory.SIZE,
+                     FactorCategory.YIELD, FactorCategory.GROWTH,
+                     FactorCategory.LIQUIDITY}
         for cat in all_cats:
             assert cat in cats, f"Missing category: {cat}"
 
@@ -562,6 +798,30 @@ class TestApiSimulation:
         if not factor_alias:
             with pytest.raises(ValueError, match="请先选择因子"):
                 raise ValueError("请先选择因子")
+
+    def test_product_category_profiles_directly(self, sample_registry):
+        dates = pd.date_range("2020-01-01", periods=120)
+        trend = pd.Series(np.linspace(0, 1, 120), index=dates)
+        noisy = pd.Series(np.random.default_rng(7).normal(0, 1, 120), index=dates)
+        target_series = {
+            "TREND.PROD": trend + 0.01,
+            "NOISY.PROD": noisy,
+        }
+        refs = {
+            "trend_a": trend,
+            "vol_a": pd.Series(np.random.default_rng(9).normal(0, 1, 120), index=dates),
+        }
+
+        payload = product_category_profiles(
+            target_series=target_series,
+            reference_series=refs,
+            registry=sample_registry,
+            min_periods=10,
+        )
+
+        trend_profile = next(item for item in payload["profiles"] if item["product"] == "TREND.PROD")
+        assert trend_profile["best_category"] == "趋势跟踪"
+        assert payload["category_rankings"]["趋势跟踪"][0]["product"] == "TREND.PROD"
 
     def test_default_registry_to_dict(self, sample_registry):
         """验证参照因子可序列化为前端所需格式。"""

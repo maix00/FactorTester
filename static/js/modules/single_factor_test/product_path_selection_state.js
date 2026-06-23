@@ -42,6 +42,35 @@
         }).filter(Boolean);
     }
 
+    function compactSelection(selection, serialization) {
+        var id = selectionId(selection);
+        if (!selection || !id) return null;
+        serialization = serialization || {};
+        var idKeys = serialization.id_keys || ['product_path_selection_id', 'selection_id', 'id'];
+        var referenceKeys = serialization.product_group_reference_keys || ['product_group_template_id', 'path_id'];
+        var sourceType = serialization.product_group_source_type || 'user_product_group_template';
+        var manualPathKeys = serialization.manual_path_keys || ['paths', 'selected_paths'];
+        var productGroupId = '';
+        referenceKeys.forEach(function(key) {
+            if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+        });
+        if (!productGroupId && selection.source_type === sourceType) {
+            idKeys.forEach(function(key) {
+                if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+            });
+        }
+        if (productGroupId) return { product_path_selection_id: productGroupId };
+        var paths = [];
+        manualPathKeys.forEach(function(key) {
+            if (!paths.length && Array.isArray(selection[key])) paths = selection[key];
+        });
+        var compact = { product_path_selection_id: id };
+        if (Array.isArray(paths) && paths.length) {
+            compact.paths = paths.map(function(path) { return String(path || '').trim(); }).filter(Boolean);
+        }
+        return compact;
+    }
+
     function selectionIdentity(selection) {
         if (!selection) return '';
         var templateId = selection.product_group_template_id || selection.path_id || '';
@@ -78,6 +107,7 @@
         selectionDisplayLabel: selectionDisplayLabel,
         selectionIdentity: selectionIdentity,
         selectionProducts: selectionProducts,
+        compactSelection: compactSelection,
         dedupe: dedupe,
     };
 })();

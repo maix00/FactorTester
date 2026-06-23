@@ -186,3 +186,90 @@ def best_category_match(
             k: round(float(v), 4) for k, v in category_correlations.items()
         },
     }
+
+
+def product_category_profiles(
+    *,
+    target_series: dict[str, pd.Series],
+    reference_series: dict[str, pd.Series],
+    registry: Any,
+    min_periods: int = 30,
+    method: str = "pearson",
+) -> dict[str, Any]:
+    """
+    计算每个产品上的因子类型画像。
+
+    这一步服务于 IC 前的因子诊断：先判断因子在不同产品上更像趋势、
+    波动率、动量等哪类已知风格，再进入预测能力检验。
+    """
+    profiles: list[dict[str, Any]] = []
+    rankings: dict[str, list[dict[str, Any]]] = {}
+    for product, series in target_series.items():
+        ref_corrs = compute_time_series_correlation(
+            target_series=series,
+            reference_series=reference_series,
+            min_periods=min_periods,
+            method=method,
+        )
+        category_values: dict[str, list[float]] = {}
+        reference_rows: list[dict[str, Any]] = []
+        for ref_key, corr_info in ref_corrs.items():
+            try:
+                ref_def = registry.get(ref_key)
+            except KeyError:
+                continue
+            corr = corr_info.get("correlation")
+            label = ref_def.category.label_cn
+            if corr is not None:
+                category_values.setdefault(label, []).append(float(corr))
+            reference_rows.append({
+                "key": ref_key,
+                "name": ref_def.name,
+                "category": ref_def.category.value,
+                "category_label": label,
+                "correlation": corr,
+                "abs_correlation": round(abs(float(corr)), 4) if corr is not None else None,
+                "p_value": corr_info.get("p_value"),
+                "valid_periods": corr_info.get("valid_periods", 0),
+                "insufficient_data": bool(corr_info.get("insufficient_data")),
+            })
+
+        category_scores = {
+            label: round(float(np.mean([abs(v) for v in values])), 4)
+            for label, values in category_values.items()
+            if values
+        }
+        category_signed = {
+            label: round(float(np.mean(values)), 4)
+            for label, values in category_values.items()
+            if values
+        }
+        best = best_category_match(category_scores)
+        profile = {
+            "product": product,
+            "best_category": best.get("best_category", ""),
+            "best_score": best.get("best_corr", 0),
+            "category_scores": category_scores,
+            "category_signed_correlations": category_signed,
+            "reference_correlations": sorted(
+                reference_rows,
+                key=lambda row: row["abs_correlation"] if row["abs_correlation"] is not None else -1,
+                reverse=True,
+            ),
+        }
+        profiles.append(profile)
+        for label, score in category_scores.items():
+            rankings.setdefault(label, []).append({
+                "product": product,
+                "score": score,
+                "signed_correlation": category_signed.get(label),
+                "best_category": profile["best_category"],
+            })
+
+    profiles.sort(key=lambda item: item.get("best_score") or 0, reverse=True)
+    for label, rows in rankings.items():
+        rows.sort(key=lambda item: abs(item.get("score") or 0), reverse=True)
+    return {
+        "profiles": profiles,
+        "category_rankings": rankings,
+    }

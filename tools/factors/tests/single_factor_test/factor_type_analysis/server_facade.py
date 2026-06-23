@@ -23,6 +23,7 @@ from server.modules.shared.factor_data_helpers import (
     match_product_column as _match_product_column,
 )
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
+from server.modules.shared.factor_tester_runtime import selection_from_request
 from server.modules.shared.submission_model import ProductPathSelection
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, get_session_params
@@ -132,10 +133,42 @@ def _run_window_datetimes(
     end_date = str(settings.get("end_date") or "").strip()
     if not start_date or not end_date:
         return None, None
+    precision = str(settings.get("time_precision") or "exact")
+    if precision == "trading_day":
+        return (
+            DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
+            DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
+        )
     timezone = str(settings.get("timezone") or "Asia/Shanghai")
-    start = pd.Timestamp(f"{start_date} 00:00").tz_localize(timezone)
-    end = pd.Timestamp(f"{end_date} 23:59").tz_localize(timezone)
-    return DataTime(ts=start), DataTime(ts=end)
+    start_time = str(settings.get("start_time") or "00:00")
+    end_time = str(settings.get("end_time") or "23:59")
+    start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
+    end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
+    return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
+
+
+def _infer_asset_classes(selection: ProductPathSelection) -> tuple[str, ...]:
+    """Infer the broad asset domain from the selected product paths."""
+    classes: set[str] = set()
+    for raw_path in getattr(selection, "selected_paths", []) or []:
+        path = str(raw_path).lstrip("-")
+        lowered = path.lower()
+        if "/futures/" in lowered or "cnfutures" in lowered or lowered.startswith("product/futures"):
+            classes.add("futures")
+        elif "/equity/" in lowered or "/stock" in lowered or lowered.startswith("product/equity"):
+            classes.add("equity")
+    return tuple(sorted(classes)) or ("unknown",)
+
+
+def _reference_skip_reason(ref_def: Any, asset_classes: tuple[str, ...]) -> str | None:
+    ref_assets = set(getattr(ref_def, "asset_classes", ()) or ())
+    inferred_assets = set(asset_classes)
+    if ref_assets and "unknown" not in inferred_assets and ref_assets.isdisjoint(inferred_assets):
+        return "asset_class_not_applicable"
+    if not getattr(ref_def, "enabled_by_default", True):
+        required = ",".join(getattr(ref_def, "requires_data", ()) or ())
+        return f"requires_explicit_enable_or_data:{required}" if required else "requires_explicit_enable"
+    return None
 
 
 @dataclass(slots=True)
@@ -148,12 +181,10 @@ class FactorTypeAnalysisRun:
     page_uuid: str
     settings: dict[str, Any] | None = None
     method: str = "pearson"
+    min_periods: int = 30
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorTypeAnalysisRun":
-        paths = data.get("paths") or data.get("selected_paths") or []
-        if not isinstance(paths, list) or not paths:
-            raise ValueError("请先从产品树选择产品或路径")
         factor_family_alias = str(data.get("factor_family_alias") or "").strip()
         factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
         if not factor_family_alias or not factor_alias:
@@ -161,20 +192,26 @@ class FactorTypeAnalysisRun:
         method = str(data.get("method") or "pearson").strip()
         if method not in ("pearson", "spearman"):
             method = "pearson"
-        selection = ProductPathSelection.from_paths(
-            "factor-type-analysis",
-            paths,
-            label="因子类型分析",
-            source_type="factor_type_analysis",
-            page_uuid=page_uuid,
-        )
+        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+        raw_min_periods = data.get("min_periods")
+        if raw_min_periods is None:
+            raw_min_periods = settings.get("min_periods")
+        try:
+            min_periods = max(2, int(raw_min_periods or 30))
+        except (TypeError, ValueError):
+            min_periods = 30
+        try:
+            selection = selection_from_request(data, page_uuid=page_uuid)
+        except AssertionError as exc:
+            raise ValueError(str(exc) or "请先选择产品路径") from exc
         return cls(
             selection=selection,
             factor_family_alias=factor_family_alias,
             factor_alias=factor_alias,
             page_uuid=page_uuid,
-            settings=data.get("settings") if isinstance(data.get("settings"), dict) else None,
+            settings=settings,
             method=method,
+            min_periods=min_periods,
         )
 
     def run(self) -> dict[str, Any]:
@@ -205,7 +242,20 @@ class FactorTypeAnalysisRun:
 
         # 4) 计算参照因子序列 — 需要先 calc 参照因子
         reference_series: dict[str, pd.Series] = {}
+        skipped_refs = []
+        asset_classes = _infer_asset_classes(self.selection)
         for ref_def in default_registry.list():
+            skip_reason = _reference_skip_reason(ref_def, asset_classes)
+            if skip_reason:
+                skipped_refs.append({
+                    "key": ref_def.key,
+                    "name": ref_def.name,
+                    "category": ref_def.category.value,
+                    "category_label": ref_def.category.label_cn,
+                    "reason": skip_reason,
+                    "help_text": ref_def.help_text,
+                })
+                continue
             try:
                 ref_factor = _load_and_calc_factor(
                     tester,
@@ -230,6 +280,14 @@ class FactorTypeAnalysisRun:
                         reference_series[ref_def.key] = first
             except Exception:
                 # 单个参照因子失败不应中断整体
+                skipped_refs.append({
+                    "key": ref_def.key,
+                    "name": ref_def.name,
+                    "category": ref_def.category.value,
+                    "category_label": ref_def.category.label_cn,
+                    "reason": "calculation_failed",
+                    "help_text": ref_def.help_text,
+                })
                 continue
 
         # 5) 执行分析
@@ -239,6 +297,7 @@ class FactorTypeAnalysisRun:
             factor_name=self.factor_alias,
             method=self.method,
             reference_series=reference_series,
+            min_periods=self.min_periods,
         )
 
         # 6) 补充参照因子的元信息
@@ -279,14 +338,20 @@ class FactorTypeAnalysisRun:
                 "family_alias": self.factor_family_alias,
             },
             "reference_factors": ref_details,
+            "skipped_reference_factors": skipped_refs,
             "category_correlations": result.category_correlations,
             "best_match": result.best_match,
             "product_correlation": result.product_correlation,
+            "product_type_profiles": result.product_type_profiles,
+            "category_product_rankings": result.category_product_rankings,
             "product_summaries": product_summaries,
             "meta": {
                 "elapsed_ms": round((time.time() - started_at) * 1000),
                 "method": self.method,
+                "min_periods": self.min_periods,
                 "product_count": len(target_series),
                 "reference_count": len(reference_series),
+                "skipped_reference_count": len(skipped_refs),
+                "asset_classes": list(asset_classes),
             },
         }

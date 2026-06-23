@@ -16,6 +16,7 @@ from .correlation import (
     best_category_match,
     compute_product_correlation_matrix,
     compute_time_series_correlation,
+    product_category_profiles,
 )
 from .registry import FactorCategory, ReferenceFactorRegistry, create_default_registry
 
@@ -36,6 +37,12 @@ class FactorTypeAnalysisResult:
     # 品种相关性矩阵
     product_correlation: dict[str, Any] = field(default_factory=dict)
 
+    # 每个产品与参照类型的画像
+    product_type_profiles: list[dict[str, Any]] = field(default_factory=list)
+
+    # 每个因子类型下最相关的产品排名
+    category_product_rankings: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
     # 元信息
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -47,6 +54,11 @@ class FactorTypeAnalysisResult:
             "category_correlations": dict(self.category_correlations),
             "best_match": dict(self.best_match),
             "product_correlation": dict(self.product_correlation),
+            "product_type_profiles": [dict(item) for item in self.product_type_profiles],
+            "category_product_rankings": {
+                key: [dict(item) for item in value]
+                for key, value in self.category_product_rankings.items()
+            },
             "meta": dict(self.meta),
         }
 
@@ -100,7 +112,7 @@ class FactorTypeAnalyzer:
             reference_series = self._evaluate_reference_series(target_series)
 
         # ----------------------------------------
-        # 1) 取第一个产品的因子值做"代表性序列"做类别相关性
+        # 1) 取最长序列产品做整体摘要；同时保留逐产品画像。
         # ----------------------------------------
         products = list(target_series.keys())
         if not products:
@@ -142,12 +154,21 @@ class FactorTypeAnalyzer:
             min_periods=min_periods,
             method=method,
         )
+        profile_payload = product_category_profiles(
+            target_series=target_series,
+            reference_series=reference_series,
+            registry=self._registry,
+            min_periods=min_periods,
+            method=method,
+        )
 
         return FactorTypeAnalysisResult(
             reference_correlations=ref_corrs,
             category_correlations=cat_corrs,
             best_match=best,
             product_correlation=prod_corr,
+            product_type_profiles=profile_payload["profiles"],
+            category_product_rankings=profile_payload["category_rankings"],
             meta={
                 "factor_name": factor_name,
                 "representative_product": rep_product,

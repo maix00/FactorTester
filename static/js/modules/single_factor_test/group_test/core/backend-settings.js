@@ -159,9 +159,11 @@
     }
 
     function compactProductPathSelection(selection) {
+        var def = settingDef('product_path_selection') || {};
+        var utils = window.ProductPathSelectionUtils || {};
+        if (utils.compactSelection) return utils.compactSelection(selection, def.serialization || {});
         var id = selectionId(selection);
         if (!selection || !id) return null;
-        var def = settingDef('product_path_selection') || {};
         var serialization = def.serialization || {};
         var idKeys = serialization.id_keys || ['product_path_selection_id', 'selection_id', 'id'];
         var referenceKeys = serialization.product_group_reference_keys || ['product_group_template_id', 'path_id'];
@@ -176,9 +178,7 @@
                 if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
             });
         }
-        if (productGroupId) {
-            return { product_path_selection_id: productGroupId };
-        }
+        if (productGroupId) return { product_path_selection_id: productGroupId };
         var paths = [];
         manualPathKeys.forEach(function(key) {
             if (!paths.length && Array.isArray(selection[key])) paths = selection[key];

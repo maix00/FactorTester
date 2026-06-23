@@ -410,7 +410,7 @@
                 <div id="factor-type-analysis-ref-table" class="factor-type-analysis-table-wrap" style="display:none;">
                     <div style="font-size:12px;color:#64748b;margin-bottom:6px;">与参照因子相关性</div>
                     <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
-                        <table id="factor-type-analysis-ref-table-body" class="factor-type-analysis-data-table">
+                        <table class="factor-type-analysis-data-table">
                             <thead>
                                 <tr>
                                     <th>参照因子</th>
@@ -420,7 +420,24 @@
                                     <th>有效期数</th>
                                 </tr>
                             </thead>
-                            <tbody></tbody>
+                            <tbody id="factor-type-analysis-ref-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="factor-type-analysis-skipped-ref-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">未运行的已注册风格测试</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>参照测试</th>
+                                    <th>类别</th>
+                                    <th>原因</th>
+                                    <th>说明</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-skipped-ref-table"></tbody>
                         </table>
                     </div>
                 </div>
@@ -429,7 +446,7 @@
                 <div id="factor-type-analysis-category-section" class="factor-type-analysis-table-wrap" style="display:none;">
                     <div style="font-size:12px;color:#64748b;margin-bottom:6px;">因子类别聚合</div>
                     <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
-                        <table id="factor-type-analysis-category-table" class="factor-type-analysis-data-table">
+                        <table class="factor-type-analysis-data-table">
                             <thead>
                                 <tr>
                                     <th>因子类别</th>
@@ -437,7 +454,7 @@
                                     <th>判断</th>
                                 </tr>
                             </thead>
-                            <tbody></tbody>
+                            <tbody id="factor-type-analysis-category-table"></tbody>
                         </table>
                     </div>
                 </div>
@@ -449,11 +466,35 @@
                     </div>
                 </div>
 
+                <!-- 产品类型画像 -->
+                <div id="factor-type-analysis-product-profile-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">产品类型画像</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>产品</th>
+                                    <th>最接近类型</th>
+                                    <th>类型强度</th>
+                                    <th>主要参照因子</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-product-profile-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 类型下产品排名 -->
+                <div id="factor-type-analysis-category-ranking-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">类型相关产品排名</div>
+                    <div id="factor-type-analysis-category-ranking" style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;"></div>
+                </div>
+
                 <!-- 产品摘要 -->
                 <div id="factor-type-analysis-product-summary-section" class="factor-type-analysis-table-wrap" style="display:none;">
                     <div style="font-size:12px;color:#64748b;margin-bottom:6px;">产品数据摘要</div>
                     <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
-                        <table id="factor-type-analysis-product-summary-table" class="factor-type-analysis-data-table">
+                        <table class="factor-type-analysis-data-table">
                             <thead>
                                 <tr>
                                     <th>产品</th>
@@ -462,7 +503,7 @@
                                     <th>标准差</th>
                                 </tr>
                             </thead>
-                            <tbody></tbody>
+                            <tbody id="factor-type-analysis-product-summary-table"></tbody>
                         </table>
                     </div>
                 </div>

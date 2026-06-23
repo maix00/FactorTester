@@ -703,6 +703,20 @@
             + '</span>';
     }
 
+    function currentProductPathSelection() {
+        if (!state.paths.length) return null;
+        var id = 'factor-series-selection';
+        var label = productLabel() || state.paths[0] || '产品路径';
+        return {
+            product_path_selection_id: id,
+            selection_id: id,
+            label: label,
+            source_type: 'manual_selection',
+            paths: state.paths.slice(),
+            selected_paths: state.paths.slice(),
+        };
+    }
+
     function extractProductName(node) {
         if (!node || !node.key) return null;
         var data = node.data || {};
@@ -1429,8 +1443,23 @@
     }
 
     window.FactorSeriesViewer = {
-        setSelections: function() {},
-        getSelections: function() { return []; },
+        setSelections: function(data) {
+            if (data && data.product_path_selection) {
+                var selection = data.product_path_selection;
+                state.paths = (selection.paths || selection.selected_paths || []).slice();
+                state.currentPathLabel = selection.label || selection.product_group || '';
+                state.selectionKind = state.paths.length === 1 && String(state.paths[0]).indexOf('/_products/') >= 0 ? 'product' : 'path';
+                renderPathSummary();
+            }
+        },
+        getSelections: function() {
+            return {
+                product_path_selection: currentProductPathSelection(),
+                paths: state.paths.slice(),
+                factor: state.values.factor || '',
+                settings: effectiveSettingsForRun(),
+            };
+        },
         render: function() {
             if (bodyOpen()) return render();
         },
