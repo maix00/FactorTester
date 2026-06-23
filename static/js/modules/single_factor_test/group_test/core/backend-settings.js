@@ -82,12 +82,13 @@
     }
 
     function displayValue(setting, value) {
+        if (value === undefined || value === null || value === '') return '无';
         if (setting && Array.isArray(setting.options)) {
             for (var i = 0; i < setting.options.length; i++) {
                 if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
             }
         }
-        return value === undefined || value === null ? '' : String(value);
+        return String(value);
     }
 
     function escapeHTML(str) {
@@ -274,8 +275,13 @@
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveLocalValues();
         Object.keys(defaults).forEach(function(key) {
-            if (defaults[key].tab_key === tabKey && settingVisibleForValues(defaults[key], values)) {
-                out.push({ key: key, value: defaults[key].value });
+            var def = defaults[key];
+            if (def.tab_key === tabKey && settingVisibleForValues(def, values)) {
+                out.push({
+                    key: key,
+                    label: def.label || key,
+                    value: displayValue(def, def.value),
+                });
             }
         });
         return out;
@@ -505,40 +511,44 @@
     }
 
     function toggleMounted(mount, tabKey, enabled) {
-        var tabs = state.mountedTabs[mount];
-        var index = tabs.indexOf(tabKey);
-        if (enabled && index < 0) tabs.push(tabKey);
-        if (!enabled && index >= 0) {
-            tabs.splice(index, 1);
-            clearTabOverrides(mount, tabKey);
-        }
-        if (mount === LOCAL) renderLocalTabs();
-        if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+        if (!window.BackendSettingsPanel) return;
+        window.BackendSettingsPanel.toggleMountedTab({
+            mountedTabs: state.mountedTabs[mount],
+            tabKey: tabKey,
+            enabled: enabled,
+            clearTabValues: function(key) {
+                clearTabOverrides(mount, key);
+            },
+            afterChange: function() {
+                if (mount === LOCAL) renderLocalTabs();
+                if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+            },
+        });
     }
 
     function renderChooser(mount, container) {
         container.innerHTML = '';
         var intro = document.createElement('div');
-        intro.className = 'gt-backtest-settings-chooser-intro';
+        intro.className = 'backend-settings-chooser-intro gt-backtest-settings-chooser-intro';
         intro.textContent = '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。';
         container.appendChild(intro);
         availableTabs(mount).forEach(function(tab) {
             var row = document.createElement('label');
-            row.className = 'gt-backtest-settings-chooser-row';
+            row.className = 'backend-settings-chooser-row gt-backtest-settings-chooser-row';
             var checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = isMounted(mount, tab.key);
             checkbox.addEventListener('change', function() { toggleMounted(mount, tab.key, checkbox.checked); });
             var body = document.createElement('div');
-            body.className = 'gt-backtest-settings-chooser-body';
+            body.className = 'backend-settings-chooser-body gt-backtest-settings-chooser-body';
             var title = document.createElement('div');
             title.textContent = tab.label;
-            title.className = 'gt-backtest-settings-chooser-title';
+            title.className = 'backend-settings-chooser-title gt-backtest-settings-chooser-title';
             body.appendChild(title);
             var defaults = document.createElement('div');
-            defaults.className = 'gt-backtest-settings-chooser-defaults';
+            defaults.className = 'backend-settings-chooser-defaults gt-backtest-settings-chooser-defaults';
             defaultsForTab(tab.key).forEach(function(item) {
-                defaults.appendChild(chip(item.key + ': ' + item.value, true));
+                defaults.appendChild(chip(item.label + ': ' + item.value, true));
             });
             body.appendChild(defaults);
             row.appendChild(checkbox);

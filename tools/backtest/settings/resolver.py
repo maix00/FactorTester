@@ -127,7 +127,7 @@ def _resolve_setting_dependencies(
             reason="incompatible_setting_value",
         )
         basis = "close"
-    if basis in {"open", "vwap"}:
+    if basis == "vwap":
         _replace_setting_value(
             application,
             values,

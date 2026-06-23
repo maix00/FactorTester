@@ -54,3 +54,51 @@
     border-top: 1px solid #eef2f7;
     font-size: 12px;
 }
+
+.backend-settings-chooser-intro {
+    color: #667085;
+    font-size: 11px;
+    line-height: 1.45;
+    margin-bottom: 8px;
+}
+
+.backend-settings-chooser-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    padding: 6px 0;
+    border-top: 1px solid #eef2f7;
+    color: #344054;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.backend-settings-chooser-row input[type="checkbox"] {
+    margin-top: 2px;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 auto;
+}
+
+.backend-settings-chooser-body {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.backend-settings-chooser-title {
+    color: #1f2937;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.backend-settings-chooser-defaults {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 0;
+}

@@ -86,6 +86,8 @@ class ApplicationSettings:
             "defaults": {
                 key: {
                     "value": setting.default,
+                    "label": setting.label,
+                    "control_template": setting.control_template,
                     "tab_key": setting.tab,
                     "scope_policy": setting.scope_policy.value,
                     "module": setting.module,

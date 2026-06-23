@@ -369,7 +369,7 @@ def group_test_settings() -> ApplicationSettings:
         "执行价格",
         "order",
         "select",
-        "close",
+        "open",
         ScopePolicy.GROUP_OVERRIDE,
         module="order_execution",
         options=(
@@ -513,7 +513,7 @@ def group_test_settings() -> ApplicationSettings:
         "样本内截止日期",
         "evaluation",
         "date",
-        "",
+        None,
         ScopePolicy.LOCAL_ONLY,
         module="evaluation_range",
         chip_template="样本内截止: {value}",
