@@ -73,6 +73,9 @@ return GT.backendSettings.init().then(() => {
   const runPayload = GT.backendSettings.runPayload();
   assert.deepEqual(runPayload.local_settings.initial_capital, 123456);
   assert.deepEqual(runPayload.local_settings.allocation_policy, 'equal_notional');
+  assert.equal(runPayload.local_settings.start_date, undefined);
+  assert.equal(runPayload.local_settings.end_date, undefined);
+  assert.equal(runPayload.local_settings.time_precision, undefined);
   assert.equal(runPayload.initial_capital, undefined);
   assert.equal(runPayload.allocation_policy, undefined);
   assert.equal(runPayload.rebalance_trigger, undefined);
@@ -104,6 +107,7 @@ return GT.backendSettings.init().then(() => {
   const explicitSignalWindow = {
     id: 'g-time-explicit',
     name: 'TimeExplicit',
+    product_path_selection: { product_path_selection_id: 'pps-time', label: '路径时间' },
     factorAlias: 'FactorRun',
     splitCount: 5,
     groupIndex: 3,
@@ -120,6 +124,23 @@ return GT.backendSettings.init().then(() => {
   assert.equal(explicitSignalPayload.start_time, '00:00');
   assert.equal(explicitSignalPayload.end_time, '23:59');
   assert.equal(explicitSignalPayload.time_precision, undefined);
+
+  global.getSharedRuntimeTimeRange = () => ({
+    start_date: '2025-02-01',
+    end_date: '2025-02-28',
+    start_time: '09:00',
+    end_time: '15:00',
+    timezone: 'Asia/Shanghai',
+    is_trading_day: false,
+  });
+  window.BacktestTimeWindowSettings = {
+    pageRuntimeTimeRangeValues: () => global.getSharedRuntimeTimeRange(),
+  };
+  GT.backendSettings.registerLocalDefaultProvider('page_time_range', () => global.getSharedRuntimeTimeRange());
+  GT.groupSettings.groups.add(explicitSignalWindow);
+  const groupedSignalWindowPayload = GT.backendSettings.runPayload();
+  assert.equal(groupedSignalWindowPayload.local_settings.start_date, '2025-02-01');
+  assert.equal(groupedSignalWindowPayload.local_settings.end_date, '2025-02-28');
 
   assert.deepEqual(
     GT.backendSettings.compactProductPathSelection({

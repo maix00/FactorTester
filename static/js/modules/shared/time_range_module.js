@@ -243,57 +243,27 @@
     // ---------- 提交时间范围 ----------
     function persistTimeRange(timeData) {
         const data = Object.assign({ factor_family_alias: factorFamilyAlias }, timeData || getSharedRuntimeTimeRange());
-        statusSpan.innerText = '保存中...';
-        statusSpan.style.color = '#0078d4';
-
-        fetch('/set_time_range', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        })
-        .then(res => res.json())
-        .then(res => {
-            if (res.success) {
-                // 存储后端返回的 page_uuid，后续请求传回
-                if (res.page_uuid) {
-                    rememberPageUuid(res.page_uuid);
-                }
-                let msg = '✓ 已保存';
-                if (res.start_calc_param_val) {
-                    msg += '，因子起始计算时间更新为: ' + res.start_calc_param_val;
-                } else {
-                    msg += '，时间范围已更新';
-                }
-                if (res.change_factor_tester) {
-                    msg += '，正在更新因子测试中...';
-                }
-                document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
-                    detail: {
-                        start_date: data.start_date,
-                        start_time: data.start_time,
-                        end_date: data.end_date,
-                        end_time: data.end_time
-                    }
-                }));
-                statusSpan.innerText = msg;
-                statusSpan.style.color = '#28a745';
-                // 自动退出抽屉
-                var drawer = document.getElementById('time-range-drawer');
-                if (drawer) drawer.classList.remove('open');
-                var badge = document.getElementById('user-badge');
-                if (badge) badge.style.display = '';
-                setTimeout(() => {
-                    if (statusSpan.innerText === msg) statusSpan.innerText = '';
-                }, 3000);
-            } else {
-                statusSpan.innerText = '保存失败: ' + (res.error || '未知错误');
-                statusSpan.style.color = '#d40000';
+        window._confirmedTimeData = data;
+        document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
+            detail: {
+                start_date: data.start_date,
+                start_time: data.start_time,
+                end_date: data.end_date,
+                end_time: data.end_time,
+                timezone: data.timezone,
+                is_trading_day: data.is_trading_day
             }
-        })
-        .catch(err => {
-            statusSpan.innerText = '网络错误: ' + err.message;
-            statusSpan.style.color = '#d40000';
-        });
+        }));
+        const msg = '✓ 页面时间范围已更新';
+        statusSpan.innerText = msg;
+        statusSpan.style.color = '#28a745';
+        var drawer = document.getElementById('time-range-drawer');
+        if (drawer) drawer.classList.remove('open');
+        var badge = document.getElementById('user-badge');
+        if (badge) badge.style.display = '';
+        setTimeout(() => {
+            if (statusSpan.innerText === msg) statusSpan.innerText = '';
+        }, 3000);
     }
 
     function confirmTimeRange() {

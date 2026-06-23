@@ -344,18 +344,7 @@ def _resolve_run_datetimes(
     local_settings: dict[str, Any],
     resolved_settings: dict[str, dict[str, Any]],
 ):
-    if _has_run_window_values(local_settings):
-        return _settings_datetimes(local_settings)
-    windows = []
-    for settings in resolved_settings.values():
-        if not _has_run_window_values(settings):
-            continue
-        windows.append(_settings_datetimes(settings))
-    if not windows:
-        return _settings_datetimes(local_settings)
-    start_dt = min((window[0] for window in windows), key=lambda item: item.sort_key())
-    end_dt = max((window[1] for window in windows), key=lambda item: item.sort_key())
-    return start_dt, end_dt
+    return _settings_datetimes(local_settings)
 
 
 def _group_has_signal_window_override(group: dict[str, Any]) -> bool:
@@ -1654,6 +1643,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             data,
             selection_id,
             page_uuid=page_uuid,
+            start_dt=start_dt,
+            end_dt=end_dt,
             user=data.get('_run_user'),
         )
         testers_by_id[selection_id] = tester

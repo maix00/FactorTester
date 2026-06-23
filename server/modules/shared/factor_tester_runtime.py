@@ -227,7 +227,15 @@ def create_factor_tester_for_product_path_selection(
     product_path_selection_id: str,
     *,
     page_uuid: str,
+    start_dt: Any | None = None,
+    end_dt: Any | None = None,
     user: Any | None = None,
 ):
     selection = selection_for_product_path_selection(data, product_path_selection_id, page_uuid=page_uuid)
-    return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)
+    return create_factor_tester_for_run(
+        selection,
+        page_uuid=page_uuid,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        user=user,
+    )

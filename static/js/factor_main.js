@@ -39,45 +39,21 @@ document.addEventListener('DOMContentLoaded', function() {
             };
             
             if (statusSpan) {
-                statusSpan.innerText = '保存中...';
+                statusSpan.innerText = '更新中...';
                 statusSpan.style.color = '#0078d4';
             }
-            
-            fetch('/set_time_range', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (statusSpan) {
-                    if (result.success) {
-                        if (result.page_uuid) {
-                            window._pageUuid = result.page_uuid;
-                            if (typeof window.rememberSingleFactorPageUuid === 'function') {
-                                window.rememberSingleFactorPageUuid(result.page_uuid);
-                            }
-                        }
-                        window._confirmedTimeData = data;  // 记录已确认的时间，供新增因子自动应用
-                        statusSpan.innerText = '✓ 已保存，时间范围已更新';
-                        statusSpan.style.color = '#28a745';
-                        setTimeout(() => {
-                            if (statusSpan.innerText === '✓ 已保存，时间范围已更新') {
-                                statusSpan.innerText = '';
-                            }
-                        }, 3000);
-                    } else {
-                        statusSpan.innerText = '保存失败: ' + (result.error || '未知错误');
-                        statusSpan.style.color = '#d40000';
+
+            window._confirmedTimeData = data;
+            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', { detail: data }));
+            if (statusSpan) {
+                statusSpan.innerText = '✓ 页面时间范围已更新';
+                statusSpan.style.color = '#28a745';
+                setTimeout(() => {
+                    if (statusSpan.innerText === '✓ 页面时间范围已更新') {
+                        statusSpan.innerText = '';
                     }
+                }, 3000);
                 }
-            })
-            .catch(err => {
-                if (statusSpan) {
-                    statusSpan.innerText = '网络错误: ' + err.message;
-                    statusSpan.style.color = '#d40000';
-                }
-            });
         }
         
         startDate.addEventListener('change', updateStatus);

@@ -317,11 +317,11 @@
     }
 
     function applyPageTimeDefaults(options) {
-        if (!window.BacktestTimeWindowSettings) return false;
-        var values = window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues();
-        if (!values) return false;
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return false;
         options = options || {};
         var timeKeys = ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'];
+        var values = window.SingleFactorGlobalSettings.getDefaultValues(timeKeys);
+        if (!values) return false;
         if (options.blockOnAnyTimeValue && timeKeys.some(function(key) {
             return Object.prototype.hasOwnProperty.call(state.values, key) && state.values[key] !== '';
         })) {

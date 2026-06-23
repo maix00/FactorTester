@@ -122,6 +122,27 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
 
 
+def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules() -> None:
+    application = backtest_setting_registry.get("single_factor_page")
+    index = application.manifest()
+    index["shared_global_default_keys"] = backtest_setting_registry.shared_global_default_keys(
+        ("factor_evaluation", "ic_test", "group_test")
+    )
+
+    assert index["default_mounted_tabs"] == {
+        "local-settings": ["setting_template", "parameters"],
+        "group-settings": [],
+    }
+    assert index["shared_global_default_keys"] == [
+        "start_date",
+        "end_date",
+        "start_time",
+        "end_time",
+        "timezone",
+        "time_precision",
+    ]
+
+
 def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     app = Flask(__name__)
     app.register_blueprint(sft_bp)
@@ -138,30 +159,18 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert missing.status_code == 404
 
 
-def test_setting_manifest_uses_page_exact_time_as_run_default(monkeypatch) -> None:
-    from server.modules.single_factor_test import backtest_settings as routes
-    from tools.data.types import DataTime
-
+def test_setting_manifest_does_not_read_page_runtime_time() -> None:
     app = Flask(__name__)
     app.register_blueprint(sft_bp)
-    monkeypatch.setattr(
-        routes.page_runtime,
-        "get_current_time",
-        lambda page_uuid: (
-            DataTime(pd.Timestamp("2024-01-02 09:01", tz="Asia/Shanghai")),
-            DataTime(pd.Timestamp("2026-05-31 15:00", tz="Asia/Shanghai")),
-            None,
-        ),
-    )
 
     payload = app.test_client().get(
         "/api/backtest/settings/group_test?page_uuid=page-1"
     ).get_json()
 
-    assert payload["defaults"]["start_date"]["value"] == "2024-01-02"
-    assert payload["defaults"]["start_time"]["value"] == "09:01"
-    assert payload["defaults"]["end_date"]["value"] == "2026-05-31"
-    assert payload["defaults"]["end_time"]["value"] == "15:00"
+    assert payload["defaults"]["start_date"]["value"] == ""
+    assert payload["defaults"]["start_time"]["value"] == "00:00"
+    assert payload["defaults"]["end_date"]["value"] == ""
+    assert payload["defaults"]["end_time"]["value"] == "23:59"
     assert payload["defaults"]["time_precision"]["options"] == [
         {"value": "exact", "label": "精确时间"},
         {"value": "trading_day", "label": "交易日"},
@@ -328,27 +337,25 @@ def test_local_time_window_takes_precedence_over_group_envelope() -> None:
     assert end_dt.ts.strftime("%Y-%m-%d") == "2025-02-28"
 
 
-def test_group_time_windows_form_envelope_only_without_local_time_window() -> None:
+def test_group_time_windows_do_not_form_run_envelope_without_local_time_window() -> None:
     from server.modules.single_factor_test.group import _resolve_run_datetimes
 
-    start_dt, end_dt = _resolve_run_datetimes(
-        {},
-        {
-            "group-1": {
-                "start_date": "2025-01-15",
-                "end_date": "2025-02-15",
-                "time_precision": "trading_day",
+    with pytest.raises(ValueError, match="运行时间范围缺失: start_date, end_date"):
+        _resolve_run_datetimes(
+            {},
+            {
+                "group-1": {
+                    "start_date": "2025-01-15",
+                    "end_date": "2025-02-15",
+                    "time_precision": "trading_day",
+                },
+                "group-2": {
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-01-31",
+                    "time_precision": "trading_day",
+                },
             },
-            "group-2": {
-                "start_date": "2025-01-01",
-                "end_date": "2025-01-31",
-                "time_precision": "trading_day",
-            },
-        },
-    )
-
-    assert start_dt.ts.strftime("%Y-%m-%d") == "2025-01-01"
-    assert end_dt.ts.strftime("%Y-%m-%d") == "2025-02-15"
+        )
 
 
 def test_group_signal_window_override_accepts_exact_precision_without_date_boundary() -> None:
@@ -436,6 +443,49 @@ def test_local_settings_reports_missing_dates_before_dataindex_slice() -> None:
                 "timezone": "Asia/Shanghai",
             },
         })
+
+
+def test_group_run_builds_tester_from_payload_local_window(monkeypatch) -> None:
+    from server.modules.single_factor_test import group as group_module
+
+    captured = {}
+
+    def fake_create_tester(data, product_path_selection_id, *, page_uuid, start_dt=None, end_dt=None, user=None):
+        captured["selection_id"] = product_path_selection_id
+        captured["start_dt"] = start_dt
+        captured["end_dt"] = end_dt
+        raise RuntimeError("stop after tester time capture")
+
+    monkeypatch.setattr(
+        group_module,
+        "create_factor_tester_for_product_path_selection",
+        fake_create_tester,
+    )
+
+    with pytest.raises(RuntimeError, match="stop after tester time capture"):
+        group_module._run_group_test_core({
+            "groups": [{
+                "id": "group-1",
+                "product_path_selection": {"product_path_selection_id": "pg-day"},
+                "factorAlias": "FactorA",
+                "splitCount": 5,
+                "groupIndex": 1,
+            }],
+            "flatCount": 1,
+            "local_settings": {
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+                "start_time": "09:00",
+                "end_time": "15:00",
+                "time_precision": "exact",
+                "timezone": "Asia/Shanghai",
+            },
+            "page_uuid": "page-runtime-must-not-own-group-run-window",
+        })
+
+    assert captured["selection_id"] == "pg-day"
+    assert captured["start_dt"].ts.strftime("%Y-%m-%d %H:%M") == "2026-01-01 09:00"
+    assert captured["end_dt"].ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
 
 
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:

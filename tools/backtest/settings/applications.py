@@ -14,6 +14,15 @@ from .contracts import (
 )
 from .registry import ApplicationSettings, BacktestSettingRegistry
 
+RUN_WINDOW_KEYS = (
+    "start_date",
+    "end_date",
+    "start_time",
+    "end_time",
+    "timezone",
+    "time_precision",
+)
+
 
 def register_factor_execution_base(app: ApplicationSettings, *, tab: str = "factor") -> None:
     app.register_setting(SettingDefinition(
@@ -197,7 +206,6 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
             30,
-            (TabMountPoint.LOCAL_SETTINGS,),
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
@@ -229,6 +237,7 @@ def single_factor_page_settings() -> ApplicationSettings:
 
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
     for module in (
         SettingModule("execution_engine", "执行引擎", "backtest", 10),
         SettingModule("factor_execution", "因子执行", "factor", 20),
@@ -675,6 +684,7 @@ def group_test_settings() -> ApplicationSettings:
 
 def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
     for module in (
         SettingModule("factor_execution", "因子执行", "factor", 10),
         SettingModule("product_selection", "品种/路径选择", "product", 20),
@@ -893,6 +903,7 @@ def ic_test_settings() -> ApplicationSettings:
 
 def factor_evaluation_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_evaluation")
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS)
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
         SettingModule("run_window", "计算时间范围", "time", 20),

@@ -23,6 +23,7 @@ class ApplicationSettings:
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
     result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
+    accepted_global_default_keys: tuple[str, ...] = ()
 
     def register_module(self, module: SettingModule) -> None:
         if module.key in self.modules:
@@ -62,6 +63,13 @@ class ApplicationSettings:
                 f"result tab {tab.key} references unknown module {tab.module}"
             )
         self.result_tabs[tab.key] = tab
+
+    def register_accepted_global_default_keys(self, *keys: str) -> None:
+        ordered = list(self.accepted_global_default_keys)
+        for key in keys:
+            if key and key not in ordered:
+                ordered.append(key)
+        self.accepted_global_default_keys = tuple(ordered)
 
     def manifest(self) -> dict[str, Any]:
         ordered_tabs = sorted(self.tabs.values(), key=lambda item: item.order)
@@ -117,6 +125,7 @@ class ApplicationSettings:
                 tab.to_dict()
                 for tab in sorted(self.result_tabs.values(), key=lambda item: item.order)
             ],
+            "accepted_global_default_keys": list(self.accepted_global_default_keys),
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
         }
 
@@ -151,3 +160,14 @@ class BacktestSettingRegistry:
             return self._applications[application]
         except KeyError as exc:
             raise KeyError(f"unknown backtest application: {application}") from exc
+
+    def shared_global_default_keys(self, applications: tuple[str, ...]) -> list[str]:
+        counts: dict[str, int] = {}
+        ordered: list[str] = []
+        for application in applications:
+            app = self.get(application)
+            for key in app.accepted_global_default_keys:
+                if key not in ordered:
+                    ordered.append(key)
+                counts[key] = counts.get(key, 0) + 1
+        return [key for key in ordered if counts.get(key, 0) >= 2]

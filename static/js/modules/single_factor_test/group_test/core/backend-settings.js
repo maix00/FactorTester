@@ -1405,8 +1405,8 @@
     function registerBuiltInDefaultProviders() {
         if (state.localDefaultProviders.page_time_range) return;
         registerLocalDefaultProvider('page_time_range', function() {
-            if (!window.BacktestTimeWindowSettings) return null;
-            return window.BacktestTimeWindowSettings.pageRuntimeTimeRangeValues();
+            if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return null;
+            return window.SingleFactorGlobalSettings.getDefaultValues(RUN_WINDOW_KEYS);
         });
     }
 
@@ -1488,53 +1488,6 @@
         if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
     }
 
-    function syncAppliedTimeRange() {
-        var values = effectiveLocalValues();
-        if (!values.start_date || !values.end_date) return Promise.resolve(null);
-        var precision = values.time_precision || 'exact';
-        var tradingDayMode = precision === 'trading_day';
-        var timePayload = {
-            factor_family_alias: window.factorFamilyAlias || window._sftCurrentFactorId || '',
-            page_uuid: window._pageUuid || '',
-            start_date: values.start_date || '',
-            start_time: tradingDayMode ? '' : (values.start_time || '09:00'),
-            end_date: values.end_date || '',
-            end_time: tradingDayMode ? '' : (values.end_time || '15:00'),
-            timezone: tradingDayMode ? 'UTC' : (values.timezone || 'Asia/Shanghai'),
-            time_precision: tradingDayMode ? 'trading_day' : precision,
-            is_trading_day: tradingDayMode,
-            is_cn_futures_day: false,
-            is_cn_futures_night: false,
-        };
-        if (typeof window.applySharedRuntimeTimeRange === 'function') {
-            window.applySharedRuntimeTimeRange(timePayload);
-        }
-        return fetch('/set_time_range', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(timePayload),
-        }).then(function(response) {
-            return response.json().catch(function() { return {}; });
-        }).then(function(data) {
-            if (data.page_uuid) {
-                if (typeof window.rememberSingleFactorPageUuid === 'function') {
-                    window.rememberSingleFactorPageUuid(data.page_uuid);
-                } else {
-                    window._pageUuid = data.page_uuid;
-                }
-            }
-            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
-                detail: {
-                    start_date: values.start_date,
-                    start_time: values.start_time,
-                    end_date: values.end_date,
-                    end_time: values.end_time,
-                },
-            }));
-            return data;
-        });
-    }
-
     function applyFlatSnapshot(snapshot) {
         var groupSettings = snapshot && snapshot.group_settings ? snapshot.group_settings : snapshot;
         var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
@@ -1558,7 +1511,7 @@
             renderLocalTabs();
             if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
             if (GT.events && GT.events.emit) GT.events.emit('groupsChanged');
-            return syncAppliedTimeRange();
+            return null;
         });
     }
 
@@ -1648,17 +1601,45 @@
         return out;
     }
 
-    function effectiveLocalSettingsForRun() {
+    function pageRunWindowValues() {
+        var provider = state.localDefaultProviders && state.localDefaultProviders.page_time_range;
+        var values = typeof provider === 'function' ? provider() : null;
+        if (!values || typeof values !== 'object') return {};
+        return values;
+    }
+
+    function shouldUsePageRunWindowForLocalSettings() {
+        return !RUN_WINDOW_KEYS.some(function(key) {
+            return Object.prototype.hasOwnProperty.call(state.localValues || {}, key);
+        });
+    }
+
+    function collectRunLocalSettings() {
         var out = {};
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveLocalValues();
-        Object.keys(defaults).forEach(function(key) {
+        var pageWindow = shouldUsePageRunWindowForLocalSettings() ? pageRunWindowValues() : {};
+        Object.keys(state.localValues || {}).forEach(function(key) {
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
             if (key === 'product_path_selection') return;
-            if (!settingVisibleForValues(def, values)) return;
-            var value = values[key];
+            var value = state.localValues[key];
+            var visibilityValues = Object.assign({}, values, state.localValues);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
             if (value === '' || value === null || value === undefined) return;
+            out[key] = value;
+        });
+        Object.keys(pageWindow).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection') return;
+            if (Object.prototype.hasOwnProperty.call(out, key)) return;
+            var value = normalizeControlValue(def, pageWindow[key]);
+            if (value === '' || value === null || value === undefined) return;
+            var visibilityValues = Object.assign({}, values, pageWindow, out);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
             out[key] = value;
         });
         return out;
@@ -1689,11 +1670,11 @@
     function collect() { return collectLocalSettings(); }
 
     function runPayload() {
-        var values = effectiveLocalValues();
+        var localSettings = collectRunLocalSettings();
+        var values = Object.assign({}, effectiveLocalValues(), localSettings);
         var calendar = String(values.calendar_frequency || 'auto');
         var precision = values.time_precision || 'exact';
         var tradingDayMode = precision === 'trading_day';
-        var localSettings = effectiveLocalSettingsForRun();
         return {
             local_settings: localSettings,
             _runtime_window: {
@@ -1716,13 +1697,9 @@
     }
 
     function syncPageTimeDefaults() {
-        var pageUuid = encodeURIComponent(window._pageUuid || '');
-        return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
-            state.index = index;
-            copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
-            renderLocalTabs();
-            return index;
-        });
+        copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
+        renderLocalTabs();
+        return Promise.resolve(state.index);
     }
 
     document.addEventListener('timeRangeDefaultLoaded', function() {

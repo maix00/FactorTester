@@ -76,24 +76,6 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert "time_data" not in snapshot
     assert "backendBacktestSettings" not in snapshot["local_settings"]
     assert "dates" not in snapshot["local_settings"]
-    start_date = os.environ.get("LIVE_SGCCS_START_DATE", local_values["start_date"])
-    end_date = os.environ.get("LIVE_SGCCS_END_DATE", local_values["end_date"])
-    start_time = os.environ.get("LIVE_SGCCS_START_TIME", local_values["start_time"])
-    end_time = os.environ.get("LIVE_SGCCS_END_TIME", local_values["end_time"])
-
-    response = client.post("/set_time_range", json={
-        "factor_family_alias": FACTOR_FAMILY,
-        "page_uuid": page_uuid,
-        "start_date": start_date,
-        "start_time": start_time,
-        "end_date": end_date,
-        "end_time": end_time,
-        "timezone": local_values.get("timezone", "Asia/Shanghai"),
-        "time_precision": local_values.get("time_precision", "exact"),
-    })
-    assert response.status_code == 200, response.get_json()
-    assert response.get_json()["success"]
-
     response = client.post("/replace_params", json={
         "factor_family_alias": FACTOR_FAMILY,
         "params_list": snapshot["params_list"],
@@ -116,21 +98,20 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "ls_configs": long_short_configs,
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,
-        "start_date": start_date,
-        "end_date": end_date,
-        "start_time": start_time,
-        "end_time": end_time,
-        "precision": local_values.get("time_precision", "exact"),
-        "timezone": local_values.get("timezone", "Asia/Shanghai"),
+        "local_settings": {
+            **local_values,
+            "engine": "native",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+        },
         "_runtime_window": {
-            "start_date": start_date,
-            "end_date": end_date,
-            "start_time": start_time,
-            "end_time": end_time,
+            "start_date": local_values["start_date"],
+            "end_date": local_values["end_date"],
+            "start_time": local_values["start_time"],
+            "end_time": local_values["end_time"],
             "time_precision": local_values.get("time_precision", "exact"),
             "timezone": local_values.get("timezone", "Asia/Shanghai"),
         },
-        "initial_capital": local_values.get("initial_capital", 100000000),
         "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
         "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
         "_group_factor_params_list": snapshot["params_list"],
@@ -168,10 +149,12 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             status_code, body = _post_group_stream_result(client, {
                 **base_payload,
                 "groups": profile_groups,
-                "engine": engine,
-                "factor_mode": "precomputed",
-                "rebalance_trigger": "on_factor_signal",
-                "initial_capital": local_values.get("initial_capital", 100000000),
+                "local_settings": {
+                    **base_payload["local_settings"],
+                    "engine": engine,
+                    "factor_mode": "precomputed",
+                    "rebalance_trigger": "on_factor_signal",
+                },
             })
             assert status_code == 200, {
                 "profile": profile, "engine": engine, "body": body,
@@ -185,9 +168,15 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             assert body["engine_result"]["engine"] == engine
             results[profile][engine] = body
 
-    tester = page_runtime.get_factor_tester(
-        "live-sgccs-0", caller="live-framework-test", page_uuid=page_uuid
+    testers = page_runtime.iter_factor_testers(page_uuid)
+    tester = next(
+        (
+            item for item in testers
+            if item.resolve_factor("SgCCS|N:2m|$F:1m|$Rev") is not None
+        ),
+        None,
     )
+    assert tester is not None, [getattr(item, "alias", "?") for item in testers]
     factor = tester.resolve_factor("SgCCS|N:2m|$F:1m|$Rev")
     assert factor is not None
     compile_streaming_factor(
@@ -283,19 +272,6 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     snapshot = template["snapshot"]
     local_values = snapshot["local_settings"]
 
-    response = client.post("/set_time_range", json={
-        "factor_family_alias": FACTOR_FAMILY,
-        "page_uuid": page_uuid,
-        "start_date": local_values["start_date"],
-        "start_time": local_values["start_time"],
-        "end_date": local_values["end_date"],
-        "end_time": local_values["end_time"],
-        "timezone": local_values.get("timezone", "Asia/Shanghai"),
-        "time_precision": local_values.get("time_precision", "exact"),
-    })
-    assert response.status_code == 200, response.get_json()
-    assert response.get_json()["success"]
-
     response = client.post("/replace_params", json={
         "factor_family_alias": FACTOR_FAMILY,
         "params_list": snapshot["params_list"],
@@ -315,6 +291,17 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
         "ls_configs": [],
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,
+        "local_settings": {
+            **local_values,
+            "engine": "native",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+            "position_policy": "rebalance_to_target",
+            "execution_timing": "same_bar",
+            "fee_mode": "none",
+            "margin_mode": "none",
+            "liquidity_mode": "infinite",
+        },
         "_runtime_window": {
             "start_date": local_values["start_date"],
             "end_date": local_values["end_date"],
@@ -323,17 +310,8 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
             "time_precision": local_values.get("time_precision", "exact"),
             "timezone": local_values.get("timezone", "Asia/Shanghai"),
         },
-        "initial_capital": local_values.get("initial_capital", 100000000),
         "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
         "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
-        "engine": "native",
-        "factor_mode": "precomputed",
-        "rebalance_trigger": "on_factor_signal",
-        "position_policy": "rebalance_to_target",
-        "execution_timing": "same_bar",
-        "fee_mode": "none",
-        "margin_mode": "none",
-        "liquidity_mode": "infinite",
     }
     profiles = {
         "equal_notional": {"allocation_policy": "equal_notional"},

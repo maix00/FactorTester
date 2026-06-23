@@ -202,9 +202,6 @@ let productGroupResolveCalls = 0;
 global.fetch = (url) => Promise.resolve({
   ok: true,
   json: () => {
-    if (String(url).indexOf('/set_time_range') >= 0) {
-      return Promise.resolve({ ok: true, page_uuid: 'page-1' });
-    }
     if (String(url).indexOf('/api/product-groups/resolve') >= 0) {
       productGroupResolveCalls += 1;
       return Promise.resolve({
@@ -269,6 +266,17 @@ global.getSharedRuntimeTimeRange = () => ({
 window.BacktestTimeWindowSettings = {
   pageRuntimeTimeRangeValues: () => global.getSharedRuntimeTimeRange(),
 };
+window.SingleFactorGlobalSettings = {
+  getDefaultValues: (keys) => {
+    const values = global.getSharedRuntimeTimeRange();
+    const out = {};
+    keys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(values, key)) out[key] = values[key];
+    });
+    return out;
+  },
+  sharedDefaultKeys: () => ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'],
+};
 
 return GT.backendSettings.init().then(async () => {
   load('panels/list/selection-state.js');
@@ -297,6 +305,7 @@ return GT.backendSettings.init().then(async () => {
       timezone: 'Asia/Shanghai',
     },
   });
+  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2024-01-02');
   global.getSharedRuntimeTimeRange = () => ({
     start_date: '2025-09-01',
     end_date: '2025-09-30',

@@ -49,6 +49,18 @@
         return state.manifest && state.manifest.defaults ? state.manifest.defaults : {};
     }
 
+    function sharedGlobalDefaultKeys() {
+        return state.manifest && Array.isArray(state.manifest.shared_global_default_keys)
+            ? state.manifest.shared_global_default_keys.slice()
+            : [];
+    }
+
+    function sharedGlobalDefaultKeySet() {
+        var out = Object.create(null);
+        sharedGlobalDefaultKeys().forEach(function(key) { out[key] = true; });
+        return out;
+    }
+
     function effectiveValue(key) {
         if (Object.prototype.hasOwnProperty.call(state.values, key)) return state.values[key];
         var def = defaults()[key];
@@ -62,6 +74,11 @@
             if (defs[key] && defs[key].tab_key === tabKey) out.push(key);
         });
         return out;
+    }
+
+    function tabHasSharedGlobalDefaults(tabKey) {
+        var allowed = sharedGlobalDefaultKeySet();
+        return settingKeysForTab(tabKey).some(function(key) { return !!allowed[key]; });
     }
 
     function chipParts(labelOrText, value) {
@@ -87,6 +104,7 @@
         chip.innerHTML = renderChipHtml(label, value);
         chip.title = '打开' + ((tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey);
         chip.style.cursor = 'pointer';
+        chip.setAttribute('data-page-settings-tab-btn', tabKey);
         chip.addEventListener('click', function() { openTab(tabKey); });
         return chip;
     }
@@ -203,11 +221,34 @@
             btn.type = 'button';
             btn.textContent = meta ? meta.label : tabKey;
             btn.className = state.activeTab === tabKey ? 'active' : '';
+            btn.setAttribute('data-page-settings-tab-btn', tabKey);
             btn.addEventListener('click', function() {
                 openTab(tabKey);
             });
             bar.appendChild(btn);
         });
+        var manage = document.createElement('button');
+        manage.type = 'button';
+        manage.textContent = '+ 设置';
+        manage.className = state.activeTab === '__manage__' ? 'active' : '';
+        manage.setAttribute('data-page-settings-tab-btn', '__manage__');
+        manage.addEventListener('click', function() {
+            openTab('__manage__');
+        });
+        bar.appendChild(manage);
+    }
+
+    function ensurePanel(tabKey) {
+        var host = document.getElementById('single-factor-page-settings-host');
+        if (!host || !tabKey) return null;
+        if (state.containers[tabKey]) return state.containers[tabKey];
+        var panel = document.createElement('div');
+        panel.className = 'single-factor-page-settings-panel';
+        panel.setAttribute('data-page-settings-tab-panel', tabKey);
+        panel.style.display = 'none';
+        host.appendChild(panel);
+        state.containers[tabKey] = panel;
+        return panel;
     }
 
     function renderShell() {
@@ -220,14 +261,7 @@
             + '<div class="backend-settings-chip-row" id="single-factor-page-settings-chips"></div>'
             + '<div class="backend-settings-host" id="single-factor-page-settings-host"></div>';
         var host = document.getElementById('single-factor-page-settings-host');
-        state.mountedTabs.forEach(function(tabKey) {
-            var panel = document.createElement('div');
-            panel.className = 'single-factor-page-settings-panel';
-            panel.setAttribute('data-page-settings-tab-panel', tabKey);
-            panel.style.display = 'none';
-            host.appendChild(panel);
-            state.containers[tabKey] = panel;
-        });
+        state.mountedTabs.forEach(ensurePanel);
         movePanelContent('global-tpl-drawer', 'setting_template');
         movePanelContent('param-drawer', 'parameters');
         movePanelContent('time-range-drawer', 'time');
@@ -238,13 +272,15 @@
 
     function openTab(tabKey) {
         var host = document.getElementById('single-factor-page-settings-host');
+        if (tabKey) ensurePanel(tabKey);
         var toggleResult = window.BackendSettingsPanel && typeof window.BackendSettingsPanel.toggleContent === 'function'
             ? window.BackendSettingsPanel.toggleContent({
                 key: tabKey,
                 host: host,
                 getActiveKey: function() { return state.activeTab; },
                 setActiveKey: function(value) { state.activeTab = value; },
-                buttonSelector: '#single-factor-page-settings-tabs button',
+                buttonSelector: '#single-factor-page-settings-tabs [data-page-settings-tab-btn], #single-factor-page-settings-chips [data-page-settings-tab-btn]',
+                buttonKeyAttribute: 'data-page-settings-tab-btn',
                 panelSelector: '[data-page-settings-tab-panel]',
                 panelKeyAttribute: 'data-page-settings-tab-panel',
                 onClose: function() {
@@ -255,6 +291,7 @@
             : { opened: true };
         if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
             state.activeTab = tabKey || null;
+            if (state.activeTab) ensurePanel(state.activeTab);
             Object.keys(state.containers).forEach(function(key) {
                 state.containers[key].style.display = key === state.activeTab ? '' : 'none';
             });
@@ -263,6 +300,10 @@
         renderTabs();
         renderChips();
         if (!toggleResult.opened) return;
+        if (tabKey === '__manage__') {
+            renderChooser();
+            return;
+        }
         if (tabKey === 'setting_template') {
             if (typeof window._loadGlobalTemplateList === 'function') {
                 window._loadGlobalTemplateList();
@@ -348,6 +389,70 @@
         return control;
     }
 
+    function toggleMounted(tabKey, enabled) {
+        if (!window.BackendSettingsPanel) {
+            var index = state.mountedTabs.indexOf(tabKey);
+            if (enabled && index < 0) state.mountedTabs.push(tabKey);
+            if (!enabled && index >= 0) state.mountedTabs.splice(index, 1);
+            settingKeysForTab(tabKey).forEach(function(key) { delete state.values[key]; });
+            if (enabled) ensurePanel(tabKey);
+            renderTabs();
+            renderChips();
+            return;
+        }
+        window.BackendSettingsPanel.toggleMountedTab({
+            mountedTabs: state.mountedTabs,
+            tabKey: tabKey,
+            enabled: enabled,
+            clearTabValues: function(key) {
+                settingKeysForTab(key).forEach(function(settingKey) { delete state.values[settingKey]; });
+            },
+            afterChange: function() {
+                if (enabled) ensurePanel(tabKey);
+                renderTabs();
+                renderChips();
+            },
+        });
+    }
+
+    function renderChooser() {
+        var container = ensurePanel('__manage__');
+        if (!container || !state.manifest) return;
+        container.innerHTML = '';
+        var intro = document.createElement('div');
+        intro.className = 'backend-settings-chooser-intro';
+        intro.textContent = '选择可作为各测试模块全局默认值的设置。';
+        container.appendChild(intro);
+        tabs().filter(function(tab) {
+            return tabHasSharedGlobalDefaults(tab.key);
+        }).forEach(function(tab) {
+            var row = document.createElement('label');
+            row.className = 'backend-settings-chooser-row';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = state.mountedTabs.indexOf(tab.key) >= 0;
+            input.addEventListener('change', function() { toggleMounted(tab.key, input.checked); });
+            var body = document.createElement('div');
+            body.className = 'backend-settings-chooser-body';
+            var title = document.createElement('div');
+            title.className = 'backend-settings-chooser-title';
+            title.textContent = tab.label;
+            var defaultsRow = document.createElement('div');
+            defaultsRow.className = 'backend-settings-chooser-defaults';
+            var allowed = sharedGlobalDefaultKeySet();
+            settingKeysForTab(tab.key).forEach(function(key) {
+                if (!allowed[key]) return;
+                var setting = Object.assign({ key: key }, defaults()[key] || {});
+                defaultsRow.appendChild(makeChip(tab.key, setting.label || key, displayValue(setting, effectiveValue(key))));
+            });
+            body.appendChild(title);
+            body.appendChild(defaultsRow);
+            row.appendChild(input);
+            row.appendChild(body);
+            container.appendChild(row);
+        });
+    }
+
     function syncRegisteredTimeRange() {
         clearTimeout(state.timeSyncTimer);
         state.timeSyncTimer = setTimeout(function() {
@@ -371,33 +476,19 @@
         };
         var status = document.getElementById('single-factor-page-time-status');
         if (status) {
-            status.textContent = '正在同步页面默认时间范围...';
+            status.textContent = '正在更新页面默认时间范围...';
             status.style.color = '#2563eb';
         }
-        fetch('/set_time_range', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        }).then(function(res) { return res.json(); }).then(function(data) {
-            if (!data.success) throw new Error(data.error || '保存失败');
-            if (data.page_uuid && typeof window.rememberSingleFactorPageUuid === 'function') {
-                window.rememberSingleFactorPageUuid(data.page_uuid);
-            }
-            if (typeof window.applySharedRuntimeTimeRange === 'function') {
-                window.applySharedRuntimeTimeRange(payload, { persist: false });
-            }
-            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', { detail: payload }));
-            if (status) {
-                status.textContent = '已同步';
-                status.style.color = '#16a34a';
-            }
-            renderChips();
-        }).catch(function(error) {
-            if (status) {
-                status.textContent = error.message;
-                status.style.color = '#dc2626';
-            }
-        });
+        if (typeof window.applySharedRuntimeTimeRange === 'function') {
+            window.applySharedRuntimeTimeRange(payload, { persist: false });
+        }
+        window._confirmedTimeData = payload;
+        document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', { detail: payload }));
+        if (status) {
+            status.textContent = '已更新';
+            status.style.color = '#16a34a';
+        }
+        renderChips();
     }
 
     function renderRegisteredTimeTab(options) {
@@ -458,6 +549,20 @@
             console.error('[single-factor-page-settings] init failed:', error);
         });
     }
+
+    window.SingleFactorGlobalSettings = {
+        getDefaultValues: function(keys) {
+            var allowed = sharedGlobalDefaultKeySet();
+            var out = {};
+            (Array.isArray(keys) ? keys : []).forEach(function(key) {
+                if (!allowed[key]) return;
+                if (!Object.prototype.hasOwnProperty.call(defaults(), key)) return;
+                out[key] = effectiveValue(key);
+            });
+            return out;
+        },
+        sharedDefaultKeys: sharedGlobalDefaultKeys,
+    };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();
