@@ -390,6 +390,9 @@
         control.value = effectiveValue(setting, mount);
         control.disabled = mount === GROUP && !state.activeGroup;
         control.addEventListener('change', function() {
+            if (setting.control_template === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(control.value || '')) {
+                return;
+            }
             var nextValue = setting.control_template === 'number'
                 ? Number(control.value)
                 : normalizeControlValue(setting, control.value);
