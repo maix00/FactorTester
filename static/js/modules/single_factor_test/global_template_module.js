@@ -18,7 +18,6 @@
     const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
     var _templateListRequest = null;
     var _templateDetailCache = {};
-    var _lastTemplatePointerScrollSnapshot = null;
 
     function requestJSON(url, options) {
         options = options || {};
@@ -82,42 +81,6 @@
                     window.scrollTo(scrollX, scrollY);
                 });
             });
-    }
-
-    function captureScrollSnapshot() {
-        var items = [];
-        try {
-            var nodes = Array.prototype.slice.call(document.querySelectorAll('body, html, #editor-body, .editor-body, .main-content, .content-area, .single-factor-main, .settings-drawer-panel, .single-factor-page-settings-panel, .global-template-list'));
-            nodes.forEach(function(node) {
-                if (!node) return;
-                items.push({ node: node, top: node.scrollTop || 0, left: node.scrollLeft || 0 });
-            });
-        } catch (e) {}
-        return {
-            x: window.scrollX,
-            y: window.scrollY,
-            items: items,
-        };
-    }
-
-    function restoreScrollSnapshot(snapshot) {
-        if (!snapshot) return;
-        window.scrollTo(snapshot.x, snapshot.y);
-        (snapshot.items || []).forEach(function(item) {
-            if (!item.node) return;
-            item.node.scrollTop = item.top;
-            item.node.scrollLeft = item.left;
-        });
-    }
-
-    function restoreScrollForAWhile(snapshot) {
-        [0, 1, 2, 4, 8, 16, 32, 80, 160, 320, 640].forEach(function(delay) {
-            setTimeout(function() {
-                requestAnimationFrame(function() {
-                    restoreScrollSnapshot(snapshot);
-                });
-            }, delay);
-        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -634,11 +597,9 @@
             listEl.innerHTML = html;
             listEl.querySelectorAll('.global-tpl-summary-btn, .global-tpl-load-btn, .global-tpl-overwrite-btn, .global-tpl-delete-btn').forEach(btn => {
                 btn.addEventListener('pointerdown', function(e) {
-                    _lastTemplatePointerScrollSnapshot = captureScrollSnapshot();
                     e.preventDefault();
                 });
                 btn.addEventListener('mousedown', function(e) {
-                    _lastTemplatePointerScrollSnapshot = captureScrollSnapshot();
                     e.preventDefault();
                 });
             });
@@ -646,6 +607,7 @@
                 btn.addEventListener('click', function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    this.blur();
                     showTemplateSummary(this.getAttribute('data-tpl-id'));
                 });
             });
@@ -718,25 +680,19 @@
     }
 
     async function showTemplateSummary(tplId) {
-        var scrollSnapshot = _lastTemplatePointerScrollSnapshot || captureScrollSnapshot();
-        _lastTemplatePointerScrollSnapshot = null;
         var overlay = ensureSummaryOverlay();
         var title = document.getElementById('global-tpl-summary-title');
         var body = document.getElementById('global-tpl-summary-body');
         overlay.style.display = 'flex';
-        restoreScrollForAWhile(scrollSnapshot);
         if (title) title.textContent = '模板摘要';
         if (body) body.innerHTML = '<div class="global-template-empty">加载中...</div>';
         try {
             var template = await fetchTemplateDetail(tplId);
-            await _ensureGroupTestAdapters();
             if (title) title.textContent = template.name || '模板摘要';
             var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
             if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
         } catch (error) {
             if (body) body.innerHTML = '<div class="global-template-empty" style="color:#d40000;">摘要加载失败: ' + escapeHtml(error.message) + '</div>';
-        } finally {
-            restoreScrollForAWhile(scrollSnapshot);
         }
     }
 
