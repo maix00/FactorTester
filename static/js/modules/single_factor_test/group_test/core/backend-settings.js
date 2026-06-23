@@ -603,8 +603,17 @@
             if (!node) throw new Error('编辑组合设置前必须选择组合');
             var patch = {};
             patch[setting.key] = value;
-            if (node.kind === 'group') GT.groupSettings.groups.update(state.activeGroup, patch);
-            else GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
+            if (node.kind === 'group') {
+                var ctx = GT.modes && GT.modes.isMode && GT.modes.isMode('edit') && GT.modes.getEditContext
+                    ? GT.modes.getEditContext()
+                    : null;
+                var targets = ctx && Array.isArray(ctx.groups) && ctx.groups.length > 1 ? ctx.groups : [node.value];
+                targets.forEach(function(group) {
+                    if (group && group.id) GT.groupSettings.groups.update(group.id, patch);
+                });
+            } else {
+                GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
+            }
         } else {
             state.localValues[setting.key] = value;
             renderLocalSettingChips();

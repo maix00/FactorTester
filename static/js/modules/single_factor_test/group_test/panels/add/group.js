@@ -596,22 +596,22 @@
 
     function _renderEditGroup(container) {
         var selectedGroups = _selectedEditGroups();
-        var groups = _selectedEditBaseGroups();
-        if (!groups.length) {
+        var baseGroups = _selectedEditBaseGroups();
+        if (!baseGroups.length) {
             container.innerHTML = '<div style="padding:16px;color:#64748b;font-size:12px;">请选择至少一个基础组进行修改。</div>';
             return;
         }
-        var group = groups[0];
-        var isSingle = groups.length === 1;
-        var derivedSelectedCount = selectedGroups.length - groups.length;
+        var group = baseGroups[0];
+        var isSingle = selectedGroups.length === 1;
+        var derivedSelectedCount = selectedGroups.length - baseGroups.length;
         var selections = _currentSelections();
         var factors = window.factorList || [];
-        var commonSelection = _commonEditValue(groups, 'product_path_selection');
+        var commonSelection = _commonEditValue(selectedGroups, 'product_path_selection');
         var currentSelectionId = commonSelection ? _selectionId(commonSelection) : '';
-        var commonFactor = _commonEditValue(groups, 'factorAlias');
+        var commonFactor = _commonEditValue(selectedGroups, 'factorAlias');
         var factorAlias = commonFactor || '';
         var groupIndex = Number(group.groupIndex || 1);
-        var commonSplit = _commonEditValue(groups, 'splitCount');
+        var commonSplit = _commonEditValue(selectedGroups, 'splitCount');
         var splitCount = Number(commonSplit || groupIndex || 1);
 
         var html = '';
@@ -645,7 +645,7 @@
         html += '</div>';
 
         html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;">';
-        html += '<div style="font-size:12px;font-weight:700;color:#475467;margin-bottom:10px;">分组参数' + (isSingle && !derivedSelectedCount ? '' : ' · 将修改 ' + groups.length + ' 个基础组') + '</div>';
+        html += '<div style="font-size:12px;font-weight:700;color:#475467;margin-bottom:10px;">分组参数' + (isSingle ? '' : ' · 将修改 ' + selectedGroups.length + ' 个对象') + '</div>';
         html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
         html += '<span style="font-size:13px;color:#333;">分组数</span>';
         html += '<input type="number" id="edit-group-count" value="' + splitCount + '" min="1" step="1"'
@@ -664,7 +664,7 @@
         }
         html += '</div>';
         if (derivedSelectedCount > 0) {
-            html += '<div style="margin-top:8px;font-size:12px;color:#64748b;line-height:1.5;">已同时选中 ' + derivedSelectedCount + ' 个派生组；结构修改会通过其所属基础组应用到派生子树。</div>';
+            html += '<div style="margin-top:8px;font-size:12px;color:#64748b;line-height:1.5;">已同时选中 ' + derivedSelectedCount + ' 个派生组；本页修改会应用到所有选中对象。</div>';
         }
 
         html += '<div style="border-top:1px solid #eef2f7;margin:12px 0;"></div>';
@@ -699,50 +699,11 @@
 
         function applyEditPatch(rawPatch) {
             try {
-                var structurePatchKeys = {
-                    product_path_selection: rawPatch.product_path_selection !== undefined,
-                    factorAlias: rawPatch.factorAlias !== undefined,
-                    splitCount: rawPatch.splitCount !== undefined,
-                    groupIndex: rawPatch.groupIndex !== undefined && isSingle,
-                };
-                for (var gi = 0; gi < groups.length; gi++) {
-                    var target = GT.groupSettings.groups.get(groups[gi].id) || groups[gi];
-                    var nextSelection = rawPatch.product_path_selection !== undefined ? rawPatch.product_path_selection : target.product_path_selection;
-                    var nextFactor = rawPatch.factorAlias !== undefined ? rawPatch.factorAlias : target.factorAlias;
-                    var nextSplit = rawPatch.splitCount !== undefined ? Number(rawPatch.splitCount) : Number(target.splitCount || 1);
-                    var nextIndex = (rawPatch.groupIndex !== undefined && isSingle) ? Number(rawPatch.groupIndex) : Number(target.groupIndex || 1);
-                    if (!nextSplit || nextSplit < 1) nextSplit = 1;
-                    if (!nextIndex || nextIndex < 1) nextIndex = 1;
-                    if (nextIndex > nextSplit) nextSplit = nextIndex;
-                    var names = _makeEditNames(target.id, nextSelection, nextFactor, nextSplit, nextIndex);
-                    GT.groupSettings.groups.update(target.id, {
-                        product_path_selection: nextSelection,
-                        factorAlias: nextFactor,
-                        splitCount: nextSplit,
-                        groupIndex: nextIndex,
-                        name: names.name,
-                        shortAlias: names.shortAlias,
-                        needsRegenerate: true,
-                    });
-                    var descendants = GT.groupSettings.groups.getDescendants
-                        ? GT.groupSettings.groups.getDescendants(target.id)
-                        : [];
-                    for (var di = 0; di < descendants.length; di++) {
-                        if (descendants[di] === target.id) continue;
-                        var childPatch = { needsRegenerate: true };
-                        if (structurePatchKeys.product_path_selection) childPatch.product_path_selection = nextSelection;
-                        if (structurePatchKeys.factorAlias) childPatch.factorAlias = nextFactor;
-                        if (structurePatchKeys.splitCount) childPatch.splitCount = nextSplit;
-                        if (structurePatchKeys.groupIndex) childPatch.groupIndex = nextIndex;
-                        childPatch.shortAlias = '';
-                        childPatch.name = '';
-                        GT.groupSettings.groups.update(descendants[di], childPatch);
-                    }
-                }
+                _applyEditPatchToGroups(selectedGroups, rawPatch, { allowGroupIndex: isSingle });
                 if (GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.rebuildFromGroups) {
                     GT.groupSettings.addGroupBatch.rebuildFromGroups();
                 } else if (GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.ensure) {
-                    var latest = GT.groupSettings.groups.get(groups[0].id) || groups[0];
+                    var latest = GT.groupSettings.groups.get(baseGroups[0].id) || baseGroups[0];
                     GT.groupSettings.addGroupBatch.ensure(_selectionId(latest.product_path_selection), latest.factorAlias, latest.splitCount);
                 }
                 _renderEditGroup(container);
@@ -804,6 +765,76 @@
         });
     }
 
+    function _applyEditPatchToGroups(targetGroups, rawPatch, options) {
+        options = options || {};
+        var targets = (targetGroups || []).filter(function(group) { return group && group.id; });
+        var allowGroupIndex = !!options.allowGroupIndex;
+        var structurePatchKeys = {
+            product_path_selection: rawPatch.product_path_selection !== undefined,
+            factorAlias: rawPatch.factorAlias !== undefined,
+            splitCount: rawPatch.splitCount !== undefined,
+            groupIndex: rawPatch.groupIndex !== undefined && allowGroupIndex,
+        };
+        var touched = {};
+        function applyToTarget(target, inheritedValues) {
+            if (!target || !target.id || touched[target.id]) return;
+            touched[target.id] = true;
+            var current = GT.groupSettings.groups.get(target.id) || target;
+            var nextSelection = inheritedValues && inheritedValues.product_path_selection !== undefined
+                ? inheritedValues.product_path_selection
+                : (rawPatch.product_path_selection !== undefined ? rawPatch.product_path_selection : current.product_path_selection);
+            var nextFactor = inheritedValues && inheritedValues.factorAlias !== undefined
+                ? inheritedValues.factorAlias
+                : (rawPatch.factorAlias !== undefined ? rawPatch.factorAlias : current.factorAlias);
+            var nextSplit = inheritedValues && inheritedValues.splitCount !== undefined
+                ? Number(inheritedValues.splitCount)
+                : (rawPatch.splitCount !== undefined ? Number(rawPatch.splitCount) : Number(current.splitCount || 1));
+            var nextIndex = inheritedValues && inheritedValues.groupIndex !== undefined
+                ? Number(inheritedValues.groupIndex)
+                : ((rawPatch.groupIndex !== undefined && allowGroupIndex) ? Number(rawPatch.groupIndex) : Number(current.groupIndex || 1));
+            if (!nextSplit || nextSplit < 1) nextSplit = 1;
+            if (!nextIndex || nextIndex < 1) nextIndex = 1;
+            if (nextIndex > nextSplit) nextSplit = nextIndex;
+            if (current.parentId) {
+                var childPatch = { needsRegenerate: true };
+                if (structurePatchKeys.product_path_selection) childPatch.product_path_selection = nextSelection;
+                if (structurePatchKeys.factorAlias) childPatch.factorAlias = nextFactor;
+                if (structurePatchKeys.splitCount) childPatch.splitCount = nextSplit;
+                if (structurePatchKeys.groupIndex) childPatch.groupIndex = nextIndex;
+                childPatch.shortAlias = '';
+                childPatch.name = '';
+                GT.groupSettings.groups.update(current.id, childPatch);
+                return;
+            }
+            var names = _makeEditNames(current.id, nextSelection, nextFactor, nextSplit, nextIndex);
+            GT.groupSettings.groups.update(current.id, {
+                product_path_selection: nextSelection,
+                factorAlias: nextFactor,
+                splitCount: nextSplit,
+                groupIndex: nextIndex,
+                name: names.name,
+                shortAlias: names.shortAlias,
+                needsRegenerate: true,
+            });
+            var descendants = GT.groupSettings.groups.getDescendants
+                ? GT.groupSettings.groups.getDescendants(current.id)
+                : [];
+            var inherited = {
+                product_path_selection: nextSelection,
+                factorAlias: nextFactor,
+                splitCount: nextSplit,
+                groupIndex: nextIndex,
+            };
+            for (var di = 0; di < descendants.length; di++) {
+                if (descendants[di] === current.id) continue;
+                applyToTarget({ id: descendants[di] }, inherited);
+            }
+        }
+        for (var gi = 0; gi < targets.length; gi++) {
+            applyToTarget(targets[gi], null);
+        }
+    }
+
     var _editMounted = false;
     function mountEdit() {
         _editMounted = true;
@@ -832,6 +863,7 @@
         unmount: unmountEdit,
         refresh: refreshEdit,
         render: refreshEdit,
+        applyEditPatchForSelection: _applyEditPatchToGroups,
     };
 
     // ── Register add flow to GT.modes ──

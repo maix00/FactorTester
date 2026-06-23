@@ -172,12 +172,19 @@ assert.equal(derivedAfterCascade.groupIndex, 3);
 
 GT.tabs.enterEditMode(['base-a1', 'derived-a1']);
 GT.tabs.mountTab('edit-group');
-assert.match(document.getElementById('edit-group').innerHTML, /将修改 1 个基础组/);
-assert.match(document.getElementById('edit-group').innerHTML, /edit-group-index/);
+assert.match(document.getElementById('edit-group').innerHTML, /将修改 2 个对象/);
+assert.doesNotMatch(document.getElementById('edit-group').innerHTML, /edit-group-index/);
+GT.panels.edit.group.applyEditPatchForSelection(
+  [GT.groupSettings.groups.get('base-a1'), GT.groupSettings.groups.get('derived-a1')],
+  { splitCount: 7 },
+  { allowGroupIndex: false },
+);
+assert.equal(GT.groupSettings.groups.get('base-a1').splitCount, 7);
+assert.equal(GT.groupSettings.groups.get('derived-a1').splitCount, 7);
 
 GT.tabs.enterEditMode(['base-a1', 'base-c1', 'derived-a1']);
 GT.tabs.mountTab('edit-group');
-assert.match(document.getElementById('edit-group').innerHTML, /将修改 2 个基础组/);
+assert.match(document.getElementById('edit-group').innerHTML, /将修改 3 个对象/);
 assert.doesNotMatch(document.getElementById('edit-group').innerHTML, /edit-group-index/);
 
 GT.tabs.enterEditMode(['derived-a1']);
