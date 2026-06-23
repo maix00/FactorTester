@@ -24,6 +24,7 @@
         productPathTree: null,
         productPathTreeSelected: [],
         productPathDraftPaths: [],
+        productPathTreeSizer: null,
     };
 
     function requestJSON(url) {
@@ -502,6 +503,31 @@
                 state.productPathTreeSelected = paths || [];
             },
         });
+        if (typeof window.setupResizableTreeContainer === 'function') {
+            if (state.productPathTreeSizer && typeof state.productPathTreeSizer.destroy === 'function') {
+                state.productPathTreeSizer.destroy();
+            }
+            state.productPathTreeSizer = window.setupResizableTreeContainer({
+                outerElement: container.querySelector('#gt-pps-tree-panel'),
+                innerElement: treeEl,
+                minWidth: 240,
+                initialWidth: 320,
+                minHeight: 180,
+                initialHeight: 300,
+                maxWidth: 'min(52vw, 620px)',
+                maxWidthFallback: 620,
+                resizeDirection: 'both',
+                desktopMediaQuery: '(max-width: 960px)',
+                mobileInnerMaxHeight: '360px',
+            });
+        } else {
+            treeEl.style.boxSizing = 'border-box';
+            treeEl.style.minWidth = '240px';
+            treeEl.style.minHeight = '180px';
+            treeEl.style.maxWidth = 'min(52vw, 620px)';
+            treeEl.style.resize = 'both';
+            treeEl.style.overflow = 'auto';
+        }
     }
 
     function renderProductPathDraft(container) {
@@ -590,15 +616,15 @@
         loadProductPathSelections().then(function(selections) {
             var currentId = selectionId(state.localValues.product_path_selection);
             var html = '';
-            html += '<div style="display:grid;grid-template-columns:minmax(250px,0.75fr) minmax(360px,1.25fr);gap:12px;align-items:start;">';
+            html += '<div style="display:flex;flex-direction:column;gap:12px;">';
             html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;">';
             html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #eef2f7;">';
             html += '<span style="font-size:12px;font-weight:700;color:#334155;">已加载产品路径组</span>';
             html += '<span style="font-size:11px;color:#94a3b8;">' + selections.length + '</span>';
             html += '</div>';
-            html += '<div style="max-height:280px;overflow:auto;">';
+            html += '<div style="max-height:170px;overflow:auto;">';
             if (!selections.length) {
-                html += '<div style="padding:14px;color:#888;font-size:12px;">暂无产品路径组，请在右侧新增。</div>';
+                html += '<div style="padding:14px;color:#888;font-size:12px;">暂无产品路径组，请在下方新增。</div>';
             }
             selections.forEach(function(selection) {
                 var id = selectionId(selection);
@@ -622,16 +648,16 @@
             html += '<span id="gt-pps-status" style="font-size:12px;color:#64748b;"></span>';
             html += '</div>';
             html += '<input id="gt-pps-new-name" type="text" placeholder="路径组名称" style="width:100%;box-sizing:border-box;height:30px;margin-bottom:8px;padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;">';
-            html += '<div style="display:grid;grid-template-columns:minmax(220px,0.9fr) minmax(240px,1.1fr);gap:10px;align-items:start;">';
-            html += '<div style="min-width:0;">';
+            html += '<div style="display:grid;grid-template-columns:auto minmax(280px,1fr);gap:10px;align-items:start;min-width:0;">';
+            html += '<div id="gt-pps-tree-panel" style="min-width:0;">';
             html += '<div style="display:flex;gap:6px;margin-bottom:6px;">';
             html += '<button type="button" id="gt-pps-add-positive" style="height:26px;padding:0 9px;border:1px solid #bbf7d0;border-radius:4px;background:#f0fdf4;color:#166534;font-size:12px;cursor:pointer;">+ 正新增</button>';
             html += '<button type="button" id="gt-pps-add-negative" style="height:26px;padding:0 9px;border:1px solid #fecaca;border-radius:4px;background:#fef2f2;color:#b42318;font-size:12px;cursor:pointer;">- 负新增</button>';
             html += '</div>';
-            html += '<div id="gt-pps-tree" class="product-tree-scrollbox" style="height:260px;overflow:auto;border:1px solid #e1e4e8;border-radius:6px;padding:6px;background:#fff;"></div>';
+            html += '<div id="gt-pps-tree" class="product-tree-scrollbox" style="width:320px;height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:6px;padding:6px;background:#fff;"></div>';
             html += '</div>';
             html += '<div style="min-width:0;">';
-            html += '<div id="gt-pps-draft-paths" style="height:260px;overflow:auto;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></div>';
+            html += '<div id="gt-pps-draft-paths" style="height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></div>';
             html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;">';
             html += '<button type="button" id="gt-pps-clear-draft" style="height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:12px;cursor:pointer;">清空</button>';
             html += '<button type="button" id="gt-pps-create" style="height:28px;padding:0 12px;border:none;border-radius:4px;background:#2563eb;color:#fff;font-size:12px;cursor:pointer;">新增并设为默认</button>';
