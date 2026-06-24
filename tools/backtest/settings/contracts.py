@@ -30,6 +30,10 @@ class SettingModule:
     layer: str
     order: int = 100
     help_text: str = ""
+    execution_stage: str = ""
+    sharing_scope: str = ""
+    trace_policy: str = ""
+    capabilities: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.layer:

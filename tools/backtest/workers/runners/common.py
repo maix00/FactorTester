@@ -257,12 +257,15 @@ def execute_target_weights(
     target: Mapping[str, float],
     positions: Mapping[str, float],
     cash: float,
+    current_value: float | None = None,
 ) -> tuple[float, dict[str, float], dict[str, float]]:
     desired = target_quantities(
         request,
         row,
         target,
-        portfolio_value(request, row, positions, cash),
+        float(current_value)
+        if current_value is not None
+        else portfolio_value(request, row, positions, cash),
         strategy,
     )
     deltas = executable_deltas(request, row, strategy, desired, positions, cash)

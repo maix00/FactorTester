@@ -1,4 +1,6 @@
 """Group test endpoint."""
+import hashlib
+import json
 import logging, math, time, traceback
 from copy import deepcopy
 from typing import Any, cast
@@ -1318,7 +1320,29 @@ def _serialize_event_execution(
     groups = []
     metrics = {}
     metrics_by_segment = {}
+    comparison_strategies = []
     split = pd.Timestamp(evaluation_split) if evaluation_split else None
+
+    def _trace_checksum(trace: dict[str, Any]) -> str | None:
+        if not trace:
+            return None
+        digest = hashlib.sha256()
+        for timestamp in sorted(trace):
+            digest.update(str(timestamp).encode("utf-8"))
+            digest.update(b"\0")
+            payload = trace.get(timestamp) or {}
+            digest.update(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
+
     for owner in execution["group_owner"]:
         strategy_id = str(owner.get("group_id") or "")
         if strategy_id not in portfolios:
@@ -1335,6 +1359,22 @@ def _serialize_event_execution(
         returns = pd.Series(equity, index=index).pct_change().fillna(0.0)
         display_name = str(owner.get("group_name") or strategy_id)
         settings = settings_by_group[strategy_id]
+        strategy_target_trace = target_trace.get(strategy_id, {})
+        execution_trace = portfolio.get("execution_trace") or {}
+        comparison_strategies.append({
+            "strategy_id": strategy_id,
+            "display_name": display_name,
+            "final_value": round(float(equity[-1]), 10),
+            "equity_points": int(len(equity)),
+            "target_trace_points": int(len(strategy_target_trace)),
+            "target_trace_checksum": _trace_checksum(strategy_target_trace),
+            "execution_trace_points": int(
+                portfolio.get("execution_trace_count")
+                or len(execution_trace)
+            ),
+            "execution_trace_checksum": _trace_checksum(execution_trace),
+            "snapshot_points": int(len(portfolio.get("position_curve") or {})),
+        })
         groups.append({
             "key": display_name,
             "name": display_name,
@@ -1351,7 +1391,7 @@ def _serialize_event_execution(
             "allocation_policy": settings[ALLOCATION_POLICY],
             "rebalance_trigger": settings[REBALANCE_TRIGGER],
             "position_policy": settings[POSITION_POLICY],
-            "target_trace": target_trace.get(strategy_id, {}),
+            "target_trace_available": bool(strategy_target_trace),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": bool(portfolio.get("position_curve")),
             "is_ls": bool(owner.get("is_ls")),
@@ -1417,6 +1457,13 @@ def _serialize_event_execution(
             "engine": engine_result.get("engine"),
             "event_count": engine_result.get("event_count"),
             "signal_kind": execution.get("signal_kind"),
+            "comparison": {
+                "schema_version": 1,
+                "engine": engine_result.get("engine"),
+                "event_count": engine_result.get("event_count"),
+                "signal_kind": execution.get("signal_kind"),
+                "strategies": comparison_strategies,
+            },
         },
     }
 

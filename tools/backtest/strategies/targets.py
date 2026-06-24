@@ -26,6 +26,23 @@ from .allocation import (
 from .rebalance import MembershipChange, OnFactorSignal, RebalanceTrigger
 
 
+def _target_from_weights(
+    instruments: Sequence[str] | tuple[str, ...],
+    weights: np.ndarray,
+) -> dict[str, float]:
+    """Convert a dense weight vector into the sparse target trace payload."""
+
+    weight_values = np.asarray(weights, dtype=float)
+    active = ~np.isclose(weight_values, 0.0)
+    if not np.any(active):
+        return {}
+    return {
+        str(instrument): float(weight_values[index])
+        for index, instrument in enumerate(instruments)
+        if bool(active[index])
+    }
+
+
 class GroupTargetCalculator:
     """Stateful membership-to-target policy instantiated by one framework run."""
 
@@ -78,6 +95,7 @@ class GroupTargetCalculator:
         memberships: np.ndarray,
         signal_updates: np.ndarray,
         margin_ratios: np.ndarray,
+        volatilities: Mapping[str, float] | None = None,
     ) -> dict[str, float] | None:
         current_prices = np.asarray(prices, dtype=float)
         members = np.asarray(memberships, dtype=bool)
@@ -88,10 +106,10 @@ class GroupTargetCalculator:
             raise ValueError("membership row must have source-group and instrument axes")
         if updates.shape != (members.shape[0],):
             raise ValueError("signal-update row must match the source-group axis")
-        if self._previous_prices is not None:
+        if self.allocation_name == "inverse_volatility" and volatilities is None and self._previous_prices is not None:
             with np.errstate(all="ignore"):
                 returns = current_prices / self._previous_prices - 1.0
-            self.estimator.update(dict(zip(self.instruments, returns, strict=True)))
+            self.estimator.update_values(returns)
         self._previous_prices = current_prices.copy()
 
         if self.strategy_kind == "long_short":
@@ -127,8 +145,8 @@ class GroupTargetCalculator:
                     "short_count": int(np.count_nonzero(short_selected)),
                 })
                 return None
-            weights = self._allocate(timestamp, long_selected, margin_ratios, 0.5, "long")
-            weights -= self._allocate(timestamp, short_selected, margin_ratios, 0.5, "short")
+            weights = self._allocate(timestamp, long_selected, margin_ratios, 0.5, "long", volatilities)
+            weights -= self._allocate(timestamp, short_selected, margin_ratios, 0.5, "short", volatilities)
         else:
             self._validate_indices((self.membership_index,), members.shape[0])
             if not updates[self.membership_index]:
@@ -142,13 +160,9 @@ class GroupTargetCalculator:
                 return None
             if self.position_policy == "buy_and_hold" and self._position_initialized:
                 return None
-            weights = self._allocate(timestamp, selected, margin_ratios, 1.0, None)
+            weights = self._allocate(timestamp, selected, margin_ratios, 1.0, None, volatilities)
 
-        target = {
-            instrument: float(weight)
-            for instrument, weight in zip(self.instruments, weights, strict=True)
-            if not np.isclose(weight, 0.0)
-        }
+        target = _target_from_weights(self.instruments, weights)
         self.target_trace[pd.Timestamp(timestamp).isoformat()] = target
         if target:
             self._position_initialized = True
@@ -161,8 +175,10 @@ class GroupTargetCalculator:
         margin_ratios: np.ndarray,
         gross_exposure: float,
         leg: str | None,
+        volatilities: Mapping[str, float] | None = None,
     ) -> np.ndarray:
-        volatilities = self.estimator.snapshot()
+        if volatilities is None:
+            volatilities = self.estimator.snapshot()
         inputs = AllocationInput(
             self.instruments,
             selected,
@@ -314,7 +330,7 @@ def _compile_strategy(
         if previous_prices is not None:
             with np.errstate(all="ignore"):
                 returns = current_prices / previous_prices - 1.0
-            estimator.update(dict(zip(instruments, returns, strict=True)))
+            estimator.update_values(returns)
         previous_prices = current_prices.copy()
         if not signal_updates[row]:
             continue
@@ -344,11 +360,7 @@ def _compile_strategy(
                 "fallback_policy": "equal_notional",
                 "volatilities": volatilities,
             })
-        targets[timestamp.isoformat()] = {
-            instrument: float(weight)
-            for instrument, weight in zip(instruments, weights, strict=True)
-            if not np.isclose(weight, 0.0)
-        }
+        targets[timestamp.isoformat()] = _target_from_weights(instruments, weights)
     return {
         "strategy_id": strategy_id,
         "rebalance_trigger": rebalance_name,
@@ -403,7 +415,7 @@ def _compile_long_short_strategy(
         if previous_prices is not None:
             with np.errstate(all="ignore"):
                 returns = current_prices / previous_prices - 1.0
-            estimator.update(dict(zip(instruments, returns, strict=True)))
+            estimator.update_values(returns)
         previous_prices = current_prices.copy()
         if not np.any(signal_updates[row, active_indices]):
             continue
@@ -463,11 +475,7 @@ def _compile_long_short_strategy(
                 })
             leg_weights.append(side * weights)
         combined = leg_weights[0] + leg_weights[1]
-        targets[timestamp.isoformat()] = {
-            instrument: float(weight)
-            for instrument, weight in zip(instruments, combined, strict=True)
-            if not np.isclose(weight, 0.0)
-        }
+        targets[timestamp.isoformat()] = _target_from_weights(instruments, combined)
     strategy_id = str(config.get("strategy_id") or "")
     return {
         "strategy_id": strategy_id,

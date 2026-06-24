@@ -29,6 +29,18 @@ from .allocation import (
 from .rebalance import MembershipChange, OnFactorSignal
 
 
+def _target_from_weights(instruments: tuple[str, ...], weights: np.ndarray) -> dict[str, float]:
+    weight_values = np.asarray(weights, dtype=float)
+    active = ~np.isclose(weight_values, 0.0)
+    if not np.any(active):
+        return {}
+    return {
+        instrument: float(weight_values[index])
+        for index, instrument in enumerate(instruments)
+        if bool(active[index])
+    }
+
+
 class MembershipAllocationStrategy:
     """Calculate target weights causally inside the native event runtime."""
 
@@ -82,10 +94,11 @@ class MembershipAllocationStrategy:
             raise TypeError("factor.signal payload must be FactorSignal")
         current_prices = {name: float(self.market.prices[name]) for name in self.instruments}
         if self._previous_prices is not None:
-            self.estimator.update({
-                name: current_prices[name] / self._previous_prices[name] - 1.0
+            returns = np.asarray([
+                current_prices[name] / self._previous_prices[name] - 1.0
                 for name in self.instruments
-            })
+            ], dtype=float)
+            self.estimator.update_values(returns)
         self._previous_prices = current_prices
         if pd.Timestamp(event.timestamp) not in self.active_timestamps:
             return None
@@ -109,11 +122,7 @@ class MembershipAllocationStrategy:
             weights = self._allocate(
                 event.timestamp, selected, volatilities, gross_exposure=1.0
             )
-        target = {
-            name: float(weight)
-            for name, weight in zip(self.instruments, weights, strict=True)
-            if not np.isclose(weight, 0.0)
-        }
+        target = _target_from_weights(self.instruments, weights)
         self.target_trace[event.timestamp.isoformat()] = target
         if target:
             self._position_initialized = True

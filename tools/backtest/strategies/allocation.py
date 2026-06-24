@@ -115,21 +115,45 @@ class TrailingVolatilityEstimator:
         self.min_observations = minimum
         self.annualization = annualization
         self._returns = {name: deque(maxlen=lookback) for name in instruments}
+        self._sum = {name: 0.0 for name in instruments}
+        self._sum_sq = {name: 0.0 for name in instruments}
 
     def update(self, returns: Mapping[str, float]) -> None:
         for instrument in self.instruments:
             value = float(returns.get(instrument, np.nan))
-            if np.isfinite(value):
-                self._returns[instrument].append(value)
+            self._append(instrument, value)
+
+    def update_values(self, returns: np.ndarray) -> None:
+        values = np.asarray(returns, dtype=float)
+        if values.shape != (len(self.instruments),):
+            raise ValueError("returns vector must match instrument axis")
+        for index, instrument in enumerate(self.instruments):
+            self._append(instrument, float(values[index]))
+
+    def _append(self, instrument: str, value: float) -> None:
+        if np.isfinite(value):
+            values = self._returns[instrument]
+            if len(values) == self.lookback:
+                old = float(values[0])
+                self._sum[instrument] -= old
+                self._sum_sq[instrument] -= old * old
+            values.append(value)
+            self._sum[instrument] += value
+            self._sum_sq[instrument] += value * value
 
     def snapshot(self) -> dict[str, float]:
         result = {}
         scale = self.annualization ** 0.5
         for instrument, values in self._returns.items():
-            result[instrument] = (
-                float(np.std(values, ddof=1) * scale)
-                if len(values) >= self.min_observations else np.nan
+            count = len(values)
+            if count < self.min_observations:
+                result[instrument] = np.nan
+                continue
+            mean_sq = self._sum_sq[instrument] - (
+                self._sum[instrument] * self._sum[instrument] / count
             )
+            variance = max(mean_sq / (count - 1), 0.0)
+            result[instrument] = float(variance ** 0.5 * scale)
         return result
 
 
