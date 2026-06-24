@@ -390,31 +390,22 @@
         label: '参数设置',
         icon: '⚙️',
         collect: function() {
+            // Read session params from the new settings panel's cached state
             try {
-                var pl = [];
-                var tbodyEl = document.getElementById('factor_table_body');
-                var moduleElem = document.getElementById('parameter_module');
-                var paramAliases = [];
-                if (moduleElem) {
-                    var aliasesAttr = moduleElem.getAttribute('data-param-aliases');
-                    if (aliasesAttr) { try { paramAliases = JSON.parse(aliasesAttr); } catch(e) {} }
-                }
-                if (tbodyEl && paramAliases.length > 0) {
-                    var rows = tbodyEl.querySelectorAll('tr');
-                    rows.forEach(function(row) {
-                        if (row.id === 'add_row') return;
-                        var cells = row.querySelectorAll('td');
-                        if (cells.length >= paramAliases.length + 1) {
-                            var rowParams = {};
-                            for (var i = 0; i < paramAliases.length; i++) {
-                                var tdText = (cells[i + 1].textContent || '').trim();
-                                if (tdText) rowParams[paramAliases[i]] = tdText;
-                            }
-                            if (Object.keys(rowParams).length > 0) pl.push(rowParams);
-                        }
+                // The settings panel caches in a module-level state;
+                // we fall back to reading the top-level section's param-aliases
+                // and constructing params_list from _sessionParams on window
+                var cached = window._getSessionFactorParams ? window._getSessionFactorParams() : null;
+                if (cached && cached.length > 0) {
+                    return cached.map(function(row) {
+                        var p = {};
+                        Object.keys(row.params || {}).forEach(function(k) {
+                            if (row.params[k] !== '') p[k] = row.params[k];
+                        });
+                        return p;
                     });
                 }
-                return pl;
+                return [];
             } catch (e) { return []; }
         },
         apply: async function(params_list, ctx) {
@@ -431,8 +422,6 @@
                 }
                 if (typeof window._renderParamFactorRows === 'function' && Array.isArray(replaceData.factor_rows)) {
                     window._renderParamFactorRows(replaceData.factor_rows);
-                } else if (typeof window.reloadParamModule === 'function') {
-                    await new Promise(function(resolve) { window.reloadParamModule(resolve); });
                 }
                 if (typeof window.refreshICModule === 'function') window.refreshICModule();
             } catch (e) { alert('恢复参数异常: ' + e.message); }

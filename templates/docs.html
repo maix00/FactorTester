@@ -188,8 +188,6 @@
         <h3>3.2 子模块 (templates/modules/)</h3>
         <table>
             <tr><th>模块</th><th>说明</th></tr>
-            <tr><td><code>shared/parameter_module.html</code></td><td>参数配置表格，支持新增/删除/拖拽排序/模板管理</td></tr>
-            <tr><td><code>shared/time_range_module.html</code></td><td>时间范围选择，支持交易日模式、期货日夜盘、时区</td></tr>
             <tr><td><code>shared/latex_module.html</code></td><td>MathJax 渲染因子公式和文字说明</td></tr>
             <tr><td><code>shared/product_path_settings.js</code></td><td>产品路径设置状态、候选列表和现场路径组构建器；具体入口由后端注册的设置模块按需打开</td></tr>
             <tr><td><code>single_factor_test/global_template_module.html</code></td><td>单因子设置快照：一键保存/加载当前因子家族的设置组合</td></tr>
@@ -202,8 +200,6 @@
             <tr><th>JS 文件</th><th>核心功能</th></tr>
             <tr><td><code>static/js/base.js</code></td><td>全局工具：<code>searchFactors()</code> 搜索、<code>shutdownServer()</code> 关机、数字格式化</td></tr>
             <tr><td><code>static/js/factor_main.js</code></td><td>因子主页初始化，加载子模块</td></tr>
-            <tr><td><code>shared/parameter_module.js</code></td><td>参数 CRUD：<code>reloadParamModule()</code>、模板保存/加载、<code>/replace_params</code> API</td></tr>
-            <tr><td><code>shared/time_range_module.js</code></td><td>时间抽屉控制，交易日/期货盘面联动，同步到分组模块</td></tr>
             <tr><td><code>shared/date_utils.js</code></td><td>日期处理：<code>carryOver()</code> 进位、<code>adjustTime()</code> 修正</td></tr>
             <tr><td><code>single_factor_test/ic_test_module.js</code></td><td>运行 IC 测试，渲染 IC 序列/衰减/ACF/滚动 IC 图表 (Highcharts)</td></tr>
             <tr><td><code>single_factor_test/group_test_module.js</code></td><td>分组回测，渲染累积净值曲线，支持前端实时费率敏感性分析</td></tr>

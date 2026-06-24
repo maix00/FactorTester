@@ -137,14 +137,9 @@
             state.containers[tabKey].appendChild(factorChipListHost);
             renderFactorCandidateChipList(factorChipListHost);
 
-            var parameterModule = panel.querySelector('#parameter_module');
-            if (parameterModule) {
-                parameterModule.classList.add('single-factor-page-embedded-params');
-                Array.from(parameterModule.children).forEach(function(child) {
-                    if (child.classList && child.classList.contains('section-title')) return;
-                    if (child.classList && child.classList.contains('param-hint')) return;
-                    state.containers[tabKey].appendChild(child);
-                });
+            // Use initial session params from template injection (set in single_factor_test_main.html)
+            if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
+                state._sessionParams = window._initialSessionParams.slice();
             }
             drawer.style.display = 'none';
             drawer.classList.remove('open');
@@ -696,10 +691,11 @@
     }
 
     function getParamDefs() {
-        var paramModule = document.getElementById('parameter_module');
-        if (!paramModule) return [];
-        var aliasesAttr = paramModule.getAttribute('data-param-aliases');
-        var metasAttr = paramModule.getAttribute('data-param-metas');
+        // Read param definitions from the top-level section's data attributes
+        var section = document.querySelector('.section[data-param-aliases]');
+        if (!section) return [];
+        var aliasesAttr = section.getAttribute('data-param-aliases');
+        var metasAttr = section.getAttribute('data-param-metas');
         var aliases = [];
         var metas = [];
         try { if (aliasesAttr) aliases = JSON.parse(aliasesAttr); } catch(e) {}
@@ -744,29 +740,15 @@
     }
 
     function getSessionFactorParams() {
-        // Read current session params from the param table DOM (parameter_module)
-        var paramModule = document.getElementById('parameter_module');
-        if (!paramModule) return [];
-        var tbody = paramModule.querySelector('#factor_table_body');
-        if (!tbody) return [];
-        var aliasesAttr = paramModule.getAttribute('data-param-aliases');
-        var aliases = [];
-        try { if (aliasesAttr) aliases = JSON.parse(aliasesAttr); } catch(e) {}
-        var rows = [];
-        var trs = tbody.querySelectorAll('tr');
-        var ffAlias = factorFamilyAlias();
-        trs.forEach(function(tr) {
-            var cells = tr.querySelectorAll('td');
-            if (cells.length < aliases.length + 1) return;
-            var factorAlias = (cells[0].textContent || '').trim();
-            if (!factorAlias) return;
-            var params = {};
-            aliases.forEach(function(alias, i) {
-                params[alias] = (cells[i + 1].textContent || '').trim();
-            });
-            rows.push({ factor_alias: factorAlias, factor_family_alias: ffAlias, scope_key: '现场', params: params, source_type: 'session' });
-        });
-        return rows;
+        // Initialize from backend-injected data on first call
+        if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
+            setSessionFactorParams(window._initialSessionParams);
+        }
+        return Array.isArray(state._sessionParams) ? state._sessionParams : [];
+    }
+
+    function setSessionFactorParams(params) {
+        state._sessionParams = Array.isArray(params) ? params.slice() : [];
     }
 
     function renderParametersTab() {
@@ -776,6 +758,11 @@
 
         var paramDefs = getParamDefs();
         var ffAlias = factorFamilyAlias();
+
+        // Initialize session params from backend-injected data on first call
+        if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
+            setSessionFactorParams(window._initialSessionParams);
+        }
         var sessionParams = getSessionFactorParams();
 
         loadFactorLibraryParams(false).then(function(libraryParams) {
@@ -808,6 +795,8 @@
                     .then(function(res) { return res.json(); })
                     .then(function(data) {
                         if (data.success) {
+                            // Update cache so snapshot collect reads latest
+                            state._sessionParams = getSessionFactorParams().concat([param]);
                             if (typeof window._renderParamFactorRows === 'function') {
                                 window._renderParamFactorRows(data.factor_rows || []);
                             }
@@ -821,18 +810,15 @@
                 },
                 onRemoveParam: function(alias) {
                     if (!alias || !ffAlias) return;
-                    // Find the row index from the current session table
-                    var paramModule = document.getElementById('parameter_module');
-                    var tbody = paramModule && paramModule.querySelector('#factor_table_body');
-                    if (!tbody) return;
-                    var trs = tbody.querySelectorAll('tr');
+                    // Find the row index from cached session params
+                    var params = getSessionFactorParams();
                     var targetIdx = -1;
-                    trs.forEach(function(tr, idx) {
-                        var firstCell = tr.querySelector('td');
-                        if (firstCell && (firstCell.textContent || '').trim() === alias) {
-                            targetIdx = idx;
+                    for (var i = 0; i < params.length; i++) {
+                        if (params[i].factor_alias === alias) {
+                            targetIdx = i;
+                            break;
                         }
-                    });
+                    }
                     if (targetIdx < 0) return;
                     fetch('/delete_params', {
                         method: 'POST',
@@ -845,6 +831,9 @@
                     .then(function(res) { return res.json(); })
                     .then(function(data) {
                         if (data.success) {
+                            // Update cache so snapshot collect reads latest
+                            params.splice(targetIdx, 1);
+                            state._sessionParams = params;
                             if (typeof window._renderParamFactorRows === 'function') {
                                 window._renderParamFactorRows(data.factor_rows || []);
                             }
@@ -870,6 +859,14 @@
                     .then(function(res) { return res.json(); })
                     .then(function(data) {
                         if (data.success) {
+                            // Update cache so snapshot collect reads latest
+                            state._sessionParams = getSessionFactorParams().concat([{
+                                factor_alias: alias,
+                                factor_family_alias: ffAlias,
+                                params: params,
+                                scope_key: '现场',
+                                source_type: 'session'
+                            }]);
                             if (typeof window._renderParamFactorRows === 'function') {
                                 window._renderParamFactorRows(data.factor_rows || []);
                             }
@@ -975,6 +972,9 @@
         },
         sharedDefaultKeys: sharedGlobalDefaultKeys,
     };
+
+    // Expose for global_template_module.js snapshot collect to read session params
+    window._getSessionFactorParams = getSessionFactorParams;
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();

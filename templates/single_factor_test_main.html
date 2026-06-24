@@ -1,7 +1,8 @@
 <div class="section" 
      data-factor-alias="{{ factor_family_alias }}" 
      data-factor-type="{{ factor_type | default('public') }}"
-     data-param-aliases='{{ param_aliases|tojson }}'>
+     data-param-aliases='{{ param_aliases|tojson }}'
+     data-param-metas='{{ (param_metas | default([])) | tojson }}'>
     <div class="section-title">当前因子: <b style="color:#0078d4;">{{ factor_family_alias }}</b>{% if chinese_name %} <span style="color:#555;font-weight:normal;font-size:0.85em;">{{ chinese_name }}</span>{% endif %}</div>
     <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
     
@@ -12,8 +13,6 @@
         <div id="single-factor-page-settings"></div>
     </div>
     {% include 'modules/single_factor_test/global_template_module.html' %}
-    {% include 'modules/shared/parameter_module.html' %}
-    {% include 'modules/shared/time_range_module.html' %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/backend_settings_panel.css') }}">
     <script src="{{ url_for('static', filename='js/modules/shared/backend_settings_panel.js') }}"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -36,4 +35,21 @@
     {% include 'modules/single_factor_test/group_test_module.html' %}
 </div>
 
+<script>
+// Expose initial session params from backend render so new settings panel can read them
+(function() {
+    var aliases = {{ param_aliases|tojson }};
+    var factors = {{ factors|tojson }};
+    var ffAlias = '{{ factor_family_alias }}';
+    window._initialSessionParams = factors.map(function(f) {
+        var row = { factor_alias: f.alias, factor_family_alias: ffAlias, scope_key: '现场', source_type: 'session', params: {} };
+        aliases.forEach(function(alias) {
+            row.params[alias] = (f.family && f.family.params_dict && f.family.params_dict[alias])
+                ? f.family.params_dict[alias].get_value(f)
+                : '';
+        });
+        return row;
+    });
+})();
+</script>
 <script src="{{ url_for('static', filename='js/factor_main.js') }}"></script>
