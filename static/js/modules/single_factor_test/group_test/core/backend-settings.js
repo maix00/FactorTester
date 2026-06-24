@@ -718,7 +718,7 @@
                 createLabel: '新增',
                 createDefaultLabel: '新增并设为默认',
                 escapeHTML: escapeHTML,
-                productCount: productPathSelectionProducts,
+                productCount: function(selection) { return productPathSelectionProducts(selection).length; },
                 allowRemove: isManualProductPathSelection,
                 onOpen: function(selected) {
                     if (!selected || !GT.overlays || !GT.overlays.productPathSelectionProducts) return;
