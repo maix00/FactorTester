@@ -425,22 +425,35 @@ def group_test_settings() -> ApplicationSettings:
             "engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,),
         ),
-        SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 12),
+        SettingTab(
+            "factor",
+            "因子执行",
+            (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
+            "settings-grid",
+            12,
+        ),
         SettingTab(
             "product_path_selection",
             "产品路径",
-            (TabMountPoint.LOCAL_SETTINGS,),
+            (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
             "settings-grid",
             13,
         ),
-        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 14),
-        SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
+        SettingTab(
+            "group_strategy",
+            "分组数量",
+            (TabMountPoint.GROUP_SETTINGS,),
+            "settings-grid",
+            14,
+        ),
+        SettingTab("data_source", "数据源", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
+        SettingTab("frequency", "数据频率", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 16),
         SettingTab(
             "time",
             "时间范围",
             (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
             "settings-grid",
-            16,
+            17,
             summary_template="{start_date} → {end_date} · {time_precision}",
             summary_keys=("start_date", "end_date", "time_precision"),
         ),
@@ -536,11 +549,35 @@ def group_test_settings() -> ApplicationSettings:
     ))
     register_factor_execution_base(app)
     register_factor_candidate_list_base(app)
-    register_factor_selection_base(app)
+    register_factor_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
+    app.register_setting(SettingDefinition(
+        "splitCount",
+        "分组数",
+        "group_strategy",
+        "number",
+        5,
+        ScopePolicy.GROUP_ONLY,
+        module="group_strategy",
+        minimum=1,
+        step=1,
+        chip_template="分组数: {value}",
+    ))
+    app.register_setting(SettingDefinition(
+        "groupIndex",
+        "分组序号",
+        "group_strategy",
+        "number",
+        1,
+        ScopePolicy.GROUP_ONLY,
+        module="group_strategy",
+        minimum=1,
+        step=1,
+        chip_template="分组序号: {value}",
+    ))
     app.register_setting(SettingDefinition(
         "initial_capital",
         "初始资金",

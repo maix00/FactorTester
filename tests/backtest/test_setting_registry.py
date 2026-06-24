@@ -24,7 +24,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
+        "factor", "product_path_selection", "group_strategy", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
