@@ -701,7 +701,16 @@
         return control;
     }
 
-    function renderProductPathSelectionManager(container) {
+    /**
+     * Render the product-path-selection management UI into `container`.
+     * `opts.getCurrent`/`opts.setCurrent` let callers scope "当前选中" to something
+     * other than the page-level local default (e.g. an add-draft or a specific group),
+     * so the same manager UI can be reused inside the group-add/edit chip-list panel.
+     */
+    function renderProductPathSelectionManager(container, opts) {
+        opts = opts || {};
+        var getCurrent = opts.getCurrent || function() { return state.localValues.product_path_selection; };
+        var setCurrent = opts.setCurrent || setDefaultProductPathSelection;
         container.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载产品路径...</div>';
         loadProductPathSelections().then(function(selections) {
             if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
@@ -712,7 +721,7 @@
                 host: container,
                 prefix: 'gt-pps',
                 selections: selections,
-                currentSelection: state.localValues.product_path_selection,
+                currentSelection: getCurrent(),
                 currentLabel: '当前默认',
                 manualTitle: '现场新增路径组',
                 createLabel: '新增',
@@ -729,20 +738,20 @@
                     );
                 },
                 onSetDefault: function(selected) {
-                    setDefaultProductPathSelection(selected);
-                    renderProductPathSelectionManager(container);
+                    setCurrent(selected);
+                    renderProductPathSelectionManager(container, opts);
                 },
                 onRemove: function(selected) {
                     var id = selectionId(selected);
                     var name = productPathSelectionLabel(selected);
                     if (!name || !confirm('移除现场产品路径组 "' + name + '"？')) return;
                     removeProductPathSelection(id);
-                    renderProductPathSelectionManager(container);
+                    renderProductPathSelectionManager(container, opts);
                 },
                 onCreate: function(selection, meta) {
                     mergeProductPathSelections([selection]);
-                    if (meta && meta.setAsDefault) setDefaultProductPathSelection(selection);
-                    renderProductPathSelectionManager(container);
+                    if (meta && meta.setAsDefault) setCurrent(selection);
+                    renderProductPathSelectionManager(container, opts);
                 },
             });
         }).catch(function(error) {
@@ -1615,6 +1624,9 @@
         openLocalTab: openLocalTab,
         loadProductPathSelections: loadProductPathSelections,
         getProductPathSelections: function() { return state.productPathSelections.slice(); },
+        renderProductPathManager: renderProductPathSelectionManager,
+        productPathSelectionProducts: productPathSelectionProducts,
+        productPathSelectionLabel: productPathSelectionLabel,
         getDefaultProductPathSelection: function() {
             var def = settingDef('product_path_selection') || {};
             return state.localValues.product_path_selection || def.value || null;

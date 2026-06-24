@@ -231,9 +231,10 @@
 
     // ── Render ──
     //
-    // Master-inspired two-column layout:
-    //   Left column  — tester navigation (vertical buttons, like .group-nav-column)
-    //   Right column — group params + multi-select factor list
+    // 两栏布局：左栏 = 产品路径 chip-list + 分组数/分组序号设置；右栏 = 因子 chip-list（多选）。
+    // chip-list 的"管理"作用域绑定到当前 add-draft，不会唤起 local-settings 的页面级 tab。
+
+    var _addPathManageOpen = false;
 
     function render() {
         var container = $(_containerId);
@@ -245,51 +246,13 @@
         if (!draft) return;
 
         var html = '';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">';
 
-        // ═══════════════════════════════════════════════════════
-        // Two-column shell
-        // ═══════════════════════════════════════════════════════
-        html += '<div style="display:grid;grid-template-columns:minmax(180px,220px) minmax(280px,1fr);gap:12px;align-items:start;">';
-
-        // ─────────────────────────────────────────────────────────
-        // LEFT COLUMN: Tester navigation (master-style)
-        // ─────────────────────────────────────────────────────────
-        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:6px;max-height:440px;overflow:auto;">';
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 8px;">';
-        html += '<span style="font-size:12px;font-weight:700;color:#475467;">产品路径</span>';
-        html += '<button type="button" id="add-manage-product-paths" style="height:22px;padding:0 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:11px;cursor:pointer;">管理</button>';
-        html += '</div>';
-        if (selections.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:8px;line-height:1.6;">暂无产品路径组。请先进入产品路径设置新增、导入或指定默认路径组。</div>';
-        } else {
-            for (var i = 0; i < selections.length; i++) {
-                var selection = selections[i];
-                var selectionId = _selectionId(selection);
-                var label = _selectionDisplayLabel(selection) || ('产品路径 #' + selectionId);
-                var paths = selection.selected_paths || selection.paths || [];
-                var subMeta = _selectionSourceLabel(selection) || (paths.length + ' 路径');
-                var activeId = _selectionId(draft.product_path_selection);
-                var isActive = (activeId === selectionId);
-                html += '<button type="button" class="add-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
-                    + ' style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;'
-                    + 'border:1px solid ' + (isActive ? '#9cc7f2' : 'transparent') + ';'
-                    + 'background:' + (isActive ? '#e7f1ff' : 'transparent') + ';'
-                    + 'border-radius:6px;padding:7px 8px;margin-bottom:4px;'
-                    + 'text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
-                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</span>'
-                    + '<small style="color:#667085;font-size:11px;">' + escapeHTML(subMeta) + '</small>'
-                    + '</button>';
-            }
-        }
-        html += '</div>';
-
-        // ─────────────────────────────────────────────────────────
-        // RIGHT COLUMN: Group params + Factor multi-select
-        // ─────────────────────────────────────────────────────────
-        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;">';
-
-        // ── Group params (compact row) ──
-        html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">';
+        // ── LEFT: 产品路径 chip-list + 分组参数 ──
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:10px;">';
+        html += '<div id="add-product-path-chiplist"></div>';
+        html += '<div style="border-top:1px solid #eef2f7;margin:12px 0;"></div>';
+        html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">';
         html += '<span style="font-size:13px;font-weight:600;color:#333;">分组</span>';
         html += '<input type="number" id="add-group-count" value="' + (draft.splitCount || 5) + '" min="1" step="1"'
             + ' style="width:70px;padding:5px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;text-align:center;"'
@@ -301,84 +264,61 @@
             + ' title="分组索引（从1开始）">';
         html += '<span style="font-size:13px;color:#555;">组</span>';
         html += '</div>';
-        html += '<div style="margin-bottom:12px;">';
         html += '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">';
         html += '<input type="checkbox" id="add-all-groups" ' + (draft.allGroups ? 'checked' : '') + ' style="width:16px;height:16px;">';
         html += '<span>所有分组（为每个分组索引都创建一个基础组）</span>';
         html += '</label>';
         html += '</div>';
 
-        // ── Separator ──
-        html += '<div style="border-top:1px solid #eef2f7;margin:0 0 12px 0;"></div>';
-
-        // ── Tester info banner ──
-        if (draft.product_path_selection) {
-            var selectedLabel = _selectionLabel(draft.product_path_selection);
-            html += '<div style="margin-bottom:12px;padding:8px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;font-size:12px;color:#0369a1;">';
-            html += '已选：<b>' + escapeHTML(selectedLabel || '产品路径选择') + '</b> · ' + (draft.splitCount || 5) + '组';
-            if (draft.allGroups) html += ' · 所有分组';
-            else html += ' · 第 <b>' + (draft.groupIndex || 1) + '</b> 组';
-            html += '</div>';
-        } else {
-            html += '<div style="margin-bottom:12px;padding:8px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;font-size:12px;color:#c2410c;">';
-            html += '请先在左侧选择产品路径';
-            html += '</div>';
-        }
-
-        // ── Factor toolbar ──
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
-        html += '<div style="font-size:13px;font-weight:600;color:#333;">选择因子 <span style="color:red;">*</span></div>';
-        html += '<div style="display:flex;gap:6px;">';
+        // ── RIGHT: 因子 chip-list（多选） ──
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:10px;">';
+        html += '<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px;">';
         html += '<button id="add-select-all" style="padding:4px 10px;border:1px solid #10b981;border-radius:4px;background:#10b981;color:#fff;cursor:pointer;font-size:12px;font-weight:600;">全选</button>';
         html += '<button id="add-deselect-all" style="padding:4px 10px;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-size:12px;">清空</button>';
         html += '</div>';
+        html += '<div id="add-factor-chiplist"></div>';
         html += '</div>';
 
-        // ── Factor list (scrollable, checkbox style) ──
-        html += '<div style="max-height:340px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
-        if (factors.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:16px;text-align:center;">暂无因子数据</div>';
-        } else {
-            for (var j = 0; j < factors.length; j++) {
-                var alias = factors[j].alias || factors[j].name || '';
-                var isSelected = (draft.selectedFactors || []).indexOf(alias) >= 0;
-                html += '<div class="add-factor-row" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;'
-                    + (isSelected ? 'background:#e8f4fd;' : '')
-                    + 'border-bottom:1px solid #f0f2f5;font-size:13px;'
-                    + (j === factors.length - 1 ? '' : '') + '">';
-                html += '<input type="checkbox" class="add-factor-cb" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + (isSelected ? ' checked' : '')
-                    + ' style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">';
-                html += '<span style="flex:1;">' + escapeHTML(alias) + '</span>';
-                html += '<span style="font-size:11px;color:' + (isSelected ? '#0078d4' : '#ccc') + ';">' + (isSelected ? '✓' : '') + '</span>';
-                html += '</div>';
-            }
-        }
-        html += '</div>';
-
-        html += '</div>'; // close right column
         html += '</div>'; // close two-column shell
 
         container.innerHTML = html;
 
-        // ── Bind events ──
-
-        // Product-path selection nav buttons
-        var selectionBtns = container.querySelectorAll('.add-product-path-selection-nav-btn');
-        for (var tb = 0; tb < selectionBtns.length; tb++) {
-            selectionBtns[tb].addEventListener('click', function() {
-                var selectionId = this.getAttribute('data-selection-id');
-                GT.tabs.updateAddDraft({ product_path_selection: _findSelection(selectionId) });
-                render();
+        // ── Bind: 产品路径 chip-list ──
+        var pathHost = $('add-product-path-chiplist');
+        if (pathHost && GT.panels.renderProductPathChipList) {
+            GT.panels.renderProductPathChipList(pathHost, {
+                selections: selections,
+                current: draft.product_path_selection,
+                onSelect: function(selection) {
+                    GT.tabs.updateAddDraft({ product_path_selection: selection });
+                    render();
+                },
+                manageOpen: _addPathManageOpen,
+                onToggleManage: function(next) {
+                    _addPathManageOpen = next;
+                    render();
+                },
+                manageScope: {
+                    getCurrent: function() {
+                        var d = GT.tabs.getAddDraft();
+                        return d ? d.product_path_selection : null;
+                    },
+                    setCurrent: function(selection) {
+                        GT.tabs.updateAddDraft({ product_path_selection: selection });
+                        render();
+                    },
+                },
             });
         }
-        var managePathsBtn = $('add-manage-product-paths');
-        if (managePathsBtn) {
-            managePathsBtn.addEventListener('click', function() {
-                if (GT.backendSettings && typeof GT.backendSettings.openLocalTab === 'function') {
-                    GT.backendSettings.openLocalTab('product_path_selection');
-                }
+
+        // ── Bind: 因子 chip-list ──
+        var factorHost = $('add-factor-chiplist');
+        if (factorHost && GT.panels.renderFactorChipList) {
+            GT.panels.renderFactorChipList(factorHost, {
+                factors: factors,
+                selected: draft.selectedFactors || [],
+                multiple: true,
+                onToggle: function(alias) { _toggleFactor(alias, draft); },
             });
         }
 
@@ -410,25 +350,6 @@
             agCheck.addEventListener('change', function() {
                 GT.tabs.updateAddDraft({ allGroups: this.checked });
                 render();
-            });
-        }
-
-        // Factor rows (click on row or checkbox toggles selection)
-        var factorRows = container.querySelectorAll('.add-factor-row');
-        for (var fi = 0; fi < factorRows.length; fi++) {
-            factorRows[fi].addEventListener('click', function(e) {
-                // Don't double-fire if clicking directly on the checkbox
-                if (e.target.tagName === 'INPUT') return;
-                var alias = this.getAttribute('data-factor-alias');
-                _toggleFactor(alias, draft);
-            });
-        }
-        // Factor checkboxes
-        var factorCbs = container.querySelectorAll('.add-factor-cb');
-        for (var fc = 0; fc < factorCbs.length; fc++) {
-            factorCbs[fc].addEventListener('change', function() {
-                var alias = this.getAttribute('data-factor-alias');
-                _toggleFactor(alias, draft);
             });
         }
 
@@ -594,6 +515,8 @@
         return groups[0][key];
     }
 
+    var _editPathManageOpen = false;
+
     function _renderEditGroup(container) {
         var selectedGroups = _selectedEditGroups();
         var baseGroups = _selectedEditBaseGroups();
@@ -607,7 +530,6 @@
         var selections = _currentSelections();
         var factors = window.factorList || [];
         var commonSelection = _commonEditValue(selectedGroups, 'product_path_selection');
-        var currentSelectionId = commonSelection ? _selectionId(commonSelection) : '';
         var commonFactor = _commonEditValue(selectedGroups, 'factorAlias');
         var factorAlias = commonFactor || '';
         var groupIndex = Number(group.groupIndex || 1);
@@ -615,37 +537,13 @@
         var splitCount = Number(commonSplit || groupIndex || 1);
 
         var html = '';
-        html += '<div style="display:grid;grid-template-columns:minmax(180px,220px) minmax(280px,1fr);gap:12px;align-items:start;">';
-        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:6px;max-height:440px;overflow:auto;">';
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 8px;">';
-        html += '<span style="font-size:12px;font-weight:700;color:#475467;">产品路径</span>';
-        html += '<button type="button" id="edit-manage-product-paths" style="height:22px;padding:0 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;font-size:11px;cursor:pointer;">管理</button>';
-        html += '</div>';
-        if (selections.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:8px;line-height:1.6;">暂无产品路径组。请先进入产品路径设置新增、导入或指定默认路径组。</div>';
-        } else {
-            for (var si = 0; si < selections.length; si++) {
-                var selection = selections[si];
-                var selectionId = _selectionId(selection);
-                var label = _selectionDisplayLabel(selection) || ('产品路径 #' + selectionId);
-                var paths = selection.selected_paths || selection.paths || [];
-                var subMeta = _selectionSourceLabel(selection) || (paths.length + ' 路径');
-                var isActive = !!currentSelectionId && selectionId === currentSelectionId;
-                html += '<button type="button" class="edit-product-path-selection-nav-btn" data-selection-id="' + escapeHTML(selectionId) + '"'
-                    + ' style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;'
-                    + 'border:1px solid ' + (isActive ? '#9cc7f2' : 'transparent') + ';'
-                    + 'background:' + (isActive ? '#e7f1ff' : 'transparent') + ';'
-                    + 'border-radius:6px;padding:7px 8px;margin-bottom:4px;'
-                    + 'text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
-                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(label) + '</span>'
-                    + '<small style="color:#667085;font-size:11px;">' + escapeHTML(subMeta) + '</small>'
-                    + '</button>';
-            }
-        }
-        html += '</div>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">';
 
-        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:12px;">';
-        html += '<div style="font-size:12px;font-weight:700;color:#475467;margin-bottom:10px;">分组参数' + (isSingle ? '' : ' · 将修改 ' + selectedGroups.length + ' 个对象') + '</div>';
+        // ── LEFT: 产品路径 chip-list + 分组参数 ──
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:10px;">';
+        html += '<div id="edit-product-path-chiplist"></div>';
+        html += '<div style="border-top:1px solid #eef2f7;margin:12px 0;"></div>';
+        html += '<div style="font-size:12px;font-weight:700;color:#475467;margin-bottom:8px;">分组参数' + (isSingle ? '' : ' · 将修改 ' + selectedGroups.length + ' 个对象') + '</div>';
         html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
         html += '<span style="font-size:13px;color:#333;">分组数</span>';
         html += '<input type="number" id="edit-group-count" value="' + splitCount + '" min="1" step="1"'
@@ -666,33 +564,14 @@
         if (derivedSelectedCount > 0) {
             html += '<div style="margin-top:8px;font-size:12px;color:#64748b;line-height:1.5;">已同时选中 ' + derivedSelectedCount + ' 个派生组；本页修改会应用到所有选中对象。</div>';
         }
+        html += '</div>';
 
-        html += '<div style="border-top:1px solid #eef2f7;margin:12px 0;"></div>';
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
-        html += '<div style="font-size:13px;font-weight:600;color:#333;">选择因子 <span style="color:red;">*</span></div>';
-        html += '<span style="font-size:11px;color:#667085;">单组选中修改一次只对应一个因子</span>';
+        // ── RIGHT: 因子 chip-list（单选） ──
+        html += '<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:10px;">';
+        html += '<div style="font-size:11px;color:#667085;margin-bottom:6px;text-align:right;">单组选中修改一次只对应一个因子</div>';
+        html += '<div id="edit-factor-chiplist"></div>';
         html += '</div>';
-        html += '<div style="max-height:340px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
-        if (factors.length === 0) {
-            html += '<div style="color:#888;font-size:12px;padding:16px;text-align:center;">暂无因子数据</div>';
-        } else {
-            for (var fi = 0; fi < factors.length; fi++) {
-                var alias = factors[fi].alias || factors[fi].name || '';
-                var isSelected = !!factorAlias && alias === factorAlias;
-                html += '<div class="edit-factor-row" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;'
-                    + (isSelected ? 'background:#e8f4fd;' : '')
-                    + 'border-bottom:1px solid #f0f2f5;font-size:13px;">';
-                html += '<input type="radio" name="edit-factor-radio" class="edit-factor-radio" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + (isSelected ? ' checked' : '')
-                    + ' style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">';
-                html += '<span style="flex:1;">' + escapeHTML(alias) + '</span>';
-                html += '<span style="font-size:11px;color:' + (isSelected ? '#0078d4' : '#ccc') + ';">' + (isSelected ? '✓' : '') + '</span>';
-                html += '</div>';
-            }
-        }
-        html += '</div>';
-        html += '</div>';
+
         html += '</div>';
 
         container.innerHTML = html;
@@ -712,18 +591,35 @@
             }
         }
 
-        container.querySelectorAll('.edit-product-path-selection-nav-btn').forEach(function(button) {
-            button.addEventListener('click', function() {
-                var selectionId = this.getAttribute('data-selection-id');
-                applyEditPatch({ product_path_selection: _findSelection(selectionId) });
+        // ── Bind: 产品路径 chip-list ──
+        var pathHost = $('edit-product-path-chiplist');
+        if (pathHost && GT.panels.renderProductPathChipList) {
+            GT.panels.renderProductPathChipList(pathHost, {
+                selections: selections,
+                current: commonSelection,
+                onSelect: function(selection) {
+                    applyEditPatch({ product_path_selection: selection });
+                },
+                manageOpen: _editPathManageOpen,
+                onToggleManage: function(next) {
+                    _editPathManageOpen = next;
+                    _renderEditGroup(container);
+                },
+                manageScope: {
+                    getCurrent: function() { return _commonEditValue(_selectedEditGroups(), 'product_path_selection'); },
+                    setCurrent: function(selection) { applyEditPatch({ product_path_selection: selection }); },
+                },
             });
-        });
-        var managePathsBtn = $('edit-manage-product-paths');
-        if (managePathsBtn) {
-            managePathsBtn.addEventListener('click', function() {
-                if (GT.backendSettings && typeof GT.backendSettings.openLocalTab === 'function') {
-                    GT.backendSettings.openLocalTab('product_path_selection');
-                }
+        }
+
+        // ── Bind: 因子 chip-list ──
+        var factorHost = $('edit-factor-chiplist');
+        if (factorHost && GT.panels.renderFactorChipList) {
+            GT.panels.renderFactorChipList(factorHost, {
+                factors: factors,
+                selected: factorAlias,
+                multiple: false,
+                onToggle: function(alias) { applyEditPatch({ factorAlias: alias }); },
             });
         }
 
@@ -749,20 +645,6 @@
                 if (e.key === 'Enter') this.blur();
             });
         }
-        container.querySelectorAll('.edit-factor-row').forEach(function(row) {
-            row.addEventListener('click', function(e) {
-                var alias = this.getAttribute('data-factor-alias');
-                if (!alias) return;
-                applyEditPatch({ factorAlias: alias });
-            });
-        });
-        container.querySelectorAll('.edit-factor-radio').forEach(function(radio) {
-            radio.addEventListener('change', function() {
-                var alias = this.getAttribute('data-factor-alias');
-                if (!alias) return;
-                applyEditPatch({ factorAlias: alias });
-            });
-        });
     }
 
     function _applyEditPatchToGroups(targetGroups, rawPatch, options) {
