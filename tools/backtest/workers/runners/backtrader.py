@@ -381,6 +381,8 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             }
             for item, strategy in zip(calculators, request.strategies, strict=True)
         },
+        "event_count": len(request.timestamps),
+        "signal_kind": payload.get("signal_kind"),
     }
 
 
