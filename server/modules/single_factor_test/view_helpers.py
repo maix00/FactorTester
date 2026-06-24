@@ -158,7 +158,7 @@ def get_factor_main_section_html(factor_family_alias, page_uuid=None):
         )
         start_date, end_date, start_time, end_time = get_default_test_time_strings()
         return render_template(
-            'factor_main.html',
+            'single_factor_test_main.html',
             factor_family_alias=factor_family_alias,
             chinese_name=chinese_name,
             math_expr=math_expr,

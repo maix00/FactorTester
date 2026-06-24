@@ -137,7 +137,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
             factors = ff.get_factors(params_list=session_params, page_uuid=page_uuid)
             start_date, end_date, start_time, end_time = get_default_test_time_strings()
             return render_template(
-                'factor_main.html',
+                'single_factor_test_main.html',
                 factor_family_alias=display_alias,
                 chinese_name=desc,
                 math_expr=math_expr,
