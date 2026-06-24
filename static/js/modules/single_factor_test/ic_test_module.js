@@ -435,62 +435,48 @@
             });
         }
 
+        // IC 用复数 product_path_selections：从候选列表多选，每个选中项渲染成一个结果 tab。
+        // 候选来自 loadSharedProductPathSelections（本地为空时回退到页面全局候选）。
         function renderICProductPathSelectionTab() {
-            const current = icProductPathSelections[0] || null;
-            const pageDefault = defaultProductPathSelection();
+            const selectedIds = new Set(icProductPathSelections.map(selectionId));
             contentHost.innerHTML = '<div class="backend-settings-grid">'
                 + '<div class="gt-backtest-setting-row">'
-                + '<span class="gt-backtest-setting-label">当前IC产品路径</span>'
-                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', current ? selectionLabel(current) : '无') + '</span></span>'
+                + '<span class="gt-backtest-setting-label">IC 产品路径（多选）</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(icProductPathSelections.length)) + '</span></span>'
                 + '</div>'
-                + '<div class="gt-backtest-setting-row">'
-                + '<span class="gt-backtest-setting-label">页面默认</span>'
-                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', pageDefault ? selectionLabel(pageDefault) : '无') + '</span></span>'
-                + '</div>'
-                + '<div style="font-size:12px;color:#64748b;">正在加载页面产品路径列表...</div>'
+                + '<div id="ic-pps-multi" style="grid-column:1 / -1;font-size:12px;color:#64748b;">正在加载产品路径候选...</div>'
                 + '</div>';
             loadSharedProductPathSelections(false).then(selections => {
-                if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
-                    contentHost.textContent = '产品路径设置组件未加载';
-                    return;
-                }
-                const extraRows = [];
-                if (pageDefault) {
-                    extraRows.push({
-                        label: '页面默认',
-                        html: '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-                            + '<span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', selectionLabel(pageDefault)) + '</span>'
-                            + '<button type="button" class="btn btn-sm btn-outline-primary" data-ic-use-shared-default>用于IC测试</button>'
-                            + '</span>',
+                const host = document.getElementById('ic-pps-multi');
+                if (!host) return;
+                let html = '<div style="max-height:280px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+                if (!selections.length) {
+                    html += '<div style="color:#888;font-size:12px;padding:14px;text-align:center;">暂无产品路径候选（请在页面"产品路径"设置中新增）</div>';
+                } else {
+                    selections.forEach(sel => {
+                        const sid = selectionId(sel);
+                        const active = selectedIds.has(sid);
+                        const pg = sel.product_group ? '📦 ' : '';
+                        html += '<div class="ic-pps-toggle" data-selection-id="' + escapeHTML(sid) + '"'
+                            + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;'
+                            + (active ? 'background:#e8f4fd;' : '') + 'border-bottom:1px solid #f0f2f5;font-size:12px;">'
+                            + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pg + escapeHTML(selectionLabel(sel)) + '</span>'
+                            + '<span style="font-size:11px;color:' + (active ? '#0078d4' : '#ccc') + ';">' + (active ? '✓' : '') + '</span>'
+                            + '</div>';
                     });
                 }
-                window.ProductPathSelectionUtils.renderSelectionSettingsTab({
-                    host: contentHost,
-                    prefix: 'ic-pps',
-                    selections,
-                    currentSelection: current,
-                    currentLabel: '当前IC产品路径',
-                    setDefaultLabel: '用于IC测试',
-                    manualTitle: 'IC现场路径组',
-                    createLabel: '新增到IC候选列表',
-                    createDefaultLabel: '新增并用于IC测试',
-                    escapeHTML,
-                    extraRows,
-                    onSetDefault: function(selection) {
-                        icProductPathSelections = selection ? [selection] : [];
-                        window.renderICTabs(icProductPathSelections);
-                    },
-                    onCreate: function(selection, meta) {
-                        mergeICProductPathCandidates([selection]);
-                        if (meta && meta.setAsDefault) icProductPathSelections = [selection];
-                        window.renderICTabs(icProductPathSelections);
-                    },
-                });
-                contentHost.querySelectorAll('[data-ic-use-shared-default]').forEach(button => {
-                    button.addEventListener('click', function(event) {
-                        event.preventDefault();
-                        icProductPathSelections = pageDefault ? [pageDefault] : [];
-                        window.renderICTabs(icProductPathSelections);
+                html += '</div>';
+                host.innerHTML = html;
+                host.querySelectorAll('.ic-pps-toggle').forEach(row => {
+                    row.addEventListener('click', function() {
+                        const sid = row.getAttribute('data-selection-id');
+                        const sel = selections.find(s => selectionId(s) === sid);
+                        if (!sel) return;
+                        const idx = icProductPathSelections.findIndex(s => selectionId(s) === sid);
+                        if (idx >= 0) icProductPathSelections.splice(idx, 1);
+                        else icProductPathSelections.push(sel);
+                        // 重渲染结果 tab（每个 product_path 一个）+ 本设置面板（刷新勾选态）
+                        window.renderICTabs(icProductPathSelections.slice());
                     });
                 });
             }).catch(error => {
@@ -1899,7 +1885,9 @@
             const panelId = `ic-panel-${subId}`;
             const tabLabel = selectionLabel(sub) || ('产品路径' + (idx+1));
             const pgPrefix = sub.product_group ? '📦 ' : '';
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-product-path-selection-id="${subId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
+            // tab 名用 chip 渲染
+            const tabChip = '<span class="gt-backend-chip" style="pointer-events:none;">' + renderChipHtml('产品路径', pgPrefix + tabLabel) + '</span>';
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-product-path-selection-id="${subId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${tabChip}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
