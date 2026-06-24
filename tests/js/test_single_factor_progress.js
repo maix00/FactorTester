@@ -54,4 +54,26 @@ assert.equal(
   30,
 );
 
+const wrapper = { style: { display: 'none' } };
+const bar = { style: { width: '0%' } };
+const text = { textContent: '' };
+const runBtn = { disabled: false };
+const simple = progress.createSimpleProgressController({
+  resolve: () => ({ wrapper, bar, text, runBtn }),
+});
+simple.show('开始');
+assert.equal(wrapper.style.display, 'flex');
+assert.equal(runBtn.disabled, true);
+assert.equal(text.textContent, '开始');
+simple.setCount(2, 4, '节点');
+assert.equal(bar.style.width, '50%');
+assert.equal(text.textContent, '2/4 节点');
+simple.done('完成', -1);
+assert.equal(bar.style.width, '100%');
+assert.equal(runBtn.disabled, false);
+simple.fail('失败', 120, -1);
+assert.equal(bar.style.width, '100%');
+assert.equal(text.textContent, '失败');
+assert.equal(wrapper.style.display, 'flex');
+
 console.log('PASS: shared single factor progress semantics');

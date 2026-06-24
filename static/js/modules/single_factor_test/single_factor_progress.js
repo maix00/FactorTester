@@ -84,10 +84,98 @@
         return Math.max(currentPct || 0, nextPct);
     }
 
+    function clampPct(value) {
+        var pct = Number(value || 0);
+        if (!Number.isFinite(pct)) pct = 0;
+        return Math.max(0, Math.min(100, Math.floor(pct)));
+    }
+
+    function createSimpleProgressController(options) {
+        var opts = options || {};
+        var hideTimer = null;
+
+        function resolve() {
+            if (typeof opts.resolve === 'function') return opts.resolve() || {};
+            return {
+                wrapper: opts.wrapper || null,
+                bar: opts.bar || null,
+                text: opts.text || null,
+                runBtn: opts.runBtn || null,
+            };
+        }
+
+        function set(value, text) {
+            var ui = resolve();
+            var next = clampPct(value);
+            if (ui.bar) ui.bar.style.width = next + '%';
+            if (ui.text) ui.text.textContent = text || (next + '%');
+            return next;
+        }
+
+        function show(text) {
+            if (hideTimer) {
+                clearTimeout(hideTimer);
+                hideTimer = null;
+            }
+            var ui = resolve();
+            set(0, text || '0%');
+            if (ui.wrapper) ui.wrapper.style.display = opts.visibleDisplay == null ? 'flex' : opts.visibleDisplay;
+            if (ui.runBtn) ui.runBtn.disabled = true;
+        }
+
+        function done(text, delayMs) {
+            var ui = resolve();
+            set(100, text || '完成');
+            if (ui.runBtn) ui.runBtn.disabled = false;
+            var delay = delayMs == null ? 500 : delayMs;
+            if (delay >= 0 && ui.wrapper) {
+                hideTimer = setTimeout(function() {
+                    var latest = resolve();
+                    if (latest.wrapper) latest.wrapper.style.display = 'none';
+                    hideTimer = null;
+                }, delay);
+            }
+        }
+
+        function fail(text, value, delayMs) {
+            var ui = resolve();
+            set(value == null ? 0 : value, text || '失败');
+            if (ui.runBtn) ui.runBtn.disabled = false;
+            if (ui.wrapper) ui.wrapper.style.display = opts.visibleDisplay == null ? 'flex' : opts.visibleDisplay;
+            var delay = delayMs == null ? 1000 : delayMs;
+            if (delay >= 0 && ui.wrapper) {
+                hideTimer = setTimeout(function() {
+                    var latest = resolve();
+                    if (latest.wrapper) latest.wrapper.style.display = 'none';
+                    hideTimer = null;
+                }, delay);
+            }
+        }
+
+        function setCount(completed, total, suffix) {
+            var norm = normalizeProgress(completed, total, suffix || '');
+            var pct = norm.total > 0 ? (norm.completed / norm.total * 100) : 0;
+            var label = norm.total > 0
+                ? (norm.completed + '/' + norm.total + (suffix ? ' ' + suffix : ''))
+                : (suffix || '--');
+            set(pct, label);
+        }
+
+        return {
+            done: done,
+            fail: fail,
+            set: set,
+            setCount: setCount,
+            show: show,
+        };
+    }
+
     window.SingleFactorProgress = {
         aggregateSubSteps: aggregateSubSteps,
+        clampPct: clampPct,
         completePhaseRecord: completePhaseRecord,
         computeLinearPct: computeLinearPct,
+        createSimpleProgressController: createSimpleProgressController,
         isEmptyObject: isEmptyObject,
         isTerminalMessage: isTerminalMessage,
         normalizeProgress: normalizeProgress,

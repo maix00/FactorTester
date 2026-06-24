@@ -1,4 +1,6 @@
 (function() {
+    var Progress = window.SingleFactorProgress;
+    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
     var APP = 'factor_evaluation';
     var LOCAL = 'local-settings';
     var state = {
@@ -22,6 +24,7 @@
         chart: null,
         loadingFactors: false,
     };
+    var progressUi = Progress.createSimpleProgressController({ resolve: getProgressEls });
     function escapeHtml(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -73,36 +76,19 @@
     }
 
     function setProgress(value, text) {
-        var ui = getProgressEls();
-        var next = Math.max(0, Math.min(100, Math.floor(value)));
-        if (ui.bar) ui.bar.style.width = next + '%';
-        if (ui.text) ui.text.textContent = text || (next + '%');
+        progressUi.set(value, text);
     }
 
     function showProgress() {
-        var ui = getProgressEls();
-        setProgress(0, '0%');
-        if (ui.wrapper) ui.wrapper.style.display = 'flex';
-        if (ui.runBtn) ui.runBtn.disabled = true;
+        progressUi.show('0%');
     }
 
     function hideProgress(successText) {
-        var ui = getProgressEls();
-        setProgress(100, successText || '完成');
-        if (ui.runBtn) ui.runBtn.disabled = false;
-        setTimeout(function() {
-            if (ui.wrapper) ui.wrapper.style.display = 'none';
-        }, 500);
+        progressUi.done(successText || '完成', 500);
     }
 
     function failProgress(errorText, value) {
-        var ui = getProgressEls();
-        setProgress(value == null ? 0 : value, errorText || '失败');
-        if (ui.runBtn) ui.runBtn.disabled = false;
-        if (ui.wrapper) ui.wrapper.style.display = 'flex';
-        setTimeout(function() {
-            if (ui.wrapper) ui.wrapper.style.display = 'none';
-        }, 1000);
+        progressUi.fail(errorText || '失败', value == null ? 0 : value, 1000);
     }
 
     function requestJSON(url, options) {

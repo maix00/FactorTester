@@ -9,6 +9,9 @@
 (function () {
     'use strict';
 
+    var Progress = window.SingleFactorProgress;
+    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
+
     var APP = 'factor_type_analysis';
 
     var state = {
@@ -18,6 +21,16 @@
         lastResult: null,
         factors: [],
     };
+    var progressUi = Progress.createSimpleProgressController({
+        resolve: function() {
+            return {
+                wrapper: document.getElementById('factor-type-analysis-progress'),
+                bar: document.getElementById('factor-type-analysis-progress-bar'),
+                text: document.getElementById('factor-type-analysis-progress-text'),
+            };
+        },
+        visibleDisplay: '',
+    });
 
     // =========================================================
     //  Helpers
@@ -71,31 +84,21 @@
     }
 
     function showProgress() {
-        var c = document.getElementById('factor-type-analysis-progress');
-        if (c) c.style.display = '';
+        progressUi.show('0%');
     }
 
     function hideProgress(label) {
-        var c = document.getElementById('factor-type-analysis-progress');
-        if (c) c.style.display = 'none';
-        var bar = document.getElementById('factor-type-analysis-progress-bar');
-        var txt = document.getElementById('factor-type-analysis-progress-text');
-        if (bar) bar.style.width = label || '0%';
-        if (txt) txt.textContent = label || '';
+        progressUi.done(label || '完成', 0);
     }
 
     function setProgress(pct, label) {
-        var bar = document.getElementById('factor-type-analysis-progress-bar');
-        var txt = document.getElementById('factor-type-analysis-progress-text');
-        if (bar) bar.style.width = (typeof pct === 'number' ? pct + '%' : pct);
-        if (txt) txt.textContent = label || (typeof pct === 'number' ? pct + '%' : '');
+        progressUi.set(pct, label);
     }
 
     function failProgress(msg) {
         var bar = document.getElementById('factor-type-analysis-progress-bar');
-        var txt = document.getElementById('factor-type-analysis-progress-text');
         if (bar) { bar.style.background = '#d32f2f'; bar.style.width = '100%'; }
-        if (txt) txt.textContent = msg || '失败';
+        progressUi.fail(msg || '失败', 100, -1);
     }
 
     function displayProductLabel() {

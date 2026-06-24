@@ -3,6 +3,9 @@
  * 支持因子级选择和频率配置
  */
 (function() {
+    const Progress = window.SingleFactorProgress;
+    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
+
     // 全局变量
     let factorFamilyAlias = window.factorFamilyAlias || '';
     let factorList = [];  // 存储因子列表 [{alias, name, freq}]
@@ -78,6 +81,18 @@
     function productPathCandidateSerialization() {
         const def = icSettingsManifest && icSettingsManifest.defaults ? icSettingsManifest.defaults.product_path_candidates : null;
         return def && def.serialization || {};
+    }
+
+    function createIcProgressController(progressBarId) {
+        return Progress.createSimpleProgressController({
+            resolve: function() {
+                return {
+                    wrapper: document.getElementById(progressBarId),
+                    bar: document.getElementById(`${progressBarId}-fill`),
+                    text: document.getElementById(`${progressBarId}-text`),
+                };
+            },
+        });
     }
 
     function productGroupToSelection(group) {
@@ -1579,6 +1594,7 @@
                 `;
                 resultDiv.parentNode.insertBefore(progressDiv, resultDiv);
             }
+            const progressUi = createIcProgressController(progressBarId);
 
             const body = JSON.stringify({
                 product_path_selection_id: selectionId(selection),
@@ -1629,25 +1645,17 @@
                         try {
                             const payload = JSON.parse(line.slice(6));
                             if (lastEvent === 'start') {
-                                const fill = document.getElementById(`${progressBarId}-fill`);
-                                const text = document.getElementById(`${progressBarId}-text`);
-                                if (fill) fill.style.width = '0%';
-                                if (text) {
-                                    const groups = payload.groups || payload.total;
-                                    text.textContent = `0/${payload.total} 节点 (${groups} 组)`;
-                                }
+                                const groups = payload.groups || payload.total;
+                                progressUi.set(0, `0/${payload.total} 节点 (${groups} 组)`);
                             } else if (lastEvent === 'progress') {
-                                const fill = document.getElementById(`${progressBarId}-fill`);
-                                const text = document.getElementById(`${progressBarId}-text`);
                                 const phase = payload.phase || '';
                                 if (phase === 'eval') {
                                     // 节点级进度：显示 completed/total 节点
-                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
-                                    if (text) text.textContent = `${payload.completed}/${payload.total} 节点`;
+                                    progressUi.setCount(payload.completed, payload.total, '节点');
                                 } else {
                                     // group_done 等其他阶段：显示组级进度
-                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
-                                    if (text) text.textContent = `第 ${payload.completed}/${payload.total} 组完成`;
+                                    const pct = payload.total > 0 ? (payload.completed / payload.total * 100) : 0;
+                                    progressUi.set(pct, `第 ${payload.completed}/${payload.total} 组完成`);
                                 }
                             } else if (lastEvent === 'result') {
                                 data = payload;
