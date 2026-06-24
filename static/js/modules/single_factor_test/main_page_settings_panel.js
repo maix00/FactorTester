@@ -693,7 +693,7 @@
             syncTimeDefaultsFromPage();
             renderShell();
             observeSummaries();
-            openTab(null);
+            openTab('setting_template');
         }).catch(function(error) {
             console.error('[single-factor-page-settings] init failed:', error);
         });
