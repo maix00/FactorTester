@@ -115,50 +115,33 @@
         return chip;
     }
 
-    function hideLegacyRows() {
-        var rows = [
-            document.getElementById('global-tpl-summary-row'),
-            document.getElementById('param-summary-text') && document.getElementById('param-summary-text').closest('.setting-summary-row'),
-            document.getElementById('time-summary-text') && document.getElementById('time-summary-text').closest('.setting-summary-row'),
-        ];
-        rows.forEach(function(row) {
-            if (row) row.style.display = 'none';
-        });
-    }
-
-    function movePanelContent(drawerId, tabKey) {
-        var drawer = document.getElementById(drawerId);
-        var panel = drawer && drawer.querySelector('.settings-drawer-panel');
-        if (!panel || !state.containers[tabKey]) return;
-        if (tabKey === 'parameters') {
-            var factorChipListHost = document.createElement('div');
-            factorChipListHost.id = 'single-factor-page-factor-candidates';
-            factorChipListHost.className = 'single-factor-page-factor-candidates';
-            state.containers[tabKey].appendChild(factorChipListHost);
-            renderFactorCandidateChipList(factorChipListHost);
-
-            // Use initial session params from template injection (set in single_factor_test_main.html)
-            if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
-                state._sessionParams = window._initialSessionParams.slice();
-            }
-            drawer.style.display = 'none';
-            drawer.classList.remove('open');
-            return;
+    // 原生渲染"模板"标签页：构建工具栏 + 列表骨架，再交由
+    // global_template_module.js 绑定保存按钮并加载模板列表。幂等。
+    function renderSettingTemplateTab() {
+        var container = state.containers.setting_template;
+        if (!container) return;
+        if (container.dataset.rendered !== '1') {
+            container.dataset.rendered = '1';
+            container.innerHTML = ''
+                + '<div class="module global-template-panel">'
+                + '  <div class="global-template-toolbar">'
+                + '    <input type="text" id="global-tpl-save-name" placeholder="模板名称（默认当前时间戳）"'
+                + '           style="margin-bottom:10px !important;margin-top:10px !important;margin-left:5px !important;">'
+                + '    <button class="btn btn-primary btn-sm" id="global-tpl-save-btn">保存当前设置</button>'
+                + '    <span id="global-tpl-save-status" class="global-template-status"></span>'
+                + '  </div>'
+                + '  <div id="global-tpl-list" class="global-template-list">'
+                + '    <div class="global-template-empty">加载中...</div>'
+                + '  </div>'
+                + '</div>';
         }
-        if (tabKey === 'time') {
-            drawer.style.display = 'none';
-            drawer.classList.remove('open');
-            return;
+        if (typeof window._bindGlobalTemplatePanel === 'function') {
+            window._bindGlobalTemplatePanel();
+        } else {
+            setTimeout(function() {
+                if (typeof window._bindGlobalTemplatePanel === 'function') window._bindGlobalTemplatePanel();
+            }, 50);
         }
-        Array.from(panel.children).forEach(function(child) {
-            if (child.classList && child.classList.contains('drawer-close-btn')) {
-                child.style.display = 'none';
-                return;
-            }
-            state.containers[tabKey].appendChild(child);
-        });
-        drawer.style.display = 'none';
-        drawer.classList.remove('open');
     }
 
     function templateSummaryValue() {
@@ -321,10 +304,6 @@
             + '<div class="backend-settings-host" id="single-factor-page-settings-host"></div>';
         var host = document.getElementById('single-factor-page-settings-host');
         state.mountedTabs.forEach(ensurePanel);
-        movePanelContent('global-tpl-drawer', 'setting_template');
-        movePanelContent('param-drawer', 'parameters');
-        movePanelContent('time-range-drawer', 'time');
-        hideLegacyRows();
         renderTabs();
         renderChips();
     }
@@ -364,13 +343,8 @@
             return;
         }
         if (tabKey === 'setting_template') {
-            if (typeof window._loadGlobalTemplateList === 'function') {
-                window._loadGlobalTemplateList();
-            } else {
-                setTimeout(function() {
-                    if (typeof window._loadGlobalTemplateList === 'function') window._loadGlobalTemplateList();
-                }, 50);
-            }
+            renderSettingTemplateTab();
+            return;
         }
         if (tabKey === 'time') {
             renderRegisteredTimeTab();
@@ -622,57 +596,6 @@
             container.appendChild(grid);
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
-        });
-    }
-
-    function loadFactorCandidates() {
-        if (Array.isArray(window.factorList) && window.factorList.length) {
-            return Promise.resolve(window.factorList);
-        }
-        var alias = window.factorFamilyAlias || window._sftCurrentFactorId || '';
-        if (!alias) return Promise.resolve([]);
-        return requestJSON('/api/factor_list?factor_family_alias=' + encodeURIComponent(alias)).then(function(data) {
-            var factors = data.factors || [];
-            window.factorList = factors;
-            return factors;
-        });
-    }
-
-    function renderFactorCandidateChipList(container) {
-        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载因子候选...</span>';
-        loadFactorCandidates().then(function(factors) {
-            container.innerHTML = '';
-            var label = document.createElement('div');
-            label.className = 'gt-backtest-setting-label';
-            label.style.marginBottom = '6px';
-            label.textContent = '因子候选 (' + factors.length + ')';
-            container.appendChild(label);
-            if (!factors.length) {
-                var empty = document.createElement('div');
-                empty.style.cssText = 'color:#888;font-size:12px;padding:6px 0;';
-                empty.textContent = '暂无因子候选数据';
-                container.appendChild(empty);
-                return;
-            }
-            var currentAlias = String(effectiveValue('factor') || '');
-            var row = document.createElement('div');
-            row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
-            factors.forEach(function(factor) {
-                var alias = factor.alias || factor.name || '';
-                var isCurrent = !!currentAlias && alias === currentAlias;
-                var chip = document.createElement('span');
-                chip.className = 'gt-backend-chip' + (isCurrent ? ' is-primary' : '');
-                chip.style.cursor = 'pointer';
-                chip.innerHTML = '<span class="gt-backend-chip-value">' + escapeHtml(alias) + '</span>';
-                chip.title = '查看因子信息';
-                chip.addEventListener('click', function() {
-                    if (window.FactorInfoOverlay) window.FactorInfoOverlay.open(factor);
-                });
-                row.appendChild(chip);
-            });
-            container.appendChild(row);
-        }).catch(function(error) {
-            container.innerHTML = '<span style="color:#d40000;font-size:12px;">加载失败：' + escapeHtml(error.message) + '</span>';
         });
     }
 

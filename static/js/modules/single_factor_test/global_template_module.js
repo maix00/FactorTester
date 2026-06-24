@@ -795,11 +795,6 @@
             await applySnapshot(template.snapshot, tplId);
             rememberLoadedTemplateName(template.name);
             setTransientStatus(statusEl, '已加载', '#28a745');
-            // 关闭抽屉
-            const drawer = document.getElementById('global-tpl-drawer');
-            if (drawer) drawer.classList.remove('open');
-            const badge = document.getElementById('user-badge');
-            if (badge) badge.style.display = '';
         } catch (e) {
             setTransientStatus(statusEl, '网络错误', '#d40000');
         }
@@ -830,34 +825,18 @@
     }
 
     // ── 初始化 ────────────────────────────────────────────────────────────
-    function initGlobalTemplateModule() {
+    // 模板 UI 现由 setting_template 标签页原生渲染（main_page_settings_panel.js
+    // 的 renderSettingTemplateTab）。该面板渲染出 #global-tpl-save-btn 等节点后
+    // 调用此函数完成绑定并加载列表。幂等：可多次调用。
+    function bindGlobalTemplatePanel() {
         const saveBtn = document.getElementById('global-tpl-save-btn');
-        if (saveBtn) saveBtn.onclick = saveTemplate;
-
-        // 抽屉打开时加载模板列表
-        const drawer = document.getElementById('global-tpl-drawer');
-        if (drawer) {
-            const observer = new MutationObserver(() => {
-                if (drawer.classList.contains('open')) {
-                    loadTemplateList();
-                }
-            });
-            observer.observe(drawer, { attributes: true, attributeFilter: ['class'] });
-            // 如果绑定 observer 时抽屉已处于打开状态（脚本加载慢，用户先点了），立即加载
-            if (drawer.classList.contains('open')) {
-                loadTemplateList();
-            }
-        }
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initGlobalTemplateModule);
-    } else {
-        initGlobalTemplateModule();
+        if (saveBtn && saveBtn.onclick !== saveTemplate) saveBtn.onclick = saveTemplate;
+        loadTemplateList();
     }
 
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;
     window._applySnapshot = applySnapshot;
     window._loadGlobalTemplateList = loadTemplateList;
+    window._bindGlobalTemplatePanel = bindGlobalTemplatePanel;
 })();
