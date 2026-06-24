@@ -354,8 +354,8 @@
             renderProductPathSelectionTab();
             return;
         }
-        if (tabKey === 'parameters') {
-            renderParametersTab();
+        if (tabKey === 'factors') {
+            renderFactorsTab();
             return;
         }
         if (tabMeta(tabKey) && state.containers[tabKey] && state.containers[tabKey].childNodes.length === 0) {
@@ -605,7 +605,7 @@
         renderChips();
         renderProductPathSelectionTab();
         // 因子库候选列表按当前产品组现场过滤，产品组变化后需要重新加载。
-        if (state.containers.parameters) loadFactorLibraryParams(true).then(renderParametersTab);
+        if (state.containers.factors) loadFactorLibraryParams(true).then(renderFactorsTab);
         broadcastGlobalSettingsChanged();
     }
 
@@ -700,39 +700,6 @@
         });
     }
 
-    // 不按当前产品组过滤的因子库全量参数行——仅用于"恢复模板后的参数行是否
-    // 命中因子库"的交叉比对（候选列表展示仍用 loadFactorLibraryParams 的过滤结果）。
-    function loadAllFactorLibraryParams() {
-        var ffAlias = factorFamilyAlias();
-        if (!ffAlias) return Promise.resolve([]);
-        return requestJSON('/api/param-factor-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
-            var factors = Array.isArray(payload.factors) ? payload.factors : [];
-            var utils = window.FactorParamSelectionUtils || {};
-            return factors.map(function(item) {
-                return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
-            });
-        }).catch(function() {
-            return [];
-        });
-    }
-
-    // factor_alias 由因子家族对参数组合确定性编码而来，可直接作为身份匹配键。
-    // 优先匹配当前产品组绑定的因子库条目，其次未绑定产品组的，否则取任意命中。
-    function pickLibraryScopeForAlias(factorAlias, libraryParams) {
-        var matches = (libraryParams || []).filter(function(item) {
-            return item.factor_alias === factorAlias;
-        });
-        if (!matches.length) return null;
-        var preferredGroup = currentFactorLibraryProductGroup();
-        var byGroup = preferredGroup && matches.filter(function(item) {
-            return factorLibraryScopeKey(item) === preferredGroup;
-        })[0];
-        var unbound = matches.filter(function(item) {
-            return isFactorLibraryUnboundScope(factorLibraryScopeKey(item));
-        })[0];
-        return factorLibraryScopeKey(byGroup || unbound || matches[0]);
-    }
-
     function getSessionFactorParams() {
         // Initialize from backend-injected data on first call
         if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
@@ -745,8 +712,8 @@
         state._sessionParams = Array.isArray(params) ? params.slice() : [];
     }
 
-    function renderParametersTab() {
-        var container = state.containers.parameters;
+    function renderFactorsTab() {
+        var container = state.containers.factors;
         if (!container) return;
         container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载参数...</span>';
 
@@ -781,7 +748,7 @@
                         factor_family_alias: ffAlias,
                         params: param.params || {}
                     };
-                    fetch('/add_params', {
+                    fetch('/add_factor_by_params', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body)
@@ -792,7 +759,7 @@
                             // Update cache so snapshot collect reads latest
                             state._sessionParams = getSessionFactorParams().concat([param]);
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
-                            renderParametersTab(); // re-render to reflect changes
+                            renderFactorsTab(); // re-render to reflect changes
                         }
                     }).catch(function(e) {
                         console.error('[fps] load from library failed:', e);
@@ -810,7 +777,7 @@
                         }
                     }
                     if (targetIdx < 0) return;
-                    fetch('/delete_params', {
+                    fetch('/delete_factor_by_params', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -825,7 +792,7 @@
                             params.splice(targetIdx, 1);
                             state._sessionParams = params;
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
-                            renderParametersTab(); // re-render to reflect changes
+                            renderFactorsTab(); // re-render to reflect changes
                         }
                     }).catch(function(e) {
                         console.error('[fps] remove failed:', e);
@@ -837,7 +804,7 @@
                         factor_family_alias: ffAlias,
                         params: params || {}
                     };
-                    fetch('/add_params', {
+                    fetch('/add_factor_by_params', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body)
@@ -854,7 +821,7 @@
                                 source_type: 'session'
                             }]);
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
-                            renderParametersTab(); // re-render to reflect changes
+                            renderFactorsTab(); // re-render to reflect changes
                         } else {
                             alert('添加失败: ' + (data.error || '未知错误'));
                         }
@@ -868,85 +835,103 @@
         });
     }
 
-    // ── 参数面板的快照存取（供 Panels 注册表使用） ──────────────────────────
-    // 只持久化"现场/会话参数行"（params_list）；因子库候选列表不持久化，
-    // 总是按当前产品组上下文从因子库现场加载（见 loadFactorLibraryParams）。
-    function collectParamsList() {
-        return getSessionFactorParams().map(function(row) {
-            var p = {};
-            Object.keys(row.params || {}).forEach(function(k) {
-                if (row.params[k] !== '') p[k] = row.params[k];
-            });
-            return p;
-        });
+    // ── 因子面板的快照存取（供 Panels 注册表使用） ────────────────────────────
+    // 持久化字段镜像 product_path：factor_candidates（候选列表）+ factor（选中）。
+    // 每个候选形如 { alias, in_library, library_product_group, params }，自带库归属，
+    // 恢复时无需再向因子库现场交叉比对。
+    function cleanParamDict(params) {
+        var p = {};
+        Object.keys(params || {}).forEach(function(k) { if (params[k] !== '') p[k] = params[k]; });
+        return p;
     }
 
-    // 恢复模板（旧/新均经此路径）后的参数行只知道 factor_alias+params，不知道
-    // 当初是"现场"手填还是来自因子库；这里按 factor_alias 与因子库全量条目
-    // 交叉比对，命中则标注对应产品组/未绑定的因子库来源，否则才归为"现场"。
-    function applyBackendFactorRows(rows) {
-        var ffAlias = factorFamilyAlias();
-        rows = rows || [];
-        return loadAllFactorLibraryParams().then(function(libraryParams) {
-            setSessionFactorParams(rows.map(function(row) {
-                var matchedScope = pickLibraryScopeForAlias(row.factor_alias, libraryParams);
-                return {
-                    factor_alias: row.factor_alias,
-                    factor_family_alias: ffAlias,
-                    scope_key: matchedScope || '现场',
-                    source_type: matchedScope ? 'library' : 'session',
-                    params: row.params || {},
-                };
-            }));
-            renderParametersTab();
-            renderChips();
-        });
+    // 会话参数行 → 候选项。scope_key 在加载/恢复时已标好库归属：
+    //   '现场' → in_library=false；产品组名 → in_library=true(bound)；未绑定sentinel → in_library=true(unbound)
+    function sessionRowToCandidate(row) {
+        var scope = row.scope_key || '';
+        var inLibrary = scope !== '' && scope !== '现场';
+        return {
+            alias: row.factor_alias || '',
+            in_library: inLibrary,
+            library_product_group: (inLibrary && !isFactorLibraryUnboundScope(scope)) ? scope : null,
+            params: cleanParamDict(row.params),
+        };
     }
 
-    async function applyParamsSnapshot(data) {
-        var paramsList = data && Array.isArray(data.params_list) ? data.params_list : [];
-        if (!paramsList.length) return;
+    // 候选项 → 会话参数行（恢复时用，保留库归属元数据）
+    function candidateToSessionRow(c, ffAlias) {
+        var scope = c.in_library ? (c.library_product_group || FACTOR_LIBRARY_DEFAULT_SCOPE) : '现场';
+        return {
+            factor_alias: c.alias || '',
+            factor_family_alias: ffAlias,
+            scope_key: scope,
+            source_type: c.in_library ? 'library' : 'session',
+            params: c.params || {},
+        };
+    }
+
+    function collectFactorCandidates() {
+        return getSessionFactorParams().map(sessionRowToCandidate);
+    }
+
+    async function applyFactorsSnapshot(subset) {
+        var candidates = (subset && Array.isArray(subset.factor_candidates)) ? subset.factor_candidates : [];
         var ffAlias = factorFamilyAlias();
-        if (!ffAlias) return;
+        if (subset && Object.prototype.hasOwnProperty.call(subset, 'factor')) {
+            state.values.factor = subset.factor || '';
+        }
+        if (!candidates.length || !ffAlias) { renderFactorsTab(); renderChips(); return; }
         try {
+            // 推到后端会话（IC/分组测试从会话读参数）
             var resp = await fetch('/replace_params', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ factor_family_alias: ffAlias, params_list: paramsList }),
+                body: JSON.stringify({ factor_family_alias: ffAlias, params_list: candidates.map(function(c) { return c.params || {}; }) }),
             });
             var result = await resp.json();
-            if (!result.success) {
-                alert('恢复参数失败: ' + (result.error || ''));
-                return;
-            }
-            await applyBackendFactorRows(result.factor_rows || []);
+            if (!result.success) { alert('恢复因子失败: ' + (result.error || '')); return; }
+            // 后端归一化后的 factor_rows 按 alias 对回候选，保留候选携带的库归属
+            var byAlias = {};
+            candidates.forEach(function(c) { if (c.alias) byAlias[c.alias] = c; });
+            setSessionFactorParams((result.factor_rows || []).map(function(row) {
+                var c = byAlias[row.factor_alias] || { alias: row.factor_alias, in_library: false, params: row.params };
+                return candidateToSessionRow(c, ffAlias);
+            }));
+            renderFactorsTab();
+            renderChips();
             if (typeof window.refreshICModule === 'function') window.refreshICModule();
         } catch (e) {
-            alert('恢复参数异常: ' + (e && e.message || e));
+            alert('恢复因子异常: ' + (e && e.message || e));
         }
     }
 
-    function summarizeParamsSnapshot(data) {
-        var list = (data && data.params_list) || [];
-        return list.map(function(row, idx) {
+    function summarizeFactorsSnapshot(subset) {
+        var candidates = (subset && subset.factor_candidates) || [];
+        var lines = candidates.map(function(c, idx) {
+            var src = c.in_library ? (c.library_product_group ? ('因子库·' + c.library_product_group) : '因子库·未绑定') : '现场';
             var parts = [];
-            Object.keys(row || {}).forEach(function(k) { parts.push(k + '=' + row[k]); });
-            return '参数组' + (idx + 1) + ': ' + (parts.join(', ') || '未设置');
+            Object.keys(c.params || {}).forEach(function(k) { parts.push(k + '=' + c.params[k]); });
+            return (c.alias || ('因子' + (idx + 1))) + ' · ' + src + (parts.length ? ' · ' + parts.join(', ') : '');
         });
+        if (subset && subset.factor) lines.unshift('当前因子: ' + subset.factor);
+        return lines;
     }
 
     if (window.Panels) {
         window.Panels.register({
-            key: 'parameters',
+            key: 'factors',
             kind: 'setting',
-            label: '参数设置',
+            label: '因子',
             icon: '⚙️',
             el: '#single-factor-page-settings',
             snapshot: {
+                keys: ['factor_candidates', 'factor'],
                 order: 20,
-                get: function() { return { params_list: collectParamsList() }; },
-                set: applyParamsSnapshot,
-                summarize: summarizeParamsSnapshot,
+                get: function() {
+                    return { factor_candidates: collectFactorCandidates(), factor: state.values.factor || '' };
+                },
+                set: applyFactorsSnapshot,
+                summarize: summarizeFactorsSnapshot,
             },
         });
     }
@@ -977,7 +962,7 @@
                     setProductPathCandidates(productPathCandidates().concat([selection]));
                     if (meta && meta.setAsDefault) {
                         state.values.product_path_selection = selection;
-                        if (state.containers.parameters) loadFactorLibraryParams(true).then(renderParametersTab);
+                        if (state.containers.factors) loadFactorLibraryParams(true).then(renderFactorsTab);
                     }
                     renderProductPathSelectionTab();
                     broadcastGlobalSettingsChanged();

@@ -1,7 +1,7 @@
 """
 Shared parameter-management routes (any test module can use):
-  POST /add_params
-  POST /delete_params
+  POST /add_factor_by_params
+  POST /delete_factor_by_params
   POST /reorder_params
 """
 from flask import request
@@ -12,9 +12,9 @@ from server.services.api_response import api_ok, route_guard
 from .param_config import build_factor_rows, normalize_param_row, param_value_display
 
 
-@shared_bp.route('/add_params', methods=['POST'])
+@shared_bp.route('/add_factor_by_params', methods=['POST'])
 @route_guard
-def add_params():
+def add_factor_by_params():
     data = request.get_json()
     factor_family_alias = data.get('factor_family_alias')
     params = data.get('params', {})
@@ -38,9 +38,9 @@ def add_params():
     })
 
 
-@shared_bp.route('/delete_params', methods=['POST'])
+@shared_bp.route('/delete_factor_by_params', methods=['POST'])
 @route_guard
-def delete_params():
+def delete_factor_by_params():
     data = request.get_json()
     factor_family_alias = data.get('factor_family_alias')
     factor_idx = int(data.get('factor_idx', -1))

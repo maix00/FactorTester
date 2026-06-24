@@ -14,10 +14,12 @@
  *     mount:  function (ctx) {},           // 生命周期：挂载/初始化，幂等
  *     onFactorChange: function (ctx) {},   // 换因子广播回调（test 面板用）
  *     snapshot: {                          // ★ opt-in：设了才进模板快照
- *       key:   '快照字段名',               // 默认取 panel.key
+ *       keys:  ['字段A', '字段B'],          // 该面板拥有的顶层快照字段（可多个）
+ *       key:   '单字段名',                  // keys 的单字段简写，默认取 panel.key
  *       order: number,                     // apply 顺序，默认取 panel.order
- *       get:   function () { return data; },     // 默认 store.getAll()
- *       set:   function (data) {},               // 默认 store.setAll()
+ *       get:   function () { return { 字段A: ..., 字段B: ... }; },  // 返回按 keys 命名的对象
+ *       set:   function (subset) {},        // 收到仅含本面板 keys 的子对象
+ *       summarize: function (subset) {},    // 同上，返回摘要行
  *     },
  *   });
  *
@@ -95,11 +97,25 @@
         var snapshot = null;
         if (spec.snapshot) {
             var s = spec.snapshot === true ? {} : spec.snapshot;
+            // keys: 该面板拥有的顶层快照字段名数组。get() 返回 { key: value, ... }，
+            // 这些键被铺平到顶层快照；set(obj)/summarize(obj) 收到仅含这些键的子对象。
+            // 兼容旧写法 key:'x' → keys:['x']。
+            var keys = Array.isArray(s.keys) && s.keys.length ? s.keys.slice() : [s.key || spec.key];
+            // 无显式 get/set 时回退到 store：把整份 store 作为单键值。
+            var storeKey = keys[0];
+            var getFn = s.get;
+            var setFn = s.set;
+            if (!getFn && spec.store) {
+                getFn = function() { var o = {}; o[storeKey] = spec.store.getAll(); return o; };
+            }
+            if (!setFn && spec.store) {
+                setFn = function(obj) { spec.store.setAll((obj && obj[storeKey]) || {}); };
+            }
             snapshot = {
-                key: s.key || spec.key,
+                keys: keys,
                 order: typeof s.order === 'number' ? s.order : (typeof spec.order === 'number' ? spec.order : 100),
-                get: s.get || (spec.store ? spec.store.getAll : null),
-                set: s.set || (spec.store ? spec.store.setAll : null),
+                get: getFn || null,
+                set: setFn || null,
                 summarize: typeof s.summarize === 'function' ? s.summarize : null,
             };
         }
@@ -136,13 +152,31 @@
         _each(function(p) { if (p.onFactorChange && _present(p)) p.onFactorChange(ctx || {}); });
     }
 
+    // 从快照中取出某面板拥有的键子集；未命中任何键返回 null
+    function _subsetForPanel(snap, p) {
+        var subset = null;
+        p.snapshot.keys.forEach(function(key) {
+            if (Object.prototype.hasOwnProperty.call(snap, key)) {
+                if (!subset) subset = {};
+                subset[key] = snap[key];
+            }
+        });
+        return subset;
+    }
+
     // ── 快照（仅 opt-in 的面板参与） ──────────────────────────────────────
     function snapshot() {
         var out = {};
         _each(function(p) {
             if (!p.snapshot || typeof p.snapshot.get !== 'function') return;
             var data = p.snapshot.get();
-            if (data !== undefined && data !== null) out[p.snapshot.key] = data;
+            if (data === undefined || data === null) return;
+            // get() 返回 { key: value, ... }，铺平到顶层
+            p.snapshot.keys.forEach(function(key) {
+                if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined && data[key] !== null) {
+                    out[key] = data[key];
+                }
+            });
         });
         return out;
     }
@@ -150,12 +184,11 @@
         snap = snap || {};
         // 按 snapshot.order 升序 apply，逐个等待（set 可能是 async）
         var entries = list().filter(function(p) {
-            return p.snapshot && typeof p.snapshot.set === 'function'
-                && Object.prototype.hasOwnProperty.call(snap, p.snapshot.key);
+            return p.snapshot && typeof p.snapshot.set === 'function' && _subsetForPanel(snap, p);
         }).sort(function(a, b) { return a.snapshot.order - b.snapshot.order; });
         for (var i = 0; i < entries.length; i++) {
             var p = entries[i];
-            try { await p.snapshot.set(snap[p.snapshot.key]); }
+            try { await p.snapshot.set(_subsetForPanel(snap, p)); }
             catch (e) { console.warn('[Panels] apply 失败: ' + p.key, e); }
         }
     }
@@ -166,9 +199,10 @@
         var sections = [];
         _each(function(p) {
             if (!p.snapshot || typeof p.snapshot.summarize !== 'function') return;
-            if (!Object.prototype.hasOwnProperty.call(snap, p.snapshot.key)) return;
+            var subset = _subsetForPanel(snap, p);
+            if (!subset) return;
             try {
-                var value = p.snapshot.summarize(snap[p.snapshot.key]);
+                var value = p.snapshot.summarize(subset);
                 if (value === undefined || value === null) return;
                 if (Array.isArray(value) && value.length === 0) return;
                 sections.push({ key: p.key, label: p.label, icon: p.icon, value: value });

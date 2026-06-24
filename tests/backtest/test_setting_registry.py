@@ -216,7 +216,7 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
     )
 
     assert index["default_mounted_tabs"] == {
-        "local-settings": ["setting_template", "parameters"],
+        "local-settings": ["setting_template", "factors"],
         "group-settings": [],
     }
     assert index["shared_global_default_keys"] == [

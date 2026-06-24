@@ -308,11 +308,12 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab(
-            "parameters",
-            "参数设置",
+            "factors",
+            "因子",
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
             20,
+            (TabMountPoint.LOCAL_SETTINGS,),
         ),
         SettingTab(
             "product_path_selection",
@@ -356,8 +357,8 @@ def single_factor_page_settings() -> ApplicationSettings:
         module="setting_template",
         chip_template="模板: {value}",
     ))
-    register_factor_candidate_list_base(app, tab="parameters")
-    register_factor_selection_base(app, tab="parameters")
+    register_factor_candidate_list_base(app, tab="factors")
+    register_factor_selection_base(app, tab="factors")
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
     register_market_data_base(app, include_price_type=False)
