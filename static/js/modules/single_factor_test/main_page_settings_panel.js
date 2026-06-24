@@ -131,6 +131,12 @@
         var panel = drawer && drawer.querySelector('.settings-drawer-panel');
         if (!panel || !state.containers[tabKey]) return;
         if (tabKey === 'parameters') {
+            var factorChipListHost = document.createElement('div');
+            factorChipListHost.id = 'single-factor-page-factor-candidates';
+            factorChipListHost.className = 'single-factor-page-factor-candidates';
+            state.containers[tabKey].appendChild(factorChipListHost);
+            renderFactorCandidateChipList(factorChipListHost);
+
             var parameterModule = panel.querySelector('#parameter_module');
             if (parameterModule) {
                 parameterModule.classList.add('single-factor-page-embedded-params');
@@ -617,6 +623,57 @@
             container.appendChild(grid);
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    function loadFactorCandidates() {
+        if (Array.isArray(window.factorList) && window.factorList.length) {
+            return Promise.resolve(window.factorList);
+        }
+        var alias = window.factorFamilyAlias || window._sftCurrentFactorId || '';
+        if (!alias) return Promise.resolve([]);
+        return requestJSON('/api/factor_list?factor_family_alias=' + encodeURIComponent(alias)).then(function(data) {
+            var factors = data.factors || [];
+            window.factorList = factors;
+            return factors;
+        });
+    }
+
+    function renderFactorCandidateChipList(container) {
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载因子候选...</span>';
+        loadFactorCandidates().then(function(factors) {
+            container.innerHTML = '';
+            var label = document.createElement('div');
+            label.className = 'gt-backtest-setting-label';
+            label.style.marginBottom = '6px';
+            label.textContent = '因子候选 (' + factors.length + ')';
+            container.appendChild(label);
+            if (!factors.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'color:#888;font-size:12px;padding:6px 0;';
+                empty.textContent = '暂无因子候选数据';
+                container.appendChild(empty);
+                return;
+            }
+            var currentAlias = String(effectiveValue('factor') || '');
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+            factors.forEach(function(factor) {
+                var alias = factor.alias || factor.name || '';
+                var isCurrent = !!currentAlias && alias === currentAlias;
+                var chip = document.createElement('span');
+                chip.className = 'gt-backend-chip' + (isCurrent ? ' is-primary' : '');
+                chip.style.cursor = 'pointer';
+                chip.innerHTML = '<span class="gt-backend-chip-value">' + escapeHtml(alias) + '</span>';
+                chip.title = '查看因子信息';
+                chip.addEventListener('click', function() {
+                    if (window.FactorInfoOverlay) window.FactorInfoOverlay.open(factor);
+                });
+                row.appendChild(chip);
+            });
+            container.appendChild(row);
+        }).catch(function(error) {
+            container.innerHTML = '<span style="color:#d40000;font-size:12px;">加载失败：' + escapeHtml(error.message) + '</span>';
         });
     }
 

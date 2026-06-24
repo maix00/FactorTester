@@ -12,6 +12,11 @@
 
     var OVERLAY_ID = 'grouptest-product-path-selection-overlay';
     var PANEL_ID   = 'grouptest-product-path-selection-panel';
+    var TAB_PATHS   = 'paths';
+    var TAB_BACKEND = 'backend';
+    var _activeTab = TAB_PATHS;
+    var _activeProductName = null;
+    var _productFieldsCache = {};
     // ── DOM helpers ──────────────────────────────────────────────────────────
 
     function escapeHTML(str) {
@@ -77,7 +82,13 @@
      */
     function openProductPathSelectionOverlay(selectionName, products, selection) {
         ensureOverlay();
+        _activeTab = TAB_PATHS;
+        _activeProductName = null;
+        renderPanel(selectionName, products, selection);
+        document.getElementById(OVERLAY_ID).style.display = 'flex';
+    }
 
+    function renderPanel(selectionName, products, selection) {
         var panel = document.getElementById(PANEL_ID);
         if (!panel) return;
         var paths = normalizePaths(selection);
@@ -90,6 +101,19 @@
         html += '</div>';
         html += '<button type="button" id="' + PANEL_ID + '-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;line-height:1;">&times;</button>';
         html += '</div>';
+
+        html += '<div style="display:flex;gap:4px;padding:6px 10px 0;border-bottom:1px solid #e5e7eb;background:#fff;">';
+        html += '<button type="button" class="pps-tab-btn" data-tab="' + TAB_PATHS + '" style="border:none;background:none;padding:6px 10px;font-size:12px;cursor:pointer;border-bottom:2px solid ' + (_activeTab === TAB_PATHS ? '#0078d4' : 'transparent') + ';color:' + (_activeTab === TAB_PATHS ? '#0078d4' : '#64748b') + ';font-weight:' + (_activeTab === TAB_PATHS ? '600' : '400') + ';">路径与产品</button>';
+        html += '<button type="button" class="pps-tab-btn" data-tab="' + TAB_BACKEND + '" style="border:none;background:none;padding:6px 10px;font-size:12px;cursor:pointer;border-bottom:2px solid ' + (_activeTab === TAB_BACKEND ? '#0078d4' : 'transparent') + ';color:' + (_activeTab === TAB_BACKEND ? '#0078d4' : '#64748b') + ';font-weight:' + (_activeTab === TAB_BACKEND ? '600' : '400') + ';">后端信息</button>';
+        html += '</div>';
+
+        if (_activeTab === TAB_BACKEND) {
+            html += renderBackendTabHtml(products);
+            panel.innerHTML = html;
+            bindCommonHandlers(panel, selectionName, products, selection);
+            bindBackendTabHandlers(panel, products);
+            return;
+        }
 
         html += '<div style="flex:1;display:grid;grid-template-columns:minmax(360px,58%) minmax(260px,42%);min-height:0;">';
         html += '<div style="min-width:0;min-height:0;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;">';
@@ -142,13 +166,86 @@
         html += '</div>';
 
         panel.innerHTML = html;
+        bindCommonHandlers(panel, selectionName, products, selection);
+    }
 
-        // Bind close button
+    function renderBackendTabHtml(products) {
+        var html = '';
+        html += '<div style="flex:1;display:grid;grid-template-columns:minmax(220px,38%) minmax(260px,62%);min-height:0;">';
+        html += '<div style="min-width:0;min-height:0;overflow-y:auto;border-right:1px solid #e5e7eb;padding:4px 0;">';
+        if (!products || !products.length) {
+            html += '<div style="padding:14px;text-align:center;color:#888;font-size:12px;">暂无产品数据</div>';
+        } else {
+            html += '<ul style="list-style:none;margin:0;padding:0;">';
+            for (var i = 0; i < products.length; i++) {
+                var name = products[i].name || '';
+                var isActive = name === _activeProductName;
+                html += '<li class="pps-backend-product-row" data-product-name="' + escapeHTML(name) + '"'
+                    + ' style="padding:6px 10px;font-size:12px;font-family:monospace;cursor:pointer;'
+                    + 'background:' + (isActive ? '#e7f1ff' : 'transparent') + ';'
+                    + 'color:' + (isActive ? '#0078d4' : '#334155') + ';border-bottom:1px solid #f1f5f9;">'
+                    + escapeHTML(name) + '</li>';
+            }
+            html += '</ul>';
+        }
+        html += '</div>';
+        html += '<div id="' + PANEL_ID + '-backend-fields" style="min-width:0;min-height:0;overflow-y:auto;padding:4px 0;">';
+        html += '<div style="padding:14px;text-align:center;color:#888;font-size:12px;">点击左侧产品查看后端信息</div>';
+        html += '</div>';
+        html += '</div>';
+        return html;
+    }
+
+    function loadBackendFieldsFor(productName) {
+        var target = document.getElementById(PANEL_ID + '-backend-fields');
+        if (!target) return;
+        if (_productFieldsCache[productName]) {
+            target.innerHTML = window.OverlayFieldsTable
+                ? window.OverlayFieldsTable.renderHtml(_productFieldsCache[productName])
+                : '<div style="color:#888;font-size:12px;">字段渲染组件未加载</div>';
+            return;
+        }
+        target.innerHTML = '<div style="padding:14px;text-align:center;color:#888;font-size:12px;">加载中...</div>';
+        fetch('/api/product_fields?name=' + encodeURIComponent(productName), { headers: { Accept: 'application/json' } })
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (!data || !data.success) throw new Error((data && data.error) || '加载失败');
+                _productFieldsCache[productName] = data.fields || {};
+                if (_activeProductName !== productName) return;
+                target.innerHTML = window.OverlayFieldsTable
+                    ? window.OverlayFieldsTable.renderHtml(data.fields)
+                    : '<div style="color:#888;font-size:12px;">字段渲染组件未加载</div>';
+            })
+            .catch(function(error) {
+                target.innerHTML = '<div style="padding:14px;text-align:center;color:#d40000;font-size:12px;">' + escapeHTML(error.message) + '</div>';
+            });
+    }
+
+    function bindCommonHandlers(panel, selectionName, products, selection) {
         var closeBtn = document.getElementById(PANEL_ID + '-close');
         if (closeBtn) closeBtn.addEventListener('click', closeProductPathSelectionOverlay);
 
-        // Show
-        document.getElementById(OVERLAY_ID).style.display = 'flex';
+        panel.querySelectorAll('.pps-tab-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                _activeTab = btn.getAttribute('data-tab');
+                renderPanel(selectionName, products, selection);
+            });
+        });
+    }
+
+    function bindBackendTabHandlers(panel, products) {
+        panel.querySelectorAll('.pps-backend-product-row').forEach(function(row) {
+            row.addEventListener('click', function() {
+                _activeProductName = row.getAttribute('data-product-name');
+                panel.querySelectorAll('.pps-backend-product-row').forEach(function(r) {
+                    r.style.background = 'transparent';
+                    r.style.color = '#334155';
+                });
+                row.style.background = '#e7f1ff';
+                row.style.color = '#0078d4';
+                loadBackendFieldsFor(_activeProductName);
+            });
+        });
     }
 
     function closeProductPathSelectionOverlay() {
