@@ -17,6 +17,7 @@ from server.services.session_runtime import current_user
 from server.services.session_runtime import get_session_params
 from tools.data.types import finest_index
 from . import shared_bp
+from server.modules.shared.price_services import reflect_public_fields
 from server.services.api_response import api_fail, api_ok, route_guard
 from .factor_data_helpers import (
     clip_series_by_tester_range,
@@ -157,12 +158,31 @@ def factor_list():
         )
         factor_freq = f.freq
         factor_freq_str2 = factor_freq.name if factor_freq is not None else ''
+        try:
+            latex = f._source_expr.to_latex()
+        except Exception:
+            latex = None
+        try:
+            backend_fields = reflect_public_fields(f._source_expr)
+        except Exception:
+            backend_fields = {}
+        param_defs = {}
+        for param_key, param in (f.family.params_dict if f.family else {}).items():
+            try:
+                value = param.get_value(f)
+                alias = param._value_space.alias(value) if value is not None else None
+            except Exception:
+                value, alias = None, None
+            param_defs[param_key] = {'value': str(value) if value is not None else None, 'alias': alias}
         factor_data.append({
             'alias': f.alias,
             'name': f.name,
             'default_return_freq': factor_freq_str,
             'freq': factor_freq_str2,
             'category': alias_to_category.get(f.alias, ''),
+            'latex': latex,
+            'backend_fields': backend_fields,
+            'param_defs': param_defs,
         })
     return api_ok({'factors': factor_data})
 

@@ -98,6 +98,21 @@ def get_product_tree():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+@shared_bp.route('/api/product_fields')
+def get_product_fields():
+    """返回单个品种的后端反射字段（类名 + 公开属性 + 费率字段），供信息弹层展示。"""
+    name = request.args.get('name')
+    if not name:
+        return jsonify({'success': False, 'error': '缺少 name 参数'}), 400
+    try:
+        product = _find_product(_cached_products(), name)
+        if product is None:
+            return jsonify({'success': False, 'error': f'未找到品种: {name}'}), 404
+        return jsonify({'success': True, 'name': name, 'fields': _product_public_fields(product)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @shared_bp.route('/api/contract_tree')
 def get_contract_tree():
     """返回合约粒度的产品节点，供价格页左侧懒加载。"""
