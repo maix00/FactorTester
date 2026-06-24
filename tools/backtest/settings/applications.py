@@ -163,16 +163,16 @@ def register_product_path_selections_base(
         scope_policy,
         module="product_selection",
         chip_template="产品路径选择: {value}",
-        help_text="从产品路径候选列表多选；为空时回退到页面共享的单一产品路径（product_path_selection），包成单元素列表。",
+        help_text="从产品路径候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
         serialization={
             "kind": "product_path_selection_list",
             "display_order": 30,
             "item_kind": "product_path_selection",
             "multi": True,
             "candidate_field": "product_path_candidates",
-            # 模块内多选为空时回退到页面共享的单一 product_path_selection，包成 [selection]。
-            "shared_page_field": "product_path_selection",
-            "fallback_wraps_single": True,
+            # 多选为空时回退到候选列表本身：先本地 candidate_field，再其页面全局候选
+            # （由 product_path_candidate_list 的 fallback_policy 声明 local→global）。
+            "fallback": "candidates",
             "id_keys": (
                 "product_path_selection_id",
                 "selection_id",
@@ -243,6 +243,11 @@ def register_factor_candidate_list_base(
             "item_kind": "factor",
             "shared_page_field": "factor_candidates",
             "selection_field": "factor",
+            "factor_library_source": "user_param_factor_overview",
+            "fallback_policy": (
+                "copy_page_candidates",
+                "load_factor_library_when_page_empty",
+            ),
             "id_keys": ("alias", "name", "factor_alias"),
             "label_keys": ("alias", "name", "label"),
             "mutation_scope": {
@@ -295,16 +300,16 @@ def register_factor_selections_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子选择: {value}",
-        help_text="从因子候选列表多选；为空时回退到页面共享的单一因子（factor），包成单元素列表。",
+        help_text="从因子候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
         serialization={
             "kind": "factor_selection_list",
             "display_order": 30,
             "item_kind": "factor",
             "multi": True,
             "candidate_field": "factor_candidates",
-            # 模块内多选为空时回退到页面共享的单一 factor，包成 [factor]。
-            "shared_page_field": "factor",
-            "fallback_wraps_single": True,
+            # 多选为空时回退到候选列表本身：先本地 candidate_field，再其页面全局候选
+            # （由 factor_candidate_list 的 fallback_policy 声明 local→global）。
+            "fallback": "candidates",
             "id_keys": ("alias", "name", "factor_alias"),
             "label_keys": ("alias", "name", "label"),
         },
@@ -1044,12 +1049,11 @@ def ic_test_settings() -> ApplicationSettings:
     ):
         app.register_chip_field(chip)
     register_factor_execution_base(app)
+    # IC 只用复数多选字段：为每个 product_path 跑所有 factor_selections。
+    # 候选列表是多选的回退来源（本地→全局），不注册单数 factor / product_path_selection。
     register_factor_candidate_list_base(app)
-    register_factor_selection_base(app)
-    # IC 跨多个因子比较 IC，注册多选 factor_selections（空时回退到页面 factor）。
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
-    register_product_path_selection_base(app)
     register_product_path_selections_base(app)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
