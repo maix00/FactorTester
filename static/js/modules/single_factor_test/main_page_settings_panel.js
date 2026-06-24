@@ -700,6 +700,39 @@
         });
     }
 
+    // 不按当前产品组过滤的因子库全量参数行——仅用于"恢复模板后的参数行是否
+    // 命中因子库"的交叉比对（候选列表展示仍用 loadFactorLibraryParams 的过滤结果）。
+    function loadAllFactorLibraryParams() {
+        var ffAlias = factorFamilyAlias();
+        if (!ffAlias) return Promise.resolve([]);
+        return requestJSON('/api/param-factor-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+            var factors = Array.isArray(payload.factors) ? payload.factors : [];
+            var utils = window.FactorParamSelectionUtils || {};
+            return factors.map(function(item) {
+                return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+            });
+        }).catch(function() {
+            return [];
+        });
+    }
+
+    // factor_alias 由因子家族对参数组合确定性编码而来，可直接作为身份匹配键。
+    // 优先匹配当前产品组绑定的因子库条目，其次未绑定产品组的，否则取任意命中。
+    function pickLibraryScopeForAlias(factorAlias, libraryParams) {
+        var matches = (libraryParams || []).filter(function(item) {
+            return item.factor_alias === factorAlias;
+        });
+        if (!matches.length) return null;
+        var preferredGroup = currentFactorLibraryProductGroup();
+        var byGroup = preferredGroup && matches.filter(function(item) {
+            return factorLibraryScopeKey(item) === preferredGroup;
+        })[0];
+        var unbound = matches.filter(function(item) {
+            return isFactorLibraryUnboundScope(factorLibraryScopeKey(item));
+        })[0];
+        return factorLibraryScopeKey(byGroup || unbound || matches[0]);
+    }
+
     function getSessionFactorParams() {
         // Initialize from backend-injected data on first call
         if (!state._sessionParams && Array.isArray(window._initialSessionParams)) {
@@ -848,19 +881,26 @@
         });
     }
 
+    // 恢复模板（旧/新均经此路径）后的参数行只知道 factor_alias+params，不知道
+    // 当初是"现场"手填还是来自因子库；这里按 factor_alias 与因子库全量条目
+    // 交叉比对，命中则标注对应产品组/未绑定的因子库来源，否则才归为"现场"。
     function applyBackendFactorRows(rows) {
         var ffAlias = factorFamilyAlias();
-        setSessionFactorParams((rows || []).map(function(row) {
-            return {
-                factor_alias: row.factor_alias,
-                factor_family_alias: ffAlias,
-                scope_key: '现场',
-                source_type: 'session',
-                params: row.params || {},
-            };
-        }));
-        renderParametersTab();
-        renderChips();
+        rows = rows || [];
+        return loadAllFactorLibraryParams().then(function(libraryParams) {
+            setSessionFactorParams(rows.map(function(row) {
+                var matchedScope = pickLibraryScopeForAlias(row.factor_alias, libraryParams);
+                return {
+                    factor_alias: row.factor_alias,
+                    factor_family_alias: ffAlias,
+                    scope_key: matchedScope || '现场',
+                    source_type: matchedScope ? 'library' : 'session',
+                    params: row.params || {},
+                };
+            }));
+            renderParametersTab();
+            renderChips();
+        });
     }
 
     async function applyParamsSnapshot(data) {
@@ -879,7 +919,7 @@
                 alert('恢复参数失败: ' + (result.error || ''));
                 return;
             }
-            applyBackendFactorRows(result.factor_rows || []);
+            await applyBackendFactorRows(result.factor_rows || []);
             if (typeof window.refreshICModule === 'function') window.refreshICModule();
         } catch (e) {
             alert('恢复参数异常: ' + (e && e.message || e));

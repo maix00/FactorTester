@@ -390,7 +390,8 @@
 
     // ── 参数设置（parameters）现通过 window.Panels 注册（main_page_settings_panel.js），
     //    并在 collectSnapshot/applySnapshot/summarizeAll 中与本注册表的结果合并。
-    //    旧模板里的顶层 params_list 字段由 _migrateLegacySnapshot() 迁移为 parameters.params_list。
+    //    旧模板顶层 params_list 字段不再被识别——已通过
+    //    scripts/migrate_setting_templates_params_list.py 一次性迁移为 parameters.params_list。
 
     // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
     var _gtAdaptersRegistered = false;
@@ -467,16 +468,6 @@
     // 暴露给全局，供 lazy loader 在脚本加载完成后调用
     window._ensureGroupTestAdapters = _ensureGroupTestAdapters;
 
-    // 旧模板把参数行存在顶层 params_list 字段；新注册表（window.Panels）把它
-    // 收在 parameters.params_list 下。加载老模板时原地补上 parameters 字段，
-    // 让 Panels 的 'parameters' 面板（main_page_settings_panel.js）能识别。
-    function _migrateLegacySnapshot(snapshot) {
-        if (snapshot && !snapshot.parameters && Array.isArray(snapshot.params_list)) {
-            snapshot.parameters = { params_list: snapshot.params_list };
-        }
-        return snapshot;
-    }
-
     // ── 收集当前所有设置快照（通过注册表 + Panels 面板注册表） ───────────
     async function collectSnapshot() {
         await _ensureGroupTestAdapters();
@@ -498,7 +489,6 @@
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
         await _ensureGroupTestAdapters();
-        _migrateLegacySnapshot(snapshot);
 
         var ctx = { tplId: tplId, snapshot: snapshot };
         var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
@@ -703,8 +693,7 @@
         try {
             var template = await fetchTemplateDetail(tplId);
             if (title) title.textContent = template.name || '模板摘要';
-            var snap = _migrateLegacySnapshot(template.snapshot || {});
-            var summaryHtml = SnapshotRegistry.summarizeAll(snap);
+            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
             if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
             bindTemplateSummaryTabs(body);
         } catch (error) {
