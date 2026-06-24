@@ -288,10 +288,16 @@ def _compute_ic_groups(
         total_nodes = 0
         from tools.factors.tests import CrossSectionIC as _CSI
         for key, _ in param_items:
-            fe_param = param_payloads[key].get('FE')
+            payload = param_payloads[key]
+            fe_param = payload.get('FE')
             if fe_param is not None and hasattr(fe_param, '_expr'):
                 total_nodes += count_nodes(fe_param._expr)
-            tmp = _CSI().get_factor(**param_payloads[key])
+            # Private (`_`-prefixed) keys carry method metadata, not factor-family
+            # params — strip them and use the per-method family class, mirroring
+            # run_ic_for_factor().
+            ic_family_cls = payload.get('_ic_family_cls') or _CSI
+            clean_payload = {k: v for k, v in payload.items() if not str(k).startswith('_')}
+            tmp = ic_family_cls().get_factor(**clean_payload)
             if hasattr(tmp, '_expr'):
                 total_nodes += count_nodes(tmp._expr)
         setup_progress(total_nodes, lambda c, t: emitter.emit_progress(c, t, 'eval'))

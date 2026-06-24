@@ -385,6 +385,10 @@
             renderProductPathSelectionTab();
             return;
         }
+        if (tabKey === 'parameters') {
+            renderParametersTab();
+            return;
+        }
         if (tabMeta(tabKey) && state.containers[tabKey] && state.containers[tabKey].childNodes.length === 0) {
             renderRegisteredSettingsTab(tabKey);
         }
@@ -684,6 +688,208 @@
         renderProductPathSelectionTab();
         broadcastGlobalSettingsChanged();
     }
+
+    /* ── Factor-param tab (analogous to product_path_selection tab) ── */
+
+    function factorFamilyAlias() {
+        return window.factorFamilyAlias || window._sftCurrentFactorId || '';
+    }
+
+    function getParamDefs() {
+        var paramModule = document.getElementById('parameter_module');
+        if (!paramModule) return [];
+        var aliasesAttr = paramModule.getAttribute('data-param-aliases');
+        var metasAttr = paramModule.getAttribute('data-param-metas');
+        var aliases = [];
+        var metas = [];
+        try { if (aliasesAttr) aliases = JSON.parse(aliasesAttr); } catch(e) {}
+        try { if (metasAttr) metas = JSON.parse(metasAttr); } catch(e) {}
+        var metaMap = {};
+        metas.forEach(function(m) { if (m && m.alias) metaMap[m.alias] = m; });
+        return aliases.map(function(alias) {
+            var meta = metaMap[alias] || {};
+            return {
+                alias: alias,
+                label: meta.label || meta.display_name || alias,
+                default_value: meta.default_value !== undefined ? meta.default_value : '',
+            };
+        });
+    }
+
+    function factorLibraryParams() {
+        var value = state.values.factor_candidates;
+        return Array.isArray(value) ? value : [];
+    }
+
+    function setFactorLibraryParams(params) {
+        state.values.factor_candidates = Array.isArray(params) ? params.slice() : [];
+    }
+
+    function loadFactorLibraryParams(force) {
+        if (state._factorLibraryParamsLoaded && !force) return Promise.resolve(factorLibraryParams());
+        var ffAlias = factorFamilyAlias();
+        if (!ffAlias) return Promise.resolve([]);
+        return requestJSON('/api/param-factor-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+            var factors = Array.isArray(payload.factors) ? payload.factors : [];
+            var utils = window.FactorParamSelectionUtils || {};
+            var params = factors.map(function(item) {
+                return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+            });
+            setFactorLibraryParams(params);
+            state._factorLibraryParamsLoaded = true;
+            return params;
+        }).catch(function() {
+            return [];
+        });
+    }
+
+    function getSessionFactorParams() {
+        // Read current session params from the param table DOM (parameter_module)
+        var paramModule = document.getElementById('parameter_module');
+        if (!paramModule) return [];
+        var tbody = paramModule.querySelector('#factor_table_body');
+        if (!tbody) return [];
+        var aliasesAttr = paramModule.getAttribute('data-param-aliases');
+        var aliases = [];
+        try { if (aliasesAttr) aliases = JSON.parse(aliasesAttr); } catch(e) {}
+        var rows = [];
+        var trs = tbody.querySelectorAll('tr');
+        var ffAlias = factorFamilyAlias();
+        trs.forEach(function(tr) {
+            var cells = tr.querySelectorAll('td');
+            if (cells.length < aliases.length + 1) return;
+            var factorAlias = (cells[0].textContent || '').trim();
+            if (!factorAlias) return;
+            var params = {};
+            aliases.forEach(function(alias, i) {
+                params[alias] = (cells[i + 1].textContent || '').trim();
+            });
+            rows.push({ factor_alias: factorAlias, factor_family_alias: ffAlias, scope_key: '现场', params: params, source_type: 'session' });
+        });
+        return rows;
+    }
+
+    function renderParametersTab() {
+        var container = state.containers.parameters;
+        if (!container) return;
+        container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载参数...</span>';
+
+        var paramDefs = getParamDefs();
+        var ffAlias = factorFamilyAlias();
+        var sessionParams = getSessionFactorParams();
+
+        loadFactorLibraryParams(false).then(function(libraryParams) {
+            if (!window.FactorParamSelectionUtils || typeof window.FactorParamSelectionUtils.renderFactorParamSettingsTab !== 'function') {
+                container.textContent = '因子参数设置组件未加载';
+                return;
+            }
+            window.FactorParamSelectionUtils.renderFactorParamSettingsTab({
+                host: container,
+                prefix: 'page-fps',
+                factorFamilyAlias: ffAlias,
+                paramDefs: paramDefs,
+                currentFactorParams: sessionParams,
+                libraryFactorParams: libraryParams,
+                manualTitle: '现场新增因子参数',
+                addLabel: '新增到参数列表',
+                escapeHTML: escapeHtml,
+                onLoadFromLibrary: function(param) {
+                    // Insert param row from library into current session table
+                    if (!param || !ffAlias) return;
+                    var body = {
+                        factor_family_alias: ffAlias,
+                        params: param.params || {}
+                    };
+                    fetch('/add_params', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            if (typeof window._renderParamFactorRows === 'function') {
+                                window._renderParamFactorRows(data.factor_rows || []);
+                            }
+                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+                            if (typeof window.refreshICModule === 'function') window.refreshICModule();
+                            renderParametersTab(); // re-render to reflect changes
+                        }
+                    }).catch(function(e) {
+                        console.error('[fps] load from library failed:', e);
+                    });
+                },
+                onRemoveParam: function(alias) {
+                    if (!alias || !ffAlias) return;
+                    // Find the row index from the current session table
+                    var paramModule = document.getElementById('parameter_module');
+                    var tbody = paramModule && paramModule.querySelector('#factor_table_body');
+                    if (!tbody) return;
+                    var trs = tbody.querySelectorAll('tr');
+                    var targetIdx = -1;
+                    trs.forEach(function(tr, idx) {
+                        var firstCell = tr.querySelector('td');
+                        if (firstCell && (firstCell.textContent || '').trim() === alias) {
+                            targetIdx = idx;
+                        }
+                    });
+                    if (targetIdx < 0) return;
+                    fetch('/delete_params', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            factor_family_alias: ffAlias,
+                            factor_idx: targetIdx
+                        })
+                    })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            if (typeof window._renderParamFactorRows === 'function') {
+                                window._renderParamFactorRows(data.factor_rows || []);
+                            }
+                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+                            if (typeof window.refreshICModule === 'function') window.refreshICModule();
+                            renderParametersTab(); // re-render to reflect changes
+                        }
+                    }).catch(function(e) {
+                        console.error('[fps] remove failed:', e);
+                    });
+                },
+                onAddParam: function(alias, params) {
+                    if (!alias || !ffAlias) return;
+                    var body = {
+                        factor_family_alias: ffAlias,
+                        params: params || {}
+                    };
+                    fetch('/add_params', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    })
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            if (typeof window._renderParamFactorRows === 'function') {
+                                window._renderParamFactorRows(data.factor_rows || []);
+                            }
+                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+                            if (typeof window.refreshICModule === 'function') window.refreshICModule();
+                            renderParametersTab(); // re-render to reflect changes
+                        } else {
+                            alert('添加失败: ' + (data.error || '未知错误'));
+                        }
+                    }).catch(function(e) {
+                        console.error('[fps] add failed:', e);
+                    });
+                },
+            });
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    /* ── end factor-param tab ── */
 
     function renderProductPathSelectionTab() {
         var container = state.containers.product_path_selection;
