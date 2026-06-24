@@ -88,14 +88,14 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "factor", "product_path_selection", "time", "return_frequency", "delay",
-        "ic_method", "cross_section", "summary",
+        "factor", "product_path_selection", "time", "data_source", "frequency",
+        "return_frequency", "delay", "ic_method", "cross_section", "summary",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": [],
         "group-settings": [],
     }
-    assert index["defaults"]["product_path_selection"]["module"] == "product_selection"
+    assert index["defaults"]["product_path_selections"]["module"] == "product_selection"
     assert index["defaults"]["return_frequency_mode"]["module"] == "return_frequency"
     assert index["defaults"]["return_price_basis"]["value"] == "next_open_to_open_adjusted"
     assert index["defaults"]["ic_lag"]["tab_key"] == "delay"
@@ -116,7 +116,9 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
     ]
     assert index["result_tabs"][0]["default"] is True
     assert index["result_tabs"][0]["requires"] == {"ic_correlation": ["rank", "both"]}
-    assert [setting["key"] for setting in product_tab["settings"]] == ["product_path_selection"]
+    assert [setting["key"] for setting in product_tab["settings"]] == [
+        "product_path_candidates", "product_path_selections",
+    ]
     assert [setting["key"] for setting in time_tab["settings"]] == [
         "start_date", "end_date", "start_time", "end_time", "time_precision", "timezone",
     ]
@@ -189,9 +191,11 @@ def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
     method_tab = application.tab_manifest("method")
 
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "product_path_selection", "time", "factor", "method",
+        "product_path_selection", "time", "data_source", "frequency", "factor", "method",
     ]
-    assert [setting["key"] for setting in product_tab["settings"]] == ["product_path_selection"]
+    assert [setting["key"] for setting in product_tab["settings"]] == [
+        "product_path_candidates", "product_path_selection",
+    ]
     assert index["defaults"]["product_path_selection"]["serialization"]["kind"] == "product_path_selection"
     assert list(index["defaults"]["product_path_selection"]["serialization"]["manual_fields"]) == [
         "product_path_selection_id",
@@ -226,6 +230,12 @@ def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules()
         "end_time",
         "timezone",
         "time_precision",
+        "product_path_candidates",
+        "product_path_selection",
+        "factor_candidates",
+        "factor",
+        "data_source",
+        "frequency",
     ]
 
 
