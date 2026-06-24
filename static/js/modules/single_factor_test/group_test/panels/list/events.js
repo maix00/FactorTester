@@ -147,10 +147,13 @@
         });
 
         // ── Backend-registered clickable chips; overlays/data resolve lazily on click. ──
+        // Non-actionable chips (factor / splitCount / letter summaries) must bubble so a
+        // click anywhere on a batch header still selects the batch's base groups.
         container.querySelectorAll('.unified-backend-chip').forEach(function(chip) {
             chip.addEventListener('click', function(e) {
-                e.stopPropagation();
                 var action = this.getAttribute('data-chip-action') || '';
+                if (!action) return;
+                e.stopPropagation();
                 var groupId = this.getAttribute('data-gid') || '';
                 var group = GT.groupSettings.groups && GT.groupSettings.groups.get(groupId);
                 if (!group) return;
@@ -231,9 +234,12 @@
                 return;
             }
 
-            // Batch header row → toggle selection
+            // Batch header row → toggle selection (= multi-select the batch's first-level base
+            // groups and enter edit mode). Only actionable chips (e.g. the product-path chip that
+            // opens an overlay) block selection; summary chips fall through.
             var batchHeader = e.target.closest('.unified-batch-header');
-            if (batchHeader && !e.target.closest('button') && !e.target.closest('.unified-backend-chip')) {
+            var actionableChip = e.target.closest('.unified-backend-chip[data-chip-action]:not([data-chip-action=""])');
+            if (batchHeader && !e.target.closest('button') && !actionableChip) {
                 var addGroupBatchKey = batchHeader.getAttribute('data-batch-key');
                 var batchMap = H.getAddGroupBatchMap();
                 toggleBatchSelection(batchMap[addGroupBatchKey]);
