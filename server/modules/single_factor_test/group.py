@@ -516,6 +516,247 @@ def _cn_futures_contract_parent(product_ref: Any):
         return None
 
 
+def _product_parent_name(product_ref: Any) -> str:
+    raw = str(product_ref or "")
+    parts = raw.split("|")
+    if len(parts) >= 4:
+        exchange, _, code = parts[:3]
+        return f"{code}.{exchange}"
+    parent = _cn_futures_contract_parent(product_ref)
+    if parent is not None:
+        return str(getattr(parent, "name", parent))
+    name = raw
+    if "@" in name:
+        return name.split("@", 1)[0]
+    return name
+
+
+def _event_instrument_display(instrument: str, *, collapse_product: bool = False) -> dict[str, Any]:
+    if collapse_product:
+        display_ref = _product_parent_name(instrument)
+        display = _snapshot_product_display(display_ref)
+        if display_ref != instrument:
+            display["source_name"] = instrument
+        return display
+    parts = str(instrument or "").split("|")
+    if len(parts) >= 4:
+        exchange, _, code, delivery = parts[:4]
+        parent_name = _product_parent_name(instrument)
+        parent_display = _snapshot_product_display(parent_name)
+        return {
+            "name": f"{code}{delivery}.{exchange}",
+            "desc": parent_display.get("desc") or parent_display.get("name") or parent_name,
+            "source_name": instrument,
+        }
+    display = _snapshot_product_display(instrument)
+    return display
+
+
+def _first_finite(values: list[Any], default: float | None = None) -> float | None:
+    for value in values:
+        try:
+            number = float(value)
+        except Exception:
+            continue
+        if math.isfinite(number):
+            return number
+    return default
+
+
+def _event_market_rule_rows(payload: dict[str, Any]) -> dict[str, dict[str, float | None]]:
+    instruments = list(payload.get("instruments") or [])
+    rules = payload.get("market_rules") or {}
+    multipliers = rules.get("multipliers") or []
+    lot_sizes = rules.get("lot_sizes") or []
+    margin_ratios = rules.get("margin_ratios") or []
+    rows: dict[str, dict[str, float | None]] = {}
+    for idx, instrument in enumerate(instruments):
+        rows[str(instrument)] = {
+            "multiplier": _first_finite([row[idx] for row in multipliers if isinstance(row, list) and idx < len(row)]),
+            "lot_size": _first_finite([row[idx] for row in lot_sizes if isinstance(row, list) and idx < len(row)]),
+            "margin_ratio": _first_finite([row[idx] for row in margin_ratios if isinstance(row, list) and idx < len(row)]),
+        }
+    return rows
+
+
+def _event_fee_rate_rows(payload: dict[str, Any], fee_rate: float = 0.0) -> dict[str, dict[str, float]]:
+    instruments = list(payload.get("instruments") or [])
+    fee_rates = {}
+    for instrument in instruments:
+        fee_rates[str(instrument)] = {
+            "open": float(fee_rate or 0.0),
+            "close": float(fee_rate or 0.0),
+            "close_today": float(fee_rate or 0.0),
+            "close_yesterday": float(fee_rate or 0.0),
+            "total": float(fee_rate or 0.0) * 2.0,
+        }
+    return fee_rates
+
+
+def _event_position_contribution_rows(
+    *,
+    portfolio: dict[str, Any],
+    payload: dict[str, Any],
+    fee_rate: float,
+    collapse_product: bool,
+) -> list[dict[str, Any]]:
+    position_curve = portfolio.get("position_curve") or {}
+    notional_curve = portfolio.get("notional_curve") or {}
+    equity_curve = portfolio.get("equity_curve") or {}
+    if not position_curve:
+        return []
+    fee_rows = _event_fee_rate_rows(payload, fee_rate)
+    rule_rows = _event_market_rule_rows(payload)
+    accum: dict[str, dict[str, Any]] = {}
+    timestamps = sorted(position_curve.keys())
+    prev_equity: float | None = None
+    for timestamp in timestamps:
+        positions = position_curve.get(timestamp) or {}
+        notionals = notional_curve.get(timestamp) or {}
+        try:
+            equity = float(equity_curve.get(timestamp))
+        except Exception:
+            equity = None
+        if equity is None or not math.isfinite(equity):
+            continue
+        if prev_equity is None or prev_equity <= 0:
+            period_return = 0.0
+        else:
+            period_return = equity / prev_equity - 1.0
+        prev_equity = equity
+        active_total = 0.0
+        active_notionals: dict[str, float] = {}
+        for instrument, quantity in positions.items():
+            try:
+                qty = abs(float(quantity))
+            except Exception:
+                qty = 0.0
+            if qty <= 1e-12:
+                continue
+            notional = notionals.get(instrument)
+            try:
+                notional_value = abs(float(notional))
+            except Exception:
+                notional_value = 0.0
+            if notional_value <= 0:
+                notional_value = qty
+            active_notionals[str(instrument)] = notional_value
+            active_total += notional_value
+        if active_total <= 0:
+            continue
+        for instrument, notional_value in active_notionals.items():
+            key = _product_parent_name(instrument) if collapse_product else instrument
+            row = accum.setdefault(key, {
+                "display_ref": key,
+                "source_instruments": set(),
+                "active_period_count": 0,
+                "gross_contribution": 0.0,
+                "weight_sum": 0.0,
+                "fee_open_sum": 0.0,
+                "fee_close_sum": 0.0,
+                "fee_close_today_sum": 0.0,
+                "fee_close_yesterday_sum": 0.0,
+                "multiplier_sum": 0.0,
+                "lot_size_sum": 0.0,
+                "margin_ratio_sum": 0.0,
+            })
+            weight = notional_value / active_total
+            row["source_instruments"].add(instrument)
+            row["active_period_count"] += 1
+            row["gross_contribution"] += period_return * weight
+            row["weight_sum"] += weight
+            fee = fee_rows.get(instrument) or {}
+            rules = rule_rows.get(instrument) or {}
+            row["fee_open_sum"] += float(fee.get("open") or 0.0) * weight
+            row["fee_close_sum"] += float(fee.get("close") or 0.0) * weight
+            row["fee_close_today_sum"] += float(fee.get("close_today") or 0.0) * weight
+            row["fee_close_yesterday_sum"] += float(fee.get("close_yesterday") or fee.get("close") or 0.0) * weight
+            for source, target in (
+                ("multiplier", "multiplier_sum"),
+                ("lot_size", "lot_size_sum"),
+                ("margin_ratio", "margin_ratio_sum"),
+            ):
+                value = rules.get(source)
+                if value is not None and math.isfinite(float(value)):
+                    row[target] += float(value) * weight
+    rows = []
+    for key, item in accum.items():
+        weight_sum = float(item["weight_sum"] or 0.0)
+        product = _event_instrument_display(key, collapse_product=False)
+        product["fee"] = {
+            "open": item["fee_open_sum"] / weight_sum if weight_sum else None,
+            "close": item["fee_close_sum"] / weight_sum if weight_sum else None,
+            "close_today": item["fee_close_today_sum"] / weight_sum if weight_sum else None,
+            "close_yesterday": item["fee_close_yesterday_sum"] / weight_sum if weight_sum else None,
+            "_is_weighted": bool(collapse_product),
+        }
+        product["source_names"] = sorted(item["source_instruments"])
+        rows.append({
+            "product": product,
+            "active_period_count": int(item["active_period_count"]),
+            "gross_contribution": float(item["gross_contribution"]),
+            "mean_active_contribution": (
+                float(item["gross_contribution"]) / item["active_period_count"]
+                if item["active_period_count"] else None
+            ),
+            "mean_return": (
+                float(item["gross_contribution"]) / item["active_period_count"]
+                if item["active_period_count"] else None
+            ),
+            "market_rule": {
+                "multiplier": item["multiplier_sum"] / weight_sum if weight_sum else None,
+                "lot_size": item["lot_size_sum"] / weight_sum if weight_sum else None,
+                "margin_ratio": item["margin_ratio_sum"] / weight_sum if weight_sum else None,
+                "_is_weighted": bool(collapse_product),
+            },
+        })
+    return rows
+
+
+def _event_product_analysis(portfolio: dict[str, Any], payload: dict[str, Any], strategy_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        fee_rate = float((strategy_settings or {}).get("fee_rate") or 0.0)
+    except Exception:
+        fee_rate = 0.0
+    contract_rows = _event_position_contribution_rows(
+        portfolio=portfolio, payload=payload, fee_rate=fee_rate, collapse_product=False,
+    )
+    product_rows = _event_position_contribution_rows(
+        portfolio=portfolio, payload=payload, fee_rate=fee_rate, collapse_product=True,
+    )
+
+    def _pack(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        top = sorted(rows, key=lambda item: item["gross_contribution"], reverse=True)
+        bottom = sorted(rows, key=lambda item: item["gross_contribution"])
+        positive_total = sum(max(row["gross_contribution"], 0.0) for row in rows)
+        top1_ratio = (top[0]["gross_contribution"] / positive_total) if top and positive_total > 0 else None
+        top3_ratio = (
+            sum(max(row["gross_contribution"], 0.0) for row in top[:3]) / positive_total
+            if positive_total > 0 else None
+        )
+        return {
+            "rows": rows,
+            "top_products": top[:10],
+            "bottom_products": bottom[:10],
+            "top1_positive_contribution_ratio": top1_ratio,
+            "top3_positive_contribution_ratio": top3_ratio,
+            "is_concentrated": bool(
+                (top1_ratio is not None and top1_ratio >= 0.5)
+                or (top3_ratio is not None and top3_ratio >= 0.8)
+            ),
+        }
+
+    product_level = _pack(product_rows)
+    contract_level = _pack(contract_rows)
+    product_level_copy = dict(product_level)
+    product_level["by_level"] = {
+        "products": product_level_copy,
+        "contracts": contract_level,
+    }
+    product_level["default_level"] = "products"
+    return product_level
+
+
 def _snapshot_actual_quantity(
     position_row: Any,
     amount_row: Any | None,
@@ -1865,6 +2106,13 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     "engine_result": execution["engine_result"],
                     "group_owner": execution["group_owner"],
                     "serialized_execution": serialized_execution,
+                    "detail_context": {
+                        "payload": {
+                            "instruments": execution["payload"].get("instruments") or [],
+                            "market_rules": execution["payload"].get("market_rules") or {},
+                        },
+                        "settings_by_strategy": execution["settings_by_strategy"],
+                    },
                 },
             )
             _core_emit_progress(
@@ -2557,15 +2805,24 @@ def _event_group_detail(execution: dict, product_path_selection_id: str, group_i
             if abs(float(quantity)) > 1e-12
         ]
     serialized = execution.get("serialized_execution") or {}
+    detail_context = execution.get("detail_context") or {}
+    payload = execution.get("payload") or detail_context.get("payload") or {}
+    strategy_settings = (
+        execution.get("settings_by_strategy")
+        or detail_context.get("settings_by_strategy")
+        or {}
+    ).get(strategy_id) or {}
     display_name = str(owner.get("group_name") or strategy_id)
     summary = (serialized.get("metrics") or {}).get(display_name) or {}
-    return build_group_detail(
+    detail = build_group_detail(
         0,
         products_by_group,
         returns,
         index,
         summary,
     )
+    detail["product_analysis"] = _event_product_analysis(portfolio, payload, strategy_settings)
+    return detail
 
 
 def _event_group_ranking_detail(execution: dict, product_path_selection_id: str) -> dict:
