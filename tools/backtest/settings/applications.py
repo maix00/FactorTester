@@ -23,8 +23,10 @@ RUN_WINDOW_KEYS = (
     "time_precision",
 )
 PRODUCT_PATH_SELECTION_KEYS = ("product_path_selection",)
+PRODUCT_PATH_SELECTIONS_KEYS = ("product_path_selections",)
 PRODUCT_PATH_CANDIDATE_KEYS = ("product_path_candidates",)
 FACTOR_SELECTION_KEYS = ("factor",)
+FACTOR_SELECTIONS_KEYS = ("factor_selections",)
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
@@ -119,6 +121,8 @@ def register_product_path_selection_base(
         serialization={
             "kind": "product_path_selection",
             "display_order": 20,
+            # 模块内单选为空时回退到页面共享的 product_path_selection。
+            "shared_page_field": "product_path_selection",
             "product_group_reference_keys": (
                 "product_group_template_id",
                 "path_id",
@@ -139,6 +143,40 @@ def register_product_path_selection_base(
             "manual_fields": (
                 "product_path_selection_id",
                 "paths",
+            ),
+        },
+    ))
+
+
+def register_product_path_selections_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "product_path_selection",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "product_path_selections",
+        "产品路径选择",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="product_selection",
+        chip_template="产品路径选择: {value}",
+        help_text="从产品路径候选列表多选；为空时回退到页面共享的单一产品路径（product_path_selection），包成单元素列表。",
+        serialization={
+            "kind": "product_path_selection_list",
+            "display_order": 30,
+            "item_kind": "product_path_selection",
+            "multi": True,
+            "candidate_field": "product_path_candidates",
+            # 模块内多选为空时回退到页面共享的单一 product_path_selection，包成 [selection]。
+            "shared_page_field": "product_path_selection",
+            "fallback_wraps_single": True,
+            "id_keys": (
+                "product_path_selection_id",
+                "selection_id",
+                "id",
             ),
         },
     ))
@@ -234,6 +272,39 @@ def register_factor_selection_base(
             "kind": "factor_selection",
             "display_order": 20,
             "candidate_field": "factor_candidates",
+            # 模块内单选为空时回退到页面共享的 factor。
+            "shared_page_field": "factor",
+            "id_keys": ("alias", "name", "factor_alias"),
+            "label_keys": ("alias", "name", "label"),
+        },
+    ))
+
+
+def register_factor_selections_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "factor",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "factor_selections",
+        "因子选择",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="factor_execution",
+        chip_template="因子选择: {value}",
+        help_text="从因子候选列表多选；为空时回退到页面共享的单一因子（factor），包成单元素列表。",
+        serialization={
+            "kind": "factor_selection_list",
+            "display_order": 30,
+            "item_kind": "factor",
+            "multi": True,
+            "candidate_field": "factor_candidates",
+            # 模块内多选为空时回退到页面共享的单一 factor，包成 [factor]。
+            "shared_page_field": "factor",
+            "fallback_wraps_single": True,
             "id_keys": ("alias", "name", "factor_alias"),
             "label_keys": ("alias", "name", "label"),
         },
@@ -975,8 +1046,11 @@ def ic_test_settings() -> ApplicationSettings:
     register_factor_execution_base(app)
     register_factor_candidate_list_base(app)
     register_factor_selection_base(app)
+    # IC 跨多个因子比较 IC，注册多选 factor_selections（空时回退到页面 factor）。
+    register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app)
+    register_product_path_selections_base(app)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(
