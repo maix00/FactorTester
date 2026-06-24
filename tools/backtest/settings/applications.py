@@ -9,6 +9,7 @@ from .contracts import (
     SettingDefinition,
     SettingModule,
     SettingOption,
+    SettingsSurface,
     SettingTab,
     TabMountPoint,
 )
@@ -439,6 +440,10 @@ def single_factor_page_settings() -> ApplicationSettings:
     register_product_path_selection_base(app)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
+    # 单因子页只有"因子家族测试设置"这一个扁平面板（无列表项）。
+    app.register_surface(SettingsSurface(
+        "local", "因子家族测试设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
+    ))
     return app
 
 
@@ -977,6 +982,14 @@ def group_test_settings() -> ApplicationSettings:
         ),
         chip_template="时钟: {value}",
     ))
+    # 分组测试：本地设置面板 + 分组列表（多选、一次运行所有选中、点击行编辑）。
+    app.register_surface(SettingsSurface(
+        "local", "本地设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
+    ))
+    app.register_surface(SettingsSurface(
+        "groups", "分组", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
+        selection="multi", run_mode="run_all", editable=True, item_label="分组",
+    ))
     return app
 
 
@@ -1206,6 +1219,14 @@ def ic_test_settings() -> ApplicationSettings:
         ResultTabDefinition("coverage_missing", "Coverage / Missing", "cross_section", 70),
     ):
         app.register_result_tab(tab)
+    # IC：本地设置面板 + IC 配置列表（单选、选中后运行、点击行编辑）。
+    app.register_surface(SettingsSurface(
+        "local", "IC 本地设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
+    ))
+    app.register_surface(SettingsSurface(
+        "ic_configs", "IC 配置", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
+        selection="single", run_mode="select_then_run", editable=True, item_label="IC 配置",
+    ))
     return app
 
 

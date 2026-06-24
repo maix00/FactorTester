@@ -10,6 +10,7 @@ from .contracts import (
     ResultTabDefinition,
     SettingDefinition,
     SettingModule,
+    SettingsSurface,
     SettingTab,
     TabMountPoint,
 )
@@ -23,6 +24,7 @@ class ApplicationSettings:
     settings: dict[str, SettingDefinition] = field(default_factory=dict)
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
     result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
+    surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
     accepted_global_default_keys: tuple[str, ...] = ()
 
     def register_module(self, module: SettingModule) -> None:
@@ -63,6 +65,11 @@ class ApplicationSettings:
                 f"result tab {tab.key} references unknown module {tab.module}"
             )
         self.result_tabs[tab.key] = tab
+
+    def register_surface(self, surface: SettingsSurface) -> None:
+        if surface.key in self.surfaces:
+            raise ValueError(f"duplicate settings surface: {surface.key}")
+        self.surfaces[surface.key] = surface
 
     def register_accepted_global_default_keys(self, *keys: str) -> None:
         ordered = list(self.accepted_global_default_keys)
@@ -125,6 +132,10 @@ class ApplicationSettings:
             "result_tabs": [
                 tab.to_dict()
                 for tab in sorted(self.result_tabs.values(), key=lambda item: item.order)
+            ],
+            "surfaces": [
+                surface.to_dict()
+                for surface in sorted(self.surfaces.values(), key=lambda item: item.order)
             ],
             "accepted_global_default_keys": list(self.accepted_global_default_keys),
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",

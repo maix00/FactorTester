@@ -147,3 +147,41 @@ class ResultTabDefinition:
             for key, values in self.requires.items()
         }
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsSurface:
+    """A settings "surface" the frontend common component renders.
+
+    Two forms, distinguished by ``kind``:
+      - kind="panel": a flat settings panel (the module-level local-settings).
+      - kind="list":  a row-list of item-configs (each row = the GROUP_SETTINGS
+        scope), with select/expand/chips and a click-to-edit modal.
+
+    A surface binds to an existing ``mount`` point, so it reuses the existing
+    ``tab_lists[mount]`` / scope_policy machinery — it only adds the panel-level
+    declaration (label + list behavior) that was previously implicit/frontend-only.
+    """
+    key: str
+    label: str
+    mount: TabMountPoint
+    kind: str = "panel"            # "panel" | "list"
+    order: int = 0
+    # list-only behavior (ignored for kind="panel")
+    selection: str = "single"     # "single" | "multi"
+    run_mode: str = "run_all"     # "select_then_run" | "run_all" | "per_item_run"
+    editable: bool = False        # click a row to open the edit modal
+    item_label: str = ""          # display name of one item, e.g. "分组" / "IC 配置"
+    chip_keys: tuple[str, ...] = ()  # setting keys shown as chips per row (empty = all item settings)
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.label:
+            raise ValueError("settings surface requires key and label")
+        if self.kind not in ("panel", "list"):
+            raise ValueError(f"settings surface kind 非法: {self.kind}")
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["mount"] = self.mount.value
+        value["chip_keys"] = list(self.chip_keys)
+        return value
