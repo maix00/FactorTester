@@ -63,38 +63,8 @@
             <h1>工具箱</h1>
             <div class="user-area" id="user-area"></div>
         </div>
-        <div class="module-grid">
-            <div class="module-card" onclick="goModule('/single_factor_test')">
-                <div class="card-icon">📊</div>
-                <div class="card-title">单因子测试</div>
-                <div class="card-desc">IC 分析、分组回测、因子有效性评估</div>
-            </div>
-            <div class="module-card" onclick="goModule('/products')">
-                <div class="card-icon">📈</div>
-                <div class="card-title">产品管理</div>
-                <div class="card-desc">产品组管理、品种价格序列查看</div>
-            </div>
-            <div class="module-card" onclick="goModule('/sqlite-web/')">
-                <div class="card-icon">SQL</div>
-                <div class="card-title">sqlite-web</div>
-                <div class="card-desc">浏览 OpenCTP 与用户数据的 SQLite 数据库</div>
-            </div>
-            <div class="module-card" onclick="goModule('/custom-factors/editor')">
-                <div class="card-icon">🧬</div>
-                <div class="card-title">因子管理</div>
-                <div class="card-desc">创建、编辑和管理自定义因子表达式</div>
-            </div>
-            <div class="module-card" id="admin-users-card" onclick="goModule('/admin/users')" style="display:none">
-                <div class="card-icon">🏛</div>
-                <div class="card-title">用户与机构管理</div>
-                <div class="card-desc">管理机构、用户层级与管理员权限</div>
-            </div>
-            <div class="module-card" onclick="goModule('/docs')">
-                <div class="card-icon">📖</div>
-                <div class="card-title">技术文档</div>
-                <div class="card-desc">前后端架构、API 接口、因子说明</div>
-            </div>
-        </div>
+        <!-- 模块网格由 /static/config/modules.json 动态渲染（跨客户端共享的唯一注册表） -->
+        <div class="module-grid" id="module-grid"></div>
     </div>
 
     <!-- 登录/注册弹窗 -->
@@ -135,24 +105,50 @@
         let _currentRole  = null;
         let _pendingUrl  = null;
         let _organizations = [];
+        let _modules = [];
 
         async function init() {
             const data = await fetch('/api/me').then(r => r.json());
-            await loadOrganizations();
+            await Promise.all([loadOrganizations(), loadModules()]);
             _currentUser = data.username || null;
             _isAdmin     = data.is_admin || false;
             _currentRole  = data.role || null;
             renderUserArea();
+            renderModules();
             document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
             const next = new URLSearchParams(location.search).get('next');
             if (next && !_currentUser) openLoginModal(next);
         }
 
+        async function loadModules() {
+            const data = await fetch('/static/config/modules.json')
+                .then(r => r.json()).catch(() => ({ modules: [] }));
+            _modules = (data && data.modules) || [];
+        }
+
+        // 共享注册表渲染：按登录态 + 角色过滤后渲染卡片。
+        function renderModules() {
+            const grid = document.getElementById('module-grid');
+            if (!grid) return;
+            const visible = _modules.filter(m => {
+                const roles = m.roles || [];
+                if (roles.length && !roles.includes(_currentRole)) return false;
+                return true;
+            });
+            grid.innerHTML = visible.map(m =>
+                '<div class="module-card" data-path="' + escAttr(m.path) + '">'
+                + '<div class="card-icon">' + escHtml(m.icon) + '</div>'
+                + '<div class="card-title">' + escHtml(m.title) + '</div>'
+                + '<div class="card-desc">' + escHtml(m.desc) + '</div>'
+                + '</div>'
+            ).join('');
+            grid.querySelectorAll('.module-card').forEach(card => {
+                card.addEventListener('click', () => goModule(card.getAttribute('data-path')));
+            });
+        }
+
         function renderUserArea() {
             const area = document.getElementById('user-area');
-            const adminCard = document.getElementById('admin-users-card');
-            const canManageUsers = ['super_admin', 'org_admin', 'level_admin'].includes(_currentRole);
-            if (adminCard) adminCard.style.display = canManageUsers ? '' : 'none';
             if (_currentUser) {
                 area.innerHTML = '<span class="username-badge">' + _currentUser + '</span>'
                     + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#555;cursor:pointer;margin-left:4px;"><input type="checkbox" id="keep-login-cb" onchange="setKeepLogin(this.checked)" style="width:auto;margin:0;">保持登录</label>'
@@ -210,6 +206,7 @@
                 _isAdmin     = data.is_admin || false;
                 _currentRole  = data.role || null;
                 renderUserArea();
+                renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
                 document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
@@ -234,6 +231,7 @@
                 _isAdmin     = data.is_admin || false;
                 _currentRole  = data.role || null;
                 renderUserArea();
+                renderModules();
                 const nextUrl = _pendingUrl;
                 closeLoginModal();
                 document.getElementById('shutdown-btn').style.display = _isAdmin ? '' : 'none';
@@ -248,6 +246,7 @@
             _currentUser = null;
             _currentRole = null;
             renderUserArea();
+            renderModules();
         }
 
         async function setKeepLogin(val) {
