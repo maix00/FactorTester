@@ -58,10 +58,22 @@
         return source ? alias + ' · ' + source : alias;
     }
 
+    /**
+     * 因子库参数行所属的"产品组标签"——独立于现有的"现场"/"产品组"语义：
+     * - scope_key 为后端 DEFAULT_SCOPE_KEY（'default'）或历史遗留的中文'默认'
+     *   时表示该因子库参数未绑定任何产品组；
+     * - 否则 scope_key 即为绑定的产品组名称。
+     */
+    function factorLibraryScopeLabel(scope) {
+        if (!scope || scope === 'default' || scope === '默认') return '未绑定产品组';
+        return '产品组: ' + scope;
+    }
+
     function factorParamSourceLabel(param) {
         if (!param) return '';
         var scope = param.scope_key || param.product_group || param.productGroup || '';
-        if (scope && scope !== '默认') return scope;
+        if (scope === '现场') return '现场';
+        if (scope) return factorLibraryScopeLabel(scope);
         var owner = param.owner_alias || param.ownerUsername || param.owner_username || '';
         if (owner) return owner;
         return '因子库';
@@ -97,7 +109,7 @@
     function groupByScope(params) {
         var groups = {};
         (params || []).forEach(function(p) {
-            var key = p.scope_key || '默认';
+            var key = p.scope_key || 'default';
             if (!groups[key]) groups[key] = [];
             groups[key].push(p);
         });
@@ -153,8 +165,10 @@
         var sourceBadge = '';
         if (scope === '现场') {
             sourceBadge = '<span style="display:inline-block;padding:0 5px;border-radius:3px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;">现场</span>';
+        } else if (!scope || scope === 'default' || scope === '默认') {
+            sourceBadge = '<span style="display:inline-block;padding:0 5px;border-radius:3px;background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:600;">因子库 · 未绑定产品组</span>';
         } else {
-            sourceBadge = '<span style="display:inline-block;padding:0 5px;border-radius:3px;background:#dbeafe;color:#1e40af;font-size:10px;font-weight:600;">' + escapeHTML(scope || '因子库') + '</span>';
+            sourceBadge = '<span style="display:inline-block;padding:0 5px;border-radius:3px;background:#dbeafe;color:#1e40af;font-size:10px;font-weight:600;">因子库 · 产品组: ' + escapeHTML(scope) + '</span>';
         }
 
         var cells = paramDefs.map(function(def) {
@@ -344,14 +358,14 @@
             Object.keys(grouped).sort().forEach(function(scope) {
                 var count = grouped[scope].length;
                 html += '<button type="button" class="fps-scope-toggle" data-fps-scope="' + escapeFn(scope) + '" style="padding:4px 10px;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#475569;font-size:11px;cursor:pointer;">' +
-                    escapeFn(scope) + ' (' + count + ')' +
+                    escapeFn(factorLibraryScopeLabel(scope)) + ' (' + count + ')' +
                     '</button>';
             });
             html += '</div>';
 
             Object.keys(grouped).sort().forEach(function(scope) {
                 html += '<div class="fps-scope-group" data-fps-scope-group="' + escapeFn(scope) + '" style="grid-column:1 / -1;display:none;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">';
-                html += '<div style="padding:8px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:600;color:#334155;">' + escapeFn(scope) + ' (' + grouped[scope].length + ')</div>';
+                html += '<div style="padding:8px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:600;color:#334155;">' + escapeFn(factorLibraryScopeLabel(scope)) + ' (' + grouped[scope].length + ')</div>';
                 html += '<div style="overflow-x:auto;">';
                 html += '<table style="width:100%;border-collapse:collapse;">';
                 html += '<thead><tr>';
@@ -452,6 +466,7 @@
         factorParamIdentity: factorParamIdentity,
         factorParamDisplayLabel: factorParamDisplayLabel,
         factorParamSourceLabel: factorParamSourceLabel,
+        factorLibraryScopeLabel: factorLibraryScopeLabel,
         factorItemToParamSelection: factorItemToParamSelection,
         groupByScope: groupByScope,
         dedupe: dedupe,

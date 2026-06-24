@@ -604,6 +604,8 @@
         else delete state.values.product_path_selection;
         renderChips();
         renderProductPathSelectionTab();
+        // 因子库候选列表按当前产品组现场过滤，产品组变化后需要重新加载。
+        if (state.containers.parameters) loadFactorLibraryParams(true).then(renderParametersTab);
         broadcastGlobalSettingsChanged();
     }
 
@@ -644,12 +646,48 @@
         state.values.factor_candidates = Array.isArray(params) ? params.slice() : [];
     }
 
+    // 因子库中的因子参数行可以绑定某个产品组，也可以不绑定（DEFAULT_SCOPE_KEY）。
+    // 候选列表语义（类比"产品组要从用户的产品组中加载"，候选不持久化进模板，
+    // 而是每次按页面当前产品组上下文从因子库现场加载）：
+    //   - 页面未设置默认产品路径（或其为"路径组/现场"而非"产品组"）→ 仅未绑定产品组的因子库参数
+    //   - 页面默认产品路径是某"产品组" → 未绑定产品组 + 恰好绑定该产品组的因子库参数
+    var FACTOR_LIBRARY_DEFAULT_SCOPE = 'default';
+
+    function factorLibraryScopeKey(item) {
+        return (item && (item.scope_key || item.product_group || item.productGroup)) || '';
+    }
+
+    function isFactorLibraryUnboundScope(scope) {
+        return !scope || scope === FACTOR_LIBRARY_DEFAULT_SCOPE || scope === '默认';
+    }
+
+    // 当前页面默认产品路径若是一个"产品组"（而非路径组/现场），返回其产品组名
+    // 以匹配因子库的 scope_key；否则返回 null（视为"无产品组绑定"）。
+    function currentFactorLibraryProductGroup() {
+        var selection = state.values.product_path_selection;
+        if (!selection) return null;
+        var utils = window.ProductPathSelectionUtils;
+        var sourceLabel = utils && typeof utils.selectionSourceLabel === 'function'
+            ? utils.selectionSourceLabel(selection) : '';
+        if (sourceLabel !== '产品组') return null;
+        return selection.product_group || selection.product_group_name || null;
+    }
+
+    function filterFactorLibraryByProductGroup(items, groupName) {
+        return (items || []).filter(function(item) {
+            var scope = factorLibraryScopeKey(item);
+            if (isFactorLibraryUnboundScope(scope)) return true;
+            return !!groupName && scope === groupName;
+        });
+    }
+
     function loadFactorLibraryParams(force) {
         if (state._factorLibraryParamsLoaded && !force) return Promise.resolve(factorLibraryParams());
         var ffAlias = factorFamilyAlias();
         if (!ffAlias) return Promise.resolve([]);
         return requestJSON('/api/param-factor-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
             var factors = Array.isArray(payload.factors) ? payload.factors : [];
+            factors = filterFactorLibraryByProductGroup(factors, currentFactorLibraryProductGroup());
             var utils = window.FactorParamSelectionUtils || {};
             var params = factors.map(function(item) {
                 return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
@@ -720,10 +758,6 @@
                         if (data.success) {
                             // Update cache so snapshot collect reads latest
                             state._sessionParams = getSessionFactorParams().concat([param]);
-                            if (typeof window._renderParamFactorRows === 'function') {
-                                window._renderParamFactorRows(data.factor_rows || []);
-                            }
-                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
                             renderParametersTab(); // re-render to reflect changes
                         }
@@ -757,10 +791,6 @@
                             // Update cache so snapshot collect reads latest
                             params.splice(targetIdx, 1);
                             state._sessionParams = params;
-                            if (typeof window._renderParamFactorRows === 'function') {
-                                window._renderParamFactorRows(data.factor_rows || []);
-                            }
-                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
                             renderParametersTab(); // re-render to reflect changes
                         }
@@ -790,10 +820,6 @@
                                 scope_key: '现场',
                                 source_type: 'session'
                             }]);
-                            if (typeof window._renderParamFactorRows === 'function') {
-                                window._renderParamFactorRows(data.factor_rows || []);
-                            }
-                            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
                             renderParametersTab(); // re-render to reflect changes
                         } else {
@@ -806,6 +832,82 @@
             });
         }).catch(function(error) {
             container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    // ── 参数面板的快照存取（供 Panels 注册表使用） ──────────────────────────
+    // 只持久化"现场/会话参数行"（params_list）；因子库候选列表不持久化，
+    // 总是按当前产品组上下文从因子库现场加载（见 loadFactorLibraryParams）。
+    function collectParamsList() {
+        return getSessionFactorParams().map(function(row) {
+            var p = {};
+            Object.keys(row.params || {}).forEach(function(k) {
+                if (row.params[k] !== '') p[k] = row.params[k];
+            });
+            return p;
+        });
+    }
+
+    function applyBackendFactorRows(rows) {
+        var ffAlias = factorFamilyAlias();
+        setSessionFactorParams((rows || []).map(function(row) {
+            return {
+                factor_alias: row.factor_alias,
+                factor_family_alias: ffAlias,
+                scope_key: '现场',
+                source_type: 'session',
+                params: row.params || {},
+            };
+        }));
+        renderParametersTab();
+        renderChips();
+    }
+
+    async function applyParamsSnapshot(data) {
+        var paramsList = data && Array.isArray(data.params_list) ? data.params_list : [];
+        if (!paramsList.length) return;
+        var ffAlias = factorFamilyAlias();
+        if (!ffAlias) return;
+        try {
+            var resp = await fetch('/replace_params', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ factor_family_alias: ffAlias, params_list: paramsList }),
+            });
+            var result = await resp.json();
+            if (!result.success) {
+                alert('恢复参数失败: ' + (result.error || ''));
+                return;
+            }
+            applyBackendFactorRows(result.factor_rows || []);
+            if (typeof window.refreshICModule === 'function') window.refreshICModule();
+        } catch (e) {
+            alert('恢复参数异常: ' + (e && e.message || e));
+        }
+    }
+
+    function summarizeParamsSnapshot(data) {
+        var list = (data && data.params_list) || [];
+        return list.map(function(row, idx) {
+            var parts = [];
+            Object.keys(row || {}).forEach(function(k) { parts.push(k + '=' + row[k]); });
+            return '参数组' + (idx + 1) + ': ' + (parts.join(', ') || '未设置');
+        });
+    }
+
+    if (window.Panels) {
+        window.Panels.register({
+            key: 'parameters',
+            kind: 'setting',
+            label: '参数设置',
+            icon: '⚙️',
+            el: '#single-factor-page-settings',
+            snapshot: {
+                order: 20,
+                get: function() { return { params_list: collectParamsList() }; },
+                set: applyParamsSnapshot,
+                summarize: summarizeParamsSnapshot,
+            },
         });
     }
 
@@ -833,7 +935,10 @@
                 onSetDefault: setProductPathDefault,
                 onCreate: function(selection, meta) {
                     setProductPathCandidates(productPathCandidates().concat([selection]));
-                    if (meta && meta.setAsDefault) state.values.product_path_selection = selection;
+                    if (meta && meta.setAsDefault) {
+                        state.values.product_path_selection = selection;
+                        if (state.containers.parameters) loadFactorLibraryParams(true).then(renderParametersTab);
+                    }
                     renderProductPathSelectionTab();
                     broadcastGlobalSettingsChanged();
                 },
@@ -850,20 +955,6 @@
             new MutationObserver(renderChips).observe(node, { childList: true, characterData: true, subtree: true });
         });
         document.addEventListener('singleFactorTemplateChanged', renderChips);
-        document.addEventListener('singleFactorFactorCandidatesChanged', function(event) {
-            var candidates = event && event.detail && Array.isArray(event.detail.candidates)
-                ? event.detail.candidates.slice()
-                : [];
-            state.values.factor_candidates = candidates;
-            var current = state.values.factor || '';
-            var exists = candidates.some(function(item) {
-                return String(item.alias || item.name || '') === String(current);
-            });
-            state.values.factor = exists ? current : (candidates[0] ? (candidates[0].alias || candidates[0].name || '') : '');
-            renderTabs();
-            renderChips();
-            broadcastGlobalSettingsChanged();
-        });
     }
 
     function init() {
@@ -895,9 +986,6 @@
         },
         sharedDefaultKeys: sharedGlobalDefaultKeys,
     };
-
-    // Expose for global_template_module.js snapshot collect to read session params
-    window._getSessionFactorParams = getSessionFactorParams;
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();

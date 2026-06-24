@@ -177,6 +177,11 @@
                     console.error('[SnapshotRegistry] summarize failed for:', entry.key, e);
                 }
             }
+            if (window.Panels) {
+                window.Panels.summarize(snapshot).forEach(function(s) {
+                    sections.push(_buildSummarySection(s.label, s.key, s.value, s.icon));
+                });
+            }
             sections = sections.concat(_summarizeBackendBacktestSettings(snapshot));
             if (!_registryByKey.group_settings && snapshot.group_settings) {
                 sections.push(_summarizeGroupSettingsSnapshot(snapshot.group_settings));
@@ -383,59 +388,9 @@
     // 注册 6 个内置模块（order 控制 apply 顺序）
     // ═══════════════════════════════════════════════════════════════════════
 
-    // ── 1. params_list (order=20) ──
-    SnapshotRegistry.register({
-        key: 'params_list',
-        order: 20,
-        label: '参数设置',
-        icon: '⚙️',
-        collect: function() {
-            // Read session params from the new settings panel's cached state
-            try {
-                // The settings panel caches in a module-level state;
-                // we fall back to reading the top-level section's param-aliases
-                // and constructing params_list from _sessionParams on window
-                var cached = window._getSessionFactorParams ? window._getSessionFactorParams() : null;
-                if (cached && cached.length > 0) {
-                    return cached.map(function(row) {
-                        var p = {};
-                        Object.keys(row.params || {}).forEach(function(k) {
-                            if (row.params[k] !== '') p[k] = row.params[k];
-                        });
-                        return p;
-                    });
-                }
-                return [];
-            } catch (e) { return []; }
-        },
-        apply: async function(params_list, ctx) {
-            if (!params_list || params_list.length === 0) return;
-            try {
-                var replaceResp = await fetch('/replace_params', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ factor_family_alias: FF_ALIAS, params_list: params_list })
-                });
-                var replaceData = await replaceResp.json();
-                if (!replaceData.success) {
-                    alert('恢复参数失败: ' + (replaceData.error || ''));
-                    return;
-                }
-                if (typeof window._renderParamFactorRows === 'function' && Array.isArray(replaceData.factor_rows)) {
-                    window._renderParamFactorRows(replaceData.factor_rows);
-                }
-                if (typeof window.refreshICModule === 'function') window.refreshICModule();
-            } catch (e) { alert('恢复参数异常: ' + e.message); }
-        },
-        summarize: function(pl) {
-            return pl.map(function(row, idx) {
-                var parts = [];
-                Object.keys(row || {}).forEach(function(k) {
-                    parts.push(k + '=' + row[k]);
-                });
-                return '参数组' + (idx + 1) + ': ' + (parts.join(', ') || '未设置');
-            });
-        }
-    });
+    // ── 参数设置（parameters）现通过 window.Panels 注册（main_page_settings_panel.js），
+    //    并在 collectSnapshot/applySnapshot/summarizeAll 中与本注册表的结果合并。
+    //    旧模板里的顶层 params_list 字段由 _migrateLegacySnapshot() 迁移为 parameters.params_list。
 
     // ── 6+7. GroupTest 依赖的 adapter 延迟注册（等 GroupTest 脚本加载后再注册） ──
     var _gtAdaptersRegistered = false;
@@ -512,10 +467,21 @@
     // 暴露给全局，供 lazy loader 在脚本加载完成后调用
     window._ensureGroupTestAdapters = _ensureGroupTestAdapters;
 
-    // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
+    // 旧模板把参数行存在顶层 params_list 字段；新注册表（window.Panels）把它
+    // 收在 parameters.params_list 下。加载老模板时原地补上 parameters 字段，
+    // 让 Panels 的 'parameters' 面板（main_page_settings_panel.js）能识别。
+    function _migrateLegacySnapshot(snapshot) {
+        if (snapshot && !snapshot.parameters && Array.isArray(snapshot.params_list)) {
+            snapshot.parameters = { params_list: snapshot.params_list };
+        }
+        return snapshot;
+    }
+
+    // ── 收集当前所有设置快照（通过注册表 + Panels 面板注册表） ───────────
     async function collectSnapshot() {
         await _ensureGroupTestAdapters();
         var snapshot = await SnapshotRegistry.collectAll();
+        if (window.Panels) Object.assign(snapshot, window.Panels.snapshot());
         if (window.GroupTest && GroupTest.backendSettings && typeof GroupTest.backendSettings.collectLocalSettings === 'function') {
             snapshot.local_settings = Object.assign(
                 {},
@@ -527,15 +493,17 @@
         return snapshot;
     }
 
-    // ── 应用快照（通过注册表，按 order 顺序） ───────────────────────────
+    // ── 应用快照（先 Panels 面板，再注册表，按各自 order 顺序） ──────────
     // tplId: 因子家族设置模板 ID
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
         await _ensureGroupTestAdapters();
+        _migrateLegacySnapshot(snapshot);
 
         var ctx = { tplId: tplId, snapshot: snapshot };
         var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
         if (!hasGroups) _clearGroupTestData();
+        if (window.Panels) await window.Panels.applySnapshot(snapshot);
         await SnapshotRegistry.applyAll(snapshot, ctx);
 
         refreshOuterSummaries();
@@ -560,7 +528,6 @@
 
     function refreshOuterSummaries() {
         setTimeout(function() {
-            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
             if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
             if (typeof window.updateCategorySummary === 'function') window.updateCategorySummary();
             if (typeof window.updateFreqSummary === 'function') window.updateFreqSummary();
@@ -736,7 +703,8 @@
         try {
             var template = await fetchTemplateDetail(tplId);
             if (title) title.textContent = template.name || '模板摘要';
-            var summaryHtml = SnapshotRegistry.summarizeAll(template.snapshot || {});
+            var snap = _migrateLegacySnapshot(template.snapshot || {});
+            var summaryHtml = SnapshotRegistry.summarizeAll(snap);
             if (body) body.innerHTML = summaryHtml || '<div class="global-template-empty">无设置信息</div>';
             bindTemplateSummaryTabs(body);
         } catch (error) {
