@@ -16,6 +16,8 @@
 (function() {
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
+    var Progress = window.SingleFactorProgress;
+    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
 
     // ═══════════════════════════════════════════════════════════════
     // Helpers
@@ -83,55 +85,22 @@
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
-            // 非隐藏阶段列表（按 phaseOrder）
-            var visiblePhases = [];
-            for (var i = 0; i < phaseOrder.length; i++) {
-                if (!skipPhases[phaseOrder[i]] && !hideInHistory[phaseOrder[i]]) {
-                    visiblePhases.push(phaseOrder[i]);
-                }
-            }
-            if (visiblePhases.indexOf(phase) < 0 && !skipPhases[phase] && !hideInHistory[phase]) {
-                visiblePhases.push(phase);
-            }
-            var numPhases = visiblePhases.length;
-            if (numPhases <= 0) return row.pct;
-
-            var phaseIdx = visiblePhases.indexOf(phase);
-            if (phaseIdx < 0) return row.pct;
-
-            // 每个阶段占 1/numPhases 的宽度
-            var segmentWidth = 100 / numPhases;
-            var localFrac;
-            if (row.phaseHistory[phase] && row.phaseHistory[phase].subSteps && !_subStepsEmpty(row.phaseHistory[phase].subSteps)) {
+            var localCompleted = completed || 0;
+            var localTotal = total || 0;
+            if (row.phaseHistory[phase] && row.phaseHistory[phase].subSteps && !Progress.isEmptyObject(row.phaseHistory[phase].subSteps)) {
                 // 有子步骤：聚合所有子步骤的完成度
-                var agg = _aggregateSubSteps(row.phaseHistory[phase].subSteps);
-                localFrac = agg.total > 0 ? Math.max(0, Math.min(1, agg.completed / agg.total)) : 0;
-            } else {
-                localFrac = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+                var agg = Progress.aggregateSubSteps(row.phaseHistory[phase].subSteps);
+                localCompleted = agg.completed;
+                localTotal = agg.total;
+            } else if (row.phaseHistory[phase]) {
+                var hist = row.phaseHistory[phase];
+                localCompleted = hist.completed;
+                localTotal = hist.total;
             }
-            var newPct = Math.round((phaseIdx + localFrac) * segmentWidth);
-            if (newPct > (row.pct || 0)) row.pct = newPct;
+
+            var hiddenPhases = Object.assign({}, skipPhases, hideInHistory);
+            row.pct = Progress.computeLinearPct(phaseOrder, hiddenPhases, phase, localCompleted, localTotal, row.pct);
             return row.pct;
-        }
-
-        /** 聚合子步骤：total = 所有子步骤 total 之和，completed = 所有已完成子步骤 total + 当前进行中子步骤的 completed */
-        function _aggregateSubSteps(subSteps) {
-            var aggTotal = 0, aggCompleted = 0;
-            var keys = Object.keys(subSteps);
-            for (var k = 0; k < keys.length; k++) {
-                var ss = subSteps[keys[k]];
-                aggTotal += ss.total || 0;
-                if (ss.done) {
-                    aggCompleted += ss.total || 0;
-                } else {
-                    aggCompleted += ss.completed || 0;
-                }
-            }
-            return { completed: aggCompleted, total: aggTotal };
-        }
-
-        function _subStepsEmpty(subSteps) {
-            return Object.keys(subSteps).length === 0;
         }
 
         // ---- 下拉历史面板 ----
@@ -219,11 +188,7 @@
             if (hideInHistory[phase]) {
                 var prevPhase = row.phaseHistory[row.currentPhase];
                 if (row.currentPhase && prevPhase) {
-                    // 只有当该阶段的实际进度已完成时才标记 done
-                    // 避免将未完成的阶段（如 simulate 0/1）错误标记为已完成
-                    if (prevPhase.total > 0 && prevPhase.completed >= prevPhase.total) {
-                        prevPhase.done = true;
-                    }
+                    Progress.completePhaseRecord(prevPhase);
                 }
                 row.currentPhase = phase;
                 _renderPhaseHistory(row);
@@ -233,18 +198,16 @@
             // 切换阶段时，标记上一个阶段完成（仅当前一阶段确实已完成时）
             if (row.currentPhase && row.currentPhase !== phase && row.phaseHistory[row.currentPhase]) {
                 var prev = row.phaseHistory[row.currentPhase];
-                // 只有当该阶段的实际进度已完成时才标记 done
-                if (prev.total > 0 && prev.completed >= prev.total) {
-                    prev.done = true;
-                }
+                Progress.completePhaseRecord(prev);
             }
             row.currentPhase = phase;
 
             var existing = row.phaseHistory[phase] || {};
-            var newCompleted = Math.max(existing.completed || 0, completed || 0);
-            var newTotal = Math.max(existing.total || 0, total || 0);
+            var normalized = Progress.normalizeProgress(completed, total, message);
+            var newCompleted = Math.max(existing.completed || 0, normalized.completed || 0);
+            var newTotal = Math.max(existing.total || 0, normalized.total || 0);
             // 如果 phase 被重新进入（如 simulate 在多个 batch 中重复），done 必须重置
-            var isNowDone = newTotal > 0 && newCompleted >= newTotal;
+            var isNowDone = normalized.terminal || (newTotal > 0 && newCompleted >= newTotal);
             // 跳过类消息（total=0 表示"已有缓存跳过"）不覆盖已有的有意义消息
             var skipLike = (total != null && total === 0) || (message && message.indexOf('跳过') >= 0);
             var bestMessage = existing.message || '';
@@ -257,9 +220,9 @@
             var existingSubKeys = existing.subStepKeys || [];
             if (subStep) {
                 var oldSub = existingSubs[subStep] || {};
-                var subComp = Math.max(oldSub.completed || 0, completed || 0);
-                var subTot = Math.max(oldSub.total || 0, total || 0);
-                var subDone = subTot > 0 && subComp >= subTot;
+                var subComp = Math.max(oldSub.completed || 0, normalized.completed || 0);
+                var subTot = Math.max(oldSub.total || 0, normalized.total || 0);
+                var subDone = normalized.terminal || (subTot > 0 && subComp >= subTot);
                 existingSubs[subStep] = {
                     completed: subComp,
                     total: subTot,
@@ -271,7 +234,7 @@
                 }
 
                 // 有子步骤时，阶段的 completed/total 按聚合计算
-                var agg = _aggregateSubSteps(existingSubs);
+                var agg = Progress.aggregateSubSteps(existingSubs);
                 newCompleted = agg.completed;
                 newTotal = agg.total;
                 isNowDone = newTotal > 0 && newCompleted >= newTotal;
@@ -381,8 +344,8 @@
             var row = _ensureCoverageBatchRow(index, '');
 
             _registerPhase(phase);
-            _computePct(row, phase, completed, total);
             _recordPhaseProgress(row, phase, completed, total, message, subStep);
+            _computePct(row, phase, completed, total);
 
             // 更新阶段名
             if (phase && !skipPhases[phase] && row.phaseEl) {
@@ -407,8 +370,13 @@
                 row.fillEl.style.background = _phaseColor(phase);
             }
             // 更新计数（仅当有意义的 progress 时更新）
-            if (total > 0 && !skipPhases[phase]) {
-                row.textEl.textContent = completed + '/' + total;
+            if (!skipPhases[phase]) {
+                var history = row.phaseHistory[phase];
+                var displayCompleted = history ? history.completed : completed;
+                var displayTotal = history ? history.total : total;
+                if (displayTotal > 0) {
+                    row.textEl.textContent = displayCompleted + '/' + displayTotal;
+                }
             } else if (phase === 'info' && row.currentPhase) {
                 // info 消息不更新计数，保持上一个阶段的计数
             }
@@ -433,8 +401,15 @@
                     if (!row) continue;
                     // 标记当前阶段完成
                     if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
-                        row.phaseHistory[row.currentPhase].done = !!success;
+                        if (success) Progress.completePhaseRecord(row.phaseHistory[row.currentPhase]);
+                        else row.phaseHistory[row.currentPhase].done = false;
                         if (message) row.phaseHistory[row.currentPhase].message = message;
+                    }
+                    if (success) {
+                        var phaseKeys = Object.keys(row.phaseHistory || {});
+                        for (var pk = 0; pk < phaseKeys.length; pk++) {
+                            Progress.completePhaseRecord(row.phaseHistory[phaseKeys[pk]]);
+                        }
                     }
                     if (success) {
                         row.pct = 100;

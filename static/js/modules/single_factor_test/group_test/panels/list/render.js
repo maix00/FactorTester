@@ -275,6 +275,7 @@
     function _chipOwnedByBatch(chip, group, batch) {
         if (!chip) return false;
         if (chip.label === 'factor_alias') return true;
+        if (chip.label === 'split_count') return true;
         if (chip.label !== 'product_path_selection' && chip.label !== 'backtest-product_path_selection') return false;
         var groupSelection = group && group.product_path_selection;
         if (!groupSelection) return true;
