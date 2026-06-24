@@ -26,14 +26,24 @@ const manager = GT.groupSettings.runGroupBatch.createManager({
 
 manager.registerPhases(['trade_data', 'simulate']);
 manager.syncRows(1);
+manager.updateRow(0, 'trade_data', 0, 1, '加载收益', 'load_returns');
+manager.updateRow(0, 'trade_data', 0, 1, '加载价格', 'load_prices');
+let row = manager.getRow(0);
+let tradeData = row.phaseHistory.trade_data;
+assert.equal(tradeData.subSteps.load_returns.done, true);
+assert.equal(tradeData.subSteps.load_returns.completed, 1);
+assert.equal(tradeData.subSteps.load_returns.total, 1);
+assert.equal(tradeData.completed, 1);
+assert.equal(tradeData.total, 2);
+
 manager.updateRow(0, 'trade_data', 0, 0, '已有缓存，跳过', 'calendar');
 manager.updateRow(0, 'simulate', 1, 1, '完成');
 
-const row = manager.getRow(0);
-const tradeData = row.phaseHistory.trade_data;
+row = manager.getRow(0);
+tradeData = row.phaseHistory.trade_data;
 assert.equal(tradeData.done, true);
-assert.equal(tradeData.completed, 1);
-assert.equal(tradeData.total, 1);
+assert.equal(tradeData.completed, 3);
+assert.equal(tradeData.total, 3);
 assert.equal(tradeData.subSteps.calendar.done, true);
 assert.equal(tradeData.subSteps.calendar.completed, 1);
 assert.equal(tradeData.subSteps.calendar.total, 1);

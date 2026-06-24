@@ -219,6 +219,10 @@
             var existingSubs = existing.subSteps || {};
             var existingSubKeys = existing.subStepKeys || [];
             if (subStep) {
+                var lastSubStep = existingSubKeys.length ? existingSubKeys[existingSubKeys.length - 1] : '';
+                if (lastSubStep && lastSubStep !== subStep && existingSubs[lastSubStep]) {
+                    Progress.completePhaseRecord(existingSubs[lastSubStep]);
+                }
                 var oldSub = existingSubs[subStep] || {};
                 var subComp = Math.max(oldSub.completed || 0, normalized.completed || 0);
                 var subTot = Math.max(oldSub.total || 0, normalized.total || 0);
