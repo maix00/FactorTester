@@ -92,10 +92,13 @@ def test_ic_response_replacement_discards_previous_alias_result():
 
     tester = _Tester()
     compute = _ICComputeResult()
+    compute.factor_by_column[new_factor.alias] = new_factor
+    compute.series_by_column_lag[new_factor.alias] = {0: pd.Series([0.2], dtype=float)}
+    compute.stats_by_column_lag[new_factor.alias] = {0: pd.Series({"mean": 0.2}, dtype=float)}
 
     _build_ic_response(
         tester,
-        [new_factor],
+        [new_factor.alias],
         [],
         compute,
         "paths",

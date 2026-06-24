@@ -12,13 +12,13 @@ def _execution() -> dict:
         "run_id": "run-1",
         "group_owner": [
             {
-                "submission_id": "submission-1",
+                "product_path_selection_id": "submission-1",
                 "group_id": "group-1",
                 "group_name": "第一组",
                 "group_index": 0,
             },
             {
-                "submission_id": "submission-1",
+                "product_path_selection_id": "submission-1",
                 "group_id": "group-2",
                 "group_name": "第二组",
                 "group_index": 1,

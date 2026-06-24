@@ -12,14 +12,14 @@ from tools.factors.tests.single_factor_test.group.group_tester import (
 )
 
 
-def _make_spec(simulation_index: int, submission_id: str, factor_alias: str, signal_cols: list[str], trade_cols: list[str], group_count: int, *, flat_count: int) -> GroupSimulationSpec:
+def _make_spec(simulation_index: int, product_path_selection_id: str, factor_alias: str, signal_cols: list[str], trade_cols: list[str], group_count: int, *, flat_count: int) -> GroupSimulationSpec:
     signal_membership = np.zeros((1, flat_count, len(signal_cols)), dtype=bool)
     for gi in range(flat_count):
         signal_membership[0, gi, gi % len(signal_cols)] = True
     return GroupSimulationSpec(
         simulation_index=simulation_index,
-        submission_id=submission_id,
-        tester=SimpleNamespace(alias=submission_id),
+        product_path_selection_id=product_path_selection_id,
+        tester=SimpleNamespace(alias=product_path_selection_id),
         factor_alias=factor_alias,
         n_groups=group_count,
         spec={},
@@ -30,8 +30,8 @@ def _make_spec(simulation_index: int, submission_id: str, factor_alias: str, sig
             T=1,
         ),
         base_membership_np=signal_membership.copy(),
-        flat_group_info=[{'group_index': i, 'id': f'{submission_id}-{i}'} for i in range(flat_count)],
-        group_name_map={i: f'{submission_id}-{i + 1}' for i in range(flat_count)},
+        flat_group_info=[{'group_index': i, 'id': f'{product_path_selection_id}-{i}'} for i in range(flat_count)],
+        group_name_map={i: f'{product_path_selection_id}-{i + 1}' for i in range(flat_count)},
         signal_products=frozenset({f'Product:{name}' for name in signal_cols}),
         signal_membership_np=signal_membership,
     )

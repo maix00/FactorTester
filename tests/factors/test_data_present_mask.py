@@ -82,7 +82,7 @@ def test_ic_merge_publishes_intermediate_source_mask_for_group_use(monkeypatch):
 
     _merge_ic_result(
         _ICComputeResult(),
-        ("key", 0),
+        ("key", 0, "rank", "alias"),
         (
             [factor],
             pd.Series([0.1], dtype=float),
