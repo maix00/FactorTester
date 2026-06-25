@@ -187,6 +187,20 @@
         return template.replace('{value}', displaySettingValue(setting, value));
     }
 
+    // 计数类设置（候选/多选列表）的真实数据存放在运行态数组里，而非 icSettingValues。
+    // 统一在这里解析出"有效值"，让 displaySettingValue 的计数（N项/N个已选）正确——
+    // 之前各处直接读 icSettingValues[key] 导致 chip 恒显 0。
+    function icEffectiveSettingValue(key) {
+        switch (key) {
+            case 'product_path_selections': return icProductPathSelections;
+            case 'product_path_candidates': return icSharedProductPathSelections;
+            case 'factor_candidates': return factorList;
+            case 'factor_selections': return collectFactorSelections();
+            case 'category_candidates': return Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates : [];
+            default: return icSettingValues[key];
+        }
+    }
+
     function isTabMounted(tabKey) {
         return icMountedSettingsTabs.indexOf(tabKey) >= 0;
     }
@@ -295,9 +309,7 @@
                     return rows.map(row => {
                     const setting = Object.assign({ key: row.key }, row.meta || {});
                         if (!setting.chip_template) return null;
-                    const value = (setting.key === 'product_path_selections' || setting.key === 'product_path_selection')
-                        ? displaySettingValue(setting, icProductPathSelections[0] || null)
-                        : displaySettingValue(setting, icSettingValues[row.key]);
+                    const value = displaySettingValue(setting, icEffectiveSettingValue(row.key));
                         return { setting, value };
                     }).filter(Boolean);
                 },
@@ -346,9 +358,7 @@
             (settingsByTab[tab.key] || []).forEach(row => {
                 const setting = Object.assign({ key: row.key }, row.meta || {});
                 if (!setting.chip_template || !settingVisible(setting)) return;
-                const value = row.key === 'product_path_selection'
-                    ? icProductPathSelections.map(selectionLabel).filter(Boolean).join(' / ')
-                    : icSettingValues[row.key];
+                const value = icEffectiveSettingValue(row.key);
                 if (value === undefined || value === null || value === '') return;
                 const chip = document.createElement('span');
                 chip.className = 'gt-backend-chip unified-backend-chip';
@@ -382,9 +392,7 @@
             rows.forEach(row => {
                 const meta = Object.assign({ key: row.key }, row.meta || {});
                 if (!settingVisible(meta)) return;
-                const value = meta.key === 'product_path_selection'
-                    ? icProductPathSelections.map(selectionLabel).filter(Boolean).join(' / ')
-                    : icSettingValues[row.key];
+                const value = icEffectiveSettingValue(row.key);
                 html += '<label class="gt-backtest-setting-row">';
                 html += '<span class="gt-backtest-setting-label">' + escapeHTML(meta.label || row.key) + '</span>';
                 html += '<span class="gt-backtest-setting-control">';
