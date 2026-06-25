@@ -923,42 +923,44 @@
 
     function localChipRow() { return document.getElementById('gt-local-settings-chip-row'); }
 
+    // 响应式 chip：manifest 建 FieldStore（backing = state.localValues），SettingsChips 订阅。
+    // 这是"tab/内容"那条 chip 行——点击 chip 打开/关闭对应设置 tab（保留 onOpen=openLocal）。
+    var gtLocalStore = null, gtLocalChipUnbind = null;
+    function ensureGtLocalStore() {
+        if (!gtLocalStore && state.index && window.FieldStore) {
+            gtLocalStore = window.FieldStore.create({ defaults: state.index.defaults, values: state.localValues });
+        }
+        return gtLocalStore;
+    }
+
     function renderLocalSettingChips() {
         var row = document.getElementById('gt-local-settings-chip-row');
         if (!row) return;
-        row.innerHTML = '';
-        if (!state.index) {
-            row.style.display = 'none';
-            return;
-        }
-        var missing = [];
+        if (!state.index) { row.style.display = 'none'; return; }
+        var store = ensureGtLocalStore();
+        if (store) store.setMany(state.localValues);
+        if (gtLocalChipUnbind) { gtLocalChipUnbind(); gtLocalChipUnbind = null; }
+        var keys = [];
         orderedMountedTabs(LOCAL).forEach(function(tabKey) {
-            var manifest = state.tabCache[tabKey];
-            if (!manifest) {
-                missing.push(tabKey);
-                return;
-            }
-            (manifest.settings || []).forEach(function(setting) {
-                if (!setting.chip_template) return;
-                if (!settingVisible(setting, LOCAL)) return;
-                var value = effectiveValue(setting, LOCAL);
-                if (value === undefined || value === null || value === '') return;
-                var chipNode = chip(chipText(setting, value), false);
-                chipNode.setAttribute('data-backtest-local-chip', setting.key);
-                chipNode.title = '打开' + ((manifest.tab && manifest.tab.label) || setting.tab_key || tabKey);
-                chipNode.style.cursor = 'pointer';
-                chipNode.addEventListener('click', function() { openLocal(tabKey); });
-                row.appendChild(chipNode);
+            settingKeysForTab(tabKey).forEach(function(key) {
+                if ((state.index.defaults[key] || {}).chip_template) keys.push(key);
             });
         });
-        row.style.display = row.childNodes.length ? 'flex' : 'none';
-        missing.forEach(function(tabKey) {
-            loadTab(tabKey).then(function() {
-                renderLocalSettingChips();
-            }).catch(function(error) {
-                console.error('[backend-settings] local chip load failed:', tabKey, error);
+        if (window.SettingsChips && store) {
+            gtLocalChipUnbind = window.SettingsChips.render(row, {
+                manifest: { defaults: state.index.defaults },
+                store: store,
+                settingKeys: keys,
+                tabOf: function(key) { return (state.index.defaults[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openLocal(tabKey); },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
             });
-        });
+        } else {
+            row.innerHTML = '';
+        }
+        var anyVisible = Array.prototype.some.call(row.children, function(c) { return c.style.display !== 'none'; });
+        row.style.display = anyVisible ? 'flex' : 'none';
     }
 
     function deactivateLocal() {
