@@ -63,7 +63,15 @@ class SettingDefinition:
     maximum: float | None = None
     step: float | None = None
     chip_template: str | None = None
-    info_overlay: dict[str, Any] | None = None  # 点击 chip 时打开的 overlay 配置：{'type': 'factor_info'|'product_path_selection_products'|...}
+    # 点击 chip 打开的信息 overlay 配置：
+    #   {'type': 'desc',   'desc': '...'}  —— 用统一的通用 overlay 解释该字段值的含义
+    #   {'type': 'custom', 'overlay': '<name>', 'desc': '...'}  —— 用注册的特殊组件
+    info_overlay: dict[str, Any] | None = None
+    # 与 info_overlay 平行：该设置字段的值在后端对应的"页内活对象"类（如 ProductPathSelection /
+    # Category）。可为类对象，或点分路径字符串（跨层时用字符串，避免 tools→server 依赖）。
+    # 仅用于服务端（不进 JSON manifest）：instance-info 接口据此到统一的 page_runtime 注册表
+    # 里按 (kind, id) 取已存活对象并序列化——不在前端用值重建对象。
+    instance_class: type | str | None = None
     help_text: str = ""
     engine_defaults: dict[str, Any] = field(default_factory=dict)
     disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -79,6 +87,9 @@ class SettingDefinition:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["scope_policy"] = self.scope_policy.value
+        # instance_class 是 Python 类，不能进 JSON manifest；只暴露"是否有实例信息"。
+        value.pop("instance_class", None)
+        value["has_instance"] = self.instance_class is not None
         return value
 
 

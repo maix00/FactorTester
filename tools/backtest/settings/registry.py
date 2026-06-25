@@ -118,6 +118,7 @@ class ApplicationSettings:
                     "module": setting.module,
                     "chip_template": setting.chip_template,
                     "info_overlay": setting.info_overlay,
+                    "has_instance": setting.instance_class is not None,
                     "engine_defaults": dict(setting.engine_defaults),
                     "serialization": dict(setting.serialization),
                     "visible_when": {
