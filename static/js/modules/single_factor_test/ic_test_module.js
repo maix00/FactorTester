@@ -1245,10 +1245,18 @@
         var icDecayHtml = '';
         var rollingIcHtml = '';
         if (factor.ic_decay && factor.ic_decay.length > 0) {
-            icDecayHtml = '<div style="margin-top:20px;"><h6>IC 衰减分析（多周期）</h6><div id="ic-decay-chart-' + subId + '-' + idx + '" style="width:100%; height:300px;"></div></div>';
+            icDecayHtml = '<div class="ic-result-section" data-result-section="ic_decay" style="margin-top:20px;"><h6>IC 衰减分析（多周期）</h6><div id="ic-decay-chart-' + subId + '-' + idx + '" style="width:100%; height:300px;"></div></div>';
+        } else {
+            icDecayHtml = '<div class="ic-result-section" data-result-section="ic_decay" style="margin-top:20px;color:#94a3b8;font-size:13px;">暂无 IC 衰减数据（运行前在设置中配置 ic_decay_lags）</div>';
         }
         if (factor.rolling_ic && factor.rolling_ic.dates && factor.rolling_ic.dates.length > 0) {
-            rollingIcHtml = '<div style="margin-top:20px;"><h6>滚动窗口 IC（窗口=' + factor.rolling_ic.window + '）</h6><div id="ic-rolling-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>';
+            rollingIcHtml = '<div class="ic-result-section" data-result-section="rolling_ic" style="margin-top:20px;"><h6>滚动窗口 IC（窗口=' + factor.rolling_ic.window + '）</h6><div id="ic-rolling-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>';
+        } else {
+            rollingIcHtml = '<div class="ic-result-section" data-result-section="rolling_ic" style="margin-top:20px;color:#94a3b8;font-size:13px;">暂无滚动 IC 数据（运行前在设置中配置 rolling_window）</div>';
+        }
+        // 未实现的结果分析：显式占位而非隐藏。
+        function _notImplemented(key, label) {
+            return '<div class="ic-result-section" data-result-section="' + key + '" style="margin-top:20px;padding:24px;text-align:center;color:#94a3b8;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;font-size:13px;">🚧 ' + label + '：未实现</div>';
         }
         container.innerHTML = ''
             + '<!-- 因子切换导航条 -->'
@@ -1257,13 +1265,15 @@
             + '<span style="font-size:12px;color:#888;">点击统计表表头切换因子</span>'
             + (allFactors && allFactors.length > 1 ? '<span style="font-size:12px;color:#666;">（共' + allFactors.length + '个因子，当前第' + (idx + 1) + '个）</span>' : '')
             + '</div>'
-            // IC 序列图 & 自相关衰减图
-            + '<div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:16px;">'
+            // IC 序列图 & 自相关衰减图（rank/pearson 主视图）
+            + '<div class="ic-result-section" data-result-section="cross_sectional_rank_ic cross_sectional_pearson_ic ic_summary" style="display:flex; flex-wrap:wrap; gap:20px; margin-top:16px;">'
             + '<div style="flex:1;min-width:45%;"><h6>IC 序列</h6><div id="ic-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>'
             + '<div style="flex:1;min-width:45%;"><h6>IC 自相关衰减</h6><div id="ic-acf-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>'
             + '</div>'
             + icDecayHtml
             + rollingIcHtml
+            + _notImplemented('by_group_ic', '分组 IC（by_group）')
+            + _notImplemented('coverage_missing', 'Coverage / Missing 覆盖率')
             + '<div style="margin-top:14px;padding:10px 12px;border:1px dashed #d8dee4;border-radius:8px;color:#64748b;font-size:12px;background:#fafcff;">产品级因子值、价格、收益标签和合约/期限对比已拆到上方“因子序列查看”模块。</div>';
 
         // 绘制 IC 图表
@@ -1280,6 +1290,12 @@
             drawRollingICChart('ic-rolling-chart-' + subId + '-' + idx, factor.rolling_ic);
         }
 
+        // 应用当前选中的结果分析 tab（默认第一个），只显示对应 section
+        var resultBar = document.querySelector('.ic-result-tabs[data-product-path-selection-id="' + subId + '"]');
+        if (resultBar) {
+            var activeBtn = resultBar.querySelector('.ic-result-tab-btn.active') || resultBar.querySelector('.ic-result-tab-btn');
+            if (activeBtn) applyICResultTabFilter(subId, activeBtn.getAttribute('data-result-tab'));
+        }
     }
 
     // 加载因子值和收益率并绘图
@@ -1941,7 +1957,38 @@
                 trigger.addEventListener('click', (e) => { e.preventDefault(); tab.show(); });
             });
         }
+        // 结果分析 tab（rank/pearson/summary/decay/rolling/by_group/coverage）：
+        // 点击切换显示对应 data-result-section，未实现的显式占位。委托绑定一次。
+        container.querySelectorAll('.ic-result-tabs').forEach(function(bar) {
+            bar.addEventListener('click', function(e) {
+                var btn = e.target.closest('.ic-result-tab-btn');
+                if (!btn) return;
+                applyICResultTabFilter(bar.getAttribute('data-product-path-selection-id'), btn.getAttribute('data-result-tab'));
+            });
+        });
     };
+
+    // 在某 product_path 的结果区内，只显示与 tabKey 匹配的 result section。
+    function applyICResultTabFilter(subId, tabKey) {
+        if (!subId || !tabKey) return;
+        var resultDiv = document.getElementById('ic-result-' + subId);
+        if (!resultDiv) return;
+        resultDiv.querySelectorAll('.ic-result-section').forEach(function(sec) {
+            var keys = (sec.getAttribute('data-result-section') || '').split(/\s+/);
+            sec.style.display = keys.indexOf(tabKey) >= 0 ? '' : 'none';
+        });
+        // 高亮当前 result tab 按钮
+        var bar = resultDiv.parentNode && resultDiv.parentNode.querySelector('.ic-result-tabs[data-product-path-selection-id="' + subId + '"]');
+        if (bar) {
+            bar.querySelectorAll('.ic-result-tab-btn').forEach(function(b) {
+                var on = b.getAttribute('data-result-tab') === tabKey;
+                b.style.borderColor = on ? '#2563eb' : '#cbd5e1';
+                b.style.background = on ? '#eff6ff' : '#fff';
+                b.style.color = on ? '#1d4ed8' : '#475569';
+            });
+        }
+    }
+    window.applyICResultTabFilter = applyICResultTabFilter;
 
     // 页面加载完成后，如果已有 submissions，则渲染
     // 收益率频率抽屉的按钮事件
