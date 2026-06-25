@@ -192,15 +192,36 @@
     // 之前各处直接读 icSettingValues[key] 导致 chip 恒显 0。
     function icEffectiveSettingValue(key) {
         switch (key) {
-            // 空选择语义 = 回退到全部候选（与后端 fallback="candidates" 一致），
-            // 所以默认状态 chip 显示候选总数而非 0。
-            case 'product_path_selections': return icProductPathSelections.length ? icProductPathSelections : icSharedProductPathSelections;
+            // 候选/选择的真实数据在运行态数组里；空选择回退由 FieldStore 的 fallback 处理。
+            case 'product_path_selections': return icProductPathSelections;
             case 'product_path_candidates': return icSharedProductPathSelections;
             case 'factor_candidates': return factorList;
             case 'factor_selections': return collectFactorSelections();
             case 'category_candidates': return Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates : [];
             default: return icSettingValues[key];
         }
+    }
+
+    // ── 响应式 chip：用 manifest 建 FieldStore，运行态值同步进去，chip 订阅字段 ──
+    var icStore = null;
+    var icChipUnbind = null;
+    function ensureICStore() {
+        if (!icStore && icSettingsManifest && window.FieldStore) {
+            icStore = window.FieldStore.create({ defaults: icSettingsManifest.defaults, values: icSettingValues });
+        }
+        return icStore;
+    }
+    // 把运行态候选/选择推进 store（标量字段经 store.set 写入，见控件 change）。
+    function syncICStore() {
+        var s = ensureICStore();
+        if (!s) return;
+        s.setMany({
+            product_path_selections: (icProductPathSelections || []).slice(),
+            product_path_candidates: (icSharedProductPathSelections || []).slice(),
+            factor_candidates: (factorList || []).slice(),
+            factor_selections: collectFactorSelections(),
+            category_candidates: Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates.slice() : [],
+        });
     }
 
     function isTabMounted(tabKey) {
@@ -354,22 +375,28 @@
         tabHtml += '<button type="button" data-ic-settings-tab="__manage__" class="' + (icActiveSettingsTab === '__manage__' ? 'active' : '') + '">+ 设置</button>';
         tabBar.innerHTML = tabHtml;
 
-        chipRow.innerHTML = '';
+        // chip 栏：manifest 驱动，订阅 FieldStore 字段，字段变更（含 fallback）自动回刷。
+        ensureICStore();
+        syncICStore();
+        const chipKeys = [];
         tabs.forEach(tab => {
             if (!isTabMounted(tab.key)) return;
             (settingsByTab[tab.key] || []).forEach(row => {
-                const setting = Object.assign({ key: row.key }, row.meta || {});
-                if (!setting.chip_template || !settingVisible(setting)) return;
-                const value = icEffectiveSettingValue(row.key);
-                if (value === undefined || value === null || value === '') return;
-                const chip = document.createElement('span');
-                chip.className = 'gt-backend-chip unified-backend-chip';
-                chip.setAttribute('data-ic-settings-tab', tab.key);
-                chip.title = '打开' + (tab.label || tab.key);
-                chip.innerHTML = renderChipHtml(settingChipText(setting, value));
-                chipRow.appendChild(chip);
+                if ((row.meta || {}).chip_template) chipKeys.push(row.key);
             });
         });
+        if (icChipUnbind) { icChipUnbind(); icChipUnbind = null; }
+        if (window.SettingsChips && icStore) {
+            icChipUnbind = window.SettingsChips.render(chipRow, {
+                manifest: icSettingsManifest,
+                store: icStore,
+                settingKeys: chipKeys,
+                tabOf: function(key) { return (icSettingsManifest.defaults[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openTab(tabKey); },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
+            });
+        }
 
         function renderTabContent(tabKey) {
             const tab = tabs.find(item => item.key === tabKey);
@@ -434,7 +461,9 @@
                 control.addEventListener('change', function() {
                     const key = this.getAttribute('data-ic-setting');
                     const meta = defaults[key] || {};
-                    icSettingValues[key] = meta.control_template === 'number' ? Number(this.value) : this.value;
+                    const v = meta.control_template === 'number' ? Number(this.value) : this.value;
+                    icSettingValues[key] = v;
+                    if (icStore) icStore.set(key, v);  // 通知订阅该字段的 chip 即时回刷
                     if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
                     else renderICSettingsPanel(manifest);
                 });
