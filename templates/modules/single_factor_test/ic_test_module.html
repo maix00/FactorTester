@@ -1,14 +1,5 @@
-<!-- 收益率频率不再作为页面级 overlay；IC 设置模块按需提供 UI。
-     旧 IC 运行逻辑仍读取该隐藏表体，以保持默认全选/默认跟随因子频率。 -->
-<div id="ic-freq-state" hidden>
-    <table>
-        <tbody id="ic-freq-table-body">
-            <tr><td colspan="3">暂无因子数据</td></tr>
-        </tbody>
-    </table>
-    <span id="ic-freq-summary-text">默认使用因子$F</span>
-</div>
-
+<!-- 旧的隐藏频率抽屉(ic-freq-state)已删除：因子选择 + 每因子 return_freq 现由
+     IC 设置里的"因子"tab 与"收益率频率"tab 直接管理 factor_selections。 -->
 <div class="module" id="ic_test_module" style="margin-top:24px;">
     <div class="section-title">IC测试</div>
     <div id="ic-settings-container" class="backend-settings-shell" style="margin-bottom:10px;"></div>

@@ -13,7 +13,7 @@
     let icSettingsManifest = null;
     let icSettingValues = {};
     let icActiveSettingsTab = null;
-    let icMountedSettingsTabs = ['factor', 'category', 'product_path_selection'];
+    let icMountedSettingsTabs = ['factor', 'return_frequency', 'category', 'product_path_selection'];
     let icSharedProductPathSelections = [];
     let icSharedProductPathSelectionsLoaded = false;
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
@@ -386,6 +386,10 @@
                 renderICFactorSelectionTab();
                 return;
             }
+            if (tabKey === 'return_frequency') {
+                renderICReturnFreqTab();
+                return;
+            }
             if (tabKey === 'category') {
                 renderICCategoryTab();
                 return;
@@ -504,25 +508,26 @@
             });
         }
 
-        // IC 因子（多选 factor_selections）：从因子候选（factorList）多选。频率抽屉是
-        // factor_selections 的真源，本 tab 切换即勾选/取消抽屉中的对应因子。
+        // IC 因子（多选）：从因子列表多选，直接写 factor_selections（不再经频率抽屉）。
         function renderICFactorSelectionTab() {
             if (!factorList.length) {
-                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载因子候选...</div>';
-                fetchFactorList().then(function() { renderICFactorSelectionTab(); });
+                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载因子...</div>';
+                fetchFactorList().then(function() { ensureFactorSelectionsDefault(); renderICFactorSelectionTab(); });
                 return;
             }
-            var selected = {};
-            collectFactorSelections().forEach(function(f) { selected[f.alias] = true; });
+            ensureFactorSelectionsDefault();
             var html = '<div class="backend-settings-grid">'
                 + '<div class="gt-backtest-setting-row">'
                 + '<span class="gt-backtest-setting-label">IC 因子（多选）</span>'
-                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(Object.keys(selected).length)) + '</span></span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(getFactorSelections().length) + ' / ' + factorList.length) + '</span></span>'
                 + '</div>'
+                + '<div style="grid-column:1 / -1;display:flex;gap:6px;margin-bottom:6px;">'
+                + '<button type="button" id="ic-factor-all" style="height:24px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;font-size:11px;cursor:pointer;">全选</button>'
+                + '<button type="button" id="ic-factor-none" style="height:24px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;font-size:11px;cursor:pointer;">全不选</button></div>'
                 + '<div style="grid-column:1 / -1;max-height:280px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
             factorList.forEach(function(f) {
                 var alias = f.alias || f.name || '';
-                var active = !!selected[alias];
+                var active = isFactorSelected(alias);
                 html += '<div class="ic-factor-toggle" data-factor-alias="' + escapeHTML(alias) + '"'
                     + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;'
                     + (active ? 'background:#e8f4fd;' : '') + 'border-bottom:1px solid #f0f2f5;font-size:12px;">'
@@ -534,14 +539,46 @@
             contentHost.innerHTML = html;
             contentHost.querySelectorAll('.ic-factor-toggle').forEach(function(row) {
                 row.addEventListener('click', function() {
-                    var alias = row.getAttribute('data-factor-alias');
-                    var tbody = document.getElementById('ic-freq-table-body');
-                    var cb = tbody && Array.prototype.find.call(
-                        tbody.querySelectorAll('.factor-checkbox'),
-                        function(c) { return c.getAttribute('data-factor-alias') === alias; }
-                    );
-                    if (cb) { cb.checked = !cb.checked; updateFreqSummary(); }
+                    toggleFactorSelection(row.getAttribute('data-factor-alias'));
                     renderICFactorSelectionTab();
+                });
+            });
+            var allBtn = document.getElementById('ic-factor-all');
+            if (allBtn) allBtn.addEventListener('click', function() {
+                setFactorSelections(factorList.map(function(f) {
+                    var a = f.alias || f.name; var hit = getFactorSelections().find(function(s){ return s.alias === a; });
+                    return { alias: a, return_freq: hit ? hit.return_freq : '' };
+                }));
+                renderICFactorSelectionTab();
+            });
+            var noneBtn = document.getElementById('ic-factor-none');
+            if (noneBtn) noneBtn.addEventListener('click', function() { setFactorSelections([]); renderICFactorSelectionTab(); });
+        }
+
+        // IC 收益率频率：从选中的 factor_selections 出发，一行一个因子一个频率输入框，
+        // 默认占位 $F（跟随因子频率），用户可填自定义频率（文本框，非下拉）。
+        function renderICReturnFreqTab() {
+            ensureFactorSelectionsDefault();
+            var sel = getFactorSelections();
+            var html = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row"><span class="gt-backtest-setting-label">收益率频率（每因子）</span>'
+                + '<span class="gt-backtest-setting-control" style="font-size:11px;color:#94a3b8;">默认 $F = 跟随因子频率；可填自定义如 1d / 5m</span></div>'
+                + '<div style="grid-column:1 / -1;max-height:300px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            if (!sel.length) {
+                html += '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px;">未选因子，请先在"因子"tab 选择</div>';
+            } else {
+                sel.forEach(function(s) {
+                    html += '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f0f2f5;font-size:12px;">'
+                        + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(s.alias) + '</span>'
+                        + '<input type="text" class="ic-freq-input" data-factor-alias="' + escapeHTML(s.alias) + '" value="' + escapeHTML(s.return_freq || '') + '" placeholder="$F" style="width:120px;height:26px;padding:0 8px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;">'
+                        + '</div>';
+                });
+            }
+            html += '</div></div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('.ic-freq-input').forEach(function(inp) {
+                inp.addEventListener('input', function() {
+                    setFactorReturnFreq(inp.getAttribute('data-factor-alias'), inp.value.trim());
                 });
             });
         }
@@ -1909,69 +1946,10 @@
         }
     };
 
-    // Populate hidden return-frequency state until IC settings UI is lazy-loaded.
-    function populateFreqDrawer(factors) {
-        const tbody = document.getElementById('ic-freq-table-body');
-        const summaryText = document.getElementById('ic-freq-summary-text');
-        if (!tbody || !summaryText) return;
-        if (!factors || factors.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
-            summaryText.textContent = '暂无因子数据';
-            return;
-        }
-        let rows = '';
-        let customCount = 0;
-        factors.forEach(f => {
-            const defaultReturnFreq = f.default_return_freq || '';
-            const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
-            const cat = (f.category || '').trim();
-            rows += `<tr>
-                <td><label><input type="checkbox" class="factor-checkbox" data-factor-alias="${f.alias}" checked> ${f.name}</label></td>
-                <td style="color:#667085;font-size:12px;">${cat}</td>
-                <td>
-                    <input
-                        type="text"
-                        class="factor-return-freq-input form-control form-control-sm"
-                        data-factor-alias="${f.alias}"
-                        value=""
-                        placeholder="留空则使用${defaultHint}"
-                        title="留空则使用${defaultHint}；也可手动填写如 5min、1H、1D"
-                        style="width:220px; display:inline-block;"
-                    >
-                    <div style="margin-top:4px; font-size:12px; color:#6b7280;">${defaultHint}</div>
-                </td>
-            </tr>`;
-        });
-        tbody.innerHTML = rows;
-        // 更新摘要
-        updateFreqSummary();
-        // 监听输入变化更新摘要
-        tbody.querySelectorAll('.factor-return-freq-input').forEach(inp => {
-            inp.addEventListener('input', updateFreqSummary);
-        });
-        tbody.querySelectorAll('.factor-checkbox').forEach(cb => {
-            cb.addEventListener('change', updateFreqSummary);
-        });
-    }
-    
-    function updateFreqSummary() {
-        // 频率抽屉是 factor_selections 真源；变化时同步到 icSettingValues 供 chip 计数/快照。
-        icSettingValues.factor_selections = collectFactorSelections();
-        const summaryText = document.getElementById('ic-freq-summary-text');
-        if (!summaryText) return;
-        const tbody = document.getElementById('ic-freq-table-body');
-        if (!tbody) return;
-        const inputs = tbody.querySelectorAll('.factor-return-freq-input');
-        let customCount = 0;
-        inputs.forEach(inp => { if (inp.value.trim()) customCount++; });
-        const checkedCount = tbody.querySelectorAll('.factor-checkbox:checked').length;
-        if (customCount > 0) {
-            summaryText.textContent = `${customCount}个因子设置了自定义频率，${checkedCount}个因子参与测试`;
-        } else {
-            summaryText.textContent = `默认使用因子$F，${checkedCount}个因子参与测试`;
-        }
-    }
-    window.updateFreqSummary = updateFreqSummary;
+    // 旧的频率抽屉（populateFreqDrawer/updateFreqSummary/抽屉勾选框）已删除：
+    // 因子选择 + 每因子 return_freq 现由"因子"tab 与"收益率频率"tab 直接管理
+    // factor_selections（见 renderICFactorSelectionTab / renderICReturnFreqTab）。
+    window.updateFreqSummary = function() {};  // 兼容旧调用（global_template 摘要刷新）
 
     // 弃用旧的内联面板生成，保留兼容性（返回空字符串）
     function buildFactorConfigPanel(subId, factors) {
@@ -1997,10 +1975,9 @@
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请在 IC 测试设置中选择产品路径。</div>';
             return;
         }
-        // 获取因子列表（如果尚未获取）
+        // 获取因子列表（如果尚未获取），并确保 factor_selections 默认全选
         if (factorList.length === 0) await fetchFactorList();
-        // 填充收益率频率抽屉（全局，所有tab共享）
-        populateFreqDrawer(factorList);
+        ensureFactorSelectionsDefault();
         let tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         let panelsHtml = '<div class="tab-content" id="icTabContent">';
         icProductPathSelections.forEach((sub, idx) => {
@@ -2072,56 +2049,46 @@
     window.applyICResultTabFilter = applyICResultTabFilter;
 
     // 页面加载完成后，如果已有 submissions，则渲染
-    // 收益率频率抽屉的按钮事件
-    function initFreqDrawerButtons() {
-        const selectAll = document.getElementById('ic-freq-select-all');
-        const deselectAll = document.getElementById('ic-freq-deselect-all');
-        const resetFreq = document.getElementById('ic-freq-reset');
-        if (selectAll) selectAll.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = true);
-            updateFreqSummary();
-        };
-        if (deselectAll) deselectAll.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = false);
-            updateFreqSummary();
-        };
-        if (resetFreq) resetFreq.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input').forEach(input => input.value = '');
-            updateFreqSummary();
-        };
-    }
+    // 频率抽屉已删除——因子/收益率频率改由设置 tab 管理。保留空函数兼容旧调用。
+    function initFreqDrawerButtons() {}
 
     // 因子选择(factor_selections)：从频率抽屉读勾选的因子 [{alias, return_freq}]，
-    // 与 runIC 取选中因子的方式一致——即 IC 的多选因子字段。
-    function collectFactorSelections() {
-        var out = [];
-        var tbody = document.getElementById('ic-freq-table-body');
-        if (!tbody) return out;
-        tbody.querySelectorAll('.factor-checkbox:checked').forEach(function(cb) {
-            var alias = cb.getAttribute('data-factor-alias');
-            var input = Array.prototype.find.call(
-                tbody.querySelectorAll('.factor-return-freq-input'),
-                function(inp) { return inp.getAttribute('data-factor-alias') === alias; }
-            );
-            out.push({ alias: alias, return_freq: input ? input.value.trim() : '' });
-        });
-        return out;
+    // ── 因子选择(factor_selections) 唯一真源（取代旧频率抽屉）──────────────────
+    // 形如 [{alias, return_freq}]，return_freq 空 = 跟随因子频率 $F。
+    function getFactorSelections() {
+        if (!Array.isArray(icSettingValues.factor_selections)) icSettingValues.factor_selections = [];
+        return icSettingValues.factor_selections;
     }
-
+    function setFactorSelections(list) {
+        icSettingValues.factor_selections = (Array.isArray(list) ? list : []).map(function(it) {
+            return { alias: it.alias, return_freq: it.return_freq || '' };
+        });
+    }
+    // 未选时默认选中全部因子（return_freq 默认空 = $F）。
+    function ensureFactorSelectionsDefault() {
+        if (!getFactorSelections().length && factorList.length) {
+            setFactorSelections(factorList.map(function(f) { return { alias: f.alias || f.name, return_freq: '' }; }));
+        }
+    }
+    function collectFactorSelections() {
+        ensureFactorSelectionsDefault();
+        return getFactorSelections().slice();
+    }
     function applyFactorSelections(list) {
-        if (!Array.isArray(list)) return;
-        var byAlias = {};
-        list.forEach(function(it) { if (it && it.alias) byAlias[it.alias] = it; });
-        var tbody = document.getElementById('ic-freq-table-body');
-        if (!tbody) return;
-        tbody.querySelectorAll('.factor-checkbox').forEach(function(cb) {
-            cb.checked = Object.prototype.hasOwnProperty.call(byAlias, cb.getAttribute('data-factor-alias'));
-        });
-        tbody.querySelectorAll('.factor-return-freq-input').forEach(function(inp) {
-            var hit = byAlias[inp.getAttribute('data-factor-alias')];
-            if (hit && hit.return_freq) inp.value = hit.return_freq;
-        });
-        updateFreqSummary();
+        if (Array.isArray(list)) setFactorSelections(list);
+    }
+    function isFactorSelected(alias) {
+        return getFactorSelections().some(function(s) { return s.alias === alias; });
+    }
+    function toggleFactorSelection(alias) {
+        var sel = getFactorSelections();
+        var i = sel.findIndex(function(s) { return s.alias === alias; });
+        if (i >= 0) sel.splice(i, 1);
+        else sel.push({ alias: alias, return_freq: '' });
+    }
+    function setFactorReturnFreq(alias, freq) {
+        var hit = getFactorSelections().find(function(s) { return s.alias === alias; });
+        if (hit) hit.return_freq = freq;
     }
 
     // ── 模板快照：把 IC 的设置/选择注册进因子家族设置模板 ──────────────────
@@ -2147,10 +2114,10 @@
             icProductPathSelections = data.product_path_selections.slice();
             mergeICProductPathCandidates(icProductPathSelections);
         }
+        // factor_selections 现在是纯字段，须在渲染前恢复，因子/频率 tab 才显示正确。
+        if (Array.isArray(data.factor_selections)) applyFactorSelections(data.factor_selections);
         renderICSettingsPanel(icSettingsManifest);
         await window.renderICTabs(icProductPathSelections);
-        // renderICTabs 重建了频率抽屉，恢复因子勾选要在其后
-        applyFactorSelections(data.factor_selections);
     }
 
     function registerICSnapshot() {
@@ -2179,10 +2146,9 @@
     }
 
     async function initICModule() {
-        initFreqDrawerButtons();
         registerICSnapshot();
         await fetchFactorList();
-        populateFreqDrawer(factorList);
+        ensureFactorSelectionsDefault();
         await window.renderICTabs(icProductPathSelections);
     }
 
@@ -2196,7 +2162,7 @@
     window.refreshICModule = async function() {
         console.log('刷新 IC 模块因子列表');
         await fetchFactorList();  // 重新获取因子列表
-        populateFreqDrawer(factorList);  // 刷新收益率频率抽屉
+        ensureFactorSelectionsDefault();
         await window.renderICTabs(icProductPathSelections);
         window.factorList = factorList;
     };
