@@ -30,6 +30,8 @@ PRODUCT_PATH_CANDIDATE_KEYS = ("product_path_candidates",)
 FACTOR_SELECTION_KEYS = ("factor",)
 FACTOR_SELECTIONS_KEYS = ("factor_selections",)
 FACTOR_CANDIDATE_KEYS = ("factor_candidates",)
+CATEGORY_SELECTION_KEYS = ("category",)
+CATEGORY_CANDIDATE_KEYS = ("category_candidates",)
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
 
@@ -314,6 +316,73 @@ def register_factor_selections_base(
             "fallback": "candidates",
             "id_keys": ("alias", "name", "factor_alias"),
             "label_keys": ("alias", "name", "label"),
+        },
+    ))
+
+
+# ── 分类(Category)：与 factor / product_path 同构的三元组，驱动 by_group IC ──────
+# 一个 Category = 一组互不相交的路径组(类别)，组外产品归入"其他"。候选可来自
+# 数据源已定义的 Category（如 LocalCNFutures 的 行业/日夜盘/行业×日夜盘，来源"数据库"）、
+# 用户自定义("自定义")、或现场新增("现场")。
+def register_category_candidate_list_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "category",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "category_candidates",
+        "分类候选列表",
+        tab,
+        "custom",
+        [],
+        scope_policy,
+        module="category_grouping",
+        chip_template="分类候选: {value}",
+        help_text="分类候选：数据源内置(数据库) + 用户自定义 + 现场新增；每个分类是一组不相交的路径组。",
+        serialization={
+            "kind": "category_candidate_list",
+            "display_order": 10,
+            "item_kind": "category",
+            "shared_page_field": "category_candidates",
+            "selection_field": "category",
+            "category_source": "data_source_categories",
+            "fallback_policy": (
+                "copy_page_candidates",
+                "load_data_source_categories_when_page_empty",
+            ),
+            "id_keys": ("name", "id"),
+            "label_keys": ("name", "label"),
+            "mutation_scope": {
+                "page": "page_candidates_only",
+                "module": "module_candidates_only",
+            },
+        },
+    ))
+
+
+def register_category_selection_base(
+    app: ApplicationSettings,
+    *,
+    tab: str = "category",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
+) -> None:
+    app.register_setting(SettingDefinition(
+        "category",
+        "分类",
+        tab,
+        "select",
+        "",
+        scope_policy,
+        module="category_grouping",
+        chip_template="分类: {value}",
+        serialization={
+            "kind": "category_selection",
+            "display_order": 20,
+            "candidate_field": "category_candidates",
+            "shared_page_field": "category",
+            "id_keys": ("name", "id"),
+            "label_keys": ("name", "label"),
         },
     ))
 
@@ -1010,10 +1079,11 @@ def group_test_settings() -> ApplicationSettings:
 
 def ic_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("ic_test")
-    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
+    app.register_accepted_global_default_keys(*RUN_WINDOW_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *CATEGORY_CANDIDATE_KEYS, *CATEGORY_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS)
     for module in (
         SettingModule("factor_execution", "因子执行", "factor", 10),
         SettingModule("product_selection", "品种/路径选择", "product", 20),
+        SettingModule("category_grouping", "分类分组", "product", 25),
         SettingModule("run_window", "运行时间范围", "backtest", 30),
         SettingModule("market_data_source", "数据源", "market_data", 35),
         SettingModule("market_data_frequency", "数据频率", "market_data", 36),
@@ -1027,6 +1097,7 @@ def ic_test_settings() -> ApplicationSettings:
         app.register_module(module)
     for tab in (
         SettingTab("factor", "因子执行", (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 10),
+        SettingTab("category", "分类", (TabMountPoint.LOCAL_SETTINGS,), "custom", 15),
         SettingTab(
             "product_path_selection",
             "产品路径",
@@ -1083,6 +1154,9 @@ def ic_test_settings() -> ApplicationSettings:
     register_factor_selections_base(app)
     register_product_path_candidate_list_base(app)
     register_product_path_selections_base(app)
+    # 分类：by_group IC 的分组维度（候选 + 选中），管理方式同 product_path/factor。
+    register_category_candidate_list_base(app)
+    register_category_selection_base(app)
     register_market_data_base(app, include_price_type=False)
     register_run_window_base(app)
     app.register_setting(SettingDefinition(

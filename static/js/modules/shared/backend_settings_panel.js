@@ -191,7 +191,8 @@
             return '无';
         }
         if (serializationKind === 'product_path_candidate_list'
-            || serializationKind === 'factor_candidate_list') {
+            || serializationKind === 'factor_candidate_list'
+            || serializationKind === 'category_candidate_list') {
             return (Array.isArray(value) ? value.length : 0) + '项';
         }
         // 多选列表（复数 selections）：显示已选个数。

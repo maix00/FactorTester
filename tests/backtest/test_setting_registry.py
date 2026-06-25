@@ -88,7 +88,7 @@ def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "factor", "product_path_selection", "time", "data_source", "frequency",
+        "factor", "category", "product_path_selection", "time", "data_source", "frequency",
         "return_frequency", "delay", "ic_method", "cross_section", "summary",
     ]
     assert index["default_mounted_tabs"] == {
