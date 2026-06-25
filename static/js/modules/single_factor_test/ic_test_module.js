@@ -1512,21 +1512,13 @@
         const resultDiv = document.getElementById(`ic-result-${subId}`);
         if (!btn || !statusSpan || !resultDiv) return;
 
-        // 收集选中的因子及频率（从全局抽屉读取）
-        const selectedFactors = [];
-        const checkboxes = document.querySelectorAll('#ic-freq-table-body .factor-checkbox:checked');
-        if (checkboxes.length === 0) {
+        // 收集选中的因子及频率（factor_selections，与快照/抽屉同一来源）
+        const selectedFactors = collectFactorSelections();
+        if (selectedFactors.length === 0) {
             statusSpan.innerText = '请至少选择一个因子';
             statusSpan.style.color = '#d40000';
             return;
         }
-        checkboxes.forEach(cb => {
-            const alias = cb.getAttribute('data-factor-alias');
-            const allFreqInputs = document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input');
-            const freqInput = Array.from(allFreqInputs).find(input => input.getAttribute('data-factor-alias') === alias) || null;
-            const return_freq = freqInput ? freqInput.value.trim() : '';
-            selectedFactors.push({ alias, return_freq });
-        });
         const selection = selectionById(subId);
         if (!selection) {
             statusSpan.innerText = '错误：未找到产品路径选择';
@@ -1926,11 +1918,45 @@
         };
     }
 
+    // 因子选择(factor_selections)：从频率抽屉读勾选的因子 [{alias, return_freq}]，
+    // 与 runIC 取选中因子的方式一致——即 IC 的多选因子字段。
+    function collectFactorSelections() {
+        var out = [];
+        var tbody = document.getElementById('ic-freq-table-body');
+        if (!tbody) return out;
+        tbody.querySelectorAll('.factor-checkbox:checked').forEach(function(cb) {
+            var alias = cb.getAttribute('data-factor-alias');
+            var input = Array.prototype.find.call(
+                tbody.querySelectorAll('.factor-return-freq-input'),
+                function(inp) { return inp.getAttribute('data-factor-alias') === alias; }
+            );
+            out.push({ alias: alias, return_freq: input ? input.value.trim() : '' });
+        });
+        return out;
+    }
+
+    function applyFactorSelections(list) {
+        if (!Array.isArray(list)) return;
+        var byAlias = {};
+        list.forEach(function(it) { if (it && it.alias) byAlias[it.alias] = it; });
+        var tbody = document.getElementById('ic-freq-table-body');
+        if (!tbody) return;
+        tbody.querySelectorAll('.factor-checkbox').forEach(function(cb) {
+            cb.checked = Object.prototype.hasOwnProperty.call(byAlias, cb.getAttribute('data-factor-alias'));
+        });
+        tbody.querySelectorAll('.factor-return-freq-input').forEach(function(inp) {
+            var hit = byAlias[inp.getAttribute('data-factor-alias')];
+            if (hit && hit.return_freq) inp.value = hit.return_freq;
+        });
+        updateFreqSummary();
+    }
+
     // ── 模板快照：把 IC 的设置/选择注册进因子家族设置模板 ──────────────────
     function collectICSnapshot() {
         return {
             settings: Object.assign({}, icSettingValues),
             product_path_selections: (icProductPathSelections || []).slice(),
+            factor_selections: collectFactorSelections(),
             mounted_tabs: (icMountedSettingsTabs || []).slice(),
         };
     }
@@ -1950,6 +1976,8 @@
         }
         renderICSettingsPanel(icSettingsManifest);
         await window.renderICTabs(icProductPathSelections);
+        // renderICTabs 重建了频率抽屉，恢复因子勾选要在其后
+        applyFactorSelections(data.factor_selections);
     }
 
     function registerICSnapshot() {
@@ -1966,6 +1994,8 @@
                 var lines = [];
                 var n = (d && d.product_path_selections || []).length;
                 if (n) lines.push('产品路径选择: ' + n + ' 个');
+                var fn = (d && d.factor_selections || []).length;
+                if (fn) lines.push('因子选择: ' + fn + ' 个');
                 ['ic_correlation', 'ic_lag', 'return_price_basis', 'return_frequency_mode', 'by_group', 'group_adjust', 'min_cross_section_count'].forEach(function(k) {
                     if (s[k] !== undefined && s[k] !== '' && s[k] !== null) lines.push(k + ': ' + s[k]);
                 });
