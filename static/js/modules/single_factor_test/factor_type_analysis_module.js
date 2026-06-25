@@ -131,15 +131,7 @@
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
-    function settingChipParts(setting) {
-        if (!setting || !setting.chip_template) return null;
-        if (!settingVisible(setting, state.values || {})) return null;
-        var value = displaySettingValue(setting, effectiveValue(setting.key));
-        var text = String(setting.chip_template).replace('{value}', value);
-        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
-        if (match && match[2]) return { label: match[1], value: match[2] };
-        return { label: setting.label || setting.key, value: value };
-    }
+    // settingChipParts 已删除：chip 改由 manifest 驱动的 SettingsChips + FieldStore 渲染。
 
     function renderChipHtml(labelOrText, value) {
         var text = value === undefined || value === null || value === ''
@@ -356,21 +348,33 @@
         });
     }
 
+    // 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅。
+    var ftaStore = null, ftaChipUnbind = null;
+    function ensureFtaStore() {
+        if (!ftaStore && state.manifest && window.FieldStore) {
+            ftaStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
+        }
+        return ftaStore;
+    }
+
     function renderSettingChips() {
         if (!state.manifest) return;
-        var defaults = state.manifest.defaults || {};
         var row = document.getElementById('factor-type-analysis-chip-row');
         if (!row) return;
-        row.innerHTML = '';
-        window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(Object.keys(defaults), defaults).forEach(function (key) {
-            var setting = Object.assign({ key: key }, defaults[key] || {});
-            var parts = settingChipParts(setting);
-            if (!parts) return;
-            var span = document.createElement('span');
-            span.className = 'gt-backend-chip unified-backend-chip';
-            span.innerHTML = renderChipHtml(parts.label, parts.value);
-            row.appendChild(span);
-        });
+        ensureFtaStore();
+        if (ftaStore) ftaStore.setMany(state.values);
+        if (ftaChipUnbind) { ftaChipUnbind(); ftaChipUnbind = null; }
+        var defaults = state.manifest.defaults || {};
+        var keys = window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(Object.keys(defaults), defaults)
+            .filter(function (k) { return defaults[k] && defaults[k].chip_template; });
+        if (window.SettingsChips && ftaStore) {
+            ftaChipUnbind = window.SettingsChips.render(row, {
+                manifest: state.manifest, store: ftaStore, settingKeys: keys,
+                escapeHTML: escapeHTML, renderChipHtml: renderChipHtml,
+            });
+        } else {
+            row.innerHTML = '';
+        }
     }
 
     // =========================================================
