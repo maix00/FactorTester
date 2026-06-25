@@ -13,7 +13,7 @@
     let icSettingsManifest = null;
     let icSettingValues = {};
     let icActiveSettingsTab = null;
-    let icMountedSettingsTabs = ['factor', 'product_path_selection'];
+    let icMountedSettingsTabs = ['factor', 'category', 'product_path_selection'];
     let icSharedProductPathSelections = [];
     let icSharedProductPathSelectionsLoaded = false;
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
@@ -192,7 +192,9 @@
     // 之前各处直接读 icSettingValues[key] 导致 chip 恒显 0。
     function icEffectiveSettingValue(key) {
         switch (key) {
-            case 'product_path_selections': return icProductPathSelections;
+            // 空选择语义 = 回退到全部候选（与后端 fallback="candidates" 一致），
+            // 所以默认状态 chip 显示候选总数而非 0。
+            case 'product_path_selections': return icProductPathSelections.length ? icProductPathSelections : icSharedProductPathSelections;
             case 'product_path_candidates': return icSharedProductPathSelections;
             case 'factor_candidates': return factorList;
             case 'factor_selections': return collectFactorSelections();
@@ -384,6 +386,10 @@
                 renderICFactorSelectionTab();
                 return;
             }
+            if (tabKey === 'category') {
+                renderICCategoryTab();
+                return;
+            }
             if (!tab || !rows.length || !isTabMounted(tabKey)) {
                 contentHost.innerHTML = '';
                 return;
@@ -431,6 +437,73 @@
             });
         }
 
+        // 分类(Category)管理：列表初始来自数据源(数据库)，可叠加 自定义/现场；
+        // 每项可启用/停用（是否用于产品树类别筛选），可选中作为默认 category。
+        // 新建分类（提交互不相交的多个路径组、命名、其余归"其他"）是更复杂的流程，
+        // 这里先做"列表 + 启停 + 选默认"，新建入口先占位。
+        function icCategoryCandidates() {
+            return Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates : [];
+        }
+        function renderICCategoryTab() {
+            var cats = icCategoryCandidates();
+            if (!cats.length) {
+                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载分类候选...</div>';
+                fetch('/api/data_source_categories', { headers: { Accept: 'application/json' } })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        icSettingValues.category_candidates = (d && d.categories) || [];
+                        renderICCategoryTab();
+                    })
+                    .catch(function() { contentHost.innerHTML = '<div style="font-size:12px;color:#b91c1c;">分类加载失败</div>'; });
+                return;
+            }
+            var selectedName = icSettingValues.category || '';
+            var html = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row"><span class="gt-backtest-setting-label">分类（用于 by_group IC）</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('候选', String(cats.length)) + '</span></span></div>'
+                + '<div style="grid-column:1 / -1;max-height:300px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            cats.forEach(function(cat, i) {
+                var name = cat.name || ('分类' + (i + 1));
+                var src = cat.source || '数据库';
+                var srcColor = src === '数据库' ? '#1e40af' : (src === '自定义' ? '#7a4b00' : '#92400e');
+                var srcBg = src === '数据库' ? '#dbeafe' : (src === '自定义' ? '#fff8e6' : '#fef3c7');
+                var enabled = cat.enabled !== false;
+                var isDefault = name === selectedName;
+                html += '<div class="ic-cat-row" data-cat-idx="' + i + '" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f0f2f5;font-size:12px;' + (isDefault ? 'background:#e8f4fd;' : '') + '">'
+                    + '<span class="ic-cat-default" data-cat-idx="' + i + '" title="选为默认" style="width:16px;text-align:center;cursor:pointer;color:' + (isDefault ? '#0078d4' : '#ccc') + ';">' + (isDefault ? '●' : '○') + '</span>'
+                    + '<span style="flex:1;min-width:0;"><b>' + escapeHTML(name) + '</b>'
+                    + ' <span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;font-weight:600;background:' + srcBg + ';color:' + srcColor + ';">' + escapeHTML(src) + '</span>'
+                    + ' <span style="color:#94a3b8;">' + escapeHTML((cat.categories || []).join('、')) + '</span>'
+                    + (cat.product_paths && cat.product_paths.length ? ' <span style="color:#cbd5e1;">· ' + escapeHTML(cat.product_paths.join(', ')) + '</span>' : '')
+                    + '</span>'
+                    + '<button type="button" class="ic-cat-toggle" data-cat-idx="' + i + '" style="height:22px;padding:0 9px;border:1px solid ' + (enabled ? '#86efac' : '#cbd5e1') + ';border-radius:4px;background:' + (enabled ? '#f0fdf4' : '#fff') + ';color:' + (enabled ? '#15803d' : '#64748b') + ';font-size:11px;cursor:pointer;">' + (enabled ? '已启用' : '已停用') + '</button>'
+                    + '</div>';
+            });
+            html += '</div>'
+                + '<div style="grid-column:1 / -1;margin-top:8px;"><button type="button" id="ic-cat-add" style="height:26px;padding:0 12px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;">+ 新增分类（现场）</button>'
+                + '<span style="margin-left:10px;color:#94a3b8;font-size:11px;">新建：提交互不相交的多个路径组并命名，其余产品归"其他"（待实现）</span></div>'
+                + '</div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('.ic-cat-default').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var c = icCategoryCandidates()[parseInt(el.getAttribute('data-cat-idx'), 10)];
+                    icSettingValues.category = c ? (c.name || '') : '';
+                    renderICCategoryTab();
+                });
+            });
+            contentHost.querySelectorAll('.ic-cat-toggle').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var c = icCategoryCandidates()[parseInt(el.getAttribute('data-cat-idx'), 10)];
+                    if (c) c.enabled = c.enabled === false;  // 启停：是否用于产品树类别筛选
+                    renderICCategoryTab();
+                });
+            });
+            var addBtn = document.getElementById('ic-cat-add');
+            if (addBtn) addBtn.addEventListener('click', function() {
+                alert('新建分类（提交互不相交路径组 + 命名 + 其余归"其他"）流程待实现。');
+            });
+        }
+
         // IC 因子（多选 factor_selections）：从因子候选（factorList）多选。频率抽屉是
         // factor_selections 的真源，本 tab 切换即勾选/取消抽屉中的对应因子。
         function renderICFactorSelectionTab() {
@@ -473,51 +546,41 @@
             });
         }
 
-        // IC 用复数 product_path_selections：从候选列表多选，每个选中项渲染成一个结果 tab。
-        // 候选来自 loadSharedProductPathSelections（本地为空时回退到页面全局候选）。
+        // IC 产品路径（多选）：复用共享的 renderSelectionSettingsTab（多选模式），
+        // 以便统一管理 + 现场新增路径组。每个选中项对应一个结果 tab。
         function renderICProductPathSelectionTab() {
-            const selectedIds = new Set(icProductPathSelections.map(selectionId));
-            contentHost.innerHTML = '<div class="backend-settings-grid">'
-                + '<div class="gt-backtest-setting-row">'
-                + '<span class="gt-backtest-setting-label">IC 产品路径（多选）</span>'
-                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(icProductPathSelections.length)) + '</span></span>'
-                + '</div>'
-                + '<div id="ic-pps-multi" style="grid-column:1 / -1;font-size:12px;color:#64748b;">正在加载产品路径候选...</div>'
-                + '</div>';
-            loadSharedProductPathSelections(false).then(selections => {
-                const host = document.getElementById('ic-pps-multi');
-                if (!host) return;
-                let html = '<div style="max-height:280px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
-                if (!selections.length) {
-                    html += '<div style="color:#888;font-size:12px;padding:14px;text-align:center;">暂无产品路径候选（请在页面"产品路径"设置中新增）</div>';
-                } else {
-                    selections.forEach(sel => {
-                        const sid = selectionId(sel);
-                        const active = selectedIds.has(sid);
-                        const pg = sel.product_group ? '📦 ' : '';
-                        html += '<div class="ic-pps-toggle" data-selection-id="' + escapeHTML(sid) + '"'
-                            + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;'
-                            + (active ? 'background:#e8f4fd;' : '') + 'border-bottom:1px solid #f0f2f5;font-size:12px;">'
-                            + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pg + escapeHTML(selectionLabel(sel)) + '</span>'
-                            + '<span style="font-size:11px;color:' + (active ? '#0078d4' : '#ccc') + ';">' + (active ? '✓' : '') + '</span>'
-                            + '</div>';
-                    });
+            contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载产品路径候选...</div>';
+            loadSharedProductPathSelections(false).then(function(selections) {
+                var utils = window.ProductPathSelectionUtils;
+                if (!utils || typeof utils.renderSelectionSettingsTab !== 'function') {
+                    contentHost.textContent = '产品路径设置组件未加载';
+                    return;
                 }
-                html += '</div>';
-                host.innerHTML = html;
-                host.querySelectorAll('.ic-pps-toggle').forEach(row => {
-                    row.addEventListener('click', function() {
-                        const sid = row.getAttribute('data-selection-id');
-                        const sel = selections.find(s => selectionId(s) === sid);
-                        if (!sel) return;
-                        const idx = icProductPathSelections.findIndex(s => selectionId(s) === sid);
-                        if (idx >= 0) icProductPathSelections.splice(idx, 1);
-                        else icProductPathSelections.push(sel);
-                        // 重渲染结果 tab（每个 product_path 一个）+ 本设置面板（刷新勾选态）
+                utils.renderSelectionSettingsTab({
+                    host: contentHost,
+                    prefix: 'ic-pps',
+                    selections: selections,
+                    multiSelect: true,
+                    selectedIds: icProductPathSelections.map(selectionId),
+                    currentLabel: 'IC 产品路径（多选）',
+                    manualTitle: 'IC 现场新增路径组',
+                    createLabel: '新增',
+                    createDefaultLabel: '新增并选中',
+                    escapeHTML: escapeHTML,
+                    onToggle: function(selection) {
+                        var sid = selectionId(selection);
+                        var i = icProductPathSelections.findIndex(function(s) { return selectionId(s) === sid; });
+                        if (i >= 0) icProductPathSelections.splice(i, 1);
+                        else icProductPathSelections.push(selection);
                         window.renderICTabs(icProductPathSelections.slice());
-                    });
+                    },
+                    onCreate: function(selection) {
+                        mergeICProductPathCandidates([selection]);  // 现场新增进候选池
+                        icProductPathSelections.push(selection);    // 并默认选中
+                        window.renderICTabs(icProductPathSelections.slice());
+                    },
                 });
-            }).catch(error => {
+            }).catch(function(error) {
                 contentHost.innerHTML = '<div style="font-size:12px;color:#b91c1c;">加载失败：' + escapeHTML(error.message || error) + '</div>';
             });
         }

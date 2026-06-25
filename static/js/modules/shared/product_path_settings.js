@@ -403,6 +403,11 @@
         if (!host) return;
         var escapeFn = options.escapeHTML || escapeHTML;
         var selections = Array.isArray(options.selections) ? options.selections : [];
+        // 多选模式：传 selectedIds + onToggle，则每项显示勾选切换、顶部显示已选个数；
+        // 否则单选模式（currentSelection + onSetDefault）。两种模式都支持现场新增。
+        var multiSelect = !!options.multiSelect;
+        var selectedIdSet = {};
+        (options.selectedIds || []).forEach(function(id) { selectedIdSet[String(id)] = true; });
         var current = options.currentSelection || null;
         var currentId = selectionId(current);
         var currentLabel = current ? selectionDisplayLabel(current) : '无';
@@ -419,8 +424,14 @@
         var html = '';
         html += '<div class="backend-settings-grid product-path-settings-tab">';
         html += '<div class="gt-backtest-setting-row">';
-        html += '<span class="gt-backtest-setting-label">' + escapeFn(options.currentLabel || '当前默认') + '</span>';
-        html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', currentLabel, escapeFn) + '</span></span>';
+        if (multiSelect) {
+            var selCount = selections.filter(function(s) { return selectedIdSet[String(selectionId(s))]; }).length;
+            html += '<span class="gt-backtest-setting-label">' + escapeFn(options.currentLabel || '已选') + '</span>';
+            html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(selCount) + ' / ' + selections.length, escapeFn) + '</span></span>';
+        } else {
+            html += '<span class="gt-backtest-setting-label">' + escapeFn(options.currentLabel || '当前默认') + '</span>';
+            html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('产品路径', currentLabel, escapeFn) + '</span></span>';
+        }
         html += '</div>';
         (options.extraRows || []).forEach(function(row) {
             if (!row) return;
@@ -439,14 +450,18 @@
         }
         selections.forEach(function(selection) {
             var id = selectionId(selection);
-            var active = id && id === currentId;
+            var active = multiSelect ? !!selectedIdSet[String(id)] : (id && id === currentId);
             var label = selectionDisplayLabel(selection);
             html += '<div class="product-path-selection-item' + (active ? ' active' : '') + '" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:7px 8px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px;background:' + (active ? '#eff6ff' : '#fff') + ';">';
             html += '<button type="button" data-pps-tab-open="' + escapeFn(id) + '" style="min-width:0;text-align:left;border:none;background:transparent;padding:0;cursor:pointer;">';
             html += '<div class="gt-backend-chip unified-backend-chip" style="display:inline-flex;">' + renderChipHtml('产品路径', label, escapeFn) + '</div>';
-            html += '<div style="font-size:11px;color:#64748b;margin-top:3px;">' + pathCount(selection) + ' 路径 · ' + productCount(selection) + ' 产品' + (active ? ' · 默认' : '') + '</div>';
+            html += '<div style="font-size:11px;color:#64748b;margin-top:3px;">' + pathCount(selection) + ' 路径 · ' + productCount(selection) + ' 产品' + (active ? (multiSelect ? ' · 已选' : ' · 默认') : '') + '</div>';
             html += '</button>';
-            html += '<button type="button" data-pps-tab-default="' + escapeFn(id) + '" class="gt-backend-chip unified-backend-chip" style="border:1px solid #cbd5e1;background:#fff;cursor:pointer;">' + renderChipHtml(active ? '默认' : (options.setDefaultLabel || '设为默认'), '', escapeFn) + '</button>';
+            if (multiSelect) {
+                html += '<button type="button" data-pps-tab-toggle="' + escapeFn(id) + '" class="gt-backend-chip unified-backend-chip" style="border:1px solid ' + (active ? '#86efac' : '#cbd5e1') + ';background:' + (active ? '#f0fdf4' : '#fff') + ';color:' + (active ? '#15803d' : '#475569') + ';cursor:pointer;">' + renderChipHtml(active ? '✓ 已选' : '选择', '', escapeFn) + '</button>';
+            } else {
+                html += '<button type="button" data-pps-tab-default="' + escapeFn(id) + '" class="gt-backend-chip unified-backend-chip" style="border:1px solid #cbd5e1;background:#fff;cursor:pointer;">' + renderChipHtml(active ? '默认' : (options.setDefaultLabel || '设为默认'), '', escapeFn) + '</button>';
+            }
             if (allowRemove(selection)) {
                 html += '<button type="button" data-pps-tab-remove="' + escapeFn(id) + '" style="height:24px;padding:0 7px;border:1px solid #fecaca;border-radius:4px;background:#fff5f5;color:#b91c1c;font-size:11px;cursor:pointer;">移除</button>';
             } else {
@@ -473,6 +488,14 @@
                 var id = this.getAttribute('data-pps-tab-default');
                 var selection = selections.filter(function(item) { return selectionId(item) === id; })[0] || null;
                 if (selection && typeof options.onSetDefault === 'function') options.onSetDefault(selection);
+            });
+        });
+        host.querySelectorAll('[data-pps-tab-toggle]').forEach(function(button) {
+            button.addEventListener('click', function(event) {
+                event.preventDefault();
+                var id = this.getAttribute('data-pps-tab-toggle');
+                var selection = selections.filter(function(item) { return selectionId(item) === id; })[0] || null;
+                if (selection && typeof options.onToggle === 'function') options.onToggle(selection, !selectedIdSet[String(id)]);
             });
         });
         host.querySelectorAll('[data-pps-tab-remove]').forEach(function(button) {
