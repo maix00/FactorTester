@@ -169,9 +169,8 @@
             return window.BackendSettingsPanel.displaySettingValue(setting, current);
         }
         if (setting && (setting.key === 'factor_selections' || setting.key === 'factor')) {
-            var picked = collectFactorSelections();
-            if (picked.length) return picked.map(function(p) { return p.alias; }).filter(Boolean).join(' / ');
-            return factorFamilyAlias || '无';
+            // 只显示选中个数（因子可能很多，避免 chip 过长）
+            return collectFactorSelections().length + ' 个已选';
         }
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
