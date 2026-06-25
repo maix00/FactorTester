@@ -141,12 +141,9 @@
         return true;
     }
 
+    // 委托到共用 DomUtils（页面已先加载）；保留薄封装以免改动各调用点。
     function escapeHTML(value) {
-        return String(value == null ? '' : value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+        return window.DomUtils.escapeHTML(value);
     }
 
     function chipParts(labelOrText, value) {
