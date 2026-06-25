@@ -19,7 +19,7 @@ from server.services.page_runtime import factor_testers_lock
 from . import shared_bp
 from .submission_helpers import resolve_products_from_paths, submissions_payload
 from .submission_ids import make_submission_id
-from .submission_model import ProductPathSelection
+from tools.products.product_path_selection import ProductPathSelection
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 from server.modules.shared.price_services import product_public_fields

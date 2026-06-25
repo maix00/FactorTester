@@ -8,7 +8,7 @@ import pandas as pd
 
 import server.services.page_runtime as runtime_state
 from server.modules.products.product_group_store import load_product_groups, product_group_to_path_selection
-from server.modules.shared.submission_model import ProductPathSelection
+from tools.products.product_path_selection import ProductPathSelection
 from server.services.session_runtime import current_user, current_user_obj
 from tools.data.types import DataTime
 

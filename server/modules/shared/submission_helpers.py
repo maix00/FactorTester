@@ -151,6 +151,12 @@ def resolve_products_from_paths(raw_paths: list[str]):
     return resolve_selection_products(raw_paths, tree)
 
 
+# 把基于服务端产品树的解析器注入领域对象 ProductPathSelection（位于 tools 层），
+# 使该对象不反向依赖 server。本模块在 server 启动早期被导入。
+from tools.products.product_path_selection import set_product_resolver as _set_pps_resolver
+_set_pps_resolver(resolve_products_from_paths)
+
+
 def valid_testers(page_uuid=None):
     """Return active submissions, preferring product selections over legacy testers."""
     if not page_uuid:

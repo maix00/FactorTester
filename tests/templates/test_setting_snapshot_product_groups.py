@@ -44,7 +44,7 @@ def test_product_group_template_builds_matching_product_path_selection(monkeypat
     from server.modules.products.product_group_store import product_group_to_path_selection
 
     monkeypatch.setattr(
-        "server.modules.shared.submission_model.resolve_products_from_paths",
+        "tools.products.product_path_selection.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF", "AL.SHF"]),
     )
 

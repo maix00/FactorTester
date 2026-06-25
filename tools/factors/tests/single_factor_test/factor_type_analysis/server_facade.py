@@ -24,7 +24,7 @@ from server.modules.shared.factor_data_helpers import (
 )
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
-from server.modules.shared.submission_model import ProductPathSelection
+from tools.products.product_path_selection import ProductPathSelection
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, get_session_params
 from tools.data.types import DataTime, finest_index

@@ -1,11 +1,41 @@
-"""Backend objects for page-level product path submissions."""
+"""ProductPathSelection —— 页级产品/路径选择的领域对象。
+
+纯领域对象：只持有"路径/产品组"语义，不反向依赖 server。把"路径 → 产品"的解析
+通过 set_product_resolver() 注入（server 启动时注入其产品树解析器），从而本对象可
+位于 tools 层、被 tools.backtest.settings 等直接引用（instance_class）。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
-from server.modules.shared.submission_helpers import resolve_products_from_paths
+# 注入的解析器：list[str] paths -> (canonical_paths: list[str], products: list)。
+# 由 server 在启动时通过 set_product_resolver() 注入真正的产品树解析。
+_product_resolver: Callable[[list[str]], tuple[list[str], list]] | None = None
+
+
+def set_product_resolver(resolver: Callable[[list[str]], tuple[list[str], list]]) -> None:
+    """注入路径→产品解析器（server 启动时调用）。"""
+    global _product_resolver
+    _product_resolver = resolver
+
+
+def resolve_products_from_paths(raw_paths: list[str]) -> tuple[list[str], list]:
+    """委托给注入的解析器。未注入时报错（说明 server 尚未完成启动注入）。
+
+    单独成函数（而非内联）以便测试可直接 monkeypatch 本模块的该名字。
+    """
+    if _product_resolver is None:
+        raise RuntimeError(
+            "product resolver 未注入：server 启动应调用 "
+            "tools.products.product_path_selection.set_product_resolver()"
+        )
+    return _product_resolver(list(raw_paths))
+
+
+def _core_submission_id(alias: str) -> str:
+    return alias.split(":", 1)[-1] if ":" in str(alias) else str(alias)
 
 
 @dataclass(slots=True)
@@ -124,7 +154,3 @@ class ProductPathSelection:
 
     def to_product_path_selection_dict(self) -> dict[str, Any]:
         return self.to_submission_dict()
-
-
-def _core_submission_id(alias: str) -> str:
-    return alias.split(":", 1)[-1] if ":" in str(alias) else str(alias)

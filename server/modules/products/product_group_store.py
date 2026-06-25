@@ -7,7 +7,7 @@ import uuid
 from hashlib import sha1
 
 from server.modules.products.product_path_selection import resolve_selection_products
-from server.modules.shared.submission_model import ProductPathSelection
+from tools.products.product_path_selection import ProductPathSelection
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
 

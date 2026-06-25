@@ -103,12 +103,12 @@ def test_reorder_only_reorders_testers_from_current_page(app, two_page_testers):
 
 
 def test_submit_selected_products_registers_selection_not_factor_tester(app, monkeypatch):
-    from server.modules.shared.submission_model import ProductPathSelection
+    from tools.products.product_path_selection import ProductPathSelection
 
     original_page_objects = _snapshot_page_objects()
     runtime_state.page_objects = {}
     monkeypatch.setattr(
-        "server.modules.shared.submission_model.resolve_products_from_paths",
+        "tools.products.product_path_selection.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF", "AL.SHF"]),
     )
 
@@ -161,7 +161,7 @@ def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch
     runtime_state.page_objects = {}
     runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
     monkeypatch.setattr(
-        "server.modules.shared.submission_model.resolve_products_from_paths",
+        "tools.products.product_path_selection.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF"]),
     )
     monkeypatch.setattr(
@@ -229,7 +229,7 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
     runtime_state.page_objects = {}
     runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
     monkeypatch.setattr(
-        "server.modules.shared.submission_model.resolve_products_from_paths",
+        "tools.products.product_path_selection.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF"]),
     )
     monkeypatch.setattr(
@@ -302,7 +302,7 @@ def test_product_path_selection_inherits_from_parent_group(monkeypatch):
     from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
 
     monkeypatch.setattr(
-        "server.modules.shared.submission_model.resolve_products_from_paths",
+        "tools.products.product_path_selection.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF"]),
     )
 
