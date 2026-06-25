@@ -13,7 +13,7 @@
     let icSettingsManifest = null;
     let icSettingValues = {};
     let icActiveSettingsTab = null;
-    let icMountedSettingsTabs = ['product_path_selection'];
+    let icMountedSettingsTabs = ['factor', 'product_path_selection'];
     let icSharedProductPathSelections = [];
     let icSharedProductPathSelectionsLoaded = false;
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
@@ -264,8 +264,7 @@
         const host = document.getElementById('ic-settings-container');
         if (!host || !manifest) return;
         const defaults = manifest.defaults || {};
-        const tabs = (manifest.tab_lists && manifest.tab_lists['local-settings'] || [])
-            .filter(tab => tab.key !== 'factor');
+        const tabs = (manifest.tab_lists && manifest.tab_lists['local-settings'] || []);
         const settingsByTab = {};
         Object.keys(defaults).forEach(key => {
             const meta = defaults[key];
@@ -372,6 +371,10 @@
                 renderICProductPathSelectionTab();
                 return;
             }
+            if (tabKey === 'factor') {
+                renderICFactorSelectionTab();
+                return;
+            }
             if (!tab || !rows.length || !isTabMounted(tabKey)) {
                 contentHost.innerHTML = '';
                 return;
@@ -417,6 +420,48 @@
                     icSettingValues[key] = meta.control_template === 'number' ? Number(this.value) : this.value;
                     if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
                     else renderICSettingsPanel(manifest);
+                });
+            });
+        }
+
+        // IC 因子（多选 factor_selections）：从因子候选（factorList）多选。频率抽屉是
+        // factor_selections 的真源，本 tab 切换即勾选/取消抽屉中的对应因子。
+        function renderICFactorSelectionTab() {
+            if (!factorList.length) {
+                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载因子候选...</div>';
+                fetchFactorList().then(function() { renderICFactorSelectionTab(); });
+                return;
+            }
+            var selected = {};
+            collectFactorSelections().forEach(function(f) { selected[f.alias] = true; });
+            var html = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row">'
+                + '<span class="gt-backtest-setting-label">IC 因子（多选）</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(Object.keys(selected).length)) + '</span></span>'
+                + '</div>'
+                + '<div style="grid-column:1 / -1;max-height:280px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            factorList.forEach(function(f) {
+                var alias = f.alias || f.name || '';
+                var active = !!selected[alias];
+                html += '<div class="ic-factor-toggle" data-factor-alias="' + escapeHTML(alias) + '"'
+                    + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;'
+                    + (active ? 'background:#e8f4fd;' : '') + 'border-bottom:1px solid #f0f2f5;font-size:12px;">'
+                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(f.name || alias) + '</span>'
+                    + '<span style="font-size:11px;color:' + (active ? '#0078d4' : '#ccc') + ';">' + (active ? '✓' : '') + '</span>'
+                    + '</div>';
+            });
+            html += '</div></div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('.ic-factor-toggle').forEach(function(row) {
+                row.addEventListener('click', function() {
+                    var alias = row.getAttribute('data-factor-alias');
+                    var tbody = document.getElementById('ic-freq-table-body');
+                    var cb = tbody && Array.prototype.find.call(
+                        tbody.querySelectorAll('.factor-checkbox'),
+                        function(c) { return c.getAttribute('data-factor-alias') === alias; }
+                    );
+                    if (cb) { cb.checked = !cb.checked; updateFreqSummary(); }
+                    renderICFactorSelectionTab();
                 });
             });
         }
@@ -1813,6 +1858,8 @@
     }
     
     function updateFreqSummary() {
+        // 频率抽屉是 factor_selections 真源；变化时同步到 icSettingValues 供 chip 计数/快照。
+        icSettingValues.factor_selections = collectFactorSelections();
         const summaryText = document.getElementById('ic-freq-summary-text');
         if (!summaryText) return;
         const tbody = document.getElementById('ic-freq-table-body');
