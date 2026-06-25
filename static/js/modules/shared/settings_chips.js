@@ -43,11 +43,14 @@
         function chipText(key) {
             var setting = Object.assign({ key: key }, defaults[key] || {});
             var value = store ? store.effective(key) : (setting.value);
+            // chip 值统一以后端注册的 displaySettingValue 为准（按 serialization.kind）。
             var shown = BSP ? BSP.displaySettingValue(setting, value) : String(value);
             return String(setting.chip_template).replace('{value}', shown);
         }
 
         function chipVisible(key) {
+            // 模块自定义运行时跳过（如"无产品路径则不显示 product"），manifest 表达不了的。
+            if (typeof opts.shouldShow === 'function' && !opts.shouldShow(key)) return false;
             if (!BSP || !store) return true;
             var setting = Object.assign({ key: key }, defaults[key] || {});
             // 用所有字段的有效值判断 visible_when

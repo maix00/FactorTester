@@ -142,14 +142,9 @@
         return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
     }
 
+    // chip 值统一以后端注册的 displaySettingValue 为准（按 serialization.kind），
+    // 不再为 product/factor 自定义显示——与其他测试模块一致。
     function displayValue(setting, value) {
-        if (setting && setting.key === 'product') {
-            return productLabel() || '无';
-        }
-        if (setting && setting.key === 'factor') {
-            var factor = selectedFactor();
-            return factor ? factor.alias || factor.name || '' : '无';
-        }
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
@@ -329,38 +324,66 @@
         return out;
     }
 
+    // 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅。
+    var fsvStore = null, fsvSettingsUnbind = null, fsvResultUnbind = null;
+    function ensureFsvStore() {
+        if (!fsvStore && state.manifest && window.FieldStore) {
+            fsvStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
+        }
+        return fsvStore;
+    }
+    function syncFsvStore() { var s = ensureFsvStore(); if (s) s.setMany(state.values); }
+    // 模块自定义运行时跳过：无产品路径不显示 product，无选中因子不显示 factor。
+    function fsvShouldShow(key) {
+        if (key === 'product' && !state.paths.length) return false;
+        if (key === 'factor' && !selectedFactor()) return false;
+        return true;
+    }
+
     function renderSettingChips() {
         var row = document.getElementById('factor-series-settings-chip-row');
         if (!row || !state.manifest) return;
-        row.innerHTML = '';
+        ensureFsvStore();
+        syncFsvStore();
+        // 懒加载未缓存的挂载 tab manifest（仍按需拉取）
         orderedMountedTabs().forEach(function(tabKey) {
-            var manifest = state.tabCache[tabKey];
-            if (!manifest) {
-                loadTab(tabKey).then(renderSettingChips).catch(function() {});
-                return;
-            }
-            (manifest.settings || []).forEach(function(setting) {
-                var value = effectiveValue(setting.key);
-                if (setting.key === 'product' && !state.paths.length) return;
-                if (setting.key === 'factor' && !selectedFactor()) return;
-                row.appendChild(makeChip(setting, value, tabKey));
+            if (!state.tabCache[tabKey]) loadTab(tabKey).then(renderSettingChips).catch(function() {});
+        });
+        var keys = [];
+        orderedMountedTabs().forEach(function(tabKey) {
+            settingKeysForTab(tabKey).forEach(function(key) {
+                if ((defaults()[key] || {}).chip_template) keys.push(key);
             });
         });
+        if (fsvSettingsUnbind) { fsvSettingsUnbind(); fsvSettingsUnbind = null; }
+        if (window.SettingsChips && fsvStore) {
+            fsvSettingsUnbind = window.SettingsChips.render(row, {
+                manifest: state.manifest, store: fsvStore, settingKeys: keys,
+                tabOf: function(key) { return (defaults()[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openTab(tabKey); },
+                shouldShow: fsvShouldShow,
+                escapeHTML: escapeHtml, renderChipHtml: renderChipHtml,
+            });
+        } else { row.innerHTML = ''; }
     }
 
     function renderResultChips() {
         var row = document.getElementById('factor-series-result-chip-row');
         if (!row || !state.manifest) return;
-        row.innerHTML = '';
+        ensureFsvStore();
+        syncFsvStore();
         var mountedKeys = mountedSettingKeys();
-        Object.keys(defaults()).forEach(function(key) {
-            if (mountedKeys[key]) return;
-            var setting = Object.assign({ key: key }, defaults()[key] || {});
-            if (!setting.chip_template) return;
-            if (key === 'product' && !state.paths.length) return;
-            if (key === 'factor' && !selectedFactor()) return;
-            row.appendChild(makeChip(setting, effectiveValue(key), setting.tab_key));
+        var keys = Object.keys(defaults()).filter(function(key) {
+            return !mountedKeys[key] && (defaults()[key] || {}).chip_template;
         });
+        if (fsvResultUnbind) { fsvResultUnbind(); fsvResultUnbind = null; }
+        if (window.SettingsChips && fsvStore) {
+            fsvResultUnbind = window.SettingsChips.render(row, {
+                manifest: state.manifest, store: fsvStore, settingKeys: keys,
+                shouldShow: fsvShouldShow,
+                escapeHTML: escapeHtml, renderChipHtml: renderChipHtml,
+            });
+        } else { row.innerHTML = ''; }
     }
 
     function loadManifest() {
