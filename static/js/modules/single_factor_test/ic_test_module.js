@@ -1934,8 +1934,58 @@
         };
     }
 
+    // ── 模板快照：把 IC 的设置/选择注册进因子家族设置模板 ──────────────────
+    function collectICSnapshot() {
+        return {
+            settings: Object.assign({}, icSettingValues),
+            product_path_selections: (icProductPathSelections || []).slice(),
+            mounted_tabs: (icMountedSettingsTabs || []).slice(),
+        };
+    }
+
+    async function applyICSnapshot(data) {
+        if (!data || typeof data !== 'object') return;
+        await loadICSettingsManifest();
+        if (data.settings && typeof data.settings === 'object') {
+            Object.keys(data.settings).forEach(function(k) { icSettingValues[k] = data.settings[k]; });
+        }
+        if (Array.isArray(data.mounted_tabs) && data.mounted_tabs.length) {
+            icMountedSettingsTabs = data.mounted_tabs.slice();
+        }
+        if (Array.isArray(data.product_path_selections) && data.product_path_selections.length) {
+            icProductPathSelections = data.product_path_selections.slice();
+            mergeICProductPathCandidates(icProductPathSelections);
+        }
+        renderICSettingsPanel(icSettingsManifest);
+        await window.renderICTabs(icProductPathSelections);
+    }
+
+    function registerICSnapshot() {
+        if (!window._snapshotRegistry || typeof window._snapshotRegistry.register !== 'function') return false;
+        window._snapshotRegistry.register({
+            key: 'ic_test',
+            order: 60,   // 在页面设置 / 分组之后再 apply（IC 依赖页面产品路径作回退）
+            label: 'IC 测试',
+            icon: '📈',
+            collect: collectICSnapshot,
+            apply: applyICSnapshot,
+            summarize: function(d) {
+                var s = (d && d.settings) || {};
+                var lines = [];
+                var n = (d && d.product_path_selections || []).length;
+                if (n) lines.push('产品路径选择: ' + n + ' 个');
+                ['ic_correlation', 'ic_lag', 'return_price_basis', 'return_frequency_mode', 'by_group', 'group_adjust', 'min_cross_section_count'].forEach(function(k) {
+                    if (s[k] !== undefined && s[k] !== '' && s[k] !== null) lines.push(k + ': ' + s[k]);
+                });
+                return lines.length ? lines : null;
+            },
+        });
+        return true;
+    }
+
     async function initICModule() {
         initFreqDrawerButtons();
+        registerICSnapshot();
         await fetchFactorList();
         populateFreqDrawer(factorList);
         await window.renderICTabs(icProductPathSelections);
