@@ -213,7 +213,7 @@ def create_factor_tester_for_run(
     tester.selection_source_key = selection.source_key
     tester.product_selection = selection
     tester._page_uuid = page_uuid
-    runtime_state.register_factor_tester(tester, page_uuid=page_uuid)
+    runtime_state.register_page_object(runtime_state.FACTOR_TESTER, tester, page_uuid=page_uuid)
     return tester
 
 

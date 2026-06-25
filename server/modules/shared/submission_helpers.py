@@ -153,14 +153,16 @@ def resolve_products_from_paths(raw_paths: list[str]):
 
 def valid_testers(page_uuid=None):
     """Return active submissions, preferring product selections over legacy testers."""
-    selections = runtime_state.iter_product_selections(page_uuid)
+    if not page_uuid:
+        return []
+    selections = runtime_state.iter_page_objects(runtime_state.PRODUCT_SELECTION, page_uuid=page_uuid)
     if selections:
         return [
             selection for selection in selections
             if getattr(selection, 'selected_paths', None)
             or getattr(selection, 'products', None)
         ]
-    testers = runtime_state.iter_factor_testers(page_uuid)
+    testers = runtime_state.iter_page_objects(runtime_state.FACTOR_TESTER, page_uuid=page_uuid)
     return [
         t for t in testers
         if (getattr(t, 'selected_paths', None) and len(t.selected_paths) > 0)

@@ -42,18 +42,15 @@ def _matches_page(tester: Any, page_uuid: str | None) -> bool:
 
 
 def _find_submission(id_time: str, page_uuid: str | None):
-    if page_uuid:
-        selection = runtime_state.find_product_selection(id_time, page_uuid=page_uuid)
-        if selection is not None:
-            return selection
-    return next(
-        (
-            tester for tester in runtime_state.iter_factor_testers(page_uuid)
-            if runtime_state.alias_matches_submission_id(
-                getattr(tester, 'alias', ''), id_time, allow_suffix=True
-            )
-        ),
-        None,
+    if not page_uuid:
+        return None
+    selection = runtime_state.find_page_object(
+        runtime_state.PRODUCT_SELECTION, id_time, page_uuid=page_uuid
+    )
+    if selection is not None:
+        return selection
+    return runtime_state.find_page_object(
+        runtime_state.FACTOR_TESTER, id_time, page_uuid=page_uuid, allow_suffix=True
     )
 
 
@@ -206,7 +203,7 @@ def submit_selected_products():
         source_key=group_name or id_time,
         page_uuid=page_uuid,
     )
-    runtime_state.register_product_selection(selection, page_uuid=page_uuid)
+    runtime_state.register_page_object(runtime_state.PRODUCT_SELECTION, selection, page_uuid=page_uuid)
     selected_products = selection.products
     return api_ok({
         'count':               len(selected_products),
@@ -258,7 +255,7 @@ def update_submission_paths():
                 source_key=submission.source_key,
                 page_uuid=page_uuid,
             )
-            runtime_state.register_product_selection(updated, page_uuid=page_uuid)
+            runtime_state.register_page_object(runtime_state.PRODUCT_SELECTION, updated, page_uuid=page_uuid)
         else:
             submission.products = sorted(list(set(selected_products)))
             submission.selected_paths = selected_paths
@@ -297,12 +294,12 @@ def delete_submission():
     submission = _find_submission(id_time, page_uuid)
     assert submission is not None, "Submission not found"
     if isinstance(submission, ProductPathSelection):
-        runtime_state.remove_product_selection(submission)
-        tester = runtime_state.find_factor_tester(id_time, page_uuid=page_uuid)
+        runtime_state.remove_page_object(runtime_state.PRODUCT_SELECTION, submission)
+        tester = runtime_state.find_page_object(runtime_state.FACTOR_TESTER, id_time, page_uuid=page_uuid)
         if tester is not None:
-            runtime_state.remove_factor_tester(tester, delete=True)
+            runtime_state.remove_page_object(runtime_state.FACTOR_TESTER, tester, delete=True)
     else:
-        runtime_state.remove_factor_tester(submission, delete=True)
+        runtime_state.remove_page_object(runtime_state.FACTOR_TESTER, submission, delete=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -317,7 +314,7 @@ def clear_all_submissions():
     page_uuid, err = _require_page_uuid(data)
     if err is not None:
         return err
-    runtime_state.clear_page_submissions(page_uuid, delete_testers=True)
+    runtime_state.clear_page(page_uuid, delete=True)
     return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
@@ -345,7 +342,7 @@ def delete_path_of_submission():
                 source_key=submission.source_key,
                 page_uuid=page_uuid,
             )
-            runtime_state.register_product_selection(updated, page_uuid=page_uuid)
+            runtime_state.register_page_object(runtime_state.PRODUCT_SELECTION, updated, page_uuid=page_uuid)
         else:
             submission.products = sorted(list(set(selected_products)))
             submission.selected_paths = selected_paths

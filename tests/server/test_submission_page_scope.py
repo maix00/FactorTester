@@ -12,6 +12,22 @@ from server.modules.shared import page_lifecycle as page_lifecycle_routes
 from server.modules.single_factor_test import page as page_routes
 from server.modules.single_factor_test import view_helpers
 
+_FT = runtime_state.FACTOR_TESTER
+
+
+def _snapshot_page_objects() -> dict:
+    """深拷贝当前页对象注册表，用于测试前后保存/还原。"""
+    return {pu: {k: list(v) for k, v in kinds.items()} for pu, kinds in runtime_state.page_objects.items()}
+
+
+def _set_page_testers(mapping: dict) -> None:
+    """{page_uuid: [testers]} → 重置注册表为这些 FactorTester。"""
+    runtime_state.page_objects = {pu: {_FT.name: list(testers)} for pu, testers in mapping.items()}
+
+
+def _page_testers(page_uuid: str) -> list:
+    return runtime_state.iter_page_objects(_FT, page_uuid=page_uuid)
+
 
 @dataclass
 class _Tester:
@@ -40,20 +56,18 @@ def app():
 
 @pytest.fixture
 def two_page_testers():
-    original_page_factor_testers = dict(runtime_state.page_factor_testers)
-    original_page_product_selections = dict(runtime_state.page_product_selections)
+    original_page_objects = _snapshot_page_objects()
     original_page_owners = dict(runtime_state.page_owners)
     original_time_store = dict(runtime_state.page_time_store)
     page_a = [_Tester("a1", "page-a"), _Tester("a2", "page-a")]
     page_b = [_Tester("b1", "page-b"), _Tester("b2", "page-b")]
-    runtime_state.page_factor_testers = {"page-a": [page_a[0], page_a[1]], "page-b": [page_b[0], page_b[1]]}
+    _set_page_testers({"page-a": [page_a[0], page_a[1]], "page-b": [page_b[0], page_b[1]]})
     runtime_state.page_owners = {"page-a": "user-a", "page-b": "user-b"}
     runtime_state.page_time_store = {"page-a": ("start", "end", "start"), "page-b": ("start", "end", "start")}
     try:
         yield page_a, page_b
     finally:
-        runtime_state.page_factor_testers = original_page_factor_testers
-        runtime_state.page_product_selections = original_page_product_selections
+        runtime_state.page_objects = original_page_objects
         runtime_state.page_owners = original_page_owners
         runtime_state.page_time_store = original_time_store
 
@@ -84,17 +98,15 @@ def test_reorder_only_reorders_testers_from_current_page(app, two_page_testers):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    assert runtime_state.page_factor_testers["page-a"] == [page_a[0], page_a[1]]
-    assert runtime_state.page_factor_testers["page-b"] == page_b
+    assert _page_testers("page-a") == [page_a[0], page_a[1]]
+    assert _page_testers("page-b") == page_b
 
 
 def test_submit_selected_products_registers_selection_not_factor_tester(app, monkeypatch):
     from server.modules.shared.submission_model import ProductPathSelection
 
-    original_page_product_selections = dict(runtime_state.page_product_selections)
-    original_page_factor_testers = dict(runtime_state.page_factor_testers)
-    runtime_state.page_product_selections = {}
-    runtime_state.page_factor_testers = {}
+    original_page_objects = _snapshot_page_objects()
+    runtime_state.page_objects = {}
     monkeypatch.setattr(
         "server.modules.shared.submission_model.resolve_products_from_paths",
         lambda paths: (list(paths), ["CU.SHF", "AL.SHF"]),
@@ -118,13 +130,12 @@ def test_submit_selected_products_registers_selection_not_factor_tester(app, mon
         assert payload["success"] is True
         assert payload["submissions"][0]["product_path_selection_id"] == "sel-1"
         assert payload["submissions"][0]["source_type"] == "user_product_group_template"
-        assert runtime_state.page_factor_testers == {}
-        selection = runtime_state.get_product_selection("sel-1", page_uuid="page-a")
+        assert _page_testers("page-a") == []
+        selection = runtime_state.get_page_object(runtime_state.PRODUCT_SELECTION, "sel-1", page_uuid="page-a")
         assert isinstance(selection, ProductPathSelection)
         assert selection.product_group == "Metals"
     finally:
-        runtime_state.page_product_selections = original_page_product_selections
-        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_objects = original_page_objects
 
 
 def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch):
@@ -145,11 +156,9 @@ def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch
             self.alias = alias
             self.selected_paths = []
 
-    original_page_product_selections = dict(runtime_state.page_product_selections)
-    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_page_objects = _snapshot_page_objects()
     original_time_store = dict(runtime_state.page_time_store)
-    runtime_state.page_product_selections = {}
-    runtime_state.page_factor_testers = {}
+    runtime_state.page_objects = {}
     runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
     monkeypatch.setattr(
         "server.modules.shared.submission_model.resolve_products_from_paths",
@@ -190,10 +199,9 @@ def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch
             "end_dt": "run-end",
             "user": "alice",
         }
-        assert runtime_state.get_factor_tester("sel-run", page_uuid="page-a") is tester
+        assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, "sel-run", page_uuid="page-a") is tester
     finally:
-        runtime_state.page_product_selections = original_page_product_selections
-        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_objects = original_page_objects
         runtime_state.page_time_store = original_time_store
 
 
@@ -216,9 +224,9 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
             self.alias = alias
             self.selected_paths = []
 
-    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_page_objects = _snapshot_page_objects()
     original_time_store = dict(runtime_state.page_time_store)
-    runtime_state.page_factor_testers = {}
+    runtime_state.page_objects = {}
     runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
     monkeypatch.setattr(
         "server.modules.shared.submission_model.resolve_products_from_paths",
@@ -251,7 +259,7 @@ def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
         assert tester.product_group_template_id == "pg-metals"
         assert created == {"products": ["CU.SHF"], "alias": "sel-run", "user": "captured-user"}
     finally:
-        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_objects = original_page_objects
         runtime_state.page_time_store = original_time_store
 
 
@@ -343,10 +351,10 @@ def test_factor_tester_lookup_is_isolated_by_page(two_page_testers):
     page_a[0].alias = "user-a:same-submission"
     page_b[0].alias = "user-b:same-submission"
 
-    assert runtime_state.get_factor_tester(
+    assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
         "same-submission", page_uuid="page-a"
     ) is page_a[0]
-    assert runtime_state.get_factor_tester(
+    assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
         "same-submission", page_uuid="page-b"
     ) is page_b[0]
 
@@ -472,7 +480,7 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
     from server.services.factor_registry import page_families, page_factors
 
     tester = _Tester("alice:submission-1", "page-unload")
-    runtime_state.page_factor_testers["page-unload"] = [tester]
+    runtime_state.register_page_object(runtime_state.FACTOR_TESTER, tester, page_uuid="page-unload")
     runtime_state.page_owners["page-unload"] = "alice"
     runtime_state.page_states["page-unload"] = {"latest_group_execution": object()}
     runtime_state.page_time_store["page-unload"] = ("start", "end", "start")
@@ -489,7 +497,7 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
 
     assert response.status_code == 200
     assert tester.deleted is True
-    assert "page-unload" not in runtime_state.page_factor_testers
+    assert "page-unload" not in runtime_state.page_objects
     assert "page-unload" not in runtime_state.page_owners
     assert "page-unload" not in runtime_state.page_states
     assert "page-unload" not in runtime_state.page_time_store

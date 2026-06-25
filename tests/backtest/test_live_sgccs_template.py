@@ -168,7 +168,7 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             assert body["engine_result"]["engine"] == engine
             results[profile][engine] = body
 
-    testers = page_runtime.iter_factor_testers(page_uuid)
+    testers = page_runtime.iter_page_objects(page_runtime.FACTOR_TESTER, page_uuid=page_uuid)
     tester = next(
         (
             item for item in testers

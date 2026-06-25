@@ -11,7 +11,6 @@ import pandas as pd
 import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
-from server.services.page_runtime import get_factor_tester
 import server.services.page_runtime as page_runtime
 from server.services.session_runtime import current_user
 from server.services.session_runtime import get_session_params
@@ -68,7 +67,9 @@ def _request_product_path_selection_id(data: dict[str, Any]) -> str:
 def _get_or_create_selection_tester(data: dict[str, Any], *, page_uuid: str, caller: str):
     selection_id = _request_product_path_selection_id(data)
     try:
-        return get_factor_tester(selection_id, caller=caller, page_uuid=page_uuid)
+        return page_runtime.get_page_object(
+            page_runtime.FACTOR_TESTER, selection_id, caller=caller, page_uuid=page_uuid
+        )
     except AssertionError:
         return create_factor_tester_for_product_path_selection(
             data,

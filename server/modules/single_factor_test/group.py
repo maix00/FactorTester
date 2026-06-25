@@ -2228,7 +2228,7 @@ def get_group_snapshot():
                 int(timestamp_ms),
                 data.get("event_cursor"),
             ))
-        tester = runtime_state.get_factor_tester(
+        tester = runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
             product_path_selection_id, caller='get_group_snapshot', page_uuid=page_uuid or None
         )
 
@@ -2932,9 +2932,7 @@ def get_product_path_selection_session_info():
     selections_info = []
     for sid in ids:
         try:
-            tester = runtime_state.find_factor_tester(
-                str(sid), allow_suffix=True, page_uuid=page_uuid
-            )
+            tester = runtime_state.find_page_object(runtime_state.FACTOR_TESTER, str(sid), allow_suffix=True, page_uuid=page_uuid)
             if tester is None:
                 selections_info.append({'product_path_selection_id': str(sid), 'error': '未找到运行上下文'})
                 continue

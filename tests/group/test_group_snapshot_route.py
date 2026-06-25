@@ -70,7 +70,7 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -127,7 +127,7 @@ def test_group_snapshot_includes_capital_warning_when_first_period_cannot_open_p
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -182,7 +182,7 @@ def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -228,7 +228,7 @@ def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):
     group_result.position_quantities_np[0, 6, 7] = 1.0
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -271,7 +271,7 @@ def test_group_snapshot_response_is_strict_json_when_positions_have_nonfinite_va
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -319,7 +319,7 @@ def test_group_snapshot_rebuilds_per_product_amounts_from_quantities_and_prices(
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -386,7 +386,7 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -479,7 +479,7 @@ def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -522,7 +522,7 @@ def test_group_snapshot_rebuilds_zero_hold_amounts_from_simulated_positions(monk
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
@@ -564,7 +564,7 @@ def test_group_snapshot_reports_neighbor_change_timestamps(monkeypatch):
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
-    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+    monkeypatch.setattr(group_routes.runtime_state, 'get_page_object', lambda *args, **kwargs: tester)
 
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
