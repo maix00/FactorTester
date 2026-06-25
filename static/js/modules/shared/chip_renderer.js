@@ -129,23 +129,23 @@
             return true;
         }
 
-        function dispatchClick(chip) {
-            if (hasOnOpen && chip.tab_key) { opts.onOpen(chip.tab_key, chip.key); return; }
-            if (chip.action && typeof opts.onAction === 'function') { opts.onAction(chip.action, chip, { store: store }); return; }
-            if (chip.info_overlay && window.SettingsChipOverlays) {
-                window.SettingsChipOverlays.open(chip.info_overlay, effectiveForOverlay(chip));
-            }
-        }
+        var overlays = window.SettingsChipOverlays;
 
         function effectiveForOverlay(chip) {
             // overlay 取该 chip 主字段的有效值
             return effective((chip.source_keys && chip.source_keys[0]) || chip.key);
         }
 
+        function dispatchClick(chip) {
+            if (hasOnOpen && chip.tab_key) { opts.onOpen(chip.tab_key, chip.key); return; }
+            if (chip.action && typeof opts.onAction === 'function') { opts.onAction(chip.action, chip, { store: store }); return; }
+            if (chip.info_overlay && overlays) overlays.open(chip.info_overlay, effectiveForOverlay(chip));
+        }
+
         function clickable(chip) {
             if (hasOnOpen && chip.tab_key) return true;
             if (chip.action && typeof opts.onAction === 'function') return true;
-            return !!(chip.info_overlay && window.SettingsChipOverlays);
+            return !!(chip.info_overlay && overlays && overlays.has(chip.info_overlay));
         }
 
         chips.forEach(function(chip) {
