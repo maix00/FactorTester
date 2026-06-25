@@ -171,8 +171,9 @@
             const current = icProductPathSelections[0] || null;
             return window.BackendSettingsPanel.displaySettingValue(setting, current);
         }
-        if (setting && setting.key === 'factor') {
-            if (factorList.length) return factorList.map(f => f.alias || f.name || '').filter(Boolean).join(' / ');
+        if (setting && (setting.key === 'factor_selections' || setting.key === 'factor')) {
+            var picked = collectFactorSelections();
+            if (picked.length) return picked.map(function(p) { return p.alias; }).filter(Boolean).join(' / ');
             return factorFamilyAlias || '无';
         }
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
