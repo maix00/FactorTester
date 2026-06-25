@@ -63,6 +63,7 @@ class SettingDefinition:
     maximum: float | None = None
     step: float | None = None
     chip_template: str | None = None
+    info_overlay: dict[str, Any] | None = None  # 点击 chip 时打开的 overlay 配置：{'type': 'factor_info'|'product_path_selection_products'|...}
     help_text: str = ""
     engine_defaults: dict[str, Any] = field(default_factory=dict)
     disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)

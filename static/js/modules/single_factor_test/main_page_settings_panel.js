@@ -104,17 +104,6 @@
             + '<span class="gt-backend-chip-value">' + escapeHtml(parts.value) + '</span>';
     }
 
-    function makeChip(tabKey, label, value) {
-        var chip = document.createElement('span');
-        chip.className = 'gt-backend-chip';
-        chip.innerHTML = renderChipHtml(label, value);
-        chip.title = '打开' + ((tabMeta(tabKey) && tabMeta(tabKey).label) || tabKey);
-        chip.style.cursor = 'pointer';
-        chip.setAttribute('data-page-settings-tab-btn', tabKey);
-        chip.addEventListener('click', function() { openTab(tabKey); });
-        return chip;
-    }
-
     // 原生渲染"模板"标签页：构建工具栏 + 列表骨架，再交由
     // global_template_module.js 绑定保存按钮并加载模板列表。幂等。
     function renderSettingTemplateTab() {
@@ -208,10 +197,6 @@
             renderChips();
             broadcastGlobalSettingsChanged();
         }
-    }
-
-    function displayValue(setting, value) {
-        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     // 旧的 chip 计算链（settingChipParts/registeredTabChipParts/chipPartsForTab）已删除，
@@ -481,28 +466,16 @@
         var container = ensurePanel('__manage__');
         if (!container || !state.manifest) return;
         if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
-        var allowed = sharedGlobalDefaultKeySet();
         window.BackendSettingsPanel.renderChooser({
             host: container,
+            manifest: state.manifest,
+            store: pageStore,
             tabs: tabs(),
             mountedTabs: state.mountedTabs,
             introText: '选择可作为各测试模块全局默认值的设置。',
             isVisible: function(tab) { return tabHasSharedGlobalDefaults(tab.key); },
-            defaultsForTab: function(tab) {
-                return settingKeysForTab(tab.key).map(function(key) {
-                    if (!allowed[key]) return null;
-                    var setting = Object.assign({ key: key }, defaults()[key] || {});
-                    return {
-                        tabKey: tab.key,
-                        setting: setting,
-                        label: setting.label || key,
-                        value: displayValue(setting, effectiveValue(key)),
-                    };
-                }).filter(Boolean);
-            },
-            renderChip: function(item) {
-                return makeChip(item.tabKey, item.label, item.value);
-            },
+            escapeHTML: escapeHtml,
+            renderChipHtml: renderChipHtml,
             onToggle: function(tab, enabled) { toggleMounted(tab.key, enabled); },
         });
     }

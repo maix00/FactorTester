@@ -84,6 +84,16 @@
         var host = resolveElement(options.host);
         if (!host) return;
         host.innerHTML = '';
+
+        // 新路径：manifest + store → 用 SettingsChips 渲染每行 chip
+        var manifest = options.manifest;
+        var store = options.store;
+        if (manifest && store && window.SettingsChips) {
+            _renderChooserWithSettingsChips(host, options);
+            return;
+        }
+
+        // 旧路径（向后兼容，仅当无 manifest+store 时）
         var introText = options.introText || '选择要挂载的设置。未挂载项继续使用默认值。';
         if (introText) {
             var intro = document.createElement('div');
@@ -128,6 +138,66 @@
             row.appendChild(input);
             row.appendChild(body);
             host.appendChild(row);
+        });
+    }
+
+    function _renderChooserWithSettingsChips(host, options) {
+        var manifest = options.manifest;
+        var store = options.store;
+        var defaults = manifest.defaults || {};
+        var tabs = Array.isArray(options.tabs) ? options.tabs : [];
+        var mountedTabs = Array.isArray(options.mountedTabs) ? options.mountedTabs : [];
+        var isVisible = typeof options.isVisible === 'function' ? options.isVisible : function() { return true; };
+        var onToggle = typeof options.onToggle === 'function' ? options.onToggle : function() {};
+        var shouldShow = typeof options.shouldShow === 'function' ? options.shouldShow : null;
+        var escapeHTML = options.escapeHTML;
+        var renderChipHtml = options.renderChipHtml;
+
+        var introText = options.introText || '选择要挂载的设置。未挂载项继续使用默认值。';
+        if (introText) {
+            var intro = document.createElement('div');
+            intro.className = options.introClassName || 'backend-settings-chooser-intro';
+            intro.textContent = introText;
+            host.appendChild(intro);
+        }
+
+        tabs.filter(isVisible).forEach(function(tab) {
+            // 收集该 tab 下有 chip_template 的 setting key
+            var tabSettingKeys = Object.keys(defaults).filter(function(key) {
+                var def = defaults[key] || {};
+                return (def.tab_key || def.tab) === tab.key && def.chip_template;
+            });
+            tabSettingKeys = sortSettingKeysByDisplayOrder(tabSettingKeys, defaults);
+
+            var row = document.createElement('label');
+            row.className = options.rowClassName || 'backend-settings-chooser-row';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = mountedTabs.indexOf(tab.key) >= 0;
+            input.addEventListener('change', function() { onToggle(tab, input.checked); });
+            var body = document.createElement('div');
+            body.className = options.bodyClassName || 'backend-settings-chooser-body';
+            var title = document.createElement('div');
+            title.className = options.titleClassName || 'backend-settings-chooser-title';
+            title.textContent = tab.label || tab.key;
+            var defaultsHost = document.createElement('div');
+            defaultsHost.className = options.defaultsClassName || 'backend-settings-chooser-defaults';
+            body.appendChild(title);
+            body.appendChild(defaultsHost);
+            row.appendChild(input);
+            row.appendChild(body);
+            host.appendChild(row);
+
+            // 用 SettingsChips 渲染该 tab 的 chip 行。
+            // 不传 onOpen → chip 默认行为：按 info_overlay 打开信息 overlay。
+            window.SettingsChips.render(defaultsHost, {
+                manifest: manifest,
+                store: store,
+                settingKeys: tabSettingKeys,
+                shouldShow: shouldShow,
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
+            });
         });
     }
 

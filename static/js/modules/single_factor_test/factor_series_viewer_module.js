@@ -165,27 +165,6 @@
             + '<span class="gt-backend-chip-value">' + escapeHtml(parts.value) + '</span>';
     }
 
-    function chipText(setting, value) {
-        var template = setting && setting.chip_template ? setting.chip_template : ((setting && (setting.label || setting.key) || '') + ': {value}');
-        return template.replace('{value}', displayValue(setting, value));
-    }
-
-    function makeChip(setting, value, explicitTabKey, muted) {
-        var tabKey = explicitTabKey || setting.tab_key || setting.tab || '';
-        var node = document.createElement('span');
-        node.className = 'gt-backend-chip factor-series-settings-chip' + (muted ? ' is-muted' : '');
-        node.innerHTML = renderChipHtml(chipText(setting, value));
-        node.setAttribute('data-factor-series-tab-key', tabKey);
-        if (tabKey && !muted) {
-            node.title = '打开' + (tabMeta(tabKey) && tabMeta(tabKey).label || tabKey);
-            node.style.cursor = 'pointer';
-            node.addEventListener('click', function() {
-                openTab(tabKey);
-            });
-        }
-        return node;
-    }
-
     function productLabel() {
         if (state.selectionKind === 'path') {
             var label = state.currentPathLabel || state.paths[0] || '';
@@ -570,23 +549,16 @@
     function renderChooser() {
         var host = document.getElementById('factor-series-settings-host');
         if (!host || !state.manifest) return;
-        var tabs = state.manifest.tab_lists && state.manifest.tab_lists[LOCAL] || [];
         if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
         window.BackendSettingsPanel.renderChooser({
             host: host,
-            tabs: tabs,
+            manifest: state.manifest,
+            store: fsvStore,
+            tabs: state.manifest.tab_lists && state.manifest.tab_lists[LOCAL] || [],
             mountedTabs: state.mountedTabs,
             introText: '选择要挂载到此栏的设置。未挂载项继续使用下列默认值。',
-            defaultsForTab: function(tab) {
-                return settingKeysForTab(tab.key).map(function(key) {
-                    var setting = Object.assign({ key: key }, defaults()[key] || {});
-                    if (!setting.chip_template) return null;
-                    return { setting: setting, tabKey: tab.key };
-                }).filter(Boolean);
-            },
-            renderChip: function(item) {
-                return makeChip(item.setting, item.setting.value, item.tabKey, true);
-            },
+            escapeHTML: escapeHTML,
+            renderChipHtml: renderChipHtml,
             onToggle: function(tab, enabled) {
                 window.BackendSettingsPanel.toggleMountedTab({
                     mountedTabs: state.mountedTabs,

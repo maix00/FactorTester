@@ -122,6 +122,7 @@ def register_product_path_selection_base(
         module="product_selection",
         chip_template="产品路径: {value}",
         help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
+        info_overlay={"type": "product_path_selection_products"},
         serialization={
             "kind": "product_path_selection",
             "display_order": 20,
@@ -168,6 +169,7 @@ def register_product_path_selections_base(
         module="product_selection",
         chip_template="产品路径选择: {value}",
         help_text="从产品路径候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
+        info_overlay={"type": "product_path_selection_products"},
         serialization={
             "kind": "product_path_selection_list",
             "display_order": 30,
@@ -277,6 +279,7 @@ def register_factor_selection_base(
         scope_policy,
         module="factor_execution",
         chip_template="因子: {value}",
+        info_overlay={"type": "factor_info"},
         serialization={
             "kind": "factor_selection",
             "display_order": 20,
@@ -305,6 +308,7 @@ def register_factor_selections_base(
         module="factor_execution",
         chip_template="因子选择: {value}",
         help_text="从因子候选列表多选；为空时回退到候选列表（先本模块本地候选，再页面全局候选）。",
+        info_overlay={"type": "factor_info"},
         serialization={
             "kind": "factor_selection_list",
             "display_order": 30,

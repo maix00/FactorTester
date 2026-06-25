@@ -117,6 +117,7 @@ class ApplicationSettings:
                     "scope_policy": setting.scope_policy.value,
                     "module": setting.module,
                     "chip_template": setting.chip_template,
+                    "info_overlay": setting.info_overlay,
                     "engine_defaults": dict(setting.engine_defaults),
                     "serialization": dict(setting.serialization),
                     "visible_when": {

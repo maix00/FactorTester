@@ -163,43 +163,9 @@
             + '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
     }
 
-    function displaySettingValue(setting, value) {
-        if (setting && (setting.key === 'product_path_selections' || setting.key === 'product_path_selection')) {
-            const current = icProductPathSelections[0] || null;
-            return window.BackendSettingsPanel.displaySettingValue(setting, current);
-        }
-        if (setting && (setting.key === 'factor_selections' || setting.key === 'factor')) {
-            // 只显示选中个数（因子可能很多，避免 chip 过长）
-            return collectFactorSelections().length + ' 个已选';
-        }
-        return window.BackendSettingsPanel.displaySettingValue(setting, value);
-    }
-
     function settingVisible(setting) {
         const values = Object.assign({}, icSettingValues);
         return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
-    }
-
-    function settingChipText(setting, value) {
-        const template = setting && setting.chip_template
-            ? setting.chip_template
-            : ((setting && (setting.label || setting.key) || '') + ': {value}');
-        return template.replace('{value}', displaySettingValue(setting, value));
-    }
-
-    // 计数类设置（候选/多选列表）的真实数据存放在运行态数组里，而非 icSettingValues。
-    // 统一在这里解析出"有效值"，让 displaySettingValue 的计数（N项/N个已选）正确——
-    // 之前各处直接读 icSettingValues[key] 导致 chip 恒显 0。
-    function icEffectiveSettingValue(key) {
-        switch (key) {
-            // 候选/选择的真实数据在运行态数组里；空选择回退由 FieldStore 的 fallback 处理。
-            case 'product_path_selections': return icProductPathSelections;
-            case 'product_path_candidates': return icSharedProductPathSelections;
-            case 'factor_candidates': return factorList;
-            case 'factor_selections': return collectFactorSelections();
-            case 'category_candidates': return Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates : [];
-            default: return icSettingValues[key];
-        }
     }
 
     // ── 响应式 chip：用 manifest 建 FieldStore，运行态值同步进去，chip 订阅字段 ──
@@ -321,27 +287,16 @@
             if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
             window.BackendSettingsPanel.renderChooser({
                 host: contentHost,
+                manifest: manifest,
+                store: icStore,
                 tabs,
                 mountedTabs: icMountedSettingsTabs,
                 introText: '选择要挂载到 IC 测试的设置。未挂载项使用后端默认值。',
                 isVisible: function(tab) {
                     return !!(settingsByTab[tab.key] || []).length;
                 },
-                defaultsForTab: function(tab) {
-                const rows = settingsByTab[tab.key] || [];
-                    return rows.map(row => {
-                    const setting = Object.assign({ key: row.key }, row.meta || {});
-                        if (!setting.chip_template) return null;
-                    const value = displaySettingValue(setting, icEffectiveSettingValue(row.key));
-                        return { setting, value };
-                    }).filter(Boolean);
-                },
-                renderChip: function(item) {
-                    const chip = document.createElement('span');
-                    chip.className = 'gt-backend-chip is-muted';
-                    chip.innerHTML = renderChipHtml(settingChipText(item.setting, item.value));
-                    return chip;
-                },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
                 onToggle: function(tab, enabled) {
                     const tabKey = tab.key;
                     const index = icMountedSettingsTabs.indexOf(tabKey);
@@ -429,13 +384,13 @@
             rows.forEach(row => {
                 const meta = Object.assign({ key: row.key }, row.meta || {});
                 if (!settingVisible(meta)) return;
-                const value = icEffectiveSettingValue(row.key);
+                const value = icSettingValues[row.key];
                 html += '<label class="gt-backtest-setting-row">';
                 html += '<span class="gt-backtest-setting-label">' + escapeHTML(meta.label || row.key) + '</span>';
                 html += '<span class="gt-backtest-setting-control">';
                 if (meta.control_template === 'custom') {
                     html += '<span class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;">'
-                        + escapeHTML(displaySettingValue(meta, value))
+                        + escapeHTML(window.BackendSettingsPanel.displaySettingValue(meta, value))
                         + '</span>';
                 } else if ((meta.options || []).length || meta.control_template === 'select') {
                     html += '<select data-ic-setting="' + row.key + '">';
