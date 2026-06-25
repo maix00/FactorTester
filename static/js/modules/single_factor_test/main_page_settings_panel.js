@@ -637,13 +637,20 @@
         });
     }
 
+    // 因子库"现场加载池"（可从中加载到工作列表），与持久化的工作候选列表
+    // state.values.factor_candidates 分开：后者镜像当前会话因子（chip 计数据此）。
     function factorLibraryParams() {
-        var value = state.values.factor_candidates;
-        return Array.isArray(value) ? value : [];
+        return Array.isArray(state._factorLibraryPool) ? state._factorLibraryPool : [];
     }
 
     function setFactorLibraryParams(params) {
-        state.values.factor_candidates = Array.isArray(params) ? params.slice() : [];
+        state._factorLibraryPool = Array.isArray(params) ? params.slice() : [];
+    }
+
+    // 把工作候选列表（= 当前会话因子，shape {alias,in_library,library_product_group,params}）
+    // 同步到 state.values.factor_candidates，供 chip 计数与快照收集。
+    function syncFactorCandidatesValue() {
+        state.values.factor_candidates = collectFactorCandidates();
     }
 
     // 因子库中的因子参数行可以绑定某个产品组，也可以不绑定（DEFAULT_SCOPE_KEY）。
@@ -710,6 +717,7 @@
 
     function setSessionFactorParams(params) {
         state._sessionParams = Array.isArray(params) ? params.slice() : [];
+        syncFactorCandidatesValue();  // 工作候选列表随会话因子变化，chip 计数才正确
     }
 
     function renderFactorsTab() {
@@ -725,6 +733,9 @@
             setSessionFactorParams(window._initialSessionParams);
         }
         var sessionParams = getSessionFactorParams();
+        // 工作候选列表与 chip 计数随会话因子保持同步（含直接改 _sessionParams 的路径）
+        syncFactorCandidatesValue();
+        renderChips();
 
         loadFactorLibraryParams(false).then(function(libraryParams) {
             if (!window.FactorParamSelectionUtils || typeof window.FactorParamSelectionUtils.renderFactorParamSettingsTab !== 'function') {
@@ -874,12 +885,22 @@
         return getSessionFactorParams().map(sessionRowToCandidate);
     }
 
+    // 因子 tab 默认隐藏；加载的模板含因子设置时懒挂载它。
+    function ensureFactorsTabMounted() {
+        if (state.mountedTabs.indexOf('factors') < 0) {
+            state.mountedTabs.push('factors');
+            ensurePanel('factors');
+            renderTabs();
+        }
+    }
+
     async function applyFactorsSnapshot(subset) {
         var candidates = (subset && Array.isArray(subset.factor_candidates)) ? subset.factor_candidates : [];
         var ffAlias = factorFamilyAlias();
         if (subset && Object.prototype.hasOwnProperty.call(subset, 'factor')) {
             state.values.factor = subset.factor || '';
         }
+        if (candidates.length || (subset && subset.factor)) ensureFactorsTabMounted();
         if (!candidates.length || !ffAlias) { renderFactorsTab(); renderChips(); return; }
         try {
             // 推到后端会话（IC/分组测试从会话读参数）

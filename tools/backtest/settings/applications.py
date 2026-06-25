@@ -391,7 +391,7 @@ def single_factor_page_settings() -> ApplicationSettings:
             (TabMountPoint.LOCAL_SETTINGS,),
             "custom",
             20,
-            (TabMountPoint.LOCAL_SETTINGS,),
+            # 默认隐藏：加载模板后若含因子设置再懒挂载（见 main_page_settings_panel）。
         ),
         SettingTab(
             "product_path_selection",
