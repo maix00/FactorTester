@@ -366,7 +366,13 @@ def execution_trace_entry(
     deltas: Mapping[str, float],
     cash: float,
 ) -> dict[str, Any]:
-    """Describe the fee-aware executable target produced inside one event."""
+    """Describe the fee-aware executable target produced inside one event.
+
+    Emits the compact ``changed_only`` shape: only instruments actually moved
+    by the event are listed. This mirrors the native event runner's vectorized
+    trace so the detailed trace is identical across every engine, and keeps
+    snapshot overlays free of a full copy of every unchanged instrument.
+    """
     def clean(value: float) -> float:
         value = float(value)
         if abs(value) <= 1e-12:
@@ -376,27 +382,38 @@ def execution_trace_entry(
     fee_rate = float(strategy.get("fee_rate") or 0.0)
     sell_proceeds_after_fee = 0.0
     buy_cost_with_fee = 0.0
-    clean_deltas: dict[str, float] = {}
+    delta_out: dict[str, float] = {}
+    current_size: dict[str, float] = {}
     target_size: dict[str, float] = {}
+    fill_price: dict[str, float] = {}
+    notional: dict[str, float] = {}
     for instrument in request.instruments:
         delta = float(deltas.get(instrument, 0.0))
-        clean_deltas[instrument] = clean(delta)
-        target_size[instrument] = clean(float(current.get(instrument, 0.0)) + delta)
         if abs(delta) <= 1e-12:
             continue
+        before = float(current.get(instrument, 0.0))
         price = execution_price(valuation_price(request, row, instrument), delta, strategy)
-        notional = abs(delta) * price
+        trade_value = abs(delta) * price
+        delta_out[instrument] = clean(delta)
+        current_size[instrument] = clean(before)
+        target_size[instrument] = clean(before + delta)
+        fill_price[instrument] = clean(price)
+        notional[instrument] = clean(trade_value)
         if delta < 0:
-            sell_proceeds_after_fee += notional * (1.0 - fee_rate)
+            sell_proceeds_after_fee += trade_value * (1.0 - fee_rate)
         else:
-            buy_cost_with_fee += notional * (1.0 + fee_rate)
+            buy_cost_with_fee += trade_value * (1.0 + fee_rate)
     return {
-        "delta": clean_deltas,
+        "delta": delta_out,
+        "current_size": current_size,
         "target_size": target_size,
+        "fill_price": fill_price,
+        "notional": notional,
         "cash_before": clean(cash),
         "cash_available_after_sells": clean(float(cash) + sell_proceeds_after_fee),
         "buy_cost_with_fee": clean(buy_cost_with_fee),
         "fee_rate": clean(fee_rate),
+        "trace_shape": "changed_only",
     }
 
 

@@ -221,7 +221,7 @@ def test_framework_progress_is_bounded_for_long_replays() -> None:
     assert len(checkpoints) <= 102
 
 
-def test_native_group_strategy_progress_counts_every_strategy() -> None:
+def test_native_group_strategy_progress_counts_every_bar() -> None:
     from tools.backtest.workers.runners.native import run_group_strategy
 
     events = []
@@ -262,8 +262,10 @@ def test_native_group_strategy_progress_counts_every_strategy() -> None:
         "timestamp": timestamp,
     }))
 
-    assert [event["completed"] for event in events] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    assert {event["total"] for event in events} == {9}
+    # The vectorized native engine advances every strategy together on each bar,
+    # so replay progress is reported per bar (not per strategy sub-step).
+    assert [event["completed"] for event in events] == [1, 2, 3]
+    assert {event["total"] for event in events} == {3}
 
 
 def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
@@ -568,6 +570,7 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
             "rebalance_trigger": "on_factor_signal",
             "position_policy": "rebalance_to_target",
             "fee_rate": 0.001,
+            "collect_execution_trace": True,
         }],
     }
     dispatcher = EngineWorkerDispatcher()
@@ -746,6 +749,7 @@ def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> N
             "position_policy": "rebalance_to_target",
             "execution_timing": "next_bar",
             "fee_rate": 0.001,
+            "collect_execution_trace": True,
         }],
     }
     dispatcher = EngineWorkerDispatcher()

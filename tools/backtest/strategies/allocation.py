@@ -116,7 +116,6 @@ class TrailingVolatilityEstimator:
         self.annualization = annualization
         self._returns = {name: deque(maxlen=lookback) for name in instruments}
         self._sum = {name: 0.0 for name in instruments}
-        self._sum_sq = {name: 0.0 for name in instruments}
 
     def update(self, returns: Mapping[str, float]) -> None:
         for instrument in self.instruments:
@@ -136,10 +135,8 @@ class TrailingVolatilityEstimator:
             if len(values) == self.lookback:
                 old = float(values[0])
                 self._sum[instrument] -= old
-                self._sum_sq[instrument] -= old * old
             values.append(value)
             self._sum[instrument] += value
-            self._sum_sq[instrument] += value * value
 
     def snapshot(self) -> dict[str, float]:
         result = {}
@@ -149,10 +146,14 @@ class TrailingVolatilityEstimator:
             if count < self.min_observations:
                 result[instrument] = np.nan
                 continue
-            mean_sq = self._sum_sq[instrument] - (
-                self._sum[instrument] * self._sum[instrument] / count
-            )
-            variance = max(mean_sq / (count - 1), 0.0)
+            # Compute the sample variance about the mean rather than via the
+            # Σx² − (Σx)²/n "computational formula", which suffers catastrophic
+            # cancellation and reports spurious non-zero volatility for a
+            # constant return series. The lookback window is small, so the
+            # two-pass cost is negligible and numerically exact.
+            mean = self._sum[instrument] / count
+            sum_sq_dev = sum((float(value) - mean) ** 2 for value in values)
+            variance = max(sum_sq_dev / (count - 1), 0.0)
             result[instrument] = float(variance ** 0.5 * scale)
         return result
 

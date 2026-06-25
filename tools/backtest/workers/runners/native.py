@@ -48,7 +48,6 @@ def _positions_dict(instruments: tuple[str, ...], positions: np.ndarray) -> dict
     return {
         instrument: float(positions[index])
         for index, instrument in enumerate(instruments)
-        if abs(float(positions[index])) > 1e-12
     }
 
 

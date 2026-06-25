@@ -116,6 +116,8 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         notional_curve = {}
         margin_curve = {}
         execution_trace = {}
+        execution_trace_count = 0
+        collect_trace = bool(strategy.get("collect_execution_trace"))
         timing = execution_timing(strategy)
         delay_bars = execution_delay_bars(strategy)
         for row, timestamp in enumerate(request.timestamps):
@@ -136,9 +138,11 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     request, row, strategy, pending, positions, cash
                 )
                 if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                        request, row, strategy, before, deltas, cash_before
-                    )
+                    execution_trace_count += 1
+                    if collect_trace:
+                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                            request, row, strategy, before, deltas, cash_before
+                        )
             target = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -153,9 +157,11 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     request, row, strategy, target, positions, cash
                 )
                 if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                        request, row, strategy, before, deltas, cash_before
-                    )
+                    execution_trace_count += 1
+                    if collect_trace:
+                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                            request, row, strategy, before, deltas, cash_before
+                        )
             elif timing == "next_bar":
                 if target is not None:
                     pending_targets.append((row + delay_bars, target))
@@ -190,6 +196,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
             "notional_curve": notional_curve,
             "margin_curve": margin_curve,
             "execution_trace": execution_trace,
+            "execution_trace_count": execution_trace_count,
         }
     return {
         "engine": "qlib",
