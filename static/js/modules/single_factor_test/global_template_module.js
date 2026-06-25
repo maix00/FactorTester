@@ -65,10 +65,11 @@
     }
 
     function rememberLoadedTemplateName(name) {
-        window._currentSingleFactorTemplateName = name || '';
-        document.dispatchEvent(new CustomEvent('singleFactorTemplateChanged', {
-            detail: { name: window._currentSingleFactorTemplateName },
-        }));
+        // 通过 FieldStore 驱动 SettingsChips 自动刷新，不再依赖 DOM 事件
+        var store = window._singleFactorPageStore;
+        if (store && typeof store.set === 'function') {
+            store.set('setting_template', name || '');
+        }
     }
 
     function restoreScrollAfter(work) {

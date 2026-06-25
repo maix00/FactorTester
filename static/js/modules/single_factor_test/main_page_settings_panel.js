@@ -144,10 +144,6 @@
         }
     }
 
-    function templateSummaryValue() {
-        return window._currentSingleFactorTemplateName || '无';
-    }
-
     function productPathSelectionId(selection) {
         if (!selection) return '';
         if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.selectionId === 'function') {
@@ -228,6 +224,8 @@
         if (!pageStore && state.manifest && window.FieldStore) {
             pageStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
         }
+        // 暴露给 global_template_module 等外部模块，通过 store.set('setting_template', name) 直接驱动 chip 刷新
+        window._singleFactorPageStore = pageStore;
         return pageStore;
     }
     function syncPageStore() {
@@ -245,7 +243,6 @@
         var mounted = orderedMountedTabs();
         var chipKeys = [];
         mounted.forEach(function(tabKey) {
-            if (tabKey === 'setting_template') return;  // 模板不是后端 setting，单独渲染
             settingKeysForTab(tabKey).forEach(function(key) {
                 if ((defaults()[key] || {}).chip_template) chipKeys.push(key);
             });
@@ -262,10 +259,6 @@
             });
         } else {
             row.innerHTML = '';
-        }
-        // 模板 chip 置首（setting_template 不是后端字段）
-        if (mounted.indexOf('setting_template') >= 0) {
-            row.insertBefore(makeChip('setting_template', '模板', templateSummaryValue()), row.firstChild);
         }
     }
 
@@ -1016,7 +1009,7 @@
             if (!node || !window.MutationObserver) return;
             new MutationObserver(renderChips).observe(node, { childList: true, characterData: true, subtree: true });
         });
-        document.addEventListener('singleFactorTemplateChanged', renderChips);
+        // 模板 chip 由 FieldStore 订阅自动刷新，不再需要 DOM 事件监听
     }
 
     function init() {
