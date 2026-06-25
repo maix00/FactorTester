@@ -682,6 +682,27 @@
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
+        } else if (setting.control_template === 'custom') {
+            // 自定义控件（候选/多选列表，如 factor_candidates / product_path_candidates /
+            // category_candidates）：行内不内联完整管理 UI，显示摘要 chip + "管理"按钮，
+            // 点击挂载并跳转到对应设置 tab。
+            control = document.createElement('div');
+            control.style.cssText = 'display:flex;align-items:center;gap:8px;';
+            var summary = document.createElement('span');
+            summary.className = 'gt-backend-chip unified-backend-chip';
+            try { summary.innerHTML = renderChipHtml(window.BackendSettingsPanel.displaySettingValue(setting, effectiveValue(setting, mount))); }
+            catch (e) { summary.textContent = '—'; }
+            control.appendChild(summary);
+            var manageBtn = document.createElement('button');
+            manageBtn.type = 'button';
+            manageBtn.textContent = '管理';
+            manageBtn.style.cssText = 'height:24px;padding:0 10px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+            var targetTab = setting.tab || setting.tab_key;
+            manageBtn.addEventListener('click', function() {
+                if (targetTab && GT.tabs && typeof GT.tabs.mountTab === 'function') GT.tabs.mountTab(targetTab);
+            });
+            control.appendChild(manageBtn);
+            return control;
         } else {
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
