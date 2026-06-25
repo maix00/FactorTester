@@ -190,11 +190,14 @@
             if (serializationKind === 'product_path_selection') return '无';
             return '无';
         }
-        if (serializationKind === 'product_path_candidate_list') {
+        if (serializationKind === 'product_path_candidate_list'
+            || serializationKind === 'factor_candidate_list') {
             return (Array.isArray(value) ? value.length : 0) + '项';
         }
-        if (serializationKind === 'factor_candidate_list') {
-            return (Array.isArray(value) ? value.length : 0) + '项';
+        // 多选列表（复数 selections）：显示已选个数。
+        if (serializationKind === 'product_path_selection_list'
+            || serializationKind === 'factor_selection_list') {
+            return (Array.isArray(value) ? value.length : 0) + ' 个已选';
         }
         if (serializationKind === 'product_path_selection' && value && typeof value === 'object') {
             var pps = window.ProductPathSelectionUtils;
