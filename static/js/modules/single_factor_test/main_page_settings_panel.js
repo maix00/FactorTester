@@ -218,39 +218,55 @@
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
-    function settingChipParts(setting) {
-        if (!setting || !setting.chip_template) return null;
-        var value = displayValue(setting, effectiveValue(setting.key));
-        var text = String(setting.chip_template).replace('{value}', value);
-        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
-        if (match && match[2]) return { label: match[1], value: match[2] };
-        return { label: setting.label || setting.key, value: value };
-    }
+    // 旧的 chip 计算链（settingChipParts/registeredTabChipParts/chipPartsForTab）已删除，
+    // chip 改由 manifest 驱动的 SettingsChips + FieldStore 渲染（见 renderChips）。
 
-    function registeredTabChipParts(tabKey) {
-        var values = {};
-        Object.keys(defaults()).forEach(function(key) { values[key] = effectiveValue(key); });
-        return settingKeysForTab(tabKey).map(function(key) {
-            var setting = Object.assign({ key: key }, defaults()[key] || {});
-            if (!settingVisibleForValues(setting, values)) return null;
-            return settingChipParts(setting);
-        }).filter(Boolean);
+    // ── 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅 ──
+    var pageStore = null;
+    var pageChipUnbind = null;
+    function ensurePageStore() {
+        if (!pageStore && state.manifest && window.FieldStore) {
+            pageStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
+        }
+        return pageStore;
     }
-
-    function chipPartsForTab(tabKey) {
-        if (tabKey === 'setting_template') return [{ label: '模板', value: templateSummaryValue() }];
-        return registeredTabChipParts(tabKey);
+    function syncPageStore() {
+        var s = ensurePageStore();
+        if (s) s.setMany(state.values);  // state.values 是页面字段真源（候选已同步进去）
     }
 
     function renderChips() {
         var row = document.getElementById('single-factor-page-settings-chips');
         if (!row) return;
-        row.innerHTML = '';
-        orderedMountedTabs().forEach(function(tabKey) {
-            chipPartsForTab(tabKey).forEach(function(parts) {
-                row.appendChild(makeChip(tabKey, parts.label, parts.value));
+        ensurePageStore();
+        syncPageStore();
+        if (pageChipUnbind) { pageChipUnbind(); pageChipUnbind = null; }
+
+        var mounted = orderedMountedTabs();
+        var chipKeys = [];
+        mounted.forEach(function(tabKey) {
+            if (tabKey === 'setting_template') return;  // 模板不是后端 setting，单独渲染
+            settingKeysForTab(tabKey).forEach(function(key) {
+                if ((defaults()[key] || {}).chip_template) chipKeys.push(key);
             });
         });
+        if (window.SettingsChips && pageStore) {
+            pageChipUnbind = window.SettingsChips.render(row, {
+                manifest: state.manifest,
+                store: pageStore,
+                settingKeys: chipKeys,
+                tabOf: function(key) { return (defaults()[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openTab(tabKey); },
+                escapeHTML: escapeHtml,
+                renderChipHtml: renderChipHtml,
+            });
+        } else {
+            row.innerHTML = '';
+        }
+        // 模板 chip 置首（setting_template 不是后端字段）
+        if (mounted.indexOf('setting_template') >= 0) {
+            row.insertBefore(makeChip('setting_template', '模板', templateSummaryValue()), row.firstChild);
+        }
     }
 
     function renderTabs() {
