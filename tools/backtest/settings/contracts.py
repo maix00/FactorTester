@@ -185,3 +185,47 @@ class SettingsSurface:
         value["mount"] = self.mount.value
         value["chip_keys"] = list(self.chip_keys)
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceFlow:
+    """A declarative action ("flow") a list surface supports.
+
+    Declares the *metadata* a client needs to render the affordance uniformly —
+    label, kind, which form tab it opens, and when it is available (selection
+    count + structural predicates). The flow's *behavior* (how a draft is built,
+    what a submit does) stays in the per-client module; this makes the flow set
+    and its UI portable across clients while keeping logic where it belongs.
+
+    kinds:
+      - "create":  add a brand-new item (e.g. 新增分组)
+      - "derive":  create a child item from the selected one(s) (派生)
+      - "compose": combine selected items into a new derived one (Long-Short)
+      - "edit":    modify the selected item
+      - "delete":  remove the selected item(s)
+      - "clone":   copy the selected item(s)
+    """
+    surface: str                    # owning list surface key, e.g. "groups" / "ic_configs"
+    key: str                        # flow key, e.g. "add_group" / "create_derived" / "delete"
+    label: str
+    kind: str
+    order: int = 0
+    form_tab: str = ""              # add/edit form tab to open (frontend defaultTab), if any
+    min_selected: int | None = None  # availability: required selection count (inclusive)
+    max_selected: int | None = None
+    requires: dict[str, Any] = field(default_factory=dict)  # structural predicates, e.g. {"has_derived_groups": True}
+    button_class: str = ""          # optional presentation hint
+
+    _KINDS = ("create", "derive", "compose", "edit", "delete", "clone")
+
+    def __post_init__(self) -> None:
+        if not self.surface or not self.key or not self.label:
+            raise ValueError("surface flow requires surface, key and label")
+        if self.kind not in self._KINDS:
+            raise ValueError(f"surface flow kind 非法: {self.kind}")
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value.pop("_KINDS", None)
+        value["requires"] = dict(self.requires)
+        return value

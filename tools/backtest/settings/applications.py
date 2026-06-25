@@ -11,6 +11,7 @@ from .contracts import (
     SettingOption,
     SettingsSurface,
     SettingTab,
+    SurfaceFlow,
     TabMountPoint,
 )
 from .registry import ApplicationSettings, BacktestSettingRegistry
@@ -990,6 +991,19 @@ def group_test_settings() -> ApplicationSettings:
         "groups", "分组", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
         selection="multi", run_mode="run_all", editable=True, item_label="分组",
     ))
+    # 分组列表支持的 flow（声明元数据；行为仍由前端 GT.modes 提供）。
+    for flow in (
+        SurfaceFlow("groups", "add_group", "新增分组", "create", order=0, form_tab="add-group"),
+        SurfaceFlow("groups", "create_derived", "派生组", "derive", order=10,
+                    form_tab="add-derived", min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "create_ls", "创建 Long-Short 组合", "compose", order=20,
+                    min_selected=2, max_selected=2),
+        SurfaceFlow("groups", "clone", "复制为派生组", "clone", order=30, min_selected=1),
+        SurfaceFlow("groups", "edit", "编辑", "edit", order=40, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "delete", "删除", "delete", order=50, min_selected=1,
+                    button_class="btn-outline-danger"),
+    ):
+        app.register_flow(flow)
     return app
 
 
@@ -1227,6 +1241,13 @@ def ic_test_settings() -> ApplicationSettings:
         "ic_configs", "IC 配置", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
         selection="single", run_mode="select_then_run", editable=True, item_label="IC 配置",
     ))
+    for flow in (
+        SurfaceFlow("ic_configs", "add_config", "新增 IC 配置", "create", order=0),
+        SurfaceFlow("ic_configs", "edit", "编辑", "edit", order=10, min_selected=1, max_selected=1),
+        SurfaceFlow("ic_configs", "delete", "删除", "delete", order=20, min_selected=1,
+                    button_class="btn-outline-danger"),
+    ):
+        app.register_flow(flow)
     return app
 
 

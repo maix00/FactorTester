@@ -12,6 +12,7 @@ from .contracts import (
     SettingModule,
     SettingsSurface,
     SettingTab,
+    SurfaceFlow,
     TabMountPoint,
 )
 
@@ -25,6 +26,7 @@ class ApplicationSettings:
     chip_fields: dict[str, ChipDefinition] = field(default_factory=dict)
     result_tabs: dict[str, ResultTabDefinition] = field(default_factory=dict)
     surfaces: dict[str, SettingsSurface] = field(default_factory=dict)
+    flows: list[SurfaceFlow] = field(default_factory=list)
     accepted_global_default_keys: tuple[str, ...] = ()
 
     def register_module(self, module: SettingModule) -> None:
@@ -70,6 +72,13 @@ class ApplicationSettings:
         if surface.key in self.surfaces:
             raise ValueError(f"duplicate settings surface: {surface.key}")
         self.surfaces[surface.key] = surface
+
+    def register_flow(self, flow: SurfaceFlow) -> None:
+        if flow.surface not in self.surfaces:
+            raise ValueError(f"flow {flow.key} references unknown surface {flow.surface}")
+        if any(f.surface == flow.surface and f.key == flow.key for f in self.flows):
+            raise ValueError(f"duplicate flow {flow.key} on surface {flow.surface}")
+        self.flows.append(flow)
 
     def register_accepted_global_default_keys(self, *keys: str) -> None:
         ordered = list(self.accepted_global_default_keys)
@@ -136,6 +145,10 @@ class ApplicationSettings:
             "surfaces": [
                 surface.to_dict()
                 for surface in sorted(self.surfaces.values(), key=lambda item: item.order)
+            ],
+            "flows": [
+                flow.to_dict()
+                for flow in sorted(self.flows, key=lambda item: (item.surface, item.order, item.key))
             ],
             "accepted_global_default_keys": list(self.accepted_global_default_keys),
             "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
