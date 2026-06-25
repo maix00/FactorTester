@@ -429,49 +429,7 @@
         }
     });
 
-    // ── 复制（派生组） ──
-    M.registerEditAction({
-        name: 'clone',
-        label: '<i class="fas fa-copy"></i>',
-        title: '复制为派生组',
-        priority: 40,
-        condition: function(ctx) { return ctx.count > 0; },
-        action: function(ctx, helpers) {
-            var groups = GT.groupSettings.groups;
-            var ids = ctx.ids;
-            var created = [];
-            for (var i = 0; i < ids.length; i++) {
-                var src = groups.get(ids[i]);
-                if (!src) continue;
-                var parent = src.parentId ? groups.get(src.parentId) : src;
-                if (!parent) continue;
-                var clone = {
-                    name: '',
-                    parentId: src.id,
-                    splitCount: src.splitCount || (parent && parent.splitCount) || 1,
-                    groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
-                    productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
-                };
-                try {
-                    var newId = groups.add(clone);
-                    created.push(newId);
-                } catch (err) {
-                    alert('复制失败: ' + (err && err.message || err));
-                    break;
-                }
-            }
-            if (created.length > 0) {
-                // 选中新创建的派生组
-                var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
-                if (sel) {
-                    sel.clear();
-                    for (var j = 0; j < created.length; j++) { sel.add(created[j]); }
-                }
-                if (GT.events && GT.events.emit) GT.events.emit('derivedGraphChanged');
-            }
-            helpers.exitEdit();
-        }
-    });
+    // 复制(clone) 现已改为可编辑 flow，注册在 panels/add/derived.js（复用派生表单）。
 
     GT.log('registry/tabs loaded');
 })();

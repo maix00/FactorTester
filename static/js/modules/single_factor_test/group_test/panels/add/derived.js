@@ -52,6 +52,25 @@
         return draft;
     }
 
+    // 复制(clone)：和派生一样走可编辑的派生表单（主界面即分组设置），但用源组的
+    // 设置预填草稿，让用户改部分设置后再保存——不再即时复制。
+    function _buildCloneDraft(ctx) {
+        var ids = (ctx && ctx.ids) ? ctx.ids : [];
+        if (ids.length !== 1) return null;
+        var src = _getGroup(ids[0]);
+        if (!src) return null;
+        var draft = { addFlow: 'derived', cloneFromId: src.id };
+        draft.preselectedParentId = src.id;
+        draft.preselectedParentLabel = src.name || src.shortAlias || src.id;
+        draft.defaultName = (src.shortAlias || src.name || '组') + ' 副本';
+        if (src.splitCount) draft.splitCount = src.splitCount;
+        if (src.productMask) {
+            var picked = Object.keys(src.productMask).filter(function(k) { return src.productMask[k]; });
+            if (picked.length) draft.preselectedProducts = picked;
+        }
+        return draft;
+    }
+
     function _submitDerived(draft, helpers) {
         if (!draft) { alert('提交草稿丢失'); return; }
         var parentId = draft.preselectedParentId;
@@ -74,7 +93,7 @@
             name: resolvedName,
             parentId: parentId,
             productMask: productMask,
-            splitCount: (parentNode && parentNode.splitCount) || 1,
+            splitCount: draft.splitCount || (parentNode && parentNode.splitCount) || 1,
         };
         try {
             GT.groupSettings.groups.add(config);
@@ -282,6 +301,25 @@
                     alert('无法识别选中的分组类型');
                     return;
                 }
+                helpers.exitEdit();
+                M.enterAdd('derived');
+                M.setAddDraft(draft);
+                helpers.mountTab('add-derived');
+                helpers.renderActions();
+            },
+            standalone: true
+        });
+
+        // 复制：和派生共用可编辑表单，预填源组设置后允许修改再保存。
+        M.registerEditAction({
+            name: 'clone',
+            label: '<i class="fas fa-copy"></i>',
+            title: '复制为派生组（可编辑后保存）',
+            priority: 40,
+            condition: function(ctx) { return ctx && ctx.count === 1; },
+            action: function(ctx, helpers) {
+                var draft = _buildCloneDraft(ctx);
+                if (!draft) { alert('请选择 1 行来复制'); return; }
                 helpers.exitEdit();
                 M.enterAdd('derived');
                 M.setAddDraft(draft);
