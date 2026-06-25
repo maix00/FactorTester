@@ -1620,6 +1620,16 @@
                 resultDiv.parentNode.insertBefore(progressDiv, resultDiv);
             }
             const progressUi = createIcProgressController(progressBarId);
+            // 单根进度条只由节点级 eval 进度（累计、单调）驱动；组完成只作文字标注，
+            // 避免节点/组两套分母互相竞态。
+            let nodeCompleted = 0, nodeTotal = 0, groupDone = 0, groupTotal = 0;
+            const renderICProgress = () => {
+                const pct = nodeTotal > 0 ? (nodeCompleted / nodeTotal * 100) : 0;
+                const parts = [];
+                if (nodeTotal > 0) parts.push(nodeCompleted + '/' + nodeTotal + ' 节点');
+                if (groupTotal > 0) parts.push('第 ' + groupDone + '/' + groupTotal + ' 组');
+                progressUi.set(pct, parts.join(' · ') || '准备中…');
+            };
 
             const body = JSON.stringify({
                 product_path_selection_id: selectionId(selection),
@@ -1670,18 +1680,19 @@
                         try {
                             const payload = JSON.parse(line.slice(6));
                             if (lastEvent === 'start') {
-                                const groups = payload.groups || payload.total;
-                                progressUi.set(0, `0/${payload.total} 节点 (${groups} 组)`);
+                                nodeTotal = payload.total || 0;
+                                groupTotal = payload.groups || 0;
+                                nodeCompleted = 0; groupDone = 0;
+                                renderICProgress();
                             } else if (lastEvent === 'progress') {
                                 const phase = payload.phase || '';
                                 if (phase === 'eval') {
-                                    // 节点级进度：显示 completed/total 节点
-                                    progressUi.setCount(payload.completed, payload.total, '节点');
+                                    nodeCompleted = payload.completed; nodeTotal = payload.total;
                                 } else {
-                                    // group_done 等其他阶段：显示组级进度
-                                    const pct = payload.total > 0 ? (payload.completed / payload.total * 100) : 0;
-                                    progressUi.set(pct, `第 ${payload.completed}/${payload.total} 组完成`);
+                                    // group_done 等：只更新组计数文字，不改进度分数
+                                    groupDone = payload.completed; groupTotal = payload.total;
                                 }
+                                renderICProgress();
                             } else if (lastEvent === 'result') {
                                 data = payload;
                             } else if (lastEvent === 'error') {
