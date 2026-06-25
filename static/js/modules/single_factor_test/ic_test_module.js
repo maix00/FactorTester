@@ -62,15 +62,6 @@
         return icProductPathSelections.find(selection => selectionId(selection) === target) || null;
     }
 
-    function defaultProductPathSelection() {
-        if (window.SingleFactorGlobalSettings && typeof window.SingleFactorGlobalSettings.getDefaultValues === 'function') {
-            const selectionField = productPathCandidateSerialization().selection_field || 'product_path_selection';
-            const values = window.SingleFactorGlobalSettings.getDefaultValues([selectionField]);
-            if (values && values[selectionField]) return values[selectionField];
-        }
-        return icProductPathSelections[0] || null;
-    }
-
     function pageProductPathCandidates() {
         if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return [];
         const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
@@ -140,13 +131,13 @@
         return icSharedProductPathSelections;
     }
 
-    function syncDefaultProductPathSelection() {
-        const selection = defaultProductPathSelection();
-        if (!selection) return false;
-        const currentId = selectionId(icProductPathSelections[0]);
-        const nextId = selectionId(selection);
-        if (nextId && currentId === nextId) return false;
-        icProductPathSelections = [selection];
+    // 删除单数页面回退：IC 的产品路径来自其多选 product_path_selections，为空时
+    // 回退到候选列表（本地 icSharedProductPathSelections → 页面全局 product_path_candidates，
+    // 由 loadSharedProductPathSelections 串联），不再回退到页面单数 product_path_selection。
+    function fallbackToCandidatesIfEmpty() {
+        if (icProductPathSelections.length) return false;
+        if (!icSharedProductPathSelections.length) return false;
+        icProductPathSelections = icSharedProductPathSelections.slice();
         return true;
     }
 
@@ -176,8 +167,8 @@
     }
 
     function displaySettingValue(setting, value) {
-        if (setting && setting.key === 'product_path_selection') {
-            const current = defaultProductPathSelection() || icProductPathSelections[0] || null;
+        if (setting && (setting.key === 'product_path_selections' || setting.key === 'product_path_selection')) {
+            const current = icProductPathSelections[0] || null;
             return window.BackendSettingsPanel.displaySettingValue(setting, current);
         }
         if (setting && setting.key === 'factor') {
@@ -234,7 +225,6 @@
         const sharedKeys = (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || [];
         const values = window.SingleFactorGlobalSettings.getDefaultValues(sharedKeys);
         const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
-        const selectionField = productPathCandidateSerialization().selection_field || 'product_path_selection';
         let changed = false;
         if (Array.isArray(values[candidatesField]) && values[candidatesField].length) {
             const before = icSharedProductPathSelections.length;
@@ -248,10 +238,8 @@
             icSettingValues[key] = values[key];
             changed = true;
         });
-        if (values[selectionField] && !icProductPathSelections.length) {
-            icProductPathSelections = [values[selectionField]];
-            changed = true;
-        }
+        // 删除单数页面回退：不再从页面 product_path_selection 注入；为空走候选回退。
+        if (fallbackToCandidatesIfEmpty()) changed = true;
         return changed;
     }
 
@@ -311,8 +299,8 @@
                     return rows.map(row => {
                     const setting = Object.assign({ key: row.key }, row.meta || {});
                         if (!setting.chip_template) return null;
-                    const value = setting.key === 'product_path_selection'
-                        ? displaySettingValue(setting, defaultProductPathSelection())
+                    const value = (setting.key === 'product_path_selections' || setting.key === 'product_path_selection')
+                        ? displaySettingValue(setting, icProductPathSelections[0] || null)
                         : displaySettingValue(setting, icSettingValues[row.key]);
                         return { setting, value };
                     }).filter(Boolean);
@@ -1861,7 +1849,11 @@
         const container = document.getElementById('ic-tab-container');
         if (!container) return;
         icProductPathSelections = Array.isArray(productPathSelections) ? productPathSelections.slice() : [];
-        if (!icProductPathSelections.length) syncDefaultProductPathSelection();
+        if (!icProductPathSelections.length) {
+            // 回退到候选列表（本地→页面全局），不再回退到页面单数 product_path_selection
+            await loadSharedProductPathSelections(false).catch(function() {});
+            fallbackToCandidatesIfEmpty();
+        }
         if (window.FactorSeriesViewer && typeof window.FactorSeriesViewer.setSelections === 'function') {
             window.FactorSeriesViewer.setSelections({ product_path_selection: icProductPathSelections[0] || null });
         }
@@ -2009,7 +2001,7 @@
     window.factorList = factorList;
 
     document.addEventListener('groupTestProductPathSelectionsChanged', function() {
-        if (syncDefaultProductPathSelection()) {
+        if (fallbackToCandidatesIfEmpty()) {
             window.renderICTabs(icProductPathSelections).catch(function(error) {
                 console.error('[IC] refresh product path selection failed:', error);
             });
@@ -2019,7 +2011,7 @@
     });
 
     document.addEventListener('singleFactorGlobalSettingsChanged', function() {
-        const changed = applyGlobalICDefaults() || syncDefaultProductPathSelection();
+        const changed = applyGlobalICDefaults();
         if (changed) {
             window.renderICTabs(icProductPathSelections).catch(function(error) {
                 console.error('[IC] refresh global defaults failed:', error);
