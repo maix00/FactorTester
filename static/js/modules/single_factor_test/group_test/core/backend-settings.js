@@ -99,10 +99,7 @@
         return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    function chipText(setting, value) {
-        var template = setting && setting.chip_template ? setting.chip_template : ((setting && setting.key || '') + ': {value}');
-        return template.replace('{value}', displayValue(setting, value));
-    }
+    // chipText 已删除：chip HTML 统一由 ChipRenderer.chipHtml 渲染（见 gtSettingChipHtml）。
 
     function chipParts(labelOrText, value) {
         if (value !== undefined && value !== null && value !== '') {
@@ -435,10 +432,33 @@
         return source && source[name] != null ? source[name] : '';
     }
 
-    function renderChipTemplate(template, group, source, resolvers) {
-        return String(template || '').replace(/\{([^}]+)\}/g, function(_, key) {
-            return escapeHTML(resolveChipValue(key, group, source, resolvers));
-        }).replace(/\s+/g, ' ').trim();
+    // group_test 的 chip HTML 改由统一的 ChipRenderer.chipHtml 渲染（与各设置栏同一实现）。
+    // 这里提供其取值 ctx：valueOf 取 group/source 字段；resolve 复用 resolveChipValue 的
+    // resolver 分发；settingValueFn 用于"每设置一枚"的配置 chip（{value}→displayValue）。
+    function gtChipCtx(group, source, settingValueFn) {
+        return {
+            valueOf: function(name) {
+                if (settingValueFn) return settingValueFn(name);
+                return source && source[name] != null ? source[name] : '';
+            },
+            resolve: function(resolverName, name) {
+                var oneResolver = {}; oneResolver[name] = resolverName;
+                return resolveChipValue(name, group, source, oneResolver);
+            },
+            renderChipHtml: renderChipHtml,
+            escapeHTML: escapeHTML,
+        };
+    }
+
+    function gtChipHtml(template, valueResolvers, ctx) {
+        return window.ChipRenderer.chipHtml({ chip_template: template, value_resolvers: valueResolvers || {} }, ctx);
+    }
+
+    // "每设置一枚"的配置 chip：chip_template 里 {value} → displayValue(setting, value)。
+    function gtSettingChipHtml(setting, value) {
+        return gtChipHtml(setting.chip_template, {}, gtChipCtx(null, null, function(name) {
+            return name === 'value' ? displayValue(setting, value) : '';
+        }));
     }
 
     function summaryTabs() {
@@ -842,7 +862,10 @@
                     var node = activeNode();
                     if (!node || !Object.prototype.hasOwnProperty.call(node.value, setting.key)) return;
                 }
-                chips.appendChild(chip(chipText(setting, effectiveValue(setting, mount)), false));
+                var node = document.createElement('span');
+                node.className = 'gt-backend-chip';
+                node.innerHTML = gtSettingChipHtml(setting, effectiveValue(setting, mount));
+                chips.appendChild(node);
             });
             chips.style.display = chips.childNodes.length ? 'flex' : 'none';
         }
@@ -1125,7 +1148,7 @@
         if (!setting.chip_template) return null;
         return {
             label: 'backtest-' + key,
-            html: renderChipHtml(chipText(setting, value)),
+            html: gtSettingChipHtml(setting, value),
             category: 'config',
             style: null,
         };
@@ -1154,7 +1177,7 @@
             if (!setting.chip_template) return null;
             return {
                 label: 'backtest-' + key,
-                html: renderChipHtml(chipText(setting, value)),
+                html: gtSettingChipHtml(setting, value),
                 category: 'config',
                 style: null,
             };
@@ -1186,7 +1209,7 @@
             }
             chips.push({
                 label: def.key,
-                html: renderChipHtml(renderChipTemplate(def.chip_template, group, source, def.value_resolvers || {})),
+                html: gtChipHtml(def.chip_template, def.value_resolvers || {}, gtChipCtx(group, source)),
                 category: def.category,
                 clickable: !!def.clickable,
                 action: def.key === 'tester' ? 'tester-products' : (def.key === 'product_mask' ? 'toggle-product-mask' : ''),
@@ -1232,7 +1255,7 @@
             if (!settingVisibleForValues(def, values)) return;
             childChips.push({
                 label: 'backtest-' + key,
-                html: renderChipHtml(chipText(settingDef(key), childValue)),
+                html: gtSettingChipHtml(settingDef(key), childValue),
                 category: 'config',
                 style: null,
             });

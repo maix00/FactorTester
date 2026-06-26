@@ -60,6 +60,20 @@
             GT.overlays.productPathSelectionProducts.open(label, products, value);
         },
     };
+    // 唯一的"模板 → 内部 HTML 字符串"渲染（DOM 模式与字符串模式共用，bar 与 list 共用）。
+    // ctx: { valueOf(name), resolve(resolverName, name), renderChipHtml, escapeHTML }
+    function chipHtml(chip, ctx) {
+        var esc = ctx.escapeHTML || _esc;
+        var text = String(chip.chip_template || '').replace(/\{([^}]+)\}/g, function(_, name) {
+            var rn = chip.value_resolvers && chip.value_resolvers[name];
+            var v = rn ? ctx.resolve(rn, name) : (ctx.valueOf ? ctx.valueOf(name) : '');
+            return v == null ? '' : String(v);
+        }).replace(/\s+/g, ' ').trim();
+        var m = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (ctx.renderChipHtml && m && m[2]) return ctx.renderChipHtml(m[1], m[2], esc);
+        return '<span class="gt-backend-chip-value">' + esc(text) + '</span>';
+    }
+
     function overlayType(info) { return typeof info === 'string' ? info : (info && info.type); }
     function overlayHas(info) { return typeof overlayHandlers[overlayType(info)] === 'function'; }
     function overlayOpen(info, value) {
@@ -130,23 +144,23 @@
             return store && typeof store.effective === 'function' ? store.effective(key) : undefined;
         }
 
-        function resolvePlaceholder(chip, name) {
-            var resolverName = chip.value_resolvers && chip.value_resolvers[name];
-            if (resolverName === SETTING_DISPLAY) {
-                var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
-                return BSP ? BSP.displaySettingValue(setting, effective(chip.key)) : effective(chip.key);
-            }
-            if (resolverName && typeof resolvers[resolverName] === 'function') {
-                return resolvers[resolverName]({ store: store, chip: chip, key: chip.key, placeholder: name });
-            }
-            var v = effective(name);
-            return v == null ? '' : v;
-        }
-
-        function chipText(chip) {
-            return String(chip.chip_template || '').replace(/\{([^}]+)\}/g, function(_, name) {
-                return resolvePlaceholder(chip, name);
-            }).replace(/\s+/g, ' ').trim();
+        // store 取值 + 内置 __setting_display__ + 模块 resolvers，组成 chipHtml 的 ctx。
+        function chipCtx(chip) {
+            return {
+                valueOf: function(name) { return effective(name); },
+                resolve: function(resolverName, name) {
+                    if (resolverName === SETTING_DISPLAY) {
+                        var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
+                        return BSP ? BSP.displaySettingValue(setting, effective(chip.key)) : effective(chip.key);
+                    }
+                    if (typeof resolvers[resolverName] === 'function') {
+                        return resolvers[resolverName]({ store: store, chip: chip, key: chip.key, placeholder: name });
+                    }
+                    return effective(name);
+                },
+                renderChipHtml: renderChipHtml,
+                escapeHTML: esc,
+            };
         }
 
         function chipVisible(chip) {
@@ -184,10 +198,7 @@
             function repaint() {
                 if (!chipVisible(chip)) { span.style.display = 'none'; return; }
                 span.style.display = '';
-                var text = chipText(chip);
-                var m = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
-                if (renderChipHtml && m && m[2]) span.innerHTML = renderChipHtml(m[1], m[2], esc);
-                else span.innerHTML = '<span class="gt-backend-chip-value">' + esc(text) + '</span>';
+                span.innerHTML = chipHtml(chip, chipCtx(chip));
             }
             repaint();
             if (isClickable) span.addEventListener('click', function() { dispatchClick(chip); });
@@ -205,6 +216,7 @@
 
     window.ChipRenderer = {
         render: render,
+        chipHtml: chipHtml,                 // 单枚 chip 模板→HTML 字符串（list 等字符串场景复用）
         normalizeFromManifest: normalizeFromManifest,
         registerOverlay: function(type, fn) { overlayHandlers[type] = fn; },
         SETTING_DISPLAY: SETTING_DISPLAY,
