@@ -85,9 +85,9 @@ def register_all_module_settings(app: Any) -> None:
 # ── BacktestModuleRegistry ────────────────────────────────────────
 
 # Import at runtime to avoid circular imports
-def _get_tester_setting_registry():
-    from tools.testers.settings import tester_setting_registry
-    return tester_setting_registry
+def _get_backtest_setting_registry():
+    from tools.testers.settings import backtest_setting_registry
+    return backtest_setting_registry
 
 
 class BacktestModuleRegistry(ModuleRegistry):
