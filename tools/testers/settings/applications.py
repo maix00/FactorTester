@@ -529,9 +529,9 @@ def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
 
     # Infrastructure settings (SettingModules, SettingTabs, ChipDefinitions,
-    # and non-module SettingDefinitions) — owned by GroupTestModuleRegistry.
-    from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
-    GroupTestModuleRegistry.register_settings(app)
+    # and non-module SettingDefinitions) — moved to tools/testers/backtest/settings.py.
+    from tools.testers.backtest.settings import register_group_test_settings
+    register_group_test_settings(app)
 
     # Module-owned settings (fee, slippage, liquidity, margin) — from
     # each ExecutableModule's setting_definitions classvar.
