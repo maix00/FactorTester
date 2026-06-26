@@ -85,11 +85,11 @@
         if (!host) return;
         host.innerHTML = '';
 
-        // 新路径：manifest + store → 用 SettingsChips 渲染每行 chip
+        // 新路径：manifest + store → 用 ChipRenderer 渲染每行 chip
         var manifest = options.manifest;
         var store = options.store;
-        if (manifest && store && window.SettingsChips) {
-            _renderChooserWithSettingsChips(host, options);
+        if (manifest && store && window.ChipRenderer) {
+            _renderChooserChips(host, options);
             return;
         }
 
@@ -141,7 +141,7 @@
         });
     }
 
-    function _renderChooserWithSettingsChips(host, options) {
+    function _renderChooserChips(host, options) {
         var manifest = options.manifest;
         var store = options.store;
         var defaults = manifest.defaults || {};
@@ -188,9 +188,9 @@
             row.appendChild(body);
             host.appendChild(row);
 
-            // 用 SettingsChips 渲染该 tab 的 chip 行。
+            // 用 ChipRenderer 渲染该 tab 的 chip 行。
             // 不传 onOpen → chip 默认行为：按 info_overlay 打开信息 overlay。
-            window.SettingsChips.render(defaultsHost, {
+            window.ChipRenderer.render(defaultsHost, {
                 manifest: manifest,
                 store: store,
                 settingKeys: tabSettingKeys,

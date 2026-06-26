@@ -923,7 +923,7 @@
 
     function localChipRow() { return document.getElementById('gt-local-settings-chip-row'); }
 
-    // 响应式 chip：manifest 建 FieldStore（backing = state.localValues），SettingsChips 订阅。
+    // 响应式 chip：manifest 建 FieldStore（backing = state.localValues），ChipRenderer 订阅。
     // 这是"tab/内容"那条 chip 行——点击 chip 打开/关闭对应设置 tab（保留 onOpen=openLocal）。
     var gtLocalStore = null, gtLocalChipUnbind = null;
     function ensureGtLocalStore() {
@@ -946,8 +946,8 @@
                 if ((state.index.defaults[key] || {}).chip_template) keys.push(key);
             });
         });
-        if (window.SettingsChips && store) {
-            gtLocalChipUnbind = window.SettingsChips.render(row, {
+        if (window.ChipRenderer && store) {
+            gtLocalChipUnbind = window.ChipRenderer.render(row, {
                 manifest: { defaults: state.index.defaults },
                 store: store,
                 settingKeys: keys,

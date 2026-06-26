@@ -200,9 +200,9 @@
     }
 
     // 旧的 chip 计算链（settingChipParts/registeredTabChipParts/chipPartsForTab）已删除，
-    // chip 改由 manifest 驱动的 SettingsChips + FieldStore 渲染（见 renderChips）。
+    // chip 改由 manifest 驱动的 ChipRenderer + FieldStore 渲染（见 renderChips）。
 
-    // ── 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅 ──
+    // ── 响应式 chip：manifest 建 FieldStore（backing = state.values），ChipRenderer 订阅 ──
     var pageStore = null;
     var pageChipUnbind = null;
     function ensurePageStore() {
@@ -232,8 +232,8 @@
                 if ((defaults()[key] || {}).chip_template) chipKeys.push(key);
             });
         });
-        if (window.SettingsChips && pageStore) {
-            pageChipUnbind = window.SettingsChips.render(row, {
+        if (window.ChipRenderer && pageStore) {
+            pageChipUnbind = window.ChipRenderer.render(row, {
                 manifest: state.manifest,
                 store: pageStore,
                 settingKeys: chipKeys,

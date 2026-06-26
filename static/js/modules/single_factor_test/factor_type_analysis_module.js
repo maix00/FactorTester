@@ -131,7 +131,7 @@
         return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
-    // settingChipParts 已删除：chip 改由 manifest 驱动的 SettingsChips + FieldStore 渲染。
+    // settingChipParts 已删除：chip 改由 manifest 驱动的 ChipRenderer + FieldStore 渲染。
 
     function renderChipHtml(labelOrText, value) {
         var text = value === undefined || value === null || value === ''
@@ -348,7 +348,7 @@
         });
     }
 
-    // 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅。
+    // 响应式 chip：manifest 建 FieldStore（backing = state.values），ChipRenderer 订阅。
     var ftaStore = null, ftaChipUnbind = null;
     function ensureFtaStore() {
         if (!ftaStore && state.manifest && window.FieldStore) {
@@ -367,8 +367,8 @@
         var defaults = state.manifest.defaults || {};
         var keys = window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(Object.keys(defaults), defaults)
             .filter(function (k) { return defaults[k] && defaults[k].chip_template; });
-        if (window.SettingsChips && ftaStore) {
-            ftaChipUnbind = window.SettingsChips.render(row, {
+        if (window.ChipRenderer && ftaStore) {
+            ftaChipUnbind = window.ChipRenderer.render(row, {
                 manifest: state.manifest, store: ftaStore, settingKeys: keys,
                 escapeHTML: escapeHTML, renderChipHtml: renderChipHtml,
             });

@@ -303,7 +303,7 @@
         return out;
     }
 
-    // 响应式 chip：manifest 建 FieldStore（backing = state.values），SettingsChips 订阅。
+    // 响应式 chip：manifest 建 FieldStore（backing = state.values），ChipRenderer 订阅。
     var fsvStore = null, fsvSettingsUnbind = null, fsvResultUnbind = null;
     function ensureFsvStore() {
         if (!fsvStore && state.manifest && window.FieldStore) {
@@ -335,8 +335,8 @@
             });
         });
         if (fsvSettingsUnbind) { fsvSettingsUnbind(); fsvSettingsUnbind = null; }
-        if (window.SettingsChips && fsvStore) {
-            fsvSettingsUnbind = window.SettingsChips.render(row, {
+        if (window.ChipRenderer && fsvStore) {
+            fsvSettingsUnbind = window.ChipRenderer.render(row, {
                 manifest: state.manifest, store: fsvStore, settingKeys: keys,
                 tabOf: function(key) { return (defaults()[key] || {}).tab_key || key; },
                 onOpen: function(tabKey) { openTab(tabKey); },
@@ -356,8 +356,8 @@
             return !mountedKeys[key] && (defaults()[key] || {}).chip_template;
         });
         if (fsvResultUnbind) { fsvResultUnbind(); fsvResultUnbind = null; }
-        if (window.SettingsChips && fsvStore) {
-            fsvResultUnbind = window.SettingsChips.render(row, {
+        if (window.ChipRenderer && fsvStore) {
+            fsvResultUnbind = window.ChipRenderer.render(row, {
                 manifest: state.manifest, store: fsvStore, settingKeys: keys,
                 shouldShow: fsvShouldShow,
                 escapeHTML: escapeHtml, renderChipHtml: renderChipHtml,

@@ -341,8 +341,8 @@
             });
         });
         if (icChipUnbind) { icChipUnbind(); icChipUnbind = null; }
-        if (window.SettingsChips && icStore) {
-            icChipUnbind = window.SettingsChips.render(chipRow, {
+        if (window.ChipRenderer && icStore) {
+            icChipUnbind = window.ChipRenderer.render(chipRow, {
                 manifest: icSettingsManifest,
                 store: icStore,
                 settingKeys: chipKeys,
