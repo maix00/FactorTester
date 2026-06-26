@@ -14,8 +14,6 @@
     let icSettingValues = {};
     let icActiveSettingsTab = null;
     let icMountedSettingsTabs = ['factor', 'return_frequency', 'category', 'product_path_selection'];
-    let icSharedProductPathSelections = [];
-    let icSharedProductPathSelectionsLoaded = false;
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
     let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
@@ -62,18 +60,6 @@
         return icProductPathSelections.find(selection => selectionId(selection) === target) || null;
     }
 
-    function pageProductPathCandidates() {
-        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return [];
-        const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
-        const values = window.SingleFactorGlobalSettings.getDefaultValues([candidatesField]);
-        return Array.isArray(values[candidatesField]) ? values[candidatesField] : [];
-    }
-
-    function productPathCandidateSerialization() {
-        const def = icSettingsManifest && icSettingsManifest.defaults ? icSettingsManifest.defaults.product_path_candidates : null;
-        return def && def.serialization || {};
-    }
-
     function createIcProgressController(progressBarId) {
         return Progress.createSimpleProgressController({
             resolve: function() {
@@ -86,60 +72,8 @@
         });
     }
 
-    function productGroupToSelection(group) {
-        if (window.ProductPathSelectionUtils && typeof window.ProductPathSelectionUtils.productGroupToSelection === 'function') {
-            return window.ProductPathSelectionUtils.productGroupToSelection(group);
-        }
-        group = group || {};
-        const id = String(group.id || group.name || '');
-        return {
-            id,
-            product_path_selection_id: id,
-            product_group_template_id: String(group.id || ''),
-            path_id: String(group.id || ''),
-            product_group: group.name || '',
-            label: group.name || '',
-            paths: (group.paths || []).slice(),
-            selected_paths: (group.paths || []).slice(),
-            products: [],
-            product_groups: [],
-        };
-    }
-
-    async function loadSharedProductPathSelections(force) {
-        if (icSharedProductPathSelectionsLoaded && !force) return icSharedProductPathSelections;
-        const candidates = pageProductPathCandidates();
-        if (candidates.length) {
-            mergeICProductPathCandidates(candidates);
-        } else {
-            const response = await fetch('/api/product-groups', { headers: { Accept: 'application/json' } });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload.success === false) {
-                throw new Error(payload.error || ('HTTP ' + response.status));
-            }
-            mergeICProductPathCandidates((payload.groups || []).map(productGroupToSelection));
-        }
-        icSharedProductPathSelectionsLoaded = true;
-        return icSharedProductPathSelections;
-    }
-
-    function mergeICProductPathCandidates(selections) {
-        const utils = window.ProductPathSelectionUtils || {};
-        const merged = icSharedProductPathSelections.concat(Array.isArray(selections) ? selections : []);
-        icSharedProductPathSelections = utils.dedupe ? utils.dedupe(merged) : merged;
-        icSettingValues.product_path_candidates = icSharedProductPathSelections.slice();
-        return icSharedProductPathSelections;
-    }
-
-    // 删除单数页面回退：IC 的产品路径来自其多选 product_path_selections，为空时
-    // 回退到候选列表（本地 icSharedProductPathSelections → 页面全局 product_path_candidates，
-    // 由 loadSharedProductPathSelections 串联），不再回退到页面单数 product_path_selection。
-    function fallbackToCandidatesIfEmpty() {
-        if (icProductPathSelections.length) return false;
-        if (!icSharedProductPathSelections.length) return false;
-        icProductPathSelections = icSharedProductPathSelections.slice();
-        return true;
-    }
+    // ── 候选回退已由 FieldStore.effective() + pageStore wired parent 统一处理，
+    //    不再需要 ad-hoc productGroupToSelection / loadSharedProductPathSelections。
 
     // 委托到共用 DomUtils（页面已先加载）；保留薄封装以免改动各调用点。
     function escapeHTML(value) {
@@ -187,7 +121,7 @@
         if (!s) return;
         s.setMany({
             product_path_selections: (icProductPathSelections || []).slice(),
-            product_path_candidates: (icSharedProductPathSelections || []).slice(),
+            product_path_candidates: Array.isArray(icSettingValues.product_path_candidates) ? icSettingValues.product_path_candidates.slice() : [],
             factor_candidates: (factorList || []).slice(),
             factor_selections: collectFactorSelections(),
             category_candidates: Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates.slice() : [],
@@ -228,13 +162,8 @@
         if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return false;
         const sharedKeys = (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || [];
         const values = window.SingleFactorGlobalSettings.getDefaultValues(sharedKeys);
-        const candidatesField = productPathCandidateSerialization().shared_page_field || 'product_path_candidates';
+        // 候选回退由 FieldStore.effective() 通过 shared_page_field→parent 自动处理，不再手动合并。
         let changed = false;
-        if (Array.isArray(values[candidatesField]) && values[candidatesField].length) {
-            const before = icSharedProductPathSelections.length;
-            mergeICProductPathCandidates(values[candidatesField]);
-            if (icSharedProductPathSelections.length !== before) changed = true;
-        }
         ['data_source', 'frequency'].forEach(key => {
             if (!Object.prototype.hasOwnProperty.call(icSettingValues, key)) return;
             if (values[key] === undefined || values[key] === null || values[key] === '') return;
@@ -242,8 +171,6 @@
             icSettingValues[key] = values[key];
             changed = true;
         });
-        // 删除单数页面回退：不再从页面 product_path_selection 注入；为空走候选回退。
-        if (fallbackToCandidatesIfEmpty()) changed = true;
         return changed;
     }
 
