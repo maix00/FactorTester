@@ -438,6 +438,9 @@
         }
 
         // IC 因子（多选）：从因子列表多选，直接写 factor_selections（不再经频率抽屉）。
+        // 因子管理：照搬"因子家族测试设置"模块的因子管理界面（同一个 FactorParamSelectionUtils
+        // 组件），selectionMode='multi'。候选 = factorList（page_factors，与页面/分组测试同源），
+        // 可从因子库新增到 page_factors；选择 = factor_selections（IC 的计算输入）。
         function renderICFactorSelectionTab() {
             if (!factorList.length) {
                 contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载因子...</div>';
@@ -445,43 +448,62 @@
                 return;
             }
             ensureFactorSelectionsDefault();
-            var html = '<div class="backend-settings-grid">'
-                + '<div class="gt-backtest-setting-row">'
-                + '<span class="gt-backtest-setting-label">IC 因子（多选）</span>'
-                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('已选', String(getFactorSelections().length) + ' / ' + factorList.length) + '</span></span>'
-                + '</div>'
-                + '<div style="grid-column:1 / -1;display:flex;gap:6px;margin-bottom:6px;">'
-                + '<button type="button" id="ic-factor-all" style="height:24px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;font-size:11px;cursor:pointer;">全选</button>'
-                + '<button type="button" id="ic-factor-none" style="height:24px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;font-size:11px;cursor:pointer;">全不选</button></div>'
-                + '<div style="grid-column:1 / -1;max-height:280px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
-            factorList.forEach(function(f) {
-                var alias = f.alias || f.name || '';
-                var active = isFactorSelected(alias);
-                html += '<div class="ic-factor-toggle" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;'
-                    + (active ? 'background:#e8f4fd;' : '') + 'border-bottom:1px solid #f0f2f5;font-size:12px;">'
-                    + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(f.name || alias) + '</span>'
-                    + '<span style="font-size:11px;color:' + (active ? '#0078d4' : '#ccc') + ';">' + (active ? '✓' : '') + '</span>'
-                    + '</div>';
+            var utils = window.FactorParamSelectionUtils;
+            if (!utils || typeof utils.renderFactorParamSettingsTab !== 'function') {
+                contentHost.textContent = '因子参数设置组件未加载';
+                return;
+            }
+            var currentParams = factorList.map(function(f) {
+                return { factor_alias: f.alias || f.name || '', scope_key: '', params: {} };
             });
-            html += '</div></div>';
-            contentHost.innerHTML = html;
-            contentHost.querySelectorAll('.ic-factor-toggle').forEach(function(row) {
-                row.addEventListener('click', function() {
-                    toggleFactorSelection(row.getAttribute('data-factor-alias'));
-                    renderICFactorSelectionTab();
+            fetch('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(factorFamilyAlias))
+                .then(function(res) { return res.json(); })
+                .catch(function() { return { factors: [] }; })
+                .then(function(payload) {
+                    var libraryItems = Array.isArray(payload.factors) ? payload.factors : [];
+                    var libraryParams = libraryItems.map(function(item) {
+                        return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+                    });
+                    utils.renderFactorParamSettingsTab({
+                        host: contentHost,
+                        prefix: 'ic-fps',
+                        paramDefs: [],
+                        currentFactorParams: currentParams,
+                        libraryFactorParams: libraryParams,
+                        selectionMode: 'multi',
+                        selectedIds: getFactorSelections().map(function(s) { return s.alias; }),
+                        onToggle: function(alias) { toggleFactorSelection(alias); renderICFactorSelectionTab(); },
+                        manualTitle: '现场新增因子参数',
+                        addLabel: '新增到参数列表',
+                        escapeHTML: escapeHTML,
+                        onAddParam: function(alias, params) {
+                            if (!alias || !factorFamilyAlias) return;
+                            addFactorByParams(params).then(renderICFactorSelectionTab);
+                        },
+                        onLoadFromLibrary: function(param) {
+                            if (!param || !factorFamilyAlias) return;
+                            addFactorByParams(param.params || {}).then(renderICFactorSelectionTab);
+                        },
+                    });
                 });
+        }
+
+        // 新增一个因子候选：POST /add_factor_by_params（写入 page_factors），成功后刷新 factorList。
+        function addFactorByParams(params) {
+            return fetch('/add_factor_by_params', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    factor_family_alias: factorFamilyAlias,
+                    params: params || {},
+                    page_uuid: window._pageUuid || '',
+                }),
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                if (data && data.success) return fetchFactorList();
+                return data;
+            }).catch(function(err) {
+                console.error('[IC factor-manager] add_factor_by_params failed:', err);
             });
-            var allBtn = document.getElementById('ic-factor-all');
-            if (allBtn) allBtn.addEventListener('click', function() {
-                setFactorSelections(factorList.map(function(f) {
-                    var a = f.alias || f.name; var hit = getFactorSelections().find(function(s){ return s.alias === a; });
-                    return { alias: a, return_freq: hit ? hit.return_freq : '' };
-                }));
-                renderICFactorSelectionTab();
-            });
-            var noneBtn = document.getElementById('ic-factor-none');
-            if (noneBtn) noneBtn.addEventListener('click', function() { setFactorSelections([]); renderICFactorSelectionTab(); });
         }
 
         // IC 收益率频率：从选中的 factor_selections 出发，一行一个因子一个频率输入框，
@@ -2005,9 +2027,6 @@
     }
     function applyFactorSelections(list) {
         if (Array.isArray(list)) setFactorSelections(list);
-    }
-    function isFactorSelected(alias) {
-        return getFactorSelections().some(function(s) { return s.alias === alias; });
     }
     function toggleFactorSelection(alias) {
         var sel = getFactorSelections();
