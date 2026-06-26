@@ -234,7 +234,14 @@
             return '未注册显示格式';
         }
         var template = setting && setting.control_template;
-        if (!template || template === 'custom') return '未注册显示格式';
+        if (!template || template === 'custom') {
+            // 标量值（string/number/boolean）直接显示；custom 控件只是编辑方式，
+            // 值本身（如模板名）仍应能作为 chip 展示。
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                return String(value);
+            }
+            return '未注册显示格式';
+        }
         return String(value);
     }
 
