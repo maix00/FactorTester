@@ -41,10 +41,11 @@
      */
     function _productPathChipHtml(sel) {
         var label = selectionDisplayLabel(sel) || '未命名';
-        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
-            return GT.backendSettings.renderChipHtml('产品路径', label);
-        }
-        return escapeHTML(label);
+        return window.ChipRenderer.chipHtml(
+            { chip_template: '产品路径: {label}', value_resolvers: {} },
+            { valueOf: function() { return label; }, resolve: function() { return label; },
+              renderChipHtml: GT.backendSettings && GT.backendSettings.renderChipHtml, escapeHTML: escapeHTML }
+        );
     }
 
     function renderProductPathChipList(container, options) {
@@ -181,13 +182,16 @@
      *   - factors: Array — window.factorList entries ({alias, latex, backend_fields, param_defs, ...})
      *   - selected: string|Array<string> — currently selected alias(es)
      *   - multiple: boolean — true allows toggling several (add-flow); false is single-select (edit-flow)
-     *   - onToggle: function(alias) — called when a candidate row is clicked
+     *   - onToggle: function(alias) — called when a candidate row is clicked, or from the manage panel
+     *   - manageOpen: boolean — caller-owned toggle state (survives re-renders)
+     *   - onToggleManage: function(nextOpen) — caller persists the toggle and re-renders
      */
     function _factorChipHtml(alias) {
-        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
-            return GT.backendSettings.renderChipHtml('因子', alias);
-        }
-        return escapeHTML(alias);
+        return window.ChipRenderer.chipHtml(
+            { chip_template: '因子: {alias}', value_resolvers: {} },
+            { valueOf: function() { return alias; }, resolve: function() { return alias; },
+              renderChipHtml: GT.backendSettings && GT.backendSettings.renderChipHtml, escapeHTML: escapeHTML }
+        );
     }
 
     function renderFactorChipList(container, options) {
@@ -195,6 +199,7 @@
         var factors = options.factors || [];
         var multiple = !!options.multiple;
         var selected = options.selected;
+        var manageOpen = !!options.manageOpen;
         var selectedSet = {};
         if (multiple) {
             (selected || []).forEach(function(alias) { selectedSet[alias] = true; });
@@ -207,30 +212,35 @@
         html += '<span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#475467;">因子' + (multiple ? ' <span style="color:red;">*</span>' : '');
         html += '<span class="gt-chiplist-title-chip" data-chip-kind="factor"></span>';
         html += '</span>';
+        html += '<button type="button" class="gt-chiplist-manage-btn" data-kind="factor" style="height:22px;padding:0 8px;border:1px solid #cbd5e1;border-radius:4px;background:' + (manageOpen ? '#e7f1ff' : '#fff') + ';color:#475569;font-size:11px;cursor:pointer;">' + (manageOpen ? '完成' : '管理') + '</button>';
         html += '</div>';
 
-        html += '<div style="max-height:260px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
-        if (!factors.length) {
-            html += '<div style="color:#888;font-size:12px;padding:14px;text-align:center;">暂无因子候选</div>';
+        if (manageOpen) {
+            html += '<div class="gt-chiplist-manage-host" data-kind="factor" style="border:1px solid #e5e7eb;border-radius:6px;min-height:120px;"></div>';
         } else {
-            for (var i = 0; i < factors.length; i++) {
-                var f = factors[i];
-                var alias = f.alias || f.name || '';
-                var isActive = !!selectedSet[alias];
-                html += '<div class="gt-chiplist-row" data-kind="factor" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;cursor:pointer;'
-                    + (isActive ? 'background:#e8f4fd;' : '')
-                    + 'border-bottom:1px solid #f0f2f5;">';
-                // chip：点击弹出 FactorInfoOverlay（stopPropagation 阻止触发行选中）
-                html += '<span class="gt-backend-chip gt-chiplist-chip" data-kind="factor" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="cursor:pointer;max-width:calc(100% - 24px);">'
-                    + _factorChipHtml(alias) + '</span>';
-                // 选中标记：行尾部，不在 chip 内
-                html += '<span style="flex-shrink:0;font-size:11px;color:' + (isActive ? '#0078d4' : '#ccc') + ';min-width:12px;text-align:center;">' + (isActive ? '✓' : '') + '</span>';
-                html += '</div>';
+            html += '<div style="max-height:260px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            if (!factors.length) {
+                html += '<div style="color:#888;font-size:12px;padding:14px;text-align:center;">暂无因子候选，请点击"管理"新增</div>';
+            } else {
+                for (var i = 0; i < factors.length; i++) {
+                    var f = factors[i];
+                    var alias = f.alias || f.name || '';
+                    var isActive = !!selectedSet[alias];
+                    html += '<div class="gt-chiplist-row" data-kind="factor" data-factor-alias="' + escapeHTML(alias) + '"'
+                        + ' style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;cursor:pointer;'
+                        + (isActive ? 'background:#e8f4fd;' : '')
+                        + 'border-bottom:1px solid #f0f2f5;">';
+                    // chip：点击弹出 FactorInfoOverlay（stopPropagation 阻止触发行选中）
+                    html += '<span class="gt-backend-chip gt-chiplist-chip" data-kind="factor" data-factor-alias="' + escapeHTML(alias) + '"'
+                        + ' style="cursor:pointer;max-width:calc(100% - 24px);">'
+                        + _factorChipHtml(alias) + '</span>';
+                    // 选中标记：行尾部，不在 chip 内
+                    html += '<span style="flex-shrink:0;font-size:11px;color:' + (isActive ? '#0078d4' : '#ccc') + ';min-width:12px;text-align:center;">' + (isActive ? '✓' : '') + '</span>';
+                    html += '</div>';
+                }
             }
+            html += '</div>';
         }
-        html += '</div>';
 
         container.innerHTML = html;
 
@@ -277,6 +287,25 @@
             } else {
                 titleHost.innerHTML = multiple ? '<span style="font-weight:400;font-size:11px;color:#888;">未选</span>' : '';
             }
+        }
+
+        var manageBtn = container.querySelector('.gt-chiplist-manage-btn[data-kind="factor"]');
+        if (manageBtn) {
+            manageBtn.addEventListener('click', function() {
+                if (typeof options.onToggleManage === 'function') options.onToggleManage(!manageOpen);
+            });
+        }
+
+        if (manageOpen) {
+            var host = container.querySelector('.gt-chiplist-manage-host[data-kind="factor"]');
+            if (host && GT.backendSettings && typeof GT.backendSettings.renderFactorManager === 'function') {
+                GT.backendSettings.renderFactorManager(host, {
+                    multiple: multiple,
+                    selected: selected,
+                    onToggle: options.onToggle,
+                });
+            }
+            return;
         }
 
         // 行点击 → 选中/切换（排除 chip 上的点击）

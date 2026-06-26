@@ -795,6 +795,85 @@
         });
     }
 
+    // 因子管理面板：照搬"因子家族测试设置"的因子管理界面（同一个 FactorParamSelectionUtils
+    // 组件），用 selectionMode 区分单选（编辑分组的因子）/多选（新建分组的因子）。
+    // 候选来自页面已加载的 window.factorList（与 IC/page 同源），可从因子库新增到 page_factors。
+    function renderFactorManager(container, opts) {
+        opts = opts || {};
+        var multiple = !!opts.multiple;
+        var onToggle = opts.onToggle || function() {};
+        container.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载因子库...</div>';
+        var ffAlias = window.factorFamilyAlias || '';
+        var libraryPromise = ffAlias
+            ? requestJSON('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).catch(function() { return { factors: [] }; })
+            : Promise.resolve({ factors: [] });
+        libraryPromise.then(function(payload) {
+            var utils = window.FactorParamSelectionUtils;
+            if (!utils || typeof utils.renderFactorParamSettingsTab !== 'function') {
+                container.textContent = '因子参数设置组件未加载';
+                return;
+            }
+            var libraryItems = Array.isArray(payload.factors) ? payload.factors : [];
+            var libraryParams = libraryItems.map(function(item) {
+                return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+            });
+            var currentParams = (window.factorList || []).map(function(f) {
+                return { factor_alias: f.alias || f.name || '', scope_key: '', params: {} };
+            });
+            var selected = opts.selected;
+            utils.renderFactorParamSettingsTab({
+                host: container,
+                prefix: 'gt-fps',
+                paramDefs: [],
+                currentFactorParams: currentParams,
+                libraryFactorParams: libraryParams,
+                selectionMode: multiple ? 'multi' : 'single',
+                selectedIds: multiple ? (Array.isArray(selected) ? selected : []) : [],
+                currentSelection: multiple ? '' : (selected || ''),
+                onToggle: function(alias) { onToggle(alias); renderFactorManager(container, opts); },
+                onSetDefault: function(alias) { onToggle(alias); renderFactorManager(container, opts); },
+                manualTitle: '现场新增因子参数',
+                addLabel: '新增到参数列表',
+                escapeHTML: escapeHTML,
+                onAddParam: function(alias, params) {
+                    if (!alias || !ffAlias) return;
+                    addFactorByParams(ffAlias, params).then(function() {
+                        renderFactorManager(container, opts);
+                    });
+                },
+                onLoadFromLibrary: function(param) {
+                    if (!param || !ffAlias) return;
+                    addFactorByParams(ffAlias, param.params || {}).then(function() {
+                        renderFactorManager(container, opts);
+                    });
+                },
+            });
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    // 新增一个因子候选：POST /add_factor_by_params（写入 page_factors），
+    // 成功后刷新 window.factorList（与 IC 共用同一全局列表与刷新入口）。
+    function addFactorByParams(factorFamilyAlias, params) {
+        return fetch('/add_factor_by_params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factor_family_alias: factorFamilyAlias,
+                params: params || {},
+                page_uuid: window._pageUuid || '',
+            }),
+        }).then(function(res) { return res.json(); }).then(function(data) {
+            if (data && data.success && data.factor_alias && typeof window.refreshICModule === 'function') {
+                return window.refreshICModule();
+            }
+            return data;
+        }).catch(function(err) {
+            console.error('[gt factor-manager] add_factor_by_params failed:', err);
+        });
+    }
+
     function parseDateParts(value) {
         var match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(value || '').trim());
         return {
@@ -1657,6 +1736,7 @@
         loadProductPathSelections: loadProductPathSelections,
         getProductPathSelections: function() { return state.productPathSelections.slice(); },
         renderProductPathManager: renderProductPathSelectionManager,
+        renderFactorManager: renderFactorManager,
         productPathSelectionProducts: productPathSelectionProducts,
         productPathSelectionLabel: productPathSelectionLabel,
         getDefaultProductPathSelection: function() {

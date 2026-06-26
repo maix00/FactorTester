@@ -235,6 +235,7 @@
     // chip-list 的"管理"作用域绑定到当前 add-draft，不会唤起 local-settings 的页面级 tab。
 
     var _addPathManageOpen = false;
+    var _addFactorManageOpen = false;
 
     function render() {
         var container = $(_containerId);
@@ -319,6 +320,11 @@
                 selected: draft.selectedFactors || [],
                 multiple: true,
                 onToggle: function(alias) { _toggleFactor(alias, draft); },
+                manageOpen: _addFactorManageOpen,
+                onToggleManage: function(next) {
+                    _addFactorManageOpen = next;
+                    render();
+                },
             });
         }
 
@@ -516,6 +522,7 @@
     }
 
     var _editPathManageOpen = false;
+    var _editFactorManageOpen = false;
 
     function _renderEditGroup(container) {
         var selectedGroups = _selectedEditGroups();
@@ -620,6 +627,11 @@
                 selected: factorAlias,
                 multiple: false,
                 onToggle: function(alias) { applyEditPatch({ factorAlias: alias }); },
+                manageOpen: _editFactorManageOpen,
+                onToggleManage: function(next) {
+                    _editFactorManageOpen = next;
+                    _renderEditGroup(container);
+                },
             });
         }
 
