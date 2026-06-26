@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from server.modules.shared.factor_data_helpers import (
+from server.modules.factors.helpers import (
     clip_series_by_tester_range,
     find_factor as _find_factor,
     match_product_column as _match_product_column,

@@ -1,27 +1,23 @@
 """
-Shared factor data-query + instance-management routes (any test module can use):
-  POST /add_factor_by_params
+Factor data-query routes:
   GET  /api/factor_list
   POST /get_factor_series
   POST /get_return_series
   POST /get_price_series
   POST /get_factor_distribution
-  POST /api/factor_evaluation/evaluate
-  POST /api/factor_type_analysis/analyze
 """
+from __future__ import annotations
+
 from typing import Any
 import numpy as np
 import pandas as pd
 import traceback
+
 from flask import request, jsonify
-from server.services.factor_registry import get_factor_family_instance, get_page_factor, set_page_factor
-import server.services.page_runtime as page_runtime
-from server.services.session_runtime import current_user
-from tools.data.types import finest_index
-from . import shared_bp
-from server.modules.shared.price_services import reflect_public_fields
-from server.services.api_response import api_fail, api_ok, route_guard
-from .factor_data_helpers import (
+
+from . import factors_bp
+from ._common import request_page_uuid, get_page_factors_for_family, get_or_create_selection_tester
+from .helpers import (
     clip_series_by_tester_range,
     column_names as _column_names,
     find_tester_product,
@@ -31,121 +27,14 @@ from .factor_data_helpers import (
     resolve_product_from_tester,
     series_to_frontend,
 )
-from .price_data_helpers import to_epoch_ms
-from .factor_tester_runtime import (
-    create_factor_tester_for_product_path_selection,
-)
-from server.modules.single_factor_test.evaluation import FactorEvaluation
-from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
-    FactorTypeAnalysisRun,
-)
-from .factor_param_utils import build_factor_rows, normalize_factor_param_row, factor_param_value_display
+from server.modules.shared.price_data_helpers import to_epoch_ms
+from server.modules.shared.price_services import reflect_public_fields
+from server.services.api_response import api_fail, api_ok, route_guard
+from server.services.factor_registry import get_factor_family_instance
+from tools.data.types import finest_index
 
 
-def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
-    page_uuid = str(data.get('page_uuid') or '').strip()
-    if not page_uuid:
-        return None, (jsonify({'error': '缺少 page_uuid'}), 400)
-    if page_runtime.get_page_owner(page_uuid) != current_user():
-        return None, (jsonify({'error': 'page_uuid 不属于当前用户'}), 403)
-    return page_uuid, None
-
-
-def _get_page_factors_for_family(page_uuid: str, factor_family) -> list:
-    """Populate and return factors from page_factors for the given family+page.
-
-    Factors are the single source of truth in page_factors.
-    This replaces the old session-scoped params_list → get_factors() pattern.
-    """
-    from server.services.factor_registry import page_factors
-    page_dict = page_factors.get(str(page_uuid), {})
-    family_alias = getattr(factor_family, 'alias', '')
-    factors = [
-        f for alias, f in page_dict.items()
-        if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
-    ]
-    factor_family.factors = factors
-    return factors
-
-
-def _request_product_path_selection_id(data: dict[str, Any]) -> str:
-    raw = data.get("product_path_selection")
-    if isinstance(raw, dict):
-        selection_id = (
-            raw.get("product_path_selection_id")
-            or raw.get("selection_id")
-            or raw.get("id")
-            or data.get("product_path_selection_id")
-        )
-    else:
-        selection_id = data.get("product_path_selection_id")
-    selection_id = str(selection_id or "").strip()
-    if not selection_id:
-        raise AssertionError("缺少 product_path_selection_id")
-    return selection_id
-
-
-def _get_or_create_selection_tester(data: dict[str, Any], *, page_uuid: str, caller: str):
-    selection_id = _request_product_path_selection_id(data)
-    try:
-        return page_runtime.get_page_object(
-            page_runtime.FACTOR_TESTER, selection_id, caller=caller, page_uuid=page_uuid
-        )
-    except AssertionError:
-        return create_factor_tester_for_product_path_selection(
-            data,
-            selection_id,
-            page_uuid=page_uuid,
-        )
-
-
-@shared_bp.route('/api/factor_evaluation/evaluate', methods=['POST'])
-def factor_evaluation_evaluate():
-    """Evaluate one factor for products selected directly from the product tree."""
-    data = request.get_json() or {}
-    page_uuid, error = _request_page_uuid(data)
-    if error is not None:
-        return error
-
-    try:
-        evaluation = FactorEvaluation.from_request(data, page_uuid=page_uuid)
-        return jsonify(evaluation.run())
-    except LookupError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc), "traceback": traceback.format_exc()}), 500
-
-
-@shared_bp.route('/api/factor_type_analysis/analyze', methods=['POST'])
-def factor_type_analysis_analyze():
-    """
-    因子类型分析 API。
-    
-    接收因子 + 产品 + 时间设置，返回：
-      - 与各参照因子的相关性
-      - 与各因子类别的聚合相关性
-      - 最佳匹配类别
-      - 品种间相关性矩阵
-    """
-    data = request.get_json() or {}
-    page_uuid, error = _request_page_uuid(data)
-    if error is not None:
-        return error
-
-    try:
-        run = FactorTypeAnalysisRun.from_request(data, page_uuid=page_uuid)
-        return jsonify(run.run())
-    except LookupError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc), "traceback": traceback.format_exc()}), 500
-
-
-@shared_bp.route('/api/factor_list')
+@factors_bp.route('/api/factor_list')
 @route_guard
 def factor_list():
     factor_family_alias = request.args.get('factor_family_alias')
@@ -198,7 +87,9 @@ def factor_list():
             'name': f.name,
             'default_return_freq': factor_freq_str,
             'freq': factor_freq_str2,
-            'category': alias_to_category.get(f.alias, ''),
+            # 因子家族测试设置的"分类"功能依赖旧 params_list 行上的用户标签，已随该
+            # 系统移除；page_factors 中的 Factor 实例没有等价属性，暂留空。
+            'category': '',
             'latex': latex,
             'backend_fields': backend_fields,
             'param_defs': param_defs,
@@ -206,10 +97,10 @@ def factor_list():
     return api_ok({'factors': factor_data})
 
 
-@shared_bp.route('/get_factor_series', methods=['POST'])
+@factors_bp.route('/get_factor_series', methods=['POST'])
 def get_factor_series():
     data = request.get_json()
-    page_uuid, error = _request_page_uuid(data)
+    page_uuid, error = request_page_uuid(data)
     if error is not None:
         return error
     factor_family_alias = data.get('factor_family_alias')
@@ -217,11 +108,11 @@ def get_factor_series():
     factor_alias        = data.get('factor_alias')
     product_name        = data.get('product')
     try:
-        tester = _get_or_create_selection_tester(
+        tester = get_or_create_selection_tester(
             data, caller='get_factor_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
-        factors = _get_page_factors_for_family(page_uuid, factor_family)
+        factors = get_page_factors_for_family(page_uuid, factor_family)
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -230,14 +121,14 @@ def get_factor_series():
 
         # 优先从 FactorRunResult.func_table 获取 FE intermediate（含 $Rev，无 SignalAlign）
         r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
-        
+
         # DIAG: if not found, try matching by alias
         if r is None and hasattr(tester, 'results'):
             for k in tester.results:
                 if getattr(k, 'alias', None) == target_factor.alias:
                     r = tester.results[k]
                     break
-        
+
         fe_table = r.func_table if r is not None and not r.func_table.empty else pd.DataFrame()
         fe_col = _match_product_column(fe_table, product)
 
@@ -287,10 +178,10 @@ def get_factor_series():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
-@shared_bp.route('/get_return_series', methods=['POST'])
+@factors_bp.route('/get_return_series', methods=['POST'])
 def get_return_series():
     data = request.get_json()
-    page_uuid, error = _request_page_uuid(data)
+    page_uuid, error = request_page_uuid(data)
     if error is not None:
         return error
     product_name        = data.get('product')
@@ -298,11 +189,11 @@ def get_return_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = _get_or_create_selection_tester(
+        tester = get_or_create_selection_tester(
             data, caller='get_return_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
-        factors = _get_page_factors_for_family(page_uuid, factor_family)
+        factors = get_page_factors_for_family(page_uuid, factor_family)
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -344,10 +235,10 @@ def get_return_series():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
-@shared_bp.route('/get_price_series', methods=['POST'])
+@factors_bp.route('/get_price_series', methods=['POST'])
 def get_price_series():
     data = request.get_json()
-    page_uuid, error = _request_page_uuid(data)
+    page_uuid, error = request_page_uuid(data)
     if error is not None:
         return error
     product_name        = data.get('product')
@@ -359,11 +250,11 @@ def get_price_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        tester = _get_or_create_selection_tester(
+        tester = get_or_create_selection_tester(
             data, caller='get_price_series', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
-        factors = _get_page_factors_for_family(page_uuid, factor_family)
+        factors = get_page_factors_for_family(page_uuid, factor_family)
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -471,11 +362,11 @@ def get_price_series():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
-@shared_bp.route('/get_factor_distribution', methods=['POST'])
+@factors_bp.route('/get_factor_distribution', methods=['POST'])
 def get_factor_distribution():
     """返回某个时间点所有品种的因子截面分布值。"""
     data = request.get_json()
-    page_uuid, error = _request_page_uuid(data)
+    page_uuid, error = request_page_uuid(data)
     if error is not None:
         return error
     factor_family_alias = data.get('factor_family_alias')
@@ -485,11 +376,11 @@ def get_factor_distribution():
     product_name        = data.get('product')    # 当前选中产品名，用于高亮
     try:
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
-        tester = _get_or_create_selection_tester(
+        tester = get_or_create_selection_tester(
             data, caller='get_factor_distribution', page_uuid=page_uuid
         )
         factor_family = get_factor_family_instance(factor_family_alias, page_uuid=page_uuid)
-        factors = _get_page_factors_for_family(page_uuid, factor_family)
+        factors = get_page_factors_for_family(page_uuid, factor_family)
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -560,58 +451,3 @@ def get_factor_distribution():
         })
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
-
-
-# ── Factor instance management (page-scoped) ──────────────────────────
-
-@shared_bp.route('/add_factor_by_params', methods=['POST'])
-@route_guard
-def add_factor_by_params():
-    data = request.get_json()
-    factor_family_alias = data.get('factor_family_alias')
-    params = data.get('params', {})
-    page_uuid = str(data.get('page_uuid') or '')
-    ff = get_factor_family_instance(factor_family_alias, username=current_user(), page_uuid=page_uuid)
-    new_params = normalize_factor_param_row(ff, params)
-    new_alias = ff.get_alias(**new_params)
-
-    # Factor is the single source of truth, stored in page_factors.
-    # Check if already exists — if not, create via FactorFamily.get_factor().
-    existing = get_page_factor(page_uuid, new_alias) if page_uuid else None
-    existed = existing is not None
-    if not existed and page_uuid:
-        ff.get_factor(**new_params, page_uuid=page_uuid)
-
-    added_display = {}
-    for p in ff.params:
-        val = new_params.get(p.alias)
-        added_display[p.alias] = factor_param_value_display(p, val)
-
-    # Collect all current factors for this page+family to build factor_rows
-    factors_for_page = {}
-    if page_uuid:
-        from server.services.factor_registry import page_factors
-        page_dict = page_factors.get(page_uuid, {})
-        factors_for_page = {
-            alias: f for alias, f in page_dict.items()
-            if getattr(f, 'family', None) and getattr(f.family, 'alias', None) == factor_family_alias
-        }
-
-    factor_rows = []
-    for alias, factor in factors_for_page.items():
-        display_params = {}
-        for p in ff.params:
-            val = getattr(factor, p.alias, None)
-            display_params[p.alias] = factor_param_value_display(p, val)
-        factor_rows.append({
-            'index': len(factor_rows),
-            'factor_alias': alias,
-            'params': display_params,
-        })
-
-    return api_ok({
-        'factor_alias': new_alias,
-        'existed': existed,
-        'added_params': added_display,
-        'factor_rows': factor_rows,
-    })

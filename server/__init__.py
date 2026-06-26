@@ -48,6 +48,8 @@ def create_app() -> Flask:
     from server.modules.templates import templates_bp
     from server.modules.shared import shared_bp
     from server.modules.shared import register_routes as register_shared_routes
+    from server.modules.factors import factors_bp
+    from server.modules.factors import register_routes as register_factor_routes
     from server.modules.single_factor_test import sft_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import cf_bp
@@ -55,12 +57,14 @@ def create_app() -> Flask:
     from server.admin import admin_bp
 
     register_shared_routes()
+    register_factor_routes()
     register_custom_factor_routes()
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)
     app.register_blueprint(templates_bp)
     app.register_blueprint(shared_bp)
+    app.register_blueprint(factors_bp)
     app.register_blueprint(sft_bp)
     app.register_blueprint(cn_futures_bp)
     app.register_blueprint(cf_bp)

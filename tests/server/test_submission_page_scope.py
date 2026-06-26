@@ -7,7 +7,7 @@ from flask import Flask
 
 import server.services.page_runtime as runtime_state
 from server.modules.shared import submissions as submission_routes
-from server.modules.shared import factor_data as factor_data_routes
+from server.modules.factors import data as factor_data_routes
 from server.modules.shared import page_lifecycle as page_lifecycle_routes
 from server.modules.single_factor_test import page as page_routes
 from server.modules.single_factor_test import view_helpers
@@ -372,7 +372,8 @@ def test_factor_data_requires_page_uuid(app):
 
 
 def test_factor_data_rejects_another_users_page(app, two_page_testers, monkeypatch):
-    monkeypatch.setattr(factor_data_routes, "current_user", lambda: "user-b")
+    from server.modules.factors import _common
+    monkeypatch.setattr(_common, "current_user", lambda: "user-b")
     with app.test_request_context(
         "/get_factor_series",
         method="POST",
