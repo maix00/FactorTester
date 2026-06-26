@@ -200,10 +200,16 @@ class BacktestModuleRegistry(ModuleRegistry):
         # 1) Executable module params (fee, liquidity, margin...)
         merged = super().build_group_params(group_settings, raw_group)
 
-        # 2) Settings-derived params — any group_settings key that maps to
-        #    a known setting gets forwarded if not already contributed.
+        # 2) Settings-derived params — any group_settings key that maps to a
+        #    known GROUP_ONLY/GROUP_OVERRIDE setting gets forwarded if not
+        #    already contributed. LOCAL_ONLY settings (e.g. engine) are
+        #    page/run-level, not per-group constructor params — they're
+        #    already extracted separately via collect_local_only_settings.
+        from tools.testers.settings.contracts import ScopePolicy
         app = self.get_app()
         for key, setting in app.settings.items():
+            if setting.scope_policy == ScopePolicy.LOCAL_ONLY:
+                continue
             if key in group_settings and key not in merged:
                 merged[key] = group_settings[key]
 

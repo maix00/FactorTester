@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from tools.testers.backtest.engines.event_driven.stages import PhaseContext, PhaseHandler
+from tools.testers.backtest.engines.native.stages import PhaseContext, PhaseHandler
 from .base import ExecutableModule
 
 

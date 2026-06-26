@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..event_driven.runtime import (
+from ..native.runtime import (
     EventDraft,
     EventEnvelope,
     EventRuntime,

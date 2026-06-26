@@ -7,7 +7,7 @@ from typing import Protocol
 
 import pandas as pd
 
-from ..event_driven.contracts import FeeBreakdown, FeeComponent, Fill, Order
+from ..native.contracts import FeeBreakdown, FeeComponent, Fill, Order
 from ..market_rules import (
     FeeSchedule,
     RuleFallbackPolicy,

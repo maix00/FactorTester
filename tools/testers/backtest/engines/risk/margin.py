@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 import numpy as np
 
-from ..event_driven.contracts import PortfolioIntent, TargetKind
-from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
+from ..native.contracts import PortfolioIntent, TargetKind
+from ..native.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..execution.trading import Ledger
 from ..market_rules import RuleFallbackPolicy, RuleProvider, RuleUsageJournal
 

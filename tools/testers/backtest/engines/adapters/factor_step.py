@@ -9,7 +9,7 @@ import pandas as pd
 
 from tools.factors.expr import ColumnRef, FactorExpr
 
-from ..event_driven.runtime import MarketSlice, ProductPrice
+from ..native.runtime import MarketSlice, ProductPrice
 from ..factors.events import FactorSignal
 from ..factors.incremental import StreamingFactorPlan, compile_streaming_factor
 from .frameworks import IncrementalFactorSource, PrecomputedFactorSource

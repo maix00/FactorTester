@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.event_driven.runtime import (
+from tools.testers.backtest.engines.native.runtime import (
     EventDraft,
     EventRuntime,
     EventTopic,

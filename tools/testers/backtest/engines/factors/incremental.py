@@ -20,7 +20,7 @@ from tools.factors.expr import (
     ShiftOp,
 )
 
-from ..event_driven.runtime import MarketSlice
+from ..native.runtime import MarketSlice
 from .events import IncrementalFactorExecutor
 
 

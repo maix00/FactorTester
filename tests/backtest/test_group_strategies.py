@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.testers.backtest.engines.event_driven.contracts import PortfolioIntent, TargetKind
+from tools.testers.backtest.engines.native.contracts import PortfolioIntent, TargetKind
 from tools.testers.backtest.engines.factors.events import FactorSignal
 from tools.testers.backtest.engines.strategies.group import QuantileGroupStrategy
 from tools.testers.backtest.engines.strategies.allocation import AllocationInput, EqualNotionalAllocator
 from tools.testers.backtest.engines.strategies.long_short import QuantileLongShortStrategy
 from tools.testers.backtest.engines.strategies.rebalance import OnFactorSignal
-from tools.testers.backtest.engines.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
+from tools.testers.backtest.engines.native.runtime import EventRuntime, EventTopic, ReplayEventSource
 from tools.testers.backtest.engines.execution.trading import (
     CashAccounting,
     EqualNotionalSizer,

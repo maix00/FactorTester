@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from tools.testers.backtest.engines.event_driven.stages import PhaseContext, PhaseHandler
+from tools.testers.backtest.engines.native.stages import PhaseContext, PhaseHandler
 
 
 class ExecutableModule:

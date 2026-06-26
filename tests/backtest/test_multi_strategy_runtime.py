@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.engines.factors.events import PrecomputedFactorPublisher
-from tools.testers.backtest.engines.event_driven.runtime import (
+from tools.testers.backtest.engines.native.runtime import (
     EventRuntime,
     EventTopic,
     MarketSliceBarrier,

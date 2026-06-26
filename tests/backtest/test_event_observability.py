@@ -5,9 +5,9 @@ import logging
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.event_driven.contracts import RunIdentity
+from tools.testers.backtest.engines.native.contracts import RunIdentity
 from tools.testers.backtest.engines.observability.events import ProgressObserver, StructuredEventLogger
-from tools.testers.backtest.engines.event_driven.runtime import EventRuntime, EventTopic, ReplayEventSource
+from tools.testers.backtest.engines.native.runtime import EventRuntime, EventTopic, ReplayEventSource
 
 
 def test_two_users_receive_independent_structured_event_context(caplog) -> None:

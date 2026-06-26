@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from ..event_driven.backtest import StrategyLane
+from ..native.backtest import StrategyLane
 from ..execution.trading import (
     CashAccounting,
     EqualNotionalSizer,

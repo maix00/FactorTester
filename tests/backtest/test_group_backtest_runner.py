@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.testers.backtest.engines.event_driven.backtest import BacktestRunner, ExecutionVenue
-from tools.testers.backtest.engines.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.testers.backtest.engines.event_driven.runtime import ProductPrice, ReplayEventSource
+from tools.testers.backtest.engines.native.backtest import BacktestRunner, ExecutionVenue
+from tools.testers.backtest.engines.native.contracts import BacktestPlan, RunIdentity
+from tools.testers.backtest.engines.native.runtime import ProductPrice, ReplayEventSource
 from tools.testers.backtest.engines.execution.trading import ImmediateBroker, MarketState
 from tools.testers.backtest.engines.factors.events import PrecomputedFactorPublisher
 from tools.testers.backtest.engines.strategies.group_backtest import build_quantile_group_lanes

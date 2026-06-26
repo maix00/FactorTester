@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from tools.testers.backtest.engines.event_driven.contracts import FeeBreakdown, FeeComponent, Order, OrderSide
+from tools.testers.backtest.engines.native.contracts import FeeBreakdown, FeeComponent, Order, OrderSide
 from tools.testers.backtest.engines.execution.fees import FeeJournal, ProviderCommissionModel
-from tools.testers.backtest.engines.event_driven.runtime import EventDraft, EventRuntime, EventTopic
+from tools.testers.backtest.engines.native.runtime import EventDraft, EventRuntime, EventTopic
 from tools.testers.backtest.engines.execution.trading import CashAccounting, ImmediateBroker, Ledger, MarketState
 from tools.testers.backtest.engines.market_rules import (
     FeeSchedule,

@@ -3,18 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.testers.backtest.engines.event_driven.backtest import (
+from tools.testers.backtest.engines.native.backtest import (
     BacktestRunner,
     ExecutionVenue,
     StrategyLane,
 )
-from tools.testers.backtest.engines.event_driven.contracts import (
+from tools.testers.backtest.engines.native.contracts import (
     BacktestPlan,
     ExecutionIsolation,
     RunIdentity,
 )
 from tools.testers.backtest.engines.factors.events import PrecomputedFactorPublisher
-from tools.testers.backtest.engines.event_driven.runtime import ProductPrice, ReplayEventSource
+from tools.testers.backtest.engines.native.runtime import ProductPrice, ReplayEventSource
 from tools.testers.backtest.engines.execution.trading import (
     CashAccounting,
     ImmediateBroker,

@@ -11,8 +11,8 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
-from ..event_driven.contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
-from ..event_driven.runtime import (
+from ..native.contracts import Fill, Order, OrderSide, PortfolioIntent, TargetKind
+from ..native.runtime import (
     EventDraft,
     EventEnvelope,
     EventRuntime,

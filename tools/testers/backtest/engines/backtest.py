@@ -219,7 +219,7 @@ class Backtest:
         """
         if not self._has_friction:
             return self._run_vectorized()
-        return self._run_event_driven()
+        return self._run_native()
 
     # ------------------------------------------------------------------
     # 纯向量化路径（无摩擦）
@@ -291,7 +291,7 @@ class Backtest:
     # 事件驱动路径（有摩擦）
     # ------------------------------------------------------------------
 
-    def _run_event_driven(self) -> BacktestResult:
+    def _run_native(self) -> BacktestResult:
         """事件驱动 DES 回测。
 
         对标 simulate_group_trading_book() 的主循环：

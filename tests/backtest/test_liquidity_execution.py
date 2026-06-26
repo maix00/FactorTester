@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.testers.backtest.engines.event_driven.contracts import Order, OrderSide
-from tools.testers.backtest.engines.event_driven.runtime import (
+from tools.testers.backtest.engines.native.contracts import Order, OrderSide
+from tools.testers.backtest.engines.native.runtime import (
     EventDraft,
     EventRuntime,
     EventTopic,

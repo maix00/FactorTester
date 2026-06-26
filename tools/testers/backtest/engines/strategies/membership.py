@@ -7,8 +7,8 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from ..event_driven.contracts import PortfolioIntent, TargetKind
-from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
+from ..native.contracts import PortfolioIntent, TargetKind
+from ..native.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..factors.events import FactorSignal
 from ..execution.trading import MarketState
 from tools.testers.settings.strategy_fields import (

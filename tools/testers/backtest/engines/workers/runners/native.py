@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ...event_driven.runtime import (
+from ...native.runtime import (
     EventDraft,
     EventEnvelope,
     EventRuntime,
@@ -25,7 +25,7 @@ from ...event_driven.runtime import (
     MarketSliceBarrier,
     ReplayEventSource,
 )
-from ...event_driven.stages import (
+from ...native.stages import (
     ExecutionStage,
     PhaseContext,
     PhaseHandler,
