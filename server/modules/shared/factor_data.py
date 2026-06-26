@@ -1,16 +1,20 @@
 """
-Shared factor data-query routes (any test module can use):
+Shared factor data-query + instance-management routes (any test module can use):
+  POST /add_factor_by_params
   GET  /api/factor_list
   POST /get_factor_series
   POST /get_return_series
   POST /get_price_series
+  POST /get_factor_distribution
+  POST /api/factor_evaluation/evaluate
+  POST /api/factor_type_analysis/analyze
 """
 from typing import Any
 import numpy as np
 import pandas as pd
 import traceback
 from flask import request, jsonify
-from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_registry import get_factor_family_instance, get_page_factor, set_page_factor
 import server.services.page_runtime as page_runtime
 from server.services.session_runtime import current_user
 from tools.data.types import finest_index
@@ -35,6 +39,7 @@ from server.modules.single_factor_test.evaluation import FactorEvaluation
 from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
     FactorTypeAnalysisRun,
 )
+from .factor_param_utils import build_factor_rows, normalize_factor_param_row, factor_param_value_display
 
 
 def _request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
@@ -555,3 +560,58 @@ def get_factor_distribution():
         })
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+# ── Factor instance management (page-scoped) ──────────────────────────
+
+@shared_bp.route('/add_factor_by_params', methods=['POST'])
+@route_guard
+def add_factor_by_params():
+    data = request.get_json()
+    factor_family_alias = data.get('factor_family_alias')
+    params = data.get('params', {})
+    page_uuid = str(data.get('page_uuid') or '')
+    ff = get_factor_family_instance(factor_family_alias, username=current_user(), page_uuid=page_uuid)
+    new_params = normalize_factor_param_row(ff, params)
+    new_alias = ff.get_alias(**new_params)
+
+    # Factor is the single source of truth, stored in page_factors.
+    # Check if already exists — if not, create via FactorFamily.get_factor().
+    existing = get_page_factor(page_uuid, new_alias) if page_uuid else None
+    existed = existing is not None
+    if not existed and page_uuid:
+        ff.get_factor(**new_params, page_uuid=page_uuid)
+
+    added_display = {}
+    for p in ff.params:
+        val = new_params.get(p.alias)
+        added_display[p.alias] = factor_param_value_display(p, val)
+
+    # Collect all current factors for this page+family to build factor_rows
+    factors_for_page = {}
+    if page_uuid:
+        from server.services.factor_registry import page_factors
+        page_dict = page_factors.get(page_uuid, {})
+        factors_for_page = {
+            alias: f for alias, f in page_dict.items()
+            if getattr(f, 'family', None) and getattr(f.family, 'alias', None) == factor_family_alias
+        }
+
+    factor_rows = []
+    for alias, factor in factors_for_page.items():
+        display_params = {}
+        for p in ff.params:
+            val = getattr(factor, p.alias, None)
+            display_params[p.alias] = factor_param_value_display(p, val)
+        factor_rows.append({
+            'index': len(factor_rows),
+            'factor_alias': alias,
+            'params': display_params,
+        })
+
+    return api_ok({
+        'factor_alias': new_alias,
+        'existed': existed,
+        'added_params': added_display,
+        'factor_rows': factor_rows,
+    })
