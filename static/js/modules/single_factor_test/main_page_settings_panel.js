@@ -194,7 +194,7 @@
         load_factor_library_when_page_empty: function(fieldKey, serial) {
             var ffAlias = window.factorFamilyAlias || window._sftCurrentFactorId || '';
             if (!ffAlias) return Promise.resolve();
-            return requestJSON('/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+            return requestJSON('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
                 var factors = Array.isArray(payload.factors) ? payload.factors : [];
                 // 按当前 product_path_selection 的产品组过滤（与 loadFactorLibraryParams 逻辑一致）
                 var group = currentFactorLibraryProductGroup();
@@ -732,7 +732,7 @@
         if (state._factorLibraryParamsLoaded && !force) return Promise.resolve(factorLibraryParams());
         var ffAlias = factorFamilyAlias();
         if (!ffAlias) return Promise.resolve([]);
-        return requestJSON('/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+        return requestJSON('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
             var factors = Array.isArray(payload.factors) ? payload.factors : [];
             factors = filterFactorLibraryByProductGroup(factors, currentFactorLibraryProductGroup());
             var utils = window.FactorParamSelectionUtils || {};
