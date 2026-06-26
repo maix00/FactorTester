@@ -345,8 +345,6 @@
                 }
             }
 
-            var selection = batch.product_path_selection;
-            var selectionLabel = H.productPathSelectionLabel(selection);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
             var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
@@ -360,9 +358,23 @@
             if (batchLetter) {
                 h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
             }
-            h += '<span class="gt-backend-chip unified-backend-chip">' + H.renderChipHtml('因子', batch.factorAlias || '无') + '</span>';
-            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="product-path-selection">' + H.renderChipHtml('产品路径', selectionLabel) + '</span>';
-            h += '<span class="gt-backend-chip unified-backend-chip">' + H.renderChipHtml('分组数', batch.splitCount || '无') + '</span>';
+            // 批次头的 因子/产品路径/分组数 走后端 ChipDefinition（manifest 驱动），
+            // 与每组行同源：per-group 行用 _chipOwnedByBatch 把这些"批次自有"的 identity
+            // chip 排除，正由批次头在此渲染。产品路径保留点击打开产品 overlay 的动作。
+            var batchGroup = batch.items[0];
+            var batchHeaderChips = batchGroup ? _chipsForGroup(batchGroup).filter(function(c) {
+                return c.category === 'identity'
+                    && (c.label === 'factor_alias' || c.label === 'product_path_selection' || c.label === 'split_count');
+            }) : [];
+            for (var hci = 0; hci < batchHeaderChips.length; hci++) {
+                var hchip = batchHeaderChips[hci];
+                if (hchip.label === 'product_path_selection') {
+                    h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="'
+                        + H.escapeHTML(batchGroup && batchGroup.id || '') + '" data-chip-label="product-path-selection">' + hchip.html + '</span>';
+                } else {
+                    h += '<span class="gt-backend-chip unified-backend-chip">' + hchip.html + '</span>';
+                }
+            }
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" title="删除批次" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑</button>';
             h += '</div>';
