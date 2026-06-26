@@ -2,10 +2,10 @@
 and strategy parsing.
 
 Inheritance chain:
-    ModuleRegistry                    — base: collects ExecutableModules, produces module manifest
-        BacktestModuleRegistry        — adds ApplicationSettings, produces full frontend manifest
-            GroupTestModuleRegistry   — group-test modules + group strategy parsing
-            LongShortModuleRegistry   — long-short modules + LS strategy parsing
+    tools.data.modules.registry.ModuleRegistry  ← domain-neutral base
+        BacktestModuleRegistry                   ← adds ApplicationSettings, full frontend manifest
+            GroupTestModuleRegistry              ← group-test modules + group strategy parsing
+            LongShortModuleRegistry              ← long-short modules + LS strategy parsing
 
 Every module self-registers (no hardcoding in orchestrators or server endpoints).
 The frontend receives the manifest from the registry — it knows nothing about
@@ -14,8 +14,9 @@ individual module files.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from tools.data.modules.registry import ModuleRegistry
 
 from .base import ExecutableModule
 from .fee import FeeModule
@@ -26,26 +27,7 @@ from .position_sizing import PositionSizingModule
 from .cash_rescale import CashRescaleModule
 
 
-# ── Module manifest entries ───────────────────────────────────────
-
-@dataclass(frozen=True, slots=True)
-class ModuleManifestEntry:
-    """Self-describing entry for a single executable module."""
-    key: str
-    label: str
-    order: int
-    phases: tuple[dict[str, Any], ...]  # PhaseHandler → dict
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "key": self.key,
-            "label": self.label,
-            "order": self.order,
-            "phases": self.phases,
-        }
-
-
-# ── All known ExecutableModule subclasses ─────────────────────────
+# ── All known ExecutableModule subclasses for backtest ───────────
 
 _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     FeeModule,
@@ -68,70 +50,6 @@ def _module_class_by_key() -> dict[str, type[ExecutableModule]]:
     return result
 
 
-# ── ModuleRegistry (base) ─────────────────────────────────────────
-
-
-class ModuleRegistry:
-    """Collects ExecutableModule subclasses and produces a module manifest.
-
-    This is the base registry — it knows about executable modules only
-    (no settings schema, no strategy parsing).
-    """
-
-    application: str = ""
-
-    def __init__(self) -> None:
-        self._module_classes: dict[str, type[ExecutableModule]] = _module_class_by_key()
-
-    # ── module discovery ───────────────────────────────────────
-
-    @property
-    def module_keys(self) -> tuple[str, ...]:
-        return tuple(self._module_classes.keys())
-
-    def get_module_class(self, key: str) -> type[ExecutableModule]:
-        try:
-            return self._module_classes[key]
-        except KeyError:
-            raise KeyError(f"unknown executable module: {key!r}") from None
-
-    def instantiate_all(self) -> list[ExecutableModule]:
-        """Create one instance of every registered module."""
-        return [cls() for cls in self._module_classes.values()]
-
-    def instantiate(self, *keys: str) -> list[ExecutableModule]:
-        """Create instances for the requested module keys (in given order)."""
-        return [self.get_module_class(key)() for key in keys]
-
-    # ── manifest ───────────────────────────────────────────────
-
-    def module_manifest(self) -> list[dict[str, Any]]:
-        """Return a list of module manifest dicts for the frontend.
-
-        Each module's `phases` (PhaseHandler) declares what it needs/produces.
-        """
-        entries: list[dict[str, Any]] = []
-        for cls in sorted(self._module_classes.values(), key=lambda c: c.order):
-            phases = []
-            for ph in cls.phases:
-                phases.append({
-                    "phase": ph.phase,
-                    "order": ph.order,
-                    "before": list(ph.before),
-                    "after": list(ph.after),
-                    "needs": list(ph.needs),
-                    "produces": list(ph.produces),
-                    "records": list(ph.records),
-                })
-            entries.append({
-                "key": cls.key,
-                "label": cls.label,
-                "order": cls.order,
-                "phases": phases,
-            })
-        return entries
-
-
 # ── BacktestModuleRegistry ────────────────────────────────────────
 
 # Import at runtime to avoid circular imports
@@ -145,10 +63,12 @@ class BacktestModuleRegistry(ModuleRegistry):
 
     The manifest merges:
       - Settings schema from ApplicationSettings (tabs, settings, chips, etc.)
-      - Executable module info from ModuleRegistry
+      - Executable module info from ModuleRegistry (base)
 
     Strategy parsing is deferred to subclasses (GroupTest / LongShort).
     """
+
+    _module_classes = _ALL_MODULE_CLASSES
 
     def __init__(self) -> None:
         super().__init__()
