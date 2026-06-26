@@ -831,43 +831,6 @@ def group_test_settings() -> ApplicationSettings:
         chip_template="持仓: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "fee_mode",
-        "费用规则",
-        "cost",
-        "select",
-        "market",
-        ScopePolicy.GROUP_OVERRIDE,
-        module="transaction_cost",
-        options=(
-            SettingOption("none", "无费用"),
-            SettingOption("market", "市场历史费率"),
-            SettingOption("custom", "自定义费率"),
-        ),
-        chip_template="费用: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "custom_fee_rate", "自定义成交费率", "cost", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, module="transaction_cost", minimum=0.0, step=0.000001,
-        chip_template="费率: {value}",
-        visible_when={"fee_mode": ("custom",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "slippage_mode", "滑点模型", "cost", "select", "none",
-        ScopePolicy.GROUP_OVERRIDE,
-        module="slippage",
-        options=(
-            SettingOption("none", "零滑点"),
-            SettingOption("fixed_bps", "固定基点"),
-        ),
-        chip_template="滑点: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "slippage_bps", "固定滑点（基点）", "cost", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, module="slippage", minimum=0.0, step=0.1,
-        chip_template="滑点bp: {value}",
-        visible_when={"slippage_mode": ("fixed_bps",)},
-    ))
-    app.register_setting(SettingDefinition(
         "execution_timing",
         "执行时点",
         "order",
@@ -951,47 +914,6 @@ def group_test_settings() -> ApplicationSettings:
             SettingOption("nearest_lot", "按最小买入手数四舍五入"),
         ),
         chip_template="取整: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "liquidity_mode",
-        "流动性规则",
-        "liquidity",
-        "select",
-        "infinite",
-        ScopePolicy.GROUP_OVERRIDE,
-        module="liquidity",
-        options=(
-            SettingOption("infinite", "无限流动性"),
-            SettingOption("volume_participation", "成交量参与率"),
-        ),
-        chip_template="流动性: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "participation_rate",
-        "成交量参与率",
-        "liquidity",
-        "number",
-        0.1,
-        ScopePolicy.GROUP_OVERRIDE,
-        module="liquidity",
-        minimum=0.0,
-        maximum=1.0,
-        step=0.01,
-        chip_template="参与率: {value}",
-        visible_when={"liquidity_mode": ("volume_participation",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "margin_mode", "保证金约束", "margin", "select", "market",
-        ScopePolicy.GROUP_OVERRIDE,
-        module="margin",
-        options=(SettingOption("none", "关闭"), SettingOption("market", "市场保证金规则")),
-        chip_template="保证金: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "collateral_fraction", "最大保证金占权益", "margin", "number", 1.0,
-        ScopePolicy.GROUP_OVERRIDE, module="margin", minimum=0.01, maximum=1.0, step=0.01,
-        chip_template="保证金上限: {value}",
-        visible_when={"margin_mode": ("market",)},
     ))
     app.register_setting(SettingDefinition(
         "market_rule_fallback",
@@ -1335,6 +1257,11 @@ def ic_test_settings() -> ApplicationSettings:
                     button_class="btn-outline-danger"),
     ):
         app.register_flow(flow)
+
+    # Register settings from executable modules (fee, slippage, liquidity, margin).
+    from tools.backtest.modules.registry import register_all_module_settings
+    register_all_module_settings(app)
+
     return app
 
 
