@@ -128,6 +128,20 @@
         });
     }
 
+    function mergeICProductPathCandidates(selections) {
+        if (!Array.isArray(selections)) return icSettingValues.product_path_candidates || [];
+        icSettingValues.product_path_candidates = Array.isArray(icSettingValues.product_path_candidates) ? icSettingValues.product_path_candidates.slice() : [];
+        for (var i = 0; i < selections.length; i++) {
+            var sel = selections[i];
+            var sid = selectionId(sel);
+            if (!sid) continue;
+            var exists = icSettingValues.product_path_candidates.some(function(c) { return selectionId(c) === sid; });
+            if (!exists) icSettingValues.product_path_candidates.push(sel);
+        }
+        syncICStore();
+        return icSettingValues.product_path_candidates;
+    }
+
     function isTabMounted(tabKey) {
         return icMountedSettingsTabs.indexOf(tabKey) >= 0;
     }
@@ -501,39 +515,36 @@
         // IC 产品路径（多选）：复用共享的 renderSelectionSettingsTab（多选模式），
         // 以便统一管理 + 现场新增路径组。每个选中项对应一个结果 tab。
         function renderICProductPathSelectionTab() {
-            contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载产品路径候选...</div>';
-            loadSharedProductPathSelections(false).then(function(selections) {
-                var utils = window.ProductPathSelectionUtils;
-                if (!utils || typeof utils.renderSelectionSettingsTab !== 'function') {
-                    contentHost.textContent = '产品路径设置组件未加载';
-                    return;
-                }
-                utils.renderSelectionSettingsTab({
-                    host: contentHost,
-                    prefix: 'ic-pps',
-                    selections: selections,
-                    multiSelect: true,
-                    selectedIds: icProductPathSelections.map(selectionId),
-                    currentLabel: 'IC 产品路径（多选）',
-                    manualTitle: 'IC 现场新增路径组',
-                    createLabel: '新增',
-                    createDefaultLabel: '新增并选中',
-                    escapeHTML: escapeHTML,
-                    onToggle: function(selection) {
-                        var sid = selectionId(selection);
-                        var i = icProductPathSelections.findIndex(function(s) { return selectionId(s) === sid; });
-                        if (i >= 0) icProductPathSelections.splice(i, 1);
-                        else icProductPathSelections.push(selection);
-                        window.renderICTabs(icProductPathSelections.slice());
-                    },
-                    onCreate: function(selection) {
-                        mergeICProductPathCandidates([selection]);  // 现场新增进候选池
-                        icProductPathSelections.push(selection);    // 并默认选中
-                        window.renderICTabs(icProductPathSelections.slice());
-                    },
-                });
-            }).catch(function(error) {
-                contentHost.innerHTML = '<div style="font-size:12px;color:#b91c1c;">加载失败：' + escapeHTML(error.message || error) + '</div>';
+            var s = ensureICStore();
+            var selections = (s && s.effective('product_path_candidates')) || [];
+            var utils = window.ProductPathSelectionUtils;
+            if (!utils || typeof utils.renderSelectionSettingsTab !== 'function') {
+                contentHost.textContent = '产品路径设置组件未加载';
+                return;
+            }
+            utils.renderSelectionSettingsTab({
+                host: contentHost,
+                prefix: 'ic-pps',
+                selections: selections,
+                multiSelect: true,
+                selectedIds: icProductPathSelections.map(selectionId),
+                currentLabel: 'IC 产品路径（多选）',
+                manualTitle: 'IC 现场新增路径组',
+                createLabel: '新增',
+                createDefaultLabel: '新增并选中',
+                escapeHTML: escapeHTML,
+                onToggle: function(selection) {
+                    var sid = selectionId(selection);
+                    var i = icProductPathSelections.findIndex(function(s) { return selectionId(s) === sid; });
+                    if (i >= 0) icProductPathSelections.splice(i, 1);
+                    else icProductPathSelections.push(selection);
+                    window.renderICTabs(icProductPathSelections.slice());
+                },
+                onCreate: function(selection) {
+                    mergeICProductPathCandidates([selection]);  // 现场新增进候选池
+                    icProductPathSelections.push(selection);    // 并默认选中
+                    window.renderICTabs(icProductPathSelections.slice());
+                },
             });
         }
 
@@ -1859,11 +1870,6 @@
         const container = document.getElementById('ic-tab-container');
         if (!container) return;
         icProductPathSelections = Array.isArray(productPathSelections) ? productPathSelections.slice() : [];
-        if (!icProductPathSelections.length) {
-            // 回退到候选列表（本地→页面全局），不再回退到页面单数 product_path_selection
-            await loadSharedProductPathSelections(false).catch(function() {});
-            fallbackToCandidatesIfEmpty();
-        }
         if (window.FactorSeriesViewer && typeof window.FactorSeriesViewer.setSelections === 'function') {
             window.FactorSeriesViewer.setSelections({ product_path_selection: icProductPathSelections[0] || null });
         }
@@ -2068,11 +2074,11 @@
     window.factorList = factorList;
 
     document.addEventListener('groupTestProductPathSelectionsChanged', function() {
-        if (fallbackToCandidatesIfEmpty()) {
+        if (icProductPathSelections.length) {
             window.renderICTabs(icProductPathSelections).catch(function(error) {
                 console.error('[IC] refresh product path selection failed:', error);
             });
-        } else if (!icProductPathSelections.length) {
+        } else {
             renderICSettingsPanel(icSettingsManifest);
         }
     });
