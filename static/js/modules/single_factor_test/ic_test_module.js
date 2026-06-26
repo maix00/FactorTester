@@ -1865,6 +1865,29 @@
         return '';
     }
 
+    // 按后端 manifest serialization.fallback 声明，将空 selections 回退到 candidates
+    function applyFallbackSelectionsFromCandidates() {
+        var s = ensureICStore();
+        if (!s || !icSettingsManifest) return;
+        var defs = icSettingsManifest.defaults || {};
+        Object.keys(defs).forEach(function(key) {
+            var meta = defs[key] || {};
+            var ser = meta.serialization || {};
+            if (ser.fallback !== 'candidates') return;
+            if (!ser.candidate_field) return;
+            var selections = icSettingValues[key];
+            if (Array.isArray(selections) && selections.length > 0) return;
+            // 从 candidate_field 对应的值回退：先 icSettingValues，再 effective（parent 回退）
+            var candidates = s.effective(ser.candidate_field);
+            if (!Array.isArray(candidates) || !candidates.length) return;
+            // 全选候选
+            icSettingValues[key] = candidates.slice();
+            if (key === 'product_path_selections') {
+                icProductPathSelections = candidates.slice();
+            }
+        });
+    }
+
     // 渲染主选项卡（外部调用）
     window.renderICTabs = async function(productPathSelections) {
         const container = document.getElementById('ic-tab-container');
@@ -1874,6 +1897,8 @@
             window.FactorSeriesViewer.setSelections({ product_path_selection: icProductPathSelections[0] || null });
         }
         const settingsManifest = await loadICSettingsManifest();
+        applyFallbackSelectionsFromCandidates();
+        syncICStore();
         renderICSettingsPanel(settingsManifest);
         if (icProductPathSelections.length === 0) {
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请在 IC 测试设置中选择产品路径。</div>';
