@@ -352,7 +352,10 @@
     var ftaStore = null, ftaChipUnbind = null;
     function ensureFtaStore() {
         if (!ftaStore && state.manifest && window.FieldStore) {
-            ftaStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
+            ftaStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values, parent: window._singleFactorPageStore || null });
+        }
+        if (ftaStore && window._singleFactorPageStore && ftaStore.setParent) {
+            ftaStore.setParent(window._singleFactorPageStore);
         }
         return ftaStore;
     }

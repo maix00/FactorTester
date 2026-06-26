@@ -109,8 +109,23 @@
         }
 
         // 跨 store 广播：父（页面）store 的 shared_page_field 变更 → 通知本 store 中回退到它的字段。
-        if (parent && typeof parent.subscribe === 'function') {
-            var pageFieldDeps = Object.create(null);   // pageFieldName -> [本store回退到它的key...]
+        _wireParentBroadcast();
+
+        function destroy() {
+            parentUnsubs.forEach(function(fn) { try { fn(); } catch (e) {} });
+            parentUnsubs = [];
+        }
+
+        // 延迟绑定父 store：用于确保 create 后 parent 才就绪的场景（如页面 store 在子模块之后初始化）。
+        function setParent(p) {
+            if (!p || parent === p) return;
+            parent = p;
+            _wireParentBroadcast();
+        }
+
+        function _wireParentBroadcast() {
+            if (!parent || typeof parent.subscribe !== 'function') return;
+            var pageFieldDeps = Object.create(null);
             Object.keys(defaults).forEach(function(key) {
                 var pf = serial(key).shared_page_field;
                 if (pf) (pageFieldDeps[pf] = pageFieldDeps[pf] || []).push(key);
@@ -123,11 +138,6 @@
             });
         }
 
-        function destroy() {
-            parentUnsubs.forEach(function(fn) { try { fn(); } catch (e) {} });
-            parentUnsubs = [];
-        }
-
         var store = {
             get: get,
             effective: effective,
@@ -135,6 +145,7 @@
             setMany: setMany,
             subscribe: subscribe,
             destroy: destroy,
+            setParent: setParent,
             values: function() { var o = {}; Object.keys(values).forEach(function(k) { o[k] = values[k]; }); return o; },
             _dependents: dependents,
         };

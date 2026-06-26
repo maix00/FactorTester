@@ -939,7 +939,10 @@
     var gtLocalStore = null, gtLocalChipUnbind = null;
     function ensureGtLocalStore() {
         if (!gtLocalStore && state.index && window.FieldStore) {
-            gtLocalStore = window.FieldStore.create({ defaults: state.index.defaults, values: state.localValues });
+            gtLocalStore = window.FieldStore.create({ defaults: state.index.defaults, values: state.localValues, parent: window._singleFactorPageStore || null });
+        }
+        if (gtLocalStore && window._singleFactorPageStore && gtLocalStore.setParent) {
+            gtLocalStore.setParent(window._singleFactorPageStore);
         }
         return gtLocalStore;
     }

@@ -307,7 +307,10 @@
     var fsvStore = null, fsvSettingsUnbind = null, fsvResultUnbind = null;
     function ensureFsvStore() {
         if (!fsvStore && state.manifest && window.FieldStore) {
-            fsvStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values });
+            fsvStore = window.FieldStore.create({ defaults: state.manifest.defaults, values: state.values, parent: window._singleFactorPageStore || null });
+        }
+        if (fsvStore && window._singleFactorPageStore && fsvStore.setParent) {
+            fsvStore.setParent(window._singleFactorPageStore);
         }
         return fsvStore;
     }

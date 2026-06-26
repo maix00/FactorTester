@@ -173,7 +173,11 @@
     var icChipUnbind = null;
     function ensureICStore() {
         if (!icStore && icSettingsManifest && window.FieldStore) {
-            icStore = window.FieldStore.create({ defaults: icSettingsManifest.defaults, values: icSettingValues });
+            icStore = window.FieldStore.create({ defaults: icSettingsManifest.defaults, values: icSettingValues, parent: window._singleFactorPageStore || null });
+        }
+        // 延迟绑定：如果创建时 pageStore 未就绪，后续 sync 时补绑
+        if (icStore && window._singleFactorPageStore && icStore.setParent) {
+            icStore.setParent(window._singleFactorPageStore);
         }
         return icStore;
     }
