@@ -85,9 +85,9 @@ def register_all_module_settings(app: Any) -> None:
 # ── BacktestModuleRegistry ────────────────────────────────────────
 
 # Import at runtime to avoid circular imports
-def _get_backtest_setting_registry():
-    from tools.testers.settings import backtest_setting_registry
-    return backtest_setting_registry
+def _get_tester_setting_registry():
+    from tools.testers.settings import tester_setting_registry
+    return tester_setting_registry
 
 
 class BacktestModuleRegistry(ModuleRegistry):
@@ -200,15 +200,25 @@ class BacktestModuleRegistry(ModuleRegistry):
         # 1) Executable module params (fee, liquidity, margin...)
         merged = super().build_group_params(group_settings, raw_group)
 
-        # 2) Settings-derived params — any group_settings key that maps to a
-        #    known GROUP_ONLY/GROUP_OVERRIDE setting gets forwarded if not
-        #    already contributed. LOCAL_ONLY settings (e.g. engine) are
-        #    page/run-level, not per-group constructor params — they're
-        #    already extracted separately via collect_local_only_settings.
+        # 2) Settings-derived params — forward a group_settings key only if it
+        #    is both (a) a GROUP_ONLY/GROUP_OVERRIDE setting and (b) an actual
+        #    _FactorGroupTestGroup constructor field. Most GROUP_OVERRIDE
+        #    settings (order_execution, slippage, target_allocation, ...) are
+        #    consumed by their own executable module's build_group_params
+        #    (step 1) or read directly from group_settings at run time — they
+        #    are not _FactorGroupTestGroup fields, and forwarding them blindly
+        #    raises TypeError on construction. LOCAL_ONLY settings (e.g.
+        #    engine) are page/run-level, already extracted separately via
+        #    collect_local_only_settings.
+        import dataclasses
+        from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
         from tools.testers.settings.contracts import ScopePolicy
+        group_fields = {f.name for f in dataclasses.fields(_FactorGroupTestGroup)}
         app = self.get_app()
         for key, setting in app.settings.items():
             if setting.scope_policy == ScopePolicy.LOCAL_ONLY:
+                continue
+            if key not in group_fields:
                 continue
             if key in group_settings and key not in merged:
                 merged[key] = group_settings[key]
