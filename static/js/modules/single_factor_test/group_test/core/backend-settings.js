@@ -532,22 +532,7 @@
         return state.tabRequests[tabKey];
     }
 
-    function defaultsForTab(tabKey) {
-        var out = [];
-        var defaults = state.index && state.index.defaults || {};
-        var values = effectiveLocalValues();
-        Object.keys(defaults).forEach(function(key) {
-            var def = defaults[key];
-            if (def.tab_key === tabKey && settingVisibleForValues(def, values)) {
-                out.push({
-                    key: key,
-                    label: def.label || key,
-                    value: displayValue(def, def.value),
-                });
-            }
-        });
-        return out;
-    }
+    // defaultsForTab 已删除：选择器改走统一的 manifest + store 路径（ChipRenderer 渲染）。
 
     function activeNode() {
         if (!state.activeGroup) return null;
@@ -926,8 +911,11 @@
 
     function renderChooser(mount, container) {
         if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+        // 统一走 manifest + store 路径（与其它模块的选择器一致），chip 由 ChipRenderer 渲染。
         window.BackendSettingsPanel.renderChooser({
             host: container,
+            manifest: state.index,
+            store: ensureGtLocalStore(),
             tabs: availableTabs(mount),
             mountedTabs: state.mountedTabs[mount],
             introText: '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。',
@@ -936,9 +924,9 @@
             bodyClassName: 'backend-settings-chooser-body gt-backtest-settings-chooser-body',
             titleClassName: 'backend-settings-chooser-title gt-backtest-settings-chooser-title',
             defaultsClassName: 'backend-settings-chooser-defaults gt-backtest-settings-chooser-defaults',
-            defaultsForTab: function(tab) { return defaultsForTab(tab.key); },
-            renderChip: function(item) { return chip(item.label + ': ' + item.value, true); },
             onToggle: function(tab, enabled) { toggleMounted(mount, tab.key, enabled); },
+            escapeHTML: escapeHTML,
+            renderChipHtml: renderChipHtml,
         });
     }
 

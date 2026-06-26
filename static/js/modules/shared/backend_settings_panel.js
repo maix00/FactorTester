@@ -79,66 +79,14 @@
         return { opened: !!key, key: key || null };
     }
 
+    // 选择器（"+ 设置"）：统一 manifest + store + ChipRenderer 一条路径，无 fallback。
     function renderChooser(options) {
         options = options || {};
         var host = resolveElement(options.host);
         if (!host) return;
         host.innerHTML = '';
-
-        // 新路径：manifest + store → 用 ChipRenderer 渲染每行 chip
-        var manifest = options.manifest;
-        var store = options.store;
-        if (manifest && store && window.ChipRenderer) {
-            _renderChooserChips(host, options);
-            return;
-        }
-
-        // 旧路径（向后兼容，仅当无 manifest+store 时）
-        var introText = options.introText || '选择要挂载的设置。未挂载项继续使用默认值。';
-        if (introText) {
-            var intro = document.createElement('div');
-            intro.className = options.introClassName || 'backend-settings-chooser-intro';
-            intro.textContent = introText;
-            host.appendChild(intro);
-        }
-        var tabs = Array.isArray(options.tabs) ? options.tabs : [];
-        var mountedTabs = Array.isArray(options.mountedTabs) ? options.mountedTabs : [];
-        var isVisible = typeof options.isVisible === 'function' ? options.isVisible : function() { return true; };
-        var defaultsForTab = typeof options.defaultsForTab === 'function' ? options.defaultsForTab : function() { return []; };
-        var onToggle = typeof options.onToggle === 'function' ? options.onToggle : function() {};
-        var renderChip = typeof options.renderChip === 'function'
-            ? options.renderChip
-            : function(item) {
-                var span = document.createElement('span');
-                span.className = 'gt-backend-chip is-muted';
-                span.textContent = item && item.text || '';
-                return span;
-            };
-
-        tabs.filter(isVisible).forEach(function(tab) {
-            var row = document.createElement('label');
-            row.className = options.rowClassName || 'backend-settings-chooser-row';
-            var input = document.createElement('input');
-            input.type = 'checkbox';
-            input.checked = mountedTabs.indexOf(tab.key) >= 0;
-            input.addEventListener('change', function() { onToggle(tab, input.checked); });
-            var body = document.createElement('div');
-            body.className = options.bodyClassName || 'backend-settings-chooser-body';
-            var title = document.createElement('div');
-            title.className = options.titleClassName || 'backend-settings-chooser-title';
-            title.textContent = tab.label || tab.key;
-            var defaults = document.createElement('div');
-            defaults.className = options.defaultsClassName || 'backend-settings-chooser-defaults';
-            defaultsForTab(tab).forEach(function(item) {
-                var chip = renderChip(item, tab);
-                if (chip) defaults.appendChild(chip);
-            });
-            body.appendChild(title);
-            body.appendChild(defaults);
-            row.appendChild(input);
-            row.appendChild(body);
-            host.appendChild(row);
-        });
+        if (!options.manifest || !options.store || !window.ChipRenderer) return;
+        _renderChooserChips(host, options);
     }
 
     function _renderChooserChips(host, options) {
