@@ -13,7 +13,7 @@
     let icSettingsManifest = null;
     let icSettingValues = {};
     let icActiveSettingsTab = null;
-    let icMountedSettingsTabs = ['factor', 'return_frequency', 'category', 'product_path_selection'];
+    let icMountedSettingsTabs = ['factor', 'product_path_selection'];
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
     let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
