@@ -114,8 +114,8 @@ return GT.backendSettings.init().then(() => {
   assert.equal(runPayload.allocation_policy, undefined);
   assert.equal(runPayload.rebalance_trigger, undefined);
   assert.equal(runPayload.volatility_lookback, undefined);
-  assert.equal(runPayload._runtime_window.start_date, '2026-01-01');
-  assert.equal(runPayload._runtime_window.end_date, '2026-01-31');
+  assert.equal(runPayload.local_settings.start_date, '2026-01-01');
+  assert.equal(runPayload.local_settings.end_date, '2026-01-31');
 
   const groupPayload = GT.backendSettings.groupPayloadForRun(group);
   assert.equal(groupPayload.allocation_policy, 'inverse_volatility');

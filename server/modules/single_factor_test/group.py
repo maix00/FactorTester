@@ -1921,8 +1921,10 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         factor_family_alias = str(req_family)
 
     # ── Factor inputs & calendar ──
-    auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
-    requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
+    local_settings = data.get('local_settings', {}) or {}
+    calendar_frequency = str(local_settings.get('calendar_frequency', '') or 'auto')
+    auto_group_calendar_freq = calendar_frequency == 'auto'
+    requested_group_calendar_freq = None if auto_group_calendar_freq else calendar_frequency
     group_factor_params_list = data.get('_group_factor_params_list')
     if not isinstance(group_factor_params_list, list):
         group_factor_params_list = None

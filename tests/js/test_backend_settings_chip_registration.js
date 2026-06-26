@@ -304,7 +304,7 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(GT.backendSettings._state.index.defaults.start_time.value, '09:01');
   assert.equal(GT.backendSettings._state.index.defaults.end_time.value, '14:59');
   assert.equal(GT.backendSettings.collectLocalSettings().start_date, undefined);
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2025-05-06');
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2025-05-06');
 
   await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
@@ -316,7 +316,7 @@ return GT.backendSettings.init().then(async () => {
       timezone: 'Asia/Shanghai',
     },
   });
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2024-01-02');
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2024-01-02');
   global.getSharedRuntimeTimeRange = () => ({
     start_date: '2025-09-01',
     end_date: '2025-09-30',
@@ -331,8 +331,8 @@ return GT.backendSettings.init().then(async () => {
     }),
     false,
   );
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2024-01-02');
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.timezone, 'Asia/Shanghai');
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2024-01-02');
+  assert.equal(GT.backendSettings.runPayload().local_settings.timezone, 'Asia/Shanghai');
 
   window.submissions = [{
     id: 'tester-chip-order',
@@ -496,7 +496,7 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(sparseRunPayload.base_currency, undefined);
   assert.equal(sparseRunPayload.currency_conversion_fee_rate, undefined);
   assert.equal(sparseRunPayload.start_date, undefined);
-  assert.ok(sparseRunPayload._runtime_window);
+  assert.ok(sparseRunPayload.local_settings);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['group-settings'], []);
   const localChipText = document.getElementById('gt-local-settings-chip-row').childNodes
     .map((chip) => chip.innerHTML.replace(/<[^>]+>/g, ''));
@@ -511,12 +511,12 @@ return GT.backendSettings.init().then(async () => {
     },
   });
   const tradingDayPayload = GT.backendSettings.runPayload();
-  assert.equal(tradingDayPayload._runtime_window.start_date, '2025-04-01');
-  assert.equal(tradingDayPayload._runtime_window.end_date, '2025-04-30');
-  assert.equal(tradingDayPayload._runtime_window.time_precision, 'trading_day');
-  assert.equal(tradingDayPayload._runtime_window.start_time, '');
-  assert.equal(tradingDayPayload._runtime_window.end_time, '');
-  assert.equal(tradingDayPayload._runtime_window.timezone, '');
+  assert.equal(tradingDayPayload.local_settings.start_date, '2025-04-01');
+  assert.equal(tradingDayPayload.local_settings.end_date, '2025-04-30');
+  assert.equal(tradingDayPayload.local_settings.time_precision, 'trading_day');
+  assert.equal(tradingDayPayload.local_settings.start_time, '');
+  assert.equal(tradingDayPayload.local_settings.end_time, '');
+  assert.equal(tradingDayPayload.local_settings.timezone, '');
   assert.deepEqual(GT.backendSettings._state.mountedTabs['local-settings'], ['time']);
 
   await GT.backendSettings.applyFlatSnapshot({

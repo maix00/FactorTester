@@ -185,26 +185,27 @@
             return;
         }
         var backendRunPayload = GT.backendSettings.runPayload();
-        var runtimeWindow = backendRunPayload.local_settings || {};
-        if (!runtimeWindow.start_date || !runtimeWindow.end_date) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ 请在回测设置中指定有效时间范围'; statusSpan.style.color = '#d40000'; }
+        if (!GT.backendSettings || typeof GT.backendSettings.runPayload !== 'function') {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 后端注册的回测设置尚未加载'; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;
         }
+        var backendRunPayload = GT.backendSettings.runPayload();
 
         if (statusSpan) {
             statusSpan.innerHTML = '分组测试运行中...';
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
-        var bulkPayload = Object.assign({}, backendRunPayload, {
+        // ── 合并 local_settings ──
+        var bulkPayload = {
+            local_settings: backendRunPayload.local_settings || {},
             groups: runGroups,
             flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''
-        });
+        };
         var runToken = (window.crypto && typeof window.crypto.randomUUID === 'function')
             ? window.crypto.randomUUID()
             : String(Date.now()) + '-' + Math.random().toString(16).slice(2);

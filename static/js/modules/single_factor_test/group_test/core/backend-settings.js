@@ -1569,23 +1569,7 @@
 
     function runPayload() {
         var localSettings = collectRunLocalSettings();
-        var values = Object.assign({}, effectiveLocalValues(), localSettings);
-        var calendar = String(values.calendar_frequency || 'auto');
-        var precision = values.time_precision || 'exact';
-        var tradingDayMode = precision === 'trading_day';
-        return {
-            local_settings: localSettings,
-            _runtime_window: {
-                start_date: values.start_date,
-                end_date: values.end_date,
-                start_time: tradingDayMode ? '' : values.start_time,
-                end_time: tradingDayMode ? '' : values.end_time,
-                time_precision: tradingDayMode ? 'trading_day' : precision,
-                timezone: tradingDayMode ? '' : (values.timezone || 'Asia/Shanghai'),
-            },
-            auto_group_calendar_freq: calendar === 'auto',
-            group_calendar_freq: calendar === 'auto' ? null : calendar,
-        };
+        return { local_settings: localSettings };
     }
 
     function groupOverrideValues(groupId) {
