@@ -20,7 +20,7 @@ from server.services.factor_registry import (
     get_factor_groups,
 )
 import server.services.page_runtime as runtime_state
-from server.services.session_runtime import current_user, get_session_id, get_session_params
+from server.services.session_runtime import current_user, get_session_id
 from server.modules.single_factor_test.view_helpers import (
     get_default_test_time_strings,
     get_factor_main_section_html,
@@ -133,8 +133,15 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
 
             param_metas = [serialize_param_meta(p) for p in params]
             param_aliases = [p.alias for p in params]
-            session_params = get_session_params(display_alias, ff)
-            factors = ff.get_factors(params_list=session_params, page_uuid=page_uuid)
+            # Factors from page_factors (single source of truth)
+            from server.services.factor_registry import page_factors
+            page_dict = page_factors.get(str(page_uuid), {})
+            family_alias = getattr(ff, 'alias', '')
+            factors = [
+                f for alias, f in page_dict.items()
+                if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
+            ]
+            ff.factors = factors
             start_date, end_date, start_time, end_time = get_default_test_time_strings()
             return render_template(
                 'single_factor_test_main.html',

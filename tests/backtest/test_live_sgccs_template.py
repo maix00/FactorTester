@@ -76,12 +76,15 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert "time_data" not in snapshot
     assert "backendBacktestSettings" not in snapshot["local_settings"]
     assert "dates" not in snapshot["local_settings"]
-    response = client.post("/replace_params", json={
-        "factor_family_alias": FACTOR_FAMILY,
-        "params_list": snapshot["params_list"],
-    })
-    assert response.status_code == 200, response.get_json()
-    assert response.get_json()["success"]
+    # /replace_params removed — push each candidate via /add_factor_by_params instead
+    for params_row in snapshot["params_list"]:
+        resp = client.post("/add_factor_by_params", json={
+            "factor_family_alias": FACTOR_FAMILY,
+            "params": params_row,
+            "page_uuid": page_uuid,
+        })
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["success"]
 
     groups = _resolve_groups(snapshot["group_settings"]["groups"], {})
     long_short_configs = _resolve_ls_configs(
@@ -113,7 +116,6 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         },
         "auto_group_calendar_freq": local_values.get("calendar_frequency", "auto") == "auto",
         "group_calendar_freq": None if local_values.get("calendar_frequency", "auto") == "auto" else local_values["calendar_frequency"],
-        "_group_factor_params_list": snapshot["params_list"],
         "_group_owner_username": USERNAME,
     }
     profiles = {
@@ -307,12 +309,15 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     snapshot = template["snapshot"]
     local_values = snapshot["local_settings"]
 
-    response = client.post("/replace_params", json={
-        "factor_family_alias": FACTOR_FAMILY,
-        "params_list": snapshot["params_list"],
-    })
-    assert response.status_code == 200, response.get_json()
-    assert response.get_json()["success"]
+    # /replace_params removed — push each candidate via /add_factor_by_params instead
+    for params_row in snapshot["params_list"]:
+        resp = client.post("/add_factor_by_params", json={
+            "factor_family_alias": FACTOR_FAMILY,
+            "params": params_row,
+            "page_uuid": page_uuid,
+        })
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["success"]
 
     groups = [
         group for group in _resolve_groups(snapshot["group_settings"]["groups"], {})

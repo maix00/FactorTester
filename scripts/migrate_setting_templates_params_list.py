@@ -91,7 +91,7 @@ def migrate_templates(
 
     # Fallback for templates whose factor family no longer resolves (deleted
     # custom factors): still convert so params are not stranded in the dead
-    # params_list field; alias is left empty and recomputed by /replace_params
+    # params_list field; alias is left empty and recomputed by /add_factor_by_params
     # on restore.
     def _null_resolve(_params: dict) -> dict:
         return {"alias": "", "in_library": False, "library_product_group": None}

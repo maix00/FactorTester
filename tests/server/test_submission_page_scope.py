@@ -613,11 +613,12 @@ def test_factor_main_section_does_not_build_defaults_when_session_params_empty(a
             return []
 
     monkeypatch.setattr(view_helpers, "get_factor_family_instance", lambda *args, **kwargs: _FakeFamily())
-    monkeypatch.setattr(view_helpers, "get_session_params", lambda *args, **kwargs: [])
+    monkeypatch.setattr(view_helpers, "page_factors", {})
     monkeypatch.setattr(view_helpers, "render_template", lambda template, **ctx: ctx)
 
     with app.test_request_context("/single_factor_test/api/content?page_uuid=page-x"):
         ctx = view_helpers.get_factor_main_section_html("Mm", page_uuid="page-x")
 
     assert ctx["factor_family_alias"] == "Mm"
-    assert captured == {"params_list": [], "page_uuid": "page-x"}
+    # Factors are now read directly from page_factors, not via get_factors(params_list=session_params)
+    assert captured == {}

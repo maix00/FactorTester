@@ -36,9 +36,8 @@ from tools.backtest.settings.strategy_fields import (
 )
 from . import sft_bp
 import server.services.page_runtime as runtime_state
-from server.services.session_runtime import current_user, current_user_obj, get_session_params
+from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
-from server.services.factor_registry import get_factor_family_instance
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -109,30 +108,32 @@ def _ensure_tester_factors_for_group(
     factor_aliases: list[str],
     factor_family_alias: str | None,
     *,
-    params_list: list | None = None,
     username: str | None = None,
     page_uuid: str | None = None,
 ) -> None:
-    """Ensure direct group runs can resolve factors even when IC has not run."""
+    """Ensure direct group runs can resolve factors from page_factors.
+
+    Factors are the single source of truth — no session-scoped params dict.
+    When page_uuid is provided, factors are looked up from page_factors directly.
+    When page_uuid is absent, factors must already be on the tester (caller error).
+    """
     missing_aliases = [
         str(alias) for alias in factor_aliases
         if alias and tester.resolve_factor(str(alias)) is None
     ]
     if not missing_aliases:
         return
-    if not factor_family_alias:
+
+    if not page_uuid:
         return
 
-    factor_family = get_factor_family_instance(
-        str(factor_family_alias), username=username, page_uuid=page_uuid
-    )
-    if params_list is None:
-        params_list = get_session_params(str(factor_family_alias), factor_family)
-    factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
+    from server.services.factor_registry import page_factors
+    page_dict = page_factors.get(str(page_uuid), {})
+
     existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
-    for factor in factors:
-        alias = getattr(factor, 'alias', '')
-        if not alias:
+    for alias in missing_aliases:
+        factor = page_dict.get(alias)
+        if factor is None:
             continue
         if alias in existing_by_alias:
             tester.factors[existing_by_alias[alias]] = factor
@@ -1911,9 +1912,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     calendar_frequency = str(local_settings.get('calendar_frequency', '') or 'auto')
     auto_group_calendar_freq = calendar_frequency == 'auto'
     requested_group_calendar_freq = None if auto_group_calendar_freq else calendar_frequency
-    group_factor_params_list = data.get('_group_factor_params_list')
-    if not isinstance(group_factor_params_list, list):
-        group_factor_params_list = None
     group_owner_username = data.get('_group_owner_username')
     group_owner_username = str(group_owner_username) if group_owner_username else None
 
@@ -1936,7 +1934,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             tester,
             factor_aliases,
             factor_family_alias,
-            params_list=group_factor_params_list,
             username=group_owner_username,
             page_uuid=page_uuid,
         )
@@ -3014,37 +3011,9 @@ def run_group_test_stream():
         active_run = backtest_runs.register(run_token, page_uuid, owner)
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
-    factor_family_alias = ''
-    if page_uuid:
-        try:
-            page_state = runtime_state.get_page_state(page_uuid)
-            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
-        except Exception:
-            pass
-    # Allow override from request
-    req_family = data.get('factor_family_alias')
-    if req_family:
-        factor_family_alias = str(req_family)
     data = dict(data)
     data['_run_user'] = run_user
-    if factor_family_alias:
-        try:
-            factor_family = get_factor_family_instance(
-                factor_family_alias,
-                username=owner,
-                page_uuid=page_uuid,
-            )
-            data['_group_owner_username'] = owner
-            data['_group_factor_params_list'] = get_session_params(
-                factor_family_alias,
-                factor_family,
-            )
-        except Exception as exc:
-            backtest_runs.finish(run_token)
-            def _early_factor_err():
-                yield f"event: error\ndata: {_json.dumps({'success': False, 'error': f'准备分组测试因子参数失败: {exc}'}, default=str)}\n\n"
-            return Response(_early_factor_err(), mimetype='text/event-stream',
-                            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    data['_group_owner_username'] = owner
 
     emitter = SSEProgressEmitter()
     registry = BacktestProgressRegistry()

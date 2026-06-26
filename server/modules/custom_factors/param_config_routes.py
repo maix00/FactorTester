@@ -24,7 +24,7 @@ from server.modules.custom_factors.param_config_store import (
 from tools.data.account_manage import can_view_user_scope
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
-from server.services.session_runtime import current_user, get_session_params, get_user_file_lock
+from server.services.session_runtime import current_user, get_user_file_lock
 
 
 def _username() -> str | None:
@@ -121,27 +121,25 @@ def api_add_factor_to_param_config(ff_alias):
     if not factor_alias:
         return jsonify({'success': False, 'error': '缺少 factor_alias'}), 400
 
-    # 获取当前会话中该因子族的参数列表
+    # 从 page_factors 查找因子（因子是唯一数据源），提取其参数行。
+    page_uuid = str(data.get('page_uuid') or '')
     try:
         factor_family = get_factor_family_instance(ff_alias, username=username)
     except ImportError:
         return jsonify({'success': False, 'error': f'因子族 {ff_alias} 不存在'}), 404
 
-    session_params = get_session_params(ff_alias, factor_family)
-    if not session_params:
-        # 没有会话参数，使用默认参数
-        session_params = [{p.alias: p.default_value for p in factor_family.params}]
-
-    # 找到匹配 factor_alias 的参数行
     matched_param = None
-    for row in session_params:
-        ff_alias_match = factor_family.get_alias(**row)
-        if ff_alias_match == factor_alias:
-            matched_param = dict(row)
-            break
+    if page_uuid:
+        from server.services.factor_registry import page_factors
+        factor = page_factors.get(page_uuid, {}).get(factor_alias)
+        if factor is not None:
+            matched_param = {
+                p.alias: getattr(factor, p.alias, p.default_value)
+                for p in factor_family.params
+            }
 
     if matched_param is None:
-        return jsonify({'success': False, 'error': f'未找到因子 {factor_alias} 对应的会话参数'}), 404
+        return jsonify({'success': False, 'error': f'未找到因子 {factor_alias} 对应的参数'}), 404
 
     # 读取当前 scope 下的已有配置，追加新参数行（去重）
     with get_user_file_lock(username):

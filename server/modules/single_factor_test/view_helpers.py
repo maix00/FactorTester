@@ -9,8 +9,7 @@ from flask import render_template
 
 import settings as Settings
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.factor_registry import factor_group_key, get_factor_family_instance
-from server.services.session_runtime import get_session_params
+from server.services.factor_registry import factor_group_key, get_factor_family_instance, page_factors
 
 
 def get_default_test_time_strings():
@@ -151,11 +150,17 @@ def get_factor_main_section_html(factor_family_alias, page_uuid=None):
         params = factor_family.params
         param_metas = [serialize_param_meta(param) for param in params]
         param_aliases = [param.alias for param in params]
-        session_params = get_session_params(factor_family_alias, factor_family)
-        factors = factor_family.get_factors(
-            params_list=session_params,
-            page_uuid=page_uuid,
-        )
+        # Factors are the single source of truth in page_factors.
+        # Initial page render reads from page_factors (populated by /add_factor_by_params).
+        factors = []
+        if page_uuid:
+            page_dict = page_factors.get(str(page_uuid), {})
+            family_alias = getattr(factor_family, 'alias', '')
+            factors = [
+                f for alias, f in page_dict.items()
+                if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
+            ]
+            factor_family.factors = factors
         start_date, end_date, start_time, end_time = get_default_test_time_strings()
         return render_template(
             'single_factor_test_main.html',

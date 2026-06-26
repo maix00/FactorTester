@@ -25,8 +25,8 @@ from server.modules.shared.factor_data_helpers import (
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
 from tools.products.product_path_selection import ProductPathSelection
-from server.services.factor_registry import get_factor_family_instance
-from server.services.session_runtime import current_user_obj, get_session_params
+from server.services.factor_registry import get_factor_family_instance, get_page_factor, page_factors
+from server.services.session_runtime import current_user_obj
 from tools.data.types import DataTime, finest_index
 from tools.factors.FactorTester import _active_tester
 from tools.factors.tests.single_factor_test.factor_type_analysis import (
@@ -106,10 +106,15 @@ def _load_and_calc_factor(
         factor_family_alias,
         page_uuid=page_uuid,
     )
-    factors = factor_family.get_factors(
-        params_list=get_session_params(factor_family_alias, factor_family),
-        page_uuid=page_uuid,
-    )
+    # Populate factor_family.factors from page_factors (single source of truth)
+    from server.services.factor_registry import page_factors
+    page_dict = page_factors.get(str(page_uuid), {})
+    family_alias = getattr(factor_family, 'alias', factor_family_alias)
+    factors = [
+        f for alias, f in page_dict.items()
+        if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
+    ]
+    factor_family.factors = factors
     factor = _find_factor(factors, factor_alias, factor_alias)
     if factor is None:
         raise LookupError(f"因子 {factor_alias} 未找到，请先在配置中提交")

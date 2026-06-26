@@ -16,7 +16,7 @@ def _clean_factor_alias(value: str) -> str:
 
     FactorParam values may carry $F fragments from upstream serialisation
     (e.g. 'PrOHLCMean|C:CA|H:HA|L:LA|O:OA|$F:1m').  Stripping them ensures
-    dict equality and dedup work correctly across /add_factor_by_params and /replace_params.
+    dict equality and dedup work correctly across /add_factor_by_params.
     """
     return re.sub(r'\|?\$F:[^|]+', '', value)
 

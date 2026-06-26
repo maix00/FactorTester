@@ -735,11 +735,12 @@
                 addLabel: '新增到参数列表',
                 escapeHTML: escapeHtml,
                 onLoadFromLibrary: function(param) {
-                    // Insert param row from library into current session table
+                    // Insert param row from library into page_factors via backend, then track locally
                     if (!param || !ffAlias) return;
                     var body = {
                         factor_family_alias: ffAlias,
-                        params: param.params || {}
+                        params: param.params || {},
+                        page_uuid: window._pageUuid || ''
                     };
                     fetch('/add_factor_by_params', {
                         method: 'POST',
@@ -749,10 +750,16 @@
                     .then(function(res) { return res.json(); })
                     .then(function(data) {
                         if (data.success) {
-                            // Update cache so snapshot collect reads latest
-                            state._sessionParams = getSessionFactorParams().concat([param]);
+                            // Use backend-returned factor_rows for canonical data
+                            if (data.factor_rows && data.factor_rows.length) {
+                                setSessionFactorParams(data.factor_rows.map(function(row) {
+                                    return candidateToSessionRow({ alias: row.factor_alias, in_library: param.in_library, library_product_group: param.library_product_group, params: row.params }, ffAlias);
+                                }));
+                            } else {
+                                state._sessionParams = getSessionFactorParams().concat([param]);
+                            }
                             if (typeof window.refreshICModule === 'function') window.refreshICModule();
-                            renderFactorsTab(); // re-render to reflect changes
+                            renderFactorsTab();
                         }
                     }).catch(function(e) {
                         console.error('[fps] load from library failed:', e);
@@ -760,7 +767,8 @@
                 },
                 onRemoveParam: function(alias) {
                     if (!alias || !ffAlias) return;
-                    // Find the row index from cached session params
+                    // Frontend manages candidate list locally — no backend call needed.
+                    // Factor instances in page_factors are cleaned up on page lifecycle.
                     var params = getSessionFactorParams();
                     var targetIdx = -1;
                     for (var i = 0; i < params.length; i++) {
@@ -770,32 +778,17 @@
                         }
                     }
                     if (targetIdx < 0) return;
-                    fetch('/delete_factor_by_params', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            factor_family_alias: ffAlias,
-                            factor_idx: targetIdx
-                        })
-                    })
-                    .then(function(res) { return res.json(); })
-                    .then(function(data) {
-                        if (data.success) {
-                            // Update cache so snapshot collect reads latest
-                            params.splice(targetIdx, 1);
-                            state._sessionParams = params;
-                            if (typeof window.refreshICModule === 'function') window.refreshICModule();
-                            renderFactorsTab(); // re-render to reflect changes
-                        }
-                    }).catch(function(e) {
-                        console.error('[fps] remove failed:', e);
-                    });
+                    params.splice(targetIdx, 1);
+                    state._sessionParams = params;
+                    if (typeof window.refreshICModule === 'function') window.refreshICModule();
+                    renderFactorsTab();
                 },
                 onAddParam: function(alias, params) {
                     if (!alias || !ffAlias) return;
                     var body = {
                         factor_family_alias: ffAlias,
-                        params: params || {}
+                        params: params || {},
+                        page_uuid: window._pageUuid || ''
                     };
                     fetch('/add_factor_by_params', {
                         method: 'POST',
@@ -885,21 +878,25 @@
         if (candidates.length || (subset && subset.factor)) ensureFactorsTabMounted();
         if (!candidates.length || !ffAlias) { renderFactorsTab(); renderChips(); return; }
         try {
-            // 推到后端会话（IC/分组测试从会话读参数）
-            var resp = await fetch('/replace_params', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ factor_family_alias: ffAlias, params_list: candidates.map(function(c) { return c.params || {}; }) }),
-            });
-            var result = await resp.json();
-            if (!result.success) { alert('恢复因子失败: ' + (result.error || '')); return; }
-            // 后端归一化后的 factor_rows 按 alias 对回候选，保留候选携带的库归属
-            var byAlias = {};
-            candidates.forEach(function(c) { if (c.alias) byAlias[c.alias] = c; });
-            setSessionFactorParams((result.factor_rows || []).map(function(row) {
-                var c = byAlias[row.factor_alias] || { alias: row.factor_alias, in_library: false, params: row.params };
-                return candidateToSessionRow(c, ffAlias);
-            }));
+            // Push each candidate to backend page_factors via /add_factor_by_params.
+            // Frontend manages candidate list locally; backend stores Factor instances.
+            var pageUuid = window._pageUuid || '';
+            for (var i = 0; i < candidates.length; i++) {
+                var c = candidates[i];
+                var resp = await fetch('/add_factor_by_params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        factor_family_alias: ffAlias,
+                        params: c.params || {},
+                        page_uuid: pageUuid,
+                    }),
+                });
+                var result = await resp.json();
+                if (!result.success) { alert('恢复因子 ' + (c.alias || ('#' + (i + 1))) + ' 失败: ' + (result.error || '')); return; }
+            }
+            // Update local candidate list from what was pushed
+            setSessionFactorParams(candidates.map(function(c) { return candidateToSessionRow(c, ffAlias); }));
             renderFactorsTab();
             renderChips();
             if (typeof window.refreshICModule === 'function') window.refreshICModule();

@@ -18,7 +18,7 @@ from server.modules.shared.factor_tester_runtime import create_factor_tester_for
 from server.modules.shared.submission_helpers import product_attrs
 from tools.products.product_path_selection import ProductPathSelection
 from server.services.factor_registry import get_factor_family_instance
-from server.services.session_runtime import current_user_obj, get_session_params
+from server.services.session_runtime import current_user_obj
 from tools.data.types import DataTime
 from tools.data.types import finest_index
 
@@ -78,10 +78,15 @@ class FactorEvaluation:
             self.factor_family_alias,
             page_uuid=self.page_uuid,
         )
-        factors = factor_family.get_factors(
-            params_list=get_session_params(self.factor_family_alias, factor_family),
-            page_uuid=self.page_uuid,
-        )
+        # Factors from page_factors (single source of truth)
+        from server.services.factor_registry import page_factors
+        page_dict = page_factors.get(str(self.page_uuid), {})
+        family_alias = getattr(factor_family, 'alias', '')
+        factors = [
+            f for alias, f in page_dict.items()
+            if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
+        ]
+        factor_family.factors = factors
         factor = _find_factor(factors, self.factor_alias, self.factor_alias)
         if factor is None:
             raise LookupError("请先提交参数设置，或从模板加载已有因子")

@@ -27,7 +27,7 @@ from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
 from server.services.factor_registry import get_factor_family_instance
 from server.services.page_runtime import get_page_owner
-from server.services.session_runtime import current_user, current_user_obj, get_session_params
+from server.services.session_runtime import current_user, current_user_obj
 from server.services.sse_progress import SSEProgressEmitter
 from server.modules.shared.factor_tester_runtime import selection_from_request, create_factor_tester_for_run
 
@@ -35,6 +35,26 @@ from server.modules.shared.factor_tester_runtime import selection_from_request, 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数
 # ═══════════════════════════════════════════════════════════════
+
+def _populate_family_factors_from_page(factor_family: FactorFamily, page_uuid: str) -> None:
+    """Populate factor_family.factors from page_factors for the given page.
+
+    This replaces the old session-scoped params_list → get_factors() pattern.
+    Factors are the single source of truth, stored in page_factors by
+    /add_factor_by_params or similar routes.
+    """
+    if not page_uuid:
+        factor_family.factors = []
+        return
+    from server.services.factor_registry import page_factors
+    family_alias = getattr(factor_family, 'alias', '')
+    page_dict = page_factors.get(page_uuid, {})
+    factors = [
+        f for alias, f in page_dict.items()
+        if getattr(getattr(f, 'family', None), 'alias', None) == family_alias
+    ]
+    factor_family.factors = factors
+
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
     if isinstance(idx, pd.MultiIndex):
@@ -577,7 +597,6 @@ def _prepare_ic_compute(
     data: dict,
     tester: Any,
     factor_family: Any,
-    all_factors: List[Factor],
 ) -> Tuple[
     List[str],              # display columns
     str,                    # paths_hash
@@ -687,11 +706,10 @@ def run_ic_test():
         tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
         factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
-        session_params = get_session_params(data.get('factor_family_alias', ''), factor_family)
-        all_factors = factor_family.get_factors(
-            params_list=session_params,
-            page_uuid=str(data.get('page_uuid') or ''),
-        )
+        page_uuid_str = str(data.get('page_uuid') or '')
+        # Factors are the single source of truth in page_factors (not session-scoped params).
+        # Populate factor_family.factors from page_factors so get_factor_by_alias works.
+        _populate_family_factors_from_page(factor_family, page_uuid_str)
 
         tester.sync_signal_index = None
         tester.sync_signal_index_replaced = None
@@ -699,7 +717,7 @@ def run_ic_test():
 
         (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
          ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
-            _prepare_ic_compute(data, tester, factor_family, all_factors)
+            _prepare_ic_compute(data, tester, factor_family)
 
         param_items = list(ic_param_map.items())
 
@@ -741,11 +759,8 @@ def run_ic_test_stream():
         tester = _create_ic_tester_from_request(data, page_uuid=page_uuid, user=run_user)
         factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'), page_uuid=data.get('page_uuid'))
         assert isinstance(factor_family, FactorFamily)
-        session_params = get_session_params(str(data.get('factor_family_alias', '')), factor_family)
-        all_factors = factor_family.get_factors(
-            params_list=session_params,
-            page_uuid=str(data.get('page_uuid') or ''),
-        )
+        page_uuid_str = str(data.get('page_uuid') or '')
+        _populate_family_factors_from_page(factor_family, page_uuid_str)
     except Exception as e:
         def _early_err():
             yield f"event: error\ndata: {json.dumps({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}, default=str)}\n\n"
@@ -759,7 +774,7 @@ def run_ic_test_stream():
         try:
             (display_columns, paths_hash, all_products, ic_param_map, param_payloads,
              ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
-                _prepare_ic_compute(data, tester, factor_family, all_factors)
+                _prepare_ic_compute(data, tester, factor_family)
 
             tester.sync_signal_index = None
             tester.sync_signal_index_replaced = None

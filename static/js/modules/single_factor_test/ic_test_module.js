@@ -1893,29 +1893,12 @@
                                 cachedFactors.splice(dragOverColIdx, 0, moved);
                             }
 
-                            // 同步后端 session 参数顺序
-                            fetch('/reorder_params', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    factor_family_alias: factorFamilyAlias,
-                                    from_idx: dragStartColIdx,
-                                    to_idx: dragOverColIdx
-                                })
-                            })
-                            .then(res => res.json())
-                            .then(resData => {
-                                if (resData.success) {
-                                    // 只刷新参数模块（不重新跑 IC 测试）
-                                    if (typeof window.reloadParamModule === 'function') {
-                                        window.reloadParamModule();
-                                    }
-                                    // 同步更新因子列表缓存
-                                    fetchFactorList();
-                                } else {
-                                    alert('排序失败: ' + (resData.error || '未知错误'));
-                                }
-                            });
+                            // Frontend manages candidate order locally — no backend call needed.
+                            // Reorder is tracked in local state by the settings panel.
+                            if (typeof window.reloadParamModule === 'function') {
+                                window.reloadParamModule();
+                            }
+                            fetchFactorList();
                         }
                     });
                 });
