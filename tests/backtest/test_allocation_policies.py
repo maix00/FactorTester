@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tools.backtest.strategies.allocation import (
+from tools.backtest_engines.strategies.allocation import (
     AllocationInput,
     EqualMarginAllocator,
     EqualNotionalAllocator,

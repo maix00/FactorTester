@@ -8,7 +8,7 @@ import pytest
 
 from server import create_app
 from server.services import page_runtime
-from tools.backtest.factors.incremental import compile_streaming_factor
+from tools.backtest_engines.factors.incremental import compile_streaming_factor
 
 
 pytestmark = pytest.mark.skipif(

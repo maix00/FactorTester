@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
-from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.backtest.event_driven.runtime import ProductPrice, ReplayEventSource
-from tools.backtest.execution.trading import CashAccounting, ImmediateBroker, Ledger, MarketState, OrderManager
-from tools.backtest.factors.events import PrecomputedFactorPublisher
-from tools.backtest.strategies.signal import SignalStrategy
+from tools.backtest_engines.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
+from tools.backtest_engines.event_driven.contracts import BacktestPlan, RunIdentity
+from tools.backtest_engines.event_driven.runtime import ProductPrice, ReplayEventSource
+from tools.backtest_engines.execution.trading import CashAccounting, ImmediateBroker, Ledger, MarketState, OrderManager
+from tools.backtest_engines.factors.events import PrecomputedFactorPublisher
+from tools.backtest_engines.strategies.signal import SignalStrategy
 
 
 def test_native_event_runner_reports_time_slice_progress() -> None:

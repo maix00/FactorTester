@@ -7,8 +7,8 @@ import time
 import pytest
 
 from server.services import backtest_runs
-from tools.backtest.cancellation import BacktestCancelled
-from tools.backtest.workers.dispatcher import EngineWorkerDispatcher
+from tools.backtest_engines.cancellation import BacktestCancelled
+from tools.backtest_engines.workers.dispatcher import EngineWorkerDispatcher
 
 
 def test_page_scoped_run_can_only_be_cancelled_by_its_owner() -> None:

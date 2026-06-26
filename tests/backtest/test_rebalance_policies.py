@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest.strategies.rebalance import (
+from tools.backtest_engines.strategies.rebalance import (
     BuyAndHold,
     MembershipChange,
     OnFactorSignal,

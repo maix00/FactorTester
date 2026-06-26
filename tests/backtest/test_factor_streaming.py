@@ -6,22 +6,22 @@ import pandas as pd
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.expr import CLOSE, HIGH, LOW, SMALL_VAL, ColumnRef, EvaluateContext
 
-from tools.backtest.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
-from tools.backtest.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.backtest.factors.incremental import (
+from tools.backtest_engines.event_driven.backtest import BacktestRunner, ExecutionVenue, StrategyLane
+from tools.backtest_engines.event_driven.contracts import BacktestPlan, RunIdentity
+from tools.backtest_engines.factors.incremental import (
     UnsupportedStreamingFactor,
     compile_incremental_factor,
     compile_streaming_factor,
 )
-from tools.backtest.event_driven.runtime import MarketSlice, ProductPrice, ReplayEventSource
-from tools.backtest.execution.trading import (
+from tools.backtest_engines.event_driven.runtime import MarketSlice, ProductPrice, ReplayEventSource
+from tools.backtest_engines.execution.trading import (
     CashAccounting,
     ImmediateBroker,
     Ledger,
     MarketState,
     OrderManager,
 )
-from tools.backtest.strategies.signal import SignalStrategy
+from tools.backtest_engines.strategies.signal import SignalStrategy
 
 
 def test_same_factor_expr_matches_batch_and_streaming_execution() -> None:

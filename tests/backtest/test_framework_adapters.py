@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from tools.backtest.adapters.frameworks import (
+from tools.backtest_engines.adapters.frameworks import (
     FactorBridgeRequest,
     Framework,
     FrameworkFeature,
