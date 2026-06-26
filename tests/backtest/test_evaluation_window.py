@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from tools.backtest_engines.event_driven.contracts import (
+from tools.testers.backtest.engines.event_driven.contracts import (
     EvaluationSegment,
     EvaluationWindow,
 )

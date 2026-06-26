@@ -11,7 +11,7 @@ from ..event_driven.contracts import PortfolioIntent, TargetKind
 from ..event_driven.runtime import EventDraft, EventEnvelope, EventRuntime, EventTopic
 from ..factors.events import FactorSignal
 from ..execution.trading import MarketState
-from ..settings.strategy_fields import (
+from tools.testers.settings.strategy_fields import (
     ALLOCATION_POLICY,
     POSITION_POLICY,
     REBALANCE_TRIGGER,

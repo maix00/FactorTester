@@ -2,7 +2,7 @@
 
 纯领域对象：只持有"路径/产品组"语义，不反向依赖 server。把"路径 → 产品"的解析
 通过 set_product_resolver() 注入（server 启动时注入其产品树解析器），从而本对象可
-位于 tools 层、被 tools.backtest_engines.settings 等直接引用（instance_class）。
+位于 tools 层、被 tools.testers.backtest.engines.settings 等直接引用（instance_class）。
 """
 
 from __future__ import annotations

@@ -43,7 +43,7 @@ class EngineWorkerDispatcher:
             raise WorkerExecutionError(f"no worker registered for {request.engine}") from exc
         command = [
             "conda", "run", "--no-capture-output", "-n", environment,
-            "python", "-m", "tools.backtest_engines.workers.entrypoint",
+            "python", "-m", "tools.testers.backtest.engines.workers.entrypoint",
         ]
         try:
             completed = (

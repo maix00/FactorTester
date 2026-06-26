@@ -167,7 +167,7 @@ class BacktestModuleRegistry(ModuleRegistry):
             common = registry.collect_local_only_settings(resolved)
             engine = common.get("execution_engine", {}).get("engine", "native")
         """
-        from ..settings.contracts import ScopePolicy
+        from tools.testers.settings.contracts import ScopePolicy
         if not resolved_by_group:
             return {}
         app = self.get_app()

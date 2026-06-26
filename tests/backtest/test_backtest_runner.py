@@ -3,26 +3,26 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest_engines.event_driven.backtest import (
+from tools.testers.backtest.engines.event_driven.backtest import (
     BacktestRunner,
     ExecutionVenue,
     StrategyLane,
 )
-from tools.backtest_engines.event_driven.contracts import (
+from tools.testers.backtest.engines.event_driven.contracts import (
     BacktestPlan,
     ExecutionIsolation,
     RunIdentity,
 )
-from tools.backtest_engines.factors.events import PrecomputedFactorPublisher
-from tools.backtest_engines.event_driven.runtime import ProductPrice, ReplayEventSource
-from tools.backtest_engines.execution.trading import (
+from tools.testers.backtest.engines.factors.events import PrecomputedFactorPublisher
+from tools.testers.backtest.engines.event_driven.runtime import ProductPrice, ReplayEventSource
+from tools.testers.backtest.engines.execution.trading import (
     CashAccounting,
     ImmediateBroker,
     Ledger,
     MarketState,
     OrderManager,
 )
-from tools.backtest_engines.strategies.signal import SignalStrategy
+from tools.testers.backtest.engines.strategies.signal import SignalStrategy
 
 
 def test_runner_wires_shared_data_into_isolated_strategy_ledgers() -> None:

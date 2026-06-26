@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.backtest_engines.event_driven.backtest import BacktestRunner, ExecutionVenue
-from tools.backtest_engines.event_driven.contracts import BacktestPlan, RunIdentity
-from tools.backtest_engines.event_driven.runtime import ProductPrice, ReplayEventSource
-from tools.backtest_engines.execution.trading import ImmediateBroker, MarketState
-from tools.backtest_engines.factors.events import PrecomputedFactorPublisher
-from tools.backtest_engines.strategies.group_backtest import build_quantile_group_lanes
-from tools.backtest_engines.strategies.allocation import AllocationInput, EqualNotionalAllocator
-from tools.backtest_engines.strategies.rebalance import OnFactorSignal
+from tools.testers.backtest.engines.event_driven.backtest import BacktestRunner, ExecutionVenue
+from tools.testers.backtest.engines.event_driven.contracts import BacktestPlan, RunIdentity
+from tools.testers.backtest.engines.event_driven.runtime import ProductPrice, ReplayEventSource
+from tools.testers.backtest.engines.execution.trading import ImmediateBroker, MarketState
+from tools.testers.backtest.engines.factors.events import PrecomputedFactorPublisher
+from tools.testers.backtest.engines.strategies.group_backtest import build_quantile_group_lanes
+from tools.testers.backtest.engines.strategies.allocation import AllocationInput, EqualNotionalAllocator
+from tools.testers.backtest.engines.strategies.rebalance import OnFactorSignal
 
 
 def test_five_group_strategies_run_from_factor_signal_through_fills() -> None:

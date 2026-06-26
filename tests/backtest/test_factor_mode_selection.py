@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from tools.backtest_engines.factors import FactorMode, select_factor_mode
-from tools.backtest_engines.factors.incremental import UnsupportedStreamingFactor
+from tools.testers.backtest.engines.factors import FactorMode, select_factor_mode
+from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
 from tools.data.types import DataColumn
 from tools.factors.expr import ColumnRef
 

@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..settings.strategy_fields import (
+from tools.testers.settings.strategy_fields import (
     ALLOCATION_POLICY,
     POSITION_POLICY,
     REBALANCE_TRIGGER,

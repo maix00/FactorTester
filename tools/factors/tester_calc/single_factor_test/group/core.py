@@ -103,7 +103,7 @@ def _emit_progress(phase: str, message: str, **extra) -> None:
                     extra.setdefault('product_coverage_batch_label', bl)
             cb(phase, message, extra)
         except Exception as exc:
-            from tools.backtest_engines.cancellation import BacktestCancelled
+            from tools.testers.backtest.engines.cancellation import BacktestCancelled
             if isinstance(exc, BacktestCancelled):
                 raise
 

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from tools.backtest_engines.workers import (
+from tools.testers.backtest.engines.workers import (
     EngineWorkerDispatcher,
     WorkerExecutionError,
     WorkerRequest,
@@ -67,7 +67,7 @@ def test_rqalpha_worker_is_declared_without_native_fallback() -> None:
 
 
 def test_native_group_strategy_reports_setting_fallback_diagnostics() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     payload = {
         "timestamps": ["2024-01-01T00:00:00", "2024-01-02T00:00:00"],
@@ -209,7 +209,7 @@ def test_framework_worker_streams_event_time_progress() -> None:
 
 
 def test_framework_progress_is_bounded_for_long_replays() -> None:
-    from tools.backtest_engines.workers.runners.common import should_report_progress
+    from tools.testers.backtest.engines.workers.runners.common import should_report_progress
 
     checkpoints = [
         completed for completed in range(1, 10_001)
@@ -222,7 +222,7 @@ def test_framework_progress_is_bounded_for_long_replays() -> None:
 
 
 def test_native_group_strategy_progress_counts_every_bar() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     events = []
     payload = {
@@ -269,7 +269,7 @@ def test_native_group_strategy_progress_counts_every_bar() -> None:
 
 
 def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     dispatcher = EngineWorkerDispatcher()
     payload = {
@@ -346,7 +346,7 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
 
 
 def test_frameworks_preserve_equal_risk_and_equal_notional_equity_difference() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     dispatcher = EngineWorkerDispatcher()
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 7)]
@@ -439,7 +439,7 @@ def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine:
             }],
     }
     if engine == "native":
-        from tools.backtest_engines.workers.runners.native import run_group_strategy
+        from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
         result = run_group_strategy(payload)
     else:
@@ -456,7 +456,7 @@ def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine:
 
 
 def test_framework_liquidity_plugin_limits_each_bar_without_changing_target() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 5)]
     payload = {
@@ -503,7 +503,7 @@ def test_framework_liquidity_plugin_limits_each_bar_without_changing_target() ->
 def test_framework_fee_and_slippage_plugins_are_consistent(
     overrides: dict, price: float, expected_position: float
 ) -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 4)]
     config = {
@@ -544,7 +544,7 @@ def test_framework_fee_and_slippage_plugins_are_consistent(
 
 
 def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 5)]
     payload = {
@@ -637,7 +637,7 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
 
 
 def test_framework_execution_timing_changes_returns_without_changing_targets() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     base_payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 4)],
@@ -684,7 +684,7 @@ def test_framework_execution_timing_changes_returns_without_changing_targets() -
 
 
 def test_execution_delay_bars_is_a_matching_parameter_not_slippage() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],
@@ -720,7 +720,7 @@ def test_execution_delay_bars_is_a_matching_parameter_not_slippage() -> None:
 
 
 def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> None:
-    from tools.backtest_engines.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],

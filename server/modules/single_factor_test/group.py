@@ -1771,7 +1771,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
     from tools.factors.tester_calc.single_factor_test.group.group_tester import FactorGroupTester
-    from tools.backtest_engines.cancellation import BacktestCancelled
+    from tools.testers.backtest.engines.cancellation import BacktestCancelled
 
     def _check_cancelled() -> None:
         if cancel_event is not None and cancel_event.is_set():
@@ -2047,7 +2047,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
         f"batches={group_tester.build_batch_labels()}"
     )
-    from tools.backtest_engines.orchestration import execute_group_plan
+    from tools.testers.backtest.engines.orchestration import execute_group_plan
 
     _core_emit_progress(
         "init",
@@ -3007,7 +3007,7 @@ def run_group_test_stream():
         unregister_group_progress,
     )
     from server.services import backtest_runs
-    from tools.backtest_engines.cancellation import BacktestCancelled
+    from tools.testers.backtest.engines.cancellation import BacktestCancelled
     import uuid
 
     data = request.get_json(silent=True) or {}
