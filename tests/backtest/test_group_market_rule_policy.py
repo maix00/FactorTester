@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from tools.factors.tests.single_factor_test.group.core import _resolve_group_trade_specs
+from tools.factors.tester_calc.single_factor_test.group.core import _resolve_group_trade_specs
 
 
 def _product():

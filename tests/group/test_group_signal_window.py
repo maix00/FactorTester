@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 
 from tools.data.types import DataTime
-from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-from tools.factors.tests.single_factor_test.group.core import build_flat_membership_from_groups
+from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
+from tools.factors.tester_calc.single_factor_test.group.core import build_flat_membership_from_groups
 
 
 class SharedInputs:

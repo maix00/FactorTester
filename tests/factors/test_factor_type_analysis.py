@@ -20,25 +20,25 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import tools.factors.tests.single_factor_test.factor_type_analysis.server_facade as server_facade
-from tools.factors.tests.single_factor_test.factor_type_analysis import (
+import tools.factors.tester_calc.single_factor_test.factor_type_analysis.server_facade as server_facade
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis import (
     FactorTypeAnalyzer,
     ReferenceFactorRegistry,
 )
-from tools.factors.tests.single_factor_test.factor_type_analysis.correlation import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis.correlation import (
     best_category_match,
     compute_product_correlation_matrix,
     compute_time_series_correlation,
     product_category_profiles,
     categorize_correlation_strength,
 )
-from tools.factors.tests.single_factor_test.factor_type_analysis.registry import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis.registry import (
     FactorCategory,
     ReferenceFactorDef,
     create_default_registry,
     default_registry,
 )
-from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis.server_facade import (
     FactorTypeAnalysisRun,
     _infer_asset_classes,
     _reference_skip_reason,

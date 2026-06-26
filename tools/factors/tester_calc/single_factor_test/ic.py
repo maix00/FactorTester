@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from tools.factors import Factor
-from tools.factors.tests import CrossSectionIC
+from tools.factors.tester_calc import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
 from tools.data.types import DataFreq
 from tools.data.types import finest_index

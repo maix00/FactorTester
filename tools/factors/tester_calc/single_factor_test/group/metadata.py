@@ -2,43 +2,54 @@
 分组测试元数据 — 单一数据源 (Single Source of Truth)
 
 阶段顺序、中文标签、指标名称等统一在此定义。
+GROUP_TEST_PHASES 现在通过 GroupTestModuleRegistry.build_progress_manifest()
+自动聚合：基础设施阶段 (init, factor_eval, ...) + 每个注册模块的 progress_phases。
+
 后端在 emit_start 时携带 GROUP_TEST_PHASES，前端据此渲染进度条。
+
+⚠️ GROUP_TEST_PHASES 保留为兼容性惰性导入。新代码应直接从
+   GroupTestModuleRegistry().build_progress_manifest() 获取。
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def _build_group_test_phases() -> list[dict[str, Any]]:
+    """Lazy-build GROUP_TEST_PHASES from the module registry."""
+    from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
+    return GroupTestModuleRegistry().build_progress_manifest()
+
 
 # ── 阶段元数据 ──
 
-GROUP_TEST_PHASES = [
-    {"key": "factor_eval",     "label": "因子计算"},
-    {"key": "signal_sequence", "label": "因子信号序列"},
-    {"key": "returns_eval",    "label": "收益率计算"},
-    {"key": "membership",      "label": "分组隶属"},
-    {"key": "flat_membership", "label": "展开隶属"},
-    {"key": "remap",           "label": "产品映射"},
-    {"key": "trade_data",      "label": "交易数据", "sub_steps": {
-        "start":          "开始加载",
-        "load_returns":   "加载收益",
-        "load_prices":    "加载价格",
-        "merge_products": "合并品种",
-        "settlement":     "处理结算",
-        "spec_bundle":    "计算规格",
-        "fill_returns":   "填充收益",
-        "build_configs":  "构建配置",
-        "ready":          "数据就绪",
-    }},
-    {"key": "liquidity",       "label": "流动性容量"},
-    {"key": "framework_execution", "label": "事件回测工具"},
-    {"key": "result_packaging", "label": "结果整理"},
-    {"key": "simulate",        "label": "模拟中", "sub_steps": {
-        "slicing":        "结果切片",
-    }},
-    {"key": "batch",           "label": "批次结果"},
-    {"key": "serialize",       "label": "序列化"},
-]
+# 延迟初始化，首次访问时从 registry 构建
+_phases_cache: list[dict[str, Any]] | None = None
+
+
+def get_group_test_phases() -> list[dict[str, Any]]:
+    """Return the full progress phase manifest from the module registry."""
+    global _phases_cache
+    if _phases_cache is None:
+        _phases_cache = _build_group_test_phases()
+    return _phases_cache
+
+
+# 向后兼容：模块级常量（惰性初始化）
+# 注意：直接访问 GROUP_TEST_PHASES 会触发 registry import，
+# 确保在 app context 内使用或使用 get_group_test_phases()
+GROUP_TEST_PHASES: list[dict[str, Any]] = []  # initialized on first use
+
+
+def _lazy_init_phases() -> None:
+    global GROUP_TEST_PHASES, _phases_cache
+    if _phases_cache is None:
+        _phases_cache = _build_group_test_phases()
+    GROUP_TEST_PHASES = _phases_cache
+
 
 # ── 指标元数据 ──
-
-# report_df 指标列名 → 中文名 + 描述 + LaTeX 公式
-# 前端 metrics/meta.js 曾硬编码这些，现已统一到此文件，通过 emit_result 传递
 
 GROUP_TEST_METRICS_CN = {
     "Total Return":              "总收益率",

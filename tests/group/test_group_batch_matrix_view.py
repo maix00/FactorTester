@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from tools.factors.tests.single_factor_test.group.group_tester import (
+from tools.factors.tester_calc.single_factor_test.group.group_tester import (
     BatchExecutionPlan,
     FactorGroupTester,
     GroupSimulationSpec,
@@ -49,7 +49,7 @@ def test_batch_execution_plan_reconstructs_merged_matrix_view(monkeypatch):
         return signal_to_trade, trade_products, {}
 
     monkeypatch.setattr(
-        'tools.factors.tests.single_factor_test.group.group_tester._build_product_remap_matrix',
+        'tools.factors.tester_calc.single_factor_test.group.group_tester._build_product_remap_matrix',
         fake_remap_matrix,
     )
 

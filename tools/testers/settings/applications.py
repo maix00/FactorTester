@@ -1,4 +1,4 @@
-"""Built-in backtest application setting registrations."""
+"""Built-in tester application setting registrations."""
 
 from __future__ import annotations
 
@@ -530,12 +530,12 @@ def group_test_settings() -> ApplicationSettings:
 
     # Infrastructure settings (SettingModules, SettingTabs, ChipDefinitions,
     # and non-module SettingDefinitions) — owned by GroupTestModuleRegistry.
-    from tools.backtest.modules.registry import GroupTestModuleRegistry
+    from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
     GroupTestModuleRegistry.register_settings(app)
 
     # Module-owned settings (fee, slippage, liquidity, margin) — from
     # each ExecutableModule's setting_definitions classvar.
-    from tools.backtest.modules.registry import register_all_module_settings
+    from tools.testers.backtest.modules.registry import register_all_module_settings
     register_all_module_settings(app)
 
     # 分组测试：本地设置面板 + 分组列表（多选、一次运行所有选中、点击行编辑）。
@@ -810,10 +810,6 @@ def ic_test_settings() -> ApplicationSettings:
                     button_class="btn-outline-danger"),
     ):
         app.register_flow(flow)
-
-    # Register settings from executable modules (fee, slippage, liquidity, margin).
-    from tools.backtest.modules.registry import register_all_module_settings
-    register_all_module_settings(app)
 
     return app
 

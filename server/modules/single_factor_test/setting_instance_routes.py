@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from flask import jsonify, request
 
-from tools.backtest.settings import backtest_setting_registry
+from tools.testers.settings import backtest_setting_registry
 import server.services.page_runtime as page_runtime
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user

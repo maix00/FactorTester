@@ -304,7 +304,7 @@ class FactorTester(UniqueNameObject):
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
         """计算 IC 序列的汇总统计量。"""
-        from tools.factors.tests.single_factor_test.ic import ic_stats
+        from tools.factors.tester_calc.single_factor_test.ic import ic_stats
         return ic_stats(ic_series)
 
     def resolve_factor(self, factor_alias: str) -> Optional['Factor']:
@@ -391,7 +391,7 @@ class FactorTester(UniqueNameObject):
         explicitly requests a common calendar frequency.
         """
         from typing import cast
-        from tools.factors.tests.single_factor_test.group.core import (
+        from tools.factors.tester_calc.single_factor_test.group.core import (
             align_table_for_group,
             get_factor_table_for_group,
         )

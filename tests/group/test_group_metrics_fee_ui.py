@@ -71,7 +71,7 @@ def test_group_fee_config_parses_uniform_and_closetoday_rates():
 
 
 def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
-    from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+    from tools.factors.tester_calc.single_factor_test.group.detail import build_group_detail
 
     index = [np.datetime64('2025-01-01T09:00'), np.datetime64('2025-01-01T09:01')]
     detail = build_group_detail(

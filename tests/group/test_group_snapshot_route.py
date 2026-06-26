@@ -10,7 +10,7 @@ from flask import Flask
 from server.modules.single_factor_test import group as group_routes
 from server.modules.single_factor_test import sft_bp
 from sources.LocalCNFutures import CNFutures as cn_futures_module
-from tools.factors.tests.single_factor_test.group.result import GroupRunResult
+from tools.factors.tester_calc.single_factor_test.group.result import GroupRunResult
 
 
 def _minor_units(values):

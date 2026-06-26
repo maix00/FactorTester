@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from ..event_driven.stages import PhaseContext, PhaseHandler
+from tools.backtest.event_driven.stages import PhaseContext, PhaseHandler
 from .base import ExecutableModule
 
 
@@ -19,6 +19,10 @@ class SlippageModule(ExecutableModule):
     key: ClassVar[str] = "slippage"
     label: ClassVar[str] = "滑点"
     order: ClassVar[int] = 110
+    output_fields: ClassVar[tuple[str, ...]] = ()
+    progress_phases: ClassVar[tuple[dict[str, Any], ...]] = (
+        {"key": "framework_execution", "label": "事件回测工具"},
+    )
     phases: ClassVar[tuple[PhaseHandler, ...]] = (
         PhaseHandler(
             "order_execution", order=80,
@@ -45,3 +49,33 @@ class SlippageModule(ExecutableModule):
             raise ValueError(f"unsupported slippage mode: {mode}")
 
         ctx.set("fill_prices", fill_prices)
+
+    # ── Setting definitions ─────────────────────────────────────
+
+    setting_definitions: ClassVar[tuple[dict[str, Any], ...]] = (
+        {
+            "key": "slippage_mode",
+            "label": "滑点模型",
+            "tab": "cost",
+            "control_template": "select",
+            "default": "none",
+            "scope_policy": "group_override",
+            "options": (
+                ("none", "零滑点"),
+                ("fixed_bps", "固定基点"),
+            ),
+            "chip_template": "滑点: {value}",
+        },
+        {
+            "key": "slippage_bps",
+            "label": "固定滑点（基点）",
+            "tab": "cost",
+            "control_template": "number",
+            "default": 0.0,
+            "scope_policy": "group_override",
+            "minimum": 0.0,
+            "step": 0.1,
+            "chip_template": "滑点bp: {value}",
+            "visible_when": {"slippage_mode": ("fixed_bps",)},
+        },
+    )

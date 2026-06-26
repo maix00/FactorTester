@@ -83,5 +83,88 @@ class ModuleRegistry:
                 "label": getattr(cls, "label", ""),
                 "order": getattr(cls, "order", 0),
                 "phases": phases,
+                "output_fields": list(getattr(cls, "output_fields", ())),
             })
         return entries
+
+    # ── output collection ───────────────────────────────────────
+
+    def collect_outputs(
+        self,
+        group_result: Any,
+        owner: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Collect frontend output fields from all registered modules.
+
+        Each module may declare `output_fields` and a `collect_outputs`
+        classmethod. This method iterates all registered modules, calls
+        each classmethod, and merges the results into a single dict.
+
+        Returns dict mapping field_name → value for serialization.
+        """
+        merged: dict[str, Any] = {}
+        for key, cls in self._by_key.items():
+            collector = getattr(cls, "collect_outputs", None)
+            if collector is None:
+                continue
+            fields = collector(group_result=group_result, owner=owner, settings=settings)
+            if fields:
+                merged.update(fields)
+        return merged
+
+    # ── _FactorGroupTestGroup construction ─────────────────────
+
+    def build_group_params(
+        self,
+        group_settings: dict[str, Any],
+        raw_group: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Collect _FactorGroupTestGroup construction params from all modules.
+
+        Each module declares `group_params` (tuple of parameter names) and
+        `build_group_params(group_settings, raw_group) -> dict`.
+
+        Returns merged dict of all module-contributed params.
+        """
+        merged: dict[str, Any] = {}
+        for key, cls in self._by_key.items():
+            builder = getattr(cls, "build_group_params", None)
+            if builder is None:
+                continue
+            params = builder(group_settings=group_settings, raw_group=raw_group)
+            if params:
+                merged.update(params)
+        return merged
+
+    # ── Progress manifest ─────────────────────────────────────
+
+    def build_progress_manifest(self) -> list[dict[str, Any]]:
+        """Build the full progress bar phase manifest from all modules.
+
+        Each module declares `progress_phases`: tuple of {key, label, sub_steps?}.
+        Duplicate keys are merged (sub_steps unioned).
+
+        Returns the list in module registration order (sorted by order).
+        """
+        seen: dict[str, dict[str, Any]] = {}
+        for key, cls in sorted(self._by_key.items(), key=lambda kv: getattr(kv[1], "order", 0)):
+            for phase in getattr(cls, "progress_phases", ()):
+                phase_key = str(phase.get("key", ""))
+                if not phase_key:
+                    continue
+                if phase_key in seen:
+                    # Merge sub_steps
+                    existing_sub = seen[phase_key].get("sub_steps") or {}
+                    new_sub = phase.get("sub_steps") or {}
+                    if new_sub:
+                        seen[phase_key]["sub_steps"] = {**existing_sub, **new_sub}
+                else:
+                    seen[phase_key] = {
+                        "key": phase_key,
+                        "label": str(phase.get("label", phase_key)),
+                    }
+                    sub = phase.get("sub_steps")
+                    if sub:
+                        seen[phase_key]["sub_steps"] = dict(sub)
+        return list(seen.values())

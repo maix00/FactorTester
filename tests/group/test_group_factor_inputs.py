@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from tools.data.types import DataFreq
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
-from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
+from tools.factors.tester_calc.single_factor_test.group.core import ensure_group_factor_inputs
+from tools.factors.tester_calc.single_factor_test.group.group_tester import FactorGroupTester
 from tools.factors.FactorTester import FactorTester
 
 
@@ -62,7 +62,7 @@ class _FakeTester:
 
 def test_group_inputs_compute_factor_table_without_prior_ic(monkeypatch):
     from tools.factors import eval_progress
-    from tools.factors.tests import NextReturns
+    from tools.factors.tester_calc import NextReturns
 
     tester = _FakeTester()
     factor = _FakeFactor()
@@ -91,7 +91,7 @@ def test_group_inputs_compute_factor_table_without_prior_ic(monkeypatch):
 
 def test_group_inputs_compute_returns_without_prior_ic(monkeypatch):
     from tools.factors import eval_progress
-    from tools.factors.tests import NextReturns
+    from tools.factors.tester_calc import NextReturns
 
     tester = _FakeTester()
     factor = _FakeFactor()
@@ -140,7 +140,7 @@ class _FakeRuntimeTester:
 
 
 def test_factor_group_tester_keeps_multiple_factor_specs_in_one_simulation(monkeypatch):
-    from tools.factors.tests.single_factor_test.group import group_tester as group_tester_module
+    from tools.factors.tester_calc.single_factor_test.group import group_tester as group_tester_module
 
     fake_tester = _FakeRuntimeTester()
     groups = [

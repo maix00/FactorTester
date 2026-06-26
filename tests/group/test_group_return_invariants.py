@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tools.factors.tests.single_factor_test.group.core import (
+from tools.factors.tester_calc.single_factor_test.group.core import (
     compute_group_gross_returns,
     compute_group_net_returns,
     compute_sell_fee,

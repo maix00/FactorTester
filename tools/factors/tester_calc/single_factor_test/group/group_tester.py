@@ -10,8 +10,8 @@ import pandas as pd
 
 from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-from tools.factors.tests.single_factor_test.group.core import (
+from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
+from tools.factors.tester_calc.single_factor_test.group.core import (
     build_flat_membership_from_groups,
     _build_product_remap_matrix,
     _build_group_memberships_from_shared,
@@ -22,7 +22,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     _remap_membership_to_trade,
     _resolve_group_trade_specs,
 )
-from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES
+from tools.factors.tester_calc.single_factor_test.group.metadata import GROUP_TEST_PHASES
 
 
 @dataclass(slots=True)

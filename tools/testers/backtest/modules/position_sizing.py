@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from ..event_driven.stages import PhaseContext, PhaseHandler
+from tools.backtest.event_driven.stages import PhaseContext, PhaseHandler
 from .base import ExecutableModule
 
 
@@ -20,6 +20,10 @@ class PositionSizingModule(ExecutableModule):
     key: ClassVar[str] = "order_sizing"
     label: ClassVar[str] = "开单"
     order: ClassVar[int] = 140
+    output_fields: ClassVar[tuple[str, ...]] = ()
+    progress_phases: ClassVar[tuple[dict[str, Any], ...]] = (
+        {"key": "framework_execution", "label": "事件回测工具"},
+    )
     phases: ClassVar[tuple[PhaseHandler, ...]] = (
         PhaseHandler(
             "order_sizing", order=50,

@@ -36,8 +36,8 @@ from tools.data.types import DataColumn, DataTime
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester
-from tools.factors.tests.NextReturns import NextReturns
-from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
 
 from tests.calc import (
     HEADER_FILL,

@@ -5,7 +5,7 @@ from flask import Flask
 import pandas as pd
 
 from server.modules.single_factor_test import sft_bp
-from tools.backtest.settings import backtest_setting_registry, resolve_group_settings
+from tools.testers.settings import backtest_setting_registry, resolve_group_settings
 
 
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:

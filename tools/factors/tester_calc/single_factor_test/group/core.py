@@ -19,8 +19,8 @@ from tools.data.types import DataIndex
 from tools.data.types.currency_units import minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
 from tools.factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.NextReturns import NextReturns
-from tools.factors.tests.single_factor_test.group.result import GroupRunResult
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.group.result import GroupRunResult
 from tools.products import lookup_contract_product
 
 

@@ -10,7 +10,7 @@ import pandas as pd
 from server.modules.single_factor_test.ic import _ICComputeResult, _build_ic_response
 from tools.data.types import DataFreq
 from tools.factors.FactorRunResult import FactorRunResult
-from tools.factors.tests.single_factor_test import ic as ic_module
+from tools.factors.tester_calc.single_factor_test import ic as ic_module
 
 
 class _DisposableFactor:

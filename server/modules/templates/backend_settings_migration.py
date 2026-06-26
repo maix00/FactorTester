@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from tools.backtest.settings import backtest_setting_registry
+from tools.testers.settings import backtest_setting_registry
 
 
 STRUCTURAL_GROUP_KEYS = {

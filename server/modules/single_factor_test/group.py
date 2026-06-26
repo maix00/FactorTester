@@ -11,22 +11,22 @@ from tools.data.types.currency import normalize_currency, require_product_curren
 from tools.data.types.currency_units import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
-from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
-from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
-from tools.factors.tests.single_factor_test.group.detail import (
+from tools.factors.tester_calc.single_factor_test.group.core import infer_periods_per_year
+from tools.factors.tester_calc.single_factor_test.group.core import _emit_progress as _core_emit_progress
+from tools.factors.tester_calc.single_factor_test.group.core import ensure_group_factor_inputs
+from tools.factors.tester_calc.single_factor_test.group.detail import (
     build_group_detail,
     _build_product_fee_rates,
     _display_with_fee as _display_product_with_fee,
 )
-from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
-from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
+from tools.factors.tester_calc.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
+from tools.factors.tester_calc.single_factor_test.group.monotonicity import build_group_ranking_detail
 from tools.products.AdjustableTermStructure import resolve_term_structure_product
 from tools.products.Product import Product
 from tools.products.product_utils import product_display_name
-from tools.backtest.settings import backtest_setting_registry
-from tools.backtest.settings.resolver import resolve_group_settings
-from tools.backtest.modules.registry import GroupTestModuleRegistry
+from tools.testers.settings import backtest_setting_registry
+from tools.testers.settings.resolver import resolve_group_settings
+from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
@@ -130,6 +130,19 @@ def _ensure_tester_factors_for_group(
 
 def _progress(message: str) -> None:
     print(f"[GroupTest] {message}", flush=True)
+
+
+# ── Module registry singleton ──────────────────────────────────
+
+_group_test_registry: GroupTestModuleRegistry | None = None
+
+
+def _get_group_test_registry() -> GroupTestModuleRegistry:
+    """Return the cached GroupTestModuleRegistry singleton."""
+    global _group_test_registry
+    if _group_test_registry is None:
+        _group_test_registry = GroupTestModuleRegistry()
+    return _group_test_registry
 
 
 def _get_metrics_meta() -> dict:
@@ -1547,8 +1560,15 @@ def _serialize_event_execution(
     *,
     settings_by_group: dict[str, dict[str, Any]],
     evaluation_split: str | None,
+    registry: Any | None = None,
+    group_result: Any = None,
 ) -> dict[str, Any]:
-    """Convert the selected framework's own ledger output to the UI contract."""
+    """Convert the selected framework's own ledger output to the UI contract.
+
+    Module-owned output fields (fee_costs, etc.) are collected via
+    `registry.collect_outputs(group_result, owner, settings)` so no
+    field name is hardcoded here.
+    """
 
     engine_result = execution["engine_result"]
     portfolios = engine_result.get("portfolios") or {}
@@ -1612,6 +1632,15 @@ def _serialize_event_execution(
             "execution_trace_checksum": _trace_checksum(execution_trace),
             "snapshot_points": int(len(portfolio.get("position_curve") or {})),
         })
+        # ── Collect module-owned output fields via registry ──
+        module_outputs: dict[str, Any] = {}
+        if registry is not None:
+            module_outputs = registry.collect_outputs(
+                group_result=group_result,
+                owner=owner,
+                settings=settings,
+            )
+
         groups.append({
             "key": display_name,
             "name": display_name,
@@ -1622,8 +1651,6 @@ def _serialize_event_execution(
             "timestamps": [int(value.timestamp() * 1000) for value in index],
             "total_equity": [round(float(value), 2) for value in equity],
             "gross_returns": _serialize_float_series(returns.to_numpy()),
-            "fee_costs": [0.0] * len(index),
-            "trade_notional_ratios": [0.0] * len(index),
             "engine": str(engine_result.get("engine") or ""),
             "allocation_policy": settings["allocation_policy"],
             "rebalance_trigger": settings["rebalance_trigger"],
@@ -1636,6 +1663,7 @@ def _serialize_event_execution(
                 {"type": "long_short", "strategy_id": strategy_id}
                 if owner.get("is_ls") else None
             ),
+            **module_outputs,
         })
         metrics[display_name] = _compute_return_metrics(
             returns.to_numpy(), index_like=index
@@ -1741,8 +1769,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     - success=False：dict 包含 error 和 status 字段
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+    from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
+    from tools.factors.tester_calc.single_factor_test.group.group_tester import FactorGroupTester
     from tools.backtest.cancellation import BacktestCancelled
 
     def _check_cancelled() -> None:
@@ -1782,8 +1810,16 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         return False, {'success': False, 'error': str(e), 'status': 400}
 
     resolved_backtest_settings = _resolve_flat_backtest_settings(data, flat_groups_raw, flat_ls_configs)
-    first_group_id = str(flat_groups_raw[0].get('id') or 'group-0')
-    common_backtest_settings = resolved_backtest_settings[first_group_id]
+    # ── Extract LOCAL_ONLY settings via registry (no hardcoded keys) ──
+    _run_registry = _get_group_test_registry()
+    _local_settings_by_module = _run_registry.collect_local_only_settings(resolved_backtest_settings)
+    _engine = _local_settings_by_module.get("execution_engine", {}).get("engine", "native")
+    _factor_mode = _local_settings_by_module.get("factor_execution", {}).get("factor_mode", "auto")
+    _market_rule_fallback = _local_settings_by_module.get("market_rules", {}).get("market_rule_fallback", "latest_available")
+    _evaluation_split = _local_settings_by_module.get("evaluation_range", {}).get("evaluation_split") or None
+    # Fallback for groups not explicitly in resolved_backtest_settings
+    _first_group_id = str(flat_groups_raw[0].get('id') or 'group-0')
+    _fallback_group_settings = resolved_backtest_settings.get(_first_group_id, {})
     try:
         start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
     except ValueError as exc:
@@ -1846,7 +1882,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                         f"tester_id={tid} factor_alias={fa}"
                     )
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
-                group_settings = resolved_backtest_settings.get(str(g.get('id') or '')) or common_backtest_settings
+                group_settings = resolved_backtest_settings.get(str(g.get('id') or '')) or _fallback_group_settings
                 signal_start_dt = None
                 signal_end_dt = None
                 if _group_has_signal_window_override(g):
@@ -1854,31 +1890,28 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                         signal_start_dt, signal_end_dt = _settings_datetimes(group_settings)
                     except ValueError as exc:
                         raise ValueError(f"{name} 的因子信号时间范围无效: {exc}") from exc
-                fg = _FactorGroupTestGroup(
-                    tester_id=tid,
-                    factor_alias=fa,
-                    n_groups=split_count,
-                    group_index=gi,
-                    key=name,
-                    name=name,
-                    product_list=_product_list_from_group_payload(g),
-                    fee_mode=group_settings.get('fee_mode'),
-                    fee_rate=group_settings.get('custom_fee_rate'),
-                    fee_modifications=g.get('feeModifications'),
-                    use_close_today=False,
-                    rebalance_trigger=group_settings["rebalance_trigger"],
-                    position_policy=group_settings["position_policy"],
-                    liquidity_mode=group_settings.get('liquidity_mode'),
-                    liquidity_percent=(
-                        float(group_settings.get('participation_rate') or 0) * 100
-                        if group_settings.get('liquidity_mode') == 'volume_participation'
-                        else None
-                    ),
-                    margin_mode=group_settings.get('margin_mode'),
-                    signal_start_dt=signal_start_dt,
-                    signal_end_dt=signal_end_dt,
-                    _id=str(g.get('id') or f'group-{len(all_flat_groups)}'),
-                )
+
+                # Core params (non-module): identity + infrastructure fields
+                core_params: dict[str, Any] = {
+                    "tester_id": tid,
+                    "factor_alias": fa,
+                    "n_groups": split_count,
+                    "group_index": gi,
+                    "key": name,
+                    "name": name,
+                    "product_list": _product_list_from_group_payload(g),
+                    "use_close_today": False,
+                    "rebalance_trigger": group_settings["rebalance_trigger"],
+                    "position_policy": group_settings["position_policy"],
+                    "signal_start_dt": signal_start_dt,
+                    "signal_end_dt": signal_end_dt,
+                    "_id": str(g.get('id') or f'group-{len(all_flat_groups)}'),
+                }
+
+                # Module-contributed params (fee, liquidity, margin, etc.)
+                module_params = _run_registry.build_group_params(group_settings, g)
+
+                fg = _FactorGroupTestGroup(**(core_params | module_params))
                 offset = len(all_flat_groups)
                 sim_index_by_group[offset] = sim_index
                 all_flat_groups.append(fg)
@@ -1991,15 +2024,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         factor_freq_count=len(all_factor_freqs),
     )
 
-    # ── Legacy matrix fee bridge: use backend-registered settings, not group fields.
-    fee_uniform = (
-        float(common_backtest_settings.get('custom_fee_rate') or 0.0)
-        if common_backtest_settings.get('fee_mode') == 'custom'
-        else 0.0
-    )
-    fee_modifications = None
-    use_closetoday = False
-
     # ── Run FactorGroupTester ──
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
     containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
@@ -2032,7 +2056,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         total_batches=1,
         total_entries=len(group_tester.specs),
         total_groups=len(all_flat_groups) + len(flat_ls_configs),
-        phases=GROUP_TEST_PHASES,
+        phases=_run_registry.build_progress_manifest(),
     )
 
     def _framework_progress(
@@ -2054,7 +2078,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
     try:
         execution = execute_group_plan(
             group_tester,
-            engine=common_backtest_settings["engine"],
+            engine=_engine,
             settings_by_group=resolved_backtest_settings,
             initial_capital=initial_capital,
             long_short_configs=flat_ls_configs,
@@ -2070,7 +2094,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         serialized_execution = _serialize_event_execution(
             execution,
             settings_by_group=execution["settings_by_strategy"],
-            evaluation_split=common_backtest_settings["evaluation_split"] or None,
+            evaluation_split=_evaluation_split,
+            registry=_run_registry,
         )
         _core_emit_progress(
             "result_packaging",
@@ -2107,7 +2132,7 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         import traceback as _traceback
         return False, {
             "success": False,
-            "error": f"{common_backtest_settings['engine']} 事件回测失败: {exc}",
+            "error": f"{_engine} 事件回测失败: {exc}",
             "traceback": _traceback.format_exc(),
             "status": 500,
         }
@@ -2148,9 +2173,9 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
         "cross_entry_ls_count": len(flat_ls_configs),
         "errors": None,
         "backtest_settings": {
-            "engine": common_backtest_settings["engine"],
-            "factor_mode": common_backtest_settings["factor_mode"],
-            "market_rule_fallback": common_backtest_settings["market_rule_fallback"],
+            "engine": _engine,
+            "factor_mode": _factor_mode,
+            "market_rule_fallback": _market_rule_fallback,
             "groups": resolved_backtest_settings,
         },
         "silent_default_settings": _silent_default_settings_for_run(
@@ -2164,9 +2189,9 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
             "end_ms": int(end_dt.ts.timestamp() * 1000),
             "split_ms": (
                 int(pd.Timestamp(
-                    common_backtest_settings["evaluation_split"], tz=start_dt.ts.tz
+                    _evaluation_split, tz=start_dt.ts.tz
                 ).timestamp() * 1000)
-                if common_backtest_settings["evaluation_split"] else None
+                if _evaluation_split else None
             ),
         },
     }
@@ -2977,7 +3002,7 @@ def run_group_test_stream():
     from flask import Response, stream_with_context
     from server.services.sse_progress import SSEProgressEmitter
     from tools.factors.backtest_progress import BacktestProgressRegistry
-    from tools.factors.tests.single_factor_test.group.core import (
+    from tools.factors.tester_calc.single_factor_test.group.core import (
         register_group_progress,
         unregister_group_progress,
     )

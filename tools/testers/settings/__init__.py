@@ -1,4 +1,4 @@
-"""Backend-owned backtest setting schemas and resolution."""
+"""Tester setting schemas and resolution — shared across all test applications."""
 
 from .applications import backtest_setting_registry
 from .contracts import SettingScope, TabMountPoint

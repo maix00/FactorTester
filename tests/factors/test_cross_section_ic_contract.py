@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from tools.factors.FactorExpr import CrossSectionalOp, ShiftOp
-from tools.factors.tests.CrossSectionIC import CrossSectionIC
-from tools.factors.tests.CrossSectionPearsonIC import CrossSectionPearsonIC
-from tools.factors.tests.NextReturns import NextReturns
+from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
+from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
+from tools.factors.tester_calc.NextReturns import NextReturns
 
 
 def _walk(node: Any):

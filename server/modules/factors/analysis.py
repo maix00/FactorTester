@@ -12,7 +12,7 @@ from flask import request, jsonify
 from . import factors_bp
 from ._common import request_page_uuid
 from server.modules.single_factor_test.evaluation import FactorEvaluation
-from tools.factors.tests.single_factor_test.factor_type_analysis.server_facade import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis.server_facade import (
     FactorTypeAnalysisRun,
 )
 

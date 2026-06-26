@@ -3,7 +3,7 @@ list/panel infrastructure consumed by the neutral frontend common components).""
 
 from __future__ import annotations
 
-from tools.backtest.settings import backtest_setting_registry
+from tools.testers.settings import backtest_setting_registry
 
 
 def _surfaces(app: str) -> dict[str, dict]:

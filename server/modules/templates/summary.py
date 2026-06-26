@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.backtest.settings import backtest_setting_registry
+from tools.testers.settings import backtest_setting_registry
 
 
 def build_snapshot_summary(snapshot: dict) -> dict:

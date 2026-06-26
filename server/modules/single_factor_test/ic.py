@@ -17,10 +17,10 @@ from flask import Response, jsonify, request
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.CrossSectionIC import CrossSectionIC
-from tools.factors.tests.CrossSectionPearsonIC import CrossSectionPearsonIC
-from tools.factors.tests.NextReturns import NextReturns
-from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
+from tools.factors.tester_calc.CrossSectionIC import CrossSectionIC
+from tools.factors.tester_calc.CrossSectionPearsonIC import CrossSectionPearsonIC
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
 from tools.data.types import DataTime
 
 from . import sft_bp
@@ -306,7 +306,7 @@ def _compute_ic_groups(
     # ── node-level 进度统计 ──
     if emitter is not None:
         total_nodes = 0
-        from tools.factors.tests import CrossSectionIC as _CSI
+        from tools.factors.tester_calc import CrossSectionIC as _CSI
         for key, _ in param_items:
             payload = param_payloads[key]
             fe_param = payload.get('FE')

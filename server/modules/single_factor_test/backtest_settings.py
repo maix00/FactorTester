@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from flask import jsonify
 
-from tools.backtest.settings import backtest_setting_registry
-from tools.backtest.modules.registry import BacktestModuleRegistry, GroupTestModuleRegistry
+from tools.testers.settings import backtest_setting_registry
+from tools.testers.backtest.modules.registry import BacktestModuleRegistry, GroupTestModuleRegistry
 
 from . import sft_bp
 

@@ -29,11 +29,11 @@ from server.services.factor_registry import get_factor_family_instance, get_page
 from server.services.session_runtime import current_user_obj
 from tools.data.types import DataTime, finest_index
 from tools.factors.FactorTester import _active_tester
-from tools.factors.tests.single_factor_test.factor_type_analysis import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis import (
     FactorTypeAnalyzer,
     default_registry,
 )
-from tools.factors.tests.single_factor_test.factor_type_analysis.correlation import (
+from tools.factors.tester_calc.single_factor_test.factor_type_analysis.correlation import (
     compute_time_series_correlation,
     compute_product_correlation_matrix,
 )
