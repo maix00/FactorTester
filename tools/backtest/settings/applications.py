@@ -640,6 +640,7 @@ def group_test_settings() -> ApplicationSettings:
             module="factor_execution",
             order=10,
             inherit_from_root=True,
+            batch_owned=True,
         ),
         ChipDefinition(
             "product_path_selection",
@@ -652,6 +653,7 @@ def group_test_settings() -> ApplicationSettings:
             inherit_from_root=True,
             value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
             clickable=True,
+            batch_owned=True,
         ),
         ChipDefinition(
             "split_count",
@@ -662,6 +664,7 @@ def group_test_settings() -> ApplicationSettings:
             module="group_strategy",
             order=30,
             inherit_from_root=True,
+            batch_owned=True,
         ),
         ChipDefinition(
             "group_index",
@@ -1140,6 +1143,7 @@ def ic_test_settings() -> ApplicationSettings:
             module="factor_execution",
             order=10,
             inherit_from_root=True,
+            batch_owned=True,
         ),
         ChipDefinition(
             "product_path_selection",

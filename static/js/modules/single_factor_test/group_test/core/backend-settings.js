@@ -1212,6 +1212,7 @@
                 html: gtChipHtml(def.chip_template, def.value_resolvers || {}, gtChipCtx(group, source)),
                 category: def.category,
                 clickable: !!def.clickable,
+                batch_owned: !!def.batch_owned,
                 action: def.key === 'tester' ? 'tester-products' : (def.key === 'product_mask' ? 'toggle-product-mask' : ''),
                 style: null,
             });

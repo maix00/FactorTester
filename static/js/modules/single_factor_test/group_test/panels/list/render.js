@@ -274,9 +274,11 @@
 
     function _chipOwnedByBatch(chip, group, batch) {
         if (!chip) return false;
-        if (chip.label === 'factor_alias') return true;
-        if (chip.label === 'split_count') return true;
-        if (chip.label !== 'product_path_selection' && chip.label !== 'backtest-product_path_selection') return false;
+        // 哪些 chip 属于批次键由后端 ChipDefinition.batch_owned 声明（不再前端硬编码标签）。
+        var isProductPath = chip.label === 'product_path_selection' || chip.label === 'backtest-product_path_selection';
+        if (!chip.batch_owned && !isProductPath) return false;
+        if (!isProductPath) return true;
+        // 产品路径：仅当本组选择与批次选择一致时才归批次（组内可覆盖为不同产品路径）。
         var groupSelection = group && group.product_path_selection;
         if (!groupSelection) return true;
         var groupId = H.selectionId ? H.selectionId(groupSelection) : '';
@@ -363,8 +365,7 @@
             // chip 排除，正由批次头在此渲染。产品路径保留点击打开产品 overlay 的动作。
             var batchGroup = batch.items[0];
             var batchHeaderChips = batchGroup ? _chipsForGroup(batchGroup).filter(function(c) {
-                return c.category === 'identity'
-                    && (c.label === 'factor_alias' || c.label === 'product_path_selection' || c.label === 'split_count');
+                return c.batch_owned;   // 批次键 chip 由后端 ChipDefinition.batch_owned 声明
             }) : [];
             for (var hci = 0; hci < batchHeaderChips.length; hci++) {
                 var hchip = batchHeaderChips[hci];

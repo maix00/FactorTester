@@ -105,6 +105,9 @@ class ChipDefinition:
     inherit_from_root: bool = False
     value_resolvers: dict[str, str] = field(default_factory=dict)
     clickable: bool = False
+    # 该 chip 是否为"批次键"——分组组合按这些字段成批；批次头展示它们，每组行不重复。
+    # 后端声明，前端据此渲染（取代前端硬编码的 factor_alias/product_path_selection/split_count）。
+    batch_owned: bool = False
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.category or not self.chip_template:
