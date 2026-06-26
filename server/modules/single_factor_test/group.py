@@ -26,14 +26,7 @@ from tools.products.Product import Product
 from tools.products.product_utils import product_display_name
 from tools.backtest.settings import backtest_setting_registry
 from tools.backtest.settings.resolver import resolve_group_settings
-from tools.backtest.settings.strategy_fields import (
-    ALLOCATION_POLICY,
-    EXECUTION_DELAY_BARS,
-    EXECUTION_PRICE_BASIS,
-    EXECUTION_TIMING,
-    POSITION_POLICY,
-    REBALANCE_TRIGGER,
-)
+from tools.backtest.modules.registry import GroupTestModuleRegistry
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
@@ -44,14 +37,7 @@ _log = logging.getLogger(__name__)
 
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
-_SILENT_DEFAULT_SETTING_KEYS = (
-    ALLOCATION_POLICY,
-    REBALANCE_TRIGGER,
-    POSITION_POLICY,
-    EXECUTION_TIMING,
-    EXECUTION_PRICE_BASIS,
-    EXECUTION_DELAY_BARS,
-)
+# Silent default keys now come from the registry — no hardcoded constant list
 
 
 def _group_product_path_selection_id(group: dict[str, Any]) -> str:
@@ -254,6 +240,15 @@ def _silent_default_settings_for_run(
     """Summarize strategy defaults applied because the sparse request omitted them."""
 
     app = backtest_setting_registry.get("group_test")
+    # Strategy setting keys whose silent defaults are shown when the frontend omits them.
+    silent_keys = (
+        "allocation_policy",
+        "rebalance_trigger",
+        "position_policy",
+        "execution_timing",
+        "execution_price_basis",
+        "execution_delay_bars",
+    )
     local_settings = _payload_local_settings(payload)
     explicit_local = set(local_settings) if local_settings else set(payload)
     explicit_by_group: dict[str, set[str]] = {}
@@ -265,7 +260,7 @@ def _silent_default_settings_for_run(
 
     result: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for key in _SILENT_DEFAULT_SETTING_KEYS:
+    for key in silent_keys:
         definition = app.settings.get(key)
         if definition is None or key in explicit_local:
             continue
@@ -1630,9 +1625,9 @@ def _serialize_event_execution(
             "fee_costs": [0.0] * len(index),
             "trade_notional_ratios": [0.0] * len(index),
             "engine": str(engine_result.get("engine") or ""),
-            "allocation_policy": settings[ALLOCATION_POLICY],
-            "rebalance_trigger": settings[REBALANCE_TRIGGER],
-            "position_policy": settings[POSITION_POLICY],
+            "allocation_policy": settings["allocation_policy"],
+            "rebalance_trigger": settings["rebalance_trigger"],
+            "position_policy": settings["position_policy"],
             "target_trace_available": bool(strategy_target_trace),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": bool(portfolio.get("position_curve")),
@@ -1871,8 +1866,8 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
                     fee_rate=group_settings.get('custom_fee_rate'),
                     fee_modifications=g.get('feeModifications'),
                     use_close_today=False,
-                    rebalance_trigger=group_settings[REBALANCE_TRIGGER],
-                    position_policy=group_settings[POSITION_POLICY],
+                    rebalance_trigger=group_settings["rebalance_trigger"],
+                    position_policy=group_settings["position_policy"],
                     liquidity_mode=group_settings.get('liquidity_mode'),
                     liquidity_percent=(
                         float(group_settings.get('participation_rate') or 0) * 100

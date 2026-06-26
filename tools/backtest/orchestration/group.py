@@ -12,6 +12,7 @@ import pandas as pd
 
 from tools.data.types import DataColumn, DataIndex
 
+from ..modules.registry import GroupTestModuleRegistry, LongShortModuleRegistry
 from ..workers import EngineWorkerDispatcher, WorkerRequest
 from ..workers.runners.native import run_group_strategy as run_native_group_strategy
 from ..cancellation import BacktestCancelled
@@ -57,6 +58,9 @@ def execute_group_plan(
     if plan.merged_price_np is None or plan.merged_spec_bundle is None:
         raise ValueError("group execution plan is missing prices or market rules")
     all_timestamps = np.asarray(plan.entries[0].shared_inputs.index_list, dtype=object)
+
+    # ── Build strategy configs via registry (no hardcoded keys) ──
+    group_registry = GroupTestModuleRegistry()
     strategy_configs = []
     execution_owners = list(plan.group_owner)
     settings_by_strategy: dict[str, dict[str, Any]] = {}
@@ -68,15 +72,17 @@ def execute_group_plan(
             )
         values = dict(settings_by_group[group_id])
         values.update({
-            "strategy_id": group_id,
-            "display_name": str(owner.get("group_name") or group_id),
             "group_id": group_id,
             "initial_capital": float(values.get("initial_capital") or initial_capital),
-            "fee_rate": _fee_rate(values),
             "membership_index": membership_index,
         })
-        strategy_configs.append(values)
-        settings_by_strategy[group_id] = values
+        parsed = group_registry.parse_strategy({
+            **values,
+            "strategy_id": group_id,
+            "display_name": str(owner.get("group_name") or group_id),
+        })
+        strategy_configs.append(parsed)
+        settings_by_strategy[group_id] = parsed
     owner_index_by_group_id = {
         str(owner.get("group_id") or ""): index
         for index, owner in enumerate(plan.group_owner)
@@ -110,28 +116,28 @@ def execute_group_plan(
         if any(index < 0 or index >= len(plan.group_owner) for index in short_indices):
             raise ValueError(f"Long-Short #{position + 1} has no valid short group")
         source_group_id = str(plan.group_owner[source_index].get("group_id") or "")
-        values = dict(settings_by_group[source_group_id])
-        strategy_id = f"long-short:{position + 1}"
-        display_name = str(config.get("name") or strategy_id)
-        values.update({
-            "strategy_id": strategy_id,
-            "strategy_kind": "long_short",
-            "display_name": display_name,
+
+        # Parse LS strategy via registry (no hardcoded keys)
+        ls_registry = LongShortModuleRegistry()
+        parsed = ls_registry.parse_strategy({
+            "name": f"long-short:{position + 1}",
+            "strategy_id": f"long-short:{position + 1}",
+            "display_name": str(config.get("name") or f"long-short:{position + 1}"),
             "long_indices": list(long_indices),
             "short_indices": list(short_indices),
-            "initial_capital": float(values.get("initial_capital") or initial_capital),
-            "fee_rate": _fee_rate(values),
+            "initial_capital": float(settings_by_group.get(source_group_id, {}).get("initial_capital", initial_capital)),
+            **dict(settings_by_group.get(source_group_id, {})),
         })
-        strategy_configs.append(values)
-        settings_by_strategy[strategy_id] = values
+        strategy_configs.append(parsed)
+        settings_by_strategy[parsed["strategy_id"]] = parsed
         execution_owners.append({
             "simulation_index": plan.group_owner[source_index].get("simulation_index"),
             "product_path_selection_id": plan.group_owner[source_index].get("product_path_selection_id"),
             "factor_alias": plan.group_owner[source_index].get("factor_alias"),
             "requested_n_groups": plan.group_owner[source_index].get("requested_n_groups"),
             "group_index": len(execution_owners),
-            "group_name": display_name,
-            "group_id": strategy_id,
+            "group_name": parsed["display_name"],
+            "group_id": parsed["strategy_id"],
             "is_ls": True,
         })
     spec = plan.merged_spec_bundle
@@ -258,18 +264,6 @@ def execute_group_plan(
         "simulation_count": len(plan.entries),
         "signal_kind": "group_membership",
     }
-
-
-def _fee_rate(values: Mapping[str, Any]) -> float:
-    mode = str(values.get("fee_mode") or "market")
-    if mode == "none":
-        return 0.0
-    if mode == "custom":
-        return float(values.get("custom_fee_rate") or 0.0)
-    if mode == "market":
-        # Historical fee matrices will be forwarded per timestamp in the next provider phase.
-        return 0.0
-    raise ValueError(f"unsupported fee mode: {mode}")
 
 
 def _causal_valuation_prices(prices: np.ndarray) -> np.ndarray:
