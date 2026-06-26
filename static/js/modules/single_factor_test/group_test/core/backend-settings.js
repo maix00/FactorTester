@@ -101,23 +101,33 @@
 
     // chipText 已删除：chip HTML 统一由 ChipRenderer.chipHtml 渲染（见 gtSettingChipHtml）。
 
-    function chipParts(labelOrText, value) {
-        if (value !== undefined && value !== null && value !== '') {
-            return { label: String(labelOrText || ''), value: String(value) };
-        }
-        var text = String(labelOrText == null ? '' : labelOrText).trim();
-        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
-        if (match && match[2] && /^[A-Za-z0-9_\u4e00-\u9fa5 \-]+$/.test(match[1])) {
-            return { label: match[1], value: match[2] };
-        }
-        return { label: '', value: text };
-    }
+    // chipParts 已删除：chip HTML 统一由 ChipRenderer.chipHtml 渲染。
 
     function renderChipHtml(labelOrText, value) {
-        var parts = chipParts(labelOrText, value);
-        if (!parts.label) return '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
-        return '<span class="gt-backend-chip-label">' + escapeHTML(parts.label) + '</span>'
-            + '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+        if (value !== undefined && value !== null && value !== '') {
+            return window.ChipRenderer.chipHtml(
+                { chip_template: '{label}: {value}' },
+                { valueOf: function(k) { return k === 'label' ? String(labelOrText || '') : String(value); },
+                  escapeHTML: escapeHTML,
+                  renderChipHtml: function(l, v, esc) {
+                      return '<span class="gt-backend-chip-label">' + esc(l) + '</span>'
+                          + '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+                  },
+                }
+            );
+        }
+        return window.ChipRenderer.chipHtml(
+            { chip_template: '{label}: {value}' },
+            { escapeHTML: escapeHTML,
+              resolve: function() { return ''; },
+              valueOf: function(k) { return k === 'value' ? String(labelOrText == null ? '' : labelOrText) : ''; },
+              renderChipHtml: function(l, v, esc) {
+                  if (!l) return '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+                  return '<span class="gt-backend-chip-label">' + esc(l) + '</span>'
+                      + '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+              },
+            }
+        );
     }
 
     function valuesEqual(left, right) {
@@ -1660,6 +1670,7 @@
         effectiveSettingValueForGroup: effectiveSettingValueForGroup,
         configChipForGroupKey: configChipForGroupKey,
         renderChipHtml: renderChipHtml,
+        ensureGtLocalStore: ensureGtLocalStore,
         toggleProductMask: toggleProductMask,
         isProductMaskExpanded: isProductMaskExpanded,
         _state: state,

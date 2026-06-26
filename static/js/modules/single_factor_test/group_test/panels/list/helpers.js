@@ -28,8 +28,24 @@
     var CHIP_STYLE_PLAIN = '';
 
     function renderChipHtml(labelOrText, value) {
-        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
-            return GT.backendSettings.renderChipHtml(labelOrText, value);
+        if (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function') {
+            if (value !== undefined && value !== null && value !== '') {
+                return window.ChipRenderer.chipHtml(
+                    { chip_template: '{label}: {value}' },
+                    { valueOf: function(k) { return k === 'label' ? String(labelOrText || '') : String(value); },
+                      escapeHTML: escapeHTML,
+                      renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                          ? GT.backendSettings.renderChipHtml : undefined }
+                );
+            }
+            return window.ChipRenderer.chipHtml(
+                { chip_template: '{label}: {value}' },
+                { escapeHTML: escapeHTML,
+                  resolve: function() { return ''; },
+                  valueOf: function(k) { return k === 'value' ? String(labelOrText == null ? '' : labelOrText) : ''; },
+                  renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                      ? GT.backendSettings.renderChipHtml : undefined }
+            );
         }
         return escapeHTML(value === undefined ? labelOrText : (labelOrText + ': ' + value));
     }

@@ -87,8 +87,14 @@
                 type: '当前运行配置',
                 status: '默认',
                 detailHtml: '<div class="gt-strategy-chip-list">' + parts.map(function(part) {
-                    var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
-                        ? GT.backendSettings.renderChipHtml(part.label, part.value)
+                    var chipHtml = (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function')
+                        ? window.ChipRenderer.chipHtml(
+                            { chip_template: '{label}: {value}' },
+                            { valueOf: function(k) { return k === 'label' ? part.label : part.value; },
+                              escapeHTML: GT.escapeHTML,
+                              renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                                  ? GT.backendSettings.renderChipHtml : undefined }
+                        )
                         : (GT.escapeHTML(part.label) + ': ' + GT.escapeHTML(part.value));
                     return '<span class="gt-backend-chip">' + chipHtml + '</span>';
                 }).join('') + '</div>',
@@ -105,8 +111,14 @@
                 + '<div class="gt-strategy-chip-list">' + fallbacks.map(function(item) {
                 var label = String(item.setting_key || item.module || '设置');
                 var value = String(item.requested_value) + ' → ' + String(item.applied_value);
-                var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
-                    ? GT.backendSettings.renderChipHtml(label, value)
+                var chipHtml = (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function')
+                    ? window.ChipRenderer.chipHtml(
+                        { chip_template: '{label}: {value}' },
+                        { valueOf: function(k) { return k === 'label' ? label : value; },
+                          escapeHTML: GT.escapeHTML,
+                          renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                              ? GT.backendSettings.renderChipHtml : undefined }
+                    )
                     : (GT.escapeHTML(label) + ': ' + GT.escapeHTML(value));
                 return '<span class="gt-backend-chip">' + chipHtml + '</span>';
             }).join('') + '</div>',

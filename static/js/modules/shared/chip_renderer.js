@@ -60,7 +60,6 @@
             GT.overlays.productPathSelectionProducts.open(label, products, value);
         },
     };
-    // 唯一的"模板 → 内部 HTML 字符串"渲染（DOM 模式与字符串模式共用，bar 与 list 共用）。
     // ctx: { valueOf(name), resolve(resolverName, name), renderChipHtml, escapeHTML }
     function chipHtml(chip, ctx) {
         var esc = ctx.escapeHTML || _esc;
