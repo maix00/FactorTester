@@ -158,7 +158,7 @@
      * @param {Object} param — a paramSelection
      * @param {Array} paramDefs — the factor family's param definitions [{alias, label, default_value, ...}]
      */
-    function renderParamRow(param, paramDefs) {
+    function renderParamRow(param, paramDefs, selection) {
         paramDefs = paramDefs || [];
         var alias = escapeHTML(param.factor_alias || '');
         var scope = param.scope_key || '';
@@ -177,7 +177,19 @@
             return '<td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f1f5f9;">' + escapeHTML(String(val)) + '</td>';
         }).join('');
 
-        return '<tr style="background:#fff;">' +
+        // selection 模式（IC 多选 / group_test 单选）：行首加勾选框，行高亮当前已选。
+        var selectCell = '';
+        var rowStyle = 'background:#fff;';
+        if (selection && selection.mode) {
+            var inputType = selection.mode === 'multi' ? 'checkbox' : 'radio';
+            selectCell = '<td style="padding:5px 4px;border-bottom:1px solid #f1f5f9;text-align:center;width:28px;">' +
+                '<input type="' + inputType + '" class="fps-select-row" data-fps-select-alias="' + alias + '"' +
+                (selection.active ? ' checked' : '') + '></td>';
+            if (selection.active) rowStyle = 'background:#e8f4fd;';
+        }
+
+        return '<tr style="' + rowStyle + '">' +
+            selectCell +
             '<td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">' +
             '<span style="font-weight:600;color:#1e293b;">' + alias + '</span> ' + sourceBadge +
             '</td>' +
@@ -191,11 +203,12 @@
     /**
      * Build a header row from paramDefs.
      */
-    function renderTableHeader(paramDefs) {
+    function renderTableHeader(paramDefs, hasSelectCol) {
         var cells = paramDefs.map(function(def) {
             return '<th style="padding:6px 8px;font-size:11px;font-weight:600;color:#475569;text-align:left;border-bottom:2px solid #e2e8f0;background:#f8fafc;">' + escapeHTML(def.label || def.alias || def.name || '') + '</th>';
         }).join('');
         return '<thead><tr>' +
+            (hasSelectCol ? '<th style="padding:6px 4px;border-bottom:2px solid #e2e8f0;background:#f8fafc;width:28px;"></th>' : '') +
             '<th style="padding:6px 8px;font-size:11px;font-weight:600;color:#475569;text-align:left;border-bottom:2px solid #e2e8f0;background:#f8fafc;">因子</th>' +
             cells +
             '<th style="padding:6px 8px;font-size:11px;font-weight:600;color:#475569;text-align:center;border-bottom:2px solid #e2e8f0;background:#f8fafc;width:40px;"></th>' +
@@ -304,6 +317,13 @@
      *   onAddParam: function(factorAlias, params),
      *   createLabel / createDefaultLabel,
      *   escapeHTML: function,
+     *
+     *   // 选择模式（IC 多选 / group_test 单选）；不传则保持原候选管理行为（如页面）。
+     *   selectionMode: 'multi' | 'single',
+     *   selectedIds: [string],            // selectionMode==='multi'：已选 alias 列表
+     *   currentSelection: string,         // selectionMode==='single'：当前选中 alias
+     *   onToggle: function(alias),        // selectionMode==='multi'：勾选/取消
+     *   onSetDefault: function(alias),    // selectionMode==='single'：选中
      * }
      */
     function renderFactorParamSettingsTab(options) {
@@ -314,16 +334,34 @@
         var paramDefs = options.paramDefs || [];
         var currentParams = Array.isArray(options.currentFactorParams) ? options.currentFactorParams : [];
         var libraryParams = Array.isArray(options.libraryFactorParams) ? options.libraryFactorParams : [];
+        if (options.selectionMode !== 'multi' && options.selectionMode !== 'single') {
+            throw new Error('renderFactorParamSettingsTab: selectionMode 必须是 "multi" 或 "single"');
+        }
+        var selectionMode = options.selectionMode;
+        var selectedIdSet = {};
+        (options.selectedIds || []).forEach(function(id) { selectedIdSet[String(id)] = true; });
+        var currentSelection = String(options.currentSelection || '');
+        function isActive(alias) {
+            return selectionMode === 'multi' ? !!selectedIdSet[String(alias)] : String(alias) === currentSelection;
+        }
 
         var html = '';
         html += '<div class="backend-settings-grid factor-param-settings-tab">';
 
-        // ── 1. current default summary ──
+        // ── 1. selection summary（已选个数 / 当前选中）──
         html += '<div class="gt-backtest-setting-row">';
-        html += '<span class="gt-backtest-setting-label">当前参数</span>';
-        html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' +
-            '<span class="gt-backend-chip-label">激活行数</span><span class="gt-backend-chip-value">' + currentParams.length + '</span>' +
-            '</span></span>';
+        if (selectionMode === 'multi') {
+            var selCount = currentParams.filter(function(p) { return isActive(p.factor_alias); }).length;
+            html += '<span class="gt-backtest-setting-label">已选</span>';
+            html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' +
+                '<span class="gt-backend-chip-label">已选</span><span class="gt-backend-chip-value">' + selCount + ' / ' + currentParams.length + '</span>' +
+                '</span></span>';
+        } else {
+            html += '<span class="gt-backtest-setting-label">当前选中</span>';
+            html += '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' +
+                '<span class="gt-backend-chip-label">因子</span><span class="gt-backend-chip-value">' + escapeFn(currentSelection || '无') + '</span>' +
+                '</span></span>';
+        }
         html += '</div>';
 
         // ── 2. param table ──
@@ -332,13 +370,13 @@
         html += '</div>';
         html += '<div style="grid-column:1 / -1;overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">';
         html += '<table style="width:100%;border-collapse:collapse;">';
-        html += renderTableHeader(paramDefs);
+        html += renderTableHeader(paramDefs, true);
         html += '<tbody id="' + escapeFn(options.prefix || 'fps') + '-param-tbody">';
         if (!currentParams.length) {
-            html += '<tr><td colspan="' + (paramDefs.length + 2) + '" style="padding:16px;text-align:center;color:#94a3b8;font-size:12px;">暂无参数行，请在下方新增或从因子库加载</td></tr>';
+            html += '<tr><td colspan="' + (paramDefs.length + 3) + '" style="padding:16px;text-align:center;color:#94a3b8;font-size:12px;">暂无参数行，请在下方新增或从因子库加载</td></tr>';
         } else {
             currentParams.forEach(function(p) {
-                html += renderParamRow(p, paramDefs);
+                html += renderParamRow(p, paramDefs, { mode: selectionMode, active: isActive(p.factor_alias) });
             });
         }
         html += '</tbody></table>';
@@ -454,6 +492,20 @@
                     options.onRemoveParam(alias);
                 }
             });
+            // selection 模式：勾选框/单选框切换选中（multi → onToggle；single → onSetDefault）
+            if (selectionMode) {
+                tbody.addEventListener('change', function(e) {
+                    var input = e.target.closest('.fps-select-row');
+                    if (!input) return;
+                    var alias = input.getAttribute('data-fps-select-alias');
+                    if (!alias) return;
+                    if (selectionMode === 'multi' && typeof options.onToggle === 'function') {
+                        options.onToggle(alias);
+                    } else if (selectionMode === 'single' && typeof options.onSetDefault === 'function') {
+                        options.onSetDefault(alias);
+                    }
+                });
+            }
         }
     }
 

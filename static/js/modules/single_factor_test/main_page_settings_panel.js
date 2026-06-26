@@ -649,6 +649,15 @@
         broadcastGlobalSettingsChanged();
     }
 
+    // 页面级默认因子（factor，单选）——与 product_path_selection 同构：
+    // 测试模块单选 factor 为空时回退到此字段（manifest 的 shared_page_field）。
+    function setFactorDefault(alias) {
+        state.values.factor = alias || '';
+        renderChips();
+        renderFactorsTab();
+        broadcastGlobalSettingsChanged();
+    }
+
     /* ── Factor-param tab (analogous to product_path_selection tab) ── */
 
     function factorFamilyAlias() {
@@ -789,6 +798,9 @@
                 paramDefs: paramDefs,
                 currentFactorParams: sessionParams,
                 libraryFactorParams: libraryParams,
+                selectionMode: 'single',
+                currentSelection: state.values.factor || '',
+                onSetDefault: setFactorDefault,
                 manualTitle: '现场新增因子参数',
                 addLabel: '新增到参数列表',
                 escapeHTML: escapeHtml,
