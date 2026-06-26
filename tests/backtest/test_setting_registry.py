@@ -567,7 +567,6 @@ def test_group_run_builds_tester_from_payload_local_window(monkeypatch) -> None:
                 "splitCount": 5,
                 "groupIndex": 1,
             }],
-            "flatCount": 1,
             "local_settings": {
                 "start_date": "2026-01-01",
                 "end_date": "2026-01-31",

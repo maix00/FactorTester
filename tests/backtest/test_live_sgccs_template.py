@@ -94,7 +94,6 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
             long_short_configs = [_runtime_ls_config(long_group, short_group)]
     base_payload = {
         "groups": groups,
-        "flatCount": len(groups),
         "ls_configs": long_short_configs,
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,
@@ -323,7 +322,6 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     group = groups[0]
     base_payload = {
         "groups": [group],
-        "flatCount": 1,
         "ls_configs": [],
         "page_uuid": page_uuid,
         "factor_family_alias": FACTOR_FAMILY,

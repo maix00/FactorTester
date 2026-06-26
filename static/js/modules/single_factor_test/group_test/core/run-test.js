@@ -201,7 +201,6 @@
         var bulkPayload = {
             local_settings: backendRunPayload.local_settings || {},
             groups: runGroups,
-            flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''

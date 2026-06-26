@@ -1891,20 +1891,6 @@ def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
 
     if not all_flat_groups:
         return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
-    expected_flat_count = data.get('flatCount')
-    try:
-        expected_flat_count = int(expected_flat_count)
-    except (TypeError, ValueError):
-        expected_flat_count = len(flat_groups_raw)
-    if expected_flat_count != len(all_flat_groups):
-        return False, {
-            'success': False,
-            'error': (
-                f'前端传回 {expected_flat_count} 个扁平组，但后端只解析出 '
-                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少产品路径选择/因子/组数继承字段。'
-            ),
-            'status': 400,
-        }
 
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
