@@ -172,12 +172,70 @@
         };
     }
 
-    function loadProductPathSelections(force) {
-        if (state.productPathSelectionsLoaded && !force) return Promise.resolve(state.productPathSelections);
-        return requestJSON('/api/product-groups').then(function(payload) {
-            setProductPathCandidates((payload.groups || []).map(productGroupToSelection), { silent: false });
-            state.productPathSelectionsLoaded = true;
-            return state.productPathSelections;
+    function isEmptyValue(v) {
+        return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+    }
+
+    // ── 统一 fallback 入口：扫描 manifest 中声明了 load_*_when_page_empty 的字段，字段空时调用对应 loader ──
+    // fallback_policy 形如 ("copy_page_candidates", "load_factor_library_when_page_empty")
+    // "copy_page_candidates" 由 FieldStore.effective() 的 shared_page_field 处理（子模块 store 已 wired parent）；
+    // "load_*_when_page_empty" 由这里的异步 loader 在页面初始化时填满页面字段。
+    var PAGE_FALLBACK_LOADERS = {
+        load_user_product_groups_when_page_empty: function(fieldKey, serial) {
+            return requestJSON('/api/product-groups').then(function(payload) {
+                var selections = (payload.groups || []).map(productGroupToSelection);
+                var utils = window.ProductPathSelectionUtils || {};
+                if (utils.dedupe) selections = utils.dedupe(selections);
+                state.productPathSelections = selections;
+                state.values[fieldKey] = selections;
+                state.productPathSelectionsLoaded = true;
+            });
+        },
+        load_factor_library_when_page_empty: function(fieldKey, serial) {
+            var ffAlias = window.factorFamilyAlias || window._sftCurrentFactorId || '';
+            if (!ffAlias) return Promise.resolve();
+            return requestJSON('/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+                var factors = Array.isArray(payload.factors) ? payload.factors : [];
+                // 按当前 product_path_selection 的产品组过滤（与 loadFactorLibraryParams 逻辑一致）
+                var group = currentFactorLibraryProductGroup();
+                factors = filterFactorLibraryByProductGroup(factors, group);
+                var utils = window.FactorParamSelectionUtils || {};
+                var params = factors.map(function(item) {
+                    return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+                });
+                state.values[fieldKey] = params;
+                setFactorLibraryParams(params);
+                state._factorLibraryParamsLoaded = true;
+            });
+        },
+        load_data_source_categories_when_page_empty: function(fieldKey, serial) {
+            // 分类来源：数据源内置 category（后续接入；目前不触发网络请求）
+            return Promise.resolve();
+        },
+    };
+
+    function populatePageFieldsWhenEmpty() {
+        var defs = defaults();
+        var promises = [];
+        Object.keys(defs).forEach(function(key) {
+            var value = state.values[key];
+            if (!isEmptyValue(value)) return;  // 字段已有值，不覆盖
+            var s = (defs[key] || {}).serialization;
+            if (!s || !Array.isArray(s.fallback_policy)) return;
+            s.fallback_policy.forEach(function(policy) {
+                if (typeof policy !== 'string' || policy.indexOf('load_') !== 0) return;
+                var loader = PAGE_FALLBACK_LOADERS[policy];
+                if (typeof loader === 'function') {
+                    promises.push(loader(key, s).catch(function(err) {
+                        console.warn('[page-fallback] ' + policy + ' failed for ' + key, err);
+                    }));
+                }
+            });
+        });
+        return Promise.all(promises).then(function() {
+            syncPageStore();
+            renderChips();
+            broadcastGlobalSettingsChanged();
         });
     }
 
@@ -942,7 +1000,12 @@
         var container = state.containers.product_path_selection;
         if (!container) return;
         container.innerHTML = '<span style="color:#64748b;font-size:12px;">正在加载产品路径...</span>';
-        loadProductPathSelections(false).then(function(selections) {
+        // 候选已在 init() → populatePageFieldsWhenEmpty() 填充，若仍为空则触发 load_user_product_groups_when_page_empty
+        var loadPromise = isEmptyValue(state.values.product_path_candidates)
+            ? populatePageFieldsWhenEmpty()
+            : Promise.resolve();
+        loadPromise.then(function() {
+            var selections = productPathCandidates();
             if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
                 container.textContent = '产品路径设置组件未加载';
                 return;
@@ -992,7 +1055,9 @@
             syncTimeDefaultsFromPage();
             renderShell();
             observeSummaries();
-            openTab('setting_template');
+            populatePageFieldsWhenEmpty().then(function() {
+                openTab('setting_template');
+            });
         }).catch(function(error) {
             console.error('[single-factor-page-settings] init failed:', error);
         });
