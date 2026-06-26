@@ -14,7 +14,7 @@ from server.modules.products.product_group_store import (
     reorder_product_groups,
     update_product_group,
 )
-from server.modules.custom_factors.param_config_store import rename_scope
+from server.modules.custom_factors.factor_library_store import rename_scope
 from server.services.http_auth import login_required
 from server.services.session_runtime import require_user
 

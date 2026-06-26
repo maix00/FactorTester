@@ -9,9 +9,9 @@ from tests._repo import repo_root
 from tools.parameters import TypeParam
 
 
-def _load_param_config_module():
-    module_path = repo_root(Path(__file__)) / "server/modules/shared/param_config.py"
-    spec = importlib.util.spec_from_file_location("_param_config_under_test", module_path)
+def _load_factor_param_utils_module():
+    module_path = repo_root(Path(__file__)) / "server/modules/shared/factor_param_utils.py"
+    spec = importlib.util.spec_from_file_location("_factor_param_utils_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -36,10 +36,10 @@ class _FactorFamilyStub:
 
 
 def test_numeric_type_params_are_coerced_from_text_controls():
-    param_config = _load_param_config_module()
+    param_utils = _load_factor_param_utils_module()
     family = _FactorFamilyStub()
 
-    row = param_config.normalize_param_row(
+    row = param_utils.normalize_factor_param_row(
         family,
         {"TransportAlpha": "0.2", "TransportLag": "2"},
     )
@@ -51,8 +51,8 @@ def test_numeric_type_params_are_coerced_from_text_controls():
 
 
 def test_invalid_numeric_type_param_text_remains_rejected():
-    param_config = _load_param_config_module()
+    param_utils = _load_factor_param_utils_module()
     family = _FactorFamilyStub()
 
     with pytest.raises(ValueError, match="TransportAlpha"):
-        param_config.normalize_param_row(family, {"TransportAlpha": "not-a-number"})
+        param_utils.normalize_factor_param_row(family, {"TransportAlpha": "not-a-number"})

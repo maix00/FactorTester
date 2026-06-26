@@ -6,17 +6,17 @@ import time
 from typing import cast
 
 from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
-from server.modules.custom_factors.param_config_store import (
+from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
-    list_param_config_aliases,
-    list_param_config_scopes,
-    list_all_aliases_across_scopes,
-    load_param_config,
+    list_factor_param_config_aliases,
+    list_factor_param_config_scopes,
+    list_all_factor_param_aliases_across_scopes,
+    load_factor_param_config,
     normalize_product_group,
-    save_param_config,
+    save_factor_param_config,
 )
 from server.modules.products.product_group_store import load_product_groups
-from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
+from server.modules.shared.factor_param_utils import build_factor_param_item, serialize_factor_param_rows
 from tools.data.account_manage import (
     account_display_name,
     get_account,
@@ -69,7 +69,7 @@ def resolve_param_factor_family(owner_username: str, ff_alias: str, public_by_al
     }
 
 
-def build_library_param_factor_item(
+def build_library_factor_param_item(
     current_username: str,
     owner_account: dict,
     ff_alias: str,
@@ -83,7 +83,7 @@ def build_library_param_factor_item(
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
     account['alias'] = account_display_name(owner_account)
-    return build_param_factor_item(factor_family, row or {}, row_index, account, current_username, meta=meta, config=config)
+    return build_factor_param_item(factor_family, row or {}, row_index, account, current_username, meta=meta, config=config)
 
 
 def build_factor_library_config_factors(current_username: str, owner_account: dict, ff_alias: str, config: dict) -> list:
@@ -96,7 +96,7 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
         return factors
     for row_index, row in enumerate(params_list):
         try:
-            factors.append(build_library_param_factor_item(
+            factors.append(build_library_factor_param_item(
                 current_username,
                 owner_account,
                 ff_alias,
@@ -129,7 +129,7 @@ def list_factor_library_product_groups(username: str) -> list[str]:
     except Exception:
         pass
     try:
-        groups.extend(list_param_config_scopes(username))
+        groups.extend(list_factor_param_config_scopes(username))
     except Exception:
         pass
     seen = set()
@@ -143,7 +143,7 @@ def list_factor_library_product_groups(username: str) -> list[str]:
     return result
 
 
-def build_param_factor_overview(current_username: str, include_subordinates: bool, product_group: str | None = None, factor_family_alias: str | None = None) -> dict:
+def build_factor_library_overview(current_username: str, include_subordinates: bool, product_group: str | None = None, factor_family_alias: str | None = None) -> dict:
     product_group = normalize_product_group(product_group) if product_group else None
     accounts = (
         visible_accounts_for(current_username, include_self=True)
@@ -165,19 +165,19 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
         if product_group:
             scope_keys = [product_group] if product_group in list_factor_library_product_groups(owner_username) else []
         else:
-            scope_keys = list_param_config_scopes(owner_username)
+            scope_keys = list_factor_param_config_scopes(owner_username)
 
         for sk in scope_keys:
-            for ff_alias in list_param_config_aliases(owner_username, sk):
+            for ff_alias in list_factor_param_config_aliases(owner_username, sk):
                 if factor_family_alias and ff_alias != factor_family_alias:
                     continue
-                config = load_param_config(owner_username, ff_alias, sk)
+                config = load_factor_param_config(owner_username, ff_alias, sk)
                 if not config:
                     continue
                 params_list = config.get('params_list') or []
                 for row_index, row in enumerate(params_list):
                     try:
-                        item = build_library_param_factor_item(
+                        item = build_library_factor_param_item(
                             current_username,
                             account,
                             ff_alias,
@@ -220,7 +220,7 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
     }
 
 
-def list_param_config_users(current_username: str, ff_alias: str, product_group: str = DEFAULT_SCOPE_KEY) -> dict:
+def list_factor_library_config_users(current_username: str, ff_alias: str, product_group: str = DEFAULT_SCOPE_KEY) -> dict:
     product_group = normalize_product_group(product_group)
     accounts = visible_accounts_for(current_username, include_self=True)
     current_account = get_account(current_username) or {}
@@ -232,7 +232,7 @@ def list_param_config_users(current_username: str, ff_alias: str, product_group:
         owner_username = account.get('username')
         if not owner_username:
             continue
-        config = load_param_config(owner_username, ff_alias, product_group)
+        config = load_factor_param_config(owner_username, ff_alias, product_group)
         factors = []
         custom_by_alias = alias_map(list_custom_factors(owner_username))
         if config:
@@ -241,7 +241,7 @@ def list_param_config_users(current_username: str, ff_alias: str, product_group:
                 params_list = []
             for row_index, row in enumerate(params_list):
                 try:
-                    factors.append(build_library_param_factor_item(
+                    factors.append(build_library_factor_param_item(
                         current_username,
                         account,
                         ff_alias,
@@ -276,11 +276,11 @@ def list_param_config_users(current_username: str, ff_alias: str, product_group:
     }
 
 
-def save_current_user_param_config(current_username: str, ff_alias: str, params_list: list, product_group: str = DEFAULT_SCOPE_KEY) -> tuple[dict, list]:
+def save_current_user_library_config(current_username: str, ff_alias: str, params_list: list, product_group: str = DEFAULT_SCOPE_KEY) -> tuple[dict, list]:
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
-    serialized_rows = serialize_param_rows(factor_family, params_list)
-    config = save_param_config(current_username, ff_alias, serialized_rows, product_group)
+    serialized_rows = serialize_factor_param_rows(factor_family, params_list)
+    config = save_factor_param_config(current_username, ff_alias, serialized_rows, product_group)
     account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
     return config, factors

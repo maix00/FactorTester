@@ -6,18 +6,18 @@ from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
 from server.services.api_response import api_ok, route_guard
-from server.modules.custom_factors.param_config_service import (
-    build_param_factor_overview,
+from server.modules.custom_factors.factor_library_service import (
+    build_factor_library_overview,
     list_factor_library_product_groups,
-    list_param_config_users,
-    save_current_user_param_config,
+    list_factor_library_config_users,
+    save_current_user_library_config,
 )
-from server.modules.custom_factors.param_config_store import (
+from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
-    delete_param_config,
+    delete_factor_param_config,
     delete_scope,
     ensure_scope_exists,
-    load_param_config,
+    load_factor_param_config,
     normalize_product_group,
     rename_scope,
 )
@@ -34,40 +34,40 @@ def _username() -> str | None:
     return u
 
 
-@cf_bp.route('/api/param-factor-overview', methods=['GET'])
+@cf_bp.route('/api/factor-library-overview', methods=['GET'])
 @login_required
-def api_param_factor_overview():
+def api_factor_library_overview():
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     include_subordinates = request.args.get('include_subordinates') == '1'
     product_group = request.args.get('product_group') or request.args.get('scope_key') or None
     factor_family_alias = request.args.get('factor_family_alias') or None
-    payload = build_param_factor_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
+    payload = build_factor_library_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
     return jsonify({'success': True, **payload})
 
 
-@cf_bp.route('/api/param-configs/<ff_alias>', methods=['GET'])
+@cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['GET'])
 @login_required
-def api_param_configs(ff_alias):
+def api_factor_library_configs(ff_alias):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
-    payload = list_param_config_users(username, ff_alias, product_group=product_group)
+    payload = list_factor_library_config_users(username, ff_alias, product_group=product_group)
     return jsonify({'success': True, **payload})
 
 
-@cf_bp.route('/api/param-configs/<ff_alias>/<owner_username>', methods=['GET'])
+@cf_bp.route('/api/factor-library-configs/<ff_alias>/<owner_username>', methods=['GET'])
 @login_required
-def api_get_param_config(ff_alias, owner_username):
+def api_get_factor_library_config(ff_alias, owner_username):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     if not can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
     product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
-    config = load_param_config(owner_username, ff_alias, scope_key=product_group)
+    config = load_factor_param_config(owner_username, ff_alias, scope_key=product_group)
     if not config:
         return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
     config = dict(config)
@@ -76,10 +76,10 @@ def api_get_param_config(ff_alias, owner_username):
     return jsonify({'success': True, 'config': config})
 
 
-@cf_bp.route('/api/param-configs/<ff_alias>', methods=['PUT'])
+@cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['PUT'])
 @login_required
 @route_guard
-def api_save_param_config(ff_alias):
+def api_save_factor_library_config(ff_alias):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
@@ -89,27 +89,27 @@ def api_save_param_config(ff_alias):
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
     with get_user_file_lock(username):
-        config, factors = save_current_user_param_config(username, ff_alias, params_list, product_group=product_group)
+        config, factors = save_current_user_library_config(username, ff_alias, params_list, product_group=product_group)
     return api_ok({'config': config, 'factors': factors})
 
 
-@cf_bp.route('/api/param-configs/<ff_alias>', methods=['DELETE'])
+@cf_bp.route('/api/factor-library-configs/<ff_alias>', methods=['DELETE'])
 @login_required
-def api_delete_param_config(ff_alias):
+def api_delete_factor_library_config(ff_alias):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     scope_key = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
     with get_user_file_lock(username):
-        deleted = delete_param_config(username, ff_alias, scope_key=scope_key)
+        deleted = delete_factor_param_config(username, ff_alias, scope_key=scope_key)
     if not deleted:
         return jsonify({'success': False, 'error': '配置不存在'}), 404
     return jsonify({'success': True})
 
 
-@cf_bp.route('/api/param-configs/<ff_alias>/add-factor', methods=['POST'])
+@cf_bp.route('/api/factor-library-configs/<ff_alias>/add-factor', methods=['POST'])
 @login_required
-def api_add_factor_to_param_config(ff_alias):
+def api_add_factor_to_library_config(ff_alias):
     """从当前会话参数中，将一个因子追加到用户因子库配置中。"""
     username = _username()
     if username is None:
@@ -143,7 +143,7 @@ def api_add_factor_to_param_config(ff_alias):
 
     # 读取当前 scope 下的已有配置，追加新参数行（去重）
     with get_user_file_lock(username):
-        existing_config = load_param_config(username, ff_alias, scope_key=scope_key)
+        existing_config = load_factor_param_config(username, ff_alias, scope_key=scope_key)
         existing_params = existing_config.get('params_list', []) if existing_config else []
 
         # 去重：检查是否已存在相同因子 alias 的参数行
@@ -157,14 +157,14 @@ def api_add_factor_to_param_config(ff_alias):
             return jsonify({'success': True, 'message': f'因子 {factor_alias} 已存在，无需重复添加', 'skipped': True})
 
         existing_params.append(matched_param)
-        config, factors = save_current_user_param_config(username, ff_alias, existing_params, product_group=scope_key)
+        config, factors = save_current_user_library_config(username, ff_alias, existing_params, product_group=scope_key)
 
     return api_ok({'config': config, 'factors': factors})
 
 
 # ── Scope management ──
 
-@cf_bp.route('/api/param-config-scopes', methods=['GET'])
+@cf_bp.route('/api/factor-library-scopes', methods=['GET'])
 @login_required
 def api_list_scopes():
     username = _username()
@@ -174,7 +174,7 @@ def api_list_scopes():
     return jsonify({'success': True, 'scopes': product_groups, 'product_groups': product_groups})
 
 
-@cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['PUT'])
+@cf_bp.route('/api/factor-library-scopes/<scope_key>', methods=['PUT'])
 @login_required
 def api_ensure_scope(scope_key):
     username = _username()
@@ -185,7 +185,7 @@ def api_ensure_scope(scope_key):
     return jsonify({'success': True, 'scope_key': actual, 'product_group': actual})
 
 
-@cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['PATCH'])
+@cf_bp.route('/api/factor-library-scopes/<scope_key>', methods=['PATCH'])
 @login_required
 def api_rename_scope(scope_key):
     username = _username()
@@ -204,7 +204,7 @@ def api_rename_scope(scope_key):
     return jsonify({'success': True, 'scope_key': new_key, 'product_group': new_key})
 
 
-@cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['DELETE'])
+@cf_bp.route('/api/factor-library-scopes/<scope_key>', methods=['DELETE'])
 @login_required
 def api_delete_scope(scope_key):
     username = _username()

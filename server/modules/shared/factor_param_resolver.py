@@ -3,8 +3,8 @@
 from __future__ import annotations
 from typing import cast
 
-from server.modules.custom_factors.param_config_service import build_param_factor_overview
-from server.modules.shared.param_config import normalize_param_row
+from server.modules.custom_factors.factor_library_service import build_factor_library_overview
+from server.modules.shared.factor_param_utils import normalize_factor_param_row
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user
 from tools.factors.factor_param_resolution import register_factor_param_resolver
@@ -31,7 +31,7 @@ def resolve_factor_param_value(value):
     owner_username = item.get('owner_username') or current_user()
     ff = get_factor_family_instance(family_alias, username=owner_username)
     params = _params_list_to_dict(item.get('params') or [])
-    normalized = normalize_param_row(ff, params)
+    normalized = normalize_factor_param_row(ff, params)
     return ff.get_factor(params_list=[normalized])
 
 

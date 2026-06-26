@@ -1,6 +1,6 @@
 """Shared helpers for template routes."""
 
-from server.modules.shared.param_config import param_value_display
+from server.modules.shared.factor_param_utils import factor_param_value_display
 from tools.data.account_manage import load_user_templates, new_template_id, save_user_templates
 
 
@@ -14,7 +14,7 @@ def build_factor_rows(factor_family, params_list):
         display_params = {}
         for param in factor_family.params:
             value = row.get(param.alias)
-            display_params[param.alias] = param_value_display(param, value)
+            display_params[param.alias] = factor_param_value_display(param, value)
         rows.append({
             'index': idx,
             'factor_alias': factor.alias,

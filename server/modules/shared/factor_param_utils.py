@@ -43,7 +43,7 @@ def _coerce_transport_value(param, value):
     return value
 
 
-def normalize_param_rows(factor_family, params_list: list) -> list:
+def normalize_factor_param_rows(factor_family, params_list: list) -> list:
     normalized_rows = []
     for params in params_list:
         if not isinstance(params, dict):
@@ -68,11 +68,11 @@ def normalize_param_rows(factor_family, params_list: list) -> list:
     return normalized_rows
 
 
-def normalize_param_row(factor_family, params: dict) -> dict:
-    return normalize_param_rows(factor_family, [params])[0]
+def normalize_factor_param_row(factor_family, params: dict) -> dict:
+    return normalize_factor_param_rows(factor_family, [params])[0]
 
 
-def param_value_display(param, value) -> str:
+def factor_param_value_display(param, value) -> str:
     if value is None:
         return ''
     try:
@@ -87,7 +87,7 @@ def build_factor_rows(factor_family, params_list: list) -> list:
     rows = []
     for idx, (factor, row) in enumerate(zip(factors, params_list)):
         display_params = {
-            p.alias: param_value_display(p, row.get(p.alias))
+            p.alias: factor_param_value_display(p, row.get(p.alias))
             for p in factor_family.params
         }
         rows.append({
@@ -98,9 +98,9 @@ def build_factor_rows(factor_family, params_list: list) -> list:
     return rows
 
 
-def serialize_param_rows(factor_family, params_list: list) -> list:
+def serialize_factor_param_rows(factor_family, params_list: list) -> list:
     """Normalize rows, then store JSON-safe value aliases."""
-    normalized_rows = normalize_param_rows(factor_family, params_list)
+    normalized_rows = normalize_factor_param_rows(factor_family, params_list)
     rows = []
     seen_aliases = set()
     for idx, row in enumerate(normalized_rows):
@@ -109,7 +109,7 @@ def serialize_param_rows(factor_family, params_list: list) -> list:
             continue
         seen_aliases.add(factor_alias)
         item = {
-            p.alias: param_value_display(p, row.get(p.alias))
+            p.alias: factor_param_value_display(p, row.get(p.alias))
             for p in factor_family.params
         }
         # 保留条目级 category（如果原始 params_list 中提供）
@@ -121,7 +121,7 @@ def serialize_param_rows(factor_family, params_list: list) -> list:
     return rows
 
 
-def build_param_factor_item(
+def build_factor_param_item(
     factor_family,
     params: dict,
     row_idx: int,
@@ -133,11 +133,11 @@ def build_param_factor_item(
     meta = meta or {}
     config = config or {}
     owner_username = owner_acct.get('username') or ''
-    normalized_row = normalize_param_row(factor_family, params)
+    normalized_row = normalize_factor_param_row(factor_family, params)
     params_display = [
         {
             'alias': p.alias,
-            'value': param_value_display(p, normalized_row.get(p.alias)),
+            'value': factor_param_value_display(p, normalized_row.get(p.alias)),
         }
         for p in factor_family.params
     ]

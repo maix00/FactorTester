@@ -26,8 +26,8 @@ if str(ROOT) not in sys.path:
 from server import create_app  # noqa: E402  (boots import order for tools.data)
 import settings as Settings  # noqa: E402
 from server.modules.templates.params_list_migration import migrate_snapshot_to_factor_candidates  # noqa: E402
-from server.modules.shared.param_config import normalize_param_row  # noqa: E402
-from server.modules.custom_factors.param_config_service import build_param_factor_overview  # noqa: E402
+from server.modules.shared.factor_param_utils import normalize_factor_param_row  # noqa: E402
+from server.modules.custom_factors.factor_library_service import build_factor_library_overview  # noqa: E402
 from server.services.factor_registry import get_factor_family_instance  # noqa: E402
 from tools.data.sqlite.account_manager.user_template import TEMPLATE_TABLE, ensure_user_template_schema  # noqa: E402
 from tools.data.sqlite.db import connect_sqlite  # noqa: E402
@@ -57,7 +57,7 @@ def _build_resolver(username: str, ff_alias: str) -> Callable[[dict], dict] | No
 
     def resolve(params: dict) -> dict:
         try:
-            row = normalize_param_row(factor_family, params)
+            row = normalize_factor_param_row(factor_family, params)
             alias = factor_family.get_alias(**row)
         except Exception:
             return {"alias": "", "in_library": False, "library_product_group": None}

@@ -7,7 +7,7 @@ from server.services.factor_registry import get_factor_family_instance, get_page
 from server.services.session_runtime import current_user
 from . import shared_bp
 from server.services.api_response import api_ok, route_guard
-from .param_config import build_factor_rows, normalize_param_row, param_value_display
+from .factor_param_utils import build_factor_rows, normalize_factor_param_row, factor_param_value_display
 
 
 @shared_bp.route('/add_factor_by_params', methods=['POST'])
@@ -18,7 +18,7 @@ def add_factor_by_params():
     params = data.get('params', {})
     page_uuid = str(data.get('page_uuid') or '')
     ff = get_factor_family_instance(factor_family_alias, username=current_user())
-    new_params = normalize_param_row(ff, params)
+    new_params = normalize_factor_param_row(ff, params)
     new_alias = ff.get_alias(**new_params)
 
     # Factor is the single source of truth, stored in page_factors.
@@ -31,7 +31,7 @@ def add_factor_by_params():
     added_display = {}
     for p in ff.params:
         val = new_params.get(p.alias)
-        added_display[p.alias] = param_value_display(p, val)
+        added_display[p.alias] = factor_param_value_display(p, val)
 
     # Collect all current factors for this page+family to build factor_rows
     factors_for_page = {}
@@ -48,7 +48,7 @@ def add_factor_by_params():
         display_params = {}
         for p in ff.params:
             val = getattr(factor, p.alias, None)
-            display_params[p.alias] = param_value_display(p, val)
+            display_params[p.alias] = factor_param_value_display(p, val)
         factor_rows.append({
             'index': len(factor_rows),
             'factor_alias': alias,

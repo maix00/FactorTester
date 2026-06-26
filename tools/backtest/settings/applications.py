@@ -252,7 +252,7 @@ def register_factor_candidate_list_base(
             "item_kind": "factor",
             "shared_page_field": "factor_candidates",
             "selection_field": "factor",
-            "factor_library_source": "user_param_factor_overview",
+            "factor_library_source": "user_factor_library_overview",
             "fallback_policy": (
                 "copy_page_candidates",
                 "load_factor_library_when_page_empty",

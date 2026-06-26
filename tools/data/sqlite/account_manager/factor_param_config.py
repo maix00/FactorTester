@@ -20,7 +20,7 @@ def normalize_product_group(product_group: str | None) -> str:
     return value or DEFAULT_SCOPE_KEY
 
 
-def ensure_param_config_schema(conn: sqlite3.Connection) -> None:
+def ensure_factor_param_config_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS account_factor_param_scopes (
@@ -48,7 +48,7 @@ def ensure_param_config_schema(conn: sqlite3.Connection) -> None:
 def ensure_scope_exists(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> str:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         conn.execute(
             """
             INSERT INTO account_factor_param_scopes (username, scope_key, updated_at)
@@ -61,10 +61,10 @@ def ensure_scope_exists(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> st
     return scope_key
 
 
-def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> dict[str, Any] | None:
+def load_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> dict[str, Any] | None:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         row = conn.execute(
             """
             SELECT payload_json
@@ -82,7 +82,7 @@ def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCO
     return payload if isinstance(payload, dict) else None
 
 
-def save_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict[str, Any]:
+def save_factor_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict[str, Any]:
     scope_key = ensure_scope_exists(username, scope_key)
     config = {
         "id": username,
@@ -94,11 +94,11 @@ def save_param_config(username: str, ff_alias: str, params_list: list, scope_key
         "params_list": params_list,
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
     }
-    save_param_config_payload(username, ff_alias, config, scope_key)
+    save_factor_param_config_payload(username, ff_alias, config, scope_key)
     return config
 
 
-def save_param_config_payload(
+def save_factor_param_config_payload(
     username: str,
     ff_alias: str,
     config: dict[str, Any],
@@ -107,7 +107,7 @@ def save_param_config_payload(
     scope_key = ensure_scope_exists(username, scope_key)
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         conn.execute(
             """
             INSERT INTO account_factor_param_configs (
@@ -126,10 +126,10 @@ def save_param_config_payload(
         )
 
 
-def delete_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
+def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         cursor = conn.execute(
             """
             DELETE FROM account_factor_param_configs
@@ -140,10 +140,10 @@ def delete_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_S
     return bool(cursor.rowcount)
 
 
-def list_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
+def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         rows = conn.execute(
             """
             SELECT ff_alias
@@ -156,9 +156,9 @@ def list_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY)
     return [str(row["ff_alias"]) for row in rows]
 
 
-def list_param_config_scopes(username: str) -> list[str]:
+def list_factor_param_config_scopes(username: str) -> list[str]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         rows = conn.execute(
             """
             SELECT scope_key
@@ -172,10 +172,10 @@ def list_param_config_scopes(username: str) -> list[str]:
     return scopes if scopes else [DEFAULT_SCOPE_KEY]
 
 
-def list_all_aliases_across_scopes(username: str) -> dict[str, list[str]]:
+def list_all_factor_param_aliases_across_scopes(username: str) -> dict[str, list[str]]:
     result: dict[str, list[str]] = {}
-    for scope_key in list_param_config_scopes(username):
-        aliases = list_param_config_aliases(username, scope_key)
+    for scope_key in list_factor_param_config_scopes(username):
+        aliases = list_factor_param_config_aliases(username, scope_key)
         if aliases:
             result[scope_key] = aliases
     if not result:
@@ -190,7 +190,7 @@ def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
         return True
     now = time.time()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         exists = conn.execute(
             """
             SELECT 1
@@ -262,7 +262,7 @@ def delete_scope(username: str, scope_key: str) -> bool:
     if scope_key == DEFAULT_SCOPE_KEY:
         return False
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         conn.execute(
             """
             DELETE FROM account_factor_param_configs

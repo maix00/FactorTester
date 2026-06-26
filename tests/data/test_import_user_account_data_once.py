@@ -8,8 +8,8 @@ from scripts.import_user_account_data_once import (
     verify_user_account_data_import,
 )
 from tools.data.account_manage import (
-    list_param_config_scopes,
-    load_param_config,
+    list_factor_param_config_scopes,
+    load_factor_param_config,
     load_product_groups,
     load_user_templates,
 )
@@ -60,8 +60,8 @@ def test_import_user_account_data_once_preserves_templates_groups_and_param_conf
     assert load_product_groups("default$alice@1") == [
         {"name": "黑色", "paths": ["单因子测试/黑色"], "updated_at": "2026-06-17 12:00:00"}
     ]
-    assert list_param_config_scopes("default$alice@1") == ["中国期货日盘"]
-    assert load_param_config("default$alice@1", "MmRet", "中国期货日盘") == {
+    assert list_factor_param_config_scopes("default$alice@1") == ["中国期货日盘"]
+    assert load_factor_param_config("default$alice@1", "MmRet", "中国期货日盘") == {
         "id": "default$alice@1",
         "scope": "user_product_group",
         "scope_key": "中国期货日盘",

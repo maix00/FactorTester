@@ -674,7 +674,7 @@
         if (state._factorLibraryParamsLoaded && !force) return Promise.resolve(factorLibraryParams());
         var ffAlias = factorFamilyAlias();
         if (!ffAlias) return Promise.resolve([]);
-        return requestJSON('/api/param-factor-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
+        return requestJSON('/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).then(function(payload) {
             var factors = Array.isArray(payload.factors) ? payload.factors : [];
             factors = filterFactorLibraryByProductGroup(factors, currentFactorLibraryProductGroup());
             var utils = window.FactorParamSelectionUtils || {};
