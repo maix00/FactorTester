@@ -174,7 +174,6 @@ def test_ic_prepare_uses_registered_settings_for_both_methods() -> None:
         data,
         FakeTester(),
         FakeFamily(FakeFactor()),
-        [],
     )
 
     assert display_columns == ["F1 · Rank IC", "F1 · Pearson IC"]
