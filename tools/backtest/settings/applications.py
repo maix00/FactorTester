@@ -510,6 +510,7 @@ def single_factor_page_settings() -> ApplicationSettings:
         ScopePolicy.LOCAL_ONLY,
         module="setting_template",
         chip_template="模板: {value}",
+        serialization={"kind": "setting_template"},
     ))
     register_factor_candidate_list_base(app, tab="factors")
     register_factor_selection_base(app, tab="factors")
