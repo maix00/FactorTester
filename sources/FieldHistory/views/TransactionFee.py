@@ -86,7 +86,7 @@ def save_unified_table(*, store_key: str = "openctp") -> str:
     hub = DataHub.get_instance()
     _ensure_store_registered(hub, store_key)
     path = hub._get_sqlite_store(store_key).path()
-    frame = build_unified_frame(store_key=store_key)
+    frame = _serialise_unified_frame(build_unified_frame(store_key=store_key))
     with hub.connect_store(store_key) as conn:
         frame.to_sql(UNIFIED_TABLE, conn, if_exists="replace", index=False)
     return path
@@ -159,3 +159,18 @@ def _normalise_contract_codes_json(value: Any) -> str:
         parsed = [parsed]
     codes = sorted({str(item).strip() for item in parsed if str(item).strip()})
     return json.dumps(codes, ensure_ascii=False)
+
+
+def _serialise_unified_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    result = frame.copy()
+    result["effective_trading_day"] = cast(
+        pd.Series,
+        pd.to_datetime(result["effective_trading_day"], errors="coerce"),
+    ).dt.strftime("%Y-%m-%d")
+    result["effective_timestamp"] = cast(
+        pd.Series,
+        pd.to_datetime(result["effective_timestamp"], errors="coerce"),
+    ).map(lambda value: "" if pd.isna(value) else pd.Timestamp(value).isoformat())
+    return result
