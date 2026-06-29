@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 import json
 from typing import Any
 
@@ -48,6 +48,15 @@ def _parse_effective_date(value: Any) -> date | None:
     return date.fromisoformat(text[:10])
 
 
+def _parse_effective_timestamp(value: Any) -> datetime | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "nat"}:
+        return None
+    return datetime.fromisoformat(text.replace("T", " "))
+
+
 def _float_or_none(value: Any) -> float | None:
     if value is None or bool(pd.isna(value)):
         return None
@@ -76,6 +85,7 @@ def _events_from_frame(df: pd.DataFrame) -> list[AlterEvent]:
                 old_value=_float_or_none(row.get("old_value")),
                 new_value=_float_or_zero(row.get("new_value")),
                 effective_date=_parse_effective_date(row.get("effective_date")),
+                effective_timestamp=_parse_effective_timestamp(row.get("effective_timestamp")),
                 source_url=str(row.get("source_url") or ""),
                 source_date=str(row.get("source_date") or ""),
                 raw_note=str(row.get("raw_note") or ""),
@@ -189,7 +199,7 @@ def to_dataframe(events: list[AlterEvent] | None = None) -> pd.DataFrame:
                 "exchange", "product_label", "product_code", "product_codes",
                 "instrument_type", "contract_codes",
                 "field", "old_value", "new_value", "effective_date",
-                "is_product_level", "source_url", "source_date", "raw_note",
+                "effective_timestamp", "is_product_level", "source_url", "source_date", "raw_note",
             ]
         )
     rows = []
@@ -206,6 +216,7 @@ def to_dataframe(events: list[AlterEvent] | None = None) -> pd.DataFrame:
             "old_value": ev.old_value,
             "new_value": ev.new_value,
             "effective_date": ev.effective_date.isoformat() if ev.effective_date else None,
+            "effective_timestamp": ev.effective_timestamp.isoformat(sep=" ") if ev.effective_timestamp else None,
             "is_product_level": ev.is_product_level,
             "source_url": ev.source_url,
             "source_date": ev.source_date,

@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -73,6 +74,7 @@ MATCH_STATUS_MATCHED = "matched"
 MATCH_STATUS_UNMATCHED = "unmatched"
 
 _ALL_FUTURES_PRODUCT_LABEL = "所有期货品种"
+_OPEN_ENDED_START_DAY = "1900-01-01"
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +155,7 @@ def event_to_historical_field_records(event: dict) -> list[dict]:
     value = event.get("new_value")
     if value is None:
         return []
-    effective_day = event.get("effective_date") or event.get("source_date")
+    effective_day = event.get("effective_date") or _OPEN_ENDED_START_DAY
     if not effective_day:
         return []
     records = []
@@ -166,6 +168,7 @@ def event_to_historical_field_records(event: dict) -> list[dict]:
             "instrument_type": event.get("instrument_type") or "future",
             "field_name": event.get("field") or "",
             "effective_trading_day": effective_day,
+            "effective_timestamp": event.get("effective_timestamp") or "",
             "value": value,
             "contract_codes": event.get("contract_codes") or [],
             "source_url": event.get("source_url") or "",
@@ -387,6 +390,23 @@ def _baseline_min_order_from_note(note: str) -> float | None:
     return float(match.group("qty"))
 
 
+def _effective_metadata_from_match(match: re.Match[str], note: str) -> tuple[str, str]:
+    """Parse the actual rule effective point from a Guosen note match."""
+    groupdict = match.groupdict()
+    month_text = groupdict.get("month") or groupdict.get("month2")
+    day_text = groupdict.get("day") or groupdict.get("day2") or "1"
+    if month_text is None:
+        raise ValueError("missing month")
+    event_date = date(int(match["year"]), int(month_text), int(day_text))
+    if "夜盘" in _clean_text(note):
+        effective_timestamp = datetime.combine(
+            event_date,
+            datetime.min.time(),
+        ).replace(hour=21)
+        return (event_date + timedelta(days=1)).isoformat(), effective_timestamp.isoformat(sep=" ")
+    return event_date.isoformat(), ""
+
+
 # ---------------------------------------------------------------------------
 # 核心解析函数
 # ---------------------------------------------------------------------------
@@ -484,6 +504,7 @@ def parse_row_to_alter_events(
             value: float | None,
             *,
             effective_date: str | None = None,
+            effective_timestamp: str | None = None,
             codes: list[str] | None = None,
         ) -> None:
             if value is None:
@@ -501,14 +522,12 @@ def parse_row_to_alter_events(
                 "old_value": None,
                 "new_value": value,
                 "effective_date": effective_date,
+                "effective_timestamp": effective_timestamp,
                 "source_url": source_url,
                 "source_date": source_date_str,
                 "raw_note": note.strip(),
                 "is_product_level": len(event_contract_codes) == 0,
             })
-
-        append_event("MaxLimitOrderVolume", limit_order_hand)
-        append_event("MaxMarketOrderVolume", market_order_hand)
 
         # 提取历史调整事件（双正则，优先 primary）
         alter_events_from_note: list[re.Match] = []
@@ -518,6 +537,31 @@ def parse_row_to_alter_events(
                 alter_events_from_note = found
                 break
 
+        row_effective_date: str | None = None
+        row_effective_timestamp: str | None = None
+        if alter_events_from_note:
+            try:
+                row_effective_date, row_effective_timestamp = _effective_metadata_from_match(
+                    alter_events_from_note[0],
+                    note,
+                )
+            except (ValueError, KeyError, TypeError):
+                row_effective_date = None
+                row_effective_timestamp = None
+
+        append_event(
+            "MaxLimitOrderVolume",
+            limit_order_hand,
+            effective_date=row_effective_date,
+            effective_timestamp=row_effective_timestamp,
+        )
+        append_event(
+            "MaxMarketOrderVolume",
+            market_order_hand,
+            effective_date=row_effective_date,
+            effective_timestamp=row_effective_timestamp,
+        )
+
         baseline_min_order = _baseline_min_order_from_note(note)
         if baseline_min_order is not None:
             append_event("MinLimitOrderVolume", baseline_min_order)
@@ -526,13 +570,7 @@ def parse_row_to_alter_events(
             # note 中包含调整记录 → 生成带 effective_date 的事件
             for m in alter_events_from_note:
                 try:
-                    y = int(m["year"])
-                    month_text = m["month"] or m.groupdict().get("month2")
-                    if month_text is None:
-                        raise ValueError("missing month")
-                    mo = int(month_text)
-                    d = int(m["day"] or m.groupdict().get("day2") or 1)
-                    eff_date = __import__("datetime").date(y, mo, d)
+                    eff_date, eff_timestamp = _effective_metadata_from_match(m, note)
                 except (ValueError, KeyError, TypeError):
                     continue
                 new_qty = float(m["new_qty"])
@@ -551,7 +589,8 @@ def parse_row_to_alter_events(
                 append_event(
                     "MinLimitOrderVolume",
                     new_qty,
-                    effective_date=eff_date.isoformat(),
+                    effective_date=eff_date,
+                    effective_timestamp=eff_timestamp,
                     codes=codes,
                 )
 

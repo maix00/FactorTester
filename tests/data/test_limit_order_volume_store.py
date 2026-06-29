@@ -223,3 +223,25 @@ def test_parse_option_list_propagates_option_suffix_to_all_items():
         "MaxMarketOrderVolume",
         "MinLimitOrderVolume",
     }
+
+
+def test_parse_contract_row_uses_note_night_session_effective_time():
+    from sources.Guosen.LimitOrderVolume._analysis import parse_row_to_alter_events
+
+    events = parse_row_to_alter_events(
+        exchange_name="大连商品交易所",
+        product_str="纯苯期货2606合约",
+        limit_order="1000手",
+        market_order="1000手",
+        note="自2026年3月9日夜盘起，每次最小开仓下单数量调整为4手",
+        source_url="https://example.test",
+        source_date="2026-06-23",
+    )
+
+    by_field = {event["field"]: event for event in events}
+    assert set(by_field) == {"MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"}
+    for field in ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"):
+        assert by_field[field]["product_code"] == "BZ"
+        assert by_field[field]["contract_codes"] == ["2606"]
+        assert by_field[field]["effective_date"] == "2026-03-10"
+        assert by_field[field]["effective_timestamp"] == "2026-03-09 21:00:00"

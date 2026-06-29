@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field as dataclass_field
-from datetime import date
+from datetime import date, datetime
 from typing import ClassVar
 
 from . import SOURCE_URL
@@ -118,6 +118,7 @@ class AlterEvent:
     old_value: float | None = None
     new_value: float = 1.0
     effective_date: date | None = None
+    effective_timestamp: datetime | None = None
     source_url: str = ""
     source_date: str = ""
     product_code: str = ""

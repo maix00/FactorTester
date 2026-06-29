@@ -30,6 +30,8 @@ from tools.data.field_history import (
     HistoricalFieldFallbackPolicy,
     FieldHistoryProvider,
     TradingDayResolver,
+    historical_fields_frame_for_products,
+    resolve_historical_fields_for_product,
 )
 
 
@@ -163,6 +165,7 @@ def _load_raw_market_data(account, ctx) -> None:
         str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
     )
     account.historical_field_names = tuple(raw.get("historical_field_names", ()))
+    account.historical_field_frames = raw.get("historical_field_frames")
     account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last
                                                 # observed value forward"
@@ -205,6 +208,9 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, 
     if provider is None:
         return {}
     resolver = cast(TradingDayResolver | None, getattr(account, "trading_day_resolver", None))
+    if resolver is None:
+        from tools.data.field_history import MissingTradingDay
+        raise MissingTradingDay("trading_day_resolver is required for MarketDataModule historical fields")
     policy = str(
         getattr(
             account,
@@ -217,19 +223,69 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, 
         return {}
     table = getattr(account, "current_prices_table", None)
     instruments = list(table.columns) if table is not None else []
+    frames = getattr(account, "historical_field_frames", None)
+    if isinstance(frames, dict):
+        return _historical_fields_at_from_frames(frames, instruments, timestamp)
     result: dict[str, dict[str, object]] = {}
     for instrument in instruments:
-        values: dict[str, object] = {}
-        for field_name in field_names:
-            try:
-                values[str(field_name)] = provider.resolve_at(
-                    instrument,
-                    str(field_name),
-                    timestamp,
-                    trading_day_resolver=resolver,
-                    fallback=policy,
-                ).value
-            except HistoricalFieldLookupError:
-                raise
+        try:
+            values = resolve_historical_fields_for_product(
+                instrument,
+                timestamp,
+                provider=provider,
+                trading_day_resolver=resolver,
+                field_names=field_names,
+                fallback=policy,
+            )
+        except HistoricalFieldLookupError:
+            raise
         result[str(instrument)] = values
     return result
+
+
+def historical_field_frames_for_market_data(
+    products: list[Any],
+    index: pd.Index,
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: tuple[object, ...],
+    policy: str,
+) -> dict[str, pd.DataFrame]:
+    return historical_fields_frame_for_products(
+        products,
+        index,
+        provider=provider,
+        trading_day_resolver=trading_day_resolver,
+        field_names=field_names,
+        fallback=policy,
+    )
+
+
+def _historical_fields_at_from_frames(
+    frames: dict[str, pd.DataFrame],
+    instruments: list[Any],
+    timestamp: pd.Timestamp,
+) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {str(instrument): {} for instrument in instruments}
+    for field_name, frame in frames.items():
+        if timestamp not in frame.index:
+            continue
+        row = frame.loc[timestamp]
+        for instrument in instruments:
+            column = _historical_field_frame_column_for(frame, instrument)
+            if column is not None:
+                result[str(instrument)][str(field_name)] = row[column]
+    return result
+
+
+def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> object | None:
+    candidates: list[object] = [instrument, str(instrument)]
+    for attr_name in ("name", "symbol", "code"):
+        attr = getattr(instrument, attr_name, None)
+        if attr is not None:
+            candidates.append(str(attr))
+    for candidate in dict.fromkeys(candidates):
+        if candidate in frame.columns:
+            return candidate
+    return None

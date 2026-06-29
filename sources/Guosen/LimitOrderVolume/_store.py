@@ -32,6 +32,7 @@ EVENT_COLUMNS = [
     "old_value",
     "new_value",
     "effective_date",
+    "effective_timestamp",
     "source_url",
     "source_date",
     "raw_note",
@@ -130,7 +131,9 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
             COUNT(DISTINCT product_label) AS product_label_count,
             COUNT(DISTINCT product_code) AS product_code_count,
             MIN(COALESCE(effective_date, source_date)) AS min_effective_or_source_date,
-            MAX(COALESCE(effective_date, source_date)) AS max_effective_or_source_date
+            MAX(COALESCE(effective_date, source_date)) AS max_effective_or_source_date,
+            MIN(effective_timestamp) AS min_effective_timestamp,
+            MAX(effective_timestamp) AS max_effective_timestamp
         FROM "{EVENTS_TABLE_NAME}"
         GROUP BY exchange, field, instrument_type, product_code_match_status
         """
@@ -148,6 +151,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
             contract_codes,
             new_value,
             effective_date,
+            effective_timestamp,
             source_date,
             raw_note,
             COUNT(*) AS row_count
@@ -155,7 +159,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
         WHERE product_code_match_status != 'matched'
         GROUP BY
             exchange, product_label, product_code, instrument_type, field,
-            product_codes, contract_codes, new_value, effective_date, source_date, raw_note
+            product_codes, contract_codes, new_value, effective_date, effective_timestamp, source_date, raw_note
         ORDER BY row_count DESC, exchange, product_label, field
         """
     )
@@ -172,7 +176,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
             OR new_value IS NULL
             OR field IS NULL
             OR instrument_type NOT IN ('future', 'option', 'unknown')
-        ORDER BY exchange, product_label, field, effective_date, contract_codes
+        ORDER BY exchange, product_label, field, effective_date, effective_timestamp, contract_codes
         """
     )
 

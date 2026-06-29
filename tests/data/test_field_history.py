@@ -93,6 +93,45 @@ def test_field_history_values_for_index_preserves_timestamp_index() -> None:
     assert values.tolist() == [500, 100, 100]
 
 
+def test_field_history_values_for_index_uses_vectorized_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+
+    def _unexpected_resolve_at(*args: object, **kwargs: object) -> None:
+        raise AssertionError("values_for_index must not call resolve_at for each timestamp")
+
+    monkeypatch.setattr(provider, "resolve_at", _unexpected_resolve_at)
+
+    values = provider.values_for_index(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.DatetimeIndex([
+            pd.Timestamp("2026-01-05 20:59:00"),
+            pd.Timestamp("2026-01-05 21:00:00"),
+            pd.Timestamp("2026-01-05 21:01:00"),
+        ]),
+        trading_day_resolver=_resolver(),
+    )
+
+    assert values.tolist() == [500, 100, 100]
+
+
+def test_field_history_tz_aware_market_timestamps_use_local_wall_clock() -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+    ts = pd.Timestamp("2026-01-05 21:01:00", tz="Asia/Shanghai")
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 21:01:00", tz="Asia/Shanghai"): pd.Timestamp("2026-01-06"),
+    })
+
+    resolved = provider.resolve_at(
+        "BZ",
+        "MaxLimitOrderVolume",
+        ts,
+        trading_day_resolver=resolver,
+    )
+
+    assert resolved.value == 100
+
+
 def test_field_history_strict_mode_raises_when_product_or_field_missing() -> None:
     provider = FieldHistoryProvider.from_records(_records())
 
@@ -195,6 +234,26 @@ def test_field_history_contract_specific_rule_overrides_product_level_rule() -> 
     assert product_value.value == 1
     assert contract_value.value == 4
     assert contract_value.contract_code == "2606"
+
+
+def test_field_history_open_ended_baseline_applies_before_source_snapshot() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "1900-01-01",
+            "value": 500,
+            "source_date": "2026-06-23",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("CU", "MaxLimitOrderVolume", "2026-03-10")
+
+    assert resolved.value == 500
+    assert resolved.effective_trading_day == pd.Timestamp("1900-01-01")
 
 
 def test_field_history_product_object_uses_main_contract_for_contract_specific_rule() -> None:

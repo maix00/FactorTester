@@ -16,6 +16,7 @@ if __name__ == "__main__":
     _repo_root = _script_dir.rsplit("/", 2)[0]
     if _repo_root not in sys.path:
         sys.path.insert(0, _repo_root)
+    sys.modules.setdefault("tools.data.field_history", sys.modules[__name__])
 
 import json
 import re
@@ -121,7 +122,7 @@ class TimestampTradingDayResolver:
             series = mapping
         else:
             series = pd.Series(dict(mapping))
-        index = pd.DatetimeIndex(pd.to_datetime(series.index))
+        index = pd.DatetimeIndex([_normalise_timestamp_key(value) for value in series.index])
         values = pd.to_datetime(series.to_numpy(), errors="coerce")
         self._series = pd.Series(values, index=index).dropna().sort_index()
 
@@ -263,22 +264,40 @@ class FieldHistoryProvider:
         instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> pd.Series:
-        values: list[Any] = []
-        timestamps: list[pd.Timestamp] = []
-        for timestamp in index:
-            ts = _normalise_timestamp_key(timestamp)
-            values.append(
-                self.resolve_at(
-                    instrument,
-                    field_name,
-                    ts,
-                    trading_day_resolver=trading_day_resolver,
-                    instrument_type=instrument_type,
-                    fallback=fallback,
-                ).value
+        policy = HistoricalFieldFallbackPolicy(fallback)
+        timestamps = [_normalise_timestamp_key(timestamp) for timestamp in index]
+        if not timestamps:
+            return pd.Series([], index=pd.DatetimeIndex([]), name=field_name, dtype=object)
+        trading_days = [
+            trading_day_resolver.resolve_trading_day(timestamp, _instrument_name(instrument))
+            for timestamp in timestamps
+        ]
+        identities = [
+            _resolve_field_instrument_identity(instrument, trading_day, instrument_type=instrument_type)
+            for trading_day in trading_days
+        ]
+        query_frame = pd.DataFrame({
+            "_row": list(range(len(timestamps))),
+            "timestamp": timestamps,
+            "trading_day": trading_days,
+            "product_code": [identity.product_code for identity in identities],
+            "instrument_type": [identity.instrument_type for identity in identities],
+            "contract_code": [identity.contract_code or "" for identity in identities],
+        })
+        result = pd.Series([None] * len(timestamps), index=pd.DatetimeIndex(timestamps), name=field_name, dtype=object)
+        for key, group in query_frame.groupby(["product_code", "instrument_type"], sort=False):
+            product_code, resolved_type = cast(tuple[Any, Any], key)
+            subset = self._subset(str(product_code), field_name, str(resolved_type))
+            values = _vectorized_values_from_subset(
+                subset,
+                group,
+                policy=policy,
+                raw_instrument=_instrument_name(instrument),
+                field_name=field_name,
             )
-            timestamps.append(ts)
-        return pd.Series(values, index=pd.DatetimeIndex(timestamps), name=field_name)
+            for row_number, value in values.items():
+                result.iloc[int(cast(Any, row_number))] = value
+        return result
 
     def frame_for_index(
         self,
@@ -487,7 +506,7 @@ def _normalise_timestamp_key(value: Any) -> pd.Timestamp:
     if pd.isna(ts):
         raise MissingTradingDay(f"invalid timestamp: {value!r}")
     if ts.tzinfo is not None:
-        ts = ts.tz_convert("UTC").tz_localize(None)
+        ts = ts.tz_localize(None)
     return ts
 
 
@@ -658,6 +677,137 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
     return cast(pd.DataFrame, df[product_level].copy())
 
 
+def _vectorized_values_from_subset(
+    subset: pd.DataFrame,
+    queries: pd.DataFrame,
+    *,
+    policy: HistoricalFieldFallbackPolicy,
+    raw_instrument: str,
+    field_name: str,
+) -> pd.Series:
+    records = subset.copy()
+    records["_scope_codes"] = _series(records, "contract_codes").map(_decode_contract_codes)
+    records["_product_level"] = _series(records, "_scope_codes").map(lambda codes: len(codes) == 0)
+    candidates: list[pd.DataFrame] = []
+    for contract_code, group in queries.groupby("contract_code", sort=False):
+        contract = str(cast(Any, contract_code) or "")
+        if contract:
+            scoped = cast(
+                pd.DataFrame,
+                records[
+                    _series(records, "_product_level")
+                    | _series(records, "_scope_codes").map(lambda codes: contract in codes)
+                ].copy(),
+            )
+            scoped["_scope_priority"] = _series(scoped, "_scope_codes").map(
+                lambda codes: 1 if contract in codes else 0
+            )
+        else:
+            scoped = cast(pd.DataFrame, records[_series(records, "_product_level")].copy())
+            scoped["_scope_priority"] = 0
+        if scoped.empty:
+            continue
+        for priority, priority_records in scoped.groupby("_scope_priority", sort=False):
+            priority_value = int(cast(Any, priority))
+            day_records = cast(
+                pd.DataFrame,
+                priority_records[_series(priority_records, "effective_timestamp").isna()].copy(),
+            )
+            ts_records = cast(
+                pd.DataFrame,
+                priority_records[_series(priority_records, "effective_timestamp").notna()].copy(),
+            )
+            day_candidates = _merge_asof_history_candidate(
+                group,
+                day_records,
+                query_key="trading_day",
+                record_key="effective_trading_day",
+                scope_priority=priority_value,
+            )
+            if day_candidates is not None:
+                candidates.append(day_candidates)
+            ts_candidates = _merge_asof_history_candidate(
+                group,
+                ts_records,
+                query_key="timestamp",
+                record_key="effective_timestamp",
+                scope_priority=priority_value,
+            )
+            if ts_candidates is not None:
+                candidates.append(ts_candidates)
+
+    result = pd.Series(index=queries["_row"], dtype=object)
+    if candidates:
+        all_candidates = pd.concat(candidates, ignore_index=True)
+        all_candidates = all_candidates.sort_values(
+            ["_row", "_scope_priority", "_effective_sort_key"],
+            kind="mergesort",
+        )
+        best = all_candidates.groupby("_row", sort=False).tail(1)
+        for _, row in best.iterrows():
+            row_number = int(cast(Any, row["_row"]))
+            result.loc[row_number] = _decode_value(row["value"], row.get("value_type"))
+
+    missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
+    if missing_rows and policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
+        fallback_row = subset.sort_values(by=["effective_trading_day", "effective_timestamp"]).iloc[-1]
+        fallback_value = _decode_value(fallback_row["value"], fallback_row.get("value_type"))
+        for row in missing_rows:
+            result.loc[row] = fallback_value
+        missing_rows = []
+    if missing_rows:
+        raise MissingHistoricalField(
+            f"no historical value for {raw_instrument}.{field_name} at {len(missing_rows)} timestamp(s)"
+        )
+    return result
+
+
+def _merge_asof_history_candidate(
+    queries: pd.DataFrame,
+    records: pd.DataFrame,
+    *,
+    query_key: str,
+    record_key: str,
+    scope_priority: int,
+) -> pd.DataFrame | None:
+    if queries.empty or records.empty:
+        return None
+    left = cast(pd.DataFrame, queries[["_row", query_key]].copy())
+    left[query_key] = pd.to_datetime(left[query_key], errors="coerce").astype("datetime64[ns]")
+    left = cast(pd.DataFrame, left.sort_values(by=cast(Any, query_key)))
+    right_columns = list(dict.fromkeys([
+        record_key,
+        "value",
+        "value_type",
+        "effective_trading_day",
+        "effective_timestamp",
+    ]))
+    right = cast(pd.DataFrame, records[right_columns].copy())
+    right[record_key] = pd.to_datetime(right[record_key], errors="coerce").astype("datetime64[ns]")
+    right = cast(pd.DataFrame, right.sort_values(by=cast(Any, record_key)))
+    merged = pd.merge_asof(
+        left,
+        right,
+        left_on=query_key,
+        right_on=record_key,
+        direction="backward",
+    )
+    merged = cast(pd.DataFrame, merged[_series(merged, "effective_trading_day").notna()].copy())
+    if merged.empty:
+        return None
+    merged["_scope_priority"] = scope_priority
+    merged["_effective_sort_key"] = _series(merged, "effective_timestamp").fillna(
+        _series(merged, "effective_trading_day")
+    )
+    return cast(pd.DataFrame, merged[[
+        "_row",
+        "_scope_priority",
+        "_effective_sort_key",
+        "value",
+        "value_type",
+    ]])
+
+
 def _series(frame: pd.DataFrame, column: str) -> pd.Series:
     return cast(pd.Series, frame[column])
 
@@ -697,9 +847,203 @@ def _load_provider_from_sqlite_path(db_path: str) -> FieldHistoryProvider:
     return FieldHistoryProvider(frame)
 
 
+def _product_from_name(name: str) -> Any:
+    from sources.LocalCNFutures.CNFutures import CNFutures, CNFuturesContract
+
+    text = str(name or "").strip()
+    if _DOTTED_CONTRACT_PATTERN.match(text) or _PIPE_CONTRACT_PATTERN.match(text):
+        return CNFuturesContract(text)
+    return CNFutures(text)
+
+
+def _parent_product_from_contract_name(name: str) -> Any | None:
+    from sources.LocalCNFutures.CNFutures import CNFutures
+
+    text = str(name or "").strip()
+    contract_match = _DOTTED_CONTRACT_PATTERN.match(text)
+    if contract_match:
+        return CNFutures(f"{contract_match.group('product').upper()}.{contract_match.group('exchange').upper()}")
+    pipe_match = _PIPE_CONTRACT_PATTERN.match(text)
+    if pipe_match:
+        exchange = pipe_match.group("exchange").upper()
+        exchange_short = {
+            "DCE": "DCE",
+            "SHFE": "SHF",
+            "INE": "INE",
+            "CZCE": "CZC",
+            "GFEX": "GFE",
+            "CFFEX": "CFE",
+        }.get(exchange, exchange)
+        return CNFutures(f"{pipe_match.group('product').upper()}.{exchange_short}")
+    return None
+
+
+def _localise_timestamp(value: str, timezone: str) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        raise MissingTradingDay(f"invalid timestamp: {value!r}")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(timezone)
+    return cast(pd.Timestamp, timestamp)
+
+
+def _price_frame_for_market_data_query(product: Any, timestamp: pd.Timestamp) -> pd.DataFrame:
+    query_timestamp = _normalise_timestamp_key(timestamp)
+    try:
+        frame = product.get_price_data(query_timestamp - pd.Timedelta(days=1), query_timestamp + pd.Timedelta(days=1))
+    except Exception:
+        frame = pd.DataFrame()
+    if frame.empty and hasattr(product, "get_parent_product"):
+        try:
+            parent = product.get_parent_product()
+        except Exception:
+            parent = None
+        if parent is not None:
+            frame = parent.get_price_data(query_timestamp - pd.Timedelta(days=1), query_timestamp + pd.Timedelta(days=1))
+    if frame.empty:
+        parent = _parent_product_from_contract_name(_instrument_name(product))
+        if parent is not None:
+            frame = parent.get_price_data(query_timestamp - pd.Timedelta(days=1), query_timestamp + pd.Timedelta(days=1))
+    if frame.empty:
+        raise MissingTradingDay(
+            f"no market data around timestamp={timestamp} for product={_instrument_name(product)}"
+        )
+    return frame
+
+
+def build_trading_day_resolver_from_market_data(frame: pd.DataFrame) -> TimestampTradingDayResolver:
+    """Build the same timestamp -> trading_day resolver MarketDataModule uses."""
+    if isinstance(frame.index, pd.MultiIndex):
+        names = list(frame.index.names)
+        day_level = "DAY1" if "DAY1" in names else ("trading_day" if "trading_day" in names else names[0])
+        timestamp_candidates = [name for name in names if name not in {day_level, None}]
+        timestamp_level = (
+            "MIN1" if "MIN1" in names
+            else ("trade_time" if "trade_time" in names else (timestamp_candidates[-1] if timestamp_candidates else names[-1]))
+        )
+        days = pd.to_datetime(frame.index.get_level_values(day_level), errors="coerce")
+        timestamps = pd.to_datetime(frame.index.get_level_values(timestamp_level), errors="coerce")
+    elif "trading_day" in frame.columns:
+        days = pd.to_datetime(frame["trading_day"], errors="coerce")
+        timestamps = pd.DatetimeIndex(frame.index)
+    else:
+        raise MissingTradingDay(
+            "market-data query requires a trading_day column or MultiIndex level; "
+            "do not infer night-session trading days from calendar dates"
+        )
+    mapping: dict[pd.Timestamp, pd.Timestamp] = {}
+    for ts, day in zip(timestamps, days):
+        if pd.isna(ts) or pd.isna(day):
+            continue
+        timestamp_key = cast(pd.Timestamp, pd.Timestamp(cast(Any, ts)))
+        trading_day_timestamp = cast(pd.Timestamp, pd.Timestamp(cast(Any, day)))
+        trading_day = cast(pd.Timestamp, trading_day_timestamp.normalize())
+        mapping[timestamp_key] = trading_day
+    if not mapping:
+        raise MissingTradingDay("market-data query contains no usable timestamp/trading_day mapping")
+    return TimestampTradingDayResolver(mapping)
+
+
+def resolve_historical_field_values_for_product(
+    product: Any,
+    timestamp: Any,
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: Iterable[object],
+    instrument_type: str | None = "future",
+    fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+) -> dict[str, HistoricalFieldValue]:
+    """Resolve market-rule fields exactly as MarketDataModule consumes them."""
+    ts = _normalise_timestamp_key(timestamp)
+    values: dict[str, HistoricalFieldValue] = {}
+    for field_name in field_names:
+        field = str(field_name)
+        values[field] = provider.resolve_at(
+            product,
+            field,
+            ts,
+            trading_day_resolver=trading_day_resolver,
+            instrument_type=instrument_type,
+            fallback=fallback,
+        )
+    return values
+
+
+def resolve_historical_fields_for_product(
+    product: Any,
+    timestamp: Any,
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: Iterable[object],
+    instrument_type: str | None = "future",
+    fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+) -> dict[str, object]:
+    return {
+        field_name: resolved.value
+        for field_name, resolved in resolve_historical_field_values_for_product(
+            product,
+            timestamp,
+            provider=provider,
+            trading_day_resolver=trading_day_resolver,
+            field_names=field_names,
+            instrument_type=instrument_type,
+            fallback=fallback,
+        ).items()
+    }
+
+
+def historical_fields_frame_for_products(
+    products: Sequence[Any],
+    index: Iterable[Any],
+    *,
+    provider: FieldHistoryProvider,
+    trading_day_resolver: TradingDayResolver,
+    field_names: Iterable[object],
+    instrument_type: str | None = "future",
+    fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+) -> dict[str, pd.DataFrame]:
+    """Vectorized MarketDataModule-style lookup for products and timestamps.
+
+    Returns one DataFrame per field, indexed by the supplied timestamps and
+    columned by Product objects. This is the batch counterpart of
+    ``resolve_historical_fields_for_product`` and uses FieldHistoryProvider's
+    vectorized ``frame_for_index`` path.
+    """
+    timestamps = list(index)
+    return {
+        str(field_name): provider.frame_for_index(
+            products,
+            str(field_name),
+            timestamps,
+            trading_day_resolver=trading_day_resolver,
+            instrument_type=instrument_type,
+            fallback=fallback,
+        )
+        for field_name in field_names
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Small manual query entrypoint for VS Code / terminal debugging."""
+    """Run a MarketDataModule-style historical-field lookup."""
     import argparse
+    import importlib.util
+    from pathlib import Path
+
+    from tools.testers.backtest.engines.native.ledger import AccountState
+    from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+
+    repo_root = Path(__file__).resolve().parents[2]
+    market_data_path = str(repo_root / "tools/testers/backtest/modules/market_data.py")
+    market_data_spec = importlib.util.spec_from_file_location("_field_history_market_data_audit", market_data_path)
+    if market_data_spec is None or market_data_spec.loader is None:
+        raise RuntimeError(f"cannot load MarketDataModule from {market_data_path}")
+    market_data_module = importlib.util.module_from_spec(market_data_spec)
+    market_data_spec.loader.exec_module(market_data_module)
+    MarketDataModule = market_data_module.MarketDataModule
+    current_historical_fields_at = market_data_module.current_historical_fields_at
+    historical_field_frames_for_market_data = market_data_module.historical_field_frames_for_market_data
 
     try:
         from settings import CACHE_DB_PATH
@@ -707,9 +1051,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception:
         default_db_path = "/Users/maxdeux/Documents/GTHT/data/sqlite/unifieddata.sqlite"
 
-    parser = argparse.ArgumentParser(description="Query historical market-rule fields by product/contract and timestamp.")
-    parser.add_argument("instrument", nargs="?", default="BZ2606.DCE", help="Product/contract, e.g. BZ, BZ2606.DCE, ME2607.CZC")
-    parser.add_argument("timestamp", nargs="?", default="2026-06-24 09:01:00", help="Timestamp to query")
+    parser = argparse.ArgumentParser(description="Query historical market-rule fields via Product + market-data trading-day mapping.")
+    parser.add_argument("product", help="Product object name, e.g. BZ.DCE; contract names such as BZ2606.DCE also work")
+    parser.add_argument("timestamp", help="Exchange-local timestamp to query; include timezone when possible")
     parser.add_argument(
         "--fields",
         nargs="+",
@@ -718,36 +1062,73 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--instrument-type", default="future", choices=["future", "option", "unknown"], help="Instrument type")
     parser.add_argument("--db", default=default_db_path, help="SQLite DB path")
-    parser.add_argument(
-        "--calendar-day",
-        action="store_true",
-        default=True,
-        help="Use calendar date as trading day. For real night-session checks, pass a trading-day resolver in code.",
-    )
+    parser.add_argument("--timezone", default="Asia/Shanghai", help="Timezone for timestamps without an explicit offset")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     provider = _load_provider_from_sqlite_path(args.db)
-    resolver = CalendarDateTradingDayResolver()
-    timestamp = pd.Timestamp(args.timestamp)
+    product = _product_from_name(args.product)
+    timestamp = _localise_timestamp(args.timestamp, str(args.timezone))
+    price_frame = _price_frame_for_market_data_query(product, timestamp)
+    resolver = build_trading_day_resolver_from_market_data(price_frame)
+    trading_day = resolver.resolve_trading_day(timestamp, _instrument_name(product))
+    raw_prices = pd.DataFrame({product: [1.0]}, index=pd.DatetimeIndex([_normalise_timestamp_key(timestamp)]))
+    historical_field_frames = historical_field_frames_for_market_data(
+        [product],
+        raw_prices.index,
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=tuple(args.fields),
+        policy=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+    )
+
+    account = AccountState()
+    setattr(account, "raw_market_data", {
+        "raw_prices": raw_prices,
+        "historical_field_provider": provider,
+        "trading_day_resolver": resolver,
+        "historical_field_policy": str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+        "historical_field_names": tuple(args.fields),
+        "historical_field_frames": historical_field_frames,
+    })
+    setup_ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    MarketDataModule.load_raw_market_data.compute(account, setup_ctx)
+    MarketDataModule.causal_valuation.compute(account, setup_ctx)
+
+    event_ctx = FlowContext(timestamp=_normalise_timestamp_key(timestamp), event_queue=EventQueue())
+    MarketDataModule.lookup_historical_fields_on_signal.compute(account, event_ctx)
+    module_values = current_historical_fields_at(account, _normalise_timestamp_key(timestamp))
+    product_values = module_values.get(str(product), {})
 
     print(f"db={args.db}")
-    print(f"instrument={args.instrument} timestamp={timestamp} instrument_type={args.instrument_type}")
+    print(
+        f"product={_instrument_name(product)} timestamp={timestamp} "
+        f"trading_day={trading_day.date()} instrument_type={args.instrument_type}"
+    )
+    resolved_values = resolve_historical_field_values_for_product(
+        product,
+        timestamp,
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=args.fields,
+        instrument_type=args.instrument_type,
+    )
     for field_name in args.fields:
-        resolved = provider.resolve_at(
-            args.instrument,
-            field_name,
-            timestamp,
-            trading_day_resolver=resolver,
-            instrument_type=args.instrument_type,
-        )
+        resolved = resolved_values[str(field_name)]
+        module_value = product_values.get(str(field_name))
         print(
-            f"{field_name}: value={resolved.value} "
+            f"{field_name}: value={module_value} "
             f"product={resolved.instrument} contract={resolved.contract_code or '-'} "
             f"effective_day={resolved.effective_trading_day.date()} "
-            f"provider={resolved.provider}/{resolved.source_key}"
+            f"effective_timestamp={resolved.effective_timestamp or '-'} "
+            f"provider={resolved.provider}/{resolved.source_key} via=MarketDataModule"
         )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Manual audit case:
+    # Product query goes through Product -> market-data trading_day mapping ->
+    # FieldHistoryProvider, matching the MarketDataModule consumption shape.
+    AUDIT_PRODUCT = "BZ.DCE"
+    AUDIT_TIMESTAMP = "2026-03-10 09:01:00+08:00"
+    raise SystemExit(main(None if len(sys.argv) > 1 else [AUDIT_PRODUCT, AUDIT_TIMESTAMP]))
