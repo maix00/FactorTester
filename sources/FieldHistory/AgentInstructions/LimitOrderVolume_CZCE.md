@@ -70,3 +70,39 @@ The reposted original says:
   `2609`.
 
 Each product/contract pair must be ingested as one event.
+
+## Audited Product-Level Examples
+
+Guosen's current snapshot can mention old CZCE adjustments as a single latest
+state. When the original notice says only `<品种>期货合约` and does not list a
+specific contract range, store the event at product level with
+`contract_codes = []`.
+
+- Red dates (`CJ`):
+  - `郑商所发〔2021〕108号`: accessible repost
+    `https://www.founderfu.com/fzzqqh_2019/details_247_41617.html`.
+    Effective from `2021-12-16`. Product-level fields:
+    `MinLimitOrderVolume = 4`, `MaxLimitOrderVolume = 100`,
+    `MaxMarketOrderVolume = 20`.
+  - `郑商所发〔2022〕98号`: accessible repost
+    `https://www.bhfcc.com/customer-center-ques-details.html?id=8761`.
+    Effective from `2022-12-15`. Product-level
+    `MinLimitOrderVolume = 2`, plus a contract-level exception
+    `CJ2301 MinLimitOrderVolume = 4`.
+  - `郑商所发〔2023〕53号`: accessible repost
+    `https://www.hsqh.net/col49/1389`. Effective from `2023-07-12`.
+    Product-level `MinLimitOrderVolume = 1`.
+- Thermal coal (`ZC`):
+  - `郑商所发〔2022〕8号`: accessible repost
+    `https://futures.pingan.com/pinganqihuogonggao/1645407031701.shtml`.
+    Effective from the `2022-02-21` night session, so
+    `effective_trading_day = 2022-02-22` and
+    `effective_timestamp = 2022-02-21 21:00:00`. Product-level fields:
+    `MinLimitOrderVolume = 2`, `MaxLimitOrderVolume = 50`,
+    `MaxMarketOrderVolume = 10`.
+  - `郑商函〔2022〕15号`: accessible repost
+    `https://www.xdsfutures.com.cn/company-news-details.aspx?category=18&id=665`.
+    Effective from the `2022-03-08` night session, so
+    `effective_trading_day = 2022-03-09` and
+    `effective_timestamp = 2022-03-08 21:00:00`. Product-level
+    `MinLimitOrderVolume = 4`.
