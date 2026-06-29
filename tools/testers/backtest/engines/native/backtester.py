@@ -1,0 +1,79 @@
+"""run_backtest_task -- the "backtester" FactorTester.dispatch("backtest",
+...) calls. Given an AccountState already built by
+strategy_config_builder.apply_strategy_configs, runs the whole engine and
+shapes the result into the `execution` dict that
+server/modules/single_factor_test/group.py's `_serialize_event_execution`/
+`_event_group_snapshot`/`_event_group_detail`/`_event_group_ranking_detail`
+already know how to read -- that contract predates this function and is
+not changed here.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Callable
+
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
+from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
+from tools.testers.backtest.modules.group_membership import target_trace_for
+from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+
+if TYPE_CHECKING:
+    from tools.factors.factor_tester_state import FactorTesterState
+    from tools.testers.backtest.engines.native.ledger import AccountState
+
+
+def _build_registry() -> FlowRegistry:
+    registry = FlowRegistry()
+    for cls in _ALL_MODULE_CLASSES:
+        for flow in getattr(cls, "flows", ()):
+            registry.register_flow(flow)
+        for override in getattr(cls, "overrides", ()):
+            registry.register_override(override)
+    return registry
+
+
+def run_backtest_task(
+    state: "FactorTesterState",
+    *,
+    account: "AccountState",
+    group_owner: list[dict[str, Any]],
+    settings_by_strategy: dict[str, dict[str, Any]],
+    run_id: str,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> dict[str, Any]:
+    """Fixed task: runs the engine against an already-built AccountState,
+    stores it on `state.account` for later snapshot/detail requests, and
+    returns the `execution` dict shape group.py already consumes."""
+    registry = _build_registry()
+    queue = EventQueue()
+    run(account, queue, registry.resolve(), progress=progress)
+
+    by_alias = {strategy.alias: strategy for strategy in account.strategy_configs}
+    portfolios: dict[str, Any] = {}
+    target_trace: dict[str, Any] = {}
+    for group_id, strategy in by_alias.items():
+        curve = equity_curve_for(account, strategy)
+        portfolios[group_id] = {
+            "equity_curve": {ts.isoformat(): float(value) for ts, value in curve.items()},
+            "position_curve": position_curve_for(account, strategy),
+            "execution_trace": {},  # TODO(issue-114): per-order delta/fill detail, not recorded yet
+            "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,
+            "market_rule_approximation_count": 0,
+        }
+        target_trace[group_id] = target_trace_for(account, strategy)
+
+    state.account = account
+    return {
+        "run_id": run_id,
+        "engine_result": {
+            "engine": "native",
+            "portfolios": portfolios,
+            "target_trace": target_trace,
+            "strategy_diagnostics": {},
+            "event_count": queue.pending_count(),
+        },
+        "group_owner": group_owner,
+        "settings_by_strategy": settings_by_strategy,
+        "payload": {"run_id": run_id, "instruments": [], "market_rules": {}},
+        "signal_kind": "native",
+    }

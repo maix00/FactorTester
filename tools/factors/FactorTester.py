@@ -27,6 +27,7 @@ from tools.data.types import UniqueNameObject
 
 from tools.factors import factor_tester_tasks as _tasks
 from tools.factors.factor_tester_state import FactorTesterState
+from tools.testers.backtest.engines.native.backtester import run_backtest_task
 
 if TYPE_CHECKING:
     from tools.data.account_manage import User
@@ -96,6 +97,7 @@ class FactorTester(UniqueNameObject):
         "sift_product_by_empty_data": _tasks.sift_product_by_empty_data,
         "sift_product_by_volumes": _tasks.sift_product_by_volumes,
         "ic_stats": _tasks.ic_stats,
+        "backtest": run_backtest_task,
         "delete": _tasks.delete,
     }
 
