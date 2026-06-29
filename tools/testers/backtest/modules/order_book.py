@@ -1,0 +1,80 @@
+"""OrderBookModule — turns target_weights into deltas (size_order) then
+into concrete Order objects (construct_orders). Owns the "how much should
+we trade" decision; LedgerModule owns account state, OrderLifecycleModule
+owns "did this Order's standoff chain accept/reject it" — three distinct
+concerns, three distinct modules."""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+from tools.testers.backtest.engines.native.events import EventKind
+from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.order import Order
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
+
+# Constructed by hand (not imported from group_membership.py) to avoid a
+# module-level circular import: group_membership.py needs OrderBookModule
+# (it schedules order execution after construct_orders), so OrderBookModule
+# can't import group_membership.py back. FieldRef equality/hash is by
+# (name, owner) tuple, so this is the exact same FieldRef as
+# GroupMembershipModule.target_weights without needing the class itself.
+_TARGET_WEIGHTS_REF: FieldRef[Any] = FieldRef("target_weights", owner="GroupMembershipModule")
+
+
+class OrderBookModule(ExecutableModule):
+    key: ClassVar[str] = "order_book"
+    label: ClassVar[str] = "订单"
+
+    deltas: ClassVar[FieldRef[Any]] = FieldRef("deltas")    # dict[Product, float], ctx-scoped, not persisted in Ledger
+    orders: ClassVar[FieldRef[Any]] = FieldRef("orders")    # list[Order], ctx-scoped
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "deltas": FieldDefinition(public=False),
+        "orders": FieldDefinition(public=False),
+    }
+
+    size_order: ClassVar[Flow] = Flow(
+        "size_order",
+        inputs=(_TARGET_WEIGHTS_REF, LedgerModule.equity,
+                 MarketDataModule.current_prices, LedgerModule.positions),
+        outputs=(deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        order=20, after=(LedgerModule.equity_on_signal,),
+        compute=lambda account, ctx: _basic_size_order(account, ctx),
+    )
+    construct_orders: ClassVar[Flow] = Flow(
+        "construct_orders", inputs=(deltas,), outputs=(orders,),
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        order=30, after=(size_order,),
+        compute=lambda account, ctx: _construct_orders(account, ctx),
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (size_order, construct_orders)
+
+
+def _basic_size_order(account, ctx) -> None:
+    prices = ctx.get(MarketDataModule.current_prices)
+    for strategy in ctx.active_strategies:
+        ledger = account.ledgers[strategy]
+        equity = ctx.get_for(LedgerModule.equity, strategy)
+        target_weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
+        positions = ledger.get(LedgerModule.positions, {})
+        deltas = {
+            product: target_weights[product] * equity / prices[product] - getattr(
+                positions.get(product), "quantity", 0.0)
+            for product in target_weights
+        }
+        ctx.set_for(OrderBookModule.deltas, strategy, deltas)
+
+
+def _construct_orders(account, ctx) -> None:
+    for strategy in ctx.active_strategies:
+        deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
+        orders = [
+            Order(instrument=product, timestamp=ctx.timestamp, quantity=quantity,
+                  intent_quantity=quantity, strategy=strategy)
+            for product, quantity in deltas.items() if quantity != 0
+        ]
+        ctx.set_for(OrderBookModule.orders, strategy, orders)
