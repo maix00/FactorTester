@@ -11,6 +11,7 @@ must be named `<FieldGroup>_<DataSource>.md`.
 Current instruction files:
 
 - `AgentInstructions/LimitOrderVolume_DCE.md`
+- `AgentInstructions/LimitOrderVolume_Guosen.md`
 
 ## Safety Model
 
