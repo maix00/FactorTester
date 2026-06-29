@@ -24,6 +24,7 @@ EVENT_COLUMNS = [
     "exchange",
     "product_label",
     "product_code",
+    "product_codes",
     "product_code_match_status",
     "instrument_type",
     "contract_codes",
@@ -86,13 +87,14 @@ def _normalise_events(events: list[dict[str, Any]]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for event in events:
         row = {column: event.get(column) for column in EVENT_COLUMNS}
-        contract_codes = row.get("contract_codes")
-        if isinstance(contract_codes, str):
-            row["contract_codes"] = contract_codes
-        elif contract_codes is None:
-            row["contract_codes"] = "[]"
-        else:
-            row["contract_codes"] = json.dumps(list(contract_codes), ensure_ascii=False)
+        for list_column in ("product_codes", "contract_codes"):
+            value = row.get(list_column)
+            if isinstance(value, str):
+                row[list_column] = value
+            elif value is None:
+                row[list_column] = "[]"
+            else:
+                row[list_column] = json.dumps(list(value), ensure_ascii=False)
         row["instrument_type"] = row.get("instrument_type") or "future"
         row["product_code_match_status"] = row.get("product_code_match_status") or ""
         rows.append(row)
@@ -140,6 +142,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
             exchange,
             product_label,
             product_code,
+            product_codes,
             instrument_type,
             field,
             contract_codes,
@@ -152,7 +155,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
         WHERE product_code_match_status != 'matched'
         GROUP BY
             exchange, product_label, product_code, instrument_type, field,
-            contract_codes, new_value, effective_date, source_date, raw_note
+            product_codes, contract_codes, new_value, effective_date, source_date, raw_note
         ORDER BY row_count DESC, exchange, product_label, field
         """
     )
@@ -165,7 +168,7 @@ def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
             product_label IS NULL
             OR product_code IS NULL
             OR lower(product_label) IN ('', 'nan', 'none')
-            OR lower(product_code) IN ('', 'nan', 'none')
+            OR (lower(product_code) IN ('nan', 'none') AND json_array_length(product_codes) = 0)
             OR new_value IS NULL
             OR field IS NULL
             OR instrument_type NOT IN ('future', 'option', 'unknown')

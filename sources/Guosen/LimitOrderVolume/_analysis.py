@@ -70,6 +70,8 @@ INSTRUMENT_TYPE_UNKNOWN = "unknown"
 MATCH_STATUS_MATCHED = "matched"
 MATCH_STATUS_UNMATCHED = "unmatched"
 
+_ALL_FUTURES_PRODUCT_LABEL = "所有期货品种"
+
 
 # ---------------------------------------------------------------------------
 # 品种中文名 → 品种代码（product_code）的映射
@@ -115,39 +117,58 @@ def lookup_product_identity(product_label: str) -> dict[str, str]:
     }
 
 
-def event_to_historical_field_record(event: dict) -> dict | None:
-    """把 Guosen 事件归一化为公共 historical_field_values 记录。"""
-    product_code = str(event.get("product_code") or "").strip()
-    if not product_code:
-        return None
+def _normalise_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def event_to_historical_field_records(event: dict) -> list[dict]:
+    """把 Guosen 事件归一化为公共 historical_field_values 记录。
+
+    页面里的「所有期货品种」是交易所级聚合语义。事件表保留原行，同时
+    historical_field_values 按解析出的 product_codes 展开，供 MarketDataModule
+    以具体品种代码查询。
+    """
+    product_codes = _normalise_string_list(event.get("product_codes"))
+    if not product_codes:
+        product_code = str(event.get("product_code") or "").strip()
+        if product_code:
+            product_codes = [product_code]
+    if not product_codes:
+        return []
     value = event.get("new_value")
     if value is None:
-        return None
+        return []
     effective_day = event.get("effective_date") or event.get("source_date")
     if not effective_day:
-        return None
-    return {
-        "provider": "Guosen",
-        "source_key": "Guosen/LimitOrderVolume",
-        "instrument": product_code,
-        "instrument_label": event.get("product_label") or "",
-        "instrument_type": event.get("instrument_type") or "future",
-        "field_name": event.get("field") or "",
-        "effective_trading_day": effective_day,
-        "value": value,
-        "contract_codes": event.get("contract_codes") or [],
-        "source_url": event.get("source_url") or "",
-        "source_date": event.get("source_date") or "",
-        "raw_note": event.get("raw_note") or "",
-    }
-
+        return []
+    records = []
+    for product_code in product_codes:
+        records.append({
+            "provider": "Guosen",
+            "source_key": "Guosen/LimitOrderVolume",
+            "instrument": product_code,
+            "instrument_label": event.get("product_label") or "",
+            "instrument_type": event.get("instrument_type") or "future",
+            "field_name": event.get("field") or "",
+            "effective_trading_day": effective_day,
+            "value": value,
+            "contract_codes": event.get("contract_codes") or [],
+            "source_url": event.get("source_url") or "",
+            "source_date": event.get("source_date") or "",
+            "raw_note": event.get("raw_note") or "",
+        })
+    return records
 
 def events_to_historical_field_records(events: list[dict]) -> list[dict]:
     records: list[dict] = []
     for event in events:
-        record = event_to_historical_field_record(event)
-        if record is not None:
-            records.append(record)
+        records.extend(event_to_historical_field_records(event))
     return records
 
 
@@ -165,6 +186,40 @@ def _load_exchange_products() -> dict[str, list[str]]:
         return _EXCHANGE_PRODUCTS
     _EXCHANGE_PRODUCTS = CNFutures.products_by_exchange()
     return _EXCHANGE_PRODUCTS
+
+
+_EXCHANGE_PRODUCT_CODES: dict[str, list[str]] = {}
+
+
+def _load_exchange_product_codes(exchange_code: str) -> list[str]:
+    """返回某交易所全部期货品种代码，用于解析「所有期货品种」。"""
+    if exchange_code in _EXCHANGE_PRODUCT_CODES:
+        return _EXCHANGE_PRODUCT_CODES[exchange_code]
+    codes: list[str] = []
+    seen: set[str] = set()
+    for product_label in _load_exchange_products().get(exchange_code, []):
+        identity = lookup_product_identity(product_label)
+        if identity["product_code_match_status"] != MATCH_STATUS_MATCHED:
+            continue
+        code = identity["product_code"]
+        if code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    _EXCHANGE_PRODUCT_CODES[exchange_code] = codes
+    return codes
+
+
+def _product_identity_for_event(clean_product: str, exchange_code: str) -> tuple[str, str, list[str]]:
+    if clean_product == _ALL_FUTURES_PRODUCT_LABEL:
+        product_codes = _load_exchange_product_codes(exchange_code)
+        status = MATCH_STATUS_MATCHED if product_codes else MATCH_STATUS_UNMATCHED
+        return "", status, product_codes
+    identity = lookup_product_identity(clean_product)
+    product_code = identity["product_code"]
+    match_status = identity["product_code_match_status"]
+    product_codes = [product_code] if match_status == MATCH_STATUS_MATCHED else []
+    return product_code, match_status, product_codes
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +290,16 @@ def parse_row_to_baseline(
         product_label = product_label.strip()
         if not product_label:
             continue
-        identity = lookup_product_identity(product_label)
+        product_code, match_status, product_codes = _product_identity_for_event(
+            product_label,
+            exchange_code,
+        )
         results.append({
             "exchange": exchange_code,
             "product_label": product_label,
-            "product_code": identity["product_code"],
-            "product_code_match_status": identity["product_code_match_status"],
+            "product_code": product_code,
+            "product_codes": product_codes,
+            "product_code_match_status": match_status,
             "instrument_type": detect_instrument_type(product_label),
             "contract_codes": [],
             "field": "MaxLimitOrderVolume",
@@ -336,9 +395,10 @@ def parse_row_to_alter_events(
         if suffix_match:
             clean_product = suffix_match.group(1).strip()
 
-        identity = lookup_product_identity(clean_product)
-        product_code = identity["product_code"]
-        product_code_match_status = identity["product_code_match_status"]
+        product_code, product_code_match_status, product_codes = _product_identity_for_event(
+            clean_product,
+            exchange_code,
+        )
 
         # 提取历史调整事件（双正则，优先 primary）
         alter_events_from_note: list[re.Match] = []
@@ -378,6 +438,7 @@ def parse_row_to_alter_events(
                     "exchange": exchange_code,
                     "product_label": clean_product,
                     "product_code": product_code,
+                    "product_codes": product_codes,
                     "product_code_match_status": product_code_match_status,
                     "instrument_type": instrument_type,
                     "contract_codes": codes,
@@ -396,6 +457,7 @@ def parse_row_to_alter_events(
                 "exchange": exchange_code,
                 "product_label": clean_product,
                 "product_code": product_code,
+                "product_codes": product_codes,
                 "product_code_match_status": product_code_match_status,
                 "instrument_type": instrument_type,
                 "contract_codes": contract_codes,
@@ -414,6 +476,7 @@ def parse_row_to_alter_events(
                     "exchange": exchange_code,
                     "product_label": clean_product,
                     "product_code": product_code,
+                    "product_codes": product_codes,
                     "product_code_match_status": product_code_match_status,
                     "instrument_type": instrument_type,
                     "contract_codes": contract_codes,

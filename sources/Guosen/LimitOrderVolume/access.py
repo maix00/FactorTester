@@ -48,6 +48,18 @@ def _parse_effective_date(value: Any) -> date | None:
     return date.fromisoformat(text[:10])
 
 
+def _float_or_none(value: Any) -> float | None:
+    if value is None or bool(pd.isna(value)):
+        return None
+    return float(value)
+
+
+def _float_or_zero(value: Any) -> float:
+    if value is None or bool(pd.isna(value)):
+        return 0.0
+    return float(value)
+
+
 def _events_from_frame(df: pd.DataFrame) -> list[AlterEvent]:
     events: list[AlterEvent] = []
     for _, row in df.iterrows():
@@ -56,12 +68,13 @@ def _events_from_frame(df: pd.DataFrame) -> list[AlterEvent]:
                 exchange=str(row.get("exchange") or ""),
                 product_label=str(row.get("product_label") or ""),
                 product_code=str(row.get("product_code") or ""),
+                product_codes=_parse_contract_codes(row.get("product_codes")),
                 product_code_match_status=str(row.get("product_code_match_status") or ""),
                 instrument_type=str(row.get("instrument_type") or "future"),
                 contract_codes=_parse_contract_codes(row.get("contract_codes")),
                 field=str(row.get("field") or "MinLimitOrderVolume"),
-                old_value=None if pd.isna(row.get("old_value")) else float(row.get("old_value")),
-                new_value=0.0 if pd.isna(row.get("new_value")) else float(row.get("new_value")),
+                old_value=_float_or_none(row.get("old_value")),
+                new_value=_float_or_zero(row.get("new_value")),
                 effective_date=_parse_effective_date(row.get("effective_date")),
                 source_url=str(row.get("source_url") or ""),
                 source_date=str(row.get("source_date") or ""),
@@ -101,8 +114,15 @@ def _ensure_loaded() -> None:
     for ev in _EVENTS:
         _EVENTS_BY_EXCHANGE.setdefault(ev.exchange, []).append(ev)
         _EVENTS_BY_PRODUCT.setdefault(ev.product_label, []).append(ev)
+        indexed_codes: set[str] = set()
         if ev.product_code:
+            indexed_codes.add(ev.product_code)
             _EVENTS_BY_PRODUCT.setdefault(ev.product_code, []).append(ev)
+        for product_code in ev.product_codes:
+            if product_code in indexed_codes:
+                continue
+            indexed_codes.add(product_code)
+            _EVENTS_BY_PRODUCT.setdefault(product_code, []).append(ev)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +186,8 @@ def to_dataframe(events: list[AlterEvent] | None = None) -> pd.DataFrame:
     if not source:
         return pd.DataFrame(
             columns=[
-                "exchange", "product_label", "product_code", "instrument_type", "contract_codes",
+                "exchange", "product_label", "product_code", "product_codes",
+                "instrument_type", "contract_codes",
                 "field", "old_value", "new_value", "effective_date",
                 "is_product_level", "source_url", "source_date", "raw_note",
             ]
@@ -177,6 +198,7 @@ def to_dataframe(events: list[AlterEvent] | None = None) -> pd.DataFrame:
             "exchange": ev.exchange,
             "product_label": ev.product_label,
             "product_code": ev.product_code,
+            "product_codes": ",".join(ev.product_codes),
             "product_code_match_status": ev.product_code_match_status,
             "instrument_type": ev.instrument_type,
             "contract_codes": ev.contract_range,

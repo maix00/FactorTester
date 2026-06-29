@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from datetime import date
 from typing import ClassVar
 
@@ -113,7 +113,7 @@ class AlterEvent:
 
     exchange: str
     product_label: str
-    contract_codes: tuple[str, ...] = field(default_factory=tuple)
+    contract_codes: tuple[str, ...] = dataclass_field(default_factory=tuple)
     field: str = "MinLimitOrderVolume"
     old_value: float | None = None
     new_value: float = 1.0
@@ -121,6 +121,7 @@ class AlterEvent:
     source_url: str = ""
     source_date: str = ""
     product_code: str = ""
+    product_codes: tuple[str, ...] = dataclass_field(default_factory=tuple)
     product_code_match_status: str = ""
     instrument_type: str = "future"
     raw_note: str = ""

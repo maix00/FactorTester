@@ -157,6 +157,7 @@ def test_event_store_roundtrip_preserves_product_identity(monkeypatch, tmp_path:
             "exchange": "DCE",
             "product_label": "纯苯",
             "product_code": "BZ",
+            "product_codes": ["BZ"],
             "product_code_match_status": "matched",
             "instrument_type": "future",
             "contract_codes": ["2606", "2607"],
@@ -175,6 +176,7 @@ def test_event_store_roundtrip_preserves_product_identity(monkeypatch, tmp_path:
     assert latest is not None
     assert latest.loc[0, "product_label"] == "纯苯"
     assert latest.loc[0, "product_code"] == "BZ"
+    assert latest.loc[0, "product_codes"] == '["BZ"]'
     assert latest.loc[0, "product_code_match_status"] == "matched"
     assert latest.loc[0, "instrument_type"] == "future"
     assert latest.loc[0, "contract_codes"] == '["2606", "2607"]'
