@@ -145,7 +145,7 @@ class TimestampTradingDayResolver:
     - Mapping: {timestamp: trading_day}
     """
 
-    def __init__(self, mapping: pd.DataFrame | pd.Series | Mapping[Any, Any]) -> None:
+    def __init__(self, mapping: pd.DataFrame | pd.Series | Mapping[Any, Any], *, allow_asof: bool = True) -> None:
         if isinstance(mapping, pd.DataFrame):
             if "trading_day" not in mapping.columns:
                 raise ValueError("timestamp/trading_day DataFrame must contain 'trading_day'")
@@ -157,12 +157,19 @@ class TimestampTradingDayResolver:
         index = pd.DatetimeIndex([_normalise_timestamp_key(value) for value in series.index])
         values = pd.to_datetime(series.to_numpy(), errors="coerce")
         self._series = pd.Series(values, index=index).dropna().sort_index()
+        self._allow_asof = allow_asof
 
     def resolve_trading_day(self, timestamp: Any, instrument: str | None = None) -> pd.Timestamp:
         ts = _normalise_timestamp_key(timestamp)
         try:
             day = self._series.loc[ts]
         except KeyError as exc:
+            if self._allow_asof and not self._series.empty:
+                pos = self._series.index.searchsorted(ts, side="right") - 1
+                if pos < 0:
+                    pos = self._series.index.searchsorted(ts, side="left")
+                if 0 <= pos < len(self._series):
+                    return _normalise_trading_day(self._series.iloc[int(pos)])
             raise MissingTradingDay(
                 f"no trading_day mapping for timestamp={ts.isoformat()}"
                 + (f", instrument={instrument}" if instrument else "")
@@ -1210,15 +1217,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Field names to query",
     )
     parser.add_argument("--instrument-type", default="future", choices=["future", "option", "unknown"], help="Instrument type")
-    parser.add_argument("--db", default=default_db_path, help="SQLite DB path")
+    parser.add_argument("--db", default="", help="SQLite DB path; omitted uses FieldHistory + OpenCTP latest market-rule provider")
     parser.add_argument("--timezone", default="Asia/Shanghai", help="Timezone for timestamps without an explicit offset")
+    parser.add_argument(
+        "--trading-day",
+        default="",
+        help=(
+            "Explicit trading day for manual audits at non-trading timestamps. "
+            "When omitted, the query uses the same market-data timestamp mapping as MarketDataModule."
+        ),
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    provider = _load_provider_from_sqlite_path(args.db)
+    provider = _load_provider_from_sqlite_path(args.db) if args.db else load_market_rule_field_provider()
     product = _product_from_name(args.product)
     timestamp = _localise_timestamp(args.timestamp, str(args.timezone))
-    price_frame = _price_frame_for_market_data_query(product, timestamp)
-    resolver = build_trading_day_resolver_from_market_data(price_frame)
+    if args.trading_day:
+        resolver = TimestampTradingDayResolver({_normalise_timestamp_key(timestamp): args.trading_day})
+        price_frame = pd.DataFrame({product: [1.0]}, index=pd.DatetimeIndex([_normalise_timestamp_key(timestamp)]))
+    else:
+        price_frame = _price_frame_for_market_data_query(product, timestamp)
+        resolver = build_trading_day_resolver_from_market_data(price_frame)
     trading_day = resolver.resolve_trading_day(timestamp, _instrument_name(product))
     raw_prices = pd.DataFrame({product: [1.0]}, index=pd.DatetimeIndex([_normalise_timestamp_key(timestamp)]))
     historical_field_frames = historical_field_frames_for_market_data(
