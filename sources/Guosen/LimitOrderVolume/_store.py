@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 TABLE_NAME = "guosen_limit_order_volume"
 EVENTS_TABLE_NAME = "guosen_limit_order_events"
+AUDIT_SUMMARY_VIEW = "guosen_limit_order_events_audit_summary"
+AUDIT_UNMATCHED_VIEW = "guosen_limit_order_events_audit_unmatched"
+AUDIT_SUSPICIOUS_VIEW = "guosen_limit_order_events_audit_suspicious"
 
 EVENT_COLUMNS = [
     "exchange",
@@ -103,8 +106,72 @@ def save_events(events: list[dict[str, Any]]) -> str:
     df = _normalise_events(events)
     with hub.connect_store("openctp") as conn:
         df.to_sql(EVENTS_TABLE_NAME, conn, if_exists="replace", index=False)
+        ensure_event_audit_views(conn)
     logger.info("已写入本地 SQLite 事件表: %s (%d 行)", path, len(df))
     return path
+
+
+def ensure_event_audit_views(conn: sqlite3.Connection) -> None:
+    """创建固定审计视图，方便人工检查 Guosen 清洗质量。"""
+    conn.execute(f'DROP VIEW IF EXISTS "{AUDIT_SUMMARY_VIEW}"')
+    conn.execute(f'DROP VIEW IF EXISTS "{AUDIT_UNMATCHED_VIEW}"')
+    conn.execute(f'DROP VIEW IF EXISTS "{AUDIT_SUSPICIOUS_VIEW}"')
+    conn.execute(
+        f"""
+        CREATE VIEW "{AUDIT_SUMMARY_VIEW}" AS
+        SELECT
+            exchange,
+            field,
+            instrument_type,
+            product_code_match_status,
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT product_label) AS product_label_count,
+            COUNT(DISTINCT product_code) AS product_code_count,
+            MIN(COALESCE(effective_date, source_date)) AS min_effective_or_source_date,
+            MAX(COALESCE(effective_date, source_date)) AS max_effective_or_source_date
+        FROM "{EVENTS_TABLE_NAME}"
+        GROUP BY exchange, field, instrument_type, product_code_match_status
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE VIEW "{AUDIT_UNMATCHED_VIEW}" AS
+        SELECT
+            exchange,
+            product_label,
+            product_code,
+            instrument_type,
+            field,
+            contract_codes,
+            new_value,
+            effective_date,
+            source_date,
+            raw_note,
+            COUNT(*) AS row_count
+        FROM "{EVENTS_TABLE_NAME}"
+        WHERE product_code_match_status != 'matched'
+        GROUP BY
+            exchange, product_label, product_code, instrument_type, field,
+            contract_codes, new_value, effective_date, source_date, raw_note
+        ORDER BY row_count DESC, exchange, product_label, field
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE VIEW "{AUDIT_SUSPICIOUS_VIEW}" AS
+        SELECT *
+        FROM "{EVENTS_TABLE_NAME}"
+        WHERE
+            product_label IS NULL
+            OR product_code IS NULL
+            OR lower(product_label) IN ('', 'nan', 'none')
+            OR lower(product_code) IN ('', 'nan', 'none')
+            OR new_value IS NULL
+            OR field IS NULL
+            OR instrument_type NOT IN ('future', 'option', 'unknown')
+        ORDER BY exchange, product_label, field, effective_date, contract_codes
+        """
+    )
 
 
 def load_latest_events() -> pd.DataFrame | None:
