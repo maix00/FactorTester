@@ -38,6 +38,16 @@ FIELD_HISTORY_COLUMNS = [
     "raw_note",
 ]
 
+FIELD_HISTORY_PRIMARY_KEY = [
+    "provider",
+    "source_key",
+    "instrument",
+    "field_name",
+    "effective_trading_day",
+    "effective_timestamp",
+    "contract_codes",
+]
+
 
 class HistoricalFieldFallbackPolicy(str, Enum):
     STRICT_HISTORICAL = "strict_historical"
@@ -382,6 +392,7 @@ def _normalise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
     df["value"] = value_pairs.map(lambda item: item[0])
     df["value_type"] = _series(df, "value_type").fillna(value_pairs.map(lambda item: item[1]))
     df["contract_codes"] = _series(df, "contract_codes").map(_encode_contract_codes)
+    df = df.drop_duplicates(subset=FIELD_HISTORY_PRIMARY_KEY, keep="last")
     return df
 
 

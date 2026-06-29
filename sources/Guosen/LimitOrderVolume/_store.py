@@ -169,9 +169,15 @@ def sync_sqlite_store(
     from tools.data.field_history import save_historical_field_records
 
     from ._analysis import events_to_historical_field_records, parse_events_from_df
-    from ._source import fetch_table
 
-    df = fetch_table(url=url, source_url=source_url, source_date=source_date)
+    if url is None and source_url is None:
+        from . import fetch_table as package_fetch_table
+
+        df = package_fetch_table()
+    else:
+        from ._source import fetch_table
+
+        df = fetch_table(url=url, source_url=source_url, source_date=source_date)
     save_table(df)
     events = parse_events_from_df(df)
     save_events(events)
