@@ -14,8 +14,8 @@ if str(ROOT) not in sys.path:
 def _load_module(module_name: str, relative_path: str):
     path = ROOT / relative_path
     spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
@@ -140,3 +140,41 @@ def test_store_roundtrip_reads_latest_source_metadata(monkeypatch, tmp_path: Pat
 
     metadata = _store.load_latest_source_metadata()
     assert metadata == ("https://www.guosenqh.com.cn/main/a/20260519/12800.shtml", "2026-05-19")
+
+
+def test_event_store_roundtrip_preserves_product_identity(monkeypatch, tmp_path: Path):
+    from tools.data.hub import SQLiteStore
+
+    db_path = tmp_path / "localdata" / "unifieddata.sqlite"
+    _store.DataHub.get_instance().register_sqlite_store(SQLiteStore(
+        key="openctp",
+        label="test-events",
+        path_getter=lambda: str(db_path),
+    ))
+
+    _store.save_events([
+        {
+            "exchange": "DCE",
+            "product_label": "纯苯",
+            "product_code": "BZ",
+            "product_code_match_status": "matched",
+            "instrument_type": "future",
+            "contract_codes": ["2606", "2607"],
+            "field": "MinLimitOrderVolume",
+            "old_value": None,
+            "new_value": 8.0,
+            "effective_date": "2026-03-09",
+            "source_url": "https://www.guosenqh.com.cn/main/a/20260519/12800.shtml",
+            "source_date": "2026-05-19",
+            "raw_note": "自2026年3月9日起调整为8手",
+            "is_product_level": False,
+        }
+    ])
+
+    latest = _store.load_latest_events()
+    assert latest is not None
+    assert latest.loc[0, "product_label"] == "纯苯"
+    assert latest.loc[0, "product_code"] == "BZ"
+    assert latest.loc[0, "product_code_match_status"] == "matched"
+    assert latest.loc[0, "instrument_type"] == "future"
+    assert latest.loc[0, "contract_codes"] == '["2606", "2607"]'

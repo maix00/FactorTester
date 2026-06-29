@@ -14,7 +14,14 @@ from typing import Any
 
 from tools.data.hub import DataHub
 from ._source import SOURCE_NAME, discover_source_url, fetch_table as _fetch_table
-from ._store import ensure_sqlite_store, load_latest_source_metadata, load_latest_table, save_table
+from ._store import (
+    ensure_sqlite_store,
+    load_latest_events,
+    load_latest_source_metadata,
+    load_latest_table,
+    save_events,
+    save_table,
+)
 
 SOURCE_KEY = "Guosen/LimitOrderVolume"
 hub = DataHub.get_instance()
@@ -41,7 +48,27 @@ def _discover_online_metadata() -> tuple[str, str]:
 def _load_online_table(source_url: str, source_date: str) -> Any:
     df = _fetch_table(source_url=source_url, source_date=source_date)
     save_table(df)
+    _save_events_for_table(df)
     return df
+
+
+def _save_events_for_table(df: Any) -> None:
+    from tools.data.field_history import save_historical_field_records
+
+    from ._analysis import events_to_historical_field_records, parse_events_from_df
+
+    events = parse_events_from_df(df)
+    save_events(events)
+    save_historical_field_records(
+        events_to_historical_field_records(events),
+        replace_provider="Guosen",
+        replace_source_key=SOURCE_KEY,
+    )
+
+
+def _ensure_events_for_cached_table(df: Any) -> None:
+    if load_latest_events() is None:
+        _save_events_for_table(df)
 
 
 def load_source_metadata() -> tuple[str, str]:
@@ -76,6 +103,7 @@ def fetch_table(url: str | None = None):
     if url is not None:
         df = _fetch_table(url=url, source_url=url)
         save_table(df)
+        _save_events_for_table(df)
         hub.record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=_today_str())
         return df
 
@@ -84,18 +112,21 @@ def fetch_table(url: str | None = None):
     local_metadata = _load_local_metadata()
     if hub.get_latest_access_date(SOURCE_KEY) == today:
         if cached is not None:
+            _ensure_events_for_cached_table(cached)
             return cached
 
     try:
         source_url, source_date = _discover_online_metadata()
     except Exception:
         if cached is not None:
+            _ensure_events_for_cached_table(cached)
             return cached
         raise
 
     if local_metadata is not None and local_metadata[1] == source_date:
         hub.record_visit(SOURCE_KEY, source_label=SOURCE_NAME, access_date=today)
         if cached is not None:
+            _ensure_events_for_cached_table(cached)
             return cached
         # 本地元数据还在但表数据丢了，兜底回抓一次。
 
@@ -128,7 +159,9 @@ __all__ = [
     "ensure_sqlite_store",
     "load_latest_source_metadata",
     "load_latest_table",
+    "load_latest_events",
     "save_table",
+    "save_events",
     "load_source_metadata",
     # 模型
     "AlterEvent",

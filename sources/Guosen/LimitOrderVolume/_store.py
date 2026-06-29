@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from typing import Any
@@ -14,6 +15,24 @@ from tools.data.hub import DataHub
 logger = logging.getLogger(__name__)
 
 TABLE_NAME = "guosen_limit_order_volume"
+EVENTS_TABLE_NAME = "guosen_limit_order_events"
+
+EVENT_COLUMNS = [
+    "exchange",
+    "product_label",
+    "product_code",
+    "product_code_match_status",
+    "instrument_type",
+    "contract_codes",
+    "field",
+    "old_value",
+    "new_value",
+    "effective_date",
+    "source_url",
+    "source_date",
+    "raw_note",
+    "is_product_level",
+]
 
 
 def _connect() -> sqlite3.Connection:
@@ -60,6 +79,56 @@ def load_latest_table() -> pd.DataFrame | None:
         return None
 
 
+def _normalise_events(events: list[dict[str, Any]]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for event in events:
+        row = {column: event.get(column) for column in EVENT_COLUMNS}
+        contract_codes = row.get("contract_codes")
+        if isinstance(contract_codes, str):
+            row["contract_codes"] = contract_codes
+        elif contract_codes is None:
+            row["contract_codes"] = "[]"
+        else:
+            row["contract_codes"] = json.dumps(list(contract_codes), ensure_ascii=False)
+        row["instrument_type"] = row.get("instrument_type") or "future"
+        row["product_code_match_status"] = row.get("product_code_match_status") or ""
+        rows.append(row)
+    return pd.DataFrame(rows, columns=EVENT_COLUMNS)
+
+
+def save_events(events: list[dict[str, Any]]) -> str:
+    """把解析后的调整/基线事件保存到本地 SQLite。"""
+    hub = DataHub.get_instance()
+    path = hub._get_sqlite_store("openctp").path()
+    df = _normalise_events(events)
+    with hub.connect_store("openctp") as conn:
+        df.to_sql(EVENTS_TABLE_NAME, conn, if_exists="replace", index=False)
+    logger.info("已写入本地 SQLite 事件表: %s (%d 行)", path, len(df))
+    return path
+
+
+def load_latest_events() -> pd.DataFrame | None:
+    """读取本地缓存的最新解析事件表。"""
+    try:
+        with _connect() as conn:
+            table_exists = conn.execute(
+                """
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = ?
+                """,
+                (EVENTS_TABLE_NAME,),
+            ).fetchone()
+            if table_exists is None:
+                return None
+            df = pd.read_sql_query(f'SELECT * FROM "{EVENTS_TABLE_NAME}"', conn)
+            if df.empty:
+                return None
+            return df
+    except Exception:
+        return None
+
+
 def load_latest_source_metadata() -> tuple[str, str] | None:
     """从本地缓存读取最新的 source_url / source_date。"""
     try:
@@ -96,11 +165,21 @@ def sync_sqlite_store(
     source_url: str | None = None,
     source_date: str | None = None,
 ) -> pd.DataFrame:
-    """抓取远端表格并同步到本地 SQLite。"""
+    """抓取远端表格并同步原始表和解析事件表到本地 SQLite。"""
+    from tools.data.field_history import save_historical_field_records
+
+    from ._analysis import events_to_historical_field_records, parse_events_from_df
     from ._source import fetch_table
 
     df = fetch_table(url=url, source_url=source_url, source_date=source_date)
     save_table(df)
+    events = parse_events_from_df(df)
+    save_events(events)
+    save_historical_field_records(
+        events_to_historical_field_records(events),
+        replace_provider="Guosen",
+        replace_source_key="Guosen/LimitOrderVolume",
+    )
     return df
 
 

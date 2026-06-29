@@ -63,12 +63,33 @@ _PRODUCT_CONTRACT_SHORT_PATTERN = re.compile(
     r"^(?P<product>.+?)\s*(?P<contract_range>\d{4}(?:[-—]\d{4})?)$"
 )
 
+INSTRUMENT_TYPE_FUTURE = "future"
+INSTRUMENT_TYPE_OPTION = "option"
+INSTRUMENT_TYPE_UNKNOWN = "unknown"
+
+MATCH_STATUS_MATCHED = "matched"
+MATCH_STATUS_UNMATCHED = "unmatched"
+
 
 # ---------------------------------------------------------------------------
 # 品种中文名 → 品种代码（product_code）的映射
 # ---------------------------------------------------------------------------
 # 主映射：通过 CNFutures.desc_to_code() 查询 SQLite catalog 的「合约标的→品种代码」
 # 补充别名：国信页面用名  ≠ catalog 合约标的 时的兜底映射
+
+
+def detect_instrument_type(product_label: str) -> str:
+    """识别国信页面中的品种类型。
+
+    国信页面多数期货品种只写中文品种名，不显式带「期货」后缀；在本数据源中
+    裸品种默认按期货处理，只有明确出现「期权」时标记为 option。
+    """
+    label = str(product_label or "").strip()
+    if "期权" in label:
+        return INSTRUMENT_TYPE_OPTION
+    if "期货" in label or "合约" in label or label:
+        return INSTRUMENT_TYPE_FUTURE
+    return INSTRUMENT_TYPE_UNKNOWN
 
 def lookup_product_code(product_label: str) -> str:
     """中文品种名 → 品种代码（如 '甲醇' → 'MA'）。未知时返回原字符串。"""
@@ -82,6 +103,52 @@ def lookup_product_code(product_label: str) -> str:
     if code != stripped:
         return code
     return product_label
+
+
+def lookup_product_identity(product_label: str) -> dict[str, str]:
+    """返回品种代码和匹配状态，避免把未匹配的中文名误当作规范代码。"""
+    code = lookup_product_code(product_label)
+    status = MATCH_STATUS_MATCHED if code != product_label else MATCH_STATUS_UNMATCHED
+    return {
+        "product_code": code,
+        "product_code_match_status": status,
+    }
+
+
+def event_to_historical_field_record(event: dict) -> dict | None:
+    """把 Guosen 事件归一化为公共 historical_field_values 记录。"""
+    product_code = str(event.get("product_code") or "").strip()
+    if not product_code:
+        return None
+    value = event.get("new_value")
+    if value is None:
+        return None
+    effective_day = event.get("effective_date") or event.get("source_date")
+    if not effective_day:
+        return None
+    return {
+        "provider": "Guosen",
+        "source_key": "Guosen/LimitOrderVolume",
+        "instrument": product_code,
+        "instrument_label": event.get("product_label") or "",
+        "instrument_type": event.get("instrument_type") or "future",
+        "field_name": event.get("field") or "",
+        "effective_trading_day": effective_day,
+        "value": value,
+        "contract_codes": event.get("contract_codes") or [],
+        "source_url": event.get("source_url") or "",
+        "source_date": event.get("source_date") or "",
+        "raw_note": event.get("raw_note") or "",
+    }
+
+
+def events_to_historical_field_records(events: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for event in events:
+        record = event_to_historical_field_record(event)
+        if record is not None:
+            records.append(record)
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +235,13 @@ def parse_row_to_baseline(
         product_label = product_label.strip()
         if not product_label:
             continue
-        product_code = lookup_product_code(product_label)
+        identity = lookup_product_identity(product_label)
         results.append({
             "exchange": exchange_code,
             "product_label": product_label,
-            "product_code": product_code,
+            "product_code": identity["product_code"],
+            "product_code_match_status": identity["product_code_match_status"],
+            "instrument_type": detect_instrument_type(product_label),
             "contract_codes": [],
             "field": "MaxLimitOrderVolume",
             "old_value": None,
@@ -241,6 +310,7 @@ def parse_row_to_alter_events(
         product_label = product_label.strip()
         if not product_label:
             continue
+        instrument_type = detect_instrument_type(product_label)
 
         # 提取合约代码（如 product_str = "甲醇期货2606合约"）
         contract_codes: list[str] = []
@@ -266,7 +336,9 @@ def parse_row_to_alter_events(
         if suffix_match:
             clean_product = suffix_match.group(1).strip()
 
-        product_code = lookup_product_code(clean_product)
+        identity = lookup_product_identity(clean_product)
+        product_code = identity["product_code"]
+        product_code_match_status = identity["product_code_match_status"]
 
         # 提取历史调整事件（双正则，优先 primary）
         alter_events_from_note: list[re.Match] = []
@@ -281,7 +353,10 @@ def parse_row_to_alter_events(
             for m in alter_events_from_note:
                 try:
                     y = int(m["year"])
-                    mo = int(m["month"] or m.groupdict().get("month2"))
+                    month_text = m["month"] or m.groupdict().get("month2")
+                    if month_text is None:
+                        raise ValueError("missing month")
+                    mo = int(month_text)
                     d = int(m["day"] or m.groupdict().get("day2") or 1)
                     eff_date = __import__("datetime").date(y, mo, d)
                 except (ValueError, KeyError, TypeError):
@@ -303,6 +378,8 @@ def parse_row_to_alter_events(
                     "exchange": exchange_code,
                     "product_label": clean_product,
                     "product_code": product_code,
+                    "product_code_match_status": product_code_match_status,
+                    "instrument_type": instrument_type,
                     "contract_codes": codes,
                     "field": "MinLimitOrderVolume",
                     "old_value": None,  # 旧值无法从页面自动解析
@@ -319,6 +396,8 @@ def parse_row_to_alter_events(
                 "exchange": exchange_code,
                 "product_label": clean_product,
                 "product_code": product_code,
+                "product_code_match_status": product_code_match_status,
+                "instrument_type": instrument_type,
                 "contract_codes": contract_codes,
                 "field": "MaxLimitOrderVolume",
                 "old_value": None,
@@ -335,6 +414,8 @@ def parse_row_to_alter_events(
                     "exchange": exchange_code,
                     "product_label": clean_product,
                     "product_code": product_code,
+                    "product_code_match_status": product_code_match_status,
+                    "instrument_type": instrument_type,
                     "contract_codes": contract_codes,
                     "field": "MaxMarketOrderVolume",
                     "old_value": None,

@@ -119,6 +119,10 @@ class AlterEvent:
     new_value: float = 1.0
     effective_date: date | None = None
     source_url: str = ""
+    source_date: str = ""
+    product_code: str = ""
+    product_code_match_status: str = ""
+    instrument_type: str = "future"
     raw_note: str = ""
 
     @property
