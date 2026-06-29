@@ -129,3 +129,112 @@ def test_field_history_store_roundtrip(tmp_path: Path) -> None:
         trading_day_resolver=_resolver(),
     )
     assert resolved.value == 100
+
+
+def test_field_history_separates_futures_and_options_for_same_code() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-05",
+            "value": 500,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "option",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-05",
+            "value": 100,
+        },
+    ])
+
+    future_value = provider.resolve_by_trading_day("CU", "MaxLimitOrderVolume", "2026-01-06")
+    option_value = provider.resolve_by_trading_day(
+        "CU",
+        "MaxLimitOrderVolume",
+        "2026-01-06",
+        instrument_type="option",
+    )
+
+    assert future_value.value == 500
+    assert option_value.value == 100
+
+
+def test_field_history_contract_specific_rule_overrides_product_level_rule() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-06-23",
+            "value": 1,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-09",
+            "value": 4,
+            "contract_codes": ["2606"],
+        },
+    ])
+
+    product_value = provider.resolve_by_trading_day("BZ", "MinLimitOrderVolume", "2026-06-24")
+    contract_value = provider.resolve_by_trading_day("BZ2606.DCE", "MinLimitOrderVolume", "2026-06-24")
+
+    assert product_value.value == 1
+    assert contract_value.value == 4
+    assert contract_value.contract_code == "2606"
+
+
+def test_field_history_product_object_uses_main_contract_for_contract_specific_rule() -> None:
+    class DummyFutures:
+        name = "BZ.DCE"
+
+        def get_contract_id_from_trading_day(self, trading_day):
+            return "BZ2606.DCE"
+
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-06-23",
+            "value": 1,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-09",
+            "value": 4,
+            "contract_codes": ["2606"],
+        },
+    ])
+    index = pd.DatetimeIndex([pd.Timestamp("2026-06-24 09:01:00")])
+
+    values = provider.values_for_index(
+        DummyFutures(),
+        "MinLimitOrderVolume",
+        index,
+        trading_day_resolver=TimestampTradingDayResolver({
+            pd.Timestamp("2026-06-24 09:01:00"): pd.Timestamp("2026-06-24"),
+        }),
+    )
+
+    assert values.iloc[0] == 4

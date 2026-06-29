@@ -180,3 +180,46 @@ def test_event_store_roundtrip_preserves_product_identity(monkeypatch, tmp_path:
     assert latest.loc[0, "product_code_match_status"] == "matched"
     assert latest.loc[0, "instrument_type"] == "future"
     assert latest.loc[0, "contract_codes"] == '["2606", "2607"]'
+
+
+def test_parse_all_futures_row_expands_product_codes_and_min_order():
+    from sources.Guosen.LimitOrderVolume._analysis import parse_row_to_alter_events
+
+    events = parse_row_to_alter_events(
+        exchange_name="上海期货交易所",
+        product_str="所有期货品种",
+        limit_order="500手",
+        market_order="0手",
+        note="每笔最小下单数量均为 1手",
+        source_url="https://example.test",
+        source_date="2026-06-23",
+    )
+
+    by_field = {event["field"]: event for event in events}
+    assert set(by_field) == {"MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"}
+    assert by_field["MaxLimitOrderVolume"]["product_code"] == ""
+    assert "CU" in by_field["MaxLimitOrderVolume"]["product_codes"]
+    assert by_field["MaxLimitOrderVolume"]["instrument_type"] == "future"
+    assert by_field["MinLimitOrderVolume"]["new_value"] == 1.0
+
+
+def test_parse_option_list_propagates_option_suffix_to_all_items():
+    from sources.Guosen.LimitOrderVolume._analysis import parse_row_to_alter_events
+
+    events = parse_row_to_alter_events(
+        exchange_name="中国金融期货交易所",
+        product_str="沪深300、中证1000、上证50股指期权合约",
+        limit_order="20手",
+        market_order="0手",
+        note="每笔最小下单数量均为 1手",
+        source_url="https://example.test",
+        source_date="2026-06-23",
+    )
+
+    assert {event["product_code"] for event in events} == {"IF", "IM", "IH"}
+    assert {event["instrument_type"] for event in events} == {"option"}
+    assert {event["field"] for event in events} == {
+        "MaxLimitOrderVolume",
+        "MaxMarketOrderVolume",
+        "MinLimitOrderVolume",
+    }

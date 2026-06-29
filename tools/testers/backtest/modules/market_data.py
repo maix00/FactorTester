@@ -223,7 +223,7 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, 
         for field_name in field_names:
             try:
                 values[str(field_name)] = provider.resolve_at(
-                    str(instrument),
+                    instrument,
                     str(field_name),
                     timestamp,
                     trading_day_resolver=resolver,

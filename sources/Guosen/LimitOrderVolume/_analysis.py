@@ -62,6 +62,8 @@ _PRODUCT_GENERIC_CONTRACT_PATTERN = re.compile(r"^(.+?)(?:期货|期权)合约$"
 _PRODUCT_CONTRACT_SHORT_PATTERN = re.compile(
     r"^(?P<product>.+?)\s*(?P<contract_range>\d{4}(?:[-—]\d{4})?)$"
 )
+_MIN_ORDER_BASELINE_PATTERN = re.compile(r"每笔最小下单数量均为\s*(?P<qty>[\d.]+)\s*手")
+_ALL_FUTURES_EXCLUSION_PATTERN = re.compile(r"所有\s*期货\s*品种\s*[（(]\s*除(?P<excluded>.+?)外\s*[）)]")
 
 INSTRUMENT_TYPE_FUTURE = "future"
 INSTRUMENT_TYPE_OPTION = "option"
@@ -92,6 +94,13 @@ def detect_instrument_type(product_label: str) -> str:
     if "期货" in label or "合约" in label or label:
         return INSTRUMENT_TYPE_FUTURE
     return INSTRUMENT_TYPE_UNKNOWN
+
+
+def _clean_text(value: object) -> str:
+    text = str(value or "").strip()
+    if text.lower() in {"nan", "none", "nat"}:
+        return ""
+    return re.sub(r"\s+", "", text)
 
 def lookup_product_code(product_label: str) -> str:
     """中文品种名 → 品种代码（如 '甲醇' → 'MA'）。未知时返回原字符串。"""
@@ -211,7 +220,7 @@ def _load_exchange_product_codes(exchange_code: str) -> list[str]:
 
 
 def _product_identity_for_event(clean_product: str, exchange_code: str) -> tuple[str, str, list[str]]:
-    if clean_product == _ALL_FUTURES_PRODUCT_LABEL:
+    if _is_all_futures_label(clean_product):
         product_codes = _load_exchange_product_codes(exchange_code)
         status = MATCH_STATUS_MATCHED if product_codes else MATCH_STATUS_UNMATCHED
         return "", status, product_codes
@@ -220,6 +229,33 @@ def _product_identity_for_event(clean_product: str, exchange_code: str) -> tuple
     match_status = identity["product_code_match_status"]
     product_codes = [product_code] if match_status == MATCH_STATUS_MATCHED else []
     return product_code, match_status, product_codes
+
+
+def _normalise_product_for_event(product_label: str) -> tuple[str, str, list[str]]:
+    product_label = _clean_text(product_label)
+    instrument_type = detect_instrument_type(product_label)
+    contract_codes: list[str] = []
+    clean_product = product_label
+
+    contract_match = _PRODUCT_FUTURES_CONTRACT_PATTERN.match(product_label)
+    if contract_match:
+        clean_product = contract_match.group("product").strip()
+        raw_range = contract_match.group("contract_range")
+        contract_codes = [
+            c.strip()
+            for c in re.split(r"[-至及,\s]+", raw_range)
+            if c.strip()
+        ]
+
+    generic_match = _PRODUCT_GENERIC_CONTRACT_PATTERN.match(clean_product)
+    if generic_match:
+        clean_product = generic_match.group(1).strip()
+
+    suffix_match = _PRODUCT_SUFFIX_PATTERN.match(clean_product)
+    if suffix_match:
+        clean_product = suffix_match.group(1).strip()
+
+    return clean_product, instrument_type, contract_codes
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +277,14 @@ def _parse_hand(value: str) -> float | None:
         return None
 
 
+def _is_partial_exclusion(label: str) -> bool:
+    return "部分" in _clean_text(label)
+
+
+def _is_all_futures_label(label: str) -> bool:
+    return _clean_text(label) in {"所有期货品种", "全部期货", "所有期货"}
+
+
 def _split_products(product_str: str) -> list[str]:
     """把「甲醇、PTA、短纤」拆成单个品种名列表。
 
@@ -249,7 +293,7 @@ def _split_products(product_str: str) -> list[str]:
     if not product_str:
         return []
     # 先用中文顿号/逗号 split
-    parts = re.split(r"[、，,]", str(product_str))
+    parts = re.split(r"[、，,]", _clean_text(product_str))
     result: list[str] = []
     for part in parts:
         part = part.strip()
@@ -262,6 +306,85 @@ def _split_products(product_str: str) -> list[str]:
             if sp:
                 result.append(sp)
     return result
+
+
+def _split_exclusion_items(excluded_raw: str) -> list[str]:
+    items = _split_products(excluded_raw)
+    if not items:
+        return []
+    suffix = ""
+    tail = items[-1]
+    if "期权" in tail:
+        suffix = "期权"
+    elif "期货" in tail:
+        suffix = "期货"
+    normalised: list[str] = []
+    for item in items:
+        clean = _clean_text(item)
+        if suffix and "期货" not in clean and "期权" not in clean:
+            clean = f"{clean}{suffix}"
+        normalised.append(clean)
+    return normalised
+
+
+def _propagate_list_instrument_suffix(products: list[str], product_text: str) -> list[str]:
+    clean_text = _clean_text(product_text)
+    suffix = ""
+    if "期权" in clean_text and "期货" not in clean_text:
+        suffix = "期权"
+    elif "期货" in clean_text and "期权" not in clean_text:
+        suffix = "期货"
+    if not suffix:
+        return products
+    propagated: list[str] = []
+    for product in products:
+        clean = _clean_text(product)
+        if clean and "期货" not in clean and "期权" not in clean and not _is_all_futures_label(clean):
+            clean = f"{clean}{suffix}"
+        propagated.append(clean)
+    return propagated
+
+
+def _included_products_for_row(exchange_code: str, product_str: str) -> list[str]:
+    product_text = _clean_text(product_str)
+    if not product_text:
+        return []
+
+    all_products_for_exch = _load_exchange_products().get(exchange_code, [])
+    all_futures_with_parenthesized_exclusion = _ALL_FUTURES_EXCLUSION_PATTERN.search(product_text)
+    if all_futures_with_parenthesized_exclusion:
+        excluded_items = _split_exclusion_items(all_futures_with_parenthesized_exclusion.group("excluded"))
+        return _filter_excluded_products(all_products_for_exch, excluded_items)
+
+    exclusion_match = _EXCLUSION_PATTERN.search(product_text)
+    if exclusion_match and "期货" in product_text:
+        excluded_items = _split_exclusion_items(exclusion_match.group("excluded"))
+        return _filter_excluded_products(all_products_for_exch, excluded_items)
+
+    return _propagate_list_instrument_suffix(_split_products(product_text), product_text)
+
+
+def _filter_excluded_products(all_products: list[str], excluded_items: list[str]) -> list[str]:
+    included: list[str] = []
+    full_exclusions = [item for item in excluded_items if not _is_partial_exclusion(item)]
+    for product in all_products:
+        product_clean = _clean_text(product)
+        is_excluded = False
+        for excluded in full_exclusions:
+            excluded_product = _PRODUCT_SUFFIX_PATTERN.sub(r"\1", excluded)
+            if excluded_product and (excluded_product in product_clean or product_clean in excluded_product):
+                is_excluded = True
+                break
+        if not is_excluded:
+            included.append(product)
+    return included
+
+
+def _baseline_min_order_from_note(note: str) -> float | None:
+    match = _MIN_ORDER_BASELINE_PATTERN.search(_clean_text(note))
+    if not match:
+        return None
+    return float(match.group("qty"))
 
 
 # ---------------------------------------------------------------------------
@@ -340,65 +463,52 @@ def parse_row_to_alter_events(
     source_date_str = source_date or ""
     limit_order_hand = _parse_hand(limit_order)
     market_order_hand = _parse_hand(market_order)
-    note = str(note).strip() if note else ""
-
-    # --- 处理「除XX外」--- 
-    exclusion_match = _EXCLUSION_PATTERN.search(product_str)
-    if exclusion_match:
-        # 反向推导：该交易所全部品种 - 排除项 = 包含项
-        excluded_raw = exclusion_match.group("excluded")
-        excluded_items = _split_products(excluded_raw)
-        all_products_for_exch = _load_exchange_products().get(exchange_code, [])
-        # 过滤掉排除品种（模糊匹配）
-        included: list[str] = []
-        for p in all_products_for_exch:
-            is_excluded = False
-            for ex in excluded_items:
-                if ex in p or p in ex:
-                    is_excluded = True
-                    break
-            if not is_excluded:
-                included.append(p)
-    else:
-        # 直接拆分
-        included = _split_products(product_str)
+    note = _clean_text(note)
+    included = _included_products_for_row(exchange_code, product_str)
 
     # --- 逐品种解析 ---
     events: list[dict] = []
     for product_label in included:
-        product_label = product_label.strip()
+        product_label = _clean_text(product_label)
         if not product_label:
             continue
-        instrument_type = detect_instrument_type(product_label)
-
-        # 提取合约代码（如 product_str = "甲醇期货2606合约"）
-        contract_codes: list[str] = []
-        clean_product = product_label
-
-        contract_match = _PRODUCT_FUTURES_CONTRACT_PATTERN.match(product_label)
-        if contract_match:
-            clean_product = contract_match.group("product").strip()
-            raw_range = contract_match.group("contract_range")
-            contract_codes = [
-                c.strip()
-                for c in re.split(r"[-至及,\s]+", raw_range)
-                if c.strip()
-            ]
-
-        # 去掉「期货合约」「期权合约」后缀（如「多晶硅期货合约」→「多晶硅」）
-        generic_match = _PRODUCT_GENERIC_CONTRACT_PATTERN.match(clean_product)
-        if generic_match:
-            clean_product = generic_match.group(1).strip()
-
-        # 去掉「期货」「期权」后缀（如果没有合约代码时，这些后缀只是表示品种类型）
-        suffix_match = _PRODUCT_SUFFIX_PATTERN.match(clean_product)
-        if suffix_match:
-            clean_product = suffix_match.group(1).strip()
+        clean_product, instrument_type, contract_codes = _normalise_product_for_event(product_label)
 
         product_code, product_code_match_status, product_codes = _product_identity_for_event(
             clean_product,
             exchange_code,
         )
+
+        def append_event(
+            field_name: str,
+            value: float | None,
+            *,
+            effective_date: str | None = None,
+            codes: list[str] | None = None,
+        ) -> None:
+            if value is None:
+                return
+            event_contract_codes = list(contract_codes if codes is None else codes)
+            events.append({
+                "exchange": exchange_code,
+                "product_label": clean_product,
+                "product_code": product_code,
+                "product_codes": product_codes,
+                "product_code_match_status": product_code_match_status,
+                "instrument_type": instrument_type,
+                "contract_codes": event_contract_codes,
+                "field": field_name,
+                "old_value": None,
+                "new_value": value,
+                "effective_date": effective_date,
+                "source_url": source_url,
+                "source_date": source_date_str,
+                "raw_note": note.strip(),
+                "is_product_level": len(event_contract_codes) == 0,
+            })
+
+        append_event("MaxLimitOrderVolume", limit_order_hand)
+        append_event("MaxMarketOrderVolume", market_order_hand)
 
         # 提取历史调整事件（双正则，优先 primary）
         alter_events_from_note: list[re.Match] = []
@@ -407,6 +517,10 @@ def parse_row_to_alter_events(
             if found:
                 alter_events_from_note = found
                 break
+
+        baseline_min_order = _baseline_min_order_from_note(note)
+        if baseline_min_order is not None:
+            append_event("MinLimitOrderVolume", baseline_min_order)
 
         if alter_events_from_note:
             # note 中包含调整记录 → 生成带 effective_date 的事件
@@ -434,61 +548,12 @@ def parse_row_to_alter_events(
                         if c.strip()
                     ]
 
-                events.append({
-                    "exchange": exchange_code,
-                    "product_label": clean_product,
-                    "product_code": product_code,
-                    "product_codes": product_codes,
-                    "product_code_match_status": product_code_match_status,
-                    "instrument_type": instrument_type,
-                    "contract_codes": codes,
-                    "field": "MinLimitOrderVolume",
-                    "old_value": None,  # 旧值无法从页面自动解析
-                    "new_value": new_qty,
-                    "effective_date": eff_date.isoformat(),
-                    "source_url": source_url,
-                    "source_date": source_date_str,
-                    "raw_note": note.strip(),
-                    "is_product_level": len(codes) == 0,
-                })
-        else:
-            # 无历史调整 → 基线事件（当前生效的限价/市价单限制）
-            events.append({
-                "exchange": exchange_code,
-                "product_label": clean_product,
-                "product_code": product_code,
-                "product_codes": product_codes,
-                "product_code_match_status": product_code_match_status,
-                "instrument_type": instrument_type,
-                "contract_codes": contract_codes,
-                "field": "MaxLimitOrderVolume",
-                "old_value": None,
-                "new_value": limit_order_hand,
-                "effective_date": None,
-                "source_url": source_url,
-                "source_date": source_date_str,
-                "raw_note": note.strip(),
-                "is_product_level": len(contract_codes) == 0,
-            })
-            # 同时也生成市价单事件（若有值）
-            if market_order_hand is not None:
-                events.append({
-                    "exchange": exchange_code,
-                    "product_label": clean_product,
-                    "product_code": product_code,
-                    "product_codes": product_codes,
-                    "product_code_match_status": product_code_match_status,
-                    "instrument_type": instrument_type,
-                    "contract_codes": contract_codes,
-                    "field": "MaxMarketOrderVolume",
-                    "old_value": None,
-                    "new_value": market_order_hand,
-                    "effective_date": None,
-                    "source_url": source_url,
-                    "source_date": source_date_str,
-                    "raw_note": note.strip(),
-                    "is_product_level": len(contract_codes) == 0,
-                })
+                append_event(
+                    "MinLimitOrderVolume",
+                    new_qty,
+                    effective_date=eff_date.isoformat(),
+                    codes=codes,
+                )
 
     return events
 

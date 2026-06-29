@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -72,6 +73,14 @@ class TradingDayResolver(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class FieldInstrumentIdentity:
+    raw_instrument: str
+    product_code: str
+    instrument_type: str = "future"
+    contract_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalFieldValue:
     instrument: str
     field_name: str
@@ -81,6 +90,7 @@ class HistoricalFieldValue:
     source_key: str = ""
     provider: str = ""
     approximated: bool = False
+    contract_code: str | None = None
 
 
 class TimestampTradingDayResolver:
@@ -144,16 +154,19 @@ class FieldHistoryProvider:
 
     def resolve_by_trading_day(
         self,
-        instrument: str,
+        instrument: Any,
         field_name: str,
         trading_day: Any,
         *,
+        instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> HistoricalFieldValue:
         policy = HistoricalFieldFallbackPolicy(fallback)
         day = _normalise_trading_day(trading_day)
-        subset = self._subset(instrument, field_name)
+        identity = _resolve_field_instrument_identity(instrument, day, instrument_type=instrument_type)
+        subset = self._subset(identity.product_code, field_name, identity.instrument_type)
         eligible = cast(pd.DataFrame, subset[_series(subset, "effective_trading_day") <= day])
+        eligible = _filter_contract_scope(eligible, identity.contract_code)
         approximated = False
         if eligible.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
@@ -163,11 +176,11 @@ class FieldHistoryProvider:
                 first = _series(subset, "effective_trading_day").min() if not subset.empty else None
                 suffix = f"; first effective day is {first.date()}" if first is not None else ""
                 raise MissingHistoricalField(
-                    f"no historical value for {instrument}.{field_name} at trading_day={day.date()}{suffix}"
+                    f"no historical value for {identity.raw_instrument}.{field_name} at trading_day={day.date()}{suffix}"
                 )
         row = eligible.iloc[-1]
         return HistoricalFieldValue(
-            instrument=instrument,
+            instrument=identity.product_code,
             field_name=field_name,
             value=_decode_value(row["value"], row.get("value_type")),
             effective_trading_day=_normalise_trading_day(row["effective_trading_day"]),
@@ -175,28 +188,32 @@ class FieldHistoryProvider:
             source_key=str(row.get("source_key") or ""),
             provider=str(row.get("provider") or ""),
             approximated=approximated,
+            contract_code=identity.contract_code,
         )
 
     def resolve_at(
         self,
-        instrument: str,
+        instrument: Any,
         field_name: str,
         timestamp: Any,
         *,
         trading_day_resolver: TradingDayResolver | None,
+        instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> HistoricalFieldValue:
         if trading_day_resolver is None:
             raise MissingTradingDay("trading_day_resolver is required for timestamp lookup")
         ts = _normalise_timestamp_key(timestamp)
-        trading_day = trading_day_resolver.resolve_trading_day(ts, instrument)
+        trading_day = trading_day_resolver.resolve_trading_day(ts, _instrument_name(instrument))
+        identity = _resolve_field_instrument_identity(instrument, trading_day, instrument_type=instrument_type)
         policy = HistoricalFieldFallbackPolicy(fallback)
-        subset = self._subset(instrument, field_name)
+        subset = self._subset(identity.product_code, field_name, identity.instrument_type)
         effective_timestamp = _series(subset, "effective_timestamp")
         effective_trading_day = _series(subset, "effective_trading_day")
         timestamp_mask = effective_timestamp.notna() & (effective_timestamp <= ts)
         trading_day_mask = effective_timestamp.isna() & (effective_trading_day <= trading_day)
         candidates = cast(pd.DataFrame, subset[timestamp_mask | trading_day_mask]).copy()
+        candidates = _filter_contract_scope(candidates, identity.contract_code)
         approximated = False
         if candidates.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
@@ -204,15 +221,18 @@ class FieldHistoryProvider:
                 approximated = True
             else:
                 raise MissingHistoricalField(
-                    f"no historical value for {instrument}.{field_name} at "
+                    f"no historical value for {identity.raw_instrument}.{field_name} at "
                     f"timestamp={ts.isoformat()}, trading_day={trading_day.date()}"
                 )
         candidates["_effective_sort_key"] = _series(candidates, "effective_timestamp").fillna(
             _series(candidates, "effective_trading_day")
         )
-        row = candidates.sort_values(by=["_effective_sort_key"]).iloc[-1]
+        sort_columns = ["_effective_sort_key"]
+        if "_contract_scope_priority" in candidates.columns:
+            sort_columns.insert(0, "_contract_scope_priority")
+        row = candidates.sort_values(by=sort_columns).iloc[-1]
         return HistoricalFieldValue(
-            instrument=instrument,
+            instrument=identity.product_code,
             field_name=field_name,
             value=_decode_value(row["value"], row.get("value_type")),
             effective_trading_day=_normalise_trading_day(row["effective_trading_day"]),
@@ -220,15 +240,17 @@ class FieldHistoryProvider:
             source_key=str(row.get("source_key") or ""),
             provider=str(row.get("provider") or ""),
             approximated=approximated,
+            contract_code=identity.contract_code,
         )
 
     def values_for_index(
         self,
-        instrument: str,
+        instrument: Any,
         field_name: str,
         index: Iterable[Any],
         *,
         trading_day_resolver: TradingDayResolver,
+        instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> pd.Series:
         values: list[Any] = []
@@ -241,6 +263,7 @@ class FieldHistoryProvider:
                     field_name,
                     ts,
                     trading_day_resolver=trading_day_resolver,
+                    instrument_type=instrument_type,
                     fallback=fallback,
                 ).value
             )
@@ -249,32 +272,44 @@ class FieldHistoryProvider:
 
     def frame_for_index(
         self,
-        instruments: Sequence[str],
+        instruments: Sequence[Any],
         field_name: str,
         index: Iterable[Any],
         *,
         trading_day_resolver: TradingDayResolver,
+        instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> pd.DataFrame:
         columns = {
-            instrument: self.values_for_index(
+            _instrument_name(instrument): self.values_for_index(
                 instrument,
                 field_name,
                 index,
                 trading_day_resolver=trading_day_resolver,
+                instrument_type=instrument_type,
                 fallback=fallback,
             )
             for instrument in instruments
         }
         return pd.DataFrame(columns)
 
-    def _subset(self, instrument: str, field_name: str) -> pd.DataFrame:
+    def _subset(self, instrument: str, field_name: str, instrument_type: str | None) -> pd.DataFrame:
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
         instrument_matches = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == instrument])
         if instrument_matches.empty:
             raise MissingHistoricalField(f"no historical field rows for instrument={instrument}")
-        subset = cast(pd.DataFrame, instrument_matches[_series(instrument_matches, "field_name") == field_name])
+        type_matches = instrument_matches
+        if instrument_type:
+            type_matches = cast(
+                pd.DataFrame,
+                instrument_matches[_series(instrument_matches, "instrument_type") == instrument_type],
+            )
+            if type_matches.empty:
+                raise MissingHistoricalField(
+                    f"no historical field rows for instrument={instrument}, instrument_type={instrument_type}"
+                )
+        subset = cast(pd.DataFrame, type_matches[_series(type_matches, "field_name") == field_name])
         if subset.empty:
             raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}")
         return subset
@@ -477,6 +512,140 @@ def _encode_contract_codes(value: Any) -> str:
     if not isinstance(value, Iterable):
         return json.dumps([str(value)], ensure_ascii=False)
     return json.dumps(list(value), ensure_ascii=False)
+
+
+_PIPE_CONTRACT_PATTERN = re.compile(r"^(?P<exchange>[A-Z]+)\|F\|(?P<product>[A-Za-z]+)\|(?P<contract>\d{3,4})$")
+_DOTTED_CONTRACT_PATTERN = re.compile(r"^(?P<product>[A-Za-z]+)(?P<contract>\d{3,4})\.(?P<exchange>[A-Za-z]+)$")
+_DOTTED_PRODUCT_PATTERN = re.compile(r"^(?P<product>[A-Za-z]+)\.(?P<exchange>[A-Za-z]+)(?:@.+)?$")
+
+
+def _instrument_name(instrument: Any) -> str:
+    return str(getattr(instrument, "name", instrument) or "").strip()
+
+
+def _resolve_field_instrument_identity(
+    instrument: Any,
+    trading_day: Any | None = None,
+    *,
+    instrument_type: str | None,
+) -> FieldInstrumentIdentity:
+    raw_name = _instrument_name(instrument)
+    resolved_type = instrument_type or "future"
+    contract_code = _contract_code_from_instrument_name(raw_name)
+
+    product_obj = None
+    if hasattr(instrument, "get_parent_product"):
+        try:
+            product_obj = instrument.get_parent_product()
+        except Exception:
+            product_obj = None
+    if product_obj is not None:
+        product_name = _instrument_name(product_obj)
+        return FieldInstrumentIdentity(
+            raw_instrument=raw_name,
+            product_code=_product_code_from_product_name(product_name),
+            instrument_type=resolved_type,
+            contract_code=contract_code,
+        )
+
+    if trading_day is not None and hasattr(instrument, "get_contract_id_from_trading_day"):
+        try:
+            current_contract = instrument.get_contract_id_from_trading_day(trading_day)
+        except Exception:
+            current_contract = None
+        if current_contract:
+            contract_code = _contract_code_from_instrument_name(str(current_contract))
+
+    product_code = _product_code_from_product_name(raw_name)
+    if contract_code:
+        parsed_product = _product_code_from_contract_name(raw_name)
+        if parsed_product:
+            product_code = parsed_product
+
+    return FieldInstrumentIdentity(
+        raw_instrument=raw_name,
+        product_code=product_code,
+        instrument_type=resolved_type,
+        contract_code=contract_code,
+    )
+
+
+def _product_code_from_product_name(name: str) -> str:
+    text = str(name or "").strip()
+    pipe_match = _PIPE_CONTRACT_PATTERN.match(text)
+    if pipe_match:
+        return pipe_match.group("product").upper()
+    contract_match = _DOTTED_CONTRACT_PATTERN.match(text)
+    if contract_match:
+        return contract_match.group("product").upper()
+    product_match = _DOTTED_PRODUCT_PATTERN.match(text)
+    if product_match:
+        return product_match.group("product").upper()
+    if "." in text:
+        text = text.split(".", 1)[0]
+    if "@" in text:
+        text = text.split("@", 1)[0]
+    return text.upper()
+
+
+def _product_code_from_contract_name(name: str) -> str | None:
+    pipe_match = _PIPE_CONTRACT_PATTERN.match(name)
+    if pipe_match:
+        return pipe_match.group("product").upper()
+    contract_match = _DOTTED_CONTRACT_PATTERN.match(name)
+    if contract_match:
+        return contract_match.group("product").upper()
+    return None
+
+
+def _contract_code_from_instrument_name(name: str) -> str | None:
+    pipe_match = _PIPE_CONTRACT_PATTERN.match(name)
+    if pipe_match:
+        return pipe_match.group("contract")
+    contract_match = _DOTTED_CONTRACT_PATTERN.match(name)
+    if contract_match:
+        return contract_match.group("contract")
+    return None
+
+
+def _decode_contract_codes(value: Any) -> list[str]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [item.strip() for item in text.split(",")]
+    else:
+        parsed = value
+    if isinstance(parsed, Iterable) and not isinstance(parsed, (str, bytes)):
+        return [str(item).strip() for item in parsed if str(item).strip()]
+    return [str(parsed).strip()] if str(parsed).strip() else []
+
+
+def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    df = frame.copy()
+    scopes = _series(df, "contract_codes").map(_decode_contract_codes)
+    product_level = scopes.map(lambda codes: len(codes) == 0)
+    if contract_code:
+        contract_level = scopes.map(lambda codes: contract_code in codes)
+        scoped = cast(pd.DataFrame, df[contract_level | product_level].copy())
+        if scoped.empty:
+            return scoped
+        scoped["_contract_scope_priority"] = [
+            1 if contract_code in codes else 0
+            for codes in scopes.loc[scoped.index]
+        ]
+        scoped = scoped.sort_values(
+            by=["_contract_scope_priority", "effective_trading_day", "effective_timestamp"],
+        )
+        return scoped
+    return cast(pd.DataFrame, df[product_level].copy())
 
 
 def _series(frame: pd.DataFrame, column: str) -> pd.Series:
