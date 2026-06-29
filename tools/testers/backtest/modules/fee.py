@@ -1,134 +1,79 @@
-"""Transaction cost module — fee = |trade_value| * fee_rate."""
+"""FeeModule — transaction cost, applied as a FlowOverride on
+LedgerModule.cash_update.
+
+`fee_mode` mirrors the old fee_mode/custom_fee_rate UI contract:
+- "none": no fee at all.
+- "custom": flat `custom_fee_rate` applied to every trade's notional.
+- "market": per-product real fee rate, read from
+  `MarketDataModule.fee_rate_table` (supplied by the data-prep stage,
+  same pattern as margin_ratio/lot_sizes) -- not yet wired to a real
+  data source this round, so selecting "market" without that table
+  populated raises clearly rather than silently charging zero fee.
+"""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
-import numpy as np
-
-from tools.testers.backtest.engines.native.stages import PhaseContext, PhaseHandler
-from .base import ExecutableModule
+from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
 
 
 class FeeModule(ExecutableModule):
-    """Applies transaction cost in two phases:
-
-    target_generation    — emits `fee_rate` into context
-    order_fill_accounting — applies fee to trade values, signals
-                            `needs_rescale` if cash is insufficient
-    """
-
     key: ClassVar[str] = "transaction_cost"
     label: ClassVar[str] = "交易费用"
-    order: ClassVar[int] = 100
-    output_fields: ClassVar[tuple[str, ...]] = ("fee_costs",)
-    group_params: ClassVar[tuple[str, ...]] = ("fee_mode", "fee_rate", "fee_modifications")
-    progress_phases: ClassVar[tuple[dict[str, Any], ...]] = (
-        {"key": "framework_execution", "label": "事件回测工具"},
-        {"key": "result_packaging", "label": "结果整理"},
-    )
-    phases: ClassVar[tuple[PhaseHandler, ...]] = (
-        PhaseHandler(
-            "target_generation", order=90,
-            produces=("fee_rate",),
+
+    fee_mode: ClassVar[FieldRef[str]] = FieldRef("fee_mode")
+    custom_fee_rate: ClassVar[FieldRef[float]] = FieldRef("custom_fee_rate")
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "fee_mode": FieldDefinition(
+            public=True, default="none", control_template="select", tab="cost",
+            options=(("none", "不计费用"), ("custom", "自定义费率"), ("market", "市场真实费率")),
         ),
-        PhaseHandler(
-            "order_fill_accounting", order=90,
-            needs=("deltas", "fill_prices", "cash"),
-            produces=("deltas", "fill_prices", "cash"),
-            records=("commission",),
+        "custom_fee_rate": FieldDefinition(
+            public=True, default=0.0, control_template="number", tab="cost",
+            visible_when={"fee_mode": ("custom",)},
+        ),
+    }
+
+    overrides: ClassVar[tuple[FlowOverride, ...]] = (
+        FlowOverride(
+            flow_names=(LedgerModule.cash_update.name,),
+            extra_inputs=(fee_mode, custom_fee_rate),
+            compute=lambda account, ctx, base_compute: _apply_fee(account, ctx, base_compute),
         ),
     )
 
-    # ── Setting definitions ─────────────────────────────────────
 
-    setting_definitions: ClassVar[tuple[dict[str, Any], ...]] = (
-        {
-            "key": "fee_mode",
-            "label": "费用规则",
-            "tab": "cost",
-            "control_template": "select",
-            "default": "market",
-            "scope_policy": "group_override",
-            "options": (
-                ("none", "无费用"),
-                ("market", "市场历史费率"),
-                ("custom", "自定义费率"),
-            ),
-            "chip_template": "费用: {value}",
-        },
-        {
-            "key": "custom_fee_rate",
-            "label": "自定义成交费率",
-            "tab": "cost",
-            "control_template": "number",
-            "default": 0.0,
-            "scope_policy": "group_override",
-            "minimum": 0.0,
-            "step": 0.000001,
-            "chip_template": "费率: {value}",
-            "visible_when": {"fee_mode": ("custom",)},
-        },
-    )
+def _resolve_fee_rate(mode: str, custom_rate: float, account, product) -> float:
+    if mode == "none":
+        return 0.0
+    if mode == "custom":
+        return custom_rate
+    # mode == "market"
+    table = getattr(account, "fee_rate_table", None)
+    if table is None or product not in table:
+        raise NotImplementedError(
+            f'fee_mode="market" requires account.fee_rate_table[{product!r}] to be '
+            "populated by the data-prep stage -- not wired to a real fee-schedule "
+            "data source this round")
+    return table[product]
 
-    def on_target_generation(self, ctx: PhaseContext) -> None:
-        fee_rate = float(self.setting("fee_rate", 0.0))
-        ctx.set("fee_rate", fee_rate)
 
-    def on_order_fill_accounting(self, ctx: PhaseContext) -> None:
-        deltas = ctx.get("deltas")
-        fill_prices = ctx.get("fill_prices")
-        cash = float(ctx.get("cash", 0.0))
-        if deltas is None or fill_prices is None:
-            return
-
-        fee_rate = float(ctx.get("fee_rate", 0.0))
-        trade_values = np.abs(deltas) * fill_prices
-        sells = deltas < -1e-12
-        buys = deltas > 1e-12
-        available = float(cash + np.sum(trade_values[sells] * (1.0 - fee_rate)))
-        buy_cost = float(np.sum(trade_values[buys] * (1.0 + fee_rate)))
-
-        if buy_cost > max(available, 0.0) + 1e-9:
-            ctx.signal("needs_rescale", {"available": available, "buy_cost": buy_cost})
-
-        commission = float(np.sum(trade_values * fee_rate))
-        next_cash = float(cash - np.sum(deltas * fill_prices + trade_values * fee_rate))
-        ctx.set("cash", next_cash)
-        ctx.set("commission", commission)
-
-    # ── Output collection ───────────────────────────────────────
-
-    @classmethod
-    def collect_outputs(
-        cls,
-        group_result: Any,
-        owner: dict[str, Any],
-        settings: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Extract fee_costs from GroupRunResult for frontend serialization.
-
-        group_result.fee_costs_np has shape (T, M) — fee in minor units
-        of base currency per timestamp per group.
-        """
-        group_index = int(owner.get("group_index", 0))
-        fee_np = getattr(group_result, "fee_costs_np", None)
-        if fee_np is not None:
-            fee_np = np.asarray(fee_np, dtype=float)
-            M = fee_np.shape[1] if fee_np.ndim >= 2 else 1
-            if 0 <= group_index < M:
-                col = fee_np[:, group_index]
-                return {"fee_costs": [round(float(v), 8) for v in col]}
-        return {"fee_costs": []}
-
-    # ── _FactorGroupTestGroup params ────────────────────────────
-
-    @classmethod
-    def build_group_params(cls, group_settings: dict[str, Any], raw_group: dict[str, Any]) -> dict[str, Any]:
-        """Extract fee-related params for _FactorGroupTestGroup."""
-        return {
-            "fee_mode": group_settings.get("fee_mode"),
-            "fee_rate": group_settings.get("custom_fee_rate"),
-            "fee_modifications": raw_group.get("feeModifications"),
-        }
-
+def _apply_fee(account, ctx, base_compute) -> None:
+    prices = ctx.get(MarketDataModule.current_prices)
+    for strategy in ctx.active_strategies:
+        # mode/custom_rate are strategy-level (not order-level) -- resolved
+        # once per strategy, not once per order, even when a strategy has
+        # several simultaneous orders in this batch.
+        config = account.config_for(strategy)
+        mode = config.get(FeeModule.fee_mode, "none")
+        custom_rate = config.get(FeeModule.custom_fee_rate, 0.0)
+        for order in ctx.payloads_for(strategy):
+            fee_rate = _resolve_fee_rate(mode, custom_rate, account, order.instrument)
+            price = order.get("effective_price", prices[order.instrument])
+            order.set("fee_cost", abs(order.quantity) * price * fee_rate)
+    base_compute(account, ctx)

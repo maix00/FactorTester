@@ -1,81 +1,60 @@
-"""Slippage module — fill_price = base_price * (1 ± slippage_bps)."""
+"""SlippageModule — worsens the effective fill price by slippage_bps,
+applied as a FlowOverride on LedgerModule.cash_update.
+
+`slippage_mode="none"` (the default) trades at the unadjusted market price;
+`slippage_mode="fixed_bps"` applies a flat `slippage_bps` adjustment."""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
-import numpy as np
-
-from tools.testers.backtest.engines.native.stages import PhaseContext, PhaseHandler
-from .base import ExecutableModule
+from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
 
 
 class SlippageModule(ExecutableModule):
-    """Adjusts execution prices by a configurable slippage model.
-
-    order_execution — reads `deltas` and `valuation_values`, writes `fill_prices`.
-    """
-
     key: ClassVar[str] = "slippage"
     label: ClassVar[str] = "滑点"
-    order: ClassVar[int] = 110
-    output_fields: ClassVar[tuple[str, ...]] = ()
-    progress_phases: ClassVar[tuple[dict[str, Any], ...]] = (
-        {"key": "framework_execution", "label": "事件回测工具"},
-    )
-    phases: ClassVar[tuple[PhaseHandler, ...]] = (
-        PhaseHandler(
-            "order_execution", order=80,
-            needs=("deltas", "valuation_values"),
-            produces=("fill_prices",),
+
+    slippage_mode: ClassVar[FieldRef[str]] = FieldRef("slippage_mode")
+    slippage_bps: ClassVar[FieldRef[float]] = FieldRef("slippage_bps")
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "slippage_mode": FieldDefinition(
+            public=True, default="none", control_template="select", tab="cost",
+            options=(("none", "不计滑点"), ("fixed_bps", "固定基点")),
+        ),
+        "slippage_bps": FieldDefinition(
+            public=True, default=0.0, control_template="number", tab="cost",
+            visible_when={"slippage_mode": ("fixed_bps",)},
+        ),
+    }
+
+    overrides: ClassVar[tuple[FlowOverride, ...]] = (
+        FlowOverride(
+            flow_names=(LedgerModule.cash_update.name,),
+            extra_inputs=(slippage_mode, slippage_bps),
+            compute=lambda account, ctx, base_compute: _apply_slippage(account, ctx, base_compute),
         ),
     )
 
-    def on_order_execution(self, ctx: PhaseContext) -> None:
-        deltas = ctx.get("deltas")
-        base_prices = ctx.get("valuation_values")
-        if deltas is None or base_prices is None:
-            return
 
-        mode = str(self.setting("slippage_mode", "none"))
-        if mode == "none":
-            fill_prices = np.asarray(base_prices, dtype=float).copy()
-        elif mode == "fixed_bps":
-            bps = float(self.setting("slippage_bps", 0.0))
-            fill_prices = np.asarray(base_prices, dtype=float) * (
-                1.0 + np.sign(np.asarray(deltas, dtype=float)) * bps / 10_000.0
-            )
-        else:
-            raise ValueError(f"unsupported slippage mode: {mode}")
-
-        ctx.set("fill_prices", fill_prices)
-
-    # ── Setting definitions ─────────────────────────────────────
-
-    setting_definitions: ClassVar[tuple[dict[str, Any], ...]] = (
-        {
-            "key": "slippage_mode",
-            "label": "滑点模型",
-            "tab": "cost",
-            "control_template": "select",
-            "default": "none",
-            "scope_policy": "group_override",
-            "options": (
-                ("none", "零滑点"),
-                ("fixed_bps", "固定基点"),
-            ),
-            "chip_template": "滑点: {value}",
-        },
-        {
-            "key": "slippage_bps",
-            "label": "固定滑点（基点）",
-            "tab": "cost",
-            "control_template": "number",
-            "default": 0.0,
-            "scope_policy": "group_override",
-            "minimum": 0.0,
-            "step": 0.1,
-            "chip_template": "滑点bp: {value}",
-            "visible_when": {"slippage_mode": ("fixed_bps",)},
-        },
-    )
+def _apply_slippage(account, ctx, base_compute) -> None:
+    prices = ctx.get(MarketDataModule.current_prices)
+    for strategy in ctx.active_strategies:
+        # mode/bps are strategy-level -- resolved once per strategy, not
+        # once per order, even when a strategy has several simultaneous
+        # orders in this batch.
+        config = account.config_for(strategy)
+        mode = config.get(SlippageModule.slippage_mode, "none")
+        slippage_bps = config.get(SlippageModule.slippage_bps, 0.0) if mode == "fixed_bps" else 0.0
+        for order in ctx.payloads_for(strategy):
+            price = prices[order.instrument]
+            # buys execute at a worse (higher) price, sells at a worse
+            # (lower) price -- sign of the adjustment follows the trade
+            # direction, not the position direction
+            sign = 1.0 if order.quantity > 0 else (-1.0 if order.quantity < 0 else 0.0)
+            order.set("effective_price", price * (1.0 + sign * slippage_bps / 10_000.0))
+    base_compute(account, ctx)
