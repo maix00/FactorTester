@@ -9,9 +9,10 @@ Module 不需要手写子类——像 static/config/modules.json 驱动首页模
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
+
+import yaml
 
 if TYPE_CHECKING:
     from tools.testers.settings.applications import ApplicationSettings
@@ -157,6 +158,19 @@ class ModuleRegistry:
         except KeyError as exc:
             raise KeyError(f"unknown module: {key!r}") from exc
 
+    def find(self, key: str) -> "Module | None":
+        """递归查找 key 对应的 Module：先查自身，再递归各子 Module 的 sub_registry。"""
+        module = self._modules.get(key)
+        if module is not None:
+            return module
+        for candidate in self._modules.values():
+            sub = candidate.sub_registry
+            if isinstance(sub, ModuleRegistry):
+                found = sub.find(key)
+                if found is not None:
+                    return found
+        return None
+
     @property
     def module_keys(self) -> tuple[str, ...]:
         return tuple(self._modules.keys())
@@ -166,9 +180,9 @@ class ModuleRegistry:
 
 
 def load_module_configs(path: str | Path) -> list[dict[str, Any]]:
-    """加载一个声明式 module config JSON 文件（与 static/config/modules.json 同形）。
+    """加载一个声明式 module config YAML 文件（结构与 static/config/modules.json 同形）。
 
     文件格式：{"version": 1, "modules": [{"key": ..., "label": ..., "order": ...}, ...]}
     """
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return payload.get("modules", [])

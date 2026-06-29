@@ -12,7 +12,7 @@ from typing import Any
 
 from tools.testers.registry import ModuleRegistry, load_module_configs
 
-_CONFIG_PATH = Path(__file__).resolve().parents[3] / "static" / "config" / "testers" / "home.json"
+_CONFIG_PATH = Path(__file__).resolve().parents[3] / "static" / "config" / "testers" / "home.yaml"
 
 
 def _build_app_resolver(cfg: dict[str, Any]):

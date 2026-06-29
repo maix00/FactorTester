@@ -39,3 +39,4 @@ dependencies:
       - orjson==3.11.9
       - playwright==1.60.0
       - beautifulsoup4==4.15.0
+      - pyyaml==6.0.2

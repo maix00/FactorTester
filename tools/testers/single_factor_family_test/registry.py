@@ -17,7 +17,7 @@ from typing import Any
 from tools.testers.registry import ModuleRegistry, load_module_configs
 
 _CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "static" / "config" / "testers" / "single_factor_family_test.json"
+    Path(__file__).resolve().parents[3] / "static" / "config" / "testers" / "single_factor_family_test.yaml"
 )
 
 

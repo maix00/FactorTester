@@ -206,6 +206,18 @@ def single_factor_page():
     )
 
 
+@sft_bp.route('/api/single_factor_test/page', methods=['POST'])
+def single_factor_page_bootstrap_api():
+    """JSON-only page bootstrap：与 single_factor_page() 走同一套 page_uuid
+    创建/注册逻辑，但不渲染 HTML——给非浏览器客户端（如 factortester CLI）用。
+    """
+    payload = request.get_json(silent=True) or {}
+    selected_name = payload.get('factor', '')
+    page_uuid = runtime_state.create_page_uuid()
+    runtime_state.register_page(page_uuid, owner=current_user(), page_kind='single_factor_test', factor_family_alias=selected_name)
+    return jsonify({'success': True, 'page_uuid': page_uuid})
+
+
 @sft_bp.route('/single_factor_test/api/list', methods=['GET'])
 def single_factor_list_api():
     search_query = request.args.get('search', '')
