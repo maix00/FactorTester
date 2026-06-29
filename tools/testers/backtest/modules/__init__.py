@@ -19,7 +19,7 @@ from .slippage import SlippageModule
 from .liquidity import LiquidityModule
 from .margin import MarginModule
 from .position_sizing import PositionSizingModule
-from .cash_rescale import CashRescaleModule
+from .cash_rescale import LedgerCashConstraintModule
 from .registry import (
     BacktestModuleRegistry,
     GroupTestModuleRegistry,
@@ -33,7 +33,7 @@ __all__ = [
     "LiquidityModule",
     "MarginModule",
     "PositionSizingModule",
-    "CashRescaleModule",
+    "LedgerCashConstraintModule",
     "ModuleRegistry",
     "BacktestModuleRegistry",
     "GroupTestModuleRegistry",

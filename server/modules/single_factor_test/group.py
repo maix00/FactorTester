@@ -11,9 +11,21 @@ from tools.data.types.currency import normalize_currency, require_product_curren
 from tools.data.types.currency_units import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tester_calc.single_factor_test.group.core import infer_periods_per_year
-from tools.factors.tester_calc.single_factor_test.group.core import _emit_progress as _core_emit_progress
-from tools.factors.tester_calc.single_factor_test.group.core import ensure_group_factor_inputs
+def infer_periods_per_year(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
+    """Stub: real implementation lived in the deleted core.py and will be
+    rewired onto the new Event/Order/Flow engine in step 11 (issue #114)."""
+    raise NotImplementedError(
+        "infer_periods_per_year: pending issue-114 step 11 production rewiring")
+
+
+def _core_emit_progress(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
+    raise NotImplementedError(
+        "_emit_progress: pending issue-114 step 11 production rewiring")
+
+
+def ensure_group_factor_inputs(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
+    raise NotImplementedError(
+        "ensure_group_factor_inputs: pending issue-114 step 11 production rewiring")
 from tools.factors.tester_calc.single_factor_test.group.detail import (
     build_group_detail,
     _build_product_fee_rates,

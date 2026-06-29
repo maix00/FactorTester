@@ -54,15 +54,15 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "liquidity_mode": ["volume_participation"],
     }
     assert index["defaults"]["collateral_fraction"]["visible_when"] == {
-        "margin_mode": ["market"],
+        "margin_mode": ["fixed", "auto"],
     }
-    assert index["defaults"]["money_unit_policy"]["value"] == "minor_units"
-    assert index["defaults"]["money_unit_policy"]["engine_defaults"] == {
-        "rqalpha": "engine_native",
-    }
-    assert index["defaults"]["money_unit_policy"]["disabled_values_by_engine"] == {
-        "rqalpha": ["minor_units"],
-    }
+    # money_unit_policy (with per-engine override: rqalpha forces
+    # "engine_native", disabling "minor_units") was an execution-engine
+    # dispatch concern spanning native/backtrader/qlib/rqalpha -- replaced
+    # by MinorUnitModule.use_minor_units, a plain boolean scoped to the
+    # native engine only (other engines' money-precision handling is their
+    # own concern, not modeled here).
+    assert index["defaults"]["use_minor_units"]["value"] is True
     assert all(item.get("module") for item in index["defaults"].values())
     assert all(chip.get("module") for chip in index["chip_fields"])
     assert {
@@ -304,7 +304,7 @@ def test_local_settings_supplies_run_defaults_without_flat_frontend_values() -> 
     assert settings["end_date"] == "2026-01-31"
     assert settings["start_time"] == "09:00"
     assert settings["end_time"] == "15:00"
-    assert settings["initial_capital"] == 100_000_000.0
+    assert settings["initial_capital_major"] == 100_000_000.0
     assert settings["allocation_policy"] == "inverse_volatility"
 
 
@@ -358,7 +358,7 @@ def test_local_settings_dict_is_the_only_run_local_settings_source() -> None:
         {
             "local_settings": {
                 "allocation_policy": "equal_notional",
-                "initial_capital": 12_345_678,
+                "initial_capital_major": 12_345_678,
                 "start_date": "2025-01-01",
                 "end_date": "2025-01-31",
             },
@@ -369,7 +369,7 @@ def test_local_settings_dict_is_the_only_run_local_settings_source() -> None:
 
     settings = resolved["group-1"]
     assert settings["allocation_policy"] == "equal_notional"
-    assert settings["initial_capital"] == 12_345_678
+    assert settings["initial_capital_major"] == 12_345_678
 
 
 def test_new_run_payload_rejects_top_level_registered_settings() -> None:
@@ -604,7 +604,7 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
         local_values={
             "engine": "native",
             "factor_mode": "auto",
-            "initial_capital": 1_000_000.0,
+            "initial_capital_major": 1_000_000.0,
             "allocation_policy": "inverse_volatility",
             "volatility_lookback": 20,
             "rebalance_trigger": "on_factor_signal",
@@ -631,7 +631,7 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
     assert resolved["combination-a:group-1"]["rebalance_trigger"] == "on_factor_signal"
     assert resolved["combination-b:group-1"]["rebalance_trigger"] == "on_factor_signal"
     assert resolved["combination-b:group-1"]["position_policy"] == "buy_and_hold"
-    assert resolved["combination-a:group-1"]["initial_capital"] == 1_000_000.0
+    assert resolved["combination-a:group-1"]["initial_capital_major"] == 1_000_000.0
 
 
 def test_local_only_group_override_falls_back_with_diagnostics() -> None:
@@ -661,11 +661,11 @@ def test_numeric_setting_strings_are_normalized() -> None:
     resolved = resolve_group_settings(
         application,
         local_values={},
-        group_values={"group-1": {"initial_capital": "123456.5"}},
+        group_values={"group-1": {"initial_capital_major": "123456.5"}},
         group_ids=("group-1",),
     )
 
-    assert resolved["group-1"]["initial_capital"] == 123456.5
+    assert resolved["group-1"]["initial_capital_major"] == 123456.5
     assert "_setting_fallbacks" not in resolved["group-1"]
 
 
@@ -675,13 +675,13 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
     resolved = resolve_group_settings(
         application,
         local_values={},
-        group_values={"group-1": {"initial_capital": ""}},
+        group_values={"group-1": {"initial_capital_major": ""}},
         group_ids=("group-1",),
     )
 
-    assert resolved["group-1"]["initial_capital"] == 100_000_000.0
+    assert resolved["group-1"]["initial_capital_major"] == 100_000_000.0
     assert resolved["group-1"]["_setting_fallbacks"] == [{
-        "setting_key": "initial_capital",
+        "setting_key": "initial_capital_major",
         "module": "portfolio_capital",
         "engine": "native",
         "requested_value": "",
@@ -690,38 +690,12 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
     }]
 
 
-def test_qlib_keeps_default_minor_unit_policy() -> None:
-    application = backtest_setting_registry.get("group_test")
-
-    resolved = resolve_group_settings(
-        application,
-        local_values={"engine": "qlib"},
-        group_values={"group-1": {}},
-        group_ids=("group-1",),
-    )
-
-    assert resolved["group-1"]["money_unit_policy"] == "minor_units"
-
-
-def test_rqalpha_disabled_money_unit_policy_falls_back_with_diagnostics() -> None:
-    application = backtest_setting_registry.get("group_test")
-
-    resolved = resolve_group_settings(
-        application,
-        local_values={"engine": "rqalpha", "money_unit_policy": "minor_units"},
-        group_values={"group-1": {}},
-        group_ids=("group-1",),
-    )
-
-    assert resolved["group-1"]["money_unit_policy"] == "engine_native"
-    assert resolved["group-1"]["_setting_fallbacks"] == [{
-        "setting_key": "money_unit_policy",
-        "module": "accounting",
-        "engine": "rqalpha",
-        "requested_value": "minor_units",
-        "applied_value": "engine_native",
-        "reason": "engine_disabled_value",
-    }]
+# money_unit_policy's per-engine override behavior (qlib keeps default,
+# rqalpha forces engine_native) was specific to that old field's
+# engine_defaults/disabled_values_by_engine mechanism. MinorUnitModule.
+# use_minor_units (its replacement) is a plain per-strategy boolean scoped
+# to the native engine only -- other engines' money-precision handling
+# isn't modeled here, so there's no equivalent cross-engine fallback to test.
 
 
 def test_execution_price_basis_dependencies_fall_back_with_diagnostics() -> None:

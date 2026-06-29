@@ -26,9 +26,7 @@ from tools.testers.settings.applications import (
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
     register_factor_candidate_list_base,
-    register_factor_execution_base,
     register_factor_selection_base,
-    register_market_data_base,
     register_product_path_candidate_list_base,
     register_product_path_selection_base,
     register_run_window_base,
@@ -169,11 +167,11 @@ def register_group_test_settings(app: Any) -> None:
                        value_resolvers={"productPathSelectionLabel": "product_path_selection_label"},
                        clickable=True, batch_owned=True),
         ChipDefinition("split_count", "分组数", "identity",
-                       "分组数: {splitCount}", ("splitCount",),
+                       "分组数: {n_groups}", ("n_groups",),
                        module="group_strategy", order=30,
                        inherit_from_root=True, batch_owned=True),
         ChipDefinition("group_index", "分组序号", "identity",
-                       "分组序号: {groupIndex}", ("groupIndex",),
+                       "分组序号: {group_index}", ("group_index",),
                        module="group_strategy", order=31,
                        inherit_from_root=True),
         ChipDefinition("product_mask", "品种范围", "derived",
@@ -201,97 +199,38 @@ def register_group_test_settings(app: Any) -> None:
         ),
         chip_template="引擎: {value}",
     ))
-    register_factor_execution_base(app)
+    # factor_mode: registered by FactorSignalModule (issue-114), not
+    # register_factor_execution_base -- it directly selects which
+    # signal_live/signal_precomputed Flow this strategy activates.
     register_factor_candidate_list_base(app)
     register_factor_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
     register_product_path_candidate_list_base(app)
     register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
-    register_market_data_base(app, include_price_type=False)
+    # data_source/frequency: registered by MarketDataModule (issue-114) via
+    # register_all_module_settings below, not register_market_data_base --
+    # unlike product_path_selection/factor (resolved upstream by candidate-
+    # list machinery this module only consumes), data_source/frequency have
+    # no candidate-list/fallback metadata, so MarketDataModule is the real
+    # owner here, not just a consumer.
     register_run_window_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
 
-    app.register_setting(SettingDefinition(
-        "splitCount", "分组数", "group_strategy", "number", 5,
-        ScopePolicy.GROUP_ONLY, module="group_strategy",
-        minimum=1, step=1, chip_template="分组数: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "groupIndex", "分组序号", "group_strategy", "number", 1,
-        ScopePolicy.GROUP_ONLY, module="group_strategy",
-        minimum=1, step=1, chip_template="分组序号: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "initial_capital", "初始资金", "capital", "number", 100_000_000.0,
-        ScopePolicy.GROUP_OVERRIDE, module="portfolio_capital",
-        minimum=0.01, step=10_000.0, chip_template="资金: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "base_currency", "基础货币", "capital", "select", "CNY",
-        ScopePolicy.GROUP_OVERRIDE, module="portfolio_capital",
-        options=(SettingOption("CNY", "CNY"), SettingOption("USD", "USD")),
-        chip_template="币种: {value}",
-    ))
+    # splitCount/groupIndex/initial_capital/base_currency/allocation_policy/
+    # volatility_lookback/volatility_warmup/rebalance_trigger/position_policy/
+    # execution_timing/execution_delay_bars/quantity_rounding_policy/
+    # money_unit_policy/position_lot_policy/evaluation_split — superseded by
+    # the issue-114 ExecutableModule fields (LedgerModule.initial_capital_major/
+    # base_currency, GroupMembershipModule.{n_groups,group_index,
+    # allocation_policy,volatility_lookback,volatility_warmup,rebalance_trigger,
+    # position_policy,execution_timing,execution_delay_bars},
+    # PositionSizingModule.quantity_rounding_policy, MinorUnitModule.
+    # use_minor_units, TradingRuleModule.cost_basis_method, RiskMetricsModule.
+    # evaluation_split) — registered by register_all_module_settings(app)
+    # below, not here. Removed rather than kept alongside to avoid two
+    # parallel settings for the same concept.
     app.register_setting(SettingDefinition(
         "currency_conversion_fee_rate", "换汇佣金率", "capital", "number", 0.0,
         ScopePolicy.GROUP_OVERRIDE, module="portfolio_capital",
         minimum=0.0, step=0.000001,
-    ))
-    app.register_setting(SettingDefinition(
-        "allocation_policy", "目标分配", "target_allocation", "select",
-        "inverse_volatility", ScopePolicy.GROUP_OVERRIDE,
-        module="target_allocation",
-        options=(
-            SettingOption("inverse_volatility", "等风险（波动率倒数）"),
-            SettingOption("equal_notional", "等市值"),
-            SettingOption("equal_margin", "等保证金（对照）"),
-        ),
-        chip_template="分配: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "volatility_lookback", "波动率回看期数", "target_allocation",
-        "number", 20, ScopePolicy.GROUP_OVERRIDE,
-        module="target_allocation", minimum=2, step=1,
-        chip_template="波动率窗口: {value}",
-        visible_when={"allocation_policy": ("inverse_volatility",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "volatility_warmup", "等风险预热处理", "target_allocation", "select",
-        "equal_notional", ScopePolicy.GROUP_OVERRIDE,
-        module="target_allocation",
-        options=(
-            SettingOption("equal_notional", "预热期使用等市值并记录"),
-            SettingOption("error", "数据不足即报错"),
-        ),
-        visible_when={"allocation_policy": ("inverse_volatility",)},
-    ))
-    app.register_setting(SettingDefinition(
-        "rebalance_trigger", "触发规则", "rebalance_trigger", "select",
-        "on_factor_signal", ScopePolicy.GROUP_OVERRIDE,
-        module="rebalance_trigger",
-        options=(
-            SettingOption("on_factor_signal", "因子信号事件"),
-            SettingOption("membership_change", "成员变化事件"),
-            SettingOption("scheduled", "日历计划事件"),
-        ),
-        chip_template="触发: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "position_policy", "仓位处理", "position_policy", "select",
-        "rebalance_to_target", ScopePolicy.GROUP_OVERRIDE,
-        module="position_policy",
-        options=(
-            SettingOption("rebalance_to_target", "按目标调仓"),
-            SettingOption("buy_and_hold", "买入持有"),
-        ),
-        chip_template="持仓: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "execution_timing", "执行时点", "order", "select", "next_bar",
-        ScopePolicy.GROUP_OVERRIDE, module="order_execution",
-        options=(
-            SettingOption("next_bar", "下一 bar 执行"),
-            SettingOption("same_bar", "本 bar 执行"),
-        ),
-        chip_template="执行: {value}",
     ))
     app.register_setting(SettingDefinition(
         "execution_price_basis", "执行价格", "order", "select", "open",
@@ -302,14 +241,6 @@ def register_group_test_settings(app: Any) -> None:
             SettingOption("vwap", "VWAP"),
         ),
         chip_template="价格: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "execution_delay_bars", "执行延迟 bar 数", "order", "number", 1,
-        ScopePolicy.GROUP_OVERRIDE, module="order_execution",
-        minimum=1, step=1,
-        chip_template="延迟: {value} 根 bar",
-        help_text="仅在「下一 bar 执行」时生效；1 表示信号产生后的下一根 bar 执行。",
-        visible_when={"execution_timing": ("next_bar",)},
     ))
     app.register_setting(SettingDefinition(
         "order_type", "订单类型", "order", "select", "market",
@@ -330,15 +261,6 @@ def register_group_test_settings(app: Any) -> None:
         chip_template="撮合: {value}",
     ))
     app.register_setting(SettingDefinition(
-        "quantity_rounding_policy", "数量取整", "order", "select",
-        "floor_to_lot", ScopePolicy.GROUP_OVERRIDE, module="order_sizing",
-        options=(
-            SettingOption("floor_to_lot", "按最小买入手数向下取整"),
-            SettingOption("nearest_lot", "按最小买入手数四舍五入"),
-        ),
-        chip_template="取整: {value}",
-    ))
-    app.register_setting(SettingDefinition(
         "market_rule_fallback", "历史规则缺失处理", "market_rules",
         "select", "latest_available", ScopePolicy.LOCAL_ONLY,
         module="market_rules",
@@ -348,30 +270,6 @@ def register_group_test_settings(app: Any) -> None:
             SettingOption("configured_default", "使用注册默认值并标记近似"),
         ),
         chip_template="规则回退: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "money_unit_policy", "金额精度", "accounting", "select",
-        "minor_units", ScopePolicy.LOCAL_ONLY, module="accounting",
-        options=(
-            SettingOption("minor_units", "内部按分制整数记账"),
-            SettingOption("engine_native", "使用执行引擎原生金额精度"),
-        ),
-        engine_defaults={"rqalpha": "engine_native"},
-        disabled_values_by_engine={"rqalpha": ("minor_units",)},
-        chip_template="金额精度: {value}",
-    ))
-    app.register_setting(SettingDefinition(
-        "position_lot_policy", "持仓批次", "accounting", "select",
-        "fifo", ScopePolicy.LOCAL_ONLY, module="accounting",
-        options=(SettingOption("fifo", "FIFO 先进先出"),),
-        chip_template="持仓批次: {value}",
-        help_text="用于期货平仓、平今/平昨费用与实现盈亏归属的批次语义；当前通用期货账本按 FIFO 管理 lot。",
-    ))
-    app.register_setting(SettingDefinition(
-        "evaluation_split", "样本内截止日期", "evaluation", "date", None,
-        ScopePolicy.LOCAL_ONLY, module="evaluation_range",
-        chip_template="样本内截止: {value}",
-        help_text="截止日期之后为样本外；留空表示全部为样本内。",
     ))
     app.register_setting(SettingDefinition(
         "calendar_frequency", "公共回测时钟", "calendar", "select", "auto",

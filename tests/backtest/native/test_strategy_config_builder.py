@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import pytest
+
+from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.strategy_config_builder import (
+    apply_strategy_configs, build_strategy_configs,
+)
+from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule
+
+# GroupMembershipModule's core Flows are unconditionally active for every
+# strategy this round (no second SignalToOrderModule exists yet to opt out
+# into), so split_count/group_index -- both frontend_only_default=True --
+# must be supplied explicitly in every payload below, or build_strategy_configs
+# raises (see test_missing_frontend_only_default_field_raises).
+_GROUP_FIELDS = {"split_count": 5, "group_index": 1}
+
+
+def test_resolved_settings_map_to_matching_field_refs():
+    configs = build_strategy_configs({
+        "A1": {"custom_fee_rate": 0.001, "accounting_mode": "Custom", **_GROUP_FIELDS},
+    })
+    strategy = next(iter(configs))
+    config = configs[strategy]
+    assert config.get(FeeModule.custom_fee_rate) == 0.001
+    assert config.get(TradingRuleModule.accounting_mode) == "Custom"
+    assert config.get(GroupMembershipModule.split_count) == 5
+
+
+def test_unknown_settings_keys_are_ignored_not_errored():
+    configs = build_strategy_configs({"A1": {"some_unrelated_old_key": 123, **_GROUP_FIELDS}})
+    strategy = next(iter(configs))
+    field_values = configs[strategy].field_values
+    assert configs[strategy].get(GroupMembershipModule.split_count) == 5
+    assert not any(ref.name == "some_unrelated_old_key" for ref in field_values)
+
+
+def test_strategy_alias_becomes_strategy_name_prefix():
+    configs = build_strategy_configs({"GroupA1": _GROUP_FIELDS})
+    strategy = next(iter(configs))
+    assert strategy.name.startswith("GroupA1:")
+
+
+def test_two_strategies_get_independent_configs():
+    configs = build_strategy_configs({
+        "A1": {"custom_fee_rate": 0.001, **_GROUP_FIELDS},
+        "A2": {"custom_fee_rate": 0.002, **_GROUP_FIELDS},
+    })
+    by_alias = {s.alias: c for s, c in configs.items()}
+    assert by_alias["A1"].get(FeeModule.custom_fee_rate) == 0.001
+    assert by_alias["A2"].get(FeeModule.custom_fee_rate) == 0.002
+
+
+def test_factor_mode_incremental_activates_signal_live_not_precomputed():
+    configs = build_strategy_configs({"A1": {"factor_mode": "incremental", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert config.uses_flow("signal_live")
+    assert not config.uses_flow("signal_precomputed")
+
+
+def test_factor_mode_precomputed_activates_signal_precomputed_not_live():
+    configs = build_strategy_configs({"A1": {"factor_mode": "precomputed", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert config.uses_flow("signal_precomputed")
+    assert not config.uses_flow("signal_live")
+
+
+def test_factor_mode_auto_defaults_to_signal_precomputed():
+    configs = build_strategy_configs({"A1": {"factor_mode": "auto", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert config.uses_flow("signal_precomputed")
+    assert not config.uses_flow("signal_live")
+
+
+def test_non_variant_flows_are_always_active():
+    configs = build_strategy_configs({"A1": _GROUP_FIELDS})
+    config = next(iter(configs.values()))
+    assert config.uses_flow("group_quantile_membership")
+    assert config.uses_flow("initialize_ledgers")
+
+
+def test_apply_strategy_configs_sets_account_attribute():
+    account = AccountState()
+    apply_strategy_configs(account, {"A1": {"custom_fee_rate": 0.001, **_GROUP_FIELDS}})
+    assert len(account.strategy_configs) == 1
+    strategy = next(iter(account.strategy_configs))
+    assert account.strategy_configs[strategy].get(FeeModule.custom_fee_rate) == 0.001
+
+
+def test_missing_frontend_only_default_field_raises():
+    """split_count's `default=5` is a UI display suggestion only
+    (frontend_only_default=True) -- a strategy that doesn't supply it must
+    not silently fall back to that value."""
+    with pytest.raises(ValueError, match="split_count"):
+        build_strategy_configs({"A1": {"group_index": 1}})
+
+
+def test_ordinary_field_missing_value_materializes_real_default():
+    """custom_fee_rate (frontend_only_default=False) DOES use its declared
+    default as a genuine backend fallback when absent -- unlike split_count."""
+    configs = build_strategy_configs({"A1": _GROUP_FIELDS})
+    config = next(iter(configs.values()))
+    assert config.get(FeeModule.custom_fee_rate) == 0.0
