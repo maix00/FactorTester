@@ -39,4 +39,7 @@ dependencies:
       - orjson==3.11.9
       - playwright==1.60.0
       - beautifulsoup4==4.15.0
+      - html5lib==1.1
+      - pyright==1.1.411
+      - mypy==2.1.0
       - pyyaml==6.0.2
