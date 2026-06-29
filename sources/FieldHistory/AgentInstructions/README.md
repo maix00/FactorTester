@@ -1,11 +1,21 @@
-# Agent Field History Ingest
+# FieldHistory Agent Instructions
 
-This workflow is for agent-centered data cleaning of historical field-change
-events. The agent reads one source URL plus its source-specific instructions,
-extracts natural-language rule changes, and writes an append-only event list.
-The system then materializes validated events into `historical_field_values`;
-`sources.FieldHistory.*` builds deduplicated views for consumers such as
-`MarketDataModule`.
+This folder contains agent-facing data-cleaning instructions for historical
+field-change events. Keep these files next to `sources.FieldHistory` because
+they describe how source-specific natural language becomes rows consumed by
+FieldHistory views.
+
+## Naming
+
+Use one Markdown file per field group and data source:
+
+`<FieldGroup>_<DataSource>.md`
+
+Examples:
+
+- `LimitOrderVolume_DCE.md`
+- `LimitOrderVolume_Guosen.md`
+- `FeeRate_SHFE.md`
 
 ## Safety Model
 
@@ -32,8 +42,6 @@ The system then materializes validated events into `historical_field_values`;
 
 ## Required Event JSON
 
-Each event must contain:
-
 ```json
 {
   "data_source": "DCE",
@@ -57,7 +65,7 @@ Each event must contain:
 }
 ```
 
-## Natural-Language Rules
+## Shared Natural-Language Rules
 
 - `期货`, `期货合约`: `instrument_type = future`.
 - `期权`, `期权合约`: `instrument_type = option`.
