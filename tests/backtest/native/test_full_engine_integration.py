@@ -7,16 +7,19 @@ that the whole framework (not just isolated units) works together.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pandas as pd
 import pytest
 
+from tools.data.types import DataColumn, DataFreq
+from tools.factors.FactorExpr import ColumnRef
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.ledger import AccountState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
-from tools.testers.backtest.modules.equity_curve import equity_curve_for
+from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
@@ -133,3 +136,89 @@ def test_full_engine_two_strategies_independent_results():
     # trajectories once prices move (not required to differ on the very
     # first point, since both start at the same initial capital)
     assert curve_a1.iloc[-1] != curve_a2.iloc[-1]
+
+
+class _RollingMeanFactorAdapter:
+    """Wraps a real `FactorExpr` (ColumnRef(...).rolling(...).mean()) so it
+    matches the zero-arg `.evaluate()` contract FactorSignalModule actually
+    calls (`factor.evaluate()` in factor_signal.py) -- the real
+    ApplicationSettings/candidate-resolution layer is what normally builds
+    this kind of adapter around a user-selected FactorExpr before it reaches
+    StrategyConfig; this test stands in for that layer, not for FactorExpr
+    itself (the rolling-mean computation below is the real expression
+    engine, not a stub)."""
+
+    def __init__(self, expr, products: list[Product], freq: "DataFreq", preloaded: dict) -> None:
+        self._expr = expr
+        self._products = products
+        self._freq = freq
+        self._preloaded = preloaded
+
+    def evaluate(self) -> pd.DataFrame:
+        return self._expr.evaluate(self._products, self._freq, preloaded=self._preloaded)
+
+
+def test_full_engine_with_real_moving_average_factor_expression():
+    """Uses a genuine FactorExpr (ColumnRef(CLOSE).rolling(5).mean(), not a
+    hand-built table) and a literal frontend-shaped JSON payload (the exact
+    flat {alias: {setting_key: value}} shape build_strategy_configs expects
+    once the existing ApplicationSettings/candidate-resolution layer has
+    already resolved group/local settings) to prove the engine produces a
+    real trade off a real moving-average crossover, not off
+    pre-fabricated signal values."""
+    p1, p2 = _product(), _product()
+    idx = pd.date_range("2024-01-01", periods=12, freq="D", name="DAY1")
+    # GroupMembershipModule ranks by raw signal_value (the 5-bar moving
+    # average level itself, not momentum) -- p1 stays well above p2's level
+    # throughout, so its MA is always the higher-ranked one, and it also
+    # keeps climbing so the resulting equity curve should rise too.
+    close_p1 = pd.DataFrame({"CLOSE": [50.0 + i for i in range(12)]}, index=idx)
+    close_p2 = pd.DataFrame({"CLOSE": [10.0 - 0.1 * i for i in range(12)]}, index=idx)
+    preloaded = {(p1, "DAY1"): close_p1, (p2, "DAY1"): close_p2}
+
+    moving_average = ColumnRef(DataColumn.CLOSE).rolling(5).mean()
+    factor = _RollingMeanFactorAdapter(moving_average, [p1, p2], DataFreq.DAY1, preloaded)
+
+    raw_prices = pd.DataFrame(
+        {p1: close_p1["CLOSE"].to_numpy(), p2: close_p2["CLOSE"].to_numpy()}, index=idx)
+
+    # The literal payload a frontend POST would carry: scalar settings only
+    # (factor_mode/split_count/group_index/initial_capital_major/...) --
+    # JSON has no way to carry a Python FactorExpr/Product object, so those
+    # two (already-resolved domain objects, same as product_path_selection
+    # everywhere else in this file) are attached after parsing, standing in
+    # for the existing candidate-resolution layer that does this in
+    # production.
+    frontend_payload = json.loads(json.dumps({
+        "A1": {
+            "factor_mode": "precomputed",
+            "split_count": 2,
+            "group_index": 1,  # highest-MA half
+            "initial_capital_major": 1_000_000.0,
+            "base_currency": "CNY",
+            "accounting_mode": "Basic",
+        },
+    }))
+    selection = _FakeProductPathSelection("sel-ma", [p1, p2])
+    frontend_payload["A1"]["product_path_selection"] = selection
+    frontend_payload["A1"]["factor"] = factor
+
+    account = AccountState()
+    apply_strategy_configs(account, frontend_payload)
+    account.raw_market_data = {"raw_prices": raw_prices}
+
+    registry = _build_registry()
+    queue = EventQueue()
+    run(account, queue, registry.resolve())
+
+    strategy = next(iter(account.strategy_configs))
+    curve = equity_curve_for(account, strategy)
+    assert not curve.empty
+    # The real rolling-mean ranking must put p1 (consistently higher MA
+    # level) in the group_index=1 (top) bucket -- proof the engine's
+    # allocation decision was actually driven by FactorExpr.evaluate()'s
+    # real output, not a hand-built signal table.
+    positions_by_ts = position_curve_for(account, strategy)
+    final_positions = positions_by_ts[max(positions_by_ts)]
+    assert final_positions.get(str(p1), 0.0) > 0.0
+    assert final_positions.get(str(p2), 0.0) == pytest.approx(0.0, abs=1e-6)

@@ -61,10 +61,16 @@ def _basic_size_order(account, ctx) -> None:
         equity = ctx.get_for(LedgerModule.equity, strategy)
         target_weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
         positions = ledger.get(LedgerModule.positions, {})
+        # Must cover every currently-held product, not just target_weights'
+        # keys -- a product that dropped out of the target (e.g. fell out
+        # of the selected quantile bucket, implicit weight 0) still needs
+        # its current quantity sold off, which only happens if it's a key
+        # here too.
+        all_products = set(target_weights) | set(positions)
         deltas = {
-            product: target_weights[product] * equity / prices[product] - getattr(
+            product: target_weights.get(product, 0.0) * equity / prices[product] - getattr(
                 positions.get(product), "quantity", 0.0)
-            for product in target_weights
+            for product in all_products
         }
         ctx.set_for(OrderBookModule.deltas, strategy, deltas)
 
