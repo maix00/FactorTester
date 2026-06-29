@@ -23,11 +23,17 @@ Supported fields:
 
 - Only create events supported by source text. Do not hard-code structured
   product/contract/value lists in code.
-- For phrases like `BZ2604、BZ2605、BZ2606合约...调整为4手`, output one event:
-  product `BZ`, contracts `2604/2605/2606`, value `4`.
-- For a sentence containing several products and one value, group contracts by
-  product. Example: `EG2604、EG2605、EG2606...调整为8手` becomes product `EG`
-  with contracts `2604/2605/2606`, value `8`.
+- For phrases like `BZ2604、BZ2605、BZ2606合约...调整为4手`, output three
+  events: product `BZ` with contract `2604`, product `BZ` with contract
+  `2605`, and product `BZ` with contract `2606`; each event has value `4`.
+- For a sentence containing several products and one value, split every
+  product/contract pair into its own event. Example:
+  `EG2604、EG2605、EG2606...调整为8手` becomes three product `EG` events with
+  singleton contract scopes `2604`, `2605`, and `2606`, each with value `8`.
+- Agent-ingested `contract_codes` must be empty for product-level rules or a
+  singleton list for one contract-specific rule. Never store multiple contract
+  codes in one event, because not every product has a term structure and the
+  consumer may query a direct contract.
 - If a DCE page cannot be fetched due anti-bot protection, use the stored raw
   HTML/text snapshot supplied in the task. Still parse from that text; do not
   write pre-parsed rules.
@@ -55,4 +61,3 @@ aliases. Known labels:
 - `effective_trading_day`: the trading day in the first date.
 - `effective_timestamp`: previous calendar day's night open, currently
   `21:00:00` for DCE futures unless a source states otherwise.
-

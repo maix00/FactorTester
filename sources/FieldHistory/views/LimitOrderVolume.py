@@ -1,8 +1,8 @@
 """Unified LimitOrderVolume historical-field view.
 
-Provider-specific modules such as Guosen snapshots and DCE official notices
-write raw normalized rows into ``historical_field_values``. This module fuses
-those rows into a deduplicated field view with multi-source evidence attached.
+Agent-cleaned and provider-normalized rows are appended to
+``historical_field_values``. This module fuses those rows into a deduplicated
+field view with multi-source evidence attached.
 """
 
 from __future__ import annotations

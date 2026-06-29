@@ -6,17 +6,8 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from tools.data.hub import DataHub, SQLiteStore
 
-from sources.ExchangeAnnouncements.LimitOrderVolume.DCE.MinLimitOrderVolume import (
-    iter_historical_field_records,
-)
-from sources.ExchangeAnnouncements.field_announcements import (
-    ANNOUNCEMENT_TABLE,
-    discover_and_sync_field_announcements,
-    get_exchange_announcement_adapter,
-)
-from sources.FieldHistory.LimitOrderVolume import build_unified_frame, build_unified_provider
+from sources.FieldHistory.views.LimitOrderVolume import build_unified_frame, build_unified_provider
 from tools.data.field_history import FieldHistoryProvider, TimestampTradingDayResolver
 
 
@@ -34,23 +25,11 @@ def _load_market_data_module():
     return module
 
 
-def test_dce_official_notice_keeps_delisted_contract_scope() -> None:
-    records = list(iter_historical_field_records())
-    bz = [row for row in records if row["instrument"] == "BZ"]
-
-    assert len(bz) == 1
-    assert bz[0]["contract_codes"] == ["2604", "2605", "2606"]
-    assert bz[0]["source_notice_id"] == "大商所发〔2026〕74号"
-    assert bz[0]["effective_trading_day"] == "2026-03-10"
-    assert bz[0]["effective_timestamp"] == "2026-03-09 21:00:00"
-    assert bz[0]["value"] == 4
-
-
-def test_limit_order_volume_unified_frame_cross_references_sources() -> None:
-    frame = pd.DataFrame([
+def _agent_limit_order_frame() -> pd.DataFrame:
+    return pd.DataFrame([
         {
-            "provider": "Guosen",
-            "source_key": "Guosen/LimitOrderVolume",
+            "provider": "Agent:DCE",
+            "source_key": "agent/DCE/event-1",
             "instrument": "BZ",
             "instrument_label": "纯苯",
             "instrument_type": "future",
@@ -59,15 +38,15 @@ def test_limit_order_volume_unified_frame_cross_references_sources() -> None:
             "effective_timestamp": "2026-03-09 21:00:00",
             "value": "4",
             "value_type": "int",
-            "contract_codes": json.dumps(["2604", "2605", "2606"]),
-            "source_url": "https://guosen.example/rules",
-            "source_date": "2026-06-23",
-            "source_notice_id": "",
-            "raw_note": "Guosen snapshot",
+            "contract_codes": json.dumps(["2604"]),
+            "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
+            "source_date": "2026-06-29T12:00:00+08:00",
+            "source_notice_id": "大商所发〔2026〕74号",
+            "raw_note": "BZ2604、BZ2605、BZ2606合约交易指令每次最小开仓下单数量调整为4手",
         },
         {
-            "provider": "DCE",
-            "source_key": "DCE/LimitOrderVolume/MinLimitOrderVolume",
+            "provider": "Agent:ManualAudit",
+            "source_key": "agent/ManualAudit/event-2",
             "instrument": "BZ",
             "instrument_label": "纯苯",
             "instrument_type": "future",
@@ -76,26 +55,27 @@ def test_limit_order_volume_unified_frame_cross_references_sources() -> None:
             "effective_timestamp": "2026-03-09 21:00:00",
             "value": "4",
             "value_type": "int",
-            "contract_codes": json.dumps(["2606", "2605", "2604"]),
-            "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
-            "source_date": "2026-03-09",
+            "contract_codes": json.dumps(["2604"]),
+            "source_url": "https://audit.example/bz",
+            "source_date": "2026-06-29T12:05:00+08:00",
             "source_notice_id": "大商所发〔2026〕74号",
-            "raw_note": "DCE notice",
+            "raw_note": "人工复核同一公告",
         },
     ])
 
-    unified = build_unified_frame(frame)
+
+def test_limit_order_volume_view_deduplicates_agent_events_and_keeps_sources() -> None:
+    unified = build_unified_frame(_agent_limit_order_frame())
 
     assert len(unified) == 1
     row = unified.iloc[0]
     assert row["source_count"] == 2
-    assert json.loads(row["providers"]) == ["DCE", "Guosen"]
+    assert json.loads(row["providers"]) == ["Agent:DCE", "Agent:ManualAudit"]
     assert json.loads(row["source_notice_ids"]) == ["大商所发〔2026〕74号"]
 
 
 def test_limit_order_volume_unified_provider_resolves_contract_scope() -> None:
-    source_frame = pd.DataFrame(list(iter_historical_field_records()))
-    provider = build_unified_provider(build_unified_frame(source_frame))
+    provider = build_unified_provider(build_unified_frame(_agent_limit_order_frame()))
 
     value = provider.resolve_at(
         "BZ2604.DCE",
@@ -110,75 +90,7 @@ def test_limit_order_volume_unified_provider_resolves_contract_scope() -> None:
     assert value.contract_code == "2604"
 
 
-def test_public_announcement_helper_discovers_and_syncs_dce_rules(tmp_path) -> None:
-    db_path = tmp_path / "field_announcements.sqlite"
-    DataHub.get_instance().register_sqlite_store(SQLiteStore(
-        key="announcement_helper_test",
-        label="announcement-helper-test",
-        path_getter=lambda: str(db_path),
-    ))
-
-    summary = discover_and_sync_field_announcements(
-        "BZ.DCE",
-        "MinLimitOrderVolume",
-        store_key="announcement_helper_test",
-    )
-
-    assert summary["candidate_count"] == 1
-    assert summary["record_count"] == 1
-    with DataHub.get_instance().connect_store("announcement_helper_test") as conn:
-        announcement = conn.execute(
-            f"SELECT * FROM {ANNOUNCEMENT_TABLE} WHERE product_code='BZ'"
-        ).fetchone()
-        assert announcement is not None
-        assert announcement["status"] == "parsed"
-        rows = conn.execute(
-            """
-            SELECT instrument, field_name, value, contract_codes, source_notice_id
-            FROM historical_field_values
-            WHERE provider='DCE' AND instrument='BZ'
-            """
-        ).fetchall()
-        assert len(rows) == 1
-        assert rows[0]["source_notice_id"] == "大商所发〔2026〕74号"
-        assert json.loads(rows[0]["contract_codes"]) == ["2604", "2605", "2606"]
-
-
-def test_default_exchange_announcement_adapters_are_registered() -> None:
-    for exchange in ("DCE", "SHFE", "INE", "CZCE", "CFFEX", "GFEX"):
-        adapter = get_exchange_announcement_adapter(exchange)
-        assert adapter.exchange == exchange
-
-
-def test_public_announcement_helper_records_non_dce_official_candidates(tmp_path) -> None:
-    db_path = tmp_path / "field_announcements_shfe.sqlite"
-    DataHub.get_instance().register_sqlite_store(SQLiteStore(
-        key="announcement_helper_shfe_test",
-        label="announcement-helper-shfe-test",
-        path_getter=lambda: str(db_path),
-    ))
-
-    summary = discover_and_sync_field_announcements(
-        "CU.SHF",
-        "MaxLimitOrderVolume",
-        store_key="announcement_helper_shfe_test",
-    )
-
-    assert summary["candidate_count"] == 1
-    assert summary["record_count"] == 0
-    with DataHub.get_instance().connect_store("announcement_helper_shfe_test") as conn:
-        row = conn.execute(
-            f"SELECT exchange, field_name, product_code, status FROM {ANNOUNCEMENT_TABLE}"
-        ).fetchone()
-        assert dict(row) == {
-            "exchange": "SHFE",
-            "field_name": "MaxLimitOrderVolume",
-            "product_code": "CU",
-            "status": "candidate",
-        }
-
-
-def test_market_data_limit_order_fields_use_unified_provider(monkeypatch) -> None:
+def test_market_data_limit_order_fields_use_field_history_view(monkeypatch) -> None:
     raw_provider = FieldHistoryProvider.from_records([
         {
             "provider": "raw",
@@ -204,7 +116,7 @@ def test_market_data_limit_order_fields_use_unified_provider(monkeypatch) -> Non
         },
     ])
 
-    import sources.FieldHistory.LimitOrderVolume as limit_order_view
+    import sources.FieldHistory.views.LimitOrderVolume as limit_order_view
 
     monkeypatch.setattr(limit_order_view, "load_unified_provider", lambda: unified_provider)
 

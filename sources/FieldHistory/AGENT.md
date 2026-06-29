@@ -1,21 +1,16 @@
 # FieldHistory Agent Instructions
 
-This folder contains agent-facing data-cleaning instructions for historical
-field-change events. Keep these files next to `sources.FieldHistory` because
-they describe how source-specific natural language becomes rows consumed by
-FieldHistory views.
+This file is the shared instruction entrypoint for agents that clean historical
+field-change events. Keep the workflow centered on `sources.FieldHistory`:
+agents append cleaned events, FieldHistory views deduplicate them, and
+MarketDataModule reads those views.
 
-## Naming
+Field-group/data-source-specific instructions live in `AgentInstructions/` and
+must be named `<FieldGroup>_<DataSource>.md`.
 
-Use one Markdown file per field group and data source:
+Current instruction files:
 
-`<FieldGroup>_<DataSource>.md`
-
-Examples:
-
-- `LimitOrderVolume_DCE.md`
-- `LimitOrderVolume_Guosen.md`
-- `FeeRate_SHFE.md`
+- `AgentInstructions/LimitOrderVolume_DCE.md`
 
 ## Safety Model
 
@@ -27,8 +22,7 @@ Examples:
 - In production, set `GTHT_AGENT_INGEST_HMAC_SECRET`; without it local
   development uses a namespaced SHA-256 fingerprint.
 - Materialization writes each agent event with source key
-  `agent/<data_source>/<event_id>`, so it does not replace exchange, Guosen, or
-  other provider rows.
+  `agent/<data_source>/<event_id>`, so it does not replace other source rows.
 
 ## Required Input To The Agent
 
@@ -57,7 +51,7 @@ Examples:
   "effective_trading_day": "2026-03-10",
   "effective_timestamp": "2026-03-09 21:00:00",
   "value": 4,
-  "contract_codes": ["2604", "2605", "2606"],
+  "contract_codes": ["2604"],
   "source_notice_id": "大商所发〔2026〕74号",
   "raw_note": "原文中支持该事件的最小完整句子",
   "evidence_text": "原文摘录",
@@ -80,8 +74,12 @@ Examples:
   can override product-level rows in FieldHistory.
 - `部分`: never infer scope from the word alone. Scope must come from the listed
   products/contracts/table rows.
-- Contract-specific phrases such as `BZ2604、BZ2605、BZ2606合约` must create one
-  event for product `BZ` with `contract_codes = ["2604", "2605", "2606"]`.
+- Contract-specific phrases such as `BZ2604、BZ2605、BZ2606合约` must create
+  one event per contract: one row with `contract_codes = ["2604"]`, one row
+  with `["2605"]`, and one row with `["2606"]`. Do not create a single row
+  containing multiple contract codes. Not every product has a term structure,
+  and consumers may query a directly traded contract, so each contract-specific
+  field-change event must be atomic.
 - Night session belongs to the next trading day. Example:
   `自2026年3月10日交易时（即3月9日夜盘交易小节时）起` means
   `effective_trading_day = 2026-03-10` and
@@ -103,7 +101,6 @@ materialize_agent_events_to_history(data_source="DCE", field_group="LimitOrderVo
 After materialization, rebuild the relevant view, for example:
 
 ```python
-from sources.FieldHistory.LimitOrderVolume import save_unified_table
+from sources.FieldHistory.views.LimitOrderVolume import save_unified_table
 save_unified_table()
 ```
-

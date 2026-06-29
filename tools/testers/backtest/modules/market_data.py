@@ -274,7 +274,7 @@ def _historical_field_provider_groups(
     other_names = tuple(name for name in field_names if str(name) not in limit_order_fields)
     groups: list[tuple[FieldHistoryProvider, tuple[object, ...]]] = []
     if limit_names:
-        from sources.FieldHistory.LimitOrderVolume import load_unified_provider
+        from sources.FieldHistory.views.LimitOrderVolume import load_unified_provider
 
         groups.append((load_unified_provider(), limit_names))
     if other_names:

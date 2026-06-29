@@ -159,6 +159,11 @@ def ensure_agent_event_schema(conn: sqlite3.Connection) -> None:
 
 def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> AgentFieldChangeEvent:
     if isinstance(event, AgentFieldChangeEvent):
+        if len(event.contract_codes) > 1:
+            raise ValueError(
+                "agent field-change event must contain at most one contract code; "
+                "split multi-contract notices into one event per contract"
+            )
         return event
     requester_hash = str(event.get("requester_key_hash") or "")
     requester_key = str(event.get("requester_key") or "")
@@ -166,6 +171,12 @@ def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> 
         if not requester_key:
             raise ValueError("agent event requires requester_key_hash or requester_key")
         requester_hash = requester_key_fingerprint(requester_key)
+    contract_codes = tuple(str(code) for code in event.get("contract_codes", ()))
+    if len(contract_codes) > 1:
+        raise ValueError(
+            "agent field-change event must contain at most one contract code; "
+            "split multi-contract notices into one event per contract"
+        )
     return AgentFieldChangeEvent(
         event_id=str(event.get("event_id") or uuid.uuid4().hex),
         data_source=str(event["data_source"]),
@@ -181,7 +192,7 @@ def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> 
         effective_trading_day=str(event["effective_trading_day"]),
         effective_timestamp=str(event.get("effective_timestamp") or ""),
         value=event["value"],
-        contract_codes=tuple(str(code) for code in event.get("contract_codes", ())),
+        contract_codes=contract_codes,
         source_notice_id=str(event.get("source_notice_id") or ""),
         raw_note=str(event.get("raw_note") or ""),
         evidence_text=str(event.get("evidence_text") or ""),
@@ -231,4 +242,3 @@ def _history_record_from_agent_row(row: sqlite3.Row) -> dict[str, Any]:
         "source_notice_id": row["source_notice_id"],
         "raw_note": row["raw_note"],
     }
-

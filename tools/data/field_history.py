@@ -1,8 +1,8 @@
 """公共的历史字段存储与查询 helper。
 
 该模块表示“某个产品/合约字段从某个交易日起生效”的时间序列规则。
-数据源（例如 Guosen、OpenCTP 或后续交易所公告）只负责把自己的原始事件
-归一化写入这里；回测侧（例如 MarketDataModule）只消费统一接口。
+数据源（例如 agent 清洗后的交易所公告、OpenCTP 或后续来源）只负责把自己的
+原始事件归一化写入这里；回测侧（例如 MarketDataModule）只消费统一接口。
 """
 
 from __future__ import annotations
