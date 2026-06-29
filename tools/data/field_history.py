@@ -42,6 +42,7 @@ FIELD_HISTORY_PRIMARY_KEY = [
     "provider",
     "source_key",
     "instrument",
+    "instrument_type",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",
@@ -329,6 +330,25 @@ def load_historical_field_provider(*, store_key: str = "openctp") -> FieldHistor
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        """,
+        (HISTORICAL_FIELD_TABLE,),
+    ).fetchone()
+    if existing is not None and _primary_key_columns(conn) != FIELD_HISTORY_PRIMARY_KEY:
+        existing_df = pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
+        conn.execute(f'DROP TABLE "{HISTORICAL_FIELD_TABLE}"')
+        _create_schema(conn)
+        storage_df = _serialise_history_frame(_normalise_history_frame(existing_df))
+        storage_df.to_sql(HISTORICAL_FIELD_TABLE, conn, if_exists="append", index=False)
+        return
+    _create_schema(conn)
+
+
+def _create_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {HISTORICAL_FIELD_TABLE} (
@@ -346,7 +366,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             source_url TEXT,
             source_date TEXT,
             raw_note TEXT,
-            PRIMARY KEY (provider, source_key, instrument, field_name, effective_trading_day, effective_timestamp, contract_codes)
+            PRIMARY KEY (provider, source_key, instrument, instrument_type, field_name, effective_trading_day, effective_timestamp, contract_codes)
         )
         """
     )
@@ -362,6 +382,18 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         ON {HISTORICAL_FIELD_TABLE} (instrument, field_name, effective_trading_day, effective_timestamp)
         """
     )
+
+
+def _primary_key_columns(conn: sqlite3.Connection) -> list[str]:
+    try:
+        rows = conn.execute(f'PRAGMA table_info("{HISTORICAL_FIELD_TABLE}")').fetchall()
+    except sqlite3.Error:
+        return []
+    keyed = sorted(
+        ((int(row["pk"]), str(row["name"])) for row in rows if int(row["pk"]) > 0),
+        key=lambda item: item[0],
+    )
+    return [name for _, name in keyed]
 
 
 def _normalise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
