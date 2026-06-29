@@ -67,7 +67,7 @@ class Ledger:
         self.fields[ref] = value
 
 
-@dataclass
+@dataclass(frozen=True)
 class StrategyConfig:
     strategy: "Strategy"
     active_flow_names: frozenset[str] = field(default_factory=frozenset)
