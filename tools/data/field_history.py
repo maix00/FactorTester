@@ -47,6 +47,7 @@ FIELD_HISTORY_COLUMNS = [
     "contract_codes",
     "source_url",
     "source_date",
+    "source_notice_id",
     "raw_note",
 ]
 
@@ -100,6 +101,8 @@ class HistoricalFieldValue:
     effective_timestamp: pd.Timestamp | None = None
     source_key: str = ""
     provider: str = ""
+    source_date: str = ""
+    source_notice_id: str = ""
     approximated: bool = False
     contract_code: str | None = None
 
@@ -198,6 +201,8 @@ class FieldHistoryProvider:
             effective_timestamp=_optional_timestamp(row.get("effective_timestamp")),
             source_key=str(row.get("source_key") or ""),
             provider=str(row.get("provider") or ""),
+            source_date=str(row.get("source_date") or ""),
+            source_notice_id=str(row.get("source_notice_id") or ""),
             approximated=approximated,
             contract_code=identity.contract_code,
         )
@@ -250,6 +255,8 @@ class FieldHistoryProvider:
             effective_timestamp=_optional_timestamp(row.get("effective_timestamp")),
             source_key=str(row.get("source_key") or ""),
             provider=str(row.get("provider") or ""),
+            source_date=str(row.get("source_date") or ""),
+            source_notice_id=str(row.get("source_notice_id") or ""),
             approximated=approximated,
             contract_code=identity.contract_code,
         )
@@ -357,6 +364,7 @@ def save_historical_field_records(
     这样一个数据源重复同步时不会产生重复历史行。
     """
     hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
     path = hub._get_sqlite_store(store_key).path()
     df = _normalise_history_frame(pd.DataFrame(list(records)))
     storage_df = _serialise_history_frame(df)
@@ -375,12 +383,13 @@ def save_historical_field_records(
                 f'DELETE FROM "{HISTORICAL_FIELD_TABLE}" WHERE {" AND ".join(clauses)}',
                 params,
             )
-        storage_df.to_sql(HISTORICAL_FIELD_TABLE, conn, if_exists="append", index=False)
+        _upsert_history_frame(conn, storage_df)
     return path
 
 
 def load_historical_field_frame(*, store_key: str = "openctp") -> pd.DataFrame:
     hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
     try:
         with hub.connect_store(store_key) as conn:
             _ensure_schema(conn)
@@ -429,6 +438,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             contract_codes TEXT NOT NULL,
             source_url TEXT,
             source_date TEXT,
+            source_notice_id TEXT,
             raw_note TEXT,
             PRIMARY KEY (provider, source_key, instrument, instrument_type, field_name, effective_trading_day, effective_timestamp, contract_codes)
         )
@@ -440,12 +450,31 @@ def _create_schema(conn: sqlite3.Connection) -> None:
     }
     if "effective_timestamp" not in existing_columns:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN effective_timestamp TEXT')
+    if "source_notice_id" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN source_notice_id TEXT')
     conn.execute(
         f"""
         CREATE INDEX IF NOT EXISTS idx_{HISTORICAL_FIELD_TABLE}_lookup
         ON {HISTORICAL_FIELD_TABLE} (instrument, field_name, effective_trading_day, effective_timestamp)
         """
     )
+
+
+def _upsert_history_frame(conn: sqlite3.Connection, frame: pd.DataFrame) -> None:
+    if frame.empty:
+        return
+    columns = FIELD_HISTORY_COLUMNS
+    placeholders = ", ".join(["?"] * len(columns))
+    quoted_columns = ", ".join(columns)
+    conn.executemany(
+        f'INSERT OR REPLACE INTO "{HISTORICAL_FIELD_TABLE}" ({quoted_columns}) VALUES ({placeholders})',
+        [tuple(row[column] for column in columns) for _, row in frame.iterrows()],
+    )
+
+
+def _ensure_store_registered(hub: DataHub, store_key: str) -> None:
+    if store_key == "openctp":
+        hub.ensure_visits_schema()
 
 
 def _primary_key_columns(conn: sqlite3.Connection) -> list[str]:
@@ -1130,5 +1159,6 @@ if __name__ == "__main__":
     # Product query goes through Product -> market-data trading_day mapping ->
     # FieldHistoryProvider, matching the MarketDataModule consumption shape.
     AUDIT_PRODUCT = "BZ.DCE"
-    AUDIT_TIMESTAMP = "2026-03-10 09:01:00+08:00"
+    # AUDIT_PRODUCT = "DCE|F|BZ|2606"
+    AUDIT_TIMESTAMP = "2026-03-09 22:01:00+08:00"
     raise SystemExit(main(None if len(sys.argv) > 1 else [AUDIT_PRODUCT, AUDIT_TIMESTAMP]))
