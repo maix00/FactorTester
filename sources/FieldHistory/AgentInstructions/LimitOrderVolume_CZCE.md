@@ -51,3 +51,22 @@ order:
 - If a business rule says the exchange may adjust standards separately, keep
   searching for later adjustment notices before using the business-rule value
   for dates after the possible adjustment.
+
+## Audited Example
+
+On 2026-06-29, the local environment could not directly fetch CZCE official
+notice text due anti-bot/precondition responses, but an accessible repost at
+`https://www.hsqh.net/col49/7101` preserved the CZCE original notice
+`郑商函〔2026〕43号`.
+
+The reposted original says:
+
+- Effective point: `自2026年3月9日当晚夜盘交易时起`, so
+  `effective_trading_day = 2026-03-10` and
+  `effective_timestamp = 2026-03-09 21:00:00`.
+- Value `8`: `MA` contracts `2606`, `2607`, `2608`, `2609`;
+  `PX/TA/PF` contracts `2604`, `2605`, `2606`, `2607`, `2608`, `2609`.
+- Value `4`: `PR/SH/PL` contracts `2604`, `2605`, `2606`, `2607`, `2608`,
+  `2609`.
+
+Each product/contract pair must be ingested as one event.

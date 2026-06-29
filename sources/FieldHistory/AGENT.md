@@ -80,6 +80,11 @@ Current instruction files:
   can override product-level rows in FieldHistory.
 - `部分`: never infer scope from the word alone. Scope must come from the listed
   products/contracts/table rows.
+- `contract_codes` is not a generic product identifier. Fill it only when the
+  source explicitly restricts the field-change event to one contract. Leave it
+  empty for product-level rules and for financial products that do not have a
+  contract-code scope in the source. Do not synthesize contract codes from a
+  term structure or main-contract mapping.
 - Contract-specific phrases such as `BZ2604、BZ2605、BZ2606合约` must create
   one event per contract: one row with `contract_codes = ["2604"]`, one row
   with `["2605"]`, and one row with `["2606"]`. Do not create a single row

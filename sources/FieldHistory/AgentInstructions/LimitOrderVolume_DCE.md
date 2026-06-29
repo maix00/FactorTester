@@ -61,6 +61,24 @@ Supported fields:
    notices often state that option maximum order volume is the same as the
    underlying futures product.
 
+## Audited Example
+
+On 2026-06-29, direct access to
+`http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html` returned WAF
+JavaScript in the local environment, but the official URL and notice id were
+located and an accessible repost at `https://www.hsqh.net/col49/7101` preserved
+the DCE original text for `大商所发〔2026〕74号`.
+
+The reposted original says:
+
+- Effective point: `自2026年3月10日交易时（即3月9日夜盘交易小节时）起`, so
+  `effective_trading_day = 2026-03-10` and
+  `effective_timestamp = 2026-03-09 21:00:00`.
+- Value `8`: `EB/EG/PG/L/V/PP` contracts `2604`, `2605`, `2606`.
+- Value `4`: `BZ` contracts `2604`, `2605`, `2606`.
+
+Each product/contract pair must be ingested as one event.
+
 ## Product Mapping
 
 Use English contract prefixes in the source text as primary product codes. If
