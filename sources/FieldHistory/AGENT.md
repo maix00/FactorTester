@@ -17,6 +17,14 @@ Current instruction files:
 - `AgentInstructions/LimitOrderVolume_Guosen.md`
 - `AgentInstructions/LimitOrderVolume_INE.md`
 - `AgentInstructions/LimitOrderVolume_SHFE.md`
+- `AgentInstructions/TransactionFee_CFFEX.md`
+- `AgentInstructions/TransactionFee_CZCE.md`
+- `AgentInstructions/TransactionFee_DCE.md`
+- `AgentInstructions/TransactionFee_GFEX.md`
+- `AgentInstructions/TransactionFee_Guosen.md`
+- `AgentInstructions/TransactionFee_INE.md`
+- `AgentInstructions/TransactionFee_OpenCTP.md`
+- `AgentInstructions/TransactionFee_SHFE.md`
 
 ## Safety Model
 

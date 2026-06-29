@@ -287,7 +287,9 @@ def _historical_field_provider_groups(
 
         groups.append((load_unified_provider(), limit_names))
     if market_rule_names:
-        groups.append((provider, market_rule_names))
+        from sources.FieldHistory.views.TransactionFee import load_unified_provider
+
+        groups.append((load_unified_provider(), market_rule_names))
     if other_names:
         groups.append((provider, other_names))
     return groups

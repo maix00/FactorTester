@@ -1,8 +1,9 @@
-"""Unified LimitOrderVolume historical-field view.
+"""Unified transaction-fee historical-field view.
 
-Agent-cleaned and provider-normalized rows are appended to
-``historical_field_values``. This module fuses those rows into a deduplicated
-field view with multi-source evidence attached.
+Historical exchange notices and provider baselines are appended to
+``historical_field_values``. This view deduplicates those rows and includes
+OpenCTP's latest contract snapshot as a current baseline so MarketDataModule can
+read one provider for both historical events and today's listed contracts.
 """
 
 from __future__ import annotations
@@ -15,16 +16,17 @@ import pandas as pd
 
 from tools.data.field_history import (
     FIELD_HISTORY_COLUMNS,
-    HISTORICAL_FIELD_TABLE,
+    TRANSACTION_FEE_FIELD_NAMES,
     FieldHistoryProvider,
     _ensure_store_registered,
     load_historical_field_frame,
+    load_openctp_latest_market_rule_frame,
 )
 from tools.data.hub import DataHub
 
 
-FIELDS = ("MinLimitOrderVolume", "MaxLimitOrderVolume", "MaxMarketOrderVolume")
-UNIFIED_TABLE = "field_history_limit_order_volume_unified"
+FIELDS = (*TRANSACTION_FEE_FIELD_NAMES, "VolumeMultiple")
+UNIFIED_TABLE = "field_history_transaction_fee_unified"
 
 _GROUP_COLUMNS = [
     "instrument",
@@ -40,10 +42,16 @@ _GROUP_COLUMNS = [
 
 
 def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
-    frame = load_historical_field_frame(store_key=store_key)
-    if frame.empty:
+    historical = load_historical_field_frame(store_key=store_key)
+    latest = load_openctp_latest_market_rule_frame(store_key=store_key)
+    frames = [frame for frame in (historical, latest) if not frame.empty]
+    if not frames:
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
-    return cast(pd.DataFrame, frame[frame["field_name"].isin(FIELDS)].copy())
+    frame = cast(pd.DataFrame, pd.concat(frames, ignore_index=True, sort=False))
+    for column in FIELD_HISTORY_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = ""
+    return cast(pd.DataFrame, frame[frame["field_name"].isin(FIELDS)][FIELD_HISTORY_COLUMNS].copy())
 
 
 def build_unified_frame(source_frame: pd.DataFrame | None = None, *, store_key: str = "openctp") -> pd.DataFrame:
