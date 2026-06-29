@@ -165,11 +165,11 @@ Interpret them as bounds, not as the web-query time range:
 
 - The date embedded in the Guosen URL or page title is `source_date`, not an
   effective start date.
-- Empty lower/min bound means Guosen did not prove the start. Do not write a
-  historical fact with a fake early date such as `1900-01-01`. If current-state
-  evidence is explicitly requested, store it as an agent candidate with
-  `parser_notes` explaining that the start date must be confirmed from the
-  exchange source before materialization.
+- Empty lower/min bound on a current baseline means the current baseline is
+  treated as open-from-past for backtest consumption. Write it as
+  `effective_trading_day = 1900-01-01`, `effective_timestamp = ""`, and explain
+  in `parser_notes` that this is a Guosen current-snapshot baseline. Later
+  dated exchange events for the same product/contract/field override it.
 - Non-empty lower/min bound, or text like `自YYYY年M月D日...起`, gives
   `effective_trading_day`. If the text says `夜盘`, the night session belongs
   to the next trading day: `自2026年3月9日夜盘起` means
@@ -182,10 +182,9 @@ Interpret them as bounds, not as the web-query time range:
   the upper bound in `parser_notes` and do not invent a new value after expiry
   unless the source states one.
 - If the Guosen page has no effective-time evidence at all, do not claim a
-  historical change point. For `MaxLimitOrderVolume` and
-  `MaxMarketOrderVolume`, use Guosen only to identify candidate current values
-  and then find the corresponding exchange notice or product business rule
-  before writing `historical_field_values`.
+  dated historical change point. Write the current baseline as open-from-past
+  only when it is needed by MarketDataModule, and prefer replacing it later
+  with exchange-official dated evidence when found.
 
 ## Finding The Official Start/End Evidence
 
@@ -201,9 +200,9 @@ Interpret them as bounds, not as the web-query time range:
 - For minimum-order adjustments, the start date should usually be in Guosen
   `备注`; confirm it against the official exchange announcement when possible.
 - For maximum limit/market order quantities, Guosen usually supplies only the
-  current value columns. The start date normally has to be found in exchange
-  business rules or an adjustment notice; if not found, do not materialize the
-  value into `historical_field_values`.
+  current value columns. If no official start date is found, materialize them
+  as open-from-past Guosen current baselines so MarketDataModule has a baseline
+  value.
 - Guosen does not provide an explicit end date for current rows. The effective
   end is implicit: it ends when a later official FieldHistory event for the
   same product/contract/field supersedes it.
