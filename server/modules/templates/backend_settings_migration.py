@@ -100,7 +100,7 @@ def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: l
             item.get("source_type")
             or ("user_product_group_template" if template_id else "manual_selection")
         )
-        selection = {
+        selection: dict[str, Any] = {
             "product_path_selection_id": selection_id,
         }
         if not template_id and paths:
@@ -321,12 +321,16 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
     if "feeMode" in item:
         mode = str(item.get("feeMode") or "none")
         if mode == "none":
-            values["fee_mode"] = "none"
+            values["fee_mode"] = "zero"
         elif mode == "per_product" and not item.get("feeMap") and item.get("feeRate") in (None, ""):
-            values["fee_mode"] = "market"
+            values["fee_mode"] = "auto"
         else:
-            values["fee_mode"] = "custom"
-            _set(values, "custom_fee_rate", item.get("feeRate"))
+            if item.get("feeMap"):
+                values["fee_mode"] = "custom"
+                values["custom_fee_overrides"] = item.get("feeMap")
+            else:
+                values["fee_mode"] = "fixed"
+                _set(values, "fixed_fee_rate", item.get("feeRate"))
     if "rebalanceMode" in item:
         mapping = {
             "each_period": "on_factor_signal",
@@ -342,7 +346,7 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
         if mode in {"percent", "volume_participation"}:
             values["liquidity_mode"] = "volume_participation"
             try:
-                percent = float(item.get("liquidityPercent"))
+                percent = float(item.get("liquidityPercent") or 0.0)
                 values["participation_rate"] = percent / 100.0 if percent > 1 else percent
             except Exception:
                 pass

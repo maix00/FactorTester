@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tools.testers.settings import backtest_setting_registry
 
 
-def build_snapshot_summary(snapshot: dict) -> dict:
+def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
     """Build a readable summary from a saved single-factor-test snapshot."""
-    summary = {}
+    summary: dict[str, Any] = {}
 
     local_settings = snapshot.get('local_settings') or {}
     backend_local = local_settings if isinstance(local_settings, dict) else {}
@@ -95,7 +97,16 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             group_parts.append(
                 f"共 {total_groups} 组{screen_note} · Long-Short {len(ls_configs)} 个"
             )
-            fee_labels = {'none': '无费用', 'market': '市场规则', 'custom': '自定义费率'}
+            fee_labels = {
+                'auto': '自动费率',
+                'close_yesterday': '平昨费率',
+                'close_today': '平今费率',
+                'custom': '自定义品种/合约',
+                'fixed': '固定费率',
+                'zero': '无费用',
+                'none': '无费用',
+                'market': '自动费率',
+            }
             trigger_labels = {
                 'on_factor_signal': '因子信号事件',
                 'membership_change': '成员变化事件',
@@ -111,11 +122,11 @@ def build_snapshot_summary(snapshot: dict) -> dict:
                 group_count_value = group.get('splitCount', '未设置')
                 factor_alias = group.get('factorAlias') or '因子未设置'
                 overrides = group if isinstance(group, dict) else {}
-                fee_mode_value = overrides.get('fee_mode') or '默认'
+                fee_mode_value = str(overrides.get('fee_mode') or '默认')
                 fee_text = fee_labels.get(fee_mode_value, fee_mode_value)
-                trigger = overrides.get('rebalance_trigger')
+                trigger = str(overrides.get('rebalance_trigger') or '')
                 trigger_text = trigger_labels.get(trigger, trigger or '默认触发')
-                position_policy = overrides.get('position_policy')
+                position_policy = str(overrides.get('position_policy') or '')
                 position_text = position_labels.get(position_policy, position_policy or '默认持仓')
                 group_parts.append(
                     f"{label} · 第{group_index}/{group_count_value}组 · 因子 {factor_alias} · {fee_text} · {trigger_text} · {position_text}"
@@ -134,8 +145,15 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         if group_count:
             group_parts.append(f"分组数={group_count}")
         fee_mode = group_settings.get('fee_mode', '')
-        if fee_mode and fee_mode != 'none':
-            fee_labels = {'none': '无费率', 'percent': '百分比', 'fixed': '固定', 'uniform': '统一费率', 'per_product': '分品种费率', 'custom': '自定义费率'}
+        if fee_mode and fee_mode not in ('none', 'zero'):
+            fee_labels = {
+                'auto': '自动费率',
+                'close_yesterday': '平昨费率',
+                'close_today': '平今费率',
+                'fixed': '固定费率',
+                'custom': '自定义品种/合约',
+                'market': '自动费率',
+            }
             group_parts.append(f"费率={fee_labels.get(fee_mode, fee_mode)}")
             if group_settings.get('fee_rate'):
                 group_parts.append(f"{group_settings.get('fee_rate')}")
@@ -159,7 +177,7 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         elif group_end:
             group_parts.append(f"终末={group_end}")
         if group_parts:
-            summary['group_test'] = ', '.join(group_parts)
+            summary['group_test'] = [', '.join(group_parts)]
 
     return summary
 

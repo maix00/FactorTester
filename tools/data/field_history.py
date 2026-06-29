@@ -33,6 +33,35 @@ from tools.data.hub import DataHub
 
 HISTORICAL_FIELD_TABLE = "historical_field_values"
 
+OPENCTP_LATEST_FIELD_PROVIDER = "OpenCTP:latest"
+OPENCTP_LATEST_FIELD_SOURCE_KEY = "openctp/latest_snapshot"
+
+OPENCTP_MARKET_RULE_FIELDS = (
+    "VolumeMultiple",
+    "PriceTick",
+    "MinLimitOrderVolume",
+    "MaxLimitOrderVolume",
+    "OpenRatioByMoney",
+    "OpenRatioByVolume",
+    "CloseRatioByMoney",
+    "CloseRatioByVolume",
+    "CloseTodayRatioByMoney",
+    "CloseTodayRatioByVolume",
+    "LongMarginRatioByMoney",
+    "LongMarginRatioByVolume",
+    "ShortMarginRatioByMoney",
+    "ShortMarginRatioByVolume",
+)
+
+TRANSACTION_FEE_FIELD_NAMES = (
+    "OpenRatioByMoney",
+    "OpenRatioByVolume",
+    "CloseRatioByMoney",
+    "CloseRatioByVolume",
+    "CloseTodayRatioByMoney",
+    "CloseTodayRatioByVolume",
+)
+
 FIELD_HISTORY_COLUMNS = [
     "provider",
     "source_key",
@@ -402,6 +431,84 @@ def load_historical_field_provider(*, store_key: str = "openctp") -> FieldHistor
     return FieldHistoryProvider(load_historical_field_frame(store_key=store_key))
 
 
+def load_market_rule_field_provider(
+    *,
+    store_key: str = "openctp",
+    include_openctp_latest: bool = True,
+) -> FieldHistoryProvider:
+    """Load FieldHistory rows plus OpenCTP's latest contract specs.
+
+    FieldHistory remains the single consumer-facing interface. Agent-cleaned
+    exchange events are stored in ``historical_field_values``; OpenCTP latest
+    rows are folded in here as an open-past baseline so backtests can still run
+    before every historical notice has been cleaned. Contract-level rows keep a
+    single ``contract_codes`` value, so querying a Futures product first expands
+    through its term structure and then matches the fee/spec row for the active
+    contract.
+    """
+    frame = load_historical_field_frame(store_key=store_key)
+    if not include_openctp_latest:
+        return FieldHistoryProvider(frame)
+    latest = load_openctp_latest_market_rule_frame(store_key=store_key)
+    if latest.empty:
+        return FieldHistoryProvider(frame)
+    combined = pd.concat([frame, latest], ignore_index=True) if not frame.empty else latest
+    return FieldHistoryProvider(combined)
+
+
+def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.DataFrame:
+    """Represent OpenCTP latest contract specs as FieldHistory records."""
+    try:
+        from sources.OpenCTP.client import read_cnfutures_contract_specs_for_date
+    except Exception:
+        return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
+
+    try:
+        specs = read_cnfutures_contract_specs_for_date(None, allow_latest_fallback=True)
+    except Exception:
+        return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
+    if specs.empty:
+        return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
+
+    source_date = str(specs.attrs.get("fee_source_date") or "")
+    source_key_suffix = source_date or "latest"
+    rows: list[dict[str, Any]] = []
+    for _, spec in specs.iterrows():
+        product_id = str(spec.get("ProductID") or "").strip().upper()
+        if not product_id:
+            continue
+        instrument_id = str(spec.get("InstrumentID") or spec.get("NormalizedInstrumentID") or "").strip()
+        contract_code = _contract_code_from_instrument_name(f"{instrument_id}.DUMMY")
+        if not contract_code:
+            contract_code = _contract_month_from_instrument_id(instrument_id, product_id)
+        contract_codes = [contract_code] if contract_code else []
+        instrument_label = str(spec.get("InstrumentName") or "")
+        for field_name in OPENCTP_MARKET_RULE_FIELDS:
+            if field_name not in spec.index:
+                continue
+            value = spec.get(field_name)
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            rows.append({
+                "provider": OPENCTP_LATEST_FIELD_PROVIDER,
+                "source_key": f"{OPENCTP_LATEST_FIELD_SOURCE_KEY}/{source_key_suffix}/{instrument_id}/{field_name}",
+                "instrument": product_id,
+                "instrument_label": instrument_label,
+                "instrument_type": "future",
+                "field_name": field_name,
+                "effective_trading_day": "1900-01-01",
+                "effective_timestamp": "",
+                "value": value,
+                "value_type": "",
+                "contract_codes": contract_codes,
+                "source_url": "OpenCTP latest cnfutures contract specs",
+                "source_date": source_date,
+                "source_notice_id": "OpenCTP latest snapshot",
+                "raw_note": "Latest OpenCTP contract-level snapshot used as baseline until exchange notice history is cleaned.",
+            })
+    return _normalise_history_frame(pd.DataFrame(rows))
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     existing = conn.execute(
         """
@@ -666,6 +773,17 @@ def _contract_code_from_instrument_name(name: str) -> str | None:
     return None
 
 
+def _contract_month_from_instrument_id(instrument_id: str, product_id: str) -> str | None:
+    text = str(instrument_id or "").strip().upper()
+    product = str(product_id or "").strip().upper()
+    if product and text.startswith(product):
+        suffix = text[len(product):]
+        if suffix.isdigit():
+            return suffix
+    match = re.search(r"(\d{3,4})$", text)
+    return match.group(1) if match else None
+
+
 def _decode_contract_codes(value: Any) -> list[str]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return []
@@ -775,14 +893,14 @@ def _vectorized_values_from_subset(
         best = all_candidates.groupby("_row", sort=False).tail(1)
         for _, row in best.iterrows():
             row_number = int(cast(Any, row["_row"]))
-            result.loc[row_number] = _decode_value(row["value"], row.get("value_type"))
+            result.at[row_number] = _decode_value(row["value"], row.get("value_type"))
 
     missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
     if missing_rows and policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
         fallback_row = subset.sort_values(by=["effective_trading_day", "effective_timestamp"]).iloc[-1]
         fallback_value = _decode_value(fallback_row["value"], fallback_row.get("value_type"))
-        for row in missing_rows:
-            result.loc[row] = fallback_value
+        for row_number in missing_rows:
+            result.at[row_number] = fallback_value
         missing_rows = []
     if missing_rows:
         raise MissingHistoricalField(
@@ -950,10 +1068,12 @@ def build_trading_day_resolver_from_market_data(frame: pd.DataFrame) -> Timestam
             "MIN1" if "MIN1" in names
             else ("trade_time" if "trade_time" in names else (timestamp_candidates[-1] if timestamp_candidates else names[-1]))
         )
-        days = pd.to_datetime(frame.index.get_level_values(day_level), errors="coerce")
-        timestamps = pd.to_datetime(frame.index.get_level_values(timestamp_level), errors="coerce")
+        day_level_key = cast(str | int, day_level)
+        timestamp_level_key = cast(str | int, timestamp_level)
+        days = pd.DatetimeIndex(pd.to_datetime(list(frame.index.get_level_values(day_level_key)), errors="coerce"))
+        timestamps = pd.DatetimeIndex(pd.to_datetime(list(frame.index.get_level_values(timestamp_level_key)), errors="coerce"))
     elif "trading_day" in frame.columns:
-        days = pd.to_datetime(frame["trading_day"], errors="coerce")
+        days = pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
         timestamps = pd.DatetimeIndex(frame.index)
     else:
         raise MissingTradingDay(
@@ -1160,5 +1280,5 @@ if __name__ == "__main__":
     # FieldHistoryProvider, matching the MarketDataModule consumption shape.
     AUDIT_PRODUCT = "BZ.DCE"
     AUDIT_PRODUCT = "DCE|F|BZ|2604"
-    AUDIT_TIMESTAMP = "2026-03-09 21:01:00+08:00"
+    AUDIT_TIMESTAMP = "2026-03-09 21:00:00+08:00"
     raise SystemExit(main(None if len(sys.argv) > 1 else [AUDIT_PRODUCT, AUDIT_TIMESTAMP]))

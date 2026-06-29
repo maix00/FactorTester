@@ -30,6 +30,7 @@ from tools.data.field_history import (
     HistoricalFieldFallbackPolicy,
     FieldHistoryProvider,
     TradingDayResolver,
+    TRANSACTION_FEE_FIELD_NAMES,
     historical_fields_frame_for_products,
     resolve_historical_fields_for_product,
 )
@@ -270,13 +271,23 @@ def _historical_field_provider_groups(
     field_names: tuple[object, ...],
 ) -> list[tuple[FieldHistoryProvider, tuple[object, ...]]]:
     limit_order_fields = {"MinLimitOrderVolume", "MaxLimitOrderVolume", "MaxMarketOrderVolume"}
+    fee_fields = set(TRANSACTION_FEE_FIELD_NAMES) | {"VolumeMultiple"}
     limit_names = tuple(name for name in field_names if str(name) in limit_order_fields)
-    other_names = tuple(name for name in field_names if str(name) not in limit_order_fields)
+    market_rule_names = tuple(
+        name for name in field_names
+        if str(name) in fee_fields and str(name) not in limit_order_fields
+    )
+    other_names = tuple(
+        name for name in field_names
+        if str(name) not in limit_order_fields and str(name) not in fee_fields
+    )
     groups: list[tuple[FieldHistoryProvider, tuple[object, ...]]] = []
     if limit_names:
         from sources.FieldHistory.views.LimitOrderVolume import load_unified_provider
 
         groups.append((load_unified_provider(), limit_names))
+    if market_rule_names:
+        groups.append((provider, market_rule_names))
     if other_names:
         groups.append((provider, other_names))
     return groups
@@ -295,7 +306,7 @@ def _historical_fields_at_from_frames(
         for instrument in instruments:
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:
-                result[str(instrument)][str(field_name)] = row[column]
+                result[str(instrument)][str(field_name)] = row[str(column)]
     return result
 
 

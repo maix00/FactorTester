@@ -196,9 +196,12 @@
             ? GT.backendSettings.groupOverrideValues(node && node.id)
             : null;
         var mode = values && values.fee_mode;
-        if (mode === 'none' || !mode) return '—';
-        if (mode === 'market') return '市场规则';
-        if (mode === 'custom') return values.custom_fee_rate != null ? Number(values.custom_fee_rate).toFixed(6) : '自定义';
+        if (mode === 'none' || mode === 'zero' || !mode) return '—';
+        if (mode === 'market' || mode === 'auto') return '自动';
+        if (mode === 'close_yesterday') return '平昨';
+        if (mode === 'close_today') return '平今';
+        if (mode === 'fixed') return values.fixed_fee_rate != null ? Number(values.fixed_fee_rate).toFixed(6) : '固定';
+        if (mode === 'custom') return '自定义';
         return mode;
     }
 

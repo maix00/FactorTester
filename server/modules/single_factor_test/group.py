@@ -8,6 +8,12 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
+from tools.data.field_history import (
+    HistoricalFieldFallbackPolicy,
+    TRANSACTION_FEE_FIELD_NAMES,
+    build_trading_day_resolver_from_market_data,
+    load_market_rule_field_provider,
+)
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
@@ -40,6 +46,7 @@ from tools.products.product_utils import product_display_name
 from tools.testers.settings import backtest_setting_registry
 from tools.testers.settings.resolver import resolve_group_settings
 from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
+from tools.testers.backtest.modules.market_data import historical_field_frames_for_market_data
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
@@ -1848,6 +1855,15 @@ def _build_group_owner_rows(groups: list[dict], *, is_ls: bool) -> list[dict[str
     return rows
 
 
+_MARKET_RULE_FIELD_NAMES = (
+    "VolumeMultiple",
+    "MaxLimitOrderVolume",
+    "MaxMarketOrderVolume",
+    "MinLimitOrderVolume",
+    *TRANSACTION_FEE_FIELD_NAMES,
+)
+
+
 def _load_raw_market_data_for(products: list, start_dt: Any, end_dt: Any) -> dict[str, Any]:
     """Real I/O: per-product CLOSE series via Product.get_price_data (existing
     utility -- masks to [start_date, end_date], returns OHLCV), assembled into
@@ -1859,7 +1875,28 @@ def _load_raw_market_data_for(products: list, start_dt: Any, end_dt: Any) -> dic
             continue
         series_by_product[product] = df['CLOSE']
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
-    return {"raw_prices": raw_prices}
+    resolver = None
+    historical_provider = load_market_rule_field_provider()
+    historical_field_names = _MARKET_RULE_FIELD_NAMES
+    historical_field_frames = None
+    if not raw_prices.empty:
+        resolver = build_trading_day_resolver_from_market_data(raw_prices)
+        historical_field_frames = historical_field_frames_for_market_data(
+            list(raw_prices.columns),
+            raw_prices.index,
+            provider=historical_provider,
+            trading_day_resolver=resolver,
+            field_names=historical_field_names,
+            policy=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+        )
+    return {
+        "raw_prices": raw_prices,
+        "historical_field_provider": historical_provider,
+        "trading_day_resolver": resolver,
+        "historical_field_policy": str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+        "historical_field_names": historical_field_names,
+        "historical_field_frames": historical_field_frames,
+    }
 
 
 def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
