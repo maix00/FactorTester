@@ -7,6 +7,16 @@
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__":
+    _script_dir = __file__.rsplit("/", 1)[0]
+    if sys.path and sys.path[0] == _script_dir:
+        sys.path.pop(0)
+    _repo_root = _script_dir.rsplit("/", 2)[0]
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+
 import json
 import re
 import sqlite3
@@ -676,3 +686,68 @@ def _decode_value(value: Any, value_type: Any) -> Any:
     if typ == "none":
         return None
     return text
+
+
+def _load_provider_from_sqlite_path(db_path: str) -> FieldHistoryProvider:
+    with sqlite3.connect(db_path) as conn:
+        try:
+            frame = pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"cannot read {HISTORICAL_FIELD_TABLE} from {db_path}") from exc
+    return FieldHistoryProvider(frame)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Small manual query entrypoint for VS Code / terminal debugging."""
+    import argparse
+
+    try:
+        from settings import CACHE_DB_PATH
+        default_db_path = str(CACHE_DB_PATH)
+    except Exception:
+        default_db_path = "/Users/maxdeux/Documents/GTHT/data/sqlite/unifieddata.sqlite"
+
+    parser = argparse.ArgumentParser(description="Query historical market-rule fields by product/contract and timestamp.")
+    parser.add_argument("instrument", nargs="?", default="BZ2606.DCE", help="Product/contract, e.g. BZ, BZ2606.DCE, ME2607.CZC")
+    parser.add_argument("timestamp", nargs="?", default="2026-06-24 09:01:00", help="Timestamp to query")
+    parser.add_argument(
+        "--fields",
+        nargs="+",
+        default=["MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"],
+        help="Field names to query",
+    )
+    parser.add_argument("--instrument-type", default="future", choices=["future", "option", "unknown"], help="Instrument type")
+    parser.add_argument("--db", default=default_db_path, help="SQLite DB path")
+    parser.add_argument(
+        "--calendar-day",
+        action="store_true",
+        default=True,
+        help="Use calendar date as trading day. For real night-session checks, pass a trading-day resolver in code.",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    provider = _load_provider_from_sqlite_path(args.db)
+    resolver = CalendarDateTradingDayResolver()
+    timestamp = pd.Timestamp(args.timestamp)
+
+    print(f"db={args.db}")
+    print(f"instrument={args.instrument} timestamp={timestamp} instrument_type={args.instrument_type}")
+    for field_name in args.fields:
+        resolved = provider.resolve_at(
+            args.instrument,
+            field_name,
+            timestamp,
+            trading_day_resolver=resolver,
+            instrument_type=args.instrument_type,
+        )
+        print(
+            f"{field_name}: value={resolved.value} "
+            f"product={resolved.instrument} contract={resolved.contract_code or '-'} "
+            f"effective_day={resolved.effective_trading_day.date()} "
+            f"provider={resolved.provider}/{resolved.source_key}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
