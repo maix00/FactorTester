@@ -30,6 +30,46 @@ Current instruction files:
 - Materialization writes each agent event with source key
   `agent/<data_source>/<event_id>`, so it does not replace other source rows.
 
+## Duplicate Check Before Append
+
+Before appending events, agents must check whether the same semantic event is
+already stored in `historical_field_values` or in the materialized unified view.
+Do not append a duplicate just because the source was visited again.
+
+Use this semantic key:
+
+- `instrument`
+- `instrument_type`
+- `field_name`
+- `effective_trading_day`
+- `effective_timestamp` normalized so empty and null mean no timestamp
+- normalized `contract_codes`
+- decoded `value`
+
+For Guosen current baselines, the semantic key is the same, with
+`provider = Agent:Guosen`, `effective_trading_day = 1900-01-01`, empty
+`effective_timestamp`, and empty `contract_codes`. If that baseline already
+exists for a product/field/type, do not store it again. Only add a Guosen
+baseline when a new product, new instrument type, or new field is missing.
+
+For exchange-official dated events, skip the append when an existing row has
+the same semantic key and the same `source_notice_id`. If the value or source
+differs, treat it as a conflict for manual review instead of appending another
+row silently.
+
+Example preflight query:
+
+```sql
+SELECT provider, source_key, source_notice_id, value, contract_codes
+FROM historical_field_values
+WHERE instrument = :instrument
+  AND instrument_type = :instrument_type
+  AND field_name = :field_name
+  AND effective_trading_day = :effective_trading_day
+  AND COALESCE(effective_timestamp, '') = COALESCE(:effective_timestamp, '')
+  AND contract_codes = :contract_codes_json;
+```
+
 ## Required Input To The Agent
 
 - Source URL and access time.
