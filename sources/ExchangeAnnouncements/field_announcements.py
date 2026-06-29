@@ -49,6 +49,7 @@ class ExchangeAnnouncementAdapter:
     field_keywords: Mapping[str, tuple[str, ...]]
     discover: Callable[[str, str], Iterable[AnnouncementCandidate]]
     parse: Callable[[AnnouncementCandidate], Iterable[dict[str, Any]]]
+    official_rule_notices: tuple[AnnouncementCandidate, ...] = ()
 
 
 _ADAPTERS: dict[str, ExchangeAnnouncementAdapter] = {}
@@ -232,11 +233,85 @@ def _parse_none(candidate: AnnouncementCandidate) -> Iterable[dict[str, Any]]:
     return ()
 
 
+def _official_candidates_for_adapter(
+    exchange: str,
+    source_key: str,
+    field_name: str,
+    product_code: str,
+    notices: Iterable[dict[str, Any]],
+) -> tuple[AnnouncementCandidate, ...]:
+    candidates: list[AnnouncementCandidate] = []
+    for notice in notices:
+        notice_fields = tuple(str(item) for item in notice.get("field_names", ()))
+        if field_name not in notice_fields:
+            continue
+        candidates.append(AnnouncementCandidate(
+            exchange=exchange,
+            field_name=field_name,
+            product_code=product_code,
+            source_key=source_key,
+            notice_id=str(notice.get("notice_id") or notice.get("url") or ""),
+            title=str(notice.get("title") or ""),
+            url=str(notice.get("url") or ""),
+            publish_date=str(notice.get("publish_date") or ""),
+            matched_keywords=tuple(str(item) for item in notice.get("keywords", ())),
+            raw_text_excerpt=str(notice.get("raw_text_excerpt") or ""),
+        ))
+    return tuple(candidates)
+
+
 def _register_default_adapters() -> None:
     shared_keywords = {
         "MinLimitOrderVolume": ("最小开仓下单数量", "最小下单数量", "每次最小开仓"),
         "MaxLimitOrderVolume": ("最大下单数量", "限价指令"),
         "MaxMarketOrderVolume": ("最大下单数量", "市价指令"),
+    }
+    official_notices_by_exchange = {
+        "SHFE": (
+            {
+                "notice_id": "SHFE-trading-rules",
+                "title": "上海期货交易所交易规则及业务细则公告入口",
+                "url": "https://www.shfe.com.cn/rules/",
+                "keywords": ("交易规则", "最大下单数量", "限价指令", "市价指令"),
+                "field_names": ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"),
+            },
+        ),
+        "INE": (
+            {
+                "notice_id": "INE-trading-rules",
+                "title": "上海国际能源交易中心交易规则及业务细则公告入口",
+                "url": "https://www.ine.cn/rules/",
+                "keywords": ("交易规则", "最大下单数量", "限价指令", "市价指令"),
+                "field_names": ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"),
+            },
+        ),
+        "CZCE": (
+            {
+                "notice_id": "CZCE-trading-rules",
+                "title": "郑州商品交易所交易规则及业务公告入口",
+                "url": "http://www.czce.com.cn/cn/gyjys/jysgg/H770301index_1.htm",
+                "keywords": ("交易规则", "最大下单数量", "最小下单数量"),
+                "field_names": ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"),
+            },
+        ),
+        "CFFEX": (
+            {
+                "notice_id": "CFFEX-trading-rules",
+                "title": "中国金融期货交易所交易规则及业务公告入口",
+                "url": "https://www.cffex.com.cn/jysgg/",
+                "keywords": ("交易规则", "最大下单数量", "最小下单数量"),
+                "field_names": ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"),
+            },
+        ),
+        "GFEX": (
+            {
+                "notice_id": "GFEX-trading-rules",
+                "title": "广州期货交易所交易规则及业务公告入口",
+                "url": "http://www.gfex.com.cn/gfex/tzts/",
+                "keywords": ("交易规则", "最大下单数量", "最小下单数量"),
+                "field_names": ("MaxLimitOrderVolume", "MaxMarketOrderVolume", "MinLimitOrderVolume"),
+            },
+        ),
     }
     for exchange, label, search_url in (
         ("SHFE", "上海期货交易所", "https://www.shfe.com.cn/news/notice/"),
@@ -245,12 +320,19 @@ def _register_default_adapters() -> None:
         ("CFFEX", "中国金融期货交易所", "https://www.cffex.com.cn/jysgg/"),
         ("GFEX", "广州期货交易所", "http://www.gfex.com.cn/gfex/tzts/"),
     ):
+        notices = official_notices_by_exchange.get(exchange, ())
         register_exchange_announcement_adapter(ExchangeAnnouncementAdapter(
             exchange=exchange,
             label=label,
             search_url=search_url,
             field_keywords=shared_keywords,
-            discover=_discover_none,
+            discover=lambda product_code, field_name, *, _exchange=exchange, _notices=notices: _official_candidates_for_adapter(
+                _exchange,
+                f"{_exchange}/OfficialRules",
+                field_name,
+                product_code,
+                _notices,
+            ),
             parse=_parse_none,
         ))
 

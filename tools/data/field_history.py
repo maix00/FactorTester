@@ -1159,6 +1159,6 @@ if __name__ == "__main__":
     # Product query goes through Product -> market-data trading_day mapping ->
     # FieldHistoryProvider, matching the MarketDataModule consumption shape.
     AUDIT_PRODUCT = "BZ.DCE"
-    # AUDIT_PRODUCT = "DCE|F|BZ|2606"
-    AUDIT_TIMESTAMP = "2026-03-09 22:01:00+08:00"
+    AUDIT_PRODUCT = "DCE|F|BZ|2604"
+    AUDIT_TIMESTAMP = "2026-03-09 21:01:00+08:00"
     raise SystemExit(main(None if len(sys.argv) > 1 else [AUDIT_PRODUCT, AUDIT_TIMESTAMP]))

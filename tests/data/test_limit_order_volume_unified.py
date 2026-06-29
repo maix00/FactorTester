@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+from pathlib import Path
 
 import pandas as pd
 from tools.data.hub import DataHub, SQLiteStore
@@ -14,7 +17,21 @@ from sources.ExchangeAnnouncements.field_announcements import (
     get_exchange_announcement_adapter,
 )
 from sources.FieldHistory.LimitOrderVolume import build_unified_frame, build_unified_provider
-from tools.data.field_history import TimestampTradingDayResolver
+from tools.data.field_history import FieldHistoryProvider, TimestampTradingDayResolver
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_market_data_module():
+    module_name = "market_data_module_test"
+    path = ROOT / "tools/testers/backtest/modules/market_data.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_dce_official_notice_keeps_delisted_contract_scope() -> None:
@@ -131,3 +148,77 @@ def test_default_exchange_announcement_adapters_are_registered() -> None:
     for exchange in ("DCE", "SHFE", "INE", "CZCE", "CFFEX", "GFEX"):
         adapter = get_exchange_announcement_adapter(exchange)
         assert adapter.exchange == exchange
+
+
+def test_public_announcement_helper_records_non_dce_official_candidates(tmp_path) -> None:
+    db_path = tmp_path / "field_announcements_shfe.sqlite"
+    DataHub.get_instance().register_sqlite_store(SQLiteStore(
+        key="announcement_helper_shfe_test",
+        label="announcement-helper-shfe-test",
+        path_getter=lambda: str(db_path),
+    ))
+
+    summary = discover_and_sync_field_announcements(
+        "CU.SHF",
+        "MaxLimitOrderVolume",
+        store_key="announcement_helper_shfe_test",
+    )
+
+    assert summary["candidate_count"] == 1
+    assert summary["record_count"] == 0
+    with DataHub.get_instance().connect_store("announcement_helper_shfe_test") as conn:
+        row = conn.execute(
+            f"SELECT exchange, field_name, product_code, status FROM {ANNOUNCEMENT_TABLE}"
+        ).fetchone()
+        assert dict(row) == {
+            "exchange": "SHFE",
+            "field_name": "MaxLimitOrderVolume",
+            "product_code": "CU",
+            "status": "candidate",
+        }
+
+
+def test_market_data_limit_order_fields_use_unified_provider(monkeypatch) -> None:
+    raw_provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "raw",
+            "source_key": "raw",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-10",
+            "value": 1,
+            "contract_codes": ["2604"],
+        },
+    ])
+    unified_provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "Unified",
+            "source_key": "unified",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-10",
+            "value": 4,
+            "contract_codes": ["2604"],
+        },
+    ])
+
+    import sources.FieldHistory.LimitOrderVolume as limit_order_view
+
+    monkeypatch.setattr(limit_order_view, "load_unified_provider", lambda: unified_provider)
+
+    index = pd.DatetimeIndex([pd.Timestamp("2026-03-10 09:01:00")])
+    market_data_module = _load_market_data_module()
+    frames = market_data_module.historical_field_frames_for_market_data(
+        ["BZ2604.DCE"],
+        index,
+        provider=raw_provider,
+        trading_day_resolver=TimestampTradingDayResolver({
+            pd.Timestamp("2026-03-10 09:01:00"): pd.Timestamp("2026-03-10"),
+        }),
+        field_names=("MinLimitOrderVolume",),
+        policy="strict_historical",
+    )
+
+    assert frames["MinLimitOrderVolume"].iloc[0, 0] == 4

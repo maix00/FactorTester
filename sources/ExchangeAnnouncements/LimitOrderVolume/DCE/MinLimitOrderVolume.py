@@ -7,8 +7,12 @@ scope, including contracts that may have delisted later.
 
 from __future__ import annotations
 
+import html
+import re
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.request import Request, urlopen
 
 from sources.ExchangeAnnouncements.field_announcements import (
     AnnouncementCandidate,
@@ -19,55 +23,78 @@ from sources.ExchangeAnnouncements.field_announcements import (
 
 PROVIDER = "DCE"
 SOURCE_KEY = "DCE/LimitOrderVolume/MinLimitOrderVolume"
+NOTICE_TITLE = "关于调整部分期货合约交易指令每次最小开仓下单数量的通知"
+
+_DCE_PRODUCT_LABELS = {
+    "BZ": "纯苯",
+    "EB": "苯乙烯",
+    "EG": "乙二醇",
+    "L": "线型低密度聚乙烯",
+    "PG": "液化石油气",
+    "PP": "聚丙烯",
+    "V": "聚氯乙烯",
+}
 
 
 _NOTICE_2026_03_09 = {
     "notice_id": "大商所发〔2026〕74号",
     "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
     "source_date": "2026-03-09",
-    "raw_note": (
-        "自2026年3月10日交易时（即3月9日夜盘交易小节时）起，乙二醇、液化石油气、"
-        "聚乙烯、聚氯乙烯、聚丙烯期货2604、2605和2606合约，苯乙烯期货2605和2606合约，"
-        "纯苯期货2604、2605和2606合约每次最小开仓下单数量调整。"
+    "raw_text_excerpt": (
+        "自2026年3月10日交易时（即3月9日夜盘交易小节时）起，"
+        "苯乙烯期货EB2605、EB2606合约，乙二醇期货EG2604、EG2605、EG2606合约，"
+        "液化石油气期货PG2604、PG2605、PG2606合约，线型低密度聚乙烯期货L2604、L2605、L2606合约，"
+        "聚氯乙烯期货V2604、V2605、V2606合约，聚丙烯期货PP2604、PP2605、PP2606合约"
+        "交易指令每次最小开仓下单数量调整为8手；纯苯期货BZ2604、BZ2605、BZ2606合约"
+        "交易指令每次最小开仓下单数量调整为4手。"
     ),
     "effective_trading_day": "2026-03-10",
     "effective_timestamp": "2026-03-09 21:00:00",
-    "rules": [
-        {"instrument": "EG", "instrument_label": "乙二醇", "contract_codes": ["2604", "2605", "2606"], "value": 8},
-        {"instrument": "PG", "instrument_label": "液化石油气", "contract_codes": ["2604", "2605", "2606"], "value": 8},
-        {"instrument": "L", "instrument_label": "聚乙烯", "contract_codes": ["2604", "2605", "2606"], "value": 8},
-        {"instrument": "V", "instrument_label": "聚氯乙烯", "contract_codes": ["2604", "2605", "2606"], "value": 8},
-        {"instrument": "PP", "instrument_label": "聚丙烯", "contract_codes": ["2604", "2605", "2606"], "value": 8},
-        {"instrument": "EB", "instrument_label": "苯乙烯", "contract_codes": ["2605", "2606"], "value": 8},
-        {"instrument": "BZ", "instrument_label": "纯苯", "contract_codes": ["2604", "2605", "2606"], "value": 4},
-    ],
 }
 
 
 OFFICIAL_NOTICES: tuple[Mapping[str, Any], ...] = (_NOTICE_2026_03_09,)
 
 
-def iter_historical_field_records() -> Iterable[dict[str, Any]]:
-    """Yield normalized historical-field rows from DCE official notices."""
-    for notice in OFFICIAL_NOTICES:
-        for rule in notice["rules"]:
-            yield {
+def parse_min_limit_order_records_from_text(
+    text: str,
+    *,
+    notice: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Parse DCE MinLimitOrderVolume rules from announcement HTML/text."""
+    cleaned = _clean_notice_text(text)
+    records: list[dict[str, Any]] = []
+    for sentence, value_text in re.findall(r"([^。；;]*?最小开仓下单数量调整为\s*(\d+)\s*手)", cleaned):
+        value = int(value_text)
+        contracts_by_product: dict[str, set[str]] = defaultdict(set)
+        for product_code, contract_code in re.findall(r"(?<![A-Z0-9])([A-Z]{1,3})(\d{4})(?![A-Z0-9])", sentence):
+            contracts_by_product[product_code.upper()].add(contract_code)
+        for product_code, contract_codes in sorted(contracts_by_product.items()):
+            records.append({
                 "provider": PROVIDER,
                 "source_key": SOURCE_KEY,
-                "instrument": rule["instrument"],
-                "instrument_label": rule["instrument_label"],
+                "instrument": product_code,
+                "instrument_label": _DCE_PRODUCT_LABELS.get(product_code, product_code),
                 "instrument_type": "future",
                 "field_name": "MinLimitOrderVolume",
                 "effective_trading_day": notice["effective_trading_day"],
                 "effective_timestamp": notice["effective_timestamp"],
-                "value": rule["value"],
+                "value": value,
                 "value_type": "int",
-                "contract_codes": rule["contract_codes"],
+                "contract_codes": sorted(contract_codes),
                 "source_url": notice["source_url"],
                 "source_date": notice["source_date"],
                 "source_notice_id": notice["notice_id"],
-                "raw_note": notice["raw_note"],
-            }
+                "raw_note": sentence.strip(),
+            })
+    return records
+
+
+def iter_historical_field_records() -> Iterable[dict[str, Any]]:
+    """Yield normalized historical-field rows from DCE official notices."""
+    for notice in OFFICIAL_NOTICES:
+        text = str(notice.get("raw_text_excerpt") or "")
+        yield from parse_min_limit_order_records_from_text(text, notice=notice)
 
 
 def sync_sqlite_store(*, store_key: str = "openctp") -> str:
@@ -88,11 +115,8 @@ def discover(product_code: str, field_name: str) -> Iterable[AnnouncementCandida
     product = str(product_code or "").upper()
     candidates: list[AnnouncementCandidate] = []
     for notice in OFFICIAL_NOTICES:
-        matched_rules = [
-            rule for rule in notice["rules"]
-            if str(rule["instrument"]).upper() == product
-        ]
-        if not matched_rules:
+        parsed = parse_min_limit_order_records_from_text(str(notice.get("raw_text_excerpt") or ""), notice=notice)
+        if not any(row["instrument"] == product for row in parsed):
             continue
         candidates.append(AnnouncementCandidate(
             exchange="DCE",
@@ -100,11 +124,11 @@ def discover(product_code: str, field_name: str) -> Iterable[AnnouncementCandida
             product_code=product,
             source_key=SOURCE_KEY,
             notice_id=str(notice["notice_id"]),
-            title="关于调整部分期货合约每次最小开仓下单数量的通知",
+            title=NOTICE_TITLE,
             url=str(notice["source_url"]),
             publish_date=str(notice["source_date"]),
             matched_keywords=("最小开仓下单数量", product),
-            raw_text_excerpt=str(notice["raw_note"]),
+            raw_text_excerpt=str(notice["raw_text_excerpt"]),
         ))
     return tuple(candidates)
 
@@ -112,11 +136,52 @@ def discover(product_code: str, field_name: str) -> Iterable[AnnouncementCandida
 def parse(candidate: AnnouncementCandidate) -> Iterable[dict[str, Any]]:
     if candidate.field_name != "MinLimitOrderVolume":
         return ()
+    notice = _notice_by_id(candidate.notice_id)
+    if notice is None:
+        return ()
+    text = _fetch_notice_text(candidate.url) or candidate.raw_text_excerpt
     return (
-        row for row in iter_historical_field_records()
+        row for row in parse_min_limit_order_records_from_text(text, notice=notice)
         if row["instrument"] == candidate.product_code
-        and row["source_notice_id"] == candidate.notice_id
     )
+
+
+def _notice_by_id(notice_id: str) -> Mapping[str, Any] | None:
+    for notice in OFFICIAL_NOTICES:
+        if str(notice["notice_id"]) == str(notice_id):
+            return notice
+    return None
+
+
+def _fetch_notice_text(url: str) -> str:
+    try:
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "http://www.dce.com.cn/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        with urlopen(request, timeout=15) as response:
+            data = response.read()
+    except Exception:
+        return ""
+    for encoding in ("utf-8", "gb18030", "gbk"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+
+def _clean_notice_text(text: str) -> str:
+    cleaned = re.sub(r"<script\b.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<style\b.*?</style>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = html.unescape(cleaned)
+    cleaned = re.sub(r"\s+", "", cleaned)
+    return cleaned
 
 
 register_exchange_announcement_adapter(ExchangeAnnouncementAdapter(
