@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import pandas as pd
@@ -20,8 +20,15 @@ from tools.factors.expr import (
     ShiftOp,
 )
 
-from ..native.runtime import MarketSlice
 from .events import IncrementalFactorExecutor
+
+if TYPE_CHECKING:
+    # MarketSlice lived in the now-deleted engines/native/runtime.py
+    # (issue-114 rewrite). Used here purely as a type annotation on
+    # `update(self, market: MarketSlice, ...)`, never instantiated — keep
+    # as a type-checking-only forward ref rather than reviving the old
+    # runtime module.
+    from ..native.runtime import MarketSlice  # type: ignore[attr-defined]
 
 
 class UnsupportedStreamingFactor(ValueError):

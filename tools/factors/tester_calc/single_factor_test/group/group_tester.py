@@ -11,17 +11,30 @@ import pandas as pd
 from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
-from tools.factors.tester_calc.single_factor_test.group.core import (
-    build_flat_membership_from_groups,
-    _build_product_remap_matrix,
-    _build_group_memberships_from_shared,
-    _emit_progress,
-    _load_group_trade_prices,
-    _load_group_trade_returns,
-    _prepare_group_shared_inputs,
-    _remap_membership_to_trade,
-    _resolve_group_trade_specs,
-)
+
+
+def _issue114_stub(name: str):
+    def _raise(*args, **kwargs):  # noqa: ANN001
+        raise NotImplementedError(
+            f"{name}: pending issue-114 step 11 production rewiring "
+            "(implementation lived in the deleted group/core.py)")
+    _raise.__name__ = name
+    return _raise
+
+
+# core.py was deleted as part of the issue-114 Event/Order/Flow rewrite —
+# FactorGroupTester (this file) is production code not yet rewired onto the
+# new engine (that's step 11). These stubs keep this module importable
+# (collection-safe) while making any actual call fail loudly and clearly.
+build_flat_membership_from_groups = _issue114_stub("build_flat_membership_from_groups")
+_build_product_remap_matrix = _issue114_stub("_build_product_remap_matrix")
+_build_group_memberships_from_shared = _issue114_stub("_build_group_memberships_from_shared")
+_emit_progress = _issue114_stub("_emit_progress")
+_load_group_trade_prices = _issue114_stub("_load_group_trade_prices")
+_load_group_trade_returns = _issue114_stub("_load_group_trade_returns")
+_prepare_group_shared_inputs = _issue114_stub("_prepare_group_shared_inputs")
+_remap_membership_to_trade = _issue114_stub("_remap_membership_to_trade")
+_resolve_group_trade_specs = _issue114_stub("_resolve_group_trade_specs")
 from tools.factors.tester_calc.single_factor_test.group.metadata import GROUP_TEST_PHASES
 
 

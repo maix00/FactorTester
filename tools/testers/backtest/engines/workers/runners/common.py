@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.targets import GroupTargetCalculator
-from ...settings.strategy_fields import validate_resolved_strategy_settings
+from tools.testers.settings.strategy_fields import validate_resolved_strategy_settings
 
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:

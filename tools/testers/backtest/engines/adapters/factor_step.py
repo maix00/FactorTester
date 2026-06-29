@@ -9,8 +9,26 @@ import pandas as pd
 
 from tools.factors.expr import ColumnRef, FactorExpr
 
-from ..native.runtime import MarketSlice, ProductPrice
 from ..factors.events import FactorSignal
+
+
+def _issue114_missing(name: str):
+    def _raise(*args, **kwargs):  # noqa: ANN001
+        raise NotImplementedError(
+            f"{name}: lived in the deleted engines/native/runtime.py "
+            "(issue-114 Event/Order/Flow rewrite); backtrader-engine adapter "
+            "bridging is explicitly out of scope this round (see plan)")
+    return _raise
+
+
+# MarketSlice/ProductPrice lived in engines/native/runtime.py, deleted in the
+# issue-114 rewrite. This adapter bridges incremental factor streaming into
+# the backtrader engine specifically — out of scope this round (plan: "不在
+# 本轮范围内... backtrader/qlib/zipline 的事件驱动桥接"). Stubbed so this
+# module stays importable; calling FactorStepAdapter.update() for the
+# incremental path raises clearly instead of silently breaking elsewhere.
+MarketSlice = _issue114_missing("MarketSlice")
+ProductPrice = _issue114_missing("ProductPrice")
 from ..factors.incremental import StreamingFactorPlan, compile_streaming_factor
 from .frameworks import IncrementalFactorSource, PrecomputedFactorSource
 

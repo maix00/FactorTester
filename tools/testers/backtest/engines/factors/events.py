@@ -7,13 +7,22 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..native.runtime import (
-    EventDraft,
-    EventEnvelope,
-    EventRuntime,
-    EventTopic,
-    MarketSlice,
-)
+if False:  # pragma: no cover — typing-only forward refs
+    from ..native.runtime import (  # type: ignore[attr-defined]
+        EventDraft,
+        EventEnvelope,
+        EventRuntime,
+        EventTopic,
+        MarketSlice,
+    )
+
+# `PrecomputedFactorPublisher`/`IncrementalFactorExecutor` published into the
+# old EventRuntime/EventTopic pub-sub system (engines/native/runtime.py),
+# deleted in the issue-114 Event/Order/Flow rewrite. Zero production callers
+# (verified: only this package's own tests reference them) — same
+# "orphan code island, evidence only" status as engines/execution/trading.py
+# et al. (see plan step 12). Kept importable via these stubs rather than
+# deleted outright, pending that evidence review.
 
 
 @dataclass(frozen=True, slots=True)
