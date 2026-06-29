@@ -10,8 +10,13 @@ must be named `<FieldGroup>_<DataSource>.md`.
 
 Current instruction files:
 
+- `AgentInstructions/LimitOrderVolume_CFFEX.md`
+- `AgentInstructions/LimitOrderVolume_CZCE.md`
 - `AgentInstructions/LimitOrderVolume_DCE.md`
+- `AgentInstructions/LimitOrderVolume_GFEX.md`
 - `AgentInstructions/LimitOrderVolume_Guosen.md`
+- `AgentInstructions/LimitOrderVolume_INE.md`
+- `AgentInstructions/LimitOrderVolume_SHFE.md`
 
 ## Safety Model
 
