@@ -540,46 +540,29 @@ def test_local_settings_reports_missing_dates_before_dataindex_slice() -> None:
         })
 
 
-def test_group_run_builds_tester_from_payload_local_window(monkeypatch) -> None:
+def test_group_run_resolves_window_from_payload_local_settings() -> None:
+    """_resolve_run_datetimes (called directly by run_group_test_stream's
+    flattened pipeline, before groups/ls_configs are resolved) must read the
+    run window from payload local_settings, not from any page-runtime-owned
+    default -- the same contract the deleted per-selection FactorTester loop
+    used to exercise indirectly via create_factor_tester_for_product_path_
+    selection's start_dt/end_dt arguments."""
     from server.modules.single_factor_test import group as group_module
 
-    captured = {}
-
-    def fake_create_tester(data, product_path_selection_id, *, page_uuid, start_dt=None, end_dt=None, user=None):
-        captured["selection_id"] = product_path_selection_id
-        captured["start_dt"] = start_dt
-        captured["end_dt"] = end_dt
-        raise RuntimeError("stop after tester time capture")
-
-    monkeypatch.setattr(
-        group_module,
-        "create_factor_tester_for_product_path_selection",
-        fake_create_tester,
+    start_dt, end_dt = group_module._resolve_run_datetimes(
+        {
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-31",
+            "start_time": "09:00",
+            "end_time": "15:00",
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+        {},
     )
 
-    with pytest.raises(RuntimeError, match="stop after tester time capture"):
-        group_module._run_group_test_core({
-            "groups": [{
-                "id": "group-1",
-                "product_path_selection": {"product_path_selection_id": "pg-day"},
-                "factorAlias": "FactorA",
-                "splitCount": 5,
-                "groupIndex": 1,
-            }],
-            "local_settings": {
-                "start_date": "2026-01-01",
-                "end_date": "2026-01-31",
-                "start_time": "09:00",
-                "end_time": "15:00",
-                "time_precision": "exact",
-                "timezone": "Asia/Shanghai",
-            },
-            "page_uuid": "page-runtime-must-not-own-group-run-window",
-        })
-
-    assert captured["selection_id"] == "pg-day"
-    assert captured["start_dt"].ts.strftime("%Y-%m-%d %H:%M") == "2026-01-01 09:00"
-    assert captured["end_dt"].ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
+    assert start_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-01 09:00"
+    assert end_dt.ts.strftime("%Y-%m-%d %H:%M") == "2026-01-31 15:00"
 
 
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:

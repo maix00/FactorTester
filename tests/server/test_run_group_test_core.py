@@ -1,0 +1,156 @@
+"""Unit-level coverage for the flattened groups -> ls_configs -> AccountState
+pipeline that replaced _run_group_test_core (now inlined directly into
+/run_group_test_stream). These exercise the new glue helpers
+(_resolve_group_strategy_settings/_build_group_owner_rows/
+_get_or_create_group_test_tester) without needing a full HTTP request or
+real product/factor data -- the engine-level contract itself is already
+covered by tests/backtest/native/test_backtester_task.py.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+import pandas as pd
+import pytest
+
+from server.modules.single_factor_test import group as group_module
+from tools.products.Product import Product
+
+
+def _product() -> Product:
+    return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
+
+
+class _FakeSelection:
+    def __init__(self, selection_id: str, products: list[Product]) -> None:
+        self.selection_id = selection_id
+        self._products = products
+
+    @property
+    def products(self):
+        return self._products
+
+
+class _FakeFactor:
+    """Stands in for the real domain Factor -- evaluate(products) takes an
+    argument (unlike FactorModule.factor's zero-arg contract), matching what
+    _FactorEvaluateAdapter is built to bridge."""
+
+    def __init__(self, table: pd.DataFrame) -> None:
+        self._table = table
+        self.table = table
+
+    def evaluate(self, products) -> None:
+        self.table = self._table
+
+
+def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(monkeypatch):
+    p1, p2 = _product(), _product()
+    selection = _FakeSelection("sel-1", [p1, p2])
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
+        lambda data, selection_id, *, page_uuid: selection,
+    )
+
+    factor_table = pd.DataFrame({p1: [1.0], p2: [2.0]})
+    factor = _FakeFactor(factor_table)
+    page_factors_dict = {"FactorA": factor}
+
+    g = {
+        "id": "group-1",
+        "product_path_selection_id": "sel-1",
+        "factorAlias": "FactorA",
+        "splitCount": 5,
+        "groupIndex": 2,  # 1-based
+    }
+    selection_cache: dict = {}
+    settings = group_module._resolve_group_strategy_settings(
+        g, resolved_backtest_settings={"group-1": {"accounting_mode": "Basic"}},
+        fallback_group_settings={}, page_uuid="page-1", data={}, page_factors_dict=page_factors_dict,
+        selection_cache=selection_cache,
+    )
+
+    assert settings["split_count"] == 5
+    assert settings["group_index"] == 1  # 0-based
+    assert settings["accounting_mode"] == "Basic"
+    assert settings["product_path_selection"] is selection
+    assert selection_cache["sel-1"] is selection
+
+    # The adapter's zero-arg evaluate() must produce the real factor's table.
+    factor_adapter = settings["factor"]
+    assert factor_adapter.evaluate() is factor_table
+
+
+def test_resolve_group_strategy_settings_reuses_cached_selection(monkeypatch):
+    p1 = _product()
+    selection = _FakeSelection("sel-shared", [p1])
+    calls = []
+
+    def _fake_resolve(data, selection_id, *, page_uuid):
+        calls.append(selection_id)
+        return selection
+
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
+        _fake_resolve,
+    )
+    page_factors_dict = {"FactorA": _FakeFactor(pd.DataFrame({p1: [1.0]}))}
+    selection_cache: dict = {}
+
+    for group_id in ("group-1", "group-2"):
+        g = {
+            "id": group_id, "product_path_selection_id": "sel-shared",
+            "factorAlias": "FactorA", "splitCount": 2, "groupIndex": 1,
+        }
+        group_module._resolve_group_strategy_settings(
+            g, resolved_backtest_settings={}, fallback_group_settings={},
+            page_uuid="page-1", data={}, page_factors_dict=page_factors_dict,
+            selection_cache=selection_cache,
+        )
+
+    assert calls == ["sel-shared"]  # only resolved once, second group reused the cache
+
+
+def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
+        lambda data, selection_id, *, page_uuid: _FakeSelection(selection_id, []),
+    )
+    g = {
+        "id": "group-1", "product_path_selection_id": "sel-1",
+        "factorAlias": "Missing", "splitCount": 2, "groupIndex": 1,
+    }
+    with pytest.raises(ValueError, match="未找到因子"):
+        group_module._resolve_group_strategy_settings(
+            g, resolved_backtest_settings={}, fallback_group_settings={},
+            page_uuid="page-1", data={}, page_factors_dict={}, selection_cache={},
+        )
+
+
+def test_build_group_owner_rows_shape():
+    groups = [
+        {"id": "g1", "shortAlias": "A1", "groupIndex": 1,
+         "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
+        {"id": "g2", "name": "G2", "groupIndex": 3,
+         "product_path_selection_id": "sel-1", "factorAlias": "FactorA"},
+    ]
+    rows = group_module._build_group_owner_rows(groups, is_ls=False)
+    assert rows == [
+        {"group_id": "g1", "group_name": "A1", "group_index": 0,
+         "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
+        {"group_id": "g2", "group_name": "G2", "group_index": 2,
+         "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
+    ]
+
+
+def test_get_or_create_group_test_tester_reuses_same_instance_per_page():
+    import server.services.page_runtime as runtime_state
+
+    page_uuid = f"page-{uuid.uuid4().hex}"
+    try:
+        first = group_module._get_or_create_group_test_tester(page_uuid)
+        second = group_module._get_or_create_group_test_tester(page_uuid)
+        assert first is second
+    finally:
+        runtime_state.page_objects.pop(page_uuid, None)
