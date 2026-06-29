@@ -70,3 +70,19 @@ def test_full_hierarchy_resolves_three_levels_deep():
     group_test = page.sub_registry.get("group_test")
     backtest_registry = group_test.sub_registry
     assert backtest_registry.module_keys
+
+
+def test_find_recurses_into_sub_registries():
+    from tools.testers.home import HomeModuleRegistry
+
+    home = HomeModuleRegistry()
+    # top-level
+    assert home.find("single_factor_family_test") is home.get("single_factor_family_test")
+    # one level down, inside single_factor_family_test's sub_registry
+    ic_module = home.find("ic_test")
+    assert ic_module is not None
+    assert ic_module.label == "IC 测试"
+    # group_test itself is also found at the same depth
+    assert home.find("group_test") is not None
+    # unknown key
+    assert home.find("does_not_exist") is None

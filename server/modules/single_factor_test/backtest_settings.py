@@ -9,16 +9,55 @@ from __future__ import annotations
 from flask import jsonify
 
 from tools.testers.settings import backtest_setting_registry
-from tools.testers.backtest.modules.registry import BacktestModuleRegistry, GroupTestModuleRegistry
+from tools.testers.backtest.modules.registry import BacktestModuleRegistry
+from tools.testers.home import HomeModuleRegistry
+from tools.testers.registry import Module, ModuleRegistry
 
 from . import sft_bp
 
 
 def _registry_for(application: str) -> BacktestModuleRegistry:
-    """Return the appropriate module registry for an application."""
-    if application == "group_test":
-        return GroupTestModuleRegistry()
+    """Return the appropriate module registry for an application.
+
+    Looks up the application's Module in the HomeModuleRegistry tree; if it
+    has a nested BacktestModuleRegistry sub_registry (e.g. group_test ->
+    GroupTestModuleRegistry), use that. Otherwise fall back to a default
+    BacktestModuleRegistry (executable modules are application-agnostic for
+    non-group applications).
+    """
+    module = HomeModuleRegistry().find(application)
+    if module is not None and isinstance(module.sub_registry, BacktestModuleRegistry):
+        return module.sub_registry
     return BacktestModuleRegistry()
+
+
+def _serialize_module(module: Module) -> dict:
+    """递归序列化一个 Module。BacktestModuleRegistry 子注册中心展开为其
+    module_manifest()（叶子是执行模块，不是嵌套 Module 树）；其它 ModuleRegistry
+    子注册中心递归展开为 Module 列表。"""
+    sub = module.sub_registry
+    if isinstance(sub, BacktestModuleRegistry):
+        modules: list[dict] = sub.module_manifest()
+    elif isinstance(sub, ModuleRegistry):
+        modules = [_serialize_module(m) for m in sub.sorted_modules()]
+    else:
+        modules = []
+    return {
+        "key": module.key,
+        "label": module.label,
+        "order": module.order,
+        "layout": module.layout,
+        "modules": modules,
+    }
+
+
+@sft_bp.get("/api/testers/modules")
+def get_testers_modules():
+    home = HomeModuleRegistry()
+    return jsonify({
+        "success": True,
+        "modules": [_serialize_module(m) for m in home.sorted_modules()],
+    })
 
 
 @sft_bp.get("/api/backtest/settings/<application>")

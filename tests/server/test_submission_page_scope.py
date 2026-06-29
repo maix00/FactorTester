@@ -410,6 +410,52 @@ def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
     }
 
 
+def test_testers_modules_endpoint_serializes_full_tree(app):
+    from server.modules.single_factor_test import backtest_settings as backtest_settings_routes
+
+    with app.test_request_context("/api/testers/modules"):
+        response = backtest_settings_routes.get_testers_modules()
+
+    payload = response.get_json()
+    assert payload["success"] is True
+    top = payload["modules"]
+    assert [m["key"] for m in top] == ["single_factor_family_test"]
+    page = top[0]
+    assert [m["key"] for m in page["modules"]] == [
+        "single_factor_page", "factor_evaluation", "factor_type_analysis", "ic_test", "group_test",
+    ]
+    leaf = next(m for m in page["modules"] if m["key"] == "ic_test")
+    assert leaf["modules"] == []
+    group_test = next(m for m in page["modules"] if m["key"] == "group_test")
+    assert group_test["modules"]  # expanded executable-module manifest, not nested Modules
+    assert "phases" in group_test["modules"][0]
+
+
+def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, monkeypatch):
+    monkeypatch.setattr(page_routes.runtime_state, "create_page_uuid", lambda: "page-bootstrap")
+    captured = {}
+    monkeypatch.setattr(
+        page_routes.runtime_state,
+        "register_page",
+        lambda page_uuid, owner=None, **state: captured.update({"page_uuid": page_uuid, "owner": owner, **state}),
+    )
+    monkeypatch.setattr(page_routes, "current_user", lambda: "alice@1")
+
+    with app.test_request_context(
+        "/api/single_factor_test/page", method="POST", json={"factor": "Mm"},
+    ):
+        response = page_routes.single_factor_page_bootstrap_api()
+
+    payload = response.get_json()
+    assert payload == {"success": True, "page_uuid": "page-bootstrap"}
+    assert captured == {
+        "page_uuid": "page-bootstrap",
+        "owner": "alice@1",
+        "page_kind": "single_factor_test",
+        "factor_family_alias": "Mm",
+    }
+
+
 def test_single_factor_page_shows_runtime_ids_for_developer(app, monkeypatch):
     captured = {}
 
