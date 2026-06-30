@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
@@ -25,8 +26,10 @@ class TradingRuleModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
-            public=True, default="Basic", control_template="select", tab="accounting",
+            public=True, default="Auto", control_template="select", tab="accounting",
             options=(("Basic", "基础"), ("Custom", "自定义"), ("Auto", "自动")),
+            editable_when={"engine_mode": ("custom",)},
+            default_when={"engine_mode": {"basic": "Basic", "auto": "Auto", "exact": "Auto"}},
             chip_template="记账: {value}", tab_label="记账规则", tab_order=180,
         ),
         "cost_basis_method": FieldDefinition(
@@ -34,19 +37,28 @@ class TradingRuleModule(ExecutableModule):
             options=(("WeightAverage", "加权平均成本法"), ("FIFO", "先进先出"),
                       ("LIFO", "后进先出"), ("HIFO", "高进先出"),
                       ("DailyMarkToMarket", "逐日盯市")),
-            editable_when={"accounting_mode": ("Custom",)},
+            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="成本法: {value}", tab_label="记账规则", tab_order=180,
         ),
         "use_int_position": FieldDefinition(
             public=True, default=False, control_template="boolean", tab="accounting",
-            editable_when={"accounting_mode": ("Custom",)},
+            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="整数持仓: {value}", tab_label="记账规则", tab_order=180,
         ),
     }
 
 
+def _effective_accounting_mode(strategy_config: "StrategyConfig") -> str:
+    engine_mode = engine_mode_for(strategy_config)
+    if engine_mode == "basic":
+        return "Basic"
+    if engine_mode == "custom":
+        return strategy_config.get(TradingRuleModule.accounting_mode, "Auto")
+    return "Auto"
+
+
 def _resolve_method(strategy_config: "StrategyConfig", product: "Product") -> str:
-    mode = strategy_config.get(TradingRuleModule.accounting_mode, "Basic")
+    mode = _effective_accounting_mode(strategy_config)
     if mode == "Basic":
         return "WeightAverage"
     if mode == "Custom":
@@ -59,9 +71,8 @@ def _resolve_method(strategy_config: "StrategyConfig", product: "Product") -> st
     # election, e.g. US IRS default method for securities).
     return "DailyMarkToMarket" if getattr(product, "is_margin_traded", False) else "FIFO"
 
-
 def _resolve_use_int_position(strategy_config: "StrategyConfig") -> bool:
-    mode = strategy_config.get(TradingRuleModule.accounting_mode, "Basic")
+    mode = _effective_accounting_mode(strategy_config)
     if mode == "Basic":
         return False
     if mode == "Auto":

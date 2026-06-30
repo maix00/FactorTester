@@ -237,6 +237,9 @@
             || serializationKind === 'category_candidate_list') {
             return (Array.isArray(value) ? value.length : 0) + '项';
         }
+        if (serializationKind === 'custom_product_overrides') {
+            return (Array.isArray(value) ? value.length : 0) + '项';
+        }
         // 多选列表（复数 selections）：显示已选个数。
         if (serializationKind === 'product_path_selection_list'
             || serializationKind === 'factor_selection_list') {

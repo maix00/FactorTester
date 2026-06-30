@@ -75,7 +75,7 @@ def test_full_engine_runs_two_product_two_day_backtest():
             "group_index": 1,  # highest-signal half
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
-            "accounting_mode": "Basic",
+            "engine_mode": "basic",
         },
     }
 
@@ -112,7 +112,7 @@ def test_full_engine_two_strategies_independent_results():
     base_settings = {
         "product_path_selection": selection, "factor": factor, "factor_mode": "precomputed",
         "split_count": 2, "initial_capital_major": 1_000_000.0, "base_currency": "CNY",
-        "accounting_mode": "Basic",
+        "engine_mode": "basic",
     }
     resolved_settings = {
         "A1": {**base_settings, "group_index": 0},
@@ -196,7 +196,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
             "group_index": 1,  # highest-MA half
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
-            "accounting_mode": "Basic",
+            "engine_mode": "basic",
         },
     }))
     selection = _FakeProductPathSelection("sel-ma", [p1, p2])

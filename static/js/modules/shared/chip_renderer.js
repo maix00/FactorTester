@@ -59,6 +59,37 @@
             var products = u && u.selectionProducts ? u.selectionProducts(value) : [];
             GT.overlays.productPathSelectionProducts.open(label, products, value);
         },
+        'custom_product_fields': function(value, info) {
+            var rows = Array.isArray(value) ? value : [];
+            var overlay = document.getElementById('custom-product-fields-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'custom-product-fields-overlay';
+                overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);align-items:center;justify-content:center;padding:24px;';
+                overlay.innerHTML = '<div style="width:min(900px,96vw);max-height:86vh;background:#fff;border-radius:8px;box-shadow:0 18px 48px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;">'
+                    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb;"><strong>自定义字段</strong><button type="button" data-close style="border:0;background:#f1f5f9;border-radius:4px;padding:4px 8px;cursor:pointer;">关闭</button></div>'
+                    + '<div data-body style="padding:14px 18px;overflow:auto;"></div></div>';
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay || e.target.getAttribute('data-close') != null) overlay.style.display = 'none';
+                });
+                document.body.appendChild(overlay);
+            }
+            var body = overlay.querySelector('[data-body]');
+            if (!rows.length) {
+                body.innerHTML = '<div style="color:#64748b;font-size:13px;">暂无自定义字段。</div>';
+            } else {
+                body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
+                    + '<thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">产品/合约</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">字段</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">值</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">开始</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">结束</th></tr></thead>'
+                    + '<tbody>' + rows.map(function(row) {
+                        return '<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.product || '') + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.field || '') + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.value == null ? '' : row.value) + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.start || '') + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.end || '') + '</td></tr>';
+                    }).join('') + '</tbody></table>';
+            }
+            overlay.style.display = 'flex';
+        },
     };
     // ctx: { valueOf(name), resolve(resolverName, name), renderChipHtml, escapeHTML }
     function chipHtml(chip, ctx) {

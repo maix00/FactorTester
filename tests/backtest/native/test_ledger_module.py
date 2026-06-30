@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.ledger import AccountState, StrategyC
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_cash_update, _basic_equity, _initialize_ledgers
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
@@ -27,7 +28,8 @@ def _strategy_config(strategy, **trading_rule_values) -> StrategyConfig:
         LedgerModule.base_currency: "CNY",
     }
     for key, value in trading_rule_values.items():
-        field_values[getattr(TradingRuleModule, key)] = value
+        ref = getattr(EngineModule, key, None) or getattr(TradingRuleModule, key)
+        field_values[ref] = value
     return StrategyConfig(strategy=strategy, field_values=field_values)
 
 
@@ -37,8 +39,8 @@ def test_initialize_ledgers_builds_correct_shape_per_method():
     p1, p2 = _product(), _product()
 
     configs = {
-        s1: _strategy_config(s1, accounting_mode="Basic"),
-        s2: _strategy_config(s2, accounting_mode="Custom", cost_basis_method="FIFO"),
+        s1: _strategy_config(s1, engine_mode="basic"),
+        s2: _strategy_config(s2, engine_mode="custom", accounting_mode="Custom", cost_basis_method="FIFO"),
     }
     account = AccountState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -62,7 +64,7 @@ def test_initialize_ledgers_builds_correct_shape_per_method():
 def test_initialize_ledgers_use_int_position_keeps_quantity_as_int():
     s = Strategy(alias="S")
     p = _product()
-    config = _strategy_config(s, accounting_mode="Custom", use_int_position=True)
+    config = _strategy_config(s, engine_mode="custom", accounting_mode="Custom", use_int_position=True)
     account = AccountState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
@@ -77,7 +79,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
     rebalance trade batch (algebraic result, not approximation)."""
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
-    config = _strategy_config(s, accounting_mode="Basic")
+    config = _strategy_config(s, engine_mode="basic")
     account = AccountState(strategy_configs={s: config})
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -118,7 +120,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
 def test_equity_on_signal_and_on_order_recompute_after_fill():
     s = Strategy(alias="S")
     p = _product()
-    config = _strategy_config(s, accounting_mode="Basic")
+    config = _strategy_config(s, engine_mode="basic")
     account = AccountState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
@@ -153,8 +155,8 @@ def test_two_strategies_independent_ledgers_do_not_cross_contaminate():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
     p = _product()
     configs = {
-        s1: _strategy_config(s1, accounting_mode="Basic"),
-        s2: _strategy_config(s2, accounting_mode="Basic"),
+        s1: _strategy_config(s1, engine_mode="basic"),
+        s2: _strategy_config(s2, engine_mode="basic"),
     }
     account = AccountState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -180,7 +182,7 @@ def test_two_strategies_independent_ledgers_do_not_cross_contaminate():
 def test_cancelled_order_has_no_ledger_effect():
     s = Strategy(alias="S")
     p = _product()
-    config = _strategy_config(s, accounting_mode="Basic")
+    config = _strategy_config(s, engine_mode="basic")
     account = AccountState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
@@ -207,7 +209,7 @@ def test_multiple_simultaneous_orders_for_one_strategy_are_all_applied():
     timestamp). All of them must update the ledger, not just one."""
     s = Strategy(alias="S")
     p1, p2, p3 = _product(), _product(), _product()
-    config = _strategy_config(s, accounting_mode="Basic")
+    config = _strategy_config(s, engine_mode="basic")
     account = AccountState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p1, p2, p3}))

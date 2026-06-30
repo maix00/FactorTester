@@ -12,10 +12,12 @@ from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule, _apply_fee
+from tools.testers.backtest.modules.custom_product import CustomProductModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.liquidity import LiquidityModule, _cap_to_liquidity
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.data.types.data_money import DataMoney
@@ -25,12 +27,22 @@ def _product() -> Product:
     return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
 
 
-def test_fee_mode_none_means_no_fee():
+def _account_with_ledger(strategy: Strategy, config: StrategyConfig) -> AccountState:
+    account = AccountState(strategy_configs={strategy: config})
+    account.ledgers[strategy] = Ledger(strategy=strategy, base_currency="CNY")
+    account.ledgers[strategy].set(LedgerModule.positions, {})
+    return account
+
+
+def test_fee_mode_zero_means_no_fee():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
-    config = StrategyConfig(strategy=s, field_values={FeeModule.fee_mode: "none"})
-    account = AccountState(strategy_configs={s: config})
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "zero",
+    })
+    account = _account_with_ledger(s, config)
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
@@ -42,49 +54,74 @@ def test_fee_mode_none_means_no_fee():
     assert order.get("fee_cost") == 0.0
 
 
-def test_fee_mode_custom_computes_notional_based_fee():
+def test_fee_mode_custom_uses_unified_product_field_overrides():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     config = StrategyConfig(strategy=s, field_values={
-        FeeModule.fee_mode: "custom", FeeModule.custom_fee_rate: 0.01,
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "custom",
+        CustomProductModule.custom_product_fields: [
+            {"product": str(p), "field": "OpenRatioByMoney", "value": 0.01},
+            {"product": str(p), "field": "OpenRatioByVolume", "value": 0.0},
+            {"product": str(p), "field": "CloseRatioByMoney", "value": 0.0},
+            {"product": str(p), "field": "CloseRatioByVolume", "value": 0.0},
+            {"product": str(p), "field": "CloseTodayRatioByMoney", "value": 0.0},
+            {"product": str(p), "field": "CloseTodayRatioByVolume", "value": 0.0},
+            {"product": str(p), "field": "VolumeMultiple", "value": 1.0},
+        ],
     })
-    account = AccountState(strategy_configs={s: config})
+    account = _account_with_ledger(s, config)
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set_for(
+        MarketDataModule.current_historical_fields,
+        s,
+        _historical_fields_for_strategy({str(p): {}}, config, pd.Timestamp("2024-01-01")),
+    )
 
     _apply_fee(account, ctx, lambda a, c: None)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.01)
 
 
-def test_fee_mode_market_without_table_raises_clearly():
+def test_fee_mode_exact_without_historical_fields_raises_clearly():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
-    config = StrategyConfig(strategy=s, field_values={FeeModule.fee_mode: "market"})
-    account = AccountState(strategy_configs={s: config})
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "exact"})
+    account = _account_with_ledger(s, config)
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(KeyError):
         _apply_fee(account, ctx, lambda a, c: None)
 
 
-def test_fee_mode_market_uses_per_product_rate_table():
+def test_fee_mode_auto_uses_historical_fields():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
-    config = StrategyConfig(strategy=s, field_values={FeeModule.fee_mode: "market"})
-    account = AccountState(strategy_configs={s: config})
-    account.fee_rate_table = {p: 0.002}
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "auto"})
+    account = _account_with_ledger(s, config)
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        str(p): {
+            "OpenRatioByMoney": 0.002,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.0,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.0,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
 
     _apply_fee(account, ctx, lambda a, c: None)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.002)

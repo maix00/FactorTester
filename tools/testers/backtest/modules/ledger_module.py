@@ -1,6 +1,6 @@
 """LedgerModule — owns the Ledger field schema (cash/positions) AND the
 mandatory baseline economic model (unlimited liquidity, fractional
-positions, no margin). TradingRuleModule/FeeModule/etc. are optional layers
+positions, no margin). EngineModule/TradingRuleModule/FeeModule/etc. are optional layers
 stacked on top via FlowOverride; this module's own Flows never depend on
 them."""
 
@@ -16,6 +16,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import ProductPosition, apply_quantity_delta
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_method, _resolve_use_int_position,
 )
@@ -51,7 +52,7 @@ class LedgerModule(ExecutableModule):
 
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
-        inputs=(TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
+        inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
                  TradingRuleModule.use_int_position, ProductSelectionModule.products),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=35,

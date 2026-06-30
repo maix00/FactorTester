@@ -27,6 +27,7 @@ from .liquidity import LiquidityModule
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
 from .market_rules import MarketRuleModule
+from .custom_product import CustomProductModule
 from .position_sizing import PositionSizingModule
 from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
@@ -67,6 +68,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     OrderExecutionModule,
     PositionSizingModule,
     MarketRuleModule,
+    CustomProductModule,
     LedgerCashConstraintModule,
     OrderLifecycleModule,
     EquityCurveModule,
@@ -291,7 +293,6 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
     """Registry for group-test (membership) strategies.
 
     Parses group configs with membership_index, group_id, display_name.
-    Supports sourcing fee_rate from the legacy fee_mode/custom_fee_rate.
     """
 
     application = "group_test"
@@ -306,7 +307,6 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
           - membership_index: int
           - group_id: str
           - display_name: str (or group_name)
-          - fee_rate: float (can come from fee_mode/custom_fee_rate)
           - initial_capital: float
           - ...other settings
         """
@@ -314,8 +314,6 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
         parsed.setdefault("strategy_id", config.get("group_id", ""))
         parsed.setdefault("display_name", config.get("group_name") or config.get("group_id", ""))
         parsed.setdefault("strategy_kind", "group")
-        if "fee_rate" not in parsed:
-            parsed["fee_rate"] = _fee_rate_from_config(config)
         return parsed
 
     def parse_group_strategies(
@@ -423,15 +421,12 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
           - short_indices: list[int] (group owner indices for short legs)
           - strategy_id: str (e.g. "long-short:1")
           - display_name: str (or "name")
-          - fee_rate: float
           - ...other settings (inherited from source group)
         """
         parsed: dict[str, Any] = dict(config)
         parsed.setdefault("strategy_id", config.get("name", ""))
         parsed.setdefault("display_name", config.get("name", ""))
         parsed.setdefault("strategy_kind", "long_short")
-        if "fee_rate" not in parsed:
-            parsed["fee_rate"] = _fee_rate_from_config(config)
         return parsed
 
     def parse_ls_strategies(
@@ -453,20 +448,6 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
             "order_sizing",
             "cash_rescale",
         )
-
-
-# ── Legacy fee-rate resolution (shared) ───────────────────────────
-
-
-def _fee_rate_from_config(config: dict[str, Any]) -> float:
-    """Resolve fee_rate from legacy fee_mode / custom_fee_rate."""
-    mode = str(config.get("fee_mode", "market"))
-    if mode == "none":
-        return 0.0
-    if mode == "custom":
-        return float(config.get("custom_fee_rate", 0.0))
-    # "market" mode — fee matrices forwarded per timestamp
-    return 0.0
 
 
 # ── Group identity helpers (shared) ────────────────────────────────

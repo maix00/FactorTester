@@ -53,7 +53,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
         "A1": {
             "product_path_selection": selection, "factor": factor, "factor_mode": "precomputed",
             "split_count": 2, "group_index": 1, "initial_capital_major": 1_000_000.0,
-            "base_currency": "CNY", "accounting_mode": "Basic",
+            "base_currency": "CNY", "engine_mode": "basic",
         },
     }
     account = AccountState()

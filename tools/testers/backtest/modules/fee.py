@@ -12,6 +12,7 @@ from typing import Any, ClassVar, cast
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
@@ -32,19 +33,21 @@ class FeeModule(ExecutableModule):
 
     fee_mode: ClassVar[FieldRef[str]] = FieldRef("fee_mode")
     fixed_fee_rate: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate")
-    custom_fee_overrides: ClassVar[FieldRef[dict[str, Any]]] = FieldRef("custom_fee_overrides")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "fee_mode": FieldDefinition(
             public=True, default="auto", control_template="select", tab="cost",
             options=(
                 ("auto", "自动"),
+                ("exact", "严格历史规则"),
+                ("custom", "自定义品种/合约"),
                 ("close_yesterday", "按平昨"),
                 ("close_today", "按平今"),
-                ("custom", "自定义品种/合约"),
                 ("fixed", "固定费率"),
                 ("zero", "不计费用"),
             ),
+            editable_when={"engine_mode": ("custom",)},
+            default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"}},
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
@@ -52,17 +55,12 @@ class FeeModule(ExecutableModule):
             visible_when={"fee_mode": ("fixed",)},
             chip_template="固定费率: {value}", tab_label="费用", tab_order=100,
         ),
-        "custom_fee_overrides": FieldDefinition(
-            public=True, default={}, control_template="custom", tab="cost",
-            visible_when={"fee_mode": ("custom",)},
-            chip_template="自定义费用: {value}", tab_label="费用", tab_order=100,
-        ),
     }
 
     overrides: ClassVar[tuple[FlowOverride, ...]] = (
         FlowOverride(
             flow_names=(LedgerModule.cash_update.name,),
-            extra_inputs=(fee_mode, fixed_fee_rate, custom_fee_overrides),
+            extra_inputs=(fee_mode, fixed_fee_rate),
             compute=lambda account, ctx, base_compute: _apply_fee(account, ctx, base_compute),
         ),
     )
@@ -78,15 +76,18 @@ def _resolve_fixed_fee_cost(mode: str, fixed_rate: float, quantity: float, price
 
 def _apply_fee(account, ctx, base_compute) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
-    historical_fields = ctx.get(MarketDataModule.current_historical_fields, {})
     for strategy in ctx.active_strategies:
         # mode/custom_rate are strategy-level (not order-level) -- resolved
         # once per strategy, not once per order, even when a strategy has
         # several simultaneous orders in this batch.
         config = account.config_for(strategy)
-        mode = _normalise_fee_mode(config.get(FeeModule.fee_mode, "auto"))
-        fixed_rate = _strategy_value(config, FeeModule.fixed_fee_rate, "custom_fee_rate", 0.0)
-        custom_overrides = _strategy_value(config, FeeModule.custom_fee_overrides, "fee_overrides", {})
+        mode = _resolve_fee_mode(config)
+        fixed_rate = _strategy_value(config, FeeModule.fixed_fee_rate, 0.0)
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
         positions = account.ledgers[strategy].get(LedgerModule.positions, {})
         for order in ctx.payloads_for(strategy):
             price = order.get("effective_price", prices[order.instrument])
@@ -95,8 +96,6 @@ def _apply_fee(account, ctx, base_compute) -> None:
                 order.set("fee_cost", fixed_fee)
                 continue
             fields = historical_fields.get(str(order.instrument), {})
-            if mode == "custom":
-                fields = _merge_custom_fee_fields(order.instrument, fields, custom_overrides)
             order.set(
                 "fee_cost",
                 _market_fee_cost(
@@ -177,53 +176,22 @@ def _normalise_fee_mode(value: object) -> str:
     return legacy.get(mode, mode)
 
 
-def _strategy_value(config, ref: FieldRef, legacy_name: str, default: Any) -> Any:
+def _resolve_fee_mode(config) -> str:
+    engine_mode = engine_mode_for(config)
+    if engine_mode == "basic":
+        return "zero"
+    if engine_mode == "auto":
+        return "auto"
+    if engine_mode == "exact":
+        return "exact"
+    return _normalise_fee_mode(config.get(FeeModule.fee_mode, "auto"))
+
+
+def _strategy_value(config, ref: FieldRef, default: Any) -> Any:
     value = config.get(ref, None)
     if value is not None:
         return value
-    return getattr(config, "field_values", {}).get(legacy_name, default)
-
-
-def _merge_custom_fee_fields(instrument: object, fields: dict[str, object], overrides: object) -> dict[str, object]:
-    override = _custom_override_for(instrument, overrides)
-    if override is None:
-        return fields
-    merged = dict(fields)
-    if isinstance(override, dict):
-        for key in (*_FEE_FIELDS, "VolumeMultiple"):
-            if key in override:
-                merged[key] = override[key]
-        return merged
-    rate = _number(override, 0.0)
-    for key in ("OpenRatioByMoney", "CloseRatioByMoney", "CloseTodayRatioByMoney"):
-        merged[key] = rate
-    for key in ("OpenRatioByVolume", "CloseRatioByVolume", "CloseTodayRatioByVolume"):
-        merged[key] = 0.0
-    return merged
-
-
-def _custom_override_for(instrument: object, overrides: object) -> object | None:
-    if not isinstance(overrides, dict):
-        return None
-    keys = [str(instrument)]
-    name = getattr(instrument, "name", None)
-    if name:
-        keys.append(str(name))
-    parent = None
-    if hasattr(instrument, "get_parent_product"):
-        try:
-            parent = instrument.get_parent_product()
-        except Exception:
-            parent = None
-    if parent is not None:
-        keys.append(str(parent))
-        parent_name = getattr(parent, "name", None)
-        if parent_name:
-            keys.append(str(parent_name))
-    for key in dict.fromkeys(keys):
-        if key in overrides:
-            return overrides[key]
-    return None
+    return default
 
 
 def _number(value: object, default: float) -> float:

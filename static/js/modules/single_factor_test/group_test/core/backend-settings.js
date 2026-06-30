@@ -728,6 +728,9 @@
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
+        } else if (setting.control_template === 'custom_product_overrides') {
+            control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange);
+            return control;
         } else if (setting.control_template === 'custom') {
             // 自定义控件（候选/多选列表，如 factor_candidates / product_path_candidates /
             // category_candidates）：行内不内联完整管理 UI，显示摘要 chip + "管理"按钮，
@@ -766,6 +769,134 @@
             rerenderAfterChange();
         });
         return control;
+    }
+
+    function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange) {
+        var host = document.createElement('div');
+        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+        var table = document.createElement('div');
+        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.textContent = '+ 字段';
+        addBtn.style.cssText = 'align-self:flex-start;height:26px;padding:0 10px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+        host.appendChild(table);
+        host.appendChild(addBtn);
+
+        function rows() {
+            var value = effectiveValue(setting, mount);
+            return Array.isArray(value) ? value.slice() : [];
+        }
+        function writeRows(nextRows) {
+            writeValue(setting, mount, nextRows.filter(function(row) {
+                return row && (row.product || row.field || row.value !== undefined && row.value !== '');
+            }));
+            render();
+            rerenderAfterChange();
+        }
+        function fieldOptions() {
+            return (setting.serialization && setting.serialization.fields) || [];
+        }
+        function selectedFieldMeta(field) {
+            var options = fieldOptions();
+            for (var i = 0; i < options.length; i++) {
+                if (String(options[i].value) === String(field)) return options[i];
+            }
+            return {};
+        }
+        function cellInput(type, value, onChange) {
+            var input = document.createElement('input');
+            input.type = type || 'text';
+            input.value = value == null ? '' : value;
+            input.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+            input.addEventListener('change', function() { onChange(input.value); });
+            return input;
+        }
+        function valueInput(meta, value, onChange) {
+            if (meta.value_type === 'select') {
+                var select = document.createElement('select');
+                select.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                (meta.value_options || []).forEach(function(item) {
+                    var option = document.createElement('option');
+                    option.value = Array.isArray(item) ? item[0] : item.value;
+                    option.textContent = Array.isArray(item) ? item[1] : item.label;
+                    select.appendChild(option);
+                });
+                select.value = value == null ? '' : value;
+                select.addEventListener('change', function() { onChange(select.value); });
+                return select;
+            }
+            return cellInput('number', value, function(nextValue) {
+                onChange(nextValue === '' ? '' : Number(nextValue));
+            });
+        }
+        function render() {
+            table.innerHTML = '';
+            var current = rows();
+            if (!current.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'color:#64748b;font-size:12px;';
+                empty.textContent = '无';
+                table.appendChild(empty);
+            }
+            current.forEach(function(row, index) {
+                var line = document.createElement('div');
+                line.style.cssText = 'display:grid;grid-template-columns:minmax(90px,1.2fr) minmax(120px,1.4fr) minmax(80px,1fr) minmax(120px,1fr) minmax(120px,1fr) 28px;gap:6px;align-items:center;';
+                line.appendChild(cellInput('text', row.product || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { product: value });
+                    writeRows(current);
+                }));
+                var select = document.createElement('select');
+                select.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                fieldOptions().forEach(function(item) {
+                    var option = document.createElement('option');
+                    option.value = item.value;
+                    option.textContent = item.label + (item.unit ? ' (' + item.unit + ')' : '');
+                    select.appendChild(option);
+                });
+                select.value = row.field || (fieldOptions()[0] && fieldOptions()[0].value) || '';
+                select.addEventListener('change', function() {
+                    current[index] = Object.assign({}, current[index], { field: select.value, start: '', end: '' });
+                    writeRows(current);
+                });
+                line.appendChild(select);
+                var meta = selectedFieldMeta(select.value);
+                line.appendChild(valueInput(meta, row.value, function(value) {
+                    current[index] = Object.assign({}, current[index], { value: value });
+                    writeRows(current);
+                }));
+                var allowRange = meta.allow_time_range !== false;
+                var start = cellInput('datetime-local', row.start || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { start: value });
+                    writeRows(current);
+                });
+                var end = cellInput('datetime-local', row.end || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { end: value });
+                    writeRows(current);
+                });
+                start.disabled = !allowRange;
+                end.disabled = !allowRange;
+                line.appendChild(start);
+                line.appendChild(end);
+                var remove = document.createElement('button');
+                remove.type = 'button';
+                remove.textContent = '×';
+                remove.style.cssText = 'height:26px;border:1px solid #fecaca;border-radius:4px;background:#fff1f2;color:#be123c;cursor:pointer;';
+                remove.addEventListener('click', function() {
+                    current.splice(index, 1);
+                    writeRows(current);
+                });
+                line.appendChild(remove);
+                table.appendChild(line);
+            });
+        }
+        addBtn.addEventListener('click', function() {
+            var current = rows();
+            current.push({ product: '', field: (fieldOptions()[0] && fieldOptions()[0].value) || '', value: '' });
+            writeRows(current);
+        });
+        render();
+        return host;
     }
 
     /**

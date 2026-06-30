@@ -50,8 +50,16 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["volatility_warmup"]["visible_when"] == {
         "allocation_policy": ["inverse_volatility"],
     }
-    assert index["defaults"]["custom_fee_rate"]["visible_when"] == {
-        "fee_mode": ["custom"],
+    assert index["defaults"]["engine_mode"]["value"] == "auto"
+    assert index["defaults"]["engine_mode"]["scope_policy"] == "overridable"
+    assert index["defaults"]["fee_mode"]["editable_when"] == {
+        "engine_mode": ["custom"],
+    }
+    assert index["defaults"]["fee_mode"]["default_when"] == {
+        "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
+    }
+    assert index["defaults"]["fixed_fee_rate"]["visible_when"] == {
+        "fee_mode": ["fixed"],
     }
     assert index["defaults"]["slippage_bps"]["visible_when"] == {
         "slippage_mode": ["fixed_bps"],
@@ -60,15 +68,19 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "liquidity_mode": ["volume_participation"],
     }
     assert index["defaults"]["collateral_fraction"]["visible_when"] == {
-        "margin_mode": ["fixed", "auto"],
+        "margin_mode": ["fixed", "auto", "exact", "custom"],
     }
     assert index["defaults"]["margin_mode"]["value"] == "auto"
     assert index["defaults"]["margin_mode"]["editable_when"] == {
-        "accounting_mode": ["Auto", "Custom"],
+        "engine_mode": ["custom"],
     }
     assert index["defaults"]["margin_mode"]["default_when"] == {
-        "accounting_mode": {"Basic": "none"},
+        "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
     }
+    assert index["defaults"]["accounting_mode"]["editable_when"] == {
+        "engine_mode": ["custom"],
+    }
+    assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
     # money_unit_policy (with per-engine override: rqalpha forces
     # "engine_native", disabling "minor_units") was an execution-engine
     # dispatch concern spanning native/backtrader/qlib/rqalpha -- replaced
@@ -88,7 +100,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine",
+        "engine", "engine_mode",
     ]
     executable_public_fields = {
         key
@@ -280,7 +292,7 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert index.status_code == 200
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
-    assert len(tab.get_json()["settings"]) == 1
+    assert [setting["key"] for setting in tab.get_json()["settings"]] == ["engine", "engine_mode"]
     assert missing.status_code == 404
 
 
@@ -612,7 +624,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
             "volatility_lookback": 20,
             "rebalance_trigger": "on_factor_signal",
             "position_policy": "rebalance_to_target",
-            "fee_mode": "market",
+            "engine_mode": "auto",
+            "fee_mode": "auto",
             "liquidity_mode": "volume_participation",
             "participation_rate": 0.1,
             "market_rule_fallback": "latest_available",
@@ -624,7 +637,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
                 "factor_mode": "incremental",
                 "rebalance_trigger": "on_factor_signal",
                 "position_policy": "buy_and_hold",
-                "fee_mode": "none",
+                "engine_mode": "basic",
+                "fee_mode": "zero",
                 "liquidity_mode": "infinite",
                 "participation_rate": 1.0,
             },

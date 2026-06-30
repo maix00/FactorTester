@@ -66,14 +66,14 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     }
     selection_cache: dict = {}
     settings = group_module._resolve_group_strategy_settings(
-        g, resolved_backtest_settings={"group-1": {"accounting_mode": "Basic"}},
+        g, resolved_backtest_settings={"group-1": {"engine_mode": "basic"}},
         fallback_group_settings={}, page_uuid="page-1", data={}, page_factors_dict=page_factors_dict,
         selection_cache=selection_cache,
     )
 
     assert settings["split_count"] == 5
     assert settings["group_index"] == 1  # 0-based
-    assert settings["accounting_mode"] == "Basic"
+    assert settings["engine_mode"] == "basic"
     assert settings["product_path_selection"] is selection
     assert selection_cache["sel-1"] is selection
 

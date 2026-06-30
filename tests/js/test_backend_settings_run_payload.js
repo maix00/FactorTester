@@ -27,6 +27,12 @@ global.fetch = () => Promise.resolve({
     default_mounted_tabs: { 'local-settings': [], 'group-settings': [] },
     defaults: {
       engine: { key: 'engine', value: 'native', tab_key: 'engine', scope_policy: 'local_only' },
+      engine_mode: {
+        key: 'engine_mode',
+        value: 'auto',
+        tab_key: 'engine',
+        scope_policy: 'overridable',
+      },
       start_date: { key: 'start_date', value: '2026-01-01', tab_key: 'time', scope_policy: 'overridable' },
       end_date: { key: 'end_date', value: '2026-01-31', tab_key: 'time', scope_policy: 'overridable' },
       start_time: { key: 'start_time', value: '09:00', tab_key: 'time', scope_policy: 'overridable' },
@@ -38,17 +44,19 @@ global.fetch = () => Promise.resolve({
       allocation_policy: { key: 'allocation_policy', value: 'inverse_volatility', tab_key: 'target_allocation', scope_policy: 'overridable' },
       accounting_mode: {
         key: 'accounting_mode',
-        value: 'Basic',
+        value: 'Auto',
         tab_key: 'accounting',
         scope_policy: 'overridable',
+        editable_when: { engine_mode: ['custom'] },
+        default_when: { engine_mode: { basic: 'Basic', auto: 'Auto', exact: 'Auto' } },
       },
       margin_mode: {
         key: 'margin_mode',
         value: 'auto',
         tab_key: 'margin',
         scope_policy: 'overridable',
-        editable_when: { accounting_mode: ['Auto', 'Custom'] },
-        default_when: { accounting_mode: { Basic: 'none' } },
+        editable_when: { engine_mode: ['custom'] },
+        default_when: { engine_mode: { basic: 'none', auto: 'auto', exact: 'exact' } },
       },
       volatility_lookback: {
         key: 'volatility_lookback',
@@ -139,17 +147,19 @@ return GT.backendSettings.init().then(() => {
   assert.equal(
     window.BackendSettingsPanel.defaultValueForValues(
       GT.backendSettings._state.index.defaults.margin_mode,
-      { accounting_mode: 'Basic' },
+      { engine_mode: 'basic' },
     ),
     'none',
   );
   const staleMarginGroup = Object.assign({}, group, {
-    accounting_mode: 'Basic',
+    engine_mode: 'basic',
+    accounting_mode: 'Custom',
     margin_mode: 'fixed',
   });
   const staleMarginPayload = GT.backendSettings.groupPayloadForRun(staleMarginGroup);
   assert.equal(staleMarginPayload.margin_mode, undefined);
   assert.equal(staleMarginPayload.accounting_mode, undefined);
+  assert.equal(staleMarginPayload.engine_mode, 'basic');
 
   const inheritedGroup = {
     id: 'g-inherit',

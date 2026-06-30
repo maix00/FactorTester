@@ -25,6 +25,8 @@ import pandas as pd
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.time_index_lookup import row_at
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
@@ -61,6 +63,10 @@ class MarketDataModule(ExecutableModule):
         # FactorSignalModule.signal_freq, which is how often the strategy
         # rebalances -- a strategy can rebalance daily on top of minute bars)
 
+    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _accounting_mode_ref: ClassVar[FieldRef[str]] = FieldRef("accounting_mode", owner="TradingRuleModule")
+
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "raw_prices": FieldDefinition(public=False),
         "lot_sizes": FieldDefinition(public=False),
@@ -71,9 +77,17 @@ class MarketDataModule(ExecutableModule):
         "trading_day_resolver": FieldDefinition(public=False),
         "historical_field_policy": FieldDefinition(
             public=True,
-            default=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+            default=str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
             control_template="select",
             tab="market_rules",
+            editable_when={"engine_mode": ("custom",)},
+            default_when={
+                "engine_mode": {
+                    "exact": str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+                    "auto": str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
+                    "custom": str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
+                },
+            },
             chip_template="历史字段: {value}",
             tab_label="市场规则",
             tab_order=170,
@@ -100,7 +114,7 @@ class MarketDataModule(ExecutableModule):
     }
 
     load_raw_market_data: ClassVar[Flow] = Flow(
-        "load_raw_market_data", inputs=(), outputs=(
+        "load_raw_market_data", inputs=(EngineModule.engine_mode,), outputs=(
             raw_prices, lot_sizes, margin_ratio, settlement_price, volume,
             historical_field_provider, trading_day_resolver, historical_field_policy,
         ),
@@ -134,22 +148,18 @@ class MarketDataModule(ExecutableModule):
         compute=lambda account, ctx: ctx.set(MarketDataModule.volume, current_volume_at(account, ctx.timestamp)),
     )
     lookup_historical_fields_on_signal: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_signal", inputs=(),
+        "lookup_historical_fields_on_signal",
+        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
-        compute=lambda account, ctx: ctx.set(
-            MarketDataModule.current_historical_fields,
-            current_historical_fields_at(account, ctx.timestamp),
-        ),
+        compute=lambda account, ctx: _set_current_historical_fields(account, ctx),
     )
     lookup_historical_fields_on_order: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_order", inputs=(),
+        "lookup_historical_fields_on_order",
+        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
-        compute=lambda account, ctx: ctx.set(
-            MarketDataModule.current_historical_fields,
-            current_historical_fields_at(account, ctx.timestamp),
-        ),
+        compute=lambda account, ctx: _set_current_historical_fields(account, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
@@ -172,16 +182,12 @@ def _load_raw_market_data(account, ctx) -> None:
     ctx.set(MarketDataModule.volume, raw.get("volume"))
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
     ctx.set(MarketDataModule.trading_day_resolver, raw.get("trading_day_resolver"))
-    ctx.set(
-        MarketDataModule.historical_field_policy,
-        raw.get("historical_field_policy", str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)),
-    )
+    raw_policy = raw.get("historical_field_policy")
+    policy = _historical_field_policy_for_engine(account, raw_policy)
+    ctx.set(MarketDataModule.historical_field_policy, policy)
     account.historical_field_provider = raw.get("historical_field_provider")
     account.trading_day_resolver = raw.get("trading_day_resolver")
-    account.historical_field_policy = raw.get(
-        "historical_field_policy",
-        str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
-    )
+    account.historical_field_policy = policy
     account.historical_field_names = tuple(raw.get("historical_field_names", ()))
     account.historical_field_frames = raw.get("historical_field_frames")
     account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero
@@ -189,9 +195,57 @@ def _load_raw_market_data(account, ctx) -> None:
                                                 # observed value forward"
 
 
+def _historical_field_policy_for_engine(account, raw_policy: object | None) -> str:
+    mode = "auto"
+    configs = getattr(account, "strategy_configs", None)
+    if configs:
+        mode = engine_mode_for(next(iter(configs.values())))
+    if mode == "exact":
+        return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
+    if mode in {"auto", "custom"}:
+        return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
+    return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
+
+
 def _causal_valuation(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     account.current_prices_table = raw_prices.ffill()
+
+
+def _set_current_historical_fields(account, ctx) -> None:
+    base_fields = current_historical_fields_at(account, ctx.timestamp)
+    ctx.set(MarketDataModule.current_historical_fields, base_fields)
+    for strategy in ctx.active_strategies:
+        config = account.config_for(strategy)
+        ctx.set_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            _historical_fields_for_strategy(base_fields, config, ctx.timestamp),
+        )
+
+
+def _historical_fields_for_strategy(
+    base_fields: dict[str, dict[str, object]],
+    strategy_config,
+    timestamp: pd.Timestamp,
+) -> dict[str, dict[str, object]]:
+    if engine_mode_for(strategy_config) != "custom":
+        return base_fields
+    if not _custom_historical_fields_enabled(strategy_config):
+        return base_fields
+    return apply_custom_product_fields(base_fields, strategy_config, timestamp)
+
+
+def _custom_historical_fields_enabled(strategy_config) -> bool:
+    from tools.testers.backtest.modules.fee import _resolve_fee_mode
+    from tools.testers.backtest.modules.margin import _resolve_margin_mode
+    from tools.testers.backtest.modules.trading_rule import _effective_accounting_mode
+
+    return (
+        _resolve_fee_mode(strategy_config) == "custom"
+        or _resolve_margin_mode(strategy_config) == "custom"
+        or _effective_accounting_mode(strategy_config) == "Custom"
+    )
 
 
 def current_prices_at(account, timestamp: pd.Timestamp) -> dict:
