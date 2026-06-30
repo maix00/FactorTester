@@ -9,6 +9,7 @@ import pandas as pd
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.modules.factor import factor_runtime_key
 from tools.testers.backtest.modules.market_data import MarketDataModule
 
 
@@ -46,13 +47,13 @@ def _schedule_bar_events(account, ctx) -> None:
     table = getattr(account, "current_prices_table", None)
     if table is None:
         return
-    representative_by_factor: dict[int, Any] = {}
+    representative_by_factor: dict[Any, Any] = {}
     for strategy in account.strategy_configs:
         config = account.config_for(strategy)
         if not config.uses_flow("signal_live"):
             continue
         factor = config.get(FieldRef("factor", owner="FactorModule"))
-        representative_by_factor.setdefault(id(factor), strategy)
+        representative_by_factor.setdefault(factor_runtime_key(factor), strategy)
     if not representative_by_factor:
         return
     drafts = [

@@ -18,7 +18,7 @@ from tools.factors.expr.signal_align import signal_align
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 
 
@@ -196,14 +196,15 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     (already at the factor's native frequency, no separate signal_align
     pass needed) and gets cached on `account.precomputed_factor_tables`
     for the PER_EVENT lookup Flow to read."""
-    by_factor: dict[int, list] = defaultdict(list)
-    factor_by_id: dict[int, Any] = {}
+    by_factor: dict[Any, list] = defaultdict(list)
+    factor_by_key: dict[Any, Any] = {}
     for strategy in account.strategy_configs:
         if not account.config_for(strategy).uses_flow("signal_precomputed"):
             continue
         factor = account.config_for(strategy).get(FactorModule.factor)
-        by_factor[id(factor)].append(strategy)
-        factor_by_id[id(factor)] = factor
+        factor_key = factor_runtime_key(factor)
+        by_factor[factor_key].append(strategy)
+        factor_by_key[factor_key] = factor
 
     tables = getattr(account, "precomputed_factor_tables", None)
     if tables is None:
@@ -215,12 +216,12 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
         account.precomputed_factor_table_keys = table_keys
 
     drafts: list[EventDraft] = []
-    for factor_id, strategies in by_factor.items():
-        factor = factor_by_id[factor_id]
+    for factor_key, strategies in by_factor.items():
+        factor = factor_by_key[factor_key]
         table = factor.evaluate()
         for strategy in strategies:
             config = account.config_for(strategy)
-            schedule_key = _precomputed_schedule_key(factor_id, config)
+            schedule_key = _precomputed_schedule_key(factor_key, config)
             if schedule_key not in tables:
                 tables[schedule_key] = _precomputed_schedule_table(table, config)
             table_keys[strategy] = schedule_key
@@ -229,12 +230,12 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     ctx.set(FactorSignalModule.signal_value, drafts)
 
 
-def _precomputed_schedule_key(factor_id: int, config) -> tuple:
+def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
     if not calendar_frequency or str(calendar_frequency) == "auto":
-        return (factor_id, "factor")
+        return (factor_key, "factor")
     return (
-        factor_id,
+        factor_key,
         str(calendar_frequency),
         config.get(FactorSignalModule.basepoint, "last"),
         config.get(FactorSignalModule.daily_basepoint),
@@ -266,22 +267,23 @@ def _evaluate_signal_live(account, ctx) -> None:
     Older table-style factors still fall back to `evaluate()` for compatibility.
     Shared factor objects are evaluated once per dispatch.
     """
-    by_factor: dict[int, list] = defaultdict(list)
-    factor_by_id: dict[int, Any] = {}
+    by_factor: dict[Any, list] = defaultdict(list)
+    factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
         factor = account.config_for(strategy).get(FactorModule.factor)
-        by_factor[id(factor)].append(strategy)
-        factor_by_id[id(factor)] = factor
+        factor_key = factor_runtime_key(factor)
+        by_factor[factor_key].append(strategy)
+        factor_by_key[factor_key] = factor
 
     price_tables = getattr(account, "live_factor_price_tables", {})
     executors = getattr(account, "live_factor_executors", {})
-    for factor_id, strategies in by_factor.items():
-        factor = factor_by_id[factor_id]
-        executor = executors.get(factor_id)
+    for factor_key, strategies in by_factor.items():
+        factor = factor_by_key[factor_key]
+        executor = executors.get(factor_key)
         if executor is not None:
             values = _row_to_signal_values(executor.on_signal(ctx.timestamp))
         else:
-            values = _live_signal_values(factor, ctx.timestamp, price_tables.get(factor_id))
+            values = _live_signal_values(factor, ctx.timestamp, price_tables.get(factor_key))
         for strategy in strategies:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
 
@@ -294,7 +296,7 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
     table_keys = getattr(account, "precomputed_factor_table_keys", {})
     for strategy in ctx.active_strategies:
         factor = account.config_for(strategy).get(FactorModule.factor)
-        table = tables.get(table_keys.get(strategy, (id(factor), "factor")))
+        table = tables.get(table_keys.get(strategy, (factor_runtime_key(factor), "factor")))
         if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue
@@ -321,32 +323,33 @@ def _observe_signal_live_bar(account, ctx) -> None:
         executors = {}
         account.live_factor_executors = executors
 
-    by_factor: dict[int, list] = defaultdict(list)
-    factor_by_id: dict[int, Any] = {}
+    by_factor: dict[Any, list] = defaultdict(list)
+    factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
         factor = account.config_for(strategy).get(FactorModule.factor)
-        by_factor[id(factor)].append(strategy)
-        factor_by_id[id(factor)] = factor
+        factor_key = factor_runtime_key(factor)
+        by_factor[factor_key].append(strategy)
+        factor_by_key[factor_key] = factor
 
     row = pd.DataFrame([prices], index=[pd.Timestamp(ctx.timestamp)])
-    for factor_id in by_factor:
-        factor = factor_by_id[factor_id]
-        table = tables.get(factor_id)
+    for factor_key in by_factor:
+        factor = factor_by_key[factor_key]
+        table = tables.get(factor_key)
         if table is None:
-            tables[factor_id] = row
+            tables[factor_key] = row
         else:
             updated = pd.concat([table, row])
-            tables[factor_id] = updated.iloc[~updated.index.duplicated(keep="last")]
-        executor = executors.get(factor_id)
+            tables[factor_key] = updated.iloc[~updated.index.duplicated(keep="last")]
+        executor = executors.get(factor_key)
         if executor is None:
             executor = _compile_live_factor_executor(
                 factor,
-                by_factor[factor_id][0],
+                by_factor[factor_key][0],
                 prices.keys(),
                 getattr(account, "source_freq", None),
             )
             if executor is not None:
-                executors[factor_id] = executor
+                executors[factor_key] = executor
         if executor is not None:
             executor.on_bar(pd.Timestamp(ctx.timestamp), prices)
             continue

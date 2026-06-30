@@ -55,3 +55,18 @@ class FactorModule(ExecutableModule):
             },
         ),
     }
+
+
+def factor_runtime_key(factor: Any) -> Any:
+    """Stable key for sharing one runtime factor calculation.
+
+    Raw factor objects default to identity because factor instances may carry
+    mutable caches/state. Adapter wrappers can expose a semantic key when they
+    are merely binding the same underlying factor to the same product universe.
+    """
+    custom_key = getattr(factor, "backtest_factor_cache_key", None)
+    if callable(custom_key):
+        return custom_key()
+    if custom_key is not None:
+        return custom_key
+    return ("object", id(factor))

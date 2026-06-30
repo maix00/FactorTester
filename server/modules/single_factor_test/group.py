@@ -1810,6 +1810,15 @@ class _FactorEvaluateAdapter:
         self._factor = factor
         self._products = products
 
+    def backtest_factor_cache_key(self) -> tuple:
+        factor_key = (
+            getattr(self._factor, "alias", None)
+            or getattr(self._factor, "name", None)
+            or id(self._factor)
+        )
+        product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
+        return ("factor_evaluate_adapter", factor_key, product_key)
+
     def evaluate(self) -> pd.DataFrame:
         self._factor.evaluate(self._products)
         return self._factor.table

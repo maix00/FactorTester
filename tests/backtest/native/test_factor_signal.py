@@ -109,7 +109,73 @@ def test_signal_precomputed_groups_by_factor_identity():
     _schedule_signal_precomputed_timestamps(account, ctx)
 
     assert shared_factor.calls == 1
-    assert (id(shared_factor), "factor") in account.precomputed_factor_tables
+    assert (("object", id(shared_factor)), "factor") in account.precomputed_factor_tables
+
+
+def test_signal_precomputed_groups_by_adapter_cache_key():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _WrappedFactor:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self):
+            self.calls += 1
+            return pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-01")])
+
+    class _Adapter:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def backtest_factor_cache_key(self):
+            return ("adapter", "same-factor", ("P1",))
+
+        def evaluate(self):
+            return self.wrapped.evaluate()
+
+    wrapped = _WrappedFactor()
+    configs = {
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"}),
+                            field_values={FactorModule.factor: _Adapter(wrapped)}),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
+                            field_values={FactorModule.factor: _Adapter(wrapped)}),
+    }
+    account = AccountState(strategy_configs=configs)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    assert wrapped.calls == 1
+
+
+def test_signal_precomputed_does_not_share_different_adapter_cache_keys():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _Adapter:
+        calls = 0
+
+        def __init__(self, product_name: str):
+            self.product_name = product_name
+
+        def backtest_factor_cache_key(self):
+            return ("adapter", "same-factor", (self.product_name,))
+
+        def evaluate(self):
+            type(self).calls += 1
+            return pd.DataFrame({self.product_name: [1.0]}, index=[pd.Timestamp("2024-01-01")])
+
+    configs = {
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"}),
+                            field_values={FactorModule.factor: _Adapter("P1")}),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
+                            field_values={FactorModule.factor: _Adapter("P2")}),
+    }
+    account = AccountState(strategy_configs=configs)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    assert _Adapter.calls == 2
 
 
 def test_signal_precomputed_calendar_frequency_aligns_schedule():
