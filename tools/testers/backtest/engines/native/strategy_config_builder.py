@@ -114,6 +114,26 @@ def _field_entries() -> list[tuple[str, Any, Any, frozenset[str]]]:
     return entries
 
 
+def _default_value_for_field(
+    fd: Any,
+    resolved: Mapping[str, Any],
+    materialized: Mapping[Any, Any],
+    entries: list[tuple[str, Any, Any, frozenset[str]]],
+) -> Any:
+    values_by_name = dict(resolved)
+    for field_name, ref, _fd, _owner_flow_names in entries:
+        if ref in materialized:
+            values_by_name[field_name] = materialized[ref]
+    for source_key, mapping in (fd.default_when or {}).items():
+        source_value = values_by_name.get(source_key)
+        if source_value in mapping:
+            return mapping[source_value]
+        source_text = str(source_value)
+        if source_text in mapping:
+            return mapping[source_text]
+    return fd.default
+
+
 def build_strategy_configs(
     resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
 ) -> dict[Strategy, StrategyConfig]:
@@ -147,7 +167,7 @@ def build_strategy_configs(
                     f"a value for required field {field_name!r} (its default is "
                     f"a frontend display suggestion only, not a backend fallback)")
             if not fd.frontend_only_default:
-                field_values[ref] = fd.default
+                field_values[ref] = _default_value_for_field(fd, resolved, field_values, entries)
         configs[strategy] = StrategyConfig(
             strategy=strategy, active_flow_names=active_flow_names, field_values=field_values,
         )

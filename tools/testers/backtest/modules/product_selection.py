@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.products.product_path_selection import ProductPathSelection
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
@@ -21,10 +22,66 @@ class ProductSelectionModule(ExecutableModule):
     label: ClassVar[str] = "产品选择"
 
     product_path_selection: ClassVar[FieldRef[Any]] = FieldRef("product_path_selection")
+    product_path_candidates: ClassVar[FieldRef[list[Any]]] = FieldRef("product_path_candidates")
     products: ClassVar[FieldRef[frozenset]] = FieldRef("products")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "product_path_selection": FieldDefinition(public=True, control_template="custom", tab="product_path_selection"),
+        "product_path_candidates": FieldDefinition(
+            public=True, default=[], control_template="custom", tab="product_path_selection",
+            chip_template="产品路径候选: {value}", tab_label="产品路径", tab_order=30,
+            help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场路径组。",
+            serialization={
+                "kind": "product_path_candidate_list",
+                "display_order": 10,
+                "item_kind": "product_path_selection",
+                "shared_page_field": "product_path_candidates",
+                "selection_field": "product_path_selection",
+                "product_group_source": "user_product_group_templates",
+                "manual_candidate_source": "runtime_manual_path_group",
+                "fallback_policy": (
+                    "copy_page_candidates",
+                    "load_user_product_groups_when_page_empty",
+                ),
+                "mutation_scope": {
+                    "page": "page_candidates_only",
+                    "module": "module_candidates_only",
+                },
+                "persist_manual_candidates": False,
+                "dedupe_product_groups": True,
+                "allow_duplicate_manual_candidates": True,
+            },
+        ),
+        "product_path_selection": FieldDefinition(
+            public=True, default=None, control_template="select", tab="product_path_selection",
+            chip_template="产品路径: {value}", tab_label="产品路径", tab_order=30,
+            help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
+            info_overlay={"type": "product_path_selection_products"},
+            instance_class=ProductPathSelection,
+            serialization={
+                "kind": "product_path_selection",
+                "display_order": 20,
+                "shared_page_field": "product_path_selection",
+                "product_group_reference_keys": (
+                    "product_group_template_id",
+                    "path_id",
+                ),
+                "product_group_source_type": "user_product_group_template",
+                "id_keys": (
+                    "product_path_selection_id",
+                    "selection_id",
+                    "id",
+                ),
+                "manual_path_keys": (
+                    "paths",
+                    "selected_paths",
+                ),
+                "product_group_fields": ("product_path_selection_id",),
+                "manual_fields": (
+                    "product_path_selection_id",
+                    "paths",
+                ),
+            },
+        ),
     }
 
     resolve_product_selection: ClassVar[Flow] = Flow(

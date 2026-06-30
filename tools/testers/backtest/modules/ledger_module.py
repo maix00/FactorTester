@@ -31,6 +31,7 @@ class LedgerModule(ExecutableModule):
     equity: ClassVar[FieldRef[float]] = FieldRef("equity")
     initial_capital_major: ClassVar[FieldRef[float]] = FieldRef("initial_capital_major")
     base_currency: ClassVar[FieldRef[str]] = FieldRef("base_currency")
+    currency_conversion_fee_rate: ClassVar[FieldRef[float]] = FieldRef("currency_conversion_fee_rate")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "initial_capital_major": FieldDefinition(
@@ -40,6 +41,11 @@ class LedgerModule(ExecutableModule):
         "base_currency": FieldDefinition(
             public=True, control_template="select", default="CNY", tab="capital",
             chip_template="币种: {value}", tab_label="资金", tab_order=50,
+        ),
+        "currency_conversion_fee_rate": FieldDefinition(
+            public=True, control_template="number", default=0.0, tab="capital",
+            minimum=0.0, step=0.000001,
+            chip_template="换汇费率: {value}", tab_label="资金", tab_order=50,
         ),
     }
 

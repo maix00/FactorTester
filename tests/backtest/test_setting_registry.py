@@ -6,6 +6,7 @@ import pandas as pd
 
 from server.modules.single_factor_test import sft_bp
 from tools.testers.settings import backtest_setting_registry, resolve_group_settings
+from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 
 def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
@@ -18,8 +19,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "time", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "accounting", "margin", "cost", "evaluation",
-        "order", "liquidity", "market_rules", "calendar",
+        "position_policy", "cost", "order", "liquidity", "margin",
+        "market_rules", "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
@@ -28,8 +29,8 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
         "factor", "product_path_selection", "data_source", "frequency", "time",
         "capital", "target_allocation", "rebalance_trigger", "position_policy",
-        "group_strategy", "accounting", "margin", "cost", "evaluation", "order",
-        "liquidity", "market_rules", "calendar",
+        "group_strategy", "cost", "order", "liquidity", "margin",
+        "market_rules", "accounting", "calendar", "evaluation",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
@@ -89,6 +90,23 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [setting["key"] for setting in engine_tab["settings"]] == [
         "engine",
     ]
+    executable_public_fields = {
+        key
+        for cls in _ALL_MODULE_CLASSES
+        for key, field in getattr(cls, "fields", {}).items()
+        if field.public
+    }
+    assert set(index["defaults"]) <= executable_public_fields
+    assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
+    assert index["defaults"]["evaluation_split"]["module"] == "run_window"
+    assert {
+        key: index["defaults"][key]["module"]
+        for key in ("execution_price_basis", "order_type", "matching_model")
+    } == {
+        "execution_price_basis": "order_execution",
+        "order_type": "order_execution",
+        "matching_model": "order_execution",
+    }
 
 
 def test_ic_setting_manifest_is_registered_and_lazy_loaded() -> None:

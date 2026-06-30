@@ -71,6 +71,13 @@ class FieldDefinition:
     tab_summary_template: str | None = None
     tab_summary_keys: tuple[str, ...] = ()
     scope_policy: str = "overridable"
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    help_text: str = ""
+    info_overlay: dict[str, Any] | None = None
+    instance_class: type | str | None = None
+    serialization: dict[str, Any] | None = None
     visible_when: dict[str, tuple[Any, ...]] | None = None
     editable_when: dict[str, tuple[Any, ...]] | None = None  # field is always
         # shown; the control is only editable when this condition holds.

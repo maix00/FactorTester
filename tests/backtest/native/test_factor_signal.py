@@ -109,7 +109,46 @@ def test_signal_precomputed_groups_by_factor_identity():
     _schedule_signal_precomputed_timestamps(account, ctx)
 
     assert shared_factor.calls == 1
-    assert id(shared_factor) in account.precomputed_factor_tables
+    assert (id(shared_factor), "factor") in account.precomputed_factor_tables
+
+
+def test_signal_precomputed_calendar_frequency_aligns_schedule():
+    strategy = Strategy(alias="A")
+
+    class _FakeFactor:
+        def evaluate(self):
+            return pd.DataFrame(
+                {"P1": [1.0, 2.0]},
+                index=pd.date_range("2024-01-01 09:00", periods=2, freq="min"),
+            )
+
+    aligned = pd.DataFrame(
+        {"P1": [2.0]},
+        index=[pd.Timestamp("2024-01-01 09:01")],
+    )
+    factor = _FakeFactor()
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"signal_precomputed"}),
+        field_values={
+            FactorModule.factor: factor,
+            FactorSignalModule.calendar_frequency: "5min",
+            FactorSignalModule.basepoint: "last",
+            FactorSignalModule.end_session_gap: "3h",
+        },
+    )
+    account = AccountState(strategy_configs={strategy: config})
+    queue = EventQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    with patch("tools.testers.backtest.modules.factor_signal.signal_align", return_value=aligned) as align:
+        _schedule_signal_precomputed_timestamps(account, ctx)
+
+    align.assert_called_once()
+    assert align.call_args.args[1] == "5min"
+    key = account.precomputed_factor_table_keys[strategy]
+    assert key in account.precomputed_factor_tables
+    assert list(account.precomputed_factor_tables[key].index) == [pd.Timestamp("2024-01-01 09:01")]
 
 
 def test_signal_live_observes_bars_then_signals_from_causal_price_table():

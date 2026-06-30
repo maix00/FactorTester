@@ -19,26 +19,15 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, returns_for
+from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
 class RiskMetricsModule(ExecutableModule):
     key: ClassVar[str] = "risk_metrics"
     label: ClassVar[str] = "风险指标"
-
-    evaluation_split: ClassVar[FieldRef[str]] = FieldRef("evaluation_split")
-        # in-sample cutoff date (inclusive); everything after is out-of-sample.
-        # None (default) means the whole run is treated as in-sample, no
-        # separate out-of-sample segment is reported.
-
-    fields: ClassVar[dict[str, FieldDefinition]] = {
-        "evaluation_split": FieldDefinition(
-            public=True, default=None, control_template="date", tab="evaluation",
-            chip_template="样本切分: {value}", tab_label="样本划分", tab_order=200,
-        ),
-    }
 
     compute_risk_metrics: ClassVar[Flow] = Flow(
         "compute_risk_metrics", inputs=(), outputs=(),
@@ -53,7 +42,7 @@ def _compute_risk_metrics(account, ctx) -> None:
     for strategy in account.strategy_configs:
         equity = equity_curve_for(account, strategy)
         returns = returns_for(account, strategy)
-        split_raw = account.config_for(strategy).get(RiskMetricsModule.evaluation_split)
+        split_raw = account.config_for(strategy).get(RunWindowModule.evaluation_split)
 
         in_sample_metrics = compute_metrics(equity, returns)
         result = {f"{k}": v for k, v in in_sample_metrics.items()}

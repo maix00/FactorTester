@@ -31,6 +31,7 @@ class FactorSignalModule(ExecutableModule):
     daily_basepoint: ClassVar[FieldRef[Any]] = FieldRef("daily_basepoint")
     end_session_skip: ClassVar[FieldRef[bool]] = FieldRef("end_session_skip")
     end_session_gap: ClassVar[FieldRef[Any]] = FieldRef("end_session_gap")
+    calendar_frequency: ClassVar[FieldRef[Any]] = FieldRef("calendar_frequency")
     signal_value: ClassVar[FieldRef[Any]] = FieldRef("signal_value")  # dict[Product, float]
     factor_mode: ClassVar[FieldRef[str]] = FieldRef("factor_mode")
         # "auto"|"precomputed"|"incremental" -- selects which of
@@ -69,6 +70,11 @@ class FactorSignalModule(ExecutableModule):
             public=True, control_template="select", default="auto", tab="factor",
             options=(("auto", "自动选择"), ("precomputed", "预计算后按事件回放"), ("incremental", "随事件增量计算")),
             chip_template="因子模式: {value}", tab_label="因子执行", tab_order=20,
+        ),
+        "calendar_frequency": FieldDefinition(
+            public=True, control_template="select", default="auto", tab="calendar",
+            options=(("auto", "按因子频率自动判断"), ("1min", "1 分钟"), ("5min", "5 分钟"), ("1day", "1 天")),
+            chip_template="时钟: {value}", tab_label="回测时钟", tab_order=190,
         ),
     }
 
@@ -134,7 +140,7 @@ def _group_strategies_by_signal_align_params(account):
     for strategy in account.strategy_configs:
         config = account.config_for(strategy)
         key = (
-            config.get(FactorSignalModule.signal_freq, "1d"),
+            _effective_signal_frequency(config),
             config.get(FactorSignalModule.basepoint, "last"),
             config.get(FactorSignalModule.daily_basepoint),
             config.get(FactorSignalModule.end_session_skip, True),
@@ -142,6 +148,13 @@ def _group_strategies_by_signal_align_params(account):
         )
         groups[key].append(strategy)
     return groups
+
+
+def _effective_signal_frequency(config) -> Any:
+    calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    if calendar_frequency and str(calendar_frequency) != "auto":
+        return calendar_frequency
+    return config.get(FactorSignalModule.signal_freq, "1d")
 
 
 def _schedule_signal_live_timestamps(account, ctx) -> None:
@@ -192,16 +205,52 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     if tables is None:
         tables = {}
         account.precomputed_factor_tables = tables
+    table_keys = getattr(account, "precomputed_factor_table_keys", None)
+    if table_keys is None:
+        table_keys = {}
+        account.precomputed_factor_table_keys = table_keys
 
     drafts: list[EventDraft] = []
     for factor_id, strategies in by_factor.items():
         factor = factor_by_id[factor_id]
         table = factor.evaluate()
-        tables[factor_id] = table
-        for ts in signal_timestamps(table):
-            for strategy in strategies:
+        for strategy in strategies:
+            config = account.config_for(strategy)
+            schedule_key = _precomputed_schedule_key(factor_id, config)
+            if schedule_key not in tables:
+                tables[schedule_key] = _precomputed_schedule_table(table, config)
+            table_keys[strategy] = schedule_key
+            for ts in signal_timestamps(tables[schedule_key]):
                 drafts.append(EventDraft(EventKind.SIGNAL, pd.Timestamp(ts), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)
+
+
+def _precomputed_schedule_key(factor_id: int, config) -> tuple:
+    calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    if not calendar_frequency or str(calendar_frequency) == "auto":
+        return (factor_id, "factor")
+    return (
+        factor_id,
+        str(calendar_frequency),
+        config.get(FactorSignalModule.basepoint, "last"),
+        config.get(FactorSignalModule.daily_basepoint),
+        config.get(FactorSignalModule.end_session_skip, True),
+        config.get(FactorSignalModule.end_session_gap, "3h"),
+    )
+
+
+def _precomputed_schedule_table(table: pd.DataFrame, config) -> pd.DataFrame:
+    calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    if not calendar_frequency or str(calendar_frequency) == "auto":
+        return table
+    return signal_align(
+        table,
+        calendar_frequency,
+        basepoint=config.get(FactorSignalModule.basepoint, "last"),
+        daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
+        end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+        end_session_gap=pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
+    )
 
 
 def _evaluate_signal_live(account, ctx) -> None:
@@ -238,9 +287,10 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
     (`account.precomputed_factor_tables`, keyed by id(factor)) -- no
     re-evaluation here."""
     tables = getattr(account, "precomputed_factor_tables", {})
+    table_keys = getattr(account, "precomputed_factor_table_keys", {})
     for strategy in ctx.active_strategies:
         factor = account.config_for(strategy).get(FactorModule.factor)
-        table = tables.get(id(factor))
+        table = tables.get(table_keys.get(strategy, (id(factor), "factor")))
         if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue

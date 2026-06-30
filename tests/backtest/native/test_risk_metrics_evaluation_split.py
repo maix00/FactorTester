@@ -7,6 +7,7 @@ from tools.testers.backtest.engines.native.ledger import AccountState, StrategyC
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.risk_metrics import RiskMetricsModule, _compute_risk_metrics
+from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
 def _seed_equity(account, strategy, points):
@@ -31,7 +32,7 @@ def test_split_separates_in_and_out_of_sample_metrics():
     s = Strategy(alias="S")
     idx = pd.date_range("2024-01-01", periods=10)
     config = StrategyConfig(strategy=s, field_values={
-        RiskMetricsModule.evaluation_split: idx[4],  # first 5 points in-sample
+        RunWindowModule.evaluation_split: idx[4],  # first 5 points in-sample
     })
     account = AccountState(strategy_configs={s: config})
     # in-sample: flat (no volatility); out-of-sample: trending up

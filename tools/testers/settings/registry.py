@@ -154,6 +154,9 @@ class ApplicationSettings:
                     "chip_template": setting.chip_template,
                     "info_overlay": setting.info_overlay,
                     "has_instance": setting.instance_class is not None,
+                    "minimum": setting.minimum,
+                    "maximum": setting.maximum,
+                    "step": setting.step,
                     "engine_defaults": dict(setting.engine_defaults),
                     "serialization": dict(setting.serialization),
                     "visible_when": {

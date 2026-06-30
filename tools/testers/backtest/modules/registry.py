@@ -19,10 +19,14 @@ from typing import Any
 from tools.data.modules.registry import ModuleRegistry
 
 from .base import ExecutableModule
+from .engine import EngineModule
+from .run_window import RunWindowModule
 from .fee import FeeModule
 from .slippage import SlippageModule
 from .liquidity import LiquidityModule
 from .margin import MarginModule
+from .order_execution import OrderExecutionModule
+from .market_rules import MarketRuleModule
 from .position_sizing import PositionSizingModule
 from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
@@ -43,6 +47,8 @@ from .risk_metrics import RiskMetricsModule
 # ── All known ExecutableModule subclasses for backtest ───────────
 
 _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
+    EngineModule,
+    RunWindowModule,
     LedgerModule,
     OrderBookModule,
     TradingRuleModule,
@@ -58,7 +64,9 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     SlippageModule,
     LiquidityModule,
     MarginModule,
+    OrderExecutionModule,
     PositionSizingModule,
+    MarketRuleModule,
     LedgerCashConstraintModule,
     OrderLifecycleModule,
     EquityCurveModule,
@@ -137,7 +145,14 @@ def register_all_module_settings(app: Any) -> None:
                 module=cls.key,
                 scope_policy=scope,
                 options=options,
+                minimum=fd.minimum,
+                maximum=fd.maximum,
+                step=fd.step,
                 chip_template=fd.chip_template or None,
+                info_overlay=fd.info_overlay,
+                instance_class=fd.instance_class,
+                help_text=fd.help_text,
+                serialization=dict(fd.serialization or {}),
                 visible_when=dict(fd.visible_when or {}),
                 editable_when=dict(fd.editable_when or {}),
                 default_when={
