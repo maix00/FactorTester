@@ -24,6 +24,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
+from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
@@ -250,7 +251,7 @@ def _trailing_volatility(table, product, timestamp, lookback: int) -> float | No
     if table is None or product not in table.columns:
         return None
     prices = table[product]
-    prices = prices[prices.index <= timestamp]
+    prices = series_up_to(prices, timestamp)
     if len(prices) < lookback + 1:
         return None
     window = prices.iloc[-(lookback + 1):]
@@ -270,7 +271,7 @@ def _resolve_execution_timestamp(account, ctx, strategy) -> pd.Timestamp:
     table = getattr(account, "current_prices_table", None)
     if table is None:
         return ctx.timestamp
-    index = table.index
+    index = signal_timestamps(table)
     pos = index.get_indexer([ctx.timestamp], method="bfill")[0]
     target_pos = min(pos + delay, len(index) - 1)
     return index[target_pos]

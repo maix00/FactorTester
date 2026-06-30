@@ -591,6 +591,7 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
             "combination-a:group-1": {
             },
             "combination-b:group-1": {
+                "factor_mode": "incremental",
                 "rebalance_trigger": "on_factor_signal",
                 "position_policy": "buy_and_hold",
                 "fee_mode": "none",
@@ -602,6 +603,8 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
     )
 
     assert resolved["combination-a:group-1"]["rebalance_trigger"] == "on_factor_signal"
+    assert resolved["combination-a:group-1"]["factor_mode"] == "auto"
+    assert resolved["combination-b:group-1"]["factor_mode"] == "incremental"
     assert resolved["combination-b:group-1"]["rebalance_trigger"] == "on_factor_signal"
     assert resolved["combination-b:group-1"]["position_policy"] == "buy_and_hold"
     assert resolved["combination-a:group-1"]["initial_capital_major"] == 1_000_000.0

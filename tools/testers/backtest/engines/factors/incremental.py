@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
 import numpy as np
 import pandas as pd
@@ -19,8 +19,6 @@ from tools.factors.expr import (
     RollingOp,
     ShiftOp,
 )
-
-from .events import IncrementalFactorExecutor
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -51,7 +49,7 @@ class ConstantNode:
 @dataclass(slots=True)
 class ColumnNode:
     column_name: str
-    products: tuple[str, ...]
+    products: tuple[Any, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
         try:
@@ -185,7 +183,7 @@ class StreamingFactorPlan:
     def __init__(
         self,
         expression: FactorExpr,
-        products: tuple[str, ...],
+        products: tuple[Any, ...],
         root: StreamingNode,
     ) -> None:
         self.expression = expression
@@ -199,9 +197,43 @@ class StreamingFactorPlan:
         return dict(zip(self.products, values, strict=True))
 
 
+@dataclass(frozen=True, slots=True)
+class _StreamingBarPrice:
+    fields: Mapping[str, float]
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamingMarketSlice:
+    prices: Mapping[Any, _StreamingBarPrice]
+
+
+class IncrementalFactorExecutor:
+    """Run-scoped stateful executor produced from a FactorExpr graph."""
+
+    def __init__(self, factor_alias: str, plan: StreamingFactorPlan) -> None:
+        if not factor_alias:
+            raise ValueError("incremental executor requires a factor alias")
+        self.factor_alias = factor_alias
+        self._plan = plan
+        self._latest: dict[Any, float] = {}
+
+    def on_bar(self, timestamp: pd.Timestamp, fields_by_product: Mapping[Any, Any]) -> None:
+        market = _StreamingMarketSlice({
+            product: _StreamingBarPrice(_normalize_bar_fields(fields))
+            for product, fields in fields_by_product.items()
+        })
+        self._latest = {
+            product: float(value)
+            for product, value in self._plan.update(pd.Timestamp(timestamp), market).items()
+        }
+
+    def on_signal(self, timestamp: pd.Timestamp) -> dict[Any, float]:
+        return dict(self._latest)
+
+
 def compile_streaming_factor(
     expression: FactorExpr,
-    products: tuple[str, ...],
+    products: tuple[Any, ...],
     *,
     source_freq: DataFreq | str | None = None,
 ) -> StreamingFactorPlan:
@@ -272,14 +304,26 @@ def compile_streaming_factor(
 def compile_incremental_factor(
     factor_alias: str,
     expression: FactorExpr,
-    products: tuple[str, ...],
+    products: tuple[Any, ...],
     *,
     source_freq: DataFreq | str | None = None,
 ) -> IncrementalFactorExecutor:
-    """Compile one author-facing FactorExpr into a runtime FactorActor."""
+    """Compile one author-facing FactorExpr into a run-scoped executor."""
 
     plan = compile_streaming_factor(expression, products, source_freq=source_freq)
-    return IncrementalFactorExecutor(factor_alias, plan.update)
+    return IncrementalFactorExecutor(factor_alias, plan)
+
+
+def _normalize_bar_fields(fields: Any) -> dict[str, float]:
+    if isinstance(fields, Mapping):
+        return {str(name): float(value) for name, value in fields.items()}
+    value = float(fields)
+    return {
+        "OPEN": value,
+        "HIGH": value,
+        "LOW": value,
+        "CLOSE": value,
+    }
 
 
 def _resolve_window_bars(

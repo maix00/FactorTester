@@ -1,7 +1,4 @@
-"""EventKind/EventDraft — the two domain events of the engine. Bar advance
-is NOT an event (timestamps are fully known upfront; the scheduler just
-walks the precomputed causal price series), so EventKind has exactly two
-values."""
+"""EventKind/EventDraft — causal replay events for the native scheduler."""
 
 from __future__ import annotations
 
@@ -18,12 +15,13 @@ if TYPE_CHECKING:
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
-    scheduler.EventQueue). SIGNAL before ORDER: process newly-produced
-    decisions before executing orders derived from them. Values are spaced
-    (0/10, not 0/1) so a future EventKind can be inserted between them
-    without renumbering everything after it."""
-    SIGNAL = 0    # a factor/signal value has been produced
-    ORDER = 10    # an Order has reached its action moment (schedule/cancel/fill
+    scheduler.EventQueue). BAR before SIGNAL before ORDER: live factors first
+    observe market data, then strategies read signal values, then orders whose
+    action time has arrived are processed. Values are spaced so a future
+    EventKind can be inserted without renumbering everything after it."""
+    BAR = 0       # a market bar has arrived; live factors may update state
+    SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
+    ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
                   # are OrderStatus values inspected from the payload, not
                   # separate EventKinds)
 

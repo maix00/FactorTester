@@ -24,16 +24,7 @@ from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import AccountState
 
-# Flow-name variants that are mutually exclusive within one module --
-# `factor_mode` (an existing frontend setting, register_factor_execution_base)
-# selects which one a strategy activates. "auto" has no real frequency-based
-# heuristic implemented yet -- defaults to "signal_precomputed" (the cheaper,
-# more common case) until one is built.
-_FACTOR_MODE_TO_FLOW_NAME = {
-    "precomputed": "signal_precomputed",
-    "incremental": "signal_live",
-    "auto": "signal_precomputed",
-}
+_FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
 
 
 def _all_flow_names() -> set[str]:
@@ -46,10 +37,66 @@ def _all_flow_names() -> set[str]:
 
 def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozenset[str]:
     names = _all_flow_names()
-    factor_mode = str(resolved_settings.get("factor_mode", "auto"))
-    chosen = _FACTOR_MODE_TO_FLOW_NAME.get(factor_mode, "signal_precomputed")
-    excluded = {"signal_live", "signal_precomputed"} - {chosen}
+    chosen = _select_factor_flow(resolved_settings)
+    excluded = _FACTOR_MODE_FLOWS - {chosen}
     return frozenset(names - excluded)
+
+
+def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:
+    requested = str(resolved_settings.get("factor_mode", "auto") or "auto")
+    if requested not in {"auto", "precomputed", "incremental"}:
+        requested = "auto"
+    can_vectorize = _factor_supports_vectorized(resolved_settings.get("factor"))
+    if requested == "precomputed":
+        if not can_vectorize:
+            raise ValueError(
+                "factor_mode='precomputed' requires a vectorizable factor; "
+                "use factor_mode='incremental' or 'auto' for live-only factors"
+            )
+        return "signal_precomputed"
+    if requested == "incremental":
+        if not _factor_supports_incremental(resolved_settings.get("factor")):
+            raise ValueError("factor_mode='incremental' requires an incrementally compilable factor")
+        return "signal_live"
+    if can_vectorize:
+        return "signal_precomputed"
+    if not _factor_supports_incremental(resolved_settings.get("factor")):
+        raise ValueError("factor_mode='auto' selected live execution, but factor is not incrementally compilable")
+    return "signal_live"
+
+
+def _factor_supports_vectorized(factor: Any) -> bool:
+    if factor is None:
+        return True
+    flag = getattr(factor, "supports_vectorized", None)
+    if callable(flag):
+        return bool(flag())
+    if flag is not None:
+        return bool(flag)
+    expr = getattr(factor, "expression", None) or getattr(factor, "_expr", None)
+    expr_flag = getattr(expr, "supports_vectorized", None)
+    if callable(expr_flag):
+        return bool(expr_flag())
+    if expr_flag is not None:
+        return bool(expr_flag)
+    return True
+
+
+def _factor_supports_incremental(factor: Any) -> bool:
+    if factor is None:
+        return True
+    flag = getattr(factor, "supports_incremental", None)
+    if callable(flag):
+        return bool(flag())
+    if flag is not None:
+        return bool(flag)
+    expr = getattr(factor, "expression", None) or getattr(factor, "_expr", None)
+    expr_flag = getattr(expr, "supports_incremental", None)
+    if callable(expr_flag):
+        return bool(expr_flag())
+    if expr_flag is not None:
+        return bool(expr_flag)
+    return True
 
 
 def _field_entries() -> list[tuple[str, Any, Any, frozenset[str]]]:

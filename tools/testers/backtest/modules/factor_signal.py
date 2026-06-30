@@ -1,13 +1,9 @@
-"""FactorSignalModule — decides WHEN a signal event should fire
-("signal_live"/"signal_precomputed" PRE_REPLAY Flows, timestamp scheduling
-only) and WHAT the signal value is at that moment ("signal_live"/
-"signal_precomputed" PER_EVENT Flows, same names, mutually exclusive per
-strategy via StrategyConfig.active_flow_names).
+"""FactorSignalModule — schedules SIGNAL events and publishes signal values.
 
-"signal_live" evaluates the factor fresh every time it fires (no caching
-across events); "signal_precomputed" evaluates the factor expression once
-over the whole backtest range in PRE_REPLAY and just looks values up by
-timestamp afterward — same data, different evaluation cadence.
+"signal_live" observes BAR events scheduled by BarEventModule into per-factor
+causal state, then emits signal values only when its scheduled SIGNAL events fire.
+"signal_precomputed" evaluates once over the whole backtest range and looks
+values up at SIGNAL events.
 """
 
 from __future__ import annotations
@@ -23,10 +19,11 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 
 
 class FactorSignalModule(ExecutableModule):
-    key: ClassVar[str] = "factor_signal"
+    key: ClassVar[str] = "factor_execution"
     label: ClassVar[str] = "信号时机"
 
     signal_freq: ClassVar[FieldRef[Any]] = FieldRef("signal_freq")
@@ -76,6 +73,11 @@ class FactorSignalModule(ExecutableModule):
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         compute=lambda account, ctx: _evaluate_signal_live(account, ctx),
     )
+    signal_live_on_bar: ClassVar[Flow] = Flow(
+        "signal_live", inputs=(FactorModule.factor,), outputs=(),
+        phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=5,
+        compute=lambda account, ctx: _observe_signal_live_bar(account, ctx),
+    )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
         "signal_precomputed", inputs=(), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
@@ -83,7 +85,8 @@ class FactorSignalModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        signal_live, signal_precomputed, signal_live_on_event, signal_precomputed_on_event,
+        signal_live, signal_precomputed, signal_live_on_bar,
+        signal_live_on_event, signal_precomputed_on_event,
     )
     # signal_live_on_event/signal_precomputed_on_event share the same
     # `name` as their PRE_REPLAY counterparts ("signal_live"/
@@ -127,15 +130,19 @@ def _group_strategies_by_signal_align_params(account):
 
 
 def _schedule_signal_live_timestamps(account, ctx) -> None:
-    """Timestamp scheduling only -- no factor value is computed here.
+    """Schedule live strategy SIGNAL timestamps.
+
+    No factor value is computed here. BarEventModule schedules BAR events to
+    update live factor state; SIGNAL events read that state and publish the
+    strategy-facing value.
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
     data = getattr(account, "current_prices_table", None)
     if data is None:
         return
-    groups = _group_strategies_by_signal_align_params(account)
     drafts: list[EventDraft] = []
+    groups = _group_strategies_by_signal_align_params(account)
     for (freq, basepoint, daily_basepoint, end_session_skip, end_session_gap), strategies in groups.items():
         strategies = [s for s in strategies if account.config_for(s).uses_flow("signal_live")]
         if not strategies:
@@ -144,7 +151,7 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
             data, freq, basepoint=basepoint, daily_basepoint=daily_basepoint,
             end_session_skip=end_session_skip, end_session_gap=pd.Timedelta(end_session_gap),
         )
-        for ts in aligned.index:
+        for ts in signal_timestamps(aligned):
             for strategy in strategies:
                 drafts.append(EventDraft(EventKind.SIGNAL, pd.Timestamp(ts), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
@@ -176,16 +183,21 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
         factor = factor_by_id[factor_id]
         table = factor.evaluate()
         tables[factor_id] = table
-        for ts in table.index:
+        for ts in signal_timestamps(table):
             for strategy in strategies:
                 drafts.append(EventDraft(EventKind.SIGNAL, pd.Timestamp(ts), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)
 
 
 def _evaluate_signal_live(account, ctx) -> None:
-    """Same factor, evaluated fresh (no caching) each time it fires --
-    groups active strategies by their `factor` object so a shared factor
-    is only evaluated once per dispatch, not once per strategy."""
+    """Publish the current live signal from per-factor BAR state.
+
+    FactorExpr/Factor values are compiled into per-run incremental executors.
+    A non-FactorExpr live adapter can still implement one of these methods:
+    `on_signal(timestamp, price_table)`, `evaluate_live(price_table, timestamp)`.
+    Older table-style factors still fall back to `evaluate()` for compatibility.
+    Shared factor objects are evaluated once per dispatch.
+    """
     by_factor: dict[int, list] = defaultdict(list)
     factor_by_id: dict[int, Any] = {}
     for strategy in ctx.active_strategies:
@@ -193,11 +205,15 @@ def _evaluate_signal_live(account, ctx) -> None:
         by_factor[id(factor)].append(strategy)
         factor_by_id[id(factor)] = factor
 
+    price_tables = getattr(account, "live_factor_price_tables", {})
+    executors = getattr(account, "live_factor_executors", {})
     for factor_id, strategies in by_factor.items():
         factor = factor_by_id[factor_id]
-        table = factor.evaluate()
-        row = table.loc[ctx.timestamp] if ctx.timestamp in table.index else None
-        values = {} if row is None else {product: float(row[product]) for product in table.columns}
+        executor = executors.get(factor_id)
+        if executor is not None:
+            values = _row_to_signal_values(executor.on_signal(ctx.timestamp))
+        else:
+            values = _live_signal_values(factor, ctx.timestamp, price_tables.get(factor_id))
         for strategy in strategies:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
 
@@ -210,9 +226,112 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
     for strategy in ctx.active_strategies:
         factor = account.config_for(strategy).get(FactorModule.factor)
         table = tables.get(id(factor))
-        if table is None or ctx.timestamp not in table.index:
+        if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue
-        row = table.loc[ctx.timestamp]
+        try:
+            row = row_at(table, ctx.timestamp)
+        except KeyError:
+            ctx.set_for(FactorSignalModule.signal_value, strategy, {})
+            continue
         ctx.set_for(FactorSignalModule.signal_value, strategy,
                      {product: float(row[product]) for product in table.columns})
+
+
+def _observe_signal_live_bar(account, ctx) -> None:
+    """Feed one bar of current market data into each active live factor."""
+    prices = ctx.get(FieldRef("current_prices", owner="MarketDataModule"), {})
+    if not prices:
+        return
+    tables = getattr(account, "live_factor_price_tables", None)
+    if tables is None:
+        tables = {}
+        account.live_factor_price_tables = tables
+    executors = getattr(account, "live_factor_executors", None)
+    if executors is None:
+        executors = {}
+        account.live_factor_executors = executors
+
+    by_factor: dict[int, list] = defaultdict(list)
+    factor_by_id: dict[int, Any] = {}
+    for strategy in ctx.active_strategies:
+        factor = account.config_for(strategy).get(FactorModule.factor)
+        by_factor[id(factor)].append(strategy)
+        factor_by_id[id(factor)] = factor
+
+    row = pd.DataFrame([prices], index=[pd.Timestamp(ctx.timestamp)])
+    for factor_id in by_factor:
+        factor = factor_by_id[factor_id]
+        table = tables.get(factor_id)
+        if table is None:
+            tables[factor_id] = row
+        else:
+            updated = pd.concat([table, row])
+            tables[factor_id] = updated.iloc[~updated.index.duplicated(keep="last")]
+        executor = executors.get(factor_id)
+        if executor is None:
+            executor = _compile_live_factor_executor(
+                factor,
+                by_factor[factor_id][0],
+                prices.keys(),
+                getattr(account, "source_freq", None),
+            )
+            if executor is not None:
+                executors[factor_id] = executor
+        if executor is not None:
+            executor.on_bar(pd.Timestamp(ctx.timestamp), prices)
+            continue
+        on_bar = getattr(factor, "on_bar", None)
+        if callable(on_bar):
+            on_bar(pd.Timestamp(ctx.timestamp), dict(prices))
+
+
+def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:
+    timestamp = pd.Timestamp(timestamp)
+    on_signal = getattr(factor, "on_signal", None)
+    if callable(on_signal):
+        return _row_to_signal_values(on_signal(timestamp, price_table))
+
+    evaluate_live = getattr(factor, "evaluate_live", None)
+    if callable(evaluate_live):
+        return _row_to_signal_values(evaluate_live(price_table, timestamp))
+
+    if hasattr(factor, "evaluate"):
+        table = factor.evaluate()
+        try:
+            row = row_at(table, timestamp)
+        except KeyError:
+            row = None
+        return _row_to_signal_values(row)
+    return {}
+
+
+def _compile_live_factor_executor(
+    factor: Any,
+    strategy: Any,
+    products: Any,
+    source_freq: Any,
+) -> Any | None:
+    compiler = getattr(factor, "compile_incremental", None)
+    if not callable(compiler):
+        return None
+    alias = getattr(strategy, "alias", "factor")
+    return compiler(
+        factor_alias=str(alias),
+        products=tuple(products),
+        source_freq=source_freq,
+    )
+
+
+def _row_to_signal_values(value: Any) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return {}
+        value = value.iloc[-1]
+    if isinstance(value, pd.Series):
+        return {product: float(score) for product, score in value.items()}
+    if isinstance(value, dict):
+        return {product: float(score) for product, score in value.items()}
+    return {}

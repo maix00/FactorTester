@@ -16,13 +16,31 @@ from tools.data.field_history import (
 )
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
+from tools.data.types.time_index import DataIndex
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
-def infer_periods_per_year(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
-    """Stub: real implementation lived in the deleted core.py and will be
-    rewired onto the new Event/Order/Flow engine in step 11 (issue #114)."""
-    raise NotImplementedError(
-        "infer_periods_per_year: pending issue-114 step 11 production rewiring")
+
+
+def infer_periods_per_year(index_like) -> float:
+    """Infer strategy periods/year from realised signal timestamps."""
+    idx = DataIndex(pd.Index(index_like)).signal_index
+    idx = idx.dropna()
+    if len(idx) < 2:
+        return 252.0
+    per_day = pd.Series(1, index=idx.normalize()).groupby(level=0).sum()
+    median_per_day = float(per_day.median()) if not per_day.empty else 1.0
+    if median_per_day > 1:
+        return median_per_day * 252.0
+    unique_days = pd.DatetimeIndex(per_day.index).sort_values()
+    if len(unique_days) < 2:
+        return 252.0
+    business_days = np.busday_count(
+        unique_days[0].date().isoformat(),
+        (unique_days[-1] + pd.Timedelta(days=1)).date().isoformat(),
+    )
+    if business_days <= 0:
+        return 252.0
+    return max(1.0, len(unique_days) / business_days * 252.0)
 
 
 def _core_emit_progress(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
@@ -47,6 +65,7 @@ from tools.testers.settings import backtest_setting_registry
 from tools.testers.settings.resolver import resolve_group_settings
 from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
 from tools.testers.backtest.modules.market_data import historical_field_frames_for_market_data
+from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
@@ -1864,13 +1883,18 @@ _MARKET_RULE_FIELD_NAMES = (
 )
 
 
-def _load_raw_market_data_for(products: list, start_dt: Any, end_dt: Any) -> dict[str, Any]:
+def _load_raw_market_data_for(
+    products: list, start_dt: Any, end_dt: Any, *, policy: str = "latest_available"
+) -> dict[str, Any]:
     """Real I/O: per-product CLOSE series via Product.get_price_data (existing
     utility -- masks to [start_date, end_date], returns OHLCV), assembled into
     the raw_prices DataFrame MarketDataModule.load_raw_market_data reads."""
     series_by_product: dict[Any, pd.Series] = {}
     for product in products:
-        df = product.get_price_data(start_dt.ts, end_dt.ts)
+        try:
+            df = product.get_price_data(start_dt.ts, end_dt.ts)
+        except (ValueError, KeyError):
+            continue
         if df.empty or 'CLOSE' not in df.columns:
             continue
         series_by_product[product] = df['CLOSE']
@@ -1880,20 +1904,27 @@ def _load_raw_market_data_for(products: list, start_dt: Any, end_dt: Any) -> dic
     historical_field_names = _MARKET_RULE_FIELD_NAMES
     historical_field_frames = None
     if not raw_prices.empty:
+        # raw_prices keeps its original (trading_day, ..., trade_time)
+        # MultiIndex -- a night-session bar's trading day differs from its
+        # calendar date, so the engine resolves trading days via this
+        # MultiIndex (through DataIndex) wherever it actually matters,
+        # rather than flattening it away up front. FieldHistoryProvider
+        # itself only wants the flat timestamp axis (it resolves trading
+        # day separately, through `resolver`, for its own bookkeeping).
         resolver = build_trading_day_resolver_from_market_data(raw_prices)
         historical_field_frames = historical_field_frames_for_market_data(
             list(raw_prices.columns),
-            raw_prices.index,
+            signal_timestamps(raw_prices),
             provider=historical_provider,
             trading_day_resolver=resolver,
             field_names=historical_field_names,
-            policy=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+            policy=policy,
         )
     return {
         "raw_prices": raw_prices,
         "historical_field_provider": historical_provider,
         "trading_day_resolver": resolver,
-        "historical_field_policy": str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
+        "historical_field_policy": policy,
         "historical_field_names": historical_field_names,
         "historical_field_frames": historical_field_frames,
     }
@@ -2783,13 +2814,13 @@ def run_group_test_stream():
                 payload, flat_groups, flat_ls_configs)
             run_registry = _get_group_test_registry()
             local_settings_by_module = run_registry.collect_local_only_settings(resolved_backtest_settings)
-            factor_mode = local_settings_by_module.get("factor_execution", {}).get("factor_mode", "auto")
             market_rule_fallback = local_settings_by_module.get(
                 "market_rules", {}).get("market_rule_fallback", "latest_available")
             evaluation_split = local_settings_by_module.get(
                 "evaluation_range", {}).get("evaluation_split") or None
             first_group_id = str(flat_groups[0].get('id') or 'group-0')
             fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
+            factor_mode = fallback_group_settings.get("factor_mode", "auto")
             start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
 
             page_factors_dict = page_factors.get(page_uuid, {})
@@ -2837,7 +2868,8 @@ def run_group_test_stream():
                     if product not in seen_products:
                         seen_products.add(product)
                         all_products.append(product)
-            account.raw_market_data = _load_raw_market_data_for(all_products, start_dt, end_dt)
+            account.raw_market_data = _load_raw_market_data_for(
+                all_products, start_dt, end_dt, policy=market_rule_fallback)
 
             tester = _get_or_create_group_test_tester(page_uuid)
 

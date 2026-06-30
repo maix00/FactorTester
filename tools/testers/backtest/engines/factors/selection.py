@@ -20,14 +20,15 @@ def select_factor_mode(
     expression: FactorExpr,
     products: tuple[str, ...],
 ) -> FactorMode:
-    """Select computation only; both modes still publish factor events."""
+    """Select computation only; auto prefers vectorized precomputation."""
     mode = FactorMode(requested)
     if mode == FactorMode.PRECOMPUTED:
+        if not expression.supports_vectorized():
+            raise UnsupportedStreamingFactor("precomputed mode requires a vectorizable factor")
         return mode
-    try:
-        compile_streaming_factor(expression, products)
-    except UnsupportedStreamingFactor:
-        if mode == FactorMode.INCREMENTAL:
-            raise
+    if mode == FactorMode.AUTO and expression.supports_vectorized():
         return FactorMode.PRECOMPUTED
+    if not expression.supports_incremental():
+        raise UnsupportedStreamingFactor("factor does not support incremental execution")
+    compile_streaming_factor(expression, products)
     return FactorMode.INCREMENTAL

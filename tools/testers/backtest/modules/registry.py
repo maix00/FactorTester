@@ -30,6 +30,7 @@ from .order_book import OrderBookModule
 from .trading_rule import TradingRuleModule
 from .product_selection import ProductSelectionModule, TermStructureExpandModule
 from .market_data import MarketDataModule
+from .bar_events import BarEventModule
 from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
@@ -48,6 +49,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     ProductSelectionModule,
     TermStructureExpandModule,
     MarketDataModule,
+    BarEventModule,
     MinorUnitModule,
     FactorModule,
     FactorSignalModule,

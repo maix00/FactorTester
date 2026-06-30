@@ -25,6 +25,8 @@ import pandas as pd
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.modules.time_index_lookup import row_at
+from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
     HistoricalFieldLookupError,
     HistoricalFieldFallbackPolicy,
@@ -107,6 +109,11 @@ class MarketDataModule(ExecutableModule):
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
         compute=lambda account, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(account, ctx.timestamp)),
     )
+    lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
+        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices,),
+        phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
+        compute=lambda account, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(account, ctx.timestamp)),
+    )
     lookup_current_prices_on_order: ClassVar[Flow] = Flow(
         "lookup_current_prices_on_order", inputs=(), outputs=(current_prices,),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
@@ -138,7 +145,8 @@ class MarketDataModule(ExecutableModule):
 
     flows: ClassVar[tuple[Flow, ...]] = (
         load_raw_market_data, causal_valuation,
-        lookup_current_prices_on_signal, lookup_current_prices_on_order, lookup_volume_on_signal,
+        lookup_current_prices_on_bar, lookup_current_prices_on_signal,
+        lookup_current_prices_on_order, lookup_volume_on_signal,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
     )
 
@@ -180,11 +188,20 @@ def _causal_valuation(account, ctx) -> None:
 def current_prices_at(account, timestamp: pd.Timestamp) -> dict:
     """Look up the per-product price dict at `timestamp` from the ffill'd
     table on `account` — never indexes past `timestamp` (no-lookahead is
-    guaranteed structurally: `.loc[timestamp]` only ever reflects rows up
-    to and including that timestamp, since `ffill()` only propagates
-    forward from earlier rows, never backward)."""
+    guaranteed structurally: an as-of lookup only ever reflects rows up to
+    and including that timestamp, since `ffill()` only propagates forward
+    from earlier rows, never backward).
+
+    The table keeps its original (trading_day, ..., trade_time) MultiIndex
+    when the underlying data is minute-level -- `row_at` resolves the actual
+    timestamp level via `DataIndex` regardless of how many other levels are
+    present. Real minute-level data has session gaps (lunch break, day/night
+    session boundary) that a fixed signal/order schedule doesn't always land
+    on exactly, so this uses an as-of lookup (last known row at or before
+    `timestamp`) rather than requiring an exact hit.
+    """
     table = account.current_prices_table
-    row = table.loc[timestamp]
+    row = row_at(table, timestamp, asof=True)
     return {product: float(row[product]) for product in table.columns}
 
 
@@ -194,7 +211,7 @@ def current_volume_at(account, timestamp: pd.Timestamp) -> dict:
     table = account.volume_table
     if table is None:
         return {}
-    row = table.loc[timestamp]
+    row = row_at(table, timestamp)
     return {product: float(row[product]) for product in table.columns}
 
 
@@ -302,9 +319,13 @@ def _historical_fields_at_from_frames(
 ) -> dict[str, dict[str, object]]:
     result: dict[str, dict[str, object]] = {str(instrument): {} for instrument in instruments}
     for field_name, frame in frames.items():
-        if timestamp not in frame.index:
+        # FieldHistoryProvider stores its frames tz-naive (it normalises
+        # every lookup key via _normalise_timestamp_key); event timestamps
+        # here are tz-aware, so align via DataIndex before indexing.
+        lookup_timestamp = DataIndex(frame.index).tz_align(timestamp)
+        if lookup_timestamp not in frame.index:
             continue
-        row = frame.loc[timestamp]
+        row = frame.loc[lookup_timestamp]
         for instrument in instruments:
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:

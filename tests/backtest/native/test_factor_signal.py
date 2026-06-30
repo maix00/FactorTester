@@ -4,15 +4,19 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from tools.data.types import DataColumn
+from tools.factors.expr import ColumnRef
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
-    FactorSignalModule, _evaluate_signal_live, _schedule_signal_live_timestamps,
-    _schedule_signal_precomputed_timestamps, normalize_signal_timestamp,
+    FactorSignalModule, _evaluate_signal_live, _observe_signal_live_bar,
+    _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
+    normalize_signal_timestamp,
 )
 
 
@@ -108,7 +112,60 @@ def test_signal_precomputed_groups_by_factor_identity():
     assert id(shared_factor) in account.precomputed_factor_tables
 
 
-def test_signal_live_on_event_shares_evaluation_across_strategies_using_same_factor():
+def test_signal_live_observes_bars_then_signals_from_causal_price_table():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _LiveFactor:
+        def __init__(self):
+            self.bars = []
+            self.evaluate_calls = 0
+
+        def on_bar(self, timestamp, prices):
+            self.bars.append((timestamp, prices))
+
+        def on_signal(self, timestamp, price_table):
+            self.signal_timestamp = timestamp
+            self.signal_table = price_table
+            return price_table.iloc[-1]
+
+        def evaluate(self):
+            self.evaluate_calls += 1
+            raise AssertionError("live factor should not need whole-table evaluate()")
+
+    shared_factor = _LiveFactor()
+    configs = {
+        s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: shared_factor}),
+        s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: shared_factor}),
+    }
+    account = AccountState(strategy_configs=configs)
+    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
+
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({s1, s2}))
+    bar_ctx.set(prices_ref, {"P1": 41.0})
+    _observe_signal_live_bar(account, bar_ctx)
+
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
+                          active_strategies=frozenset({s1, s2}))
+    bar_ctx.set(prices_ref, {"P1": 42.0})
+    _observe_signal_live_bar(account, bar_ctx)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-02"), event_queue=EventQueue(),
+                             active_strategies=frozenset({s1, s2}))
+
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert shared_factor.evaluate_calls == 0
+    assert len(shared_factor.bars) == 2
+    assert list(shared_factor.signal_table.index) == [
+        pd.Timestamp("2024-01-01"),
+        pd.Timestamp("2024-01-02"),
+    ]
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 42.0}
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
+
+
+def test_signal_live_on_event_keeps_evaluate_fallback_for_table_factors():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
     class _FakeFactor:
@@ -126,10 +183,31 @@ def test_signal_live_on_event_shares_evaluation_across_strategies_using_same_fac
     }
     account = AccountState(strategy_configs=configs)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
-                       active_strategies=frozenset({s1, s2}))
+                      active_strategies=frozenset({s1, s2}))
 
     _evaluate_signal_live(account, ctx)
 
     assert shared_factor.calls == 1
     assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 42.0}
     assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
+
+
+def test_signal_live_compiles_factor_expr_executor_from_bar_events():
+    strategy = Strategy(alias="A")
+    factor = ColumnRef(DataColumn.CLOSE) + 1.0
+    configs = {
+        strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
+    }
+    account = AccountState(strategy_configs=configs)
+    prices_ref = FieldRef("current_prices", owner="MarketDataModule")
+
+    bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                          active_strategies=frozenset({strategy}))
+    bar_ctx.set(prices_ref, {"P1": {"CLOSE": 10.0}})
+    _observe_signal_live_bar(account, bar_ctx)
+
+    signal_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                             active_strategies=frozenset({strategy}))
+    _evaluate_signal_live(account, signal_ctx)
+
+    assert signal_ctx.get_for(FactorSignalModule.signal_value, strategy) == {"P1": 11.0}

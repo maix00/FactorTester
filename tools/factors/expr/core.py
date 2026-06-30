@@ -155,6 +155,60 @@ class FactorExpr:
         """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
         return self
 
+    def supports_vectorized(self) -> bool:
+        """Whether this expression can be evaluated as a whole historical table.
+
+        Ordinary OHLCV-style FactorExpr graphs are vectorizable by default.
+        Path-dependent or live-only nodes, such as future order-book/event
+        fields, should override this to return False so backtest factor-mode
+        selection can reject forced precomputation or choose live replay in
+        auto mode.
+        """
+        return all(
+            child.supports_vectorized()
+            for child in getattr(self, "_operands", ())
+            if isinstance(child, FactorExpr)
+        )
+
+    def supports_incremental(self) -> bool:
+        """Whether this expression is intended to be incrementally compilable.
+
+        Expressions default to being eligible for incremental compilation when
+        their children are. This is intentionally independent from
+        supports_vectorized(): live-only leaves can be non-vectorizable while
+        still compiling into an incremental executor. The compiler remains the
+        source of truth for detailed unsupported operators.
+        """
+        return all(
+            child.supports_incremental()
+            for child in getattr(self, "_operands", ())
+            if isinstance(child, FactorExpr)
+        )
+
+    def compile_incremental(
+        self,
+        *,
+        factor_alias: str = "factor",
+        products: Sequence['Product'],
+        source_freq: DataFreq | str | None = None,
+    ) -> Any:
+        """Compile this FactorExpr into a run-scoped incremental executor."""
+        from tools.testers.backtest.engines.factors.incremental import (
+            UnsupportedStreamingFactor,
+            compile_incremental_factor,
+        )
+
+        if not self.supports_incremental():
+            raise UnsupportedStreamingFactor(
+                f"{type(self).__name__} does not support incremental execution"
+            )
+        return compile_incremental_factor(
+            factor_alias,
+            self,
+            tuple(products),
+            source_freq=source_freq,
+        )
+
     def evaluate(self, *args, ctx: Optional['EvaluateContext'] = None, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。
 

@@ -74,6 +74,38 @@ def test_factor_mode_auto_defaults_to_signal_precomputed():
     assert not config.uses_flow("signal_live")
 
 
+def test_factor_mode_auto_uses_live_for_non_vectorizable_factor():
+    class LiveOnlyFactor:
+        supports_vectorized = False
+
+    configs = build_strategy_configs({
+        "A1": {"factor_mode": "auto", "factor": LiveOnlyFactor(), **_GROUP_FIELDS},
+    })
+    config = next(iter(configs.values()))
+    assert config.uses_flow("signal_live")
+    assert not config.uses_flow("signal_precomputed")
+
+
+def test_factor_mode_precomputed_rejects_non_vectorizable_factor():
+    class LiveOnlyFactor:
+        supports_vectorized = False
+
+    with pytest.raises(ValueError, match="vectorizable"):
+        build_strategy_configs({
+            "A1": {"factor_mode": "precomputed", "factor": LiveOnlyFactor(), **_GROUP_FIELDS},
+        })
+
+
+def test_factor_mode_incremental_rejects_non_incremental_factor():
+    class NotIncrementalFactor:
+        supports_incremental = False
+
+    with pytest.raises(ValueError, match="incrementally"):
+        build_strategy_configs({
+            "A1": {"factor_mode": "incremental", "factor": NotIncrementalFactor(), **_GROUP_FIELDS},
+        })
+
+
 def test_non_variant_flows_are_always_active():
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))

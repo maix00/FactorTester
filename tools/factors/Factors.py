@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # =============================================================================
 # tools/factors/Factor.py
 # 因子对象模块
@@ -77,6 +79,22 @@ class Factor(UniqueNameObject, FactorExpr):
     _intermediate_factor_data: Dict[Tuple, pd.DataFrame]
     _intermediate_alias_index: Dict[str, Tuple]
     family: Optional[FactorFamily] = None
+
+    def supports_incremental(self) -> bool:
+        return self._source_expr.supports_incremental()
+
+    def compile_incremental(
+        self,
+        *,
+        factor_alias: str = "factor",
+        products: Sequence[Product],
+        source_freq: DataFreq | str | None = None,
+    ) -> Any:
+        return self._source_expr.compile_incremental(
+            factor_alias=factor_alias,
+            products=products,
+            source_freq=source_freq or self._source_freq,
+        )
 
     def clear(self):
         """清空所有计算结果。"""

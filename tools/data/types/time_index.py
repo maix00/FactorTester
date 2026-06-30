@@ -269,6 +269,42 @@ class DataIndex:
             return ts.tz_localize(idx_tz)
         return ts.tz_convert(idx_tz)
 
+    # ── 按信号时间层定位行 ──────────────────────────────────────────────────
+
+    @property
+    def level_for_xs(self) -> Any:
+        """用于 ``DataFrame.xs(..., level=...)`` 的层级标识。
+
+        MultiIndex 时返回 signal_index 对应的层级名（解析失败则回退到位置
+        -1，与 signal_index 自身的回退一致）；非 MultiIndex 时无意义，
+        返回 None（调用方应直接用 .loc，不走 xs）。
+        """
+        if not self.is_multi:
+            return None
+        idx = cast(pd.MultiIndex, self.raw)
+        name = self.signal_name
+        return name if name in idx.names else -1
+
+    def contains(self, ts: Any) -> bool:
+        """`ts`（自动 tz 对齐）是否命中 signal_index 中的某个时间点。"""
+        return self.tz_align(ts) in self.signal_index
+
+    def asof_value(self, ts: Any) -> pd.Timestamp:
+        """signal_index 中 <= `ts`（自动 tz 对齐）的最近一个时间点。
+
+        用于先定位、再用 `.xs(value, level=level_for_xs)` 取行 —— 同时支持
+        精确命中和 as-of 回退（结算时段缺口、调度时间没有精确落在某根 bar
+        上等场景）。命中或之前都没有数据时抛 KeyError。
+        """
+        aligned = self.tz_align(ts)
+        sig = self.signal_index
+        if aligned in sig:
+            return aligned
+        pos = sig.searchsorted(aligned, side="right") - 1
+        if pos < 0:
+            raise KeyError(f"no signal_index value at or before {aligned!r}")
+        return cast(pd.Timestamp, sig[pos])
+
     # ── 频率 ──────────────────────────────────────────────────────────────
 
     @property

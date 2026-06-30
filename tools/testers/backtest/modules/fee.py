@@ -226,4 +226,5 @@ def _custom_override_for(instrument: object, overrides: object) -> object | None
 def _number(value: object, default: float) -> float:
     if value in (None, ""):
         return default
-    return float(cast(Any, value))
+    number = float(cast(Any, value))
+    return default if number != number else number  # NaN check without importing math

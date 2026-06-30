@@ -330,7 +330,15 @@ class FieldHistoryProvider:
         result = pd.Series([None] * len(timestamps), index=pd.DatetimeIndex(timestamps), name=field_name, dtype=object)
         for key, group in query_frame.groupby(["product_code", "instrument_type"], sort=False):
             product_code, resolved_type = cast(tuple[Any, Any], key)
-            subset = self._subset(str(product_code), field_name, str(resolved_type))
+            try:
+                subset = self._subset(str(product_code), field_name, str(resolved_type))
+            except MissingHistoricalField:
+                if policy == HistoricalFieldFallbackPolicy.STRICT_HISTORICAL:
+                    raise
+                # No historical rows for this instrument at all -- under a
+                # fallback policy there is nothing to fall back to, so leave
+                # these rows as None rather than aborting the whole lookup.
+                continue
             values = _vectorized_values_from_subset(
                 subset,
                 group,

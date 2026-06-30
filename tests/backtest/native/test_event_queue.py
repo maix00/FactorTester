@@ -12,16 +12,23 @@ def test_pop_order_by_timestamp_then_kind():
     s = Strategy(alias="S")
     seen: list[tuple[pd.Timestamp, EventKind]] = []
 
+    queue.set_dispatcher(EventKind.BAR, lambda batch: seen.append((batch[0].timestamp, EventKind.BAR)))
     queue.set_dispatcher(EventKind.SIGNAL, lambda batch: seen.append((batch[0].timestamp, EventKind.SIGNAL)))
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER)))
 
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
     queue.push_event(EventDraft(EventKind.ORDER, t1, s))  # pushed first but ORDER value > SIGNAL
     queue.push_event(EventDraft(EventKind.SIGNAL, t1, s))
+    queue.push_event(EventDraft(EventKind.BAR, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t2, s))
     queue.run_until_drained()
 
-    assert seen == [(t1, EventKind.SIGNAL), (t1, EventKind.ORDER), (t2, EventKind.SIGNAL)]
+    assert seen == [
+        (t1, EventKind.BAR),
+        (t1, EventKind.SIGNAL),
+        (t1, EventKind.ORDER),
+        (t2, EventKind.SIGNAL),
+    ]
 
 
 def test_dynamic_push_during_handling_is_processed_in_order():
