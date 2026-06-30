@@ -93,7 +93,7 @@ class MarketDataModule(ExecutableModule):
             tab_order=10,
             options=(
                 (str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value), "真实历史数据"),
-                (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "最新数据向前填充"),
+                (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "缺失历史数据由时间差最近的数据向后填充"),
             ),
         ),
         "current_historical_fields": FieldDefinition(public=False),

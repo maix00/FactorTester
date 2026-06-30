@@ -220,14 +220,23 @@ class FieldHistoryProvider:
         approximated = False
         if eligible.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
-                eligible = subset.tail(1)
-                approximated = True
-            else:
+                scoped_fallback = _filter_contract_scope(subset, identity.contract_code)
+                eligible = _nearest_by_trading_day(scoped_fallback, day)
+                approximated = not eligible.empty
+            if eligible.empty:
                 first = _series(subset, "effective_trading_day").min() if not subset.empty else None
                 suffix = f"; first effective day is {first.date()}" if first is not None else ""
                 raise MissingHistoricalField(
                     f"no historical value for {identity.raw_instrument}.{field_name} at trading_day={day.date()}{suffix}"
                 )
+        if "_contract_scope_priority" in eligible.columns:
+            eligible = cast(
+                pd.DataFrame,
+                eligible[
+                    _series(eligible, "_contract_scope_priority")
+                    == _series(eligible, "_contract_scope_priority").max()
+                ],
+            )
         row = eligible.iloc[-1]
         return HistoricalFieldValue(
             instrument=identity.product_code,
@@ -269,9 +278,10 @@ class FieldHistoryProvider:
         approximated = False
         if candidates.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
-                candidates = subset.tail(1).copy()
-                approximated = True
-            else:
+                scoped_fallback = _filter_contract_scope(subset, identity.contract_code)
+                candidates = _nearest_by_timestamp(scoped_fallback, ts, trading_day)
+                approximated = not candidates.empty
+            if candidates.empty:
                 raise MissingHistoricalField(
                     f"no historical value for {identity.raw_instrument}.{field_name} at "
                     f"timestamp={ts.isoformat()}, trading_day={trading_day.date()}"
@@ -279,9 +289,15 @@ class FieldHistoryProvider:
         candidates["_effective_sort_key"] = _series(candidates, "effective_timestamp").fillna(
             _series(candidates, "effective_trading_day")
         )
-        sort_columns = ["_effective_sort_key"]
         if "_contract_scope_priority" in candidates.columns:
-            sort_columns.append("_contract_scope_priority")
+            candidates = cast(
+                pd.DataFrame,
+                candidates[
+                    _series(candidates, "_contract_scope_priority")
+                    == _series(candidates, "_contract_scope_priority").max()
+                ],
+            )
+        sort_columns = ["_effective_sort_key"]
         row = candidates.sort_values(by=sort_columns).iloc[-1]
         return HistoricalFieldValue(
             instrument=identity.product_code,
@@ -839,6 +855,47 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
     return cast(pd.DataFrame, df[product_level].copy())
 
 
+def _nearest_by_trading_day(frame: pd.DataFrame, trading_day: pd.Timestamp) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    candidates = frame.copy()
+    effective_day = _series(candidates, "effective_trading_day")
+    candidates["_fallback_distance"] = (effective_day - trading_day).abs()
+    candidates["_fallback_is_after"] = effective_day > trading_day
+    sort_columns = ["_fallback_distance", "_fallback_is_after", "effective_trading_day", "effective_timestamp"]
+    ascending = [True, True, False, False]
+    if "_contract_scope_priority" in candidates.columns:
+        sort_columns.append("_contract_scope_priority")
+        ascending.append(False)
+    return cast(pd.DataFrame, candidates.sort_values(by=sort_columns, ascending=ascending).head(1))
+
+
+def _nearest_by_timestamp(
+    frame: pd.DataFrame,
+    timestamp: pd.Timestamp,
+    trading_day: pd.Timestamp,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    candidates = frame.copy()
+    effective_timestamp = _series(candidates, "effective_timestamp")
+    effective_day = _series(candidates, "effective_trading_day")
+    timestamp_distance = (effective_timestamp - timestamp).abs()
+    day_distance = (effective_day - trading_day).abs()
+    candidates["_fallback_distance"] = timestamp_distance.where(effective_timestamp.notna(), day_distance)
+    candidates["_fallback_is_after"] = (effective_timestamp > timestamp).where(
+        effective_timestamp.notna(),
+        effective_day > trading_day,
+    )
+    candidates["_effective_sort_key"] = effective_timestamp.fillna(effective_day)
+    sort_columns = ["_fallback_distance", "_fallback_is_after", "_effective_sort_key"]
+    ascending = [True, True, False]
+    if "_contract_scope_priority" in candidates.columns:
+        sort_columns.append("_contract_scope_priority")
+        ascending.append(False)
+    return cast(pd.DataFrame, candidates.sort_values(by=sort_columns, ascending=ascending).head(1))
+
+
 def _vectorized_values_from_subset(
     subset: pd.DataFrame,
     queries: pd.DataFrame,
@@ -902,7 +959,7 @@ def _vectorized_values_from_subset(
     if candidates:
         all_candidates = pd.concat(candidates, ignore_index=True)
         all_candidates = all_candidates.sort_values(
-            ["_row", "_effective_sort_key", "_scope_priority"],
+            ["_row", "_scope_priority", "_effective_sort_key"],
             kind="mergesort",
         )
         best = all_candidates.groupby("_row", sort=False).tail(1)
@@ -912,11 +969,19 @@ def _vectorized_values_from_subset(
 
     missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
     if missing_rows and policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
-        fallback_row = subset.sort_values(by=["effective_trading_day", "effective_timestamp"]).iloc[-1]
-        fallback_value = _decode_value(fallback_row["value"], fallback_row.get("value_type"))
+        query_by_row = queries.set_index("_row", drop=False)
         for row_number in missing_rows:
-            result.at[row_number] = fallback_value
-        missing_rows = []
+            query = query_by_row.loc[row_number]
+            fallback = _nearest_by_timestamp(
+                _filter_contract_scope(subset, str(query.get("contract_code") or "")),
+                _normalise_timestamp_key(query["timestamp"]),
+                _normalise_trading_day(query["trading_day"]),
+            )
+            if fallback.empty:
+                continue
+            fallback_row = fallback.iloc[0]
+            result.at[row_number] = _decode_value(fallback_row["value"], fallback_row.get("value_type"))
+        missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
     if missing_rows:
         raise MissingHistoricalField(
             f"no historical value for {raw_instrument}.{field_name} at {len(missing_rows)} timestamp(s)"

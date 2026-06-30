@@ -779,6 +779,12 @@
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
+        } else if (setting.control_template === 'boolean') {
+            control = document.createElement('input');
+            control.type = 'checkbox';
+            control.style.width = '16px';
+            control.style.height = '16px';
+            control.style.margin = '0';
         } else if (setting.control_template === 'custom_product_overrides') {
             control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled);
             return control;
@@ -806,17 +812,23 @@
         } else {
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
-        control.value = effectiveValue(setting, mount);
+        if (setting.control_template === 'boolean') {
+            control.checked = !!effectiveValue(setting, mount);
+        } else {
+            control.value = effectiveValue(setting, mount);
+        }
         control.disabled = disabled;
         applyDisabledControlStyle(control, disabled);
         control.addEventListener('change', function() {
             if (setting.control_template === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(control.value || '')) {
                 return;
             }
-            var nextValue = setting.control_template === 'number'
+            var nextValue = setting.control_template === 'boolean'
+                ? !!control.checked
+                : setting.control_template === 'number'
                 ? Number(control.value)
                 : normalizeControlValue(setting, control.value);
-            control.value = nextValue;
+            if (setting.control_template !== 'boolean') control.value = nextValue;
             writeValue(setting, mount, nextValue);
             rerenderAfterChange();
         });

@@ -145,6 +145,74 @@ def test_field_history_strict_mode_raises_when_product_or_field_missing() -> Non
         )
 
 
+def test_latest_available_fallback_uses_nearest_trading_day_not_last_row() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-10",
+            "value": 100,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-02-01",
+            "value": 900,
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day(
+        "BZ",
+        "MaxLimitOrderVolume",
+        "2026-01-08",
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert resolved.value == 100
+    assert resolved.effective_trading_day == pd.Timestamp("2026-01-10")
+    assert resolved.approximated is True
+
+
+def test_values_for_index_latest_available_fallback_uses_nearest_row_per_timestamp() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-10",
+            "value": 100,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-02-01",
+            "value": 900,
+        },
+    ])
+    timestamp = pd.Timestamp("2026-01-08 09:00:00")
+
+    values = provider.values_for_index(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.DatetimeIndex([timestamp]),
+        trading_day_resolver=TimestampTradingDayResolver({timestamp: pd.Timestamp("2026-01-08")}),
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert values.tolist() == [100]
+
+
 def test_field_history_store_roundtrip(tmp_path: Path) -> None:
     db_path = tmp_path / "field_history.sqlite"
     DataHub.get_instance().register_sqlite_store(SQLiteStore(

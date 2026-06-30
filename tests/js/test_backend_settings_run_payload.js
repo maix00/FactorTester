@@ -55,7 +55,7 @@ global.fetch = () => Promise.resolve({
         value: [],
         tab_key: 'engine',
         scope_policy: 'overridable',
-        visible_when: { engine_mode: ['__storage_only__'] },
+        visible_when: { engine_mode: ['custom'] },
         editable_when: { engine_mode: ['custom'] },
         serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
       },

@@ -82,7 +82,8 @@ const indexManifest = {
       tab_key: 'engine',
       scope_policy: 'overridable',
       serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
-      visible_when: { engine_mode: ['__storage_only__'] },
+      chip_template: '自定义字段: {value}',
+      visible_when: { engine_mode: ['custom'] },
       editable_when: { engine_mode: ['custom'] },
     },
     fee_custom_product_fields: {
