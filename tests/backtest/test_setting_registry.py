@@ -80,6 +80,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
     }
+    assert index["defaults"]["custom_product_fields"]["label"] == "自定义字段"
+    assert index["defaults"]["custom_product_fields"]["visible_when"] == {}
+    assert index["defaults"]["custom_product_fields"]["editable_when"] == {
+        "engine_mode": ["custom"],
+    }
     assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
     # money_unit_policy (with per-engine override: rqalpha forces
     # "engine_native", disabling "minor_units") was an execution-engine

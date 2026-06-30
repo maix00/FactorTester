@@ -1,6 +1,7 @@
 const { assert, MockElement, resetGroupTest, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
+require('../../static/js/modules/shared/field_store.js');
 require('../../static/js/modules/shared/chip_renderer.js');
 require('../../static/js/modules/shared/backend_settings_panel.js');
 
@@ -49,6 +50,32 @@ const indexManifest = {
         { value: 'native', label: 'Native' },
         { value: 'qlib', label: 'Qlib' },
       ],
+    },
+    engine_mode: {
+      value: 'auto',
+      tab_key: 'engine',
+      scope_policy: 'overridable',
+      chip_template: '模式: {value}',
+      options: [
+        { value: 'basic', label: '基础' },
+        { value: 'auto', label: '自动兼容' },
+        { value: 'custom', label: '自定义' },
+        { value: 'exact', label: '严格' },
+      ],
+    },
+    fee_mode: {
+      value: 'auto',
+      tab_key: 'cost',
+      scope_policy: 'overridable',
+      chip_template: '费用: {value}',
+      options: [
+        { value: 'zero', label: '不计费用' },
+        { value: 'auto', label: '自动' },
+        { value: 'custom', label: '自定义品种/合约' },
+        { value: 'exact', label: '严格历史规则' },
+      ],
+      editable_when: { engine_mode: ['custom'] },
+      default_when: { engine_mode: { basic: 'zero', auto: 'auto', exact: 'exact' } },
     },
     start_date: {
       value: '2026-01-01',
@@ -558,6 +585,25 @@ return GT.backendSettings.init().then(async () => {
   const buyHoldPositionChip = GT.backendSettings.configChipForGroupKey(GT.groupSettings.groups.get(buyHoldPositionId), 'position_policy');
   assert.equal(chipPlainText(defaultPositionChip), '持仓按目标调仓');
   assert.equal(chipPlainText(buyHoldPositionChip), '持仓买入持有');
+
+  const conditionalHost = domElement('conditional-chip-host');
+  const conditionalStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: { engine_mode: 'auto', fee_mode: 'custom' },
+  });
+  window.ChipRenderer.render(conditionalHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: conditionalStore,
+    settingKeys: ['fee_mode'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+  });
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自动');
+  conditionalStore.set('engine_mode', 'basic');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用不计费用');
+  conditionalStore.set('engine_mode', 'exact');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用严格历史规则');
+  conditionalStore.set('engine_mode', 'custom');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自定义品种/合约');
 
   console.log('PASS: backend settings owns field and chip registration');
 });

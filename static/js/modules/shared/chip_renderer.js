@@ -174,6 +174,45 @@
             return store && typeof store.effective === 'function' ? store.effective(key) : undefined;
         }
 
+        function valuesForConditions() {
+            var values = {};
+            Object.keys(defaults).forEach(function(k) { values[k] = effective(k); });
+            return values;
+        }
+
+        function settingValue(chip) {
+            var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
+            var values = valuesForConditions();
+            if (BSP && !BSP.settingEditableForValues(setting, values)) {
+                return BSP.defaultValueForValues(setting, values);
+            }
+            return effective(chip.key);
+        }
+
+        function conditionKeysForSetting(key) {
+            var setting = defaults[key] || {};
+            var out = [];
+            function addFrom(obj) {
+                Object.keys(obj || {}).forEach(function(dep) {
+                    if (out.indexOf(dep) < 0) out.push(dep);
+                });
+            }
+            addFrom(setting.visible_when);
+            addFrom(setting.editable_when);
+            addFrom(setting.default_when);
+            return out;
+        }
+
+        function subscribeKeysForChip(chip) {
+            var keys = (chip.source_keys && chip.source_keys.length ? chip.source_keys : [chip.key]).slice();
+            if (chip._setting) {
+                conditionKeysForSetting(chip.key).forEach(function(key) {
+                    if (keys.indexOf(key) < 0) keys.push(key);
+                });
+            }
+            return keys;
+        }
+
         // store 取值 + 内置 __setting_display__ + 模块 resolvers，组成 chipHtml 的 ctx。
         function chipCtx(chip) {
             return {
@@ -181,7 +220,8 @@
                 resolve: function(resolverName, name) {
                     if (resolverName === SETTING_DISPLAY) {
                         var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
-                        return BSP ? BSP.displaySettingValue(setting, effective(chip.key)) : effective(chip.key);
+                        var value = settingValue(chip);
+                        return BSP ? BSP.displaySettingValue(setting, value) : value;
                     }
                     if (typeof resolvers[resolverName] === 'function') {
                         return resolvers[resolverName]({ store: store, chip: chip, key: chip.key, placeholder: name });
@@ -197,14 +237,13 @@
             if (typeof opts.shouldShow === 'function' && !opts.shouldShow(chip.key)) return false;
             if (chip._setting && BSP && store) {
                 var setting = Object.assign({ key: chip.key }, defaults[chip.key] || {});
-                var values = {};
-                Object.keys(defaults).forEach(function(k) { values[k] = effective(k); });
-                return BSP.settingVisibleForValues(setting, values);
+                return BSP.settingVisibleForValues(setting, valuesForConditions());
             }
             return true;
         }
 
         function effectiveForOverlay(chip) {
+            if (chip._setting) return settingValue(chip);
             return effective((chip.source_keys && chip.source_keys[0]) || chip.key);
         }
         function dispatchClick(chip) {
@@ -235,7 +274,7 @@
             host.appendChild(span);
 
             if (store && typeof store.subscribe === 'function') {
-                (chip.source_keys && chip.source_keys.length ? chip.source_keys : [chip.key]).forEach(function(k) {
+                subscribeKeysForChip(chip).forEach(function(k) {
                     unsubs.push(store.subscribe(k, repaint));
                 });
             }

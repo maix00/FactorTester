@@ -17,10 +17,11 @@ class CustomProductModule(ExecutableModule):
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "custom_product_fields": FieldDefinition(
             public=True,
+            label="自定义字段",
             default=[],
             control_template="custom_product_overrides",
             tab="market_rules",
-            visible_when={"engine_mode": ("custom",)},
+            editable_when={"engine_mode": ("custom",)},
             chip_template="自定义字段: {value}",
             info_overlay={"type": "custom_product_fields"},
             tab_label="市场规则",

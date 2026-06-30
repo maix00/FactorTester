@@ -697,7 +697,9 @@
             }
         } else {
             state.localValues[setting.key] = value;
-            renderLocalSettingChips();
+            var store = ensureGtLocalStore();
+            if (store && typeof store.set === 'function') store.set(setting.key, value);
+            else renderLocalSettingChips();
         }
     }
 
@@ -710,6 +712,7 @@
 
     function makeControl(setting, mount, rerenderAfterChange) {
         var control;
+        var disabled = (mount === GROUP && !state.activeGroup) || !settingEditable(setting, mount);
         if (setting.control_template === 'select') {
             control = document.createElement('select');
             (setting.options || []).forEach(function(item) {
@@ -729,7 +732,7 @@
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
         } else if (setting.control_template === 'custom_product_overrides') {
-            control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange);
+            control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled);
             return control;
         } else if (setting.control_template === 'custom') {
             // 自定义控件（候选/多选列表，如 factor_candidates / product_path_candidates /
@@ -756,7 +759,8 @@
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
         control.value = effectiveValue(setting, mount);
-        control.disabled = (mount === GROUP && !state.activeGroup) || !settingEditable(setting, mount);
+        control.disabled = disabled;
+        applyDisabledControlStyle(control, disabled);
         control.addEventListener('change', function() {
             if (setting.control_template === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(control.value || '')) {
                 return;
@@ -771,15 +775,37 @@
         return control;
     }
 
-    function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange) {
+    function applyDisabledControlStyle(control, disabled) {
+        if (!control) return;
+        if (disabled) {
+            control.classList.add('gt-backtest-setting-control-disabled');
+            control.style.background = '#f8fafc';
+            control.style.color = '#94a3b8';
+            control.style.borderColor = '#cbd5e1';
+            control.style.cursor = 'not-allowed';
+            control.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
+        } else {
+            control.classList.remove('gt-backtest-setting-control-disabled');
+            control.style.cursor = '';
+            control.title = '';
+        }
+    }
+
+    function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled) {
         var host = document.createElement('div');
         host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+        if (disabled) {
+            host.style.opacity = '0.72';
+            host.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
+        }
         var table = document.createElement('div');
         table.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
         var addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.textContent = '+ 字段';
         addBtn.style.cssText = 'align-self:flex-start;height:26px;padding:0 10px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+        addBtn.disabled = !!disabled;
+        if (disabled) addBtn.style.cssText = 'align-self:flex-start;height:26px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;font-size:12px;cursor:not-allowed;';
         host.appendChild(table);
         host.appendChild(addBtn);
 
@@ -836,16 +862,19 @@
             if (!current.length) {
                 var empty = document.createElement('div');
                 empty.style.cssText = 'color:#64748b;font-size:12px;';
-                empty.textContent = '无';
+                empty.textContent = disabled ? '无（切换到自定义模式后可编辑）' : '无';
                 table.appendChild(empty);
             }
             current.forEach(function(row, index) {
                 var line = document.createElement('div');
                 line.style.cssText = 'display:grid;grid-template-columns:minmax(90px,1.2fr) minmax(120px,1.4fr) minmax(80px,1fr) minmax(120px,1fr) minmax(120px,1fr) 28px;gap:6px;align-items:center;';
-                line.appendChild(cellInput('text', row.product || '', function(value) {
+                var productInput = cellInput('text', row.product || '', function(value) {
                     current[index] = Object.assign({}, current[index], { product: value });
                     writeRows(current);
-                }));
+                });
+                productInput.disabled = !!disabled;
+                applyDisabledControlStyle(productInput, disabled);
+                line.appendChild(productInput);
                 var select = document.createElement('select');
                 select.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
                 fieldOptions().forEach(function(item) {
@@ -855,16 +884,21 @@
                     select.appendChild(option);
                 });
                 select.value = row.field || (fieldOptions()[0] && fieldOptions()[0].value) || '';
+                select.disabled = !!disabled;
+                applyDisabledControlStyle(select, disabled);
                 select.addEventListener('change', function() {
                     current[index] = Object.assign({}, current[index], { field: select.value, start: '', end: '' });
                     writeRows(current);
                 });
                 line.appendChild(select);
                 var meta = selectedFieldMeta(select.value);
-                line.appendChild(valueInput(meta, row.value, function(value) {
+                var valueControl = valueInput(meta, row.value, function(value) {
                     current[index] = Object.assign({}, current[index], { value: value });
                     writeRows(current);
-                }));
+                });
+                valueControl.disabled = !!disabled;
+                applyDisabledControlStyle(valueControl, disabled);
+                line.appendChild(valueControl);
                 var allowRange = meta.allow_time_range !== false;
                 var start = cellInput('datetime-local', row.start || '', function(value) {
                     current[index] = Object.assign({}, current[index], { start: value });
@@ -874,15 +908,20 @@
                     current[index] = Object.assign({}, current[index], { end: value });
                     writeRows(current);
                 });
-                start.disabled = !allowRange;
-                end.disabled = !allowRange;
+                start.disabled = !allowRange || !!disabled;
+                end.disabled = !allowRange || !!disabled;
+                applyDisabledControlStyle(start, start.disabled);
+                applyDisabledControlStyle(end, end.disabled);
                 line.appendChild(start);
                 line.appendChild(end);
                 var remove = document.createElement('button');
                 remove.type = 'button';
                 remove.textContent = '×';
                 remove.style.cssText = 'height:26px;border:1px solid #fecaca;border-radius:4px;background:#fff1f2;color:#be123c;cursor:pointer;';
+                remove.disabled = !!disabled;
+                if (disabled) remove.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;cursor:not-allowed;';
                 remove.addEventListener('click', function() {
+                    if (disabled) return;
                     current.splice(index, 1);
                     writeRows(current);
                 });
@@ -891,6 +930,7 @@
             });
         }
         addBtn.addEventListener('click', function() {
+            if (disabled) return;
             var current = rows();
             current.push({ product: '', field: (fieldOptions()[0] && fieldOptions()[0].value) || '', value: '' });
             writeRows(current);
