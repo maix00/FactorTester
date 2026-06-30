@@ -550,26 +550,30 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
             product_id = str(spec.get("ProductID") or "").strip().upper()
             if not product_id:
                 continue
-            value = spec.get("VolumeMultiple")
-            if value is None or (isinstance(value, float) and pd.isna(value)):
-                continue
-            rows.append({
-                "provider": OPENCTP_LATEST_FIELD_PROVIDER,
-                "source_key": f"{OPENCTP_LATEST_FIELD_SOURCE_KEY}/{product_source_key_suffix}/{product_id}/VolumeMultiple/product",
-                "instrument": product_id,
-                "instrument_label": str(spec.get("InstrumentName") or ""),
-                "instrument_type": "future",
-                "field_name": "VolumeMultiple",
-                "effective_trading_day": "1900-01-01",
-                "effective_timestamp": "",
-                "value": value,
-                "value_type": "",
-                "contract_codes": [],
-                "source_url": "OpenCTP latest cnfutures product specs",
-                "source_date": product_source_date,
-                "source_notice_id": "OpenCTP latest snapshot",
-                "raw_note": "Latest OpenCTP product-level VolumeMultiple baseline used when a backtest holds the product rather than a specific contract.",
-            })
+            instrument_label = str(spec.get("InstrumentName") or "")
+            for field_name in OPENCTP_MARKET_RULE_FIELDS:
+                if field_name not in spec.index:
+                    continue
+                value = spec.get(field_name)
+                if value is None or (isinstance(value, float) and pd.isna(value)):
+                    continue
+                rows.append({
+                    "provider": OPENCTP_LATEST_FIELD_PROVIDER,
+                    "source_key": f"{OPENCTP_LATEST_FIELD_SOURCE_KEY}/{product_source_key_suffix}/{product_id}/{field_name}/product",
+                    "instrument": product_id,
+                    "instrument_label": instrument_label,
+                    "instrument_type": "future",
+                    "field_name": field_name,
+                    "effective_trading_day": "1900-01-01",
+                    "effective_timestamp": "",
+                    "value": value,
+                    "value_type": "",
+                    "contract_codes": [],
+                    "source_url": "OpenCTP latest cnfutures product specs",
+                    "source_date": product_source_date,
+                    "source_notice_id": "OpenCTP latest snapshot",
+                    "raw_note": "Latest OpenCTP product-level market-rule baseline used when no contract-specific historical event is available.",
+                })
     return _normalise_history_frame(pd.DataFrame(rows))
 
 
