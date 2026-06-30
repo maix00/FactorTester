@@ -1,10 +1,4 @@
-"""TradingRuleModule — cost-basis method + position-quantity type + margin
-constraints, merged into one module (issue-114 step 5/1.4c). Not split into
-CostBasisMethodModule/MarginModule subclasses: these are all parameters of
-the same "how do we account for a position" concern, selected via
-accounting_mode (Basic/Custom/Auto), not separate algorithms requiring
-their own classes.
-"""
+"""TradingRuleModule — cost-basis method + position-quantity type."""
 
 from __future__ import annotations
 
@@ -19,19 +13,15 @@ if TYPE_CHECKING:
 
 AccountingMode = Literal["Basic", "Custom", "Auto"]
 CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"]
-MarginMode = Literal["none", "fixed", "auto"]
 
 
 class TradingRuleModule(ExecutableModule):
     key: ClassVar[str] = "trading_rule"
-    label: ClassVar[str] = "记账与保证金"
+    label: ClassVar[str] = "记账规则"
 
     accounting_mode: ClassVar[FieldRef[AccountingMode]] = FieldRef("accounting_mode")
     cost_basis_method: ClassVar[FieldRef[CostBasisMethod]] = FieldRef("cost_basis_method")
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
-    margin_mode: ClassVar[FieldRef[MarginMode]] = FieldRef("margin_mode")
-    fixed_margin_ratio: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio")
-    collateral_fraction: ClassVar[FieldRef[float]] = FieldRef("collateral_fraction")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
@@ -51,22 +41,6 @@ class TradingRuleModule(ExecutableModule):
             public=True, default=False, control_template="boolean", tab="accounting",
             editable_when={"accounting_mode": ("Custom",)},
             chip_template="整数持仓: {value}", tab_label="记账规则", tab_order=180,
-        ),
-        "margin_mode": FieldDefinition(
-            public=True, default="none", control_template="select", tab="margin",
-            options=(("none", "关闭"), ("fixed", "固定比例"), ("auto", "按市场规则自动")),
-            editable_when={"accounting_mode": ("Custom",)},
-            chip_template="保证金: {value}", tab_label="保证金", tab_order=160,
-        ),
-        "fixed_margin_ratio": FieldDefinition(
-            public=True, default=1.0, control_template="number", tab="margin",
-            visible_when={"margin_mode": ("fixed",)},
-            chip_template="保证金率: {value}", tab_label="保证金", tab_order=160,
-        ),
-        "collateral_fraction": FieldDefinition(
-            public=True, default=1.0, control_template="number", tab="margin",
-            visible_when={"margin_mode": ("fixed", "auto")},
-            chip_template="抵押比例: {value}", tab_label="保证金", tab_order=160,
         ),
     }
 
@@ -95,30 +69,13 @@ def _resolve_use_int_position(strategy_config: "StrategyConfig") -> bool:
     return strategy_config.get(TradingRuleModule.use_int_position, False)
 
 
-def _resolve_margin_mode(strategy_config: "StrategyConfig") -> str:
-    mode = strategy_config.get(TradingRuleModule.accounting_mode, "Basic")
-    if mode == "Basic":
-        return "none"
-    if mode == "Auto":
-        return "auto"
-    return strategy_config.get(TradingRuleModule.margin_mode, "none")
-
-
-def _resolve_margin_ratio(strategy_config: "StrategyConfig", market_margin_ratio: float) -> float:
-    mode = _resolve_margin_mode(strategy_config)
-    if mode == "none":
-        return 1.0
-    if mode == "fixed":
-        return strategy_config.get(TradingRuleModule.fixed_margin_ratio, 1.0)
-    return market_margin_ratio  # mode == "auto"
-
-
 def open_position(
     ledger: "Ledger", strategy_config: "StrategyConfig", product: "Product",
     quantity: float, entry_price: float, multiplier: float,
     market_margin_ratio: float = 1.0,
 ) -> None:
     from .ledger_module import LedgerModule
+    from .margin import _resolve_margin_ratio
     from tools.testers.backtest.engines.native.ledger import Lot, apply_quantity_delta
 
     positions = ledger.get(LedgerModule.positions, {})
@@ -155,6 +112,7 @@ def close_position(
     market_margin_ratio: float = 1.0,
 ) -> "DataMoney":
     from .ledger_module import LedgerModule
+    from .margin import _resolve_margin_ratio
     from tools.testers.backtest.engines.native.ledger import apply_quantity_delta
 
     positions = ledger.get(LedgerModule.positions, {})

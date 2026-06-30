@@ -8,8 +8,10 @@ from tools.products.Product import Product
 from tools.testers.backtest.engines.native.ledger import Ledger, Lot, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_margin_mode, _resolve_margin_ratio, _resolve_method,
-    _resolve_use_int_position, close_position, open_position,
+    TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, open_position,
+)
+from tools.testers.backtest.modules.margin import (
+    MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
 )
 
 
@@ -21,7 +23,7 @@ def _config(**values) -> StrategyConfig:
     s = Strategy(alias="S")
     field_values = {}
     for key, value in values.items():
-        ref = getattr(TradingRuleModule, key)
+        ref = getattr(TradingRuleModule, key, None) or getattr(MarginModule, key)
         field_values[ref] = value
     return StrategyConfig(strategy=s, field_values=field_values)
 
@@ -53,15 +55,20 @@ def test_resolve_use_int_position_basic_false_auto_true_custom_reads_field():
     assert _resolve_use_int_position(_config(accounting_mode="Custom")) is False
 
 
-def test_resolve_margin_mode_basic_none_auto_auto_custom_reads_field():
+def test_resolve_margin_mode_defaults_auto_and_reads_field():
     assert _resolve_margin_mode(_config(accounting_mode="Basic")) == "none"
     assert _resolve_margin_mode(_config(accounting_mode="Auto")) == "auto"
     assert _resolve_margin_mode(_config(accounting_mode="Custom", margin_mode="fixed")) == "fixed"
 
 
-def test_resolve_margin_ratio_none_is_one():
+def test_resolve_margin_ratio_basic_is_zero():
     config = _config(accounting_mode="Basic")
-    assert _resolve_margin_ratio(config, market_margin_ratio=0.1) == 1.0
+    assert _resolve_margin_ratio(config, market_margin_ratio=0.1) == 0.0
+
+
+def test_resolve_margin_ratio_none_is_zero():
+    config = _config(accounting_mode="Custom", margin_mode="none")
+    assert _resolve_margin_ratio(config, market_margin_ratio=0.1) == 0.0
 
 
 def test_resolve_margin_ratio_fixed_uses_fixed_field():
@@ -74,23 +81,21 @@ def test_resolve_margin_ratio_auto_uses_caller_supplied_market_ratio():
     assert _resolve_margin_ratio(config, market_margin_ratio=0.15) == 0.15
 
 
-def test_equity_occupied_uniform_across_methods_with_no_margin():
-    """margin_mode='none' degrades to full notional for all five methods —
-    not an approximation, margin_ratio=1.0 makes this exact."""
+def test_equity_occupied_basic_accounting_has_zero_margin():
     product = _product()
-    config = _config(accounting_mode="Basic")  # -> WeightAverage, margin "none"
+    config = _config(accounting_mode="Basic")
     ledger = Ledger(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0,
                                                               equity_occupied=None)})
     open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0)
     entry = ledger.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(50.0)
+    assert entry.equity_occupied.to_major() == pytest.approx(0.0)
 
 
 def test_equity_occupied_fixed_margin_ratio_discounts_notional():
     product = _product()
     config = _config(accounting_mode="Custom", cost_basis_method="WeightAverage",
-                      margin_mode="fixed", fixed_margin_ratio=0.1)
+                     margin_mode="fixed", fixed_margin_ratio=0.1)
     ledger = Ledger(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0)})
     open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0)
