@@ -34,6 +34,7 @@ from openpyxl.styles import Alignment
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
+from tools.data.types import DataTime
 from tools.data.types import finest_index
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
@@ -329,11 +330,24 @@ def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: l
 # ---------------------------------------------------------------------------
 # Sheet 2: BACKEND
 # ---------------------------------------------------------------------------
-def _backend_shift(product: CNFutures, shift_val) -> pd.Series:
+def _factor_window(times: list) -> tuple[DataTime, DataTime]:
+    if not times:
+        raise ValueError("cannot build factor window without price times")
+    start = pd.Timestamp(times[0])
+    end = pd.Timestamp(times[-1])
+    if start.tzinfo is None:
+        start = start.tz_localize("Asia/Shanghai")
+    if end.tzinfo is None:
+        end = end.tz_localize("Asia/Shanghai")
+    return DataTime(ts=start), DataTime(ts=end)
+
+
+def _backend_shift(product: CNFutures, shift_val, times: list) -> pd.Series:
     """用后端 ShiftOp 计算 shift，返回 index=signal_time 的 Series。"""
-    tester = FactorTester(products=[product])
+    start_dt, end_dt = _factor_window(times)
+    tester = FactorTester(products=[product], start_dt=start_dt, end_dt=end_dt)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate([product])
+    factor.evaluate([product], start_dt=start_dt, end_dt=end_dt)
 
     col_ref = ColumnRef(DataColumn.OPEN_ADJUSTED)
     shift_expr = ShiftOp('shift', ConstExpr(shift_val), col_ref)
@@ -354,7 +368,7 @@ def _write_backend_sheet(ws, product: CNFutures, times: list) -> dict[str, int]:
     shift_series: dict[str, pd.Series] = {}
     for sn, sv in SHIFTS:
         try:
-            shift_series[sn] = _backend_shift(product, sv)
+            shift_series[sn] = _backend_shift(product, sv, times)
         except Exception as e:
             print(f'  WARNING: backend shift {sn} failed: {e}')
             shift_series[sn] = pd.Series(dtype=float)

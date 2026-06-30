@@ -480,13 +480,6 @@ def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.Da
     if callable(evaluate_live):
         return _row_to_signal_values(evaluate_live(price_table, timestamp))
 
-    if hasattr(factor, "evaluate"):
-        table = factor.evaluate()
-        try:
-            row = row_at(table, timestamp)
-        except KeyError:
-            row = None
-        return _row_to_signal_values(row)
     return {}
 
 

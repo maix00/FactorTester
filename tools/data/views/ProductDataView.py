@@ -44,7 +44,7 @@ class ProductDataView(UniqueNameObject):
       - 懒加载 + IdleResourceManager 缓存（自动回收闲置数据）
       - 列名映射（原始文件列名 → DataColumn 标准名称）
       - 时间索引构建（将日期/时间列设为 MultiIndex）
-      - StartCalcPoint 过滤（只返回计算起始点之后的数据）
+  - 按 DataTime 运行窗口过滤
       - 复权价格计算
 
     一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
@@ -247,24 +247,22 @@ class ProductDataView(UniqueNameObject):
     def get_data(
         self,
         copy: bool = False,
-        start_calc_point: Optional[Any] = None,
-        end_calc_point: Optional[Any] = None,
+        start_dt: Optional[Any] = None,
+        end_dt: Optional[Any] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """
         获取 DataFrame（通过 DataHub 缓存 + 自动回收）。
-        start_calc_point/end_calc_point: DataTime | None，为 None 时对应边界不截断。
+        start_dt/end_dt: DataTime | None，为 None 时对应边界不截断。
         copy=True 时返回副本，避免外部修改影响缓存。
-
-        Issue #3: start_calc_point 必须显式传入，不再隐式从 _active_tester 读取。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
         else:
             data = self.load_data(**kwargs)
 
-        if start_calc_point is not None or end_calc_point is not None:
-            data = self._filter_data_by_calc_window(data, start=start_calc_point, end=end_calc_point)
+        if start_dt is not None or end_dt is not None:
+            data = self._filter_data_by_calc_window(data, start=start_dt, end=end_dt)
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -280,17 +278,6 @@ class ProductDataView(UniqueNameObject):
         else:
             level = next((lvl for lvl in index.names if str(lvl).split('@')[-1] == DataFreq(level).name), None)
             return index.get_level_values(level)
-
-    def _filter_data_by_start_calc_point(self, data: pd.DataFrame, time_col: Optional[str] = None,
-                                        time: Optional[Any] = None, time_is_date: Optional[bool] = None,
-                                        copy: bool = False) -> pd.DataFrame:
-        """
-        按起始时间截断数据。time 必须是 DataTime（或 None）。
-        通过 DataIndex.slice_by_datatime() 统一处理时区对齐和截断。
-
-        Issue #3: time 参数必须显式传入，不再通过 _active_tester 隐式获取。
-        """
-        return self._filter_data_by_calc_window(data, start=time, copy=copy)
 
     def _filter_data_by_calc_window(
         self,
@@ -344,8 +331,8 @@ class ProductDataView(UniqueNameObject):
         self,
         cols: List[str] | str,
         copy: bool = True,
-        start_calc_point: Optional[Any] = None,
-        end_calc_point: Optional[Any] = None,
+        start_dt: Optional[Any] = None,
+        end_dt: Optional[Any] = None,
     ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
@@ -353,7 +340,7 @@ class ProductDataView(UniqueNameObject):
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy, start_calc_point=start_calc_point, end_calc_point=end_calc_point)
+        df = self.get_data(copy=copy, start_dt=start_dt, end_dt=end_dt)
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

@@ -29,6 +29,7 @@ from openpyxl.styles import Alignment
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
+from tools.data.types import DataTime
 from tools.data.types import finest_index
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
@@ -264,10 +265,23 @@ def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: l
         ws.append(row_cells)
 
 
-def _backend_rolling_mean(product: CNFutures, window_val) -> pd.Series:
-    tester = FactorTester(products=[product])
+def _factor_window(times: list) -> tuple[DataTime, DataTime]:
+    if not times:
+        raise ValueError("cannot build factor window without price times")
+    start = pd.Timestamp(times[0])
+    end = pd.Timestamp(times[-1])
+    if start.tzinfo is None:
+        start = start.tz_localize("Asia/Shanghai")
+    if end.tzinfo is None:
+        end = end.tz_localize("Asia/Shanghai")
+    return DataTime(ts=start), DataTime(ts=end)
+
+
+def _backend_rolling_mean(product: CNFutures, window_val, times: list) -> pd.Series:
+    start_dt, end_dt = _factor_window(times)
+    tester = FactorTester(products=[product], start_dt=start_dt, end_dt=end_dt)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate([product])
+    factor.evaluate([product], start_dt=start_dt, end_dt=end_dt)
 
     col_ref = ColumnRef(DataColumn.OPEN_ADJUSTED)
     rolling_expr = RollingOp('rolling_mean', ConstExpr(window_val), col_ref)
@@ -287,7 +301,7 @@ def _write_backend_sheet(ws, product: CNFutures, times: list) -> None:
     rolling_series: dict[str, pd.Series] = {}
     for name, window_val in WINDOWS:
         try:
-            rolling_series[name] = _backend_rolling_mean(product, window_val)
+            rolling_series[name] = _backend_rolling_mean(product, window_val, times)
         except Exception as e:
             print(f'  WARNING: backend rolling_mean {name} failed: {e}')
             rolling_series[name] = pd.Series(dtype=float)

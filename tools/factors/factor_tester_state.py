@@ -50,11 +50,10 @@ class FactorTesterState:
         self._results_lock = threading.RLock()
         self.last_group_factor: Optional["Factor"] = None
 
-        self.start_dt = None
-        self.end_dt = None
-        self.start_date = None
-        self.end_date = None
-        self.start_calc_point = None
+        self.start_dt: Optional["DataTime"] = None
+        self.end_dt: Optional["DataTime"] = None
+        self.start_date: Any = None
+        self.end_date: Any = None
         if start_dt is not None and end_dt is not None:
             from tools.factors.factor_tester_tasks import update_time_range
             update_time_range(self, start_dt, end_dt)

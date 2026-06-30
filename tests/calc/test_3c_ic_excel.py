@@ -176,7 +176,7 @@ def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: p
         end_dt=DataTime(ts=end.tz_localize("Asia/Shanghai") if end.tzinfo is None else end),
     )
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate(products)
+    factor.evaluate(products, start_dt=tester.start_dt, end_dt=tester.end_dt)
     next_returns = NextReturns().get_factor(
         SC=DataColumn.OPEN_ADJUSTED,
         RF=f'{rf_minutes}min',

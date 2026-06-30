@@ -100,8 +100,8 @@ class ColumnRef(FactorExpr):
             data = dm.get_and_adjust_cols(
                 [col_name],
                 copy=False,
-                start_calc_point=ctx.start_calc_point,
-                end_calc_point=ctx.end_calc_point,
+                start_dt=ctx.start_dt,
+                end_dt=ctx.end_dt,
             )
             if data.empty:
                 continue

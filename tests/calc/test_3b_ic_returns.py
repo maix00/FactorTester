@@ -35,7 +35,7 @@ from openpyxl.styles import Alignment, numbers
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.types import DataColumn
+from tools.data.types import DataColumn, DataTime
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorTester import FactorTester
@@ -159,9 +159,11 @@ def _iter_products(products: Iterable[str] | None = None) -> list[str]:
 
 
 def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
-    tester = FactorTester(products=[product])
+    start_dt = DataTime(ts=pd.Timestamp("2025-01-02 09:00:00", tz="Asia/Shanghai"))
+    end_dt = DataTime(ts=pd.Timestamp("2025-05-31 15:00:00", tz="Asia/Shanghai"))
+    tester = FactorTester(products=[product], start_dt=start_dt, end_dt=end_dt)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate([product])
+    factor.evaluate([product], start_dt=start_dt, end_dt=end_dt)
     next_returns = NextReturns().get_factor(
         SC=DataColumn.OPEN_ADJUSTED,
         RF=f'{rf_minutes}min',

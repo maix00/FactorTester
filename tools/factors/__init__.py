@@ -5,7 +5,6 @@ if FACTOR_WORKSPACE:
         FactorNextPeriodReturns,
         ReturnFreqParam,
         FactorFreqParam,
-        StartCalcPointParam,
         ReverseParam,
     )
     from tools.factors.Factors import Factor

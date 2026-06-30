@@ -109,7 +109,6 @@ class FactorTester(UniqueNameObject):
     end_dt = _forward("end_dt")
     start_date = _forward("start_date")
     end_date = _forward("end_date")
-    start_calc_point = _forward("start_calc_point")
     group_calendar_freq = _forward("group_calendar_freq")
     selected_paths = _forward("selected_paths")
     sift_product_by_empty_data_bool = _forward("sift_product_by_empty_data_bool")

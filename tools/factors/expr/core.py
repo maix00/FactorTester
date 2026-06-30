@@ -34,15 +34,15 @@ class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
     Issue #2: 将 5 种 _evaluate() 签名变体统一为 ctx: EvaluateContext。
-    Issue #3: 新增 start_calc_point，替代 ProductDataView 对 _active_tester 的隐式依赖。
+    Run window is explicit: factor evaluation callers must pass start_dt/end_dt.
     """
     products: Sequence['Product']
     freq: DataFreq
     source: Optional['DataSource'] = None
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
-    start_calc_point: Optional[Any] = None  # DataTime | None
-    end_calc_point: Optional[Any] = None  # DataTime | None
+    start_dt: Optional[Any] = None  # DataTime | None
+    end_dt: Optional[Any] = None  # DataTime | None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
 
@@ -224,8 +224,8 @@ class FactorExpr:
                 source=kwargs.get('source', None),
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
-                start_calc_point=kwargs.get('start_calc_point', None),
-                end_calc_point=kwargs.get('end_calc_point', None),
+                start_dt=kwargs.get('start_dt', None),
+                end_dt=kwargs.get('end_dt', None),
                 run_result=kwargs.get('run_result', None),
                 panel_timeline=kwargs.get('panel_timeline', None),
             )

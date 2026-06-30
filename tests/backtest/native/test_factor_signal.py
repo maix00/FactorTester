@@ -528,7 +528,7 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
     assert signal_ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
 
 
-def test_signal_live_on_event_keeps_evaluate_fallback_for_table_factors():
+def test_signal_live_on_event_does_not_call_zero_arg_evaluate_fallback():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
     class _FakeFactor:
@@ -550,9 +550,9 @@ def test_signal_live_on_event_keeps_evaluate_fallback_for_table_factors():
 
     _evaluate_signal_live(account, ctx)
 
-    assert shared_factor.calls == 1
-    assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 42.0}
-    assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 42.0}
+    assert shared_factor.calls == 0
+    assert ctx.get_for(FactorSignalModule.signal_value, s1) == {}
+    assert ctx.get_for(FactorSignalModule.signal_value, s2) == {}
 
 
 def test_signal_live_compiles_factor_expr_executor_from_bar_events():

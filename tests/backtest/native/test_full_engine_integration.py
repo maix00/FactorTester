@@ -140,8 +140,8 @@ def test_full_engine_two_strategies_independent_results():
 
 class _RollingMeanFactorAdapter:
     """Wraps a real `FactorExpr` (ColumnRef(...).rolling(...).mean()) so it
-    matches the zero-arg `.evaluate()` contract FactorSignalModule actually
-    calls (`factor.evaluate()` in factor_signal.py) -- the real
+    matches the explicit-window `.evaluate(start_dt=..., end_dt=...)`
+    contract FactorSignalModule calls in the precomputed path -- the real
     ApplicationSettings/candidate-resolution layer is what normally builds
     this kind of adapter around a user-selected FactorExpr before it reaches
     StrategyConfig; this test stands in for that layer, not for FactorExpr
@@ -154,8 +154,14 @@ class _RollingMeanFactorAdapter:
         self._freq = freq
         self._preloaded = preloaded
 
-    def evaluate(self) -> pd.DataFrame:
-        return self._expr.evaluate(self._products, self._freq, preloaded=self._preloaded)
+    def evaluate(self, *, start_dt=None, end_dt=None) -> pd.DataFrame:
+        return self._expr.evaluate(
+            self._products,
+            self._freq,
+            preloaded=self._preloaded,
+            start_dt=start_dt,
+            end_dt=end_dt,
+        )
 
 
 def test_full_engine_with_real_moving_average_factor_expression():

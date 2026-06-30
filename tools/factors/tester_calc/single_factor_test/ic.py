@@ -78,7 +78,7 @@ def run_ic_for_factor(
         if source_freq is None:
             configured_source_freq = getattr(getattr(sample_factor, "family", None), "_source_freq", None)
             source_freq = DataFreq(configured_source_freq) if configured_source_freq else None
-        ic_factor.evaluate(tester.products, freq=source_freq)
+        ic_factor.evaluate(tester.products, freq=source_freq, start_dt=tester.start_dt, end_dt=tester.end_dt)
 
         ic_series = cast(pd.Series, ic_factor.table["IC"])
         if not isinstance(ic_series, pd.Series):

@@ -76,7 +76,6 @@ def update_time_range(state: "FactorTesterState", start_dt: "DataTime", end_dt: 
     state.end_dt = end_dt
     state.start_date = start_dt.ts
     state.end_date = end_dt.ts
-    state.start_calc_point = start_dt
     state.logger.info(f"Time range updated to {start_dt} - {end_dt}")
 
 
@@ -135,7 +134,7 @@ def calc_factor(
 
         def _calc_one(factor: "Factor") -> None:
             _active_tester.set(token)
-            factor.evaluate(state.products)
+            factor.evaluate(state.products, start_dt=state.start_dt, end_dt=state.end_dt)
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
             futures = {pool.submit(_calc_one, f): f for f in factors}
@@ -147,7 +146,7 @@ def calc_factor(
                     raise RuntimeError(f"calc_factor: {futures[future].alias} 计算失败") from exc
     else:
         for factor in tqdm(factors, desc=f'Calculate factors for {len(state.products)} products'):
-            factor.evaluate(state.products)
+            factor.evaluate(state.products, start_dt=state.start_dt, end_dt=state.end_dt)
 
 
 def ic_stats(state: "FactorTesterState", ic_series: pd.Series) -> pd.Series:

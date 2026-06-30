@@ -149,9 +149,9 @@ def get_factor_series():
             if fb_col is not None and not factor_table.empty:
                 series = factor_table[fb_col].dropna()
             else:
-                # 最后回退：调 factor.evaluate() 生成数据
+                # 最后回退：用显式时间窗口调 factor.evaluate(...) 生成数据
                 try:
-                    tester_factor.evaluate(tester.products)
+                    tester_factor.evaluate(tester.products, start_dt=tester.start_dt, end_dt=tester.end_dt)
                     r2 = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
                     fallback_table = r2.table if r2 is not None and not r2.table.empty else pd.DataFrame()
                     fb2_col = _match_product_column(fallback_table, product)
@@ -388,9 +388,9 @@ def get_factor_distribution():
         tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
         table = _resolve_fe_table(tester_factor, tester)
         if not isinstance(table, pd.DataFrame) or table.empty:
-            # fallback: 尝试调 factor.evaluate()
+            # fallback: 尝试用显式时间窗口调 factor.evaluate(...)
             try:
-                tester_factor.evaluate(tester.products)
+                tester_factor.evaluate(tester.products, start_dt=tester.start_dt, end_dt=tester.end_dt)
                 r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
                 if r is not None and not r.table.empty:
                     table = r.table

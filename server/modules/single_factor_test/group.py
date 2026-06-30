@@ -1801,10 +1801,9 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
 
 class _FactorEvaluateAdapter:
     """Wraps a real Factor + its resolved product universe so
-    FactorModule.factor's zero-arg `.evaluate()` contract (FactorSignalModule
-    calls `factor.evaluate()` with no arguments) works against the real
-    `Factor.evaluate(products, ...)` signature, which requires the product
-    list as an argument."""
+    FactorSignalModule can evaluate it through an explicit run window while
+    the real `Factor.evaluate(products, ...)` signature keeps product and time
+    inputs mandatory."""
 
     def __init__(self, factor: Any, products) -> None:
         self._factor = factor
