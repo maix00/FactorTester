@@ -841,19 +841,19 @@
 
     function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled) {
         var host = document.createElement('div');
-        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;margin:0;';
+        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;margin:0;box-sizing:border-box;overflow:hidden;';
         if (disabled) {
             host.style.opacity = '0.72';
             host.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
         }
         var table = document.createElement('div');
-        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0;width:100%;';
+        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0;width:100%;box-sizing:border-box;';
         var addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.textContent = '+ 字段';
-        addBtn.style.cssText = 'align-self:flex-start;height:26px;padding:0 10px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+        addBtn.style.cssText = 'align-self:flex-start;height:26px;margin:0;padding:0 10px;box-sizing:border-box;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
         addBtn.disabled = !!disabled;
-        if (disabled) addBtn.style.cssText = 'align-self:flex-start;height:26px;padding:0 10px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;font-size:12px;cursor:not-allowed;';
+        if (disabled) addBtn.style.cssText = 'align-self:flex-start;height:26px;margin:0;padding:0 10px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;font-size:12px;cursor:not-allowed;';
         host.appendChild(table);
         host.appendChild(addBtn);
 
@@ -880,7 +880,7 @@
                 return filter && !fieldBelongsToEditor(row.field);
             });
             var scoped = nextRows.filter(function(row) {
-                return row && (row.product || row.field || row.value !== undefined && row.value !== '');
+                return row && (row.product || row.value !== undefined && row.value !== '');
             });
             writeValue(setting, mount, retained.concat(scoped));
             render();
@@ -901,18 +901,19 @@
             }
             return {};
         }
-        function cellInput(type, value, onChange) {
+        function cellInput(type, value, onChange, placeholder) {
             var input = document.createElement('input');
             input.type = type || 'text';
             input.value = value == null ? '' : value;
-            input.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+            input.placeholder = placeholder || '';
+            input.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
             input.addEventListener('change', function() { onChange(input.value); });
             return input;
         }
         function valueInput(meta, value, onChange) {
             if (meta.value_type === 'select') {
                 var select = document.createElement('select');
-                select.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                select.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
                 (meta.value_options || []).forEach(function(item) {
                     var option = document.createElement('option');
                     option.value = Array.isArray(item) ? item[0] : item.value;
@@ -925,29 +926,29 @@
             }
             return cellInput('number', value, function(nextValue) {
                 onChange(nextValue === '' ? '' : Number(nextValue));
-            });
+            }, '值');
         }
         function render() {
             table.innerHTML = '';
             var current = visibleRows(rows());
             if (!current.length) {
                 var empty = document.createElement('div');
-                empty.style.cssText = 'color:#64748b;font-size:12px;';
+                empty.style.cssText = 'color:#64748b;font-size:12px;margin:0;';
                 empty.textContent = disabled ? '无（切换到自定义模式后可编辑）' : '无';
                 table.appendChild(empty);
             }
             current.forEach(function(row, index) {
                 var line = document.createElement('div');
-                line.style.cssText = 'display:grid;grid-template-columns:minmax(120px,1.2fr) minmax(150px,1.4fr) minmax(90px,1fr) minmax(140px,1fr) minmax(140px,1fr) 28px;gap:6px;align-items:center;margin:0;width:100%;';
+                line.style.cssText = 'display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.35fr) minmax(0,.85fr) minmax(0,1fr) minmax(0,1fr) 26px;gap:6px;align-items:center;margin:0;width:100%;box-sizing:border-box;';
                 var productInput = cellInput('text', row.product || '', function(value) {
                     current[index] = Object.assign({}, current[index], { product: value });
                     writeRows(current);
-                });
+                }, '产品/合约代码');
                 productInput.disabled = !!disabled;
                 applyDisabledControlStyle(productInput, disabled);
                 line.appendChild(productInput);
                 var select = document.createElement('select');
-                select.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                select.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
                 fieldOptions().forEach(function(item) {
                     var option = document.createElement('option');
                     option.value = item.value;
@@ -988,9 +989,9 @@
                 var remove = document.createElement('button');
                 remove.type = 'button';
                 remove.textContent = '×';
-                remove.style.cssText = 'height:26px;border:1px solid #fecaca;border-radius:4px;background:#fff1f2;color:#be123c;cursor:pointer;';
+                remove.style.cssText = 'height:26px;width:26px;margin:0;padding:0;box-sizing:border-box;border:1px solid #fecaca;border-radius:4px;background:#fff1f2;color:#be123c;cursor:pointer;';
                 remove.disabled = !!disabled;
-                if (disabled) remove.style.cssText = 'height:26px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;cursor:not-allowed;';
+                if (disabled) remove.style.cssText = 'height:26px;width:26px;margin:0;padding:0;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;cursor:not-allowed;';
                 remove.addEventListener('click', function() {
                     if (disabled) return;
                     current.splice(index, 1);
