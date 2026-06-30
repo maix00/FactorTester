@@ -73,10 +73,6 @@ class ApplicationSettings:
         return setting.tab.replace("_", " ").title()
 
     def _mount_points_for_scope(self, scope: ScopePolicy) -> tuple[TabMountPoint, ...]:
-        if scope == ScopePolicy.LOCAL_ONLY:
-            return (TabMountPoint.LOCAL_SETTINGS,)
-        if scope == ScopePolicy.GROUP_ONLY:
-            return (TabMountPoint.GROUP_SETTINGS,)
         return (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS)
 
     def _next_tab_order(self, setting: SettingDefinition) -> int:

@@ -676,6 +676,9 @@
     }
 
     function settingEditable(setting, mount) {
+        var scope = setting && setting.scope_policy;
+        if (mount === GROUP && scope === 'local_only') return false;
+        if (mount === LOCAL && scope === 'group_only') return false;
         var node = mount === GROUP ? activeNode() : null;
         return settingEditableForValues(setting, effectiveValuesForNode(node));
     }

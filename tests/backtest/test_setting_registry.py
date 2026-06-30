@@ -19,7 +19,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "time", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "cost", "order", "liquidity", "margin",
+        "position_policy", "group_strategy", "cost", "order", "liquidity", "margin",
         "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
@@ -27,7 +27,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "factor", "product_path_selection", "data_source", "frequency", "time",
+        "engine", "factor", "product_path_selection", "data_source", "frequency", "time",
         "capital", "target_allocation", "rebalance_trigger", "position_policy",
         "group_strategy", "cost", "order", "liquidity", "margin",
         "accounting", "calendar", "evaluation",
@@ -36,6 +36,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
+    assert index["defaults"]["engine_mode"]["scope_policy"] == "overridable"
     assert index["defaults"]["start_date"]["scope_policy"] == "overridable"
     assert index["defaults"]["start_date"]["label"] == "开始日期"
     assert index["defaults"]["end_date"]["label"] == "结束日期"
