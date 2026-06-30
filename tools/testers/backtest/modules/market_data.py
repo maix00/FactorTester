@@ -18,6 +18,7 @@ right after, `account` is the only thing that lives for the whole run.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -570,17 +571,22 @@ def historical_field_frames_for_market_data(
     field_names: tuple[object, ...],
     policy: str,
 ) -> dict[str, pd.DataFrame]:
-    from sources.FieldHistory.views.Unified import load_unified_provider
-
-    unified_provider = load_unified_provider()
+    runtime_provider = _runtime_field_history_provider()
     return historical_fields_frame_for_products(
         products,
         index,
-        provider=unified_provider,
+        provider=runtime_provider,
         trading_day_resolver=trading_day_resolver,
         field_names=field_names,
         fallback=policy,
     )
+
+
+@lru_cache(maxsize=1)
+def _runtime_field_history_provider() -> FieldHistoryProvider:
+    from sources.FieldHistory.views.Unified import load_unified_provider
+
+    return load_unified_provider()
 
 
 def _historical_fields_at_from_frames(

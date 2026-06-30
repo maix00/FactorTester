@@ -179,6 +179,36 @@ class TimestampTradingDayResolver:
             ) from exc
         return _normalise_trading_day(day)
 
+    def resolve_trading_days(self, timestamps: Sequence[Any], instrument: str | None = None) -> pd.DatetimeIndex:
+        index = pd.DatetimeIndex([_normalise_timestamp_key(timestamp) for timestamp in timestamps])
+        if index.empty:
+            return pd.DatetimeIndex([])
+        resolved = self._series.reindex(index)
+        missing = resolved.isna()
+        if bool(missing.any()):
+            missing_index = pd.DatetimeIndex(index[missing.to_numpy()])
+            if not self._allow_asof or self._series.empty:
+                missing_ts = cast(pd.Timestamp, pd.Timestamp(cast(Any, missing_index)[0]))
+                raise MissingTradingDay(
+                    f"no trading_day mapping for timestamp={missing_ts.isoformat()}"
+                    + (f", instrument={instrument}" if instrument else "")
+                )
+            positions = cast(Any, self._series.index.searchsorted(missing_index, side="right")) - 1
+            missing_values: list[pd.Timestamp] = []
+            for raw_pos, raw_ts in zip(list(positions), list(missing_index)):
+                pos = int(cast(Any, raw_pos))
+                ts = cast(pd.Timestamp, pd.Timestamp(raw_ts))
+                if pos < 0:
+                    pos = self._series.index.searchsorted(ts.to_datetime64(), side="left")
+                if not (0 <= pos < len(self._series)):
+                    raise MissingTradingDay(
+                        f"no trading_day mapping for timestamp={ts.isoformat()}"
+                        + (f", instrument={instrument}" if instrument else "")
+                    )
+                missing_values.append(_normalise_trading_day(self._series.iloc[int(pos)]))
+            resolved.loc[missing] = missing_values
+        return DataIndex.normalized_days(pd.DatetimeIndex(pd.to_datetime(resolved.to_numpy(), errors="coerce")))
+
 
 class CalendarDateTradingDayResolver:
     """退化 resolver：直接把 timestamp 的自然日期当交易日。
@@ -200,6 +230,7 @@ class FieldHistoryProvider:
             self.frame = self.frame.sort_values(
                 ["instrument", "field_name", "effective_trading_day", "effective_timestamp"]
             ).reset_index(drop=True)
+        self._subset_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
 
     @classmethod
     def from_records(cls, records: Iterable[Mapping[str, Any]]) -> "FieldHistoryProvider":
@@ -367,6 +398,34 @@ class FieldHistoryProvider:
         })
         return query_frame
 
+    def query_frame_for_timestamps(
+        self,
+        instrument: Any,
+        timestamps: Sequence[Any],
+        trading_days: Sequence[Any],
+        *,
+        instrument_type: str | None = "future",
+    ) -> pd.DataFrame:
+        normalized_timestamps = [_normalise_timestamp_key(timestamp) for timestamp in timestamps]
+        normalized_days = [_normalise_trading_day(day) for day in trading_days]
+        if len(normalized_timestamps) != len(normalized_days):
+            raise ValueError("timestamps and trading_days must have the same length")
+        if not normalized_timestamps:
+            return pd.DataFrame(columns=["_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code"])
+        identities_by_day = {
+            day: _resolve_field_instrument_identity(instrument, day, instrument_type=instrument_type)
+            for day in dict.fromkeys(normalized_days)
+        }
+        identities = [identities_by_day[day] for day in normalized_days]
+        return pd.DataFrame({
+            "_row": list(range(len(normalized_timestamps))),
+            "timestamp": normalized_timestamps,
+            "trading_day": normalized_days,
+            "product_code": [identity.product_code for identity in identities],
+            "instrument_type": [identity.instrument_type for identity in identities],
+            "contract_code": [identity.contract_code or "" for identity in identities],
+        })
+
     def values_for_query_frame(
         self,
         instrument: Any,
@@ -435,6 +494,10 @@ class FieldHistoryProvider:
         return pd.DataFrame(columns)
 
     def _subset(self, instrument: str, field_name: str, instrument_type: str | None) -> pd.DataFrame:
+        cache_key = (instrument, field_name, instrument_type or "")
+        cached = self._subset_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
         instrument_matches = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == instrument])
@@ -453,6 +516,10 @@ class FieldHistoryProvider:
         subset = cast(pd.DataFrame, type_matches[_series(type_matches, "field_name") == field_name])
         if subset.empty:
             raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}")
+        subset = subset.copy()
+        subset["_scope_codes"] = _series(subset, "contract_codes").map(_decode_contract_codes)
+        subset["_product_level"] = _series(subset, "_scope_codes").map(lambda codes: len(codes) == 0)
+        self._subset_cache[cache_key] = subset
         return subset
 
 
@@ -1051,9 +1118,14 @@ def _vectorized_values_from_subset(
     raw_instrument: str,
     field_name: str,
 ) -> pd.Series:
-    records = subset.copy()
-    records["_scope_codes"] = _series(records, "contract_codes").map(_decode_contract_codes)
-    records["_product_level"] = _series(records, "_scope_codes").map(lambda codes: len(codes) == 0)
+    records = subset
+    if "_scope_codes" not in records.columns or "_product_level" not in records.columns:
+        records = records.copy()
+        records["_scope_codes"] = _series(records, "contract_codes").map(_decode_contract_codes)
+        records["_product_level"] = _series(records, "_scope_codes").map(lambda codes: len(codes) == 0)
+    constant = _constant_product_level_value(records, queries)
+    if constant is not None:
+        return pd.Series([constant] * len(queries), index=_series(queries, "_row"), dtype=object)
     candidates: list[pd.DataFrame] = []
     for contract_code, group in queries.groupby("contract_code", sort=False):
         contract = str(cast(Any, contract_code) or "")
@@ -1138,6 +1210,26 @@ def _vectorized_values_from_subset(
             f"no historical value for {raw_instrument}.{field_name} at {len(missing_rows)} timestamp(s)"
         )
     return result
+
+
+def _constant_product_level_value(records: pd.DataFrame, queries: pd.DataFrame) -> object | None:
+    if len(records) != 1 or queries.empty:
+        return None
+    row = records.iloc[0]
+    scope_codes = row.get("_scope_codes")
+    if not isinstance(scope_codes, list) or scope_codes:
+        return None
+    effective_ts = _optional_timestamp(row.get("effective_timestamp"))
+    if effective_ts is not None:
+        min_ts = pd.Timestamp(_series(queries, "timestamp").min())
+        if effective_ts > min_ts:
+            return None
+    else:
+        effective_day = _normalise_trading_day(row.get("effective_trading_day"))
+        min_day = _normalise_trading_day(_series(queries, "trading_day").min())
+        if effective_day > min_day:
+            return None
+    return _decode_value(row.get("value"), row.get("value_type"))
 
 
 def _merge_asof_history_candidate(
@@ -1386,11 +1478,15 @@ def historical_fields_frame_for_products(
     vectorized ``frame_for_index`` path.
     """
     timestamps = _timestamps_for_historical_field_index(index)
+    trading_days = list(_trading_days_for_historical_field_index(
+        timestamps,
+        trading_day_resolver=trading_day_resolver,
+    ))
     query_frames = {
-        _instrument_name(product): provider.query_frame_for_index(
+        _instrument_name(product): provider.query_frame_for_timestamps(
             product,
             timestamps,
-            trading_day_resolver=trading_day_resolver,
+            trading_days,
             instrument_type=instrument_type,
         )
         for product in products
@@ -1409,6 +1505,20 @@ def historical_fields_frame_for_products(
         }
         result[field] = pd.DataFrame(columns)
     return result
+
+
+def _trading_days_for_historical_field_index(
+    timestamps: Sequence[Any],
+    *,
+    trading_day_resolver: TradingDayResolver,
+) -> pd.DatetimeIndex:
+    batch_resolver = getattr(trading_day_resolver, "resolve_trading_days", None)
+    if callable(batch_resolver):
+        return pd.DatetimeIndex(batch_resolver(timestamps))
+    return DataIndex.normalized_days(pd.DatetimeIndex([
+        trading_day_resolver.resolve_trading_day(timestamp)
+        for timestamp in timestamps
+    ]))
 
 
 def _timestamps_for_historical_field_index(index: Iterable[Any]) -> list[Any]:
