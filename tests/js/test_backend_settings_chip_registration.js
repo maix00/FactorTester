@@ -98,11 +98,11 @@ const indexManifest = {
       value: [],
       tab_key: 'cost',
       scope_policy: 'overridable',
-      chip_template: '自定义费用字段: {value}',
       serialization: {
         kind: 'custom_product_overrides',
         storage_key: 'custom_product_fields',
         module_filter: 'fee',
+        module_editor: { tab: 'cost', mode_when: { fee_mode: ['custom'] } },
         fields: [
           { value: 'MarginRatio', module: 'margin' },
           { value: 'OpenRatioByMoney', module: 'fee' },
@@ -657,10 +657,9 @@ return GT.backendSettings.init().then(async () => {
     settingKeys: ['fee_custom_product_fields'],
     renderChipHtml: GT.backendSettings.renderChipHtml,
   });
-  assert.equal(visibleHost.childNodes[0].style.display, 'none');
+  assert.equal(visibleHost.childNodes.length, 0);
   visibleStore.set('engine_mode', 'custom');
-  assert.notEqual(visibleHost.childNodes[0].style.display, 'none');
-  assert.equal(chipPlainText({ html: visibleHost.childNodes[0].innerHTML }), '自定义费用字段1项');
+  assert.equal(visibleHost.childNodes.length, 0);
 
   const overlayHost = domElement('custom-product-fields-overlay');
   const overlayBody = domElement('custom-product-fields-overlay-body');

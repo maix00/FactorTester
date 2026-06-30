@@ -27,6 +27,15 @@ _FEE_FIELDS = (
     "CloseTodayRatioByVolume",
 )
 
+_CUSTOM_FEE_FIELDS = (
+    {"value": "OpenRatioByMoney", "label": "开仓费率", "unit": "ratio", "value_type": "number", "allow_time_range": True},
+    {"value": "OpenRatioByVolume", "label": "开仓固定费", "unit": "currency/lot", "value_type": "number", "allow_time_range": True},
+    {"value": "CloseRatioByMoney", "label": "平仓费率", "unit": "ratio", "value_type": "number", "allow_time_range": True},
+    {"value": "CloseRatioByVolume", "label": "平仓固定费", "unit": "currency/lot", "value_type": "number", "allow_time_range": True},
+    {"value": "CloseTodayRatioByMoney", "label": "平今费率", "unit": "ratio", "value_type": "number", "allow_time_range": True},
+    {"value": "CloseTodayRatioByVolume", "label": "平今固定费", "unit": "currency/lot", "value_type": "number", "allow_time_range": True},
+)
+
 
 class FeeModule(ExecutableModule):
     key: ClassVar[str] = "transaction_cost"
@@ -63,8 +72,8 @@ class FeeModule(ExecutableModule):
             tab_order=100,
             module_filter="fee",
             visible_when={"engine_mode": ("custom",), "fee_mode": ("custom",)},
-            chip_template="自定义费用字段: {value}",
             display_order=95,
+            fields=_CUSTOM_FEE_FIELDS,
         ),
     }
 

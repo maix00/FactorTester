@@ -26,7 +26,7 @@ from .slippage import SlippageModule
 from .liquidity import LiquidityModule
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
-from .custom_product import CustomProductModule
+from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
 from .position_sizing import PositionSizingModule
 from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
@@ -111,6 +111,8 @@ def register_all_module_settings(app: Any) -> None:
     auto-registered here.
     """
     from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption, TabMountPoint
+
+    refresh_custom_product_field_definitions()
 
     _SCOPE_MAP = {p.value: p for p in ScopePolicy}
     for cls in sorted(_ALL_MODULE_CLASSES, key=lambda c: getattr(c, "order", 0)):

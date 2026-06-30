@@ -13,6 +13,10 @@ from .base import ExecutableModule, FieldDefinition, FieldRef
 from .custom_product import custom_product_editor_definition
 from .engine import engine_mode_for
 
+_CUSTOM_MARGIN_FIELDS = (
+    {"value": "MarginRatio", "label": "保证金率", "unit": "ratio", "value_type": "number", "allow_time_range": True},
+)
+
 
 class MarginModule(ExecutableModule):
     key: ClassVar[str] = "margin"
@@ -53,8 +57,8 @@ class MarginModule(ExecutableModule):
             tab_order=160,
             module_filter="margin",
             visible_when={"engine_mode": ("custom",), "margin_mode": ("custom",)},
-            chip_template="自定义保证金字段: {value}",
             display_order=95,
+            fields=_CUSTOM_MARGIN_FIELDS,
         ),
     }
 

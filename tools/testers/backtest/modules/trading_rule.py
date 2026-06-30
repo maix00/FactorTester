@@ -16,6 +16,23 @@ if TYPE_CHECKING:
 AccountingMode = Literal["Basic", "Custom", "Auto"]
 CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"]
 
+_CUSTOM_TRADING_RULE_FIELDS = (
+    {
+        "value": "CostBasisMethod",
+        "label": "成本法",
+        "unit": "enum",
+        "value_type": "select",
+        "value_options": (
+            ("WeightAverage", "加权平均成本法"),
+            ("FIFO", "先进先出"),
+            ("LIFO", "后进先出"),
+            ("HIFO", "高进先出"),
+            ("DailyMarkToMarket", "逐日盯市"),
+        ),
+        "allow_time_range": False,
+    },
+)
+
 
 class TradingRuleModule(ExecutableModule):
     key: ClassVar[str] = "trading_rule"
@@ -53,8 +70,8 @@ class TradingRuleModule(ExecutableModule):
             tab_order=180,
             module_filter="trading_rule",
             visible_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
-            chip_template="自定义记账字段: {value}",
             display_order=95,
+            fields=_CUSTOM_TRADING_RULE_FIELDS,
         ),
     }
 

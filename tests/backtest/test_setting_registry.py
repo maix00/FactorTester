@@ -93,24 +93,37 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["custom_product_fields"]["chip_template"] == "自定义字段: {value}"
     assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
+    custom_fields = index["defaults"]["custom_product_fields"]["serialization"]["fields"]
+    assert {field["value"] for field in custom_fields} >= {
+        "MarginRatio",
+        "OpenRatioByMoney",
+        "CostBasisMethod",
+    }
     assert index["defaults"]["historical_field_policy"]["options"][1] == {
         "value": "latest_available",
         "label": "缺失历史数据由时间差最近的数据向后填充",
     }
     assert index["defaults"]["fee_custom_product_fields"]["tab_key"] == "cost"
+    assert index["defaults"]["fee_custom_product_fields"]["chip_template"] is None
     assert index["defaults"]["fee_custom_product_fields"]["visible_when"] == {
         "engine_mode": ["custom"],
         "fee_mode": ["custom"],
     }
     assert index["defaults"]["fee_custom_product_fields"]["serialization"]["storage_key"] == "custom_product_fields"
     assert index["defaults"]["fee_custom_product_fields"]["serialization"]["module_filter"] == "fee"
+    assert index["defaults"]["fee_custom_product_fields"]["serialization"]["module_editor"] == {
+        "tab": "cost",
+        "mode_when": {"fee_mode": ["custom"]},
+    }
     assert index["defaults"]["margin_custom_product_fields"]["tab_key"] == "margin"
+    assert index["defaults"]["margin_custom_product_fields"]["chip_template"] is None
     assert index["defaults"]["margin_custom_product_fields"]["visible_when"] == {
         "engine_mode": ["custom"],
         "margin_mode": ["custom"],
     }
     assert index["defaults"]["margin_custom_product_fields"]["serialization"]["module_filter"] == "margin"
     assert index["defaults"]["trading_rule_custom_product_fields"]["tab_key"] == "accounting"
+    assert index["defaults"]["trading_rule_custom_product_fields"]["chip_template"] is None
     assert index["defaults"]["trading_rule_custom_product_fields"]["visible_when"] == {
         "engine_mode": ["custom"],
         "accounting_mode": ["Custom"],

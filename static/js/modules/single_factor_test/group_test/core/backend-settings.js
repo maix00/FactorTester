@@ -897,7 +897,9 @@
             var scoped = nextRows.filter(function(row) {
                 return row && (row.product || row.field || row.value !== undefined && row.value !== '');
             });
-            writeValue(setting, mount, retained.concat(scoped));
+            var nextAllRows = retained.concat(scoped);
+            writeValue(setting, mount, nextAllRows);
+            activateCustomProductModules(nextAllRows);
             render();
             rerenderAfterChange();
         }
@@ -915,6 +917,53 @@
                 if (String(options[i].value) === String(field)) return options[i];
             }
             return {};
+        }
+        function customProductEditorForModule(moduleName) {
+            var defaults = state.index && state.index.defaults || {};
+            var keys = Object.keys(defaults);
+            for (var i = 0; i < keys.length; i++) {
+                var def = defaults[keys[i]] || {};
+                var serialization = def.serialization || {};
+                if (serialization.kind !== 'custom_product_overrides') continue;
+                if (serialization.module_filter && String(serialization.module_filter) === String(moduleName)) {
+                    return Object.assign({ key: keys[i] }, def);
+                }
+            }
+            return null;
+        }
+        function modePatchForCustomEditor(editor) {
+            var modeWhen = editor && editor.serialization && editor.serialization.module_editor
+                && editor.serialization.module_editor.mode_when || {};
+            var keys = Object.keys(modeWhen);
+            for (var i = 0; i < keys.length; i++) {
+                var values = Array.isArray(modeWhen[keys[i]]) ? modeWhen[keys[i]] : [modeWhen[keys[i]]];
+                if (values.length) return { key: keys[i], value: values[0] };
+            }
+            return null;
+        }
+        function activateCustomProductModules(allRows) {
+            var serialization = setting.serialization || {};
+            if (settingStorageKey(setting) !== 'custom_product_fields') return;
+            if (serialization.kind !== 'custom_product_overrides' || serialization.module_filter) return;
+            var activated = {};
+            (allRows || []).forEach(function(row) {
+                var moduleName = selectedFieldMeta(row && row.field).module;
+                if (!moduleName || activated[moduleName]) return;
+                activated[moduleName] = true;
+                var editor = customProductEditorForModule(moduleName);
+                if (!editor) return;
+                var tabKey = editor.tab_key || editor.tab || editor.serialization && editor.serialization.module_editor && editor.serialization.module_editor.tab;
+                if (tabKey && !isMounted(mount, tabKey)) toggleMounted(mount, tabKey, true);
+                var patch = modePatchForCustomEditor(editor);
+                if (!patch) return;
+                var defaults = state.index && state.index.defaults || {};
+                var modeDef = defaults[patch.key];
+                if (!modeDef) return;
+                var modeSetting = Object.assign({ key: patch.key }, modeDef);
+                if (effectiveValue(modeSetting, mount) !== patch.value) {
+                    writeValue(modeSetting, mount, patch.value);
+                }
+            });
         }
         function fieldLabel(field) {
             return window.BackendSettingsPanel.customProductFieldLabel(setting, field);

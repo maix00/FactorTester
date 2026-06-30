@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, ClassVar
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+
+_CUSTOM_PRODUCT_FIELDS: dict[str, dict[str, Any]] = {}
 
 
 def custom_product_editor_definition(
@@ -15,12 +18,14 @@ def custom_product_editor_definition(
     tab_order: int,
     module_filter: str,
     visible_when: dict[str, tuple[Any, ...]],
-    chip_template: str,
     display_order: int,
+    fields: tuple[dict[str, Any], ...],
 ) -> FieldDefinition:
+    register_custom_product_fields(module_filter, fields)
     serialization = _custom_product_serialization(
         module_filter=module_filter,
         display_order=display_order,
+        module_editor=_module_editor_metadata(tab=tab, visible_when=visible_when),
     )
     return FieldDefinition(
         public=True,
@@ -30,17 +35,67 @@ def custom_product_editor_definition(
         tab=tab,
         visible_when=visible_when,
         editable_when=visible_when,
-        chip_template=chip_template,
         tab_label=tab_label,
         tab_order=tab_order,
         serialization=serialization,
     )
 
 
+def register_custom_product_fields(module_key: str, fields: tuple[dict[str, Any], ...]) -> None:
+    if not module_key:
+        raise ValueError("custom product field registration requires module_key")
+    for item in fields:
+        field = dict(item)
+        value = str(field.get("value") or "").strip()
+        if not value:
+            raise ValueError(f"custom product field from {module_key!r} is missing value")
+        field["module"] = module_key
+        existing = _CUSTOM_PRODUCT_FIELDS.get(value)
+        if existing and existing != field:
+            raise ValueError(f"duplicate custom product field registration: {value}")
+        _CUSTOM_PRODUCT_FIELDS[value] = field
+
+
+def custom_product_field_registry(module_filter: str | None = None) -> tuple[dict[str, Any], ...]:
+    fields = tuple(dict(field) for field in _CUSTOM_PRODUCT_FIELDS.values())
+    if not module_filter:
+        return fields
+    return tuple(field for field in fields if field.get("module") == module_filter)
+
+
+def refresh_custom_product_field_definitions() -> None:
+    """Refresh serialization after all modules have registered their fields."""
+    for key, fd in tuple(CustomProductModule.fields.items()):
+        if fd.serialization and fd.serialization.get("kind") == "custom_product_overrides":
+            module_filter = fd.serialization.get("module_filter")
+            CustomProductModule.fields[key] = replace(
+                fd,
+                serialization=_custom_product_serialization(
+                    module_filter=module_filter,
+                    display_order=int(fd.serialization.get("display_order") or 90),
+                    module_editor=fd.serialization.get("module_editor"),
+                ),
+            )
+
+
+def _module_editor_metadata(
+    *,
+    tab: str,
+    visible_when: dict[str, tuple[Any, ...]],
+) -> dict[str, Any]:
+    mode_conditions = {
+        key: list(value)
+        for key, value in visible_when.items()
+        if key != "engine_mode"
+    }
+    return {"tab": tab, "mode_when": mode_conditions}
+
+
 def _custom_product_serialization(
     *,
     module_filter: str | None = None,
     display_order: int = 90,
+    module_editor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "kind": "custom_product_overrides",
@@ -53,30 +108,12 @@ def _custom_product_serialization(
             {"key": "start", "label": "开始时间", "type": "datetime", "required": False},
             {"key": "end", "label": "结束时间", "type": "datetime", "required": False},
         ),
-        "fields": (
-            {"value": "MarginRatio", "label": "保证金率", "unit": "ratio", "module": "margin", "value_type": "number", "allow_time_range": True},
-            {"value": "OpenRatioByMoney", "label": "开仓费率", "unit": "ratio", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {"value": "OpenRatioByVolume", "label": "开仓固定费", "unit": "currency/lot", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {"value": "CloseRatioByMoney", "label": "平仓费率", "unit": "ratio", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {"value": "CloseRatioByVolume", "label": "平仓固定费", "unit": "currency/lot", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {"value": "CloseTodayRatioByMoney", "label": "平今费率", "unit": "ratio", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {"value": "CloseTodayRatioByVolume", "label": "平今固定费", "unit": "currency/lot", "module": "fee", "value_type": "number", "allow_time_range": True},
-            {
-                "value": "CostBasisMethod", "label": "成本法", "unit": "enum",
-                "module": "trading_rule", "value_type": "select",
-                "value_options": (
-                    ("WeightAverage", "加权平均成本法"),
-                    ("FIFO", "先进先出"),
-                    ("LIFO", "后进先出"),
-                    ("HIFO", "高进先出"),
-                    ("DailyMarkToMarket", "逐日盯市"),
-                ),
-                "allow_time_range": False,
-            },
-        ),
+        "fields": custom_product_field_registry(module_filter),
     }
     if module_filter:
         payload["module_filter"] = module_filter
+    if module_editor:
+        payload["module_editor"] = dict(module_editor)
     return payload
 
 

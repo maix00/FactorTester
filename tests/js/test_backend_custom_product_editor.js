@@ -35,7 +35,24 @@ document.registerElement('gt-local-settings-chip-row', domElement('gt-local-sett
 
 global.fetch = (url) => Promise.resolve({
   ok: true,
-  json: () => Promise.resolve(String(url).includes('/tabs/cost') ? {
+  json: () => Promise.resolve(String(url).includes('/tabs/engine') ? {
+    tab: { key: 'engine', label: '执行引擎', layout_template: 'settings-grid' },
+    settings: [{
+      key: 'custom_product_fields',
+      label: '自定义字段',
+      value: [],
+      tab_key: 'engine',
+      scope_policy: 'overridable',
+      control_template: 'custom_product_overrides',
+      visible_when: { engine_mode: ['custom'] },
+      editable_when: { engine_mode: ['custom'] },
+      serialization: {
+        kind: 'custom_product_overrides',
+        storage_key: 'custom_product_fields',
+        fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
+      },
+    }],
+  } : String(url).includes('/tabs/cost') ? {
     tab: { key: 'cost', label: '费用', layout_template: 'settings-grid' },
     settings: [{
       key: 'fee_custom_product_fields',
@@ -50,6 +67,7 @@ global.fetch = (url) => Promise.resolve({
         kind: 'custom_product_overrides',
         storage_key: 'custom_product_fields',
         module_filter: 'fee',
+        module_editor: { tab: 'cost', mode_when: { fee_mode: ['custom'] } },
         fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
       },
     }],
@@ -57,7 +75,10 @@ global.fetch = (url) => Promise.resolve({
     schema_version: 1,
     application: 'group_test',
     tab_lists: {
-      'local-settings': [{ key: 'cost', label: '费用', mount_points: ['local-settings'], layout_template: 'settings-grid', order: 100 }],
+      'local-settings': [
+        { key: 'engine', label: '执行引擎', mount_points: ['local-settings'], layout_template: 'settings-grid', order: 10 },
+        { key: 'cost', label: '费用', mount_points: ['local-settings'], layout_template: 'settings-grid', order: 100 },
+      ],
       'group-settings': [],
     },
     default_mounted_tabs: { 'local-settings': [], 'group-settings': [] },
@@ -103,6 +124,7 @@ global.fetch = (url) => Promise.resolve({
           kind: 'custom_product_overrides',
           storage_key: 'custom_product_fields',
           module_filter: 'fee',
+          module_editor: { tab: 'cost', mode_when: { fee_mode: ['custom'] } },
           fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
         },
       },
@@ -117,8 +139,7 @@ load('core/backend-settings.js');
 
 GT.backendSettings.init().then(() => {
   GT.backendSettings._state.localValues.engine_mode = 'custom';
-  GT.backendSettings._state.localValues.fee_mode = 'custom';
-  assert.equal(GT.backendSettings.openLocalTab('cost'), true);
+  assert.equal(GT.backendSettings.openLocalTab('engine'), true);
   return new Promise((resolve) => setTimeout(resolve, 0));
 }).then(() => {
   const host = document.getElementById('gt-backtest-local-host');
@@ -133,10 +154,18 @@ GT.backendSettings.init().then(() => {
   );
   assert.equal((GT.backendSettings._state.localValues.custom_product_fields || []).length, 0);
   addButton.listeners.click[0]({});
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}).then(() => {
+  const host = document.getElementById('gt-backtest-local-host');
   const fieldSelect = findById(host, 'select');
   assert.ok(fieldSelect, 'expected field select to be rendered after adding a draft row');
   assert.equal(fieldSelect.childNodes[0].textContent, '开仓费率');
   assert.equal(fieldSelect.childNodes[0].title, 'ratio');
+  assert.equal(GT.backendSettings._state.localValues.fee_mode, 'custom');
+  assert.ok(
+    GT.backendSettings._state.mountedTabs['local-settings'].indexOf('cost') >= 0,
+    'expected fee tab to be mounted after adding a fee custom field',
+  );
   assert.deepEqual(GT.backendSettings._state.localValues.custom_product_fields, [{
     product: '',
     field: 'OpenRatioByMoney',
