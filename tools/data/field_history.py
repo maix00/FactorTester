@@ -24,11 +24,13 @@ import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Protocol, cast
 
 import pandas as pd
 
 from tools.data.hub import DataHub
+from tools.data.types.time_index import DataIndex
 
 
 HISTORICAL_FIELD_TABLE = "historical_field_values"
@@ -165,9 +167,10 @@ class TimestampTradingDayResolver:
             day = self._series.loc[ts]
         except KeyError as exc:
             if self._allow_asof and not self._series.empty:
-                pos = self._series.index.searchsorted(ts, side="right") - 1
+                ts_key = ts.to_datetime64()
+                pos = self._series.index.searchsorted(ts_key, side="right") - 1
                 if pos < 0:
-                    pos = self._series.index.searchsorted(ts, side="left")
+                    pos = self._series.index.searchsorted(ts_key, side="left")
                 if 0 <= pos < len(self._series):
                     return _normalise_trading_day(self._series.iloc[int(pos)])
             raise MissingTradingDay(
@@ -784,6 +787,8 @@ def _resolve_field_instrument_identity(
             contract_code = _contract_code_from_instrument_name(str(current_contract))
 
     product_code = _product_code_from_product_name(raw_name)
+    if trading_day is not None and not contract_code:
+        contract_code = _contract_code_for_product_name_at(raw_name, trading_day)
     if contract_code:
         parsed_product = _product_code_from_contract_name(raw_name)
         if parsed_product:
@@ -795,6 +800,45 @@ def _resolve_field_instrument_identity(
         instrument_type=resolved_type,
         contract_code=contract_code,
     )
+
+
+def _contract_code_for_product_name_at(name: str, trading_day: Any) -> str | None:
+    """Resolve a product-level CN futures name to its contract code at ``trading_day``.
+
+    Field history stores exchange-supplied contract-scoped rows and product-scoped
+    fallback rows in the same table. Product-level requests such as ``AP.CZC``
+    therefore still need a time-specific contract code so contract rows win when
+    available, while product rows remain the fallback.
+    """
+    text = str(name or "").strip()
+    if not text or _contract_code_from_instrument_name(text):
+        return None
+    if not _DOTTED_PRODUCT_PATTERN.match(text):
+        return None
+    day_key = str(_normalise_trading_day(trading_day).date())
+    return _cached_contract_code_for_product_name_at(text, day_key)
+
+
+@lru_cache(maxsize=4096)
+def _cached_contract_code_for_product_name_at(name: str, trading_day: str) -> str | None:
+    try:
+        product = _cached_cn_futures_product_for_name(name)
+    except Exception:
+        return None
+    try:
+        current_contract = product.get_contract_id_from_trading_day(trading_day)
+    except Exception:
+        return None
+    if not current_contract:
+        return None
+    return _contract_code_from_instrument_name(str(current_contract))
+
+
+@lru_cache(maxsize=512)
+def _cached_cn_futures_product_for_name(name: str) -> Any:
+    from sources.LocalCNFutures.CNFutures import CNFutures
+
+    return CNFutures.get_by_product_name(name) or CNFutures(name)
 
 
 def _product_code_from_product_name(name: str) -> str:
@@ -1172,17 +1216,8 @@ def _price_frame_for_market_data_query(product: Any, timestamp: pd.Timestamp) ->
 def build_trading_day_resolver_from_market_data(frame: pd.DataFrame) -> TimestampTradingDayResolver:
     """Build the same timestamp -> trading_day resolver MarketDataModule uses."""
     if isinstance(frame.index, pd.MultiIndex):
-        names = list(frame.index.names)
-        day_level = "DAY1" if "DAY1" in names else ("trading_day" if "trading_day" in names else names[0])
-        timestamp_candidates = [name for name in names if name not in {day_level, None}]
-        timestamp_level = (
-            "MIN1" if "MIN1" in names
-            else ("trade_time" if "trade_time" in names else (timestamp_candidates[-1] if timestamp_candidates else names[-1]))
-        )
-        day_level_key = cast(str | int, day_level)
-        timestamp_level_key = cast(str | int, timestamp_level)
-        days = pd.DatetimeIndex(pd.to_datetime(list(frame.index.get_level_values(day_level_key)), errors="coerce"))
-        timestamps = pd.DatetimeIndex(pd.to_datetime(list(frame.index.get_level_values(timestamp_level_key)), errors="coerce"))
+        days = DataIndex.trading_day_index_from_index(frame.index)
+        timestamps = DataIndex.event_timestamps_from_index(frame.index)
     elif "trading_day" in frame.columns:
         days = pd.DatetimeIndex(pd.to_datetime(frame["trading_day"], errors="coerce"))
         timestamps = pd.DatetimeIndex(frame.index)
@@ -1271,7 +1306,7 @@ def historical_fields_frame_for_products(
     ``resolve_historical_fields_for_product`` and uses FieldHistoryProvider's
     vectorized ``frame_for_index`` path.
     """
-    timestamps = list(index)
+    timestamps = _timestamps_for_historical_field_index(index)
     return {
         str(field_name): provider.frame_for_index(
             products,
@@ -1283,6 +1318,12 @@ def historical_fields_frame_for_products(
         )
         for field_name in field_names
     }
+
+
+def _timestamps_for_historical_field_index(index: Iterable[Any]) -> list[Any]:
+    if isinstance(index, pd.MultiIndex):
+        return list(DataIndex.event_timestamps_from_index(index))
+    return list(index)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

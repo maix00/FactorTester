@@ -55,7 +55,7 @@ def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:
     if len(values) == 1:
         mask[0] = True
         return mask
-    normalized = values.normalize()
+    normalized = DataIndex.normalized_days(values)
     day_change = np.flatnonzero(normalized[1:].to_numpy() != normalized[:-1].to_numpy()) + 1
     boundaries = np.concatenate([day_change, np.array([len(values)], dtype=int)])
     for end in boundaries:
@@ -68,7 +68,7 @@ def _has_subday_component(values: pd.DatetimeIndex) -> bool:
     if len(values) == 0:
         return False
     naive = values.tz_localize(None) if values.tz is not None else values
-    return bool((naive != naive.normalize()).any())
+    return bool((naive != DataIndex.normalized_days(naive)).any())
 
 
 class DataIndex:
@@ -240,6 +240,38 @@ class DataIndex:
             return result
         return pd.DatetimeIndex(idx)
 
+    def event_timestamps(self) -> pd.DatetimeIndex:
+        """返回用于逐 bar / 事件驱动查询的实际事件时间层。
+
+        这是 ``signal_index`` 的语义化别名。调用方不应再自行猜测
+        ``MIN1``/``trade_time``/最后一层；统一交给 DataIndex 解析。
+        """
+        return self.signal_index
+
+    def trading_day_index(self) -> pd.DatetimeIndex:
+        """返回交易日层。
+
+        MultiIndex 中优先使用 DAY1 / trading_day / trade_day 等日级层；
+        普通 DatetimeIndex 或没有显式交易日层时，退化为事件时间的自然日。
+        """
+        idx = self.raw
+        if isinstance(idx, pd.MultiIndex):
+            day_level = next(
+                (i for i, name in enumerate(idx.names) if name and _is_day_level_name(str(name))),
+                None,
+            )
+            if day_level is not None:
+                return DataIndex.normalized_days(idx.get_level_values(day_level))
+        return DataIndex.normalized_days(self.event_timestamps())
+
+    @staticmethod
+    def event_timestamps_from_index(index: pd.Index | DataIndex) -> pd.DatetimeIndex:
+        return index.event_timestamps() if isinstance(index, DataIndex) else DataIndex(index).event_timestamps()
+
+    @staticmethod
+    def trading_day_index_from_index(index: pd.Index | DataIndex) -> pd.DatetimeIndex:
+        return index.trading_day_index() if isinstance(index, DataIndex) else DataIndex(index).trading_day_index()
+
     @staticmethod
     def normalized_days(values: Any) -> pd.DatetimeIndex:
         """从原始列值构造标准化的日级别 DatetimeIndex（去tz + normalize）。
@@ -249,8 +281,8 @@ class DataIndex:
         """
         result = pd.DatetimeIndex(pd.to_datetime(values))
         if result.tz is not None:
-            result = result.tz_localize(None)  # type: ignore[assignment]
-        return cast(pd.DatetimeIndex, result.normalize())
+            result = pd.DatetimeIndex(result.tz_localize(None))
+        return pd.DatetimeIndex(result.to_numpy(dtype="datetime64[D]"))
 
     # ── 时区 ──────────────────────────────────────────────────────────────
 
@@ -300,7 +332,7 @@ class DataIndex:
         sig = self.signal_index
         if aligned in sig:
             return aligned
-        pos = sig.searchsorted(aligned, side="right") - 1
+        pos = sig.searchsorted(aligned.to_datetime64(), side="right") - 1
         if pos < 0:
             raise KeyError(f"no signal_index value at or before {aligned!r}")
         return cast(pd.Timestamp, sig[pos])
@@ -345,8 +377,8 @@ class DataIndex:
         """
         result = self.signal_index
         if result.tz is not None:
-            result = result.tz_localize(None)
-        return cast(pd.DatetimeIndex, result.normalize())
+            result = pd.DatetimeIndex(result.tz_localize(None))
+        return DataIndex.normalized_days(result)
 
     def end_of_trading_day(self) -> np.ndarray:
         """标记每个交易日最后一个 bar。
@@ -366,7 +398,7 @@ class DataIndex:
         ts = self.finest_index
         if len(ts) == 0:
             return np.zeros(0, dtype=bool)
-        return _last_in_groups(pd.DatetimeIndex(ts).normalize())
+        return _last_in_groups(DataIndex.normalized_days(ts))
 
     # ── 时间切片 ──────────────────────────────────────────────────────────
 
