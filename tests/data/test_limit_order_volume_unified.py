@@ -116,9 +116,9 @@ def test_market_data_limit_order_fields_use_field_history_view(monkeypatch) -> N
         },
     ])
 
-    import sources.FieldHistory.views.LimitOrderVolume as limit_order_view
+    import sources.FieldHistory.views.Unified as unified_view
 
-    monkeypatch.setattr(limit_order_view, "load_unified_provider", lambda: unified_provider)
+    monkeypatch.setattr(unified_view, "load_unified_provider", lambda: unified_provider)
 
     index = pd.DatetimeIndex([pd.Timestamp("2026-03-10 09:01:00")])
     market_data_module = _load_market_data_module()

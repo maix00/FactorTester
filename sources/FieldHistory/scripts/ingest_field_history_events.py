@@ -172,17 +172,21 @@ def _event_exists(conn: sqlite3.Connection, event: Mapping[str, Any]) -> bool:
 
 
 def _rebuild_view(field_group: str, *, store_key: str) -> list[str]:
+    from sources.FieldHistory.views.Unified import save_unified_table as save_all_fields
+
+    rebuilt = ["field_history_unified"]
+    save_all_fields(store_key=store_key)
     if field_group == "LimitOrderVolume":
         from sources.FieldHistory.views.LimitOrderVolume import save_unified_table
 
         save_unified_table(store_key=store_key)
-        return ["field_history_limit_order_volume_unified"]
+        rebuilt.append("field_history_limit_order_volume_unified")
     if field_group == "TransactionFee":
         from sources.FieldHistory.views.TransactionFee import save_unified_table
 
         save_unified_table(store_key=store_key)
-        return ["field_history_transaction_fee_unified"]
-    return []
+        rebuilt.append("field_history_transaction_fee_unified")
+    return rebuilt
 
 
 if __name__ == "__main__":

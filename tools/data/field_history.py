@@ -935,7 +935,9 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
 
 def _field_provider_priority(provider: Any) -> int:
     text = str(provider or "")
-    if text == OPENCTP_LATEST_FIELD_PROVIDER:
+    if "Agent:" in text:
+        return 1
+    if OPENCTP_LATEST_FIELD_PROVIDER in text:
         return 0
     return 1
 

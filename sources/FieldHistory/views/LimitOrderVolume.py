@@ -84,8 +84,23 @@ def save_unified_table(*, store_key: str = "openctp") -> str:
     return path
 
 
+def load_unified_frame(*, store_key: str = "openctp") -> pd.DataFrame:
+    hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
+    with hub.connect_store(store_key) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+            (UNIFIED_TABLE,),
+        ).fetchone()
+        if not exists:
+            raise RuntimeError(
+                f"{UNIFIED_TABLE} is not materialized; run save_unified_table() after ingesting FieldHistory events"
+            )
+        return pd.read_sql_query(f'SELECT * FROM "{UNIFIED_TABLE}"', conn)
+
+
 def load_unified_provider(*, store_key: str = "openctp") -> FieldHistoryProvider:
-    return build_unified_provider(build_unified_frame(store_key=store_key))
+    return build_unified_provider(load_unified_frame(store_key=store_key))
 
 
 def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:

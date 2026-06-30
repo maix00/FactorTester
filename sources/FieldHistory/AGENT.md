@@ -5,6 +5,14 @@ field-change events. Keep the workflow centered on `sources.FieldHistory`:
 agents append cleaned events, FieldHistory views deduplicate them, and
 MarketDataModule reads those views.
 
+Runtime consumers must read the materialized all-field view
+`field_history_unified`. Field-group-specific tables such as
+`field_history_transaction_fee_unified` and
+`field_history_limit_order_volume_unified` may remain for audit and backward
+compatibility, but they are not the runtime routing mechanism. When a new field
+is added, rebuild `field_history_unified`; do not add another runtime provider
+split.
+
 Field-group/data-source-specific instructions live in `AgentInstructions/` and
 must be named `<FieldGroup>_<DataSource>.md`.
 

@@ -34,7 +34,6 @@ from tools.data.field_history import (
     HistoricalFieldFallbackPolicy,
     FieldHistoryProvider,
     TradingDayResolver,
-    TRANSACTION_FEE_FIELD_NAMES,
     historical_fields_frame_for_products,
     resolve_historical_fields_for_product,
 )
@@ -266,7 +265,7 @@ def current_prices_at(account, timestamp: pd.Timestamp) -> dict:
     """
     table = account.current_prices_table
     row = row_at(table, timestamp, asof=True)
-    return {product: float(row[product]) for product in table.columns}
+    return {product: float(cast(Any, row[product])) for product in table.columns}
 
 
 def current_volume_at(account, timestamp: pd.Timestamp) -> dict:
@@ -276,7 +275,7 @@ def current_volume_at(account, timestamp: pd.Timestamp) -> dict:
     if table is None:
         return {}
     row = row_at(table, timestamp)
-    return {product: float(row[product]) for product in table.columns}
+    return {product: float(cast(Any, row[product])) for product in table.columns}
 
 
 def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, dict[str, object]]:
@@ -334,46 +333,17 @@ def historical_field_frames_for_market_data(
     field_names: tuple[object, ...],
     policy: str,
 ) -> dict[str, pd.DataFrame]:
-    result: dict[str, pd.DataFrame] = {}
-    for provider_for_fields, names in _historical_field_provider_groups(provider, field_names):
-        result.update(historical_fields_frame_for_products(
-            products,
-            index,
-            provider=provider_for_fields,
-            trading_day_resolver=trading_day_resolver,
-            field_names=names,
-            fallback=policy,
-        ))
-    return result
+    from sources.FieldHistory.views.Unified import load_unified_provider
 
-
-def _historical_field_provider_groups(
-    provider: FieldHistoryProvider,
-    field_names: tuple[object, ...],
-) -> list[tuple[FieldHistoryProvider, tuple[object, ...]]]:
-    limit_order_fields = {"MinLimitOrderVolume", "MaxLimitOrderVolume", "MaxMarketOrderVolume"}
-    fee_fields = set(TRANSACTION_FEE_FIELD_NAMES) | {"VolumeMultiple"}
-    limit_names = tuple(name for name in field_names if str(name) in limit_order_fields)
-    market_rule_names = tuple(
-        name for name in field_names
-        if str(name) in fee_fields and str(name) not in limit_order_fields
+    unified_provider = load_unified_provider()
+    return historical_fields_frame_for_products(
+        products,
+        index,
+        provider=unified_provider,
+        trading_day_resolver=trading_day_resolver,
+        field_names=field_names,
+        fallback=policy,
     )
-    other_names = tuple(
-        name for name in field_names
-        if str(name) not in limit_order_fields and str(name) not in fee_fields
-    )
-    groups: list[tuple[FieldHistoryProvider, tuple[object, ...]]] = []
-    if limit_names:
-        from sources.FieldHistory.views.LimitOrderVolume import load_unified_provider
-
-        groups.append((load_unified_provider(), limit_names))
-    if market_rule_names:
-        from sources.FieldHistory.views.TransactionFee import load_unified_provider
-
-        groups.append((load_unified_provider(), market_rule_names))
-    if other_names:
-        groups.append((provider, other_names))
-    return groups
 
 
 def _historical_fields_at_from_frames(

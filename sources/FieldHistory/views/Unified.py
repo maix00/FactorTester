@@ -1,9 +1,8 @@
-"""Unified transaction-fee historical-field view.
+"""Unified FieldHistory materialized view.
 
-Historical exchange notices and provider baselines are appended to
-``historical_field_values``. This view deduplicates those rows and includes
-OpenCTP's latest contract snapshot as a current baseline so MarketDataModule can
-read one provider for both historical events and today's listed contracts.
+This table is the runtime-facing FieldHistory view. Field-group-specific views
+may still exist for audits, but MarketDataModule should read this unified view
+so adding a new field does not require another runtime provider split.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ import pandas as pd
 
 from tools.data.field_history import (
     FIELD_HISTORY_COLUMNS,
-    TRANSACTION_FEE_FIELD_NAMES,
     FieldHistoryProvider,
     _ensure_store_registered,
     load_historical_field_frame,
@@ -25,8 +23,7 @@ from tools.data.field_history import (
 from tools.data.hub import DataHub
 
 
-FIELDS = (*TRANSACTION_FEE_FIELD_NAMES, "VolumeMultiple")
-UNIFIED_TABLE = "field_history_transaction_fee_unified"
+UNIFIED_TABLE = "field_history_unified"
 
 _GROUP_COLUMNS = [
     "instrument",
@@ -51,7 +48,7 @@ def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
     for column in FIELD_HISTORY_COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
-    return cast(pd.DataFrame, frame[frame["field_name"].isin(FIELDS)][FIELD_HISTORY_COLUMNS].copy())
+    return cast(pd.DataFrame, frame[FIELD_HISTORY_COLUMNS].copy())
 
 
 def build_unified_frame(source_frame: pd.DataFrame | None = None, *, store_key: str = "openctp") -> pd.DataFrame:
@@ -61,9 +58,6 @@ def build_unified_frame(source_frame: pd.DataFrame | None = None, *, store_key: 
     for column in FIELD_HISTORY_COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
-    frame = frame[frame["field_name"].isin(FIELDS)].copy()
-    if frame.empty:
-        return _empty_unified_frame()
     frame["contract_codes"] = cast(pd.Series, frame["contract_codes"]).map(_normalise_contract_codes_json)
     rows: list[dict[str, Any]] = []
     for _, group in frame.groupby(_GROUP_COLUMNS, dropna=False, sort=True):
@@ -115,7 +109,7 @@ def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:
     if frame.empty:
         return FieldHistoryProvider(frame)
     provider_frame = frame.copy()
-    provider_frame["provider"] = "Unified"
+    provider_frame["provider"] = provider_frame["providers"]
     provider_frame["source_key"] = provider_frame["source_keys"]
     provider_frame["source_url"] = provider_frame["source_urls"]
     provider_frame["source_date"] = provider_frame["source_dates"]
