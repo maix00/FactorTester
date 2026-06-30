@@ -3021,7 +3021,16 @@ def run_group_test_stream():
                 account.raw_market_data.get("excluded_out_of_range_products", ()),
             ))
             if excluded_products:
-                sample = "、".join(str(item) for item in excluded_products[:12])
+                excluded_product_displays = [
+                    _snapshot_product_display(product) for product in excluded_products
+                ]
+
+                def _display_text(item: dict[str, Any]) -> str:
+                    name = str(item.get("name") or "")
+                    desc = str(item.get("desc") or "")
+                    return f"{name}({desc})" if desc and desc != name else name
+
+                sample = "、".join(_display_text(item) for item in excluded_product_displays[:12])
                 if len(excluded_products) > 12:
                     sample += f" 等 {len(excluded_products)} 个"
                 row = {
@@ -3034,6 +3043,7 @@ def run_group_test_stream():
                     "code": "product_out_of_run_window",
                     "level": "info",
                     "products": list(excluded_products),
+                    "product_displays": excluded_product_displays,
                 }
                 runtime_info_rows.append(row)
                 emitter.emit_runtime_info(

@@ -34,7 +34,7 @@
             : [];
         if (!products.length) return '';
         var total = Number(batch.missing_product_count || products.length);
-        var sample = products.slice(0, 8).join('、');
+        var sample = products.slice(0, 8).map(_productDisplayText).join('、');
         if (total > products.length || products.length > 8) sample += ' 等';
         return '触发品种：' + sample + '（' + total + ' 个品种存在非头部缺 bar/交易时段差异）';
     }
@@ -45,10 +45,17 @@
         var runtimeRows = Array.isArray(data.runtime_info_rows) ? data.runtime_info_rows : [];
         for (var ri = 0; ri < runtimeRows.length; ri++) {
             var item = runtimeRows[ri] || {};
+            var detail = item.detail || item.message || '';
+            if (Array.isArray(item.product_displays) && item.product_displays.length) {
+                var productText = item.product_displays.slice(0, 12).map(_productDisplayText).join('、');
+                if (item.product_displays.length > 12) productText += ' 等 ' + item.product_displays.length + ' 个';
+                detail = '以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除：' + productText;
+            }
+            if (!detail && !item.detailHtml) continue;
             rows.push({
                 type: item.type || '运行信息',
                 status: item.status || _runtimeStatusLabel(item.level),
-                detail: item.detail || item.message || '',
+                detail: detail,
                 detailHtml: item.detailHtml || '',
             });
         }
@@ -163,6 +170,14 @@
             + '</tr>';
     }
 
+    function _productDisplayText(product) {
+        if (!product) return '';
+        if (typeof product === 'string') return product;
+        var name = String(product.name || product.alias || product.product || '');
+        var desc = String(product.desc || product.description || '');
+        return desc && desc !== name ? name + '(' + desc + ')' : name;
+    }
+
     function _runtimeStatusLabel(level) {
         if (level === 'warning') return '提示';
         if (level === 'error') return '异常';
@@ -178,7 +193,19 @@
         if (!head.innerHTML) {
             head.innerHTML = '<tr><th class="gt-strategy-type-cell">类型</th><th class="gt-strategy-status-cell">状态</th><th class="gt-strategy-detail-cell">说明</th></tr>';
         }
+        _clearPlaceholderRows(body);
         return body;
+    }
+
+    function _clearPlaceholderRows(body) {
+        if (!body) return;
+        if (body.children.length !== 1) return;
+        var onlyRow = body.children[0];
+        if (!onlyRow || onlyRow.tagName !== 'TR') return;
+        var text = (onlyRow.textContent || '').trim();
+        if (text === '运行分组测试后这里展示各策略摘要') {
+            body.innerHTML = '';
+        }
     }
 
     function pushRuntimeInfo(row) {
@@ -189,10 +216,17 @@
         if (!body._gtRuntimeInfoKeys) body._gtRuntimeInfoKeys = {};
         if (body._gtRuntimeInfoKeys[key]) return;
         body._gtRuntimeInfoKeys[key] = true;
+        var detail = normalized.detail || normalized.message || '';
+        if (Array.isArray(normalized.product_displays) && normalized.product_displays.length) {
+            var productText = normalized.product_displays.slice(0, 12).map(_productDisplayText).join('、');
+            if (normalized.product_displays.length > 12) productText += ' 等 ' + normalized.product_displays.length + ' 个';
+            detail = '以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除：' + productText;
+        }
+        if (!detail && !normalized.detailHtml) return;
         body.insertAdjacentHTML('beforeend', _rowHtml({
             type: normalized.type || '运行信息',
             status: normalized.status || _runtimeStatusLabel(normalized.level),
-            detail: normalized.detail || normalized.message || '',
+            detail: detail,
             detailHtml: normalized.detailHtml || '',
         }));
     }
@@ -207,9 +241,7 @@
 
         var rows = [];
         var hasMultiSession = !!multiSessionActive;
-        var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
-            ? multiSessionBatches
-            : [{ index: 0, product_path_selection_label: '当前产品路径', factor_alias: '当前因子', n_groups: null }];
+        var batches = Array.isArray(multiSessionBatches) ? multiSessionBatches : [];
         if (hasMultiSession) {
             for (var bi = 0; bi < batches.length; bi++) {
                 var batch = batches[bi];

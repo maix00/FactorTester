@@ -358,7 +358,7 @@
             h += '<span class="unified-batch-expand" style="margin-right:6px;width:20px;text-align:center;cursor:pointer;font-size:18px;line-height:1;">' + (isExpanded ? '▾' : '▸') + '</span>';
             h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap;">';
             if (batchLetter) {
-                h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
+                h += '<span class="unified-batch-letter" style="font-size:12px;font-weight:700;color:#4338ca;line-height:20px;padding:0 2px;">' + H.escapeHTML(batchLetter) + '</span>';
             }
             // 批次头的 因子/产品路径/分组数 走后端 ChipDefinition（manifest 驱动），
             // 与每组行同源：per-group 行用 _chipOwnedByBatch 把这些"批次自有"的 identity
