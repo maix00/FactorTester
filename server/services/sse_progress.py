@@ -63,8 +63,17 @@ class SSEProgressEmitter:
     def emit_activity(self, **payload: Any) -> None:
         self._q.put(self._event("activity", payload))
 
-    def emit_signal_progress(self, *, completed: int, total: int, phase: str = "event_replay") -> None:
-        percent = 100.0 if total <= 0 else max(0.0, min(100.0, completed / total * 100.0))
+    def emit_signal_progress(
+        self,
+        *,
+        completed: int,
+        total: int,
+        phase: str = "event_replay",
+        percent: float | None = None,
+    ) -> None:
+        if percent is None:
+            percent = 100.0 if total <= 0 else completed / total * 100.0
+        percent = max(0.0, min(100.0, float(percent)))
         self._q.put(self._event("signal_progress", {
             "completed": completed,
             "total": total,

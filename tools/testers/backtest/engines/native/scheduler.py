@@ -33,7 +33,14 @@ class SchedulerError(Exception):
 class ProgressSink(Protocol):
     def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None: ...
     def emit_activity(self, **payload: Any) -> None: ...
-    def emit_signal_progress(self, *, completed: int, total: int, phase: str = "event_replay") -> None: ...
+    def emit_signal_progress(
+        self,
+        *,
+        completed: int,
+        total: int,
+        phase: str = "event_replay",
+        percent: float | None = None,
+    ) -> None: ...
 
 
 _PHASE_LABELS: dict[str, str] = {
@@ -359,16 +366,29 @@ class _ProgressTracker:
         self._completed = 0
         self._signal_total = 0
         self._signal_completed = 0
+        self._pre_total = 0
+        self._pre_completed = 0
+        self._post_total = 0
+        self._post_completed = 0
 
     def emit_manifest(self, groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]]) -> None:
         if self._activity_sink is not None:
             self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups))
 
+    def set_phase_totals(self, *, pre_total: int, post_total: int) -> None:
+        self._pre_total = max(0, pre_total)
+        self._post_total = max(0, post_total)
+
     def note_signal_queue_ready(self) -> None:
         self._signal_total = self._event_queue.pending_count_by_kind(EventKind.SIGNAL)
         self._signal_completed = 0
         if self._activity_sink is not None:
-            self._activity_sink.emit_signal_progress(completed=0, total=self._signal_total)
+            self._activity_sink.emit_signal_progress(
+                completed=0,
+                total=self._signal_total,
+                phase="event_replay",
+                percent=10.0,
+            )
 
     def activity(self, flow: ResolvedFlow, *, timestamp: pd.Timestamp | None, phase: str | None = None) -> None:
         if self._activity_sink is None:
@@ -398,10 +418,48 @@ class _ProgressTracker:
             return
         self._signal_completed = min(self._signal_total, self._signal_completed + batch_size)
         if self._activity_sink is not None:
+            ratio = 1.0 if self._signal_total <= 0 else self._signal_completed / self._signal_total
             self._activity_sink.emit_signal_progress(
                 completed=self._signal_completed,
                 total=self._signal_total,
+                phase="event_replay",
+                percent=10.0 + ratio * 80.0,
             )
+
+    def phase_flow_done(self, *, phase: str) -> None:
+        if self._activity_sink is None:
+            return
+        if phase == "pre_replay":
+            self._pre_completed = min(self._pre_total, self._pre_completed + 1)
+            ratio = 1.0 if self._pre_total <= 0 else self._pre_completed / self._pre_total
+            self._activity_sink.emit_signal_progress(
+                completed=self._pre_completed,
+                total=self._pre_total,
+                phase=phase,
+                percent=ratio * 10.0,
+            )
+        elif phase == "post_replay":
+            self._post_completed = min(self._post_total, self._post_completed + 1)
+            ratio = 1.0 if self._post_total <= 0 else self._post_completed / self._post_total
+            self._activity_sink.emit_signal_progress(
+                completed=self._post_completed,
+                total=self._post_total,
+                phase=phase,
+                percent=90.0 + ratio * 10.0,
+            )
+
+    def event_replay_done(self) -> None:
+        if self._activity_sink is not None:
+            self._activity_sink.emit_signal_progress(
+                completed=self._signal_total,
+                total=self._signal_total,
+                phase="event_replay",
+                percent=90.0,
+            )
+
+    def complete(self) -> None:
+        if self._activity_sink is not None:
+            self._activity_sink.emit_signal_progress(completed=1, total=1, phase="done", percent=100.0)
 
 
 def make_dispatcher(
@@ -481,6 +539,15 @@ def run(
     post_replay_flows = groups.get((Phase.POST_REPLAY, None), ())
     tracker = _ProgressTracker(progress, activity_sink, event_queue)
     tracker.emit_manifest(groups)
+    applicable_pre_flows = [
+        f for f in pre_replay_flows
+        if _pre_post_applicable_strategies(account, f)
+    ]
+    applicable_post_flows = [
+        f for f in post_replay_flows
+        if _pre_post_applicable_strategies(account, f)
+    ]
+    tracker.set_phase_totals(pre_total=len(applicable_pre_flows), post_total=len(applicable_post_flows))
 
     for (phase, event_kind), ordered_flows in groups.items():
         if phase is Phase.PER_EVENT:
@@ -495,10 +562,12 @@ def run(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay")
         f.compute(account, ctx)
+        tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
     tracker.note_signal_queue_ready()
     event_queue.run_until_drained()
+    tracker.event_replay_done()
 
     ctx = FlowContext(timestamp=None, event_queue=event_queue)
     for f in post_replay_flows:
@@ -508,7 +577,9 @@ def run(
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay")
         f.compute(account, ctx)
+        tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
+    tracker.complete()
 
 
 def _activity_phase(phase: Phase) -> str:

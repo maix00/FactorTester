@@ -1,13 +1,14 @@
 /**
  * core/run-group-batch.js — native backtest activity UI.
  *
- * Public API intentionally keeps the old createManager shape used by
- * run-test.js, but the UI is now one signal-progress bar plus a parallel
- * flow-process diagram. There is no N/M display.
+ * One progress bar, one typewriter status line, and one always-visible flow
+ * line. Counts are deliberately not rendered.
  */
 (function() {
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
+
+    var EVENT_PHASE = 'event_replay';
 
     function escapeHtml(value) {
         return String(value == null ? '' : value)
@@ -27,30 +28,25 @@
         var phases = [];
         var phaseByKey = {};
         var currentPhase = '';
+        var activeFlowKey = '';
         var activityCache = {};
-        var rotateTimers = {};
+        var rotateTimer = null;
+        var typeTimer = null;
         var rotatePosition = {};
+        var done = false;
         var row = buildShell(progressContainer);
+
+        ensureFlowLineStyle();
 
         function buildShell(parent) {
             var root = document.createElement('div');
             root.className = 'gt-progress-track gt-activity-progress';
             root.style.cssText = 'margin-bottom:10px;';
 
-            var line = document.createElement('div');
-            line.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
-
-            var title = document.createElement('span');
-            title.style.cssText = 'flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            var title = document.createElement('div');
+            title.style.cssText = 'font-size:12px;font-weight:600;color:#334155;line-height:1.4;';
             title.textContent = '分组测试';
-            line.appendChild(title);
-
-            var toggle = document.createElement('button');
-            toggle.type = 'button';
-            toggle.style.cssText = 'flex:0 0 24px;width:24px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#475467;font-size:12px;cursor:pointer;line-height:1;';
-            toggle.textContent = '▾';
-            line.appendChild(toggle);
-            root.appendChild(line);
+            root.appendChild(title);
 
             var barWrap = document.createElement('div');
             barWrap.style.cssText = 'width:100%;margin-top:6px;';
@@ -63,19 +59,13 @@
             root.appendChild(barWrap);
 
             var message = document.createElement('div');
-            message.style.cssText = 'margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            message.style.cssText = 'margin-top:5px;min-height:16px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
             message.textContent = '等待回测开始';
             root.appendChild(message);
 
             var diagram = document.createElement('div');
-            diagram.style.cssText = 'display:none;margin-top:8px;padding:8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;overflow-x:auto;';
+            diagram.style.cssText = 'margin-top:10px;padding:2px 0 4px;overflow-x:auto;';
             root.appendChild(diagram);
-
-            toggle.addEventListener('click', function() {
-                var open = diagram.style.display === 'none';
-                diagram.style.display = open ? 'block' : 'none';
-                toggle.textContent = open ? '▴' : '▾';
-            });
 
             parent.appendChild(root);
             return {
@@ -83,14 +73,8 @@
                 title: title,
                 fill: fill,
                 message: message,
-                diagram: diagram,
-                toggle: toggle
+                diagram: diagram
             };
-        }
-
-        function phaseLabel(key) {
-            var phase = phaseByKey[key];
-            return phase && phase.label ? phase.label : key;
         }
 
         function registerActivityManifest(manifestPhases) {
@@ -104,9 +88,7 @@
                     label: phase.label || key,
                     flows: Array.isArray(phase.flows) ? phase.flows.slice() : []
                 };
-                normalized.flows.sort(function(a, b) {
-                    return Number(a.display_order || 0) - Number(b.display_order || 0);
-                });
+                normalized.flows.sort(sortFlows);
                 if (phaseByKey[key]) {
                     phaseByKey[key].label = normalized.label || phaseByKey[key].label;
                     mergeFlows(phaseByKey[key], normalized.flows);
@@ -116,6 +98,10 @@
                 }
             }
             renderDiagram();
+        }
+
+        function sortFlows(a, b) {
+            return Number(a.display_order || 0) - Number(b.display_order || 0);
         }
 
         function mergeFlows(phase, newFlows) {
@@ -129,61 +115,15 @@
                     seen[newFlows[j].flow_key] = true;
                 }
             }
-            phase.flows.sort(function(a, b) {
-                return Number(a.display_order || 0) - Number(b.display_order || 0);
-            });
-        }
-
-        function renderDiagram() {
-            if (!row.diagram) return;
-            if (!phases.length) {
-                row.diagram.innerHTML = '<div style="font-size:11px;color:#98a2b3;">等待流程注册</div>';
-                return;
-            }
-            var html = ['<div class="gt-flow-process" style="display:flex;align-items:stretch;gap:8px;min-width:max-content;">'];
-            for (var i = 0; i < phases.length; i++) {
-                var phase = phases[i];
-                var active = phase.key === currentPhase;
-                html.push(
-                    '<div data-phase="' + escapeHtml(phase.key) + '" class="gt-flow-phase' + (active ? ' is-active' : '') + '"'
-                    + ' style="position:relative;display:flex;flex-direction:column;gap:6px;padding:6px 8px 8px;border:1px solid ' + (active ? '#14b8a6' : '#d0d5dd') + ';border-radius:6px;background:' + (active ? '#f0fdfa' : '#f8fafc') + ';">'
-                    + '<div style="text-align:center;font-size:11px;font-weight:600;color:#475467;white-space:nowrap;">(' + escapeHtml(phase.label || phase.key) + ')</div>'
-                    + '<div style="display:flex;gap:6px;align-items:stretch;position:relative;">'
-                );
-                if (active) {
-                    html.push('<div class="gt-flow-phase-sweep" style="position:absolute;inset:0;border-radius:4px;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(20,184,166,.18),transparent);animation:gtFlowSweep 1.45s linear infinite;"></div>');
-                }
-                var flows = phase.flows || [];
-                if (!flows.length) {
-                    html.push('<div style="font-size:11px;color:#98a2b3;padding:12px 4px;">暂无节点</div>');
-                }
-                for (var j = 0; j < flows.length; j++) {
-                    html.push(
-                        '<div class="gt-flow-node" style="position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:24px;min-height:92px;padding:4px 2px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;color:#475467;font-size:11px;line-height:1.1;writing-mode:vertical-rl;text-orientation:mixed;white-space:nowrap;">'
-                        + escapeHtml(flows[j].flow_label || flows[j].flow_name || flows[j].flow_key)
-                        + '</div>'
-                    );
-                }
-                html.push('</div></div>');
-            }
-            html.push('</div>');
-            row.diagram.innerHTML = html.join('');
-            ensureSweepStyle();
-        }
-
-        function ensureSweepStyle() {
-            if (document.getElementById('gt-flow-sweep-style')) return;
-            var style = document.createElement('style');
-            style.id = 'gt-flow-sweep-style';
-            style.textContent = '@keyframes gtFlowSweep{0%{transform:translateX(-60%);opacity:.25}50%{opacity:1}100%{transform:translateX(60%);opacity:.25}}';
-            document.head.appendChild(style);
+            phase.flows.sort(sortFlows);
         }
 
         function recordActivity(payload) {
-            if (!payload || !payload.phase) return;
+            if (done || !payload || !payload.phase) return;
             var phase = normalizePhaseKey(payload.phase);
             if (!phase) return;
             currentPhase = phase;
+            activeFlowKey = payload.flow_key || '';
             if (!phaseByKey[phase]) {
                 registerActivityManifest([{ key: phase, label: payload.phase_label || phase, flows: [] }]);
             }
@@ -194,63 +134,87 @@
                     label: payload.flow_label || payload.flow_name || payload.flow_key,
                     message: payload.message || ''
                 };
-                var phaseSpec = phaseByKey[phase];
-                var exists = false;
-                for (var i = 0; i < phaseSpec.flows.length; i++) {
-                    if (phaseSpec.flows[i].flow_key === payload.flow_key) {
-                        exists = true;
-                        break;
-                    }
-                }
-                if (!exists) {
-                    phaseSpec.flows.push({
-                        phase: phase,
-                        flow_key: payload.flow_key,
-                        flow_name: payload.flow_name || payload.flow_key,
-                        flow_label: payload.flow_label || payload.flow_key,
-                        display_order: payload.display_order || phaseSpec.flows.length + 1,
-                        event_kind: payload.event_kind || ''
-                    });
-                    phaseSpec.flows.sort(function(a, b) {
-                        return Number(a.display_order || 0) - Number(b.display_order || 0);
-                    });
-                }
+                ensureFlowInPhase(phase, payload);
             }
             renderDiagram();
-            scheduleRotation(phase);
+            if (phase === EVENT_PHASE) {
+                ensureEventRotation();
+                rotateEventFlow();
+            } else {
+                stopEventRotation();
+                var rec = activityCache[phase] && activityCache[phase][payload.flow_key];
+                setMessage(rec ? formatRecord(rec) : payload.message || '');
+            }
         }
 
-        function scheduleRotation(phase) {
-            if (rotateTimers[phase]) return;
-            rotateOne(phase);
-            rotateTimers[phase] = window.setInterval(function() {
-                rotateOne(phase);
-            }, 2000);
-        }
-
-        function rotateOne(phase) {
-            if (phase !== currentPhase) return;
+        function ensureFlowInPhase(phase, payload) {
             var phaseSpec = phaseByKey[phase];
+            for (var i = 0; i < phaseSpec.flows.length; i++) {
+                if (phaseSpec.flows[i].flow_key === payload.flow_key) return;
+            }
+            phaseSpec.flows.push({
+                phase: phase,
+                flow_key: payload.flow_key,
+                flow_name: payload.flow_name || payload.flow_key,
+                flow_label: payload.flow_label || payload.flow_key,
+                display_order: payload.display_order || phaseSpec.flows.length + 1,
+                event_kind: payload.event_kind || ''
+            });
+            phaseSpec.flows.sort(sortFlows);
+        }
+
+        function ensureEventRotation() {
+            if (rotateTimer) return;
+            rotateTimer = window.setInterval(rotateEventFlow, 2000);
+        }
+
+        function stopEventRotation() {
+            if (!rotateTimer) return;
+            window.clearInterval(rotateTimer);
+            rotateTimer = null;
+        }
+
+        function rotateEventFlow() {
+            if (done || currentPhase !== EVENT_PHASE) return;
+            var phaseSpec = phaseByKey[EVENT_PHASE];
             if (!phaseSpec || !phaseSpec.flows || !phaseSpec.flows.length) return;
-            var records = activityCache[phase] || {};
-            var flows = phaseSpec.flows;
-            var start = rotatePosition[phase] == null ? -1 : rotatePosition[phase];
-            for (var offset = 1; offset <= flows.length; offset++) {
-                var idx = (start + offset) % flows.length;
-                var flow = flows[idx];
+            var records = activityCache[EVENT_PHASE] || {};
+            var start = rotatePosition[EVENT_PHASE] == null ? -1 : rotatePosition[EVENT_PHASE];
+            for (var offset = 1; offset <= phaseSpec.flows.length; offset++) {
+                var idx = (start + offset) % phaseSpec.flows.length;
+                var flow = phaseSpec.flows[idx];
                 var rec = records[flow.flow_key];
                 if (!rec) continue;
-                rotatePosition[phase] = idx;
-                var prefix = rec.timestamp ? rec.timestamp + ' ' : '';
-                var text = rec.message || (prefix + '正在' + rec.label);
-                row.message.textContent = text;
-                row.message.title = text;
-                row.title.textContent = phaseLabel(phase);
+                rotatePosition[EVENT_PHASE] = idx;
+                setMessage(formatRecord(rec));
                 return;
             }
         }
 
+        function formatRecord(rec) {
+            var prefix = rec.timestamp ? rec.timestamp + ' ' : '';
+            return rec.message || (prefix + '正在' + rec.label);
+        }
+
+        function setMessage(text) {
+            text = text || '等待回测开始';
+            if (row.message.title === text && row.message.textContent === text) return;
+            if (typeTimer) window.clearInterval(typeTimer);
+            row.message.title = text;
+            row.message.textContent = '';
+            var index = 0;
+            typeTimer = window.setInterval(function() {
+                index += 1;
+                row.message.textContent = text.slice(0, index);
+                if (index >= text.length) {
+                    window.clearInterval(typeTimer);
+                    typeTimer = null;
+                }
+            }, 18);
+        }
+
         function updateSignalProgress(payload) {
+            if (done) return;
             var percent = Number(payload && payload.percent);
             if (!isFinite(percent)) {
                 var completed = Number(payload && payload.completed || 0);
@@ -261,7 +225,75 @@
             row.fill.style.width = percent.toFixed(2) + '%';
         }
 
+        function renderDiagram() {
+            if (!row.diagram) return;
+            if (!phases.length) {
+                row.diagram.innerHTML = '<div style="font-size:11px;color:#98a2b3;">等待流程注册</div>';
+                return;
+            }
+            var html = ['<div class="gt-flow-line-root">'];
+            for (var i = 0; i < phases.length; i++) {
+                var phase = phases[i];
+                var active = phase.key === currentPhase;
+                html.push(
+                    '<div class="gt-flow-line-phase' + (active ? ' is-active' : '') + (phase.key === EVENT_PHASE ? ' is-event-phase' : '') + '" data-phase="' + escapeHtml(phase.key) + '">'
+                    + '<div class="gt-flow-phase-title">' + escapeHtml(phase.label || phase.key) + '</div>'
+                    + '<div class="gt-flow-line-track">'
+                );
+                var flows = phase.flows || [];
+                for (var j = 0; j < flows.length; j++) {
+                    var flow = flows[j];
+                    var nodeActive = active && phase.key !== EVENT_PHASE && flow.flow_key === activeFlowKey;
+                    html.push(
+                        '<div class="gt-flow-line-node' + (nodeActive ? ' is-current' : '') + '">'
+                        + '<span class="gt-flow-dot"></span>'
+                        + '<div class="gt-flow-node-label">' + escapeHtml(flow.flow_label || flow.flow_name || flow.flow_key) + '</div>'
+                        + '</div>'
+                    );
+                }
+                if (!flows.length) {
+                    html.push('<div class="gt-flow-empty">暂无节点</div>');
+                }
+                html.push('</div></div>');
+            }
+            html.push('</div>');
+            row.diagram.innerHTML = html.join('');
+        }
+
+        function ensureFlowLineStyle() {
+            if (document.getElementById('gt-flow-line-style')) return;
+            var style = document.createElement('style');
+            style.id = 'gt-flow-line-style';
+            style.textContent = [
+                '@keyframes gtFlowLineMove{0%{background-position:0 0}100%{background-position:28px 0}}',
+                '.gt-flow-line-root{display:flex;align-items:flex-start;gap:0;min-width:max-content;padding:0 2px 2px;}',
+                '.gt-flow-line-phase{position:relative;display:flex;flex-direction:column;align-items:stretch;min-width:96px;padding:0 8px;}',
+                '.gt-flow-phase-title{text-align:center;font-size:11px;font-weight:600;color:#64748b;line-height:1.2;margin-bottom:6px;white-space:nowrap;}',
+                '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:16px;padding-top:8px;}',
+                '.gt-flow-line-track:before{content:"";position:absolute;left:0;right:0;top:14px;height:2px;background:#d0d5dd;}',
+                '.gt-flow-line-phase.is-active .gt-flow-phase-title{color:#0f766e;}',
+                '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:repeating-linear-gradient(90deg,#14b8a6 0,#14b8a6 12px,#99f6e4 12px,#99f6e4 24px);background-size:28px 2px;animation:gtFlowLineMove .75s linear infinite;}',
+                '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-width:20px;}',
+                '.gt-flow-dot{width:12px;height:12px;border-radius:999px;background:#fff;border:2px solid #cbd5e1;box-sizing:border-box;}',
+                '.gt-flow-line-node.is-current .gt-flow-dot{border-color:#0f766e;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16);}',
+                '.gt-flow-node-label{margin-top:5px;font-size:10px;line-height:1.08;color:#475467;writing-mode:vertical-rl;text-orientation:mixed;white-space:nowrap;}',
+                '.gt-flow-line-node.is-current .gt-flow-node-label{color:#0f766e;font-weight:600;}',
+                '.gt-flow-empty{font-size:11px;color:#98a2b3;padding:4px 0 0;}'
+            ].join('');
+            document.head.appendChild(style);
+        }
+
+        function stopTimers() {
+            stopEventRotation();
+            if (typeTimer) {
+                window.clearInterval(typeTimer);
+                typeTimer = null;
+            }
+        }
+
         function markAllDone(success, message) {
+            done = true;
+            stopTimers();
             if (success) {
                 row.fill.style.width = '100%';
                 row.fill.style.background = 'linear-gradient(90deg,#12a150,#4caf50)';
@@ -276,6 +308,7 @@
                 row.message.textContent = message;
                 row.message.title = message;
             }
+            renderDiagram();
         }
 
         return {
@@ -289,8 +322,8 @@
                 updateSignalProgress({ completed: completed, total: total });
                 if (message) {
                     recordActivity({
-                        phase: phase || 'event_replay',
-                        flow_key: (phase || 'event_replay') + '.legacy',
+                        phase: phase || EVENT_PHASE,
+                        flow_key: (phase || EVENT_PHASE) + '.legacy',
                         flow_label: message,
                         message: message
                     });
