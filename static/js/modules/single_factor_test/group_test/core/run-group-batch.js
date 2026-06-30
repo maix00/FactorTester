@@ -33,6 +33,7 @@
         var rotateTimer = null;
         var typeTimer = null;
         var rotatePosition = {};
+        var lastMessageText = '';
         var done = false;
         var row = buildShell(progressContainer);
 
@@ -139,7 +140,7 @@
             renderDiagram();
             if (phase === EVENT_PHASE) {
                 ensureEventRotation();
-                rotateEventFlow();
+                if (!lastMessageText) rotateEventFlow();
             } else {
                 stopEventRotation();
                 var rec = activityCache[phase] && activityCache[phase][payload.flow_key];
@@ -198,8 +199,9 @@
 
         function setMessage(text) {
             text = text || '等待回测开始';
-            if (row.message.title === text && row.message.textContent === text) return;
+            if (lastMessageText === text) return;
             if (typeTimer) window.clearInterval(typeTimer);
+            lastMessageText = text;
             row.message.title = text;
             row.message.textContent = '';
             var index = 0;
@@ -271,8 +273,10 @@
                 '.gt-flow-phase-title{text-align:center;font-size:11px;font-weight:600;color:#64748b;line-height:1.2;margin-bottom:6px;white-space:nowrap;}',
                 '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:16px;padding-top:8px;}',
                 '.gt-flow-line-track:before{content:"";position:absolute;left:0;right:0;top:14px;height:2px;background:#d0d5dd;}',
+                '.gt-flow-line-track:after{content:"";position:absolute;left:0;right:0;top:13px;height:4px;border-radius:999px;opacity:0;pointer-events:none;}',
                 '.gt-flow-line-phase.is-active .gt-flow-phase-title{color:#0f766e;}',
-                '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:repeating-linear-gradient(90deg,#14b8a6 0,#14b8a6 12px,#99f6e4 12px,#99f6e4 24px);background-size:28px 2px;animation:gtFlowLineMove .75s linear infinite;}',
+                '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:#99f6e4;}',
+                '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:after{opacity:1;background:linear-gradient(90deg,transparent 0,rgba(20,184,166,.12) 18%,#14b8a6 48%,rgba(20,184,166,.12) 78%,transparent 100%);background-size:56px 4px;animation:gtFlowLineMove .75s linear infinite;}',
                 '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-width:20px;}',
                 '.gt-flow-dot{width:12px;height:12px;border-radius:999px;background:#fff;border:2px solid #cbd5e1;box-sizing:border-box;}',
                 '.gt-flow-line-node.is-current .gt-flow-dot{border-color:#0f766e;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16);}',
@@ -305,6 +309,7 @@
                 row.title.style.color = '#d92d20';
             }
             if (message) {
+                lastMessageText = message;
                 row.message.textContent = message;
                 row.message.title = message;
             }
