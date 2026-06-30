@@ -68,6 +68,7 @@ def _market_index(trading_day: str, times: list[str]) -> pd.MultiIndex:
 
 def test_load_raw_market_data_excludes_products_outside_run_window(monkeypatch):
     _stub_historical_fields(monkeypatch)
+    monkeypatch.setattr(group_module, "_supports_local_cnfutures_coverage", lambda product: True)
     old_data = pd.DataFrame(
         {DataColumn.CLOSE.name: [1.0, 2.0]},
         index=_market_index("2012-01-02", ["2012-01-01 21:00", "2012-01-02 09:00"]),
@@ -92,11 +93,29 @@ def test_load_raw_market_data_excludes_products_outside_run_window(monkeypatch):
 
 def test_load_raw_market_data_raises_for_in_range_missing_close(monkeypatch):
     _stub_historical_fields(monkeypatch)
+    monkeypatch.setattr(group_module, "_supports_local_cnfutures_coverage", lambda product: True)
     in_range_data = pd.DataFrame(
         {DataColumn.CLOSE.name: [1.0]},
         index=_market_index("2026-01-05", ["2026-01-05 09:01"]),
     )
     product = _Product("AP.CZC", _View(in_range_data, slice_result=pd.DataFrame()))
+
+    with pytest.raises(ValueError, match="本地行情缺口"):
+        group_module._load_raw_market_data_for(
+            [product],
+            _DataTime("2026-01-05 09:00"),
+            _DataTime("2026-01-05 15:00"),
+        )
+
+
+def test_load_raw_market_data_does_not_apply_local_coverage_to_other_sources(monkeypatch):
+    _stub_historical_fields(monkeypatch)
+    monkeypatch.setattr(group_module, "_supports_local_cnfutures_coverage", lambda product: False)
+    old_data = pd.DataFrame(
+        {DataColumn.CLOSE.name: [1.0]},
+        index=_market_index("2012-01-02", ["2012-01-02 09:00"]),
+    )
+    product = _Product("OTHER.SRC", _View(old_data, slice_result=pd.DataFrame()))
 
     with pytest.raises(ValueError, match="本地行情缺口"):
         group_module._load_raw_market_data_for(

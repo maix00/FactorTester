@@ -1987,6 +1987,8 @@ def _load_raw_market_data_for(
 
 
 def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
+    if not _supports_local_cnfutures_coverage(product):
+        return False
     coverage = _product_data_coverage(product)
     if coverage is None:
         return False
@@ -1998,6 +2000,20 @@ def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> boo
     if end_key is not None and data_start is not None and data_start > end_key:
         return True
     return False
+
+
+def _supports_local_cnfutures_coverage(product: Any) -> bool:
+    """Only LocalCNFutures has the current file-coverage == tradability contract.
+
+    Other data sources/product types may expose different lifecycle metadata or
+    coverage semantics; until they register their own checker, an empty slice is
+    treated as missing market data rather than a safe candidate-pool removal.
+    """
+    try:
+        from sources.LocalCNFutures.CNFutures import CNFutures, CNFuturesContract
+        return isinstance(product, (CNFutures, CNFuturesContract))
+    except Exception:
+        return False
 
 
 def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
