@@ -244,10 +244,16 @@ class ProductDataView(UniqueNameObject):
             ),
         )
     
-    def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
+    def get_data(
+        self,
+        copy: bool = False,
+        start_calc_point: Optional[Any] = None,
+        end_calc_point: Optional[Any] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
         """
         获取 DataFrame（通过 DataHub 缓存 + 自动回收）。
-        start_calc_point: DataTime | None，为 None 时不截断。
+        start_calc_point/end_calc_point: DataTime | None，为 None 时对应边界不截断。
         copy=True 时返回副本，避免外部修改影响缓存。
 
         Issue #3: start_calc_point 必须显式传入，不再隐式从 _active_tester 读取。
@@ -257,8 +263,8 @@ class ProductDataView(UniqueNameObject):
         else:
             data = self.load_data(**kwargs)
 
-        if start_calc_point is not None:
-            data = self._filter_data_by_start_calc_point(data, time=start_calc_point)
+        if start_calc_point is not None or end_calc_point is not None:
+            data = self._filter_data_by_calc_window(data, start=start_calc_point, end=end_calc_point)
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -284,21 +290,41 @@ class ProductDataView(UniqueNameObject):
 
         Issue #3: time 参数必须显式传入，不再通过 _active_tester 隐式获取。
         """
+        return self._filter_data_by_calc_window(data, start=time, copy=copy)
+
+    def _filter_data_by_calc_window(
+        self,
+        data: pd.DataFrame,
+        *,
+        start: Optional[Any] = None,
+        end: Optional[Any] = None,
+        copy: bool = False,
+    ) -> pd.DataFrame:
+        """按 DataTime 起止边界截断数据。"""
         if data.empty:
             return data
-        if time is None:
+        if start is None and end is None:
             return data.copy() if copy else data
 
         from ..types import DataTime
 
-        if not isinstance(time, DataTime):
-            raise TypeError(f"_filter_data_by_start_calc_point: time must be DataTime, got {type(time)}")
-        if not time.is_set:
+        if start is not None and not isinstance(start, DataTime):
+            raise TypeError(f"_filter_data_by_calc_window: start must be DataTime, got {type(start)}")
+        if end is not None and not isinstance(end, DataTime):
+            raise TypeError(f"_filter_data_by_calc_window: end must be DataTime, got {type(end)}")
+
+        start_set = start is not None and start.is_set
+        end_set = end is not None and end.is_set
+        if not start_set and not end_set:
             return data.copy() if copy else data
 
         di = DataIndex(data.index)
-        # 只有起始点无结束点：用 slice_by(start_ts, None)
-        mask = di.slice_by(time.ts, None)
+        if start_set and end_set:
+            mask = di.slice_by_datatime(start, end)
+        else:
+            start_ts = start.ts if start is not None and start_set else None
+            end_ts = end.ts if end is not None and end_set else None
+            mask = di.slice_by(start_ts, end_ts)
         data = cast(pd.DataFrame, data[mask])
         return cast(pd.DataFrame, data.copy()) if copy else data
     
@@ -314,14 +340,20 @@ class ProductDataView(UniqueNameObject):
     def _check_is_adjusted(col: str) -> bool:
         return col.endswith("_ADJUSTED")
 
-    def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True, start_calc_point: Optional[Any] = None) -> pd.DataFrame:
+    def get_and_adjust_cols(
+        self,
+        cols: List[str] | str,
+        copy: bool = True,
+        start_calc_point: Optional[Any] = None,
+        end_calc_point: Optional[Any] = None,
+    ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
         cols = list(set(cols))
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy, start_calc_point=start_calc_point)
+        df = self.get_data(copy=copy, start_calc_point=start_calc_point, end_calc_point=end_calc_point)
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

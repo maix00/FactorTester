@@ -182,6 +182,110 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
     ]
 
 
+def test_signal_precomputed_merges_equivalent_exact_windows_across_timezones():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, *, start_dt=None, end_dt=None):
+            self.calls += 1
+            return pd.DataFrame(
+                {"P1": [1.0, 2.0]},
+                index=pd.DatetimeIndex([
+                    pd.Timestamp("2026-01-01 01:00", tz="UTC"),
+                    pd.Timestamp("2026-01-31 07:00", tz="UTC"),
+                ]),
+            )
+
+    factor = _FakeFactor()
+    configs = {
+        s1: StrategyConfig(
+            strategy=s1,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                FactorModule.factor: factor,
+                RunWindowModule.time_precision: "exact",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-01-31",
+                RunWindowModule.end_time: "15:00",
+            },
+        ),
+        s2: StrategyConfig(
+            strategy=s2,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                FactorModule.factor: factor,
+                RunWindowModule.time_precision: "exact",
+                RunWindowModule.timezone: "UTC",
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "01:00",
+                RunWindowModule.end_date: "2026-01-31",
+                RunWindowModule.end_time: "07:00",
+            },
+        ),
+    }
+    account = AccountState(strategy_configs=configs)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    assert factor.calls == 1
+    assert len(account.precomputed_factor_tables) == 1
+
+
+def test_signal_precomputed_evaluates_factor_with_run_window_envelope():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        def __init__(self):
+            self.calls: list[tuple[object, object]] = []
+
+        def evaluate(self, *, start_dt=None, end_dt=None):
+            self.calls.append((start_dt, end_dt))
+            return pd.DataFrame(
+                {"P1": [1.0, 2.0, 3.0, 4.0]},
+                index=pd.to_datetime([
+                    "2024-01-02 09:00",
+                    "2024-01-03 09:00",
+                    "2024-01-04 09:00",
+                    "2024-01-05 09:00",
+                ]),
+            )
+
+    factor = _FakeFactor()
+    base_fields = {
+        FactorModule.factor: factor,
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_time: "09:00",
+        RunWindowModule.end_time: "15:00",
+    }
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(
+            strategy=s1,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={**base_fields, RunWindowModule.start_date: "2024-01-02", RunWindowModule.end_date: "2024-01-03"},
+        ),
+        s2: StrategyConfig(
+            strategy=s2,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={**base_fields, RunWindowModule.start_date: "2024-01-04", RunWindowModule.end_date: "2024-01-05"},
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    assert len(factor.calls) == 1
+    start_dt, end_dt = factor.calls[0]
+    assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-05 15:00", tz="Asia/Shanghai")
+
+
 def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 

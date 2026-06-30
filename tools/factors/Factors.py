@@ -184,7 +184,7 @@ class Factor(UniqueNameObject, FactorExpr):
             raise AttributeError(item)
         return getattr(self._expr, item)
 
-    def evaluate(self, products: Sequence['Product']|set['Product'], 
+    def evaluate(self, products: Sequence['Product']|set['Product'],
                  freq: Optional[DataFreq] = None, *args, **kwargs) -> pd.DataFrame:
         """
         计算因子值。
@@ -296,7 +296,14 @@ class Factor(UniqueNameObject, FactorExpr):
 
         # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
         _tester = Factor._get_active_tester()
-        start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
+        start_calc_point = kwargs.get("start_dt")
+        if start_calc_point is None:
+            start_calc_point = kwargs.get("start_calc_point")
+        if start_calc_point is None:
+            start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
+        end_calc_point = kwargs.get("end_dt")
+        if end_calc_point is None:
+            end_calc_point = kwargs.get("end_calc_point")
 
         # ── 预加载：收集需要的列，每个品种只读一次 ──
         from tools.data.views.ProductDataView import ProductDataView
@@ -307,7 +314,12 @@ class Factor(UniqueNameObject, FactorExpr):
         if columns:
             for p in products:
                 dm: ProductDataView = getattr(p, freq.name)
-                data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
+                data = dm.get_and_adjust_cols(
+                    columns,
+                    copy=False,
+                    start_calc_point=start_calc_point,
+                    end_calc_point=end_calc_point,
+                )
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
         panel_timeline = build_panel_timeline(products, freq, preloaded)
@@ -328,6 +340,7 @@ class Factor(UniqueNameObject, FactorExpr):
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
                                      cache=_intermediate_cache, start_calc_point=start_calc_point,
+                                     end_calc_point=end_calc_point,
                                      run_result=r if _tester is not None else None,
                                      panel_timeline=panel_timeline)
 

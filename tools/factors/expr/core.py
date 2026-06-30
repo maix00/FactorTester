@@ -42,6 +42,7 @@ class EvaluateContext(NamedTuple):
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
     start_calc_point: Optional[Any] = None  # DataTime | None
+    end_calc_point: Optional[Any] = None  # DataTime | None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
 
@@ -224,6 +225,7 @@ class FactorExpr:
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
                 start_calc_point=kwargs.get('start_calc_point', None),
+                end_calc_point=kwargs.get('end_calc_point', None),
                 run_result=kwargs.get('run_result', None),
                 panel_timeline=kwargs.get('panel_timeline', None),
             )

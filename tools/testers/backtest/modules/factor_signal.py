@@ -9,6 +9,7 @@ values up at SIGNAL events.
 from __future__ import annotations
 
 from collections import defaultdict
+import inspect
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -225,7 +226,7 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     drafts: list[EventDraft] = []
     for factor_key, strategies in by_factor.items():
         factor = factor_by_key[factor_key]
-        table = factor.evaluate()
+        table = _evaluate_factor_for_strategies(factor, strategies, account)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
             factor_key, strategies, account,
         ).items():
@@ -280,6 +281,41 @@ def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
     )
 
 
+def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> pd.DataFrame:
+    start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
+    evaluate = getattr(factor, "evaluate")
+    if start_dt is None or end_dt is None:
+        return evaluate()
+    try:
+        signature = inspect.signature(evaluate)
+    except (TypeError, ValueError):
+        return evaluate()
+    params = signature.parameters
+    accepts_kwargs = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values())
+    if accepts_kwargs or "start_dt" in params or "end_dt" in params:
+        return evaluate(start_dt=start_dt, end_dt=end_dt)
+    if "run_window" in params:
+        return evaluate(run_window=(start_dt, end_dt))
+    return evaluate()
+
+
+def _run_window_envelope_for_strategies(strategies: list, account) -> tuple[DataTime | None, DataTime | None]:
+    starts: list[DataTime] = []
+    ends: list[DataTime] = []
+    for strategy in strategies:
+        start_dt, end_dt = _strategy_run_window_datetimes(account.config_for(strategy))
+        if start_dt is None or end_dt is None:
+            return None, None
+        starts.append(start_dt)
+        ends.append(end_dt)
+    if not starts or not ends:
+        return None, None
+    return (
+        min(starts, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
+        max(ends, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
+    )
+
+
 def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
     if not calendar_frequency or str(calendar_frequency) == "auto":
@@ -325,21 +361,10 @@ def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | 
 
 
 def _strategy_run_window_key(config) -> tuple:
-    start_date = str(config.get(RunWindowModule.start_date, "") or "").strip()
-    end_date = str(config.get(RunWindowModule.end_date, "") or "").strip()
-    if not start_date or not end_date:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if start_dt is None or end_dt is None:
         return ("unbounded",)
-    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
-    if precision == "trading_day":
-        return ("trading_day", start_date, end_date)
-    return (
-        "exact",
-        start_date,
-        str(config.get(RunWindowModule.start_time, "00:00") or "00:00"),
-        end_date,
-        str(config.get(RunWindowModule.end_time, "23:59") or "23:59"),
-        str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai"),
-    )
+    return (str(start_dt.precision), start_dt.ts, end_dt.ts)
 
 
 def _evaluate_signal_live(account, ctx) -> None:

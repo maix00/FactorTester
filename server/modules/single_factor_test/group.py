@@ -1819,8 +1819,10 @@ class _FactorEvaluateAdapter:
         product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
         return ("factor_evaluate_adapter", factor_key, product_key)
 
-    def evaluate(self) -> pd.DataFrame:
-        self._factor.evaluate(self._products)
+    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None) -> pd.DataFrame:
+        if run_window is not None and (start_dt is None or end_dt is None):
+            start_dt, end_dt = run_window
+        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt)
         return self._factor.table
 
 

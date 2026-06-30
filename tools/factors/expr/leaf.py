@@ -97,7 +97,12 @@ class ColumnRef(FactorExpr):
             col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA
 
             # 使用 get_and_adjust_cols 确保复权列（如 CLOSE_ADJUSTED）被自动计算
-            data = dm.get_and_adjust_cols([col_name], copy=False, start_calc_point=ctx.start_calc_point)
+            data = dm.get_and_adjust_cols(
+                [col_name],
+                copy=False,
+                start_calc_point=ctx.start_calc_point,
+                end_calc_point=ctx.end_calc_point,
+            )
             if data.empty:
                 continue
             series_dict[p] = data[col_name]
