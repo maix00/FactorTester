@@ -383,21 +383,37 @@ def _supports_local_cnfutures_coverage(product: Any) -> bool:
 
 
 def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    starts: list[pd.Timestamp] = []
+    ends: list[pd.Timestamp] = []
     try:
-        frame = product.get_data()
+        freqs = list(product.list_available_freqs())
     except Exception:
         return None
-    if frame is None or frame.empty:
+    for freq in freqs:
+        try:
+            data = getattr(product, freq.name).get_data(copy=False)
+        except Exception:
+            continue
+        if data is None or data.empty:
+            continue
+        try:
+            index = DataIndex(data.index).signal_index
+        except Exception:
+            try:
+                index = DataIndex.event_timestamps_from_index(data.index)
+            except Exception:
+                index = pd.DatetimeIndex(data.index)
+        if len(index) == 0:
+            continue
+        start_key = _datetime_sort_key(index.min())
+        end_key = _datetime_sort_key(index.max())
+        if start_key is not None:
+            starts.append(start_key)
+        if end_key is not None:
+            ends.append(end_key)
+    if not starts or not ends:
         return None
-    index = frame.index
-    try:
-        timestamps = DataIndex.event_timestamps_from_index(index)
-    except Exception:
-        timestamps = pd.DatetimeIndex(index)
-    timestamps = pd.DatetimeIndex(pd.to_datetime(timestamps, errors="coerce")).dropna()
-    if timestamps.empty:
-        return None
-    return cast(pd.Timestamp, timestamps.min()), cast(pd.Timestamp, timestamps.max())
+    return min(starts), max(ends)
 
 
 def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
