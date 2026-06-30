@@ -35,3 +35,5 @@ class EventDraft:
                             # same timestamp; the scheduler batches/dispatches by this
                             # field, not by payload (a SIGNAL event has no Order yet)
     payload: Any = None
+    index_key: Any = None
+    index_names: tuple[Any, ...] = ()

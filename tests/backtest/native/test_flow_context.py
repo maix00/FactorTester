@@ -18,6 +18,16 @@ class _FakeQueue:
         self.pushed.append(draft)
 
 
+class _BulkFakeQueue(_FakeQueue):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bulk_called = False
+
+    def push_events(self, drafts: list[EventDraft]) -> None:
+        self.bulk_called = True
+        self.pushed.extend(drafts)
+
+
 def test_set_get_roundtrip():
     ctx = FlowContext(timestamp=None, event_queue=_FakeQueue())
     assert ctx.get(REF, "default") == "default"
@@ -42,6 +52,19 @@ def test_set_pushes_list_of_event_drafts():
         EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-02"), s),
     ]
     ctx.set(REF, drafts)
+    assert queue.pushed == drafts
+
+
+def test_set_pushes_list_of_event_drafts_in_bulk_when_available():
+    queue = _BulkFakeQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+    s = Strategy(alias="S")
+    drafts = [
+        EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), s),
+        EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-02"), s),
+    ]
+    ctx.set(REF, drafts)
+    assert queue.bulk_called is True
     assert queue.pushed == drafts
 
 

@@ -12,16 +12,53 @@ DatetimeIndex, transparently) so callers don't reimplement level detection.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any, cast
+
 import pandas as pd
 
 from tools.data.types.time_index import DataIndex
 
 
+@dataclass(frozen=True)
+class IndexEventTime:
+    timestamp: pd.Timestamp
+    index_key: Any
+    index_names: tuple[Any, ...]
+
+
 def signal_timestamps(table: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-    """The flat, tz-aware DatetimeIndex of actual event timestamps for
-    `table` -- the signal/trade_time level when `table.index` is a
-    MultiIndex, or the index itself otherwise."""
-    return DataIndex(table.index).signal_index
+    """Flat event timestamps for `table`.
+
+    Event replay uses the finest/last index level as the actual event time.
+    Extra MultiIndex levels such as trading_day remain part of the event
+    identity via `signal_event_times`.
+    """
+    return DataIndex(table.index).finest_index
+
+
+def signal_event_times(table: pd.DataFrame | pd.Series) -> list[IndexEventTime]:
+    """Return replay event keys from the table's original index.
+
+    For MultiIndex tables the timestamp is the last level, while `index_key`
+    preserves the full index row (trading_day, contract month, trade_time,
+    etc.). This keeps night-session trading-day semantics attached to the
+    event instead of flattening everything to one timestamp column.
+    """
+    index = table.index
+    if isinstance(index, pd.MultiIndex):
+        names = tuple(index.names)
+        timestamps = pd.DatetimeIndex(index.get_level_values(-1))
+        return [
+            IndexEventTime(cast(pd.Timestamp, pd.Timestamp(timestamp)), tuple(key), names)
+            for timestamp, key in zip(timestamps, index.tolist(), strict=True)
+        ]
+    timestamps = pd.DatetimeIndex(index)
+    names = (index.name,)
+    return [
+        IndexEventTime(cast(pd.Timestamp, pd.Timestamp(timestamp)), cast(pd.Timestamp, pd.Timestamp(timestamp)), names)
+        for timestamp in timestamps
+    ]
 
 
 def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) -> pd.Series:
@@ -39,7 +76,7 @@ def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) 
             return table.loc[ts]
         if not asof:
             raise KeyError(timestamp)
-        row = table.asof(ts)
+        row = cast(pd.Series, table.asof(ts))
         if row.isna().all():
             raise KeyError(f"no row at or before {ts!r}")
         return row
@@ -55,6 +92,19 @@ def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) 
     if isinstance(selected, pd.DataFrame):
         if len(selected) != 1:
             raise KeyError(f"ambiguous row(s) for timestamp={value!r}: {len(selected)} matches")
+        selected = selected.iloc[0]
+    return selected
+
+
+def row_at_index_key(table: pd.DataFrame, index_key: Any) -> pd.Series:
+    """Row matching the exact original index key carried by an EventDraft."""
+    if not isinstance(table.index, pd.MultiIndex):
+        return table.loc[pd.Timestamp(index_key)]
+    key = tuple(index_key) if isinstance(index_key, tuple) else (index_key,)
+    selected = table.loc[key]
+    if isinstance(selected, pd.DataFrame):
+        if len(selected) != 1:
+            raise KeyError(f"ambiguous row(s) for index_key={key!r}: {len(selected)} matches")
         selected = selected.iloc[0]
     return selected
 

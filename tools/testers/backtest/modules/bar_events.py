@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import factor_runtime_key
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.time_index_lookup import signal_event_times
 
 
 class BarEventModule(ExecutableModule):
@@ -57,8 +58,14 @@ def _schedule_bar_events(account, ctx) -> None:
     if not representative_by_factor:
         return
     drafts = [
-        EventDraft(EventKind.BAR, cast(pd.Timestamp, pd.Timestamp(ts)), strategy)
-        for ts in table.index
+        EventDraft(
+            EventKind.BAR,
+            event_time.timestamp,
+            strategy,
+            index_key=event_time.index_key,
+            index_names=event_time.index_names,
+        )
+        for event_time in signal_event_times(table)
         for strategy in representative_by_factor.values()
     ]
     ctx.set(BarEventModule.dispatched_bar_events, drafts)

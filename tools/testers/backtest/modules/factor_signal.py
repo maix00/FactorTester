@@ -21,7 +21,12 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
 from tools.testers.backtest.modules.run_window import RunWindowModule
-from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import (
+    IndexEventTime,
+    row_at,
+    row_at_index_key,
+    signal_event_times,
+)
 
 
 class FactorSignalModule(ExecutableModule):
@@ -187,10 +192,7 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
         scheduled = _clip_signal_table_to_strategy_window(aligned, account.config_for(strategies[0]))
-        timestamps = signal_timestamps(scheduled)
-        for strategy in strategies:
-            for ts in timestamps:
-                drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
+        _append_signal_drafts(drafts, signal_event_times(scheduled), strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
 
@@ -230,12 +232,24 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
             first_config = account.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
                 tables[schedule_key] = _schedule_table_for_strategy(table, first_config)
-            timestamps = signal_timestamps(tables[schedule_key])
             for strategy in scheduled_strategies:
                 table_keys[strategy] = schedule_key
-                for ts in timestamps:
-                    drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
+            _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
+
+
+def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEventTime], strategies: list) -> None:
+    for event_time in event_times:
+        for strategy in strategies:
+            drafts.append(
+                EventDraft(
+                    EventKind.SIGNAL,
+                    event_time.timestamp,
+                    strategy,
+                    index_key=event_time.index_key,
+                    index_names=event_time.index_names,
+                )
+            )
 
 
 def _group_strategies_by_precomputed_schedule(
@@ -373,7 +387,8 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue
         try:
-            row = row_at(table, ctx.timestamp)
+            draft = ctx.draft_for(strategy)
+            row = row_at_index_key(table, draft.index_key) if draft.index_key is not None else row_at(table, ctx.timestamp)
         except KeyError:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue

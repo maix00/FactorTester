@@ -14,7 +14,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
-    FactorSignalModule, _evaluate_signal_live, _observe_signal_live_bar,
+    FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
     normalize_signal_timestamp,
 )
@@ -180,6 +180,90 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
         (pd.Timestamp("2024-01-02 09:00"), s1),
         (pd.Timestamp("2024-01-03 09:00"), s2),
     ]
+
+
+def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        def evaluate(self):
+            return pd.DataFrame(
+                {"P1": [1.0, 2.0]},
+                index=pd.to_datetime(["2024-01-01 09:00", "2024-01-02 09:00"]),
+            )
+
+    fields = {
+        FactorModule.factor: _FakeFactor(),
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_date: "2024-01-01",
+        RunWindowModule.end_date: "2024-01-02",
+        RunWindowModule.start_time: "08:00",
+        RunWindowModule.end_time: "10:00",
+    }
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
+    })
+    queue = EventQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    batches: list[tuple[pd.Timestamp, set[Strategy]]] = []
+    queue.set_dispatcher(
+        EventKind.SIGNAL,
+        lambda batch: batches.append((batch[0].timestamp, {draft.strategy for draft in batch})),
+    )
+    queue.run_until_drained()
+
+    assert len(account.precomputed_factor_tables) == 1
+    assert batches == [
+        (pd.Timestamp("2024-01-01 09:00"), {s1, s2}),
+        (pd.Timestamp("2024-01-02 09:00"), {s1, s2}),
+    ]
+
+
+def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        pass
+
+    factor = _FakeFactor()
+    configs = {
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"}),
+                           field_values={FactorModule.factor: factor}),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
+                           field_values={FactorModule.factor: factor}),
+    }
+    account = AccountState(strategy_configs=configs)
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    index = pd.MultiIndex.from_tuples(
+        [
+            (pd.Timestamp("2026-03-10"), timestamp),
+            (pd.Timestamp("2026-03-09"), timestamp),
+        ],
+        names=["trading_day", "trade_time"],
+    )
+    table = pd.DataFrame({"P1": [10.0, 20.0]}, index=index)
+    key = (("object", id(factor)), "factor", ("unbounded",))
+    account.precomputed_factor_tables = {key: table}
+    account.precomputed_factor_table_keys = {s1: key, s2: key}
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+        drafts_by_strategy={
+            s1: [EventDraft(EventKind.SIGNAL, timestamp, s1, index_key=index[0], index_names=index.names)],
+            s2: [EventDraft(EventKind.SIGNAL, timestamp, s2, index_key=index[1], index_names=index.names)],
+        },
+    )
+
+    _evaluate_signal_precomputed(account, ctx)
+
+    assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 10.0}
+    assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 20.0}
 
 
 def test_signal_precomputed_groups_by_adapter_cache_key():

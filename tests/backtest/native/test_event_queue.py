@@ -68,3 +68,66 @@ def test_batches_same_timestamp_and_kind_across_strategies():
     order_batch = next(b for b in batches if b[0].kind == EventKind.ORDER)
     assert {d.strategy for d in signal_batch} == {s1, s2}
     assert {d.strategy for d in order_batch} == {s3}
+
+
+def test_push_events_bulk_preserves_timestamp_kind_ordering():
+    queue = EventQueue()
+    s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
+    seen: list[tuple[pd.Timestamp, EventKind, set[Strategy]]] = []
+
+    queue.set_dispatcher(
+        EventKind.SIGNAL,
+        lambda batch: seen.append((batch[0].timestamp, EventKind.SIGNAL, {draft.strategy for draft in batch})),
+    )
+    queue.set_dispatcher(
+        EventKind.ORDER,
+        lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER, {draft.strategy for draft in batch})),
+    )
+
+    t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
+    queue.push_events([
+        EventDraft(EventKind.SIGNAL, t2, s1),
+        EventDraft(EventKind.ORDER, t1, s1),
+        EventDraft(EventKind.SIGNAL, t1, s1),
+        EventDraft(EventKind.SIGNAL, t1, s2),
+    ])
+    queue.run_until_drained()
+
+    assert seen == [
+        (t1, EventKind.SIGNAL, {s1, s2}),
+        (t1, EventKind.ORDER, {s1}),
+        (t2, EventKind.SIGNAL, {s1}),
+    ]
+
+
+def test_event_queue_batches_same_timestamp_even_with_different_index_keys():
+    queue = EventQueue()
+    s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
+    batches: list[list[EventDraft]] = []
+    queue.set_dispatcher(EventKind.SIGNAL, lambda batch: batches.append(batch))
+
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    queue.push_events([
+        EventDraft(
+            EventKind.SIGNAL,
+            timestamp,
+            s1,
+            index_key=(pd.Timestamp("2026-03-10"), timestamp),
+            index_names=("trading_day", "trade_time"),
+        ),
+        EventDraft(
+            EventKind.SIGNAL,
+            timestamp,
+            s2,
+            index_key=(pd.Timestamp("2026-03-09"), timestamp),
+            index_names=("trading_day", "trade_time"),
+        ),
+    ])
+    queue.run_until_drained()
+
+    assert len(batches) == 1
+    assert {draft.strategy for draft in batches[0]} == {s1, s2}
+    assert {draft.index_key[0] for draft in batches[0]} == {
+        pd.Timestamp("2026-03-09"),
+        pd.Timestamp("2026-03-10"),
+    }

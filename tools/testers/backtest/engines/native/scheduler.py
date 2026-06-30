@@ -196,8 +196,12 @@ class FlowContext:
         if isinstance(value, EventDraft):
             self._event_queue.push_event(value)
         elif isinstance(value, list) and value and isinstance(value[0], EventDraft):
-            for draft in value:
-                self._event_queue.push_event(draft)
+            push_events = getattr(self._event_queue, "push_events", None)
+            if callable(push_events):
+                push_events(value)
+            else:
+                for draft in value:
+                    self._event_queue.push_event(draft)
 
     def payload_for(self, strategy: "Strategy") -> Any:
         """For event kinds that only ever carry one draft per strategy per
@@ -221,6 +225,14 @@ class FlowContext:
         just the last one."""
         return [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
 
+    def draft_for(self, strategy: "Strategy") -> EventDraft:
+        drafts = self._drafts_by_strategy[strategy]
+        if len(drafts) != 1:
+            raise SchedulerError(
+                f"draft_for expected exactly one draft for {strategy!r} in this "
+                f"batch, found {len(drafts)}")
+        return drafts[0]
+
 
 # ── EventQueue ────────────────────────────────────────────────────
 
@@ -243,6 +255,12 @@ class EventQueue:
     def push_event(self, draft: EventDraft) -> None:
         heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
 
+    def push_events(self, drafts: list[EventDraft]) -> None:
+        if not drafts:
+            return
+        self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
+        heapq.heapify(self._heap)
+
     def pending_count(self) -> int:
         """O(1) -- `len()` on a list, not a heap walk."""
         return len(self._heap)
@@ -253,20 +271,17 @@ class EventQueue:
         that inner loop is where real work (and real wall-clock time) is
         spent, not the batching loop itself."""
         while self._heap:
-            _, _, _, first = heapq.heappop(self._heap)
+            first_ts, first_kind, _, first = heapq.heappop(self._heap)
             batch = [first]
             while (
                 self._heap
-                and self._heap[0][0] == first.timestamp
-                and self._heap[0][1] == first.kind
+                and self._heap[0][0] == first_ts
+                and self._heap[0][1] == first_kind
             ):
                 batch.append(heapq.heappop(self._heap)[3])
             dispatcher = self._dispatchers.get(first.kind)
             if dispatcher is not None:
                 dispatcher(batch)
-
-
-# ── main loop ─────────────────────────────────────────────────────
 
 
 class _ProgressTracker:
