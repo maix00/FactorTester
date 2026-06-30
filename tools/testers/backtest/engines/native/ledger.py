@@ -95,6 +95,16 @@ class AccountState:
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
         )
+        self.raw_market_data: dict[str, Any] = {}
+        self.backtest_included_products: frozenset[Any] | None = None
+        self.backtest_excluded_out_of_range_products: tuple[Any, ...] = ()
+        self.historical_field_provider: Any = None
+        self.trading_day_resolver: Any = None
+        self.historical_field_policy: str | None = None
+        self.historical_field_names: tuple[str, ...] = ()
+        self.historical_field_frames: Any = None
+        self.volume_table: Any = None
+        self.current_prices_table: Any = None
         self.results = ResultStore()
 
     def ledger_for(self, order: "Order") -> Ledger:

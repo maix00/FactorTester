@@ -74,6 +74,21 @@ def test_initialize_ledgers_use_int_position_keeps_quantity_as_int():
     assert entry.quantity == 0
 
 
+def test_initialize_ledgers_uses_effective_backtest_product_universe():
+    s = Strategy(alias="S")
+    in_range, out_of_range = _product(), _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = AccountState(strategy_configs={s: config})
+    account.backtest_included_products = frozenset({in_range})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({in_range, out_of_range}))
+
+    _initialize_ledgers(account, ctx)
+
+    positions = account.ledgers[s].get(LedgerModule.positions)
+    assert set(positions) == {in_range}
+
+
 def test_cash_zeros_after_full_rebalance_with_two_products():
     """Σ target_weights = 1 -> cash should be exactly zero after a full
     rebalance trade batch (algebraic result, not approximation)."""

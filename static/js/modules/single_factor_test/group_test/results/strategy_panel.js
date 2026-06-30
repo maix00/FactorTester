@@ -42,6 +42,16 @@
     function _pushCapitalRows(rows, data) {
         if (!data) return;
         _pushRunSettingRows(rows, data);
+        var runtimeRows = Array.isArray(data.runtime_info_rows) ? data.runtime_info_rows : [];
+        for (var ri = 0; ri < runtimeRows.length; ri++) {
+            var item = runtimeRows[ri] || {};
+            rows.push({
+                type: item.type || '运行信息',
+                status: item.status || _runtimeStatusLabel(item.level),
+                detail: item.detail || item.message || '',
+                detailHtml: item.detailHtml || '',
+            });
+        }
         if (data.capital_warning) {
             rows.push({
                 type: '资金约束',
@@ -153,6 +163,40 @@
             + '</tr>';
     }
 
+    function _runtimeStatusLabel(level) {
+        if (level === 'warning') return '提示';
+        if (level === 'error') return '异常';
+        return '信息';
+    }
+
+    function _ensureTable() {
+        var layer = document.getElementById('gt-layer-strategy');
+        var head = document.getElementById('gt-strategy-head');
+        var body = document.getElementById('gt-strategy-body');
+        if (!layer || !head || !body) return null;
+        layer.style.display = '';
+        if (!head.innerHTML) {
+            head.innerHTML = '<tr><th class="gt-strategy-type-cell">类型</th><th class="gt-strategy-status-cell">状态</th><th class="gt-strategy-detail-cell">说明</th></tr>';
+        }
+        return body;
+    }
+
+    function pushRuntimeInfo(row) {
+        var body = _ensureTable();
+        if (!body) return;
+        var normalized = row || {};
+        var key = normalized.code || normalized.detail || normalized.message || JSON.stringify(normalized);
+        if (!body._gtRuntimeInfoKeys) body._gtRuntimeInfoKeys = {};
+        if (body._gtRuntimeInfoKeys[key]) return;
+        body._gtRuntimeInfoKeys[key] = true;
+        body.insertAdjacentHTML('beforeend', _rowHtml({
+            type: normalized.type || '运行信息',
+            status: normalized.status || _runtimeStatusLabel(normalized.level),
+            detail: normalized.detail || normalized.message || '',
+            detailHtml: normalized.detailHtml || '',
+        }));
+    }
+
     function render(multiSessionActive, multiSessionBatches, capitalWarningData) {
         var layer = document.getElementById('gt-layer-strategy');
         var status = document.getElementById('gt-strategy-status');
@@ -209,5 +253,6 @@
     GT.results.strategyPanel = {
         render: render,
         update: updatePanel,
+        pushRuntimeInfo: pushRuntimeInfo,
     };
 })();

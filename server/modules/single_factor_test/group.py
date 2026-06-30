@@ -540,8 +540,9 @@ def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, f
     if product is not None:
         display = product_display_name(product)
         fee_display = _display_product_with_fee(product, fee_rates)
-        if fee_display.get('fee'):
-            display['fee'] = fee_display.get('fee')
+        fee_value = fee_display.get('fee')
+        if fee_value:
+            display['fee'] = str(fee_value)
     else:
         display = _display_product_with_fee(raw_name, fee_rates)
     name = display.get('name') or raw_name
@@ -662,8 +663,9 @@ def _event_position_contribution_rows(
     for timestamp in timestamps:
         positions = position_curve.get(timestamp) or {}
         notionals = notional_curve.get(timestamp) or {}
+        equity_raw = equity_curve.get(timestamp)
         try:
-            equity = float(equity_curve.get(timestamp))
+            equity = float(equity_raw) if equity_raw is not None else None
         except Exception:
             equity = None
         if equity is None or not math.isfinite(equity):
@@ -684,7 +686,7 @@ def _event_position_contribution_rows(
                 continue
             notional = notionals.get(instrument)
             try:
-                notional_value = abs(float(notional))
+                notional_value = abs(float(notional)) if notional is not None else 0.0
             except Exception:
                 notional_value = 0.0
             if notional_value <= 0:
@@ -1909,9 +1911,16 @@ def _load_raw_market_data_for(
     follow the same rules as factor evaluation.
     """
     series_by_product: dict[Any, pd.Series] = {}
+    missing_products: list[str] = []
+    excluded_out_of_range: list[str] = []
     for product in products:
         try:
-            freq = product.get_current_freq()
+            available_freqs = list(product.list_available_freqs())
+            if not available_freqs:
+                missing_products.append(str(getattr(product, "name", product)))
+                continue
+            current_freq = getattr(product, "current_freq", None)
+            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
                 [DataColumn.CLOSE.name],
@@ -1921,10 +1930,28 @@ def _load_raw_market_data_for(
                 warmup_window=warmup_window,
             )
         except (ValueError, KeyError):
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(str(getattr(product, "name", product)))
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
             continue
         if df.empty or DataColumn.CLOSE.name not in df.columns:
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(str(getattr(product, "name", product)))
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
             continue
         series_by_product[product] = df[DataColumn.CLOSE.name]
+    if missing_products:
+        sample = ", ".join(sorted(set(missing_products))[:20])
+        suffix = "" if len(set(missing_products)) <= 20 else f" 等 {len(set(missing_products))} 个"
+        start_text = getattr(start_dt, "ts", start_dt)
+        end_text = getattr(end_dt, "ts", end_dt)
+        raise ValueError(
+            "回测产品池存在本地行情缺口，不能静默跳过或按 0 估值："
+            f"{sample}{suffix}；窗口={start_text} 到 {end_text}。"
+            "请检查产品路径是否包含已退市/无分钟数据品种，或先补齐对应行情数据。"
+        )
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
     resolver = None
     historical_provider = load_market_rule_field_provider()
@@ -1954,7 +1981,58 @@ def _load_raw_market_data_for(
         "historical_field_policy": policy,
         "historical_field_names": historical_field_names,
         "historical_field_frames": historical_field_frames,
+        "included_products": tuple(series_by_product.keys()),
+        "excluded_out_of_range_products": tuple(sorted(set(excluded_out_of_range))),
     }
+
+
+def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
+    coverage = _product_data_coverage(product)
+    if coverage is None:
+        return False
+    data_start, data_end = coverage
+    start_key = _datetime_sort_key(getattr(start_dt, "sort_key", lambda: None)())
+    end_key = _datetime_sort_key(getattr(end_dt, "sort_key", lambda: None)())
+    if start_key is not None and data_end is not None and data_end < start_key:
+        return True
+    if end_key is not None and data_start is not None and data_start > end_key:
+        return True
+    return False
+
+
+def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    starts: list[pd.Timestamp] = []
+    ends: list[pd.Timestamp] = []
+    for freq in list(product.list_available_freqs()):
+        try:
+            data = getattr(product, freq.name).get_data(copy=False)
+        except Exception:
+            continue
+        if data.empty:
+            continue
+        index = DataIndex(data.index).signal_index
+        if len(index) == 0:
+            continue
+        start_key = _datetime_sort_key(index.min())
+        end_key = _datetime_sort_key(index.max())
+        if start_key is not None:
+            starts.append(start_key)
+        if end_key is not None:
+            ends.append(end_key)
+    if not starts or not ends:
+        return None
+    return min(starts), max(ends)
+
+
+def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is not None:
+        return cast(pd.Timestamp, ts.tz_convert("UTC").tz_localize(None))
+    return cast(pd.Timestamp, ts)
 
 
 def _live_market_data_warmup_window(account) -> pd.Timedelta | None:
@@ -2030,7 +2108,7 @@ def get_group_snapshot():
                 data.get("event_cursor"),
             ))
         tester = runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
-            product_path_selection_id, caller='get_group_snapshot', page_uuid=page_uuid or None
+            product_path_selection_id, caller='get_group_snapshot', page_uuid=page_uuid
         )
 
         group_result = _latest_group_result(tester)
@@ -2921,6 +2999,33 @@ def run_group_test_stream():
                 policy=market_rule_fallback,
                 warmup_window=_live_market_data_warmup_window(account),
             )
+            runtime_info_rows: list[dict[str, Any]] = []
+            excluded_products = tuple(cast(
+                tuple[Any, ...],
+                account.raw_market_data.get("excluded_out_of_range_products", ()),
+            ))
+            if excluded_products:
+                sample = "、".join(str(item) for item in excluded_products[:12])
+                if len(excluded_products) > 12:
+                    sample += f" 等 {len(excluded_products)} 个"
+                row = {
+                    "type": "产品路径",
+                    "status": "已移除",
+                    "detail": (
+                        "以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除："
+                        f"{sample}"
+                    ),
+                    "code": "product_out_of_run_window",
+                    "level": "info",
+                    "products": list(excluded_products),
+                }
+                runtime_info_rows.append(row)
+                emitter.emit_runtime_info(
+                    row["detail"],
+                    level=row["level"],
+                    code=row["code"],
+                    row=row,
+                )
 
             tester = _get_or_create_group_test_tester(page_uuid)
 
@@ -2963,6 +3068,7 @@ def run_group_test_stream():
                 "n_groups": len(serialized_execution["groups"]),
                 "multi_session_active": False,
                 "multi_session_entries": [],
+                "runtime_info_rows": runtime_info_rows,
                 "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
                 "factor_alias": str(first_owner.get("factor_alias") or ""),
                 "product_path_selection_count": len(all_products),
@@ -2979,10 +3085,10 @@ def run_group_test_stream():
                     payload, flat_groups, flat_ls_configs, resolved_backtest_settings,
                 ),
                 "evaluation_window": {
-                    "start_ms": int(start_dt.ts.timestamp() * 1000),
-                    "end_ms": int(end_dt.ts.timestamp() * 1000),
+                    "start_ms": int(cast(Any, start_dt).ts.timestamp() * 1000),
+                    "end_ms": int(cast(Any, end_dt).ts.timestamp() * 1000),
                     "split_ms": (
-                        int(pd.Timestamp(evaluation_split, tz=start_dt.ts.tz).timestamp() * 1000)
+                        int(pd.Timestamp(evaluation_split, tz=cast(Any, start_dt).ts.tz).timestamp() * 1000)
                         if evaluation_split else None
                     ),
                 },

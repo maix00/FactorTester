@@ -115,6 +115,7 @@
                     setting_fallback_warning: data.setting_fallback_warning,
                     setting_fallbacks: data.setting_fallbacks,
                     silent_default_settings: data.silent_default_settings,
+                    runtime_info_rows: data.runtime_info_rows,
                     backtest_settings: data.backtest_settings,
                     engine_result: data.engine_result,
                 }

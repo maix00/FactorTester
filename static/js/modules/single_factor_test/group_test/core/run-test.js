@@ -365,6 +365,10 @@
                     } else {
                         batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
+                } else if (event === 'runtime_info') {
+                    if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.pushRuntimeInfo === 'function') {
+                        GT.results.strategyPanel.pushRuntimeInfo(payload.row || payload);
+                    }
                 }
             }, abortController.signal);
 

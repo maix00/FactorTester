@@ -188,6 +188,11 @@ def _load_raw_market_data(account, ctx) -> None:
     account.historical_field_provider = raw.get("historical_field_provider")
     account.trading_day_resolver = raw.get("trading_day_resolver")
     account.historical_field_policy = policy
+    included_products = raw.get("included_products")
+    account.backtest_included_products = (
+        frozenset(included_products) if included_products is not None else None
+    )
+    account.backtest_excluded_out_of_range_products = tuple(raw.get("excluded_out_of_range_products", ()))
     account.historical_field_names = tuple(raw.get("historical_field_names", ()))
     account.historical_field_frames = raw.get("historical_field_frames")
     account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero

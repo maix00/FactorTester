@@ -57,6 +57,21 @@ class SSEProgressEmitter:
         payload.update(extra)
         self._q.put(self._event("progress", payload))
 
+    def emit_runtime_info(
+        self,
+        message: str,
+        *,
+        level: str = "info",
+        code: str = "",
+        details: Optional[Dict[str, Any]] = None,
+        **extra,
+    ) -> None:
+        payload: Dict[str, Any] = {"message": message, "level": level, "code": code}
+        if details is not None:
+            payload["details"] = details
+        payload.update(extra)
+        self._q.put(self._event("runtime_info", payload))
+
     def emit_result(self, data: Dict[str, Any]) -> None:
         self._q.put(self._event("result", data))
 

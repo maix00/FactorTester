@@ -55,7 +55,7 @@ class LedgerModule(ExecutableModule):
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
                  TradingRuleModule.use_int_position, ProductSelectionModule.products),
         outputs=(cash, positions),
-        phase=Phase.PRE_REPLAY, order=35,
+        phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         compute=lambda account, ctx: _initialize_ledgers(account, ctx),
     )
     equity_on_signal: ClassVar[Flow] = Flow(
@@ -94,7 +94,7 @@ def _initialize_ledgers(account, ctx) -> None:
         zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=False)
 
         positions: dict = {}
-        products = ctx.get_for(ProductSelectionModule.products, strategy, frozenset())
+        products = _products_for_backtest_window(account, ctx, strategy)
         for product in products:
             method = _resolve_method(strategy_config, product)
             if method == "WeightAverage":
@@ -108,6 +108,14 @@ def _initialize_ledgers(account, ctx) -> None:
                     quantity=initial_quantity, equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
         account.ledgers[strategy] = ledger
+
+
+def _products_for_backtest_window(account, ctx, strategy) -> frozenset:
+    products = frozenset(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+    included = getattr(account, "backtest_included_products", None)
+    if included is None:
+        return products
+    return frozenset(product for product in products if product in included)
 
 
 def _basic_equity(account, ctx) -> None:
