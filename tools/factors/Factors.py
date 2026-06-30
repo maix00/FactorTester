@@ -186,7 +186,8 @@ class Factor(UniqueNameObject, FactorExpr):
 
     def evaluate(self, products: Sequence['Product']|set['Product'],
                  freq: Optional[DataFreq] = None, *args,
-                 start_dt: Any = None, end_dt: Any = None, **kwargs) -> pd.DataFrame:
+                 start_dt: Any = None, end_dt: Any = None,
+                 warmup_window: Any = None, **kwargs) -> pd.DataFrame:
         """
         计算因子值。
 
@@ -314,6 +315,7 @@ class Factor(UniqueNameObject, FactorExpr):
                     copy=False,
                     start_dt=start_dt,
                     end_dt=end_dt,
+                    warmup_window=warmup_window,
                 )
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
@@ -336,6 +338,7 @@ class Factor(UniqueNameObject, FactorExpr):
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
                                      cache=_intermediate_cache, start_dt=start_dt,
                                      end_dt=end_dt,
+                                     warmup_window=warmup_window,
                                      run_result=r if _tester is not None else None,
                                      panel_timeline=panel_timeline)
 

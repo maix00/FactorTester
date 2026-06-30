@@ -16,7 +16,7 @@ class _Meta:
         self.data = data
         self.day_periods = day_periods
 
-    def get_and_adjust_cols(self, columns, copy=False, start_dt=None, end_dt=None):
+    def get_and_adjust_cols(self, columns, copy=False, start_dt=None, end_dt=None, warmup_window=None):
         return self.data[columns]
 
 

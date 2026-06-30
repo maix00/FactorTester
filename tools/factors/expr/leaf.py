@@ -102,6 +102,7 @@ class ColumnRef(FactorExpr):
                 copy=False,
                 start_dt=ctx.start_dt,
                 end_dt=ctx.end_dt,
+                warmup_window=ctx.warmup_window,
             )
             if data.empty:
                 continue

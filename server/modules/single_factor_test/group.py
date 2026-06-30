@@ -14,6 +14,7 @@ from tools.data.field_history import (
     build_trading_day_resolver_from_market_data,
     load_market_rule_field_provider,
 )
+from tools.data.types import DataColumn
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.data.types.time_index import DataIndex
@@ -1818,10 +1819,10 @@ class _FactorEvaluateAdapter:
         product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
         return ("factor_evaluate_adapter", factor_key, product_key)
 
-    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None) -> pd.DataFrame:
+    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None, warmup_window=None) -> pd.DataFrame:
         if run_window is not None and (start_dt is None or end_dt is None):
             start_dt, end_dt = run_window
-        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt)
+        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
         return self._factor.table
 
 
@@ -1894,20 +1895,36 @@ _MARKET_RULE_FIELD_NAMES = (
 
 
 def _load_raw_market_data_for(
-    products: list, start_dt: Any, end_dt: Any, *, policy: str = "latest_available"
+    products: list,
+    start_dt: Any,
+    end_dt: Any,
+    *,
+    policy: str = "latest_available",
+    warmup_window: Any = None,
 ) -> dict[str, Any]:
-    """Real I/O: per-product CLOSE series via Product.get_price_data (existing
-    utility -- masks to [start_date, end_date], returns OHLCV), assembled into
-    the raw_prices DataFrame MarketDataModule.load_raw_market_data reads."""
+    """Real I/O: per-product CLOSE series through ProductDataView.
+
+    The DataTime window and optional warm-up window are interpreted by the
+    shared data view layer so exact/trading-day slicing and left warm-up bars
+    follow the same rules as factor evaluation.
+    """
     series_by_product: dict[Any, pd.Series] = {}
     for product in products:
         try:
-            df = product.get_price_data(start_dt.ts, end_dt.ts)
+            freq = product.get_current_freq()
+            data_view = getattr(product, freq.name)
+            df = data_view.get_and_adjust_cols(
+                [DataColumn.CLOSE.name],
+                copy=False,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                warmup_window=warmup_window,
+            )
         except (ValueError, KeyError):
             continue
-        if df.empty or 'CLOSE' not in df.columns:
+        if df.empty or DataColumn.CLOSE.name not in df.columns:
             continue
-        series_by_product[product] = df['CLOSE']
+        series_by_product[product] = df[DataColumn.CLOSE.name]
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
     resolver = None
     historical_provider = load_market_rule_field_provider()
@@ -1938,6 +1955,25 @@ def _load_raw_market_data_for(
         "historical_field_names": historical_field_names,
         "historical_field_frames": historical_field_frames,
     }
+
+
+def _live_market_data_warmup_window(account) -> pd.Timedelta | None:
+    """Return the warm-up window needed by live factor BAR replay, if any."""
+    from tools.testers.backtest.modules.factor import FactorModule
+    from tools.testers.backtest.modules.factor_signal import (
+        _warmup_window_for_strategies,
+    )
+
+    windows: list[pd.Timedelta] = []
+    for strategy in getattr(account, "strategy_configs", {}):
+        config = account.config_for(strategy)
+        if not config.uses_flow("signal_live"):
+            continue
+        factor = config.get(FactorModule.factor)
+        window = _warmup_window_for_strategies(factor, [strategy], account)
+        if window is not None:
+            windows.append(window)
+    return max(windows) if windows else None
 
 
 def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
@@ -2879,7 +2915,12 @@ def run_group_test_stream():
                         seen_products.add(product)
                         all_products.append(product)
             account.raw_market_data = _load_raw_market_data_for(
-                all_products, start_dt, end_dt, policy=market_rule_fallback)
+                all_products,
+                start_dt,
+                end_dt,
+                policy=market_rule_fallback,
+                warmup_window=_live_market_data_warmup_window(account),
+            )
 
             tester = _get_or_create_group_test_tester(page_uuid)
 

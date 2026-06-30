@@ -298,7 +298,7 @@ def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
 
 def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> pd.DataFrame:
     start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
-    calc_start_dt = _calc_start_for_strategies(factor, strategies, account, start_dt)
+    warmup_window = _warmup_window_for_strategies(factor, strategies, account)
     evaluate = getattr(factor, "evaluate")
     if start_dt is None or end_dt is None:
         return evaluate()
@@ -308,32 +308,14 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> p
         return evaluate()
     params = signature.parameters
     accepts_kwargs = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values())
+    kwargs: dict[str, Any] = {}
+    if accepts_kwargs or "warmup_window" in params:
+        kwargs["warmup_window"] = warmup_window
     if accepts_kwargs or "start_dt" in params or "end_dt" in params:
-        return evaluate(start_dt=calc_start_dt, end_dt=end_dt)
+        return evaluate(start_dt=start_dt, end_dt=end_dt, **kwargs)
     if "run_window" in params:
-        return evaluate(run_window=(calc_start_dt, end_dt))
+        return evaluate(run_window=(start_dt, end_dt), **kwargs)
     return evaluate()
-
-
-def _calc_start_for_strategies(
-    factor: Any,
-    strategies: list,
-    account,
-    run_start_dt: DataTime | None,
-) -> DataTime | None:
-    """Return the left edge used only for factor calculation warm-up.
-
-    The formal run window is still clipped before signal alignment and before
-    any performance/accounting flow observes the signal.
-    """
-    if run_start_dt is None:
-        return None
-    warmup = _warmup_window_for_strategies(factor, strategies, account)
-    if warmup is None or warmup <= pd.Timedelta(0):
-        return run_start_dt
-    if run_start_dt.ts is None:
-        return run_start_dt
-    return DataTime(ts=run_start_dt.ts - warmup, precision=run_start_dt.precision, tz=run_start_dt.tz)
 
 
 def _warmup_window_for_strategies(factor: Any, strategies: list, account) -> pd.Timedelta | None:

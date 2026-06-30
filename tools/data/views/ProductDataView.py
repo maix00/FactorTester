@@ -249,11 +249,13 @@ class ProductDataView(UniqueNameObject):
         copy: bool = False,
         start_dt: Optional[Any] = None,
         end_dt: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """
         获取 DataFrame（通过 DataHub 缓存 + 自动回收）。
         start_dt/end_dt: DataTime | None，为 None 时对应边界不截断。
+        warmup_window: 时间窗口，仅在 start_dt 已设置时用于按真实 bar 向左扩展计算窗口。
         copy=True 时返回副本，避免外部修改影响缓存。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
@@ -262,7 +264,12 @@ class ProductDataView(UniqueNameObject):
             data = self.load_data(**kwargs)
 
         if start_dt is not None or end_dt is not None:
-            data = self._filter_data_by_calc_window(data, start=start_dt, end=end_dt)
+            data = self._filter_data_by_calc_window(
+                data,
+                start=start_dt,
+                end=end_dt,
+                warmup_window=warmup_window,
+            )
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -285,9 +292,10 @@ class ProductDataView(UniqueNameObject):
         *,
         start: Optional[Any] = None,
         end: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
         copy: bool = False,
     ) -> pd.DataFrame:
-        """按 DataTime 起止边界截断数据。"""
+        """按 DataTime 起止边界截断数据，并可按真实 bar 向左扩展 warm-up。"""
         if data.empty:
             return data
         if start is None and end is None:
@@ -312,8 +320,50 @@ class ProductDataView(UniqueNameObject):
             start_ts = start.ts if start is not None and start_set else None
             end_ts = end.ts if end is not None and end_set else None
             mask = di.slice_by(start_ts, end_ts)
+        if start_set and warmup_window is not None:
+            mask = self._expand_window_mask_for_warmup(data, mask, warmup_window)
         data = cast(pd.DataFrame, data[mask])
         return cast(pd.DataFrame, data.copy()) if copy else data
+
+    def _expand_window_mask_for_warmup(
+        self,
+        data: pd.DataFrame,
+        mask: Any,
+        warmup_window: Any,
+    ) -> np.ndarray:
+        mask_array = np.asarray(mask, dtype=bool)
+        if mask_array.size == 0 or not mask_array.any():
+            return mask_array
+        warmup_bars = self._warmup_window_to_bars(warmup_window, data)
+        if warmup_bars <= 0:
+            return mask_array
+        positions = np.flatnonzero(mask_array)
+        left = max(0, int(positions[0]) - warmup_bars)
+        expanded = mask_array.copy()
+        expanded[left:int(positions[0])] = True
+        return expanded
+
+    def _warmup_window_to_bars(self, warmup_window: Any, data: pd.DataFrame) -> int:
+        from tools.factors.expr.rolling import _resolve_windows
+
+        if self._day_periods is None:
+            self._day_periods = self._infer_day_periods_from_index(data.index)
+        common, periods, product_periods = _resolve_windows(warmup_window, self.freq, [self.object])
+        if common:
+            return max(0, int(periods))
+        return max(0, int(product_periods.get(self.object, 0)))
+
+    @staticmethod
+    def _infer_day_periods_from_index(index: pd.Index) -> int:
+        finest = finest_index(index)
+        dt_index = pd.DatetimeIndex(finest)
+        if len(dt_index) == 0:
+            return 0
+        dates = pd.Series([ts.date() for ts in dt_index])
+        counts = dates.value_counts(sort=False)
+        if counts.empty:
+            return int(len(dt_index))
+        return int(counts.mode().iloc[0])
     
     @staticmethod
     def _get_adjusted_col_name(col: str) -> str:
@@ -333,6 +383,7 @@ class ProductDataView(UniqueNameObject):
         copy: bool = True,
         start_dt: Optional[Any] = None,
         end_dt: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
     ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
@@ -340,7 +391,7 @@ class ProductDataView(UniqueNameObject):
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy, start_dt=start_dt, end_dt=end_dt)
+        df = self.get_data(copy=copy, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

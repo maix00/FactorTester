@@ -291,10 +291,10 @@ def test_fixed_warmup_extends_evaluate_but_is_clipped_before_signal_align():
 
     class _FakeFactor:
         def __init__(self):
-            self.calls: list[tuple[object, object]] = []
+            self.calls: list[tuple[object, object, object]] = []
 
-        def evaluate(self, *, start_dt=None, end_dt=None):
-            self.calls.append((start_dt, end_dt))
+        def evaluate(self, *, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append((start_dt, end_dt, warmup_window))
             return pd.DataFrame(
                 {"P1": [0.0, 1.0, 2.0]},
                 index=pd.to_datetime([
@@ -332,9 +332,10 @@ def test_fixed_warmup_extends_evaluate_but_is_clipped_before_signal_align():
     with patch("tools.testers.backtest.modules.factor_signal.signal_align", return_value=aligned) as align:
         _schedule_signal_precomputed_timestamps(account, ctx)
 
-    start_dt, end_dt = factor.calls[0]
-    assert start_dt.ts == pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+    start_dt, end_dt, warmup_window = factor.calls[0]
+    assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
     assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    assert warmup_window == pd.Timedelta("1D")
     align_input = align.call_args.args[0]
     assert list(align_input.index) == [
         pd.Timestamp("2024-01-02 09:00"),
@@ -342,17 +343,17 @@ def test_fixed_warmup_extends_evaluate_but_is_clipped_before_signal_align():
     ]
 
 
-def test_auto_warmup_infers_nested_time_windows_for_evaluate_start():
+def test_auto_warmup_infers_nested_time_windows_for_evaluate_warmup():
     strategy = Strategy(alias="A")
 
     class _FakeFactor:
         _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
 
         def __init__(self):
-            self.calls: list[tuple[object, object]] = []
+            self.calls: list[tuple[object, object, object]] = []
 
-        def evaluate(self, *, start_dt=None, end_dt=None):
-            self.calls.append((start_dt, end_dt))
+        def evaluate(self, *, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append((start_dt, end_dt, warmup_window))
             return pd.DataFrame(
                 {"P1": [1.0]},
                 index=pd.to_datetime(["2024-01-04 09:00"]),
@@ -378,8 +379,9 @@ def test_auto_warmup_infers_nested_time_windows_for_evaluate_start():
 
     _schedule_signal_precomputed_timestamps(account, FlowContext(timestamp=None, event_queue=EventQueue()))
 
-    start_dt, _end_dt = factor.calls[0]
-    assert start_dt.ts == pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+    start_dt, _end_dt, warmup_window = factor.calls[0]
+    assert start_dt.ts == pd.Timestamp("2024-01-04 09:00", tz="Asia/Shanghai")
+    assert warmup_window == pd.Timedelta("3D")
 
 
 def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
