@@ -13,12 +13,14 @@ from typing import Any, ClassVar, cast
 
 import pandas as pd
 
+from tools.data.types import DataIndex, DataTime
 from tools.data.types.time_freq import DataFreq
 from tools.factors.expr.signal_align import signal_align
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
+from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 
 
@@ -148,6 +150,7 @@ def _group_strategies_by_signal_align_params(account):
             config.get(FactorSignalModule.daily_basepoint),
             config.get(FactorSignalModule.end_session_skip, True),
             config.get(FactorSignalModule.end_session_gap, "3h"),
+            _strategy_run_window_key(config),
         )
         groups[key].append(strategy)
     return groups
@@ -174,7 +177,7 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
         return
     drafts: list[EventDraft] = []
     groups = _group_strategies_by_signal_align_params(account)
-    for (freq, basepoint, daily_basepoint, end_session_skip, end_session_gap), strategies in groups.items():
+    for (freq, basepoint, daily_basepoint, end_session_skip, end_session_gap, _window_key), strategies in groups.items():
         strategies = [s for s in strategies if account.config_for(s).uses_flow("signal_live")]
         if not strategies:
             continue
@@ -183,8 +186,10 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
             end_session_skip=end_session_skip,
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
-        for ts in signal_timestamps(aligned):
-            for strategy in strategies:
+        scheduled = _clip_signal_table_to_strategy_window(aligned, account.config_for(strategies[0]))
+        timestamps = signal_timestamps(scheduled)
+        for strategy in strategies:
+            for ts in timestamps:
                 drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
@@ -219,21 +224,37 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     for factor_key, strategies in by_factor.items():
         factor = factor_by_key[factor_key]
         table = factor.evaluate()
-        for strategy in strategies:
-            config = account.config_for(strategy)
-            schedule_key = _precomputed_schedule_key(factor_key, config)
+        for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
+            factor_key, strategies, account,
+        ).items():
+            first_config = account.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
-                tables[schedule_key] = _precomputed_schedule_table(table, config)
-            table_keys[strategy] = schedule_key
-            for ts in signal_timestamps(tables[schedule_key]):
-                drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
+                tables[schedule_key] = _schedule_table_for_strategy(table, first_config)
+            timestamps = signal_timestamps(tables[schedule_key])
+            for strategy in scheduled_strategies:
+                table_keys[strategy] = schedule_key
+                for ts in timestamps:
+                    drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)
+
+
+def _group_strategies_by_precomputed_schedule(
+    factor_key: Any,
+    strategies: list,
+    account,
+) -> dict[tuple, list]:
+    groups: dict[tuple, list] = defaultdict(list)
+    for strategy in strategies:
+        config = account.config_for(strategy)
+        groups[_precomputed_schedule_key(factor_key, config)].append(strategy)
+    return groups
 
 
 def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    window_key = _strategy_run_window_key(config)
     if not calendar_frequency or str(calendar_frequency) == "auto":
-        return (factor_key, "factor")
+        return (factor_key, "factor", window_key)
     return (
         factor_key,
         str(calendar_frequency),
@@ -241,20 +262,69 @@ def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
         config.get(FactorSignalModule.daily_basepoint),
         config.get(FactorSignalModule.end_session_skip, True),
         config.get(FactorSignalModule.end_session_gap, "3h"),
+        window_key,
     )
 
 
-def _precomputed_schedule_table(table: pd.DataFrame, config) -> pd.DataFrame:
+def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
     if not calendar_frequency or str(calendar_frequency) == "auto":
+        scheduled = table
+    else:
+        scheduled = signal_align(
+            table,
+            calendar_frequency,
+            basepoint=config.get(FactorSignalModule.basepoint, "last"),
+            daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
+            end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
+            end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
+        )
+    return _clip_signal_table_to_strategy_window(scheduled, config)
+
+
+def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if start_dt is None or end_dt is None:
         return table
-    return signal_align(
-        table,
-        calendar_frequency,
-        basepoint=config.get(FactorSignalModule.basepoint, "last"),
-        daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
-        end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
-        end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
+    mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    return table.loc[mask]
+
+
+def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
+    start_date = str(config.get(RunWindowModule.start_date, "") or "").strip()
+    end_date = str(config.get(RunWindowModule.end_date, "") or "").strip()
+    if not start_date or not end_date:
+        return None, None
+    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
+    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+    if precision == "trading_day":
+        return (
+            DataTime.from_dict({"date": start_date}, precision="trading_day"),
+            DataTime.from_dict({"date": end_date}, precision="trading_day"),
+        )
+    start_time = str(config.get(RunWindowModule.start_time, "00:00") or "00:00")
+    end_time = str(config.get(RunWindowModule.end_time, "23:59") or "23:59")
+    return (
+        DataTime.from_dict({"date": start_date, "time": start_time, "tz": timezone}, precision="exact"),
+        DataTime.from_dict({"date": end_date, "time": end_time, "tz": timezone}, precision="exact"),
+    )
+
+
+def _strategy_run_window_key(config) -> tuple:
+    start_date = str(config.get(RunWindowModule.start_date, "") or "").strip()
+    end_date = str(config.get(RunWindowModule.end_date, "") or "").strip()
+    if not start_date or not end_date:
+        return ("unbounded",)
+    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
+    if precision == "trading_day":
+        return ("trading_day", start_date, end_date)
+    return (
+        "exact",
+        start_date,
+        str(config.get(RunWindowModule.start_time, "00:00") or "00:00"),
+        end_date,
+        str(config.get(RunWindowModule.end_time, "23:59") or "23:59"),
+        str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai"),
     )
 
 
@@ -295,8 +365,10 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
     tables = getattr(account, "precomputed_factor_tables", {})
     table_keys = getattr(account, "precomputed_factor_table_keys", {})
     for strategy in ctx.active_strategies:
-        factor = account.config_for(strategy).get(FactorModule.factor)
-        table = tables.get(table_keys.get(strategy, (factor_runtime_key(factor), "factor")))
+        config = account.config_for(strategy)
+        factor = config.get(FactorModule.factor)
+        fallback_key = _precomputed_schedule_key(factor_runtime_key(factor), config)
+        table = tables.get(table_keys.get(strategy, fallback_key))
         if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue

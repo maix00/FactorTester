@@ -18,6 +18,7 @@ from tools.testers.backtest.modules.factor_signal import (
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
     normalize_signal_timestamp,
 )
+from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
 class _FakeMinuteFreq:
@@ -109,7 +110,76 @@ def test_signal_precomputed_groups_by_factor_identity():
     _schedule_signal_precomputed_timestamps(account, ctx)
 
     assert shared_factor.calls == 1
-    assert (("object", id(shared_factor)), "factor") in account.precomputed_factor_tables
+    assert len(account.precomputed_factor_tables) == 1
+    assert (("object", id(shared_factor)), "factor", ("unbounded",)) in account.precomputed_factor_tables
+
+
+def test_signal_precomputed_clips_events_to_strategy_run_window():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self):
+            self.calls += 1
+            return pd.DataFrame(
+                {"P1": [1.0, 2.0, 3.0]},
+                index=pd.to_datetime([
+                    "2024-01-01 09:00",
+                    "2024-01-02 09:00",
+                    "2024-01-03 09:00",
+                ]),
+            )
+
+    factor = _FakeFactor()
+    base_fields = {
+        FactorModule.factor: factor,
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_time: "08:00",
+        RunWindowModule.end_time: "10:00",
+    }
+    configs = {
+        s1: StrategyConfig(
+            strategy=s1,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                **base_fields,
+                RunWindowModule.start_date: "2024-01-01",
+                RunWindowModule.end_date: "2024-01-02",
+            },
+        ),
+        s2: StrategyConfig(
+            strategy=s2,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                **base_fields,
+                RunWindowModule.start_date: "2024-01-03",
+                RunWindowModule.end_date: "2024-01-03",
+            },
+        ),
+    }
+    account = AccountState(strategy_configs=configs)
+    queue = EventQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+
+    _schedule_signal_precomputed_timestamps(account, ctx)
+
+    seen: list[tuple[pd.Timestamp, Strategy]] = []
+    queue.set_dispatcher(
+        EventKind.SIGNAL,
+        lambda batch: seen.extend((draft.timestamp, draft.strategy) for draft in batch),
+    )
+    queue.run_until_drained()
+
+    assert factor.calls == 1
+    assert len(account.precomputed_factor_tables) == 2
+    assert seen == [
+        (pd.Timestamp("2024-01-01 09:00"), s1),
+        (pd.Timestamp("2024-01-02 09:00"), s1),
+        (pd.Timestamp("2024-01-03 09:00"), s2),
+    ]
 
 
 def test_signal_precomputed_groups_by_adapter_cache_key():
