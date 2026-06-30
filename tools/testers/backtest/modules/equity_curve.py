@@ -38,7 +38,7 @@ class EquityCurveModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "compute_live": FieldDefinition(
-            public=True, default=True, control_template="boolean", tab="evaluation",
+            public=True, label="实时净值", default=True, control_template="boolean", tab="evaluation",
             chip_template="实时净值: {value}", tab_label="样本划分", tab_order=200,
         ),
     }

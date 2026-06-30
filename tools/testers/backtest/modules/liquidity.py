@@ -25,12 +25,12 @@ class LiquidityModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "liquidity_mode": FieldDefinition(
-            public=True, default="infinite", control_template="select", tab="liquidity",
+            public=True, label="流动性", default="infinite", control_template="select", tab="liquidity",
             options=(("infinite", "不限制"), ("volume_participation", "按成交量占比限制")),
             chip_template="流动性: {value}", tab_label="流动性", tab_order=150,
         ),
         "participation_rate": FieldDefinition(
-            public=True, default=0.1, control_template="number", tab="liquidity",
+            public=True, label="参与率", default=0.1, control_template="number", tab="liquidity",
             visible_when={"liquidity_mode": ("volume_participation",)},
             chip_template="参与率: {value}", tab_label="流动性", tab_order=150,
         ),

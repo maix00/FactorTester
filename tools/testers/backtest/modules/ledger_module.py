@@ -36,15 +36,15 @@ class LedgerModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "initial_capital_major": FieldDefinition(
-            public=True, control_template="number", default=100_000_000.0, tab="capital",
+            public=True, label="初始资金", control_template="number", default=100_000_000.0, tab="capital",
             chip_template="初始资金: {value}", tab_label="资金", tab_order=50,
         ),
         "base_currency": FieldDefinition(
-            public=True, control_template="select", default="CNY", tab="capital",
+            public=True, label="币种", control_template="select", default="CNY", tab="capital",
             chip_template="币种: {value}", tab_label="资金", tab_order=50,
         ),
         "currency_conversion_fee_rate": FieldDefinition(
-            public=True, control_template="number", default=0.0, tab="capital",
+            public=True, label="换汇费率", control_template="number", default=0.0, tab="capital",
             minimum=0.0, step=0.000001,
             chip_template="换汇费率: {value}", tab_label="资金", tab_order=50,
         ),

@@ -22,17 +22,17 @@ class OrderExecutionModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "execution_price_basis": FieldDefinition(
-            public=True, default="open", control_template="select", tab="order",
+            public=True, label="价格", default="open", control_template="select", tab="order",
             options=(("close", "收盘/切片价格"), ("open", "开盘价"), ("vwap", "VWAP")),
             chip_template="价格: {value}", tab_label="订单执行", tab_order=120,
         ),
         "order_type": FieldDefinition(
-            public=True, default="market", control_template="select", tab="order",
+            public=True, label="订单", default="market", control_template="select", tab="order",
             options=(("market", "市价单"), ("limit", "限价单")),
             chip_template="订单: {value}", tab_label="订单执行", tab_order=120,
         ),
         "matching_model": FieldDefinition(
-            public=True, default="next_bar_full_fill", control_template="select", tab="order",
+            public=True, label="撮合", default="next_bar_full_fill", control_template="select", tab="order",
             options=(
                 ("next_bar_full_fill", "下一 bar 全额成交"),
                 ("bar_volume_limited", "按 bar 成交量限制"),

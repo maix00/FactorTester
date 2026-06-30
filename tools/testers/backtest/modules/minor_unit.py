@@ -16,7 +16,7 @@ class MinorUnitModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "use_minor_units": FieldDefinition(
-            public=True, default=True, control_template="boolean", tab="capital",
+            public=True, label="最小货币单位", default=True, control_template="boolean", tab="capital",
             chip_template="最小货币单位: {value}", tab_label="资金", tab_order=50,
         ),
     }

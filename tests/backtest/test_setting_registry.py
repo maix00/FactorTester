@@ -37,6 +37,12 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
     assert index["defaults"]["start_date"]["scope_policy"] == "overridable"
+    assert index["defaults"]["start_date"]["label"] == "开始日期"
+    assert index["defaults"]["end_date"]["label"] == "结束日期"
+    assert index["defaults"]["time_precision"]["label"] == "时间精度"
+    assert index["defaults"]["start_time"]["label"] == "开始时间"
+    assert index["defaults"]["end_time"]["label"] == "结束时间"
+    assert index["defaults"]["timezone"]["label"] == "时区"
     assert index["defaults"]["engine"]["options"][0] == {
         "value": "native",
         "label": "Native 事件驱动回测工具",
@@ -136,6 +142,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         for key, field in getattr(cls, "fields", {}).items()
         if field.public
     }
+    missing_public_labels = [
+        f"{cls.__name__}.{key}"
+        for cls in _ALL_MODULE_CLASSES
+        for key, field in getattr(cls, "fields", {}).items()
+        if field.public and not field.label
+    ]
+    assert missing_public_labels == []
     assert set(index["defaults"]) <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
     assert index["defaults"]["evaluation_split"]["module"] == "run_window"

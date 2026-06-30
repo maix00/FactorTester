@@ -24,7 +24,7 @@ class MarginModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
-            public=True, default="auto", control_template="select", tab="margin",
+            public=True, label="保证金", default="auto", control_template="select", tab="margin",
             options=(
                 ("auto", "按市场规则自动"),
                 ("exact", "严格历史规则"),
@@ -37,12 +37,12 @@ class MarginModule(ExecutableModule):
             chip_template="保证金: {value}", tab_label="保证金", tab_order=160,
         ),
         "fixed_margin_ratio": FieldDefinition(
-            public=True, default=1.0, control_template="number", tab="margin",
+            public=True, label="保证金率", default=1.0, control_template="number", tab="margin",
             visible_when={"margin_mode": ("fixed",)},
             chip_template="保证金率: {value}", tab_label="保证金", tab_order=160,
         ),
         "collateral_fraction": FieldDefinition(
-            public=True, default=1.0, control_template="number", tab="margin",
+            public=True, label="抵押比例", default=1.0, control_template="number", tab="margin",
             visible_when={"margin_mode": ("fixed", "auto", "exact", "custom")},
             chip_template="抵押比例: {value}", tab_label="保证金", tab_order=160,
         ),

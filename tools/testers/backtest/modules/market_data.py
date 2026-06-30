@@ -77,6 +77,7 @@ class MarketDataModule(ExecutableModule):
         "trading_day_resolver": FieldDefinition(public=False),
         "historical_field_policy": FieldDefinition(
             public=True,
+            label="历史字段",
             default=str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
             control_template="select",
             tab="engine",
@@ -98,14 +99,14 @@ class MarketDataModule(ExecutableModule):
         ),
         "current_historical_fields": FieldDefinition(public=False),
         "data_source": FieldDefinition(
-            public=True, default="", control_template="select", tab="data_source",
+            public=True, label="数据源", default="", control_template="select", tab="data_source",
             options=(("", "自动"),),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,
         ),
         "frequency": FieldDefinition(
-            public=True, default="", control_template="select", tab="frequency",
+            public=True, label="Bar频率", default="", control_template="select", tab="frequency",
             options=(("", "自动"),),
             chip_template="Bar频率: {value}",
             tab_label="数据频率",

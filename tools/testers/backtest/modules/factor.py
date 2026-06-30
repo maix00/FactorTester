@@ -19,7 +19,7 @@ class FactorModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "factor_candidates": FieldDefinition(
-            public=True, default=[], control_template="custom", tab="factor",
+            public=True, label="因子候选", default=[], control_template="custom", tab="factor",
             chip_template="因子候选: {value}", tab_label="因子执行", tab_order=20,
             help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场因子。",
             serialization={
@@ -42,7 +42,7 @@ class FactorModule(ExecutableModule):
             },
         ),
         "factor": FieldDefinition(
-            public=True, default="", control_template="select", tab="factor",
+            public=True, label="因子", default="", control_template="select", tab="factor",
             chip_template="因子: {value}", tab_label="因子执行", tab_order=20,
             info_overlay={"type": "factor_info"},
             serialization={

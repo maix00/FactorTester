@@ -37,7 +37,7 @@ class FeeModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "fee_mode": FieldDefinition(
-            public=True, default="auto", control_template="select", tab="cost",
+            public=True, label="费用", default="auto", control_template="select", tab="cost",
             options=(
                 ("auto", "自动"),
                 ("exact", "严格历史规则"),
@@ -52,7 +52,7 @@ class FeeModule(ExecutableModule):
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
-            public=True, default=0.0, control_template="number", tab="cost",
+            public=True, label="固定费率", default=0.0, control_template="number", tab="cost",
             visible_when={"fee_mode": ("fixed",)},
             chip_template="固定费率: {value}", tab_label="费用", tab_order=100,
         ),

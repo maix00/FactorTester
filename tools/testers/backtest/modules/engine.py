@@ -17,6 +17,7 @@ class EngineModule(ExecutableModule):
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "engine": FieldDefinition(
             public=True,
+            label="引擎",
             default="native",
             control_template="select",
             tab="engine",
@@ -35,6 +36,7 @@ class EngineModule(ExecutableModule):
         ),
         "engine_mode": FieldDefinition(
             public=True,
+            label="模式",
             default="auto",
             control_template="select",
             tab="engine",

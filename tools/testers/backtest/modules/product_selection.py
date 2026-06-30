@@ -27,7 +27,7 @@ class ProductSelectionModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "product_path_candidates": FieldDefinition(
-            public=True, default=[], control_template="custom", tab="product_path_selection",
+            public=True, label="产品路径候选", default=[], control_template="custom", tab="product_path_selection",
             chip_template="产品路径候选: {value}", tab_label="产品路径", tab_order=30,
             help_text="页面级候选列表是共享资源；测试模块复制后可在本模块内追加现场路径组。",
             serialization={
@@ -52,7 +52,7 @@ class ProductSelectionModule(ExecutableModule):
             },
         ),
         "product_path_selection": FieldDefinition(
-            public=True, default=None, control_template="select", tab="product_path_selection",
+            public=True, label="产品路径", default=None, control_template="select", tab="product_path_selection",
             chip_template="产品路径: {value}", tab_label="产品路径", tab_order=30,
             help_text="选择或内联一组产品路径；若引用用户产品组模板，则保存产品组模板 id。",
             info_overlay={"type": "product_path_selection_products"},
