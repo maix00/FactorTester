@@ -225,6 +225,70 @@ def _seed_events() -> Iterable[dict[str, Any]]:
         parser_notes="投机日内交易在回测费率字段中映射为CloseToday；按金额收费时CloseTodayRatioByVolume为0。",
     )
 
+    # SHFE notice repost: 上期发〔2025〕45号.
+    yield from _contract_close_today_volume_events(
+        data_source="SHFE",
+        source_url="https://www.zjlnqh.com/index.php?c=show&id=11096&s=news",
+        source_notice_id="上期发〔2025〕45号",
+        instrument="RU",
+        instrument_label="天然橡胶",
+        effective_trading_day="2025-02-20",
+        effective_timestamp="2025-02-19 21:00:00",
+        contract_code="2505",
+        volume_fee=45.0,
+        raw_note="自2025年2月20日交易（即2月19日晚夜盘）起，天然橡胶期货RU2505合约日内平今仓交易手续费标准调整为45元/手。",
+        evidence_text="RU2505合约；日内平今仓交易手续费标准；45元/手。",
+        parser_notes="转载上期发通知；公告只调整平今仓字段。",
+    )
+    for contract_code in ("2503", "2504"):
+        yield from _contract_close_today_money_events(
+            data_source="SHFE",
+            source_url="https://www.zjlnqh.com/index.php?c=show&id=11096&s=news",
+            source_notice_id="上期发〔2025〕45号",
+            instrument="BR",
+            instrument_label="丁二烯橡胶",
+            effective_trading_day="2025-02-20",
+            effective_timestamp="2025-02-19 21:00:00",
+            contract_code=contract_code,
+            money_ratio=0.0003,
+            raw_note="自2025年2月20日交易（即2月19日晚夜盘）起，丁二烯橡胶期货BR2503、BR2504合约日内平今仓交易手续费标准调整为成交金额的万分之3。",
+            evidence_text=f"BR{contract_code}合约；日内平今仓交易手续费标准；成交金额的万分之3。",
+            parser_notes="转载上期发通知；公告只调整平今仓字段。",
+        )
+
+    # SHFE notice repost: 上期发〔2025〕92号.
+    yield from _contract_money_fee_events(
+        data_source="SHFE",
+        source_url="https://www.zjlnqh.com/index.php?c=show&id=11190&s=news",
+        source_notice_id="上期发〔2025〕92号",
+        instrument="AO",
+        instrument_label="氧化铝",
+        effective_trading_day="2025-04-08",
+        effective_timestamp="2025-04-07 21:00:00",
+        contract_code="",
+        money_ratio=0.0005,
+        raw_note="自2025年4月8日交易（即4月7日晚夜盘）起，氧化铝期货的交易手续费调整为成交金额的万分之5，日内平今仓交易手续费调整为成交金额的万分之5。",
+        evidence_text="氧化铝期货；交易手续费和日内平今仓交易手续费；成交金额的万分之5。",
+        parser_notes="转载上期发通知；产品级规则，contract_codes为空。",
+    )
+
+    # SHFE official notice: 上期发〔2025〕377号.
+    for contract_code in ("2602", "2604"):
+        yield from _contract_close_today_money_events(
+            data_source="SHFE",
+            source_url="https://www.shfe.com.cn/publicnotice/notice/202512/t20251222_829864.html",
+            source_notice_id="上期发〔2025〕377号",
+            instrument="AG",
+            instrument_label="白银",
+            effective_trading_day="2025-12-24",
+            effective_timestamp="2025-12-23 21:00:00",
+            contract_code=contract_code,
+            money_ratio=0.00025,
+            raw_note="自2025年12月24日交易（即12月23日晚夜盘）起，白银期货AG2602、AG2604合约日内平今仓交易手续费调整为成交金额的万分之二点五。",
+            evidence_text=f"AG{contract_code}合约；日内平今仓交易手续费；成交金额的万分之二点五。",
+            parser_notes="公告只调整平今仓字段；按金额收费时CloseTodayRatioByVolume为0。",
+        )
+
     # GFEX official notice: 广期所发〔2025〕317号.
     # Effective from 2025-11-20 trading. LC2601 transaction fee and intraday
     # close-today fee were adjusted to 0.012% of turnover.
