@@ -42,6 +42,8 @@ class FactorSignalModule(ExecutableModule):
     calendar_frequency: ClassVar[FieldRef[Any]] = FieldRef("calendar_frequency")
     signal_value: ClassVar[FieldRef[Any]] = FieldRef("signal_value")  # dict[Product, float]
     factor_mode: ClassVar[FieldRef[str]] = FieldRef("factor_mode")
+    warmup_mode: ClassVar[FieldRef[str]] = FieldRef("warmup_mode")
+    warmup_window: ClassVar[FieldRef[Any]] = FieldRef("warmup_window")
         # "auto"|"precomputed"|"incremental" -- selects which of
         # "signal_precomputed"/"signal_live" this strategy activates; read
         # directly off the resolved settings dict by
@@ -78,6 +80,19 @@ class FactorSignalModule(ExecutableModule):
             public=True, label="因子模式", control_template="select", default="auto", tab="factor",
             options=(("auto", "自动选择"), ("precomputed", "预计算后按事件回放"), ("incremental", "随事件增量计算")),
             chip_template="因子模式: {value}", tab_label="因子执行", tab_order=20,
+        ),
+        "warmup_mode": FieldDefinition(
+            public=True, label="前摇窗口", control_template="select", default="auto", tab="factor",
+            options=(("none", "不使用"), ("fixed", "固定时间"), ("auto", "按因子表达式自动推导")),
+            chip_template="前摇窗口: {value}", tab_label="因子执行", tab_order=20,
+            default_when={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+            help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
+        ),
+        "warmup_window": FieldDefinition(
+            public=True, label="前摇时长", control_template="text", default="30d", tab="factor",
+            visible_when={"warmup_mode": ("fixed",)},
+            chip_template="前摇时长: {value}", tab_label="因子执行", tab_order=20,
+            help_text="固定前摇窗口必须是时间值，例如 30min、5d、60d；不接受前端以 bar 数作为业务语义。",
         ),
         "calendar_frequency": FieldDefinition(
             public=True, label="时钟", control_template="select", default="auto", tab="calendar",
@@ -283,6 +298,7 @@ def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
 
 def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> pd.DataFrame:
     start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
+    calc_start_dt = _calc_start_for_strategies(factor, strategies, account, start_dt)
     evaluate = getattr(factor, "evaluate")
     if start_dt is None or end_dt is None:
         return evaluate()
@@ -293,10 +309,147 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> p
     params = signature.parameters
     accepts_kwargs = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values())
     if accepts_kwargs or "start_dt" in params or "end_dt" in params:
-        return evaluate(start_dt=start_dt, end_dt=end_dt)
+        return evaluate(start_dt=calc_start_dt, end_dt=end_dt)
     if "run_window" in params:
-        return evaluate(run_window=(start_dt, end_dt))
+        return evaluate(run_window=(calc_start_dt, end_dt))
     return evaluate()
+
+
+def _calc_start_for_strategies(
+    factor: Any,
+    strategies: list,
+    account,
+    run_start_dt: DataTime | None,
+) -> DataTime | None:
+    """Return the left edge used only for factor calculation warm-up.
+
+    The formal run window is still clipped before signal alignment and before
+    any performance/accounting flow observes the signal.
+    """
+    if run_start_dt is None:
+        return None
+    warmup = _warmup_window_for_strategies(factor, strategies, account)
+    if warmup is None or warmup <= pd.Timedelta(0):
+        return run_start_dt
+    if run_start_dt.ts is None:
+        return run_start_dt
+    return DataTime(ts=run_start_dt.ts - warmup, precision=run_start_dt.precision, tz=run_start_dt.tz)
+
+
+def _warmup_window_for_strategies(factor: Any, strategies: list, account) -> pd.Timedelta | None:
+    windows: list[pd.Timedelta] = []
+    for strategy in strategies:
+        config = account.config_for(strategy)
+        mode = str(config.get(FactorSignalModule.warmup_mode, "auto") or "auto").lower()
+        if mode == "none":
+            windows.append(_zero_warmup())
+        elif mode == "fixed":
+            windows.append(_parse_warmup_window(config.get(FactorSignalModule.warmup_window)))
+        elif mode == "auto":
+            windows.append(_auto_warmup_window(factor) or _zero_warmup())
+        else:
+            windows.append(_zero_warmup())
+    return max(windows) if windows else None
+
+
+def _zero_warmup() -> pd.Timedelta:
+    return cast(pd.Timedelta, pd.Timedelta(0))
+
+
+def _parse_warmup_window(value: Any) -> pd.Timedelta:
+    if value is None or str(value).strip() == "":
+        return _zero_warmup()
+    value_text = str(value).strip()
+    if value_text.endswith("d"):
+        value_text = f"{value_text[:-1]}D"
+    try:
+        delta = pd.Timedelta(value_text)
+    except Exception as exc:
+        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a time value such as '30min' or '5d'") from exc
+    if pd.isna(delta):
+        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a concrete time value")
+    if delta < pd.Timedelta(0):
+        raise ValueError(f"warmup_window must be non-negative, got {value!r}")
+    return cast(pd.Timedelta, delta)
+
+
+def _auto_warmup_window(factor: Any) -> pd.Timedelta | None:
+    """Infer expression warm-up for constant time-valued rolling/shift windows.
+
+    Dynamic parameters and integer bar windows are intentionally not guessed:
+    fixed bar counts require a product calendar/frequency context, while this
+    setting is registered as a time-valued field.
+    """
+    for obj in (factor, getattr(factor, "_expr", None), getattr(factor, "expression", None)):
+        if obj is None:
+            continue
+        required = getattr(obj, "required_warmup_window", None) or getattr(obj, "required_lookback", None)
+        if callable(required):
+            value = required()
+            return _parse_warmup_window(value)
+        if required is not None:
+            return _parse_warmup_window(required)
+        inferred = _infer_expr_warmup_window(obj)
+        if inferred is not None:
+            return inferred
+    return None
+
+
+def _infer_expr_warmup_window(expr: Any, seen: set[int] | None = None) -> pd.Timedelta | None:
+    if expr is None:
+        return None
+    seen = seen or set()
+    expr_id = id(expr)
+    if expr_id in seen:
+        return None
+    seen.add(expr_id)
+
+    cls_name = type(expr).__name__
+    if cls_name == "RollingOp":
+        window = _expr_window_to_timedelta(getattr(expr, "window", None))
+        if window is None:
+            return None
+        child_window = _max_timedelta(
+            _infer_expr_warmup_window(child, seen)
+            for child in _expr_operands(expr)
+            if child is not getattr(expr, "window", None)
+        )
+        return window + (child_window or _zero_warmup())
+    if cls_name == "ShiftOp":
+        shift = _expr_window_to_timedelta(getattr(expr, "periods", None))
+        if shift is None:
+            return None
+        child_window = _infer_expr_warmup_window(getattr(expr, "operand", None), seen)
+        return shift + (child_window or _zero_warmup())
+    return _max_timedelta(_infer_expr_warmup_window(child, seen) for child in _expr_operands(expr))
+
+
+def _expr_operands(expr: Any) -> tuple[Any, ...]:
+    operands = getattr(expr, "_operands", None)
+    if operands is None:
+        operands = getattr(expr, "operands", ())
+    try:
+        return tuple(operands)
+    except TypeError:
+        return ()
+
+
+def _expr_window_to_timedelta(expr: Any) -> pd.Timedelta | None:
+    value = getattr(expr, "value", expr)
+    if isinstance(value, (int, float)):
+        return None
+    freq_value = getattr(value, "value", None)
+    if isinstance(freq_value, pd.Timedelta):
+        return cast(pd.Timedelta, freq_value)
+    try:
+        return _parse_warmup_window(value)
+    except ValueError:
+        return None
+
+
+def _max_timedelta(values: Any) -> pd.Timedelta | None:
+    concrete = [value for value in values if value is not None]
+    return max(concrete) if concrete else None
 
 
 def _run_window_envelope_for_strategies(strategies: list, account) -> tuple[DataTime | None, DataTime | None]:
@@ -318,11 +471,12 @@ def _run_window_envelope_for_strategies(strategies: list, account) -> tuple[Data
 
 def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
     calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    run_table = _clip_signal_table_to_strategy_window(table, config)
     if not calendar_frequency or str(calendar_frequency) == "auto":
-        scheduled = table
+        scheduled = run_table
     else:
         scheduled = signal_align(
-            table,
+            run_table,
             calendar_frequency,
             basepoint=config.get(FactorSignalModule.basepoint, "last"),
             daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
@@ -373,7 +527,6 @@ def _evaluate_signal_live(account, ctx) -> None:
     FactorExpr/Factor values are compiled into per-run incremental executors.
     A non-FactorExpr live adapter can still implement one of these methods:
     `on_signal(timestamp, price_table)`, `evaluate_live(price_table, timestamp)`.
-    Older table-style factors still fall back to `evaluate()` for compatibility.
     Shared factor objects are evaluated once per dispatch.
     """
     by_factor: dict[Any, list] = defaultdict(list)

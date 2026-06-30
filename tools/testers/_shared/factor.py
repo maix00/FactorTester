@@ -34,6 +34,35 @@ def register_factor_execution_base(
         ),
         chip_template="因子计算: {value}",
     ))
+    app.register_setting(SettingDefinition(
+        "warmup_mode",
+        "前摇窗口",
+        tab,
+        "select",
+        "auto",
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
+        options=(
+            SettingOption("none", "不使用"),
+            SettingOption("fixed", "固定时间"),
+            SettingOption("auto", "按因子表达式自动推导"),
+        ),
+        chip_template="前摇窗口: {value}",
+        default_when={"engine_mode": {"basic": "none", "auto": "auto", "custom": "auto", "exact": "auto"}},
+        help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
+    ))
+    app.register_setting(SettingDefinition(
+        "warmup_window",
+        "前摇时长",
+        tab,
+        "text",
+        "30d",
+        ScopePolicy.LOCAL_ONLY,
+        module="factor_execution",
+        chip_template="前摇时长: {value}",
+        visible_when={"warmup_mode": ("fixed",)},
+        help_text="固定前摇窗口必须是时间值，例如 30min、5d、60d。",
+    ))
 
 
 def register_factor_candidate_list_base(

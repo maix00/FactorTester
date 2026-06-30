@@ -165,6 +165,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert missing_public_labels == []
     assert set(index["defaults"]) <= executable_public_fields
     assert index["defaults"]["calendar_frequency"]["module"] == "factor_execution"
+    assert index["defaults"]["warmup_mode"]["module"] == "factor_execution"
+    assert index["defaults"]["warmup_mode"]["default_when"]["engine_mode"]["basic"] == "none"
+    assert index["defaults"]["warmup_window"]["visible_when"] == {"warmup_mode": ["fixed"]}
     assert index["defaults"]["evaluation_split"]["module"] == "run_window"
     assert {
         key: index["defaults"][key]["module"]

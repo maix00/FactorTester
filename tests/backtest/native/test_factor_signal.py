@@ -286,6 +286,102 @@ def test_signal_precomputed_evaluates_factor_with_run_window_envelope():
     assert end_dt.ts == pd.Timestamp("2024-01-05 15:00", tz="Asia/Shanghai")
 
 
+def test_fixed_warmup_extends_evaluate_but_is_clipped_before_signal_align():
+    strategy = Strategy(alias="A")
+
+    class _FakeFactor:
+        def __init__(self):
+            self.calls: list[tuple[object, object]] = []
+
+        def evaluate(self, *, start_dt=None, end_dt=None):
+            self.calls.append((start_dt, end_dt))
+            return pd.DataFrame(
+                {"P1": [0.0, 1.0, 2.0]},
+                index=pd.to_datetime([
+                    "2024-01-01 09:00",
+                    "2024-01-02 09:00",
+                    "2024-01-03 09:00",
+                ]),
+            )
+
+    factor = _FakeFactor()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                FactorModule.factor: factor,
+                RunWindowModule.time_precision: "exact",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RunWindowModule.start_date: "2024-01-02",
+                RunWindowModule.end_date: "2024-01-03",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_time: "15:00",
+                FactorSignalModule.warmup_mode: "fixed",
+                FactorSignalModule.warmup_window: "1d",
+                FactorSignalModule.calendar_frequency: "1min",
+            },
+        ),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    aligned = pd.DataFrame(
+        {"P1": [1.0, 2.0]},
+        index=pd.to_datetime(["2024-01-02 09:00", "2024-01-03 09:00"]),
+    )
+
+    with patch("tools.testers.backtest.modules.factor_signal.signal_align", return_value=aligned) as align:
+        _schedule_signal_precomputed_timestamps(account, ctx)
+
+    start_dt, end_dt = factor.calls[0]
+    assert start_dt.ts == pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    align_input = align.call_args.args[0]
+    assert list(align_input.index) == [
+        pd.Timestamp("2024-01-02 09:00"),
+        pd.Timestamp("2024-01-03 09:00"),
+    ]
+
+
+def test_auto_warmup_infers_nested_time_windows_for_evaluate_start():
+    strategy = Strategy(alias="A")
+
+    class _FakeFactor:
+        _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
+
+        def __init__(self):
+            self.calls: list[tuple[object, object]] = []
+
+        def evaluate(self, *, start_dt=None, end_dt=None):
+            self.calls.append((start_dt, end_dt))
+            return pd.DataFrame(
+                {"P1": [1.0]},
+                index=pd.to_datetime(["2024-01-04 09:00"]),
+            )
+
+    factor = _FakeFactor()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                FactorModule.factor: factor,
+                RunWindowModule.time_precision: "exact",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RunWindowModule.start_date: "2024-01-04",
+                RunWindowModule.end_date: "2024-01-04",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_time: "15:00",
+                FactorSignalModule.warmup_mode: "auto",
+            },
+        ),
+    })
+
+    _schedule_signal_precomputed_timestamps(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    start_dt, _end_dt = factor.calls[0]
+    assert start_dt.ts == pd.Timestamp("2024-01-01 09:00", tz="Asia/Shanghai")
+
+
 def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
