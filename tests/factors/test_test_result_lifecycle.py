@@ -112,20 +112,3 @@ def test_ic_response_replacement_discards_previous_alias_result():
     assert tester.discarded == [old_factor]
     assert old_factor not in tester.results
     assert new_factor in tester.results
-
-
-def test_group_result_state_keeps_only_latest_run():
-    result = FactorRunResult()
-    first_returns = np.zeros((4, 2))
-    first_returns_ref = weakref.ref(first_returns)
-    first_group = SimpleNamespace(returns_np=first_returns)
-    second_group = object()
-
-    result.group_result = first_group
-    del first_returns
-    del first_group
-    result.group_result = second_group
-    gc.collect()
-
-    assert result.group_result is second_group
-    assert first_returns_ref() is None

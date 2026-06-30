@@ -233,62 +233,13 @@ class BacktestModuleRegistry(ModuleRegistry):
                 result.setdefault(setting.module, {})[key] = first_settings[key]
         return result
 
-    # ── _FactorGroupTestGroup construction ─────────────────────
-
-    def build_group_params(
-        self,
-        group_settings: dict[str, Any],
-        raw_group: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Collect _FactorGroupTestGroup construction params from all modules.
-
-        First calls the base (executable modules), then adds settings-derived
-        params that every group needs but no executable module explicitly owns
-        (rebalance_trigger, position_policy, etc.), plus raw_group-derived
-        identity fields (product_list, name, _id, etc.).
-
-        Returns merged dict of all _FactorGroupTestGroup constructor params
-        except the pure loop-context fields (tester_id, factor_alias,
-        n_groups, group_index).
-        """
-        # 1) Executable module params (fee, liquidity, margin...)
-        merged = super().build_group_params(group_settings, raw_group)
-
-        # 2) Settings-derived params — forward a group_settings key only if it
-        #    is both (a) a GROUP_ONLY/GROUP_OVERRIDE setting and (b) an actual
-        #    _FactorGroupTestGroup constructor field. Most GROUP_OVERRIDE
-        #    settings (order_execution, slippage, target_allocation, ...) are
-        #    consumed by their own executable module's build_group_params
-        #    (step 1) or read directly from group_settings at run time — they
-        #    are not _FactorGroupTestGroup fields, and forwarding them blindly
-        #    raises TypeError on construction. LOCAL_ONLY settings (e.g.
-        #    engine) are page/run-level, already extracted separately via
-        #    collect_local_only_settings.
-        import dataclasses
-        from tools.factors.tester_calc.single_factor_test.group import _FactorGroupTestGroup
-        from tools.testers.settings.contracts import ScopePolicy
-        group_fields = {f.name for f in dataclasses.fields(_FactorGroupTestGroup)}
-        app = self.get_app()
-        for key, setting in app.settings.items():
-            if setting.scope_policy == ScopePolicy.LOCAL_ONLY:
-                continue
-            if key not in group_fields:
-                continue
-            if key in group_settings and key not in merged:
-                merged[key] = group_settings[key]
-
-        # 3) Identity fields from raw_group (frontend payload)
-        merged["_id"] = str(raw_group.get("id") or "")
-        if "name" not in merged:
-            merged["name"] = _group_display_name(raw_group)
-        if "key" not in merged:
-            merged["key"] = merged["name"]
-        if "product_list" not in merged:
-            merged["product_list"] = _product_list_from_raw_group(raw_group)
-        if "use_close_today" not in merged:
-            merged["use_close_today"] = False
-
-        return merged
+    # build_group_params (the _FactorGroupTestGroup-constructor-params
+    # override that used to live here) was deleted along with
+    # _FactorGroupTestGroup itself -- its only caller was the old
+    # per-group core_params construction in
+    # server/modules/single_factor_test/group.py, replaced by
+    # strategy_config_builder.build_strategy_configs reading FieldDefinition/
+    # FieldRef directly off each ExecutableModule.
 
     # ── strategy parsing (subclasses override) ──────────────────
 

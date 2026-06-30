@@ -27,7 +27,6 @@ from tools.data.types import UniqueNameObject
 
 from tools.factors import factor_tester_tasks as _tasks
 from tools.factors.factor_tester_state import FactorTesterState
-from tools.testers.backtest.engines.native.backtester import run_backtest_task
 
 if TYPE_CHECKING:
     from tools.data.account_manage import User
@@ -97,7 +96,6 @@ class FactorTester(UniqueNameObject):
         "sift_product_by_empty_data": _tasks.sift_product_by_empty_data,
         "sift_product_by_volumes": _tasks.sift_product_by_volumes,
         "ic_stats": _tasks.ic_stats,
-        "backtest": run_backtest_task,
         "delete": _tasks.delete,
     }
 
@@ -155,6 +153,9 @@ class FactorTester(UniqueNameObject):
             )
 
     def dispatch(self, task_name: str, **kwargs: Any) -> Any:
+        if task_name == "backtest" and "backtest" not in self._TASK_HANDLERS:
+            from tools.testers.backtest.engines.native.backtester import run_backtest_task
+            FactorTester._TASK_HANDLERS["backtest"] = run_backtest_task
         handler = self._TASK_HANDLERS[task_name]
         return handler(self.state, **kwargs)
 
