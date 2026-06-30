@@ -221,6 +221,19 @@
         });
     }
 
+    function customProductFieldMeta(setting, fieldKey) {
+        var fields = setting && setting.serialization && setting.serialization.fields || [];
+        for (var i = 0; i < fields.length; i++) {
+            if (String(fields[i].value) === String(fieldKey)) return fields[i];
+        }
+        return null;
+    }
+
+    function customProductFieldLabel(setting, fieldKey) {
+        var meta = customProductFieldMeta(setting, fieldKey);
+        return meta ? String(meta.label || meta.value || fieldKey || '') : String(fieldKey || '');
+    }
+
     function displaySettingValue(setting, value) {
         var serializationKind = setting && setting.serialization && setting.serialization.kind;
         if (setting && Array.isArray(setting.options)) {
@@ -296,5 +309,7 @@
         sortSettingKeysByDisplayOrder: sortSettingKeysByDisplayOrder,
         sortTabsByOrder: sortTabsByOrder,
         displaySettingValue: displaySettingValue,
+        customProductFieldMeta: customProductFieldMeta,
+        customProductFieldLabel: customProductFieldLabel,
     };
 })();

@@ -913,6 +913,9 @@
             }
             return {};
         }
+        function fieldLabel(field) {
+            return window.BackendSettingsPanel.customProductFieldLabel(setting, field);
+        }
         function cellInput(type, value, onChange, placeholder) {
             var input = document.createElement('input');
             input.type = type || 'text';
@@ -964,7 +967,8 @@
                 fieldOptions().forEach(function(item) {
                     var option = document.createElement('option');
                     option.value = item.value;
-                    option.textContent = item.label + (item.unit ? ' (' + item.unit + ')' : '');
+                    option.textContent = fieldLabel(item.value);
+                    if (item.unit) option.title = String(item.unit);
                     select.appendChild(option);
                 });
                 select.value = row.field || (fieldOptions()[0] && fieldOptions()[0].value) || '';

@@ -61,11 +61,9 @@
         },
         'custom_product_fields': function(value, info, chip) {
             var rows = Array.isArray(value) ? value : [];
-            var fields = chip && chip.setting && chip.setting.serialization && chip.setting.serialization.fields || [];
-            var labelsByField = {};
-            fields.forEach(function(field) {
-                labelsByField[String(field.value)] = String(field.label || field.value || '');
-            });
+            var fieldLabel = window.BackendSettingsPanel && window.BackendSettingsPanel.customProductFieldLabel
+                ? function(field) { return window.BackendSettingsPanel.customProductFieldLabel(chip && chip.setting, field); }
+                : function(field) { return String(field || ''); };
             var overlay = document.getElementById('custom-product-fields-overlay');
             if (!overlay) {
                 overlay = document.createElement('div');
@@ -87,7 +85,7 @@
                     + '<thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">产品/合约</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">字段</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">值</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">开始</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">结束</th></tr></thead>'
                     + '<tbody>' + rows.map(function(row) {
                         return '<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.product || '') + '</td>'
-                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(labelsByField[String(row.field)] || row.field || '') + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(fieldLabel(row.field)) + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.value == null ? '' : row.value) + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.start || '') + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.end || '') + '</td></tr>';

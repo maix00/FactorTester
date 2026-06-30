@@ -18,6 +18,17 @@ function findByText(node, text) {
   return null;
 }
 
+function findById(node, id) {
+  if (!node) return null;
+  if (node.id === id) return node;
+  const children = node.childNodes || [];
+  for (let i = 0; i < children.length; i += 1) {
+    const found = findById(children[i], id);
+    if (found) return found;
+  }
+  return null;
+}
+
 document.registerElement('gt-backtest-local-host', domElement('gt-backtest-local-host'));
 document.registerElement('gt-local-settings-tab-bar', domElement('gt-local-settings-tab-bar'));
 document.registerElement('gt-local-settings-chip-row', domElement('gt-local-settings-chip-row'));
@@ -39,7 +50,7 @@ global.fetch = (url) => Promise.resolve({
         kind: 'custom_product_overrides',
         storage_key: 'custom_product_fields',
         module_filter: 'fee',
-        fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', module: 'fee' }],
+        fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
       },
     }],
   } : {
@@ -76,7 +87,7 @@ global.fetch = (url) => Promise.resolve({
         serialization: {
           kind: 'custom_product_overrides',
           storage_key: 'custom_product_fields',
-          fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', module: 'fee' }],
+          fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
         },
       },
       fee_custom_product_fields: {
@@ -92,7 +103,7 @@ global.fetch = (url) => Promise.resolve({
           kind: 'custom_product_overrides',
           storage_key: 'custom_product_fields',
           module_filter: 'fee',
-          fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', module: 'fee' }],
+          fields: [{ value: 'OpenRatioByMoney', label: '开仓费率', unit: 'ratio', module: 'fee' }],
         },
       },
     },
@@ -113,8 +124,19 @@ GT.backendSettings.init().then(() => {
   const host = document.getElementById('gt-backtest-local-host');
   const addButton = findByText(host, '+ 字段');
   assert.ok(addButton, 'expected + 字段 button to be rendered');
+  assert.equal(
+    window.BackendSettingsPanel.customProductFieldLabel(
+      GT.backendSettings._state.index.defaults.fee_custom_product_fields,
+      'OpenRatioByMoney',
+    ),
+    '开仓费率',
+  );
   assert.equal((GT.backendSettings._state.localValues.custom_product_fields || []).length, 0);
   addButton.listeners.click[0]({});
+  const fieldSelect = findById(host, 'select');
+  assert.ok(fieldSelect, 'expected field select to be rendered after adding a draft row');
+  assert.equal(fieldSelect.childNodes[0].textContent, '开仓费率');
+  assert.equal(fieldSelect.childNodes[0].title, 'ratio');
   assert.deepEqual(GT.backendSettings._state.localValues.custom_product_fields, [{
     product: '',
     field: 'OpenRatioByMoney',
