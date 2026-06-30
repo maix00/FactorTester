@@ -1246,7 +1246,7 @@
         white-space: nowrap;
     }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/fancytree/ui.fancytree.min.css') }}">
 
 <!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
@@ -1271,7 +1271,7 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
     "https://code.jquery.com/jquery-3.6.0.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js",
+    "{{ url_for('static', filename='vendor/fancytree/jquery.fancytree-all-deps.min.js') }}",
     "{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}",
     "{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}",
     "{{ url_for('static', filename='js/modules/products/product_selector.js') }}",

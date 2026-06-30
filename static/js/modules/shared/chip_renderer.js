@@ -59,8 +59,13 @@
             var products = u && u.selectionProducts ? u.selectionProducts(value) : [];
             GT.overlays.productPathSelectionProducts.open(label, products, value);
         },
-        'custom_product_fields': function(value, info) {
+        'custom_product_fields': function(value, info, chip) {
             var rows = Array.isArray(value) ? value : [];
+            var fields = chip && chip.setting && chip.setting.serialization && chip.setting.serialization.fields || [];
+            var labelsByField = {};
+            fields.forEach(function(field) {
+                labelsByField[String(field.value)] = String(field.label || field.value || '');
+            });
             var overlay = document.getElementById('custom-product-fields-overlay');
             if (!overlay) {
                 overlay = document.createElement('div');
@@ -82,7 +87,7 @@
                     + '<thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">产品/合约</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">字段</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">值</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">开始</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">结束</th></tr></thead>'
                     + '<tbody>' + rows.map(function(row) {
                         return '<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.product || '') + '</td>'
-                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.field || '') + '</td>'
+                            + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(labelsByField[String(row.field)] || row.field || '') + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.value == null ? '' : row.value) + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.start || '') + '</td>'
                             + '<td style="border-bottom:1px solid #f1f5f9;padding:6px;">' + _esc(row.end || '') + '</td></tr>';
@@ -106,9 +111,9 @@
 
     function overlayType(info) { return typeof info === 'string' ? info : (info && info.type); }
     function overlayHas(info) { return typeof overlayHandlers[overlayType(info)] === 'function'; }
-    function overlayOpen(info, value) {
+    function overlayOpen(info, value, chip) {
         var fn = overlayHandlers[overlayType(info)];
-        if (typeof fn === 'function') { fn(value, info); return true; }
+        if (typeof fn === 'function') { fn(value, info, chip); return true; }
         return false;
     }
 
@@ -125,6 +130,7 @@
                 key: key, chip_template: def.chip_template, source_keys: [key],
                 value_resolvers: { value: SETTING_DISPLAY }, clickable: true, category: 'setting',
                 info_overlay: def.info_overlay || null, tab_key: def.tab_key || key, action: null, _setting: true,
+                setting: Object.assign({ key: key }, def),
             });
         });
         if (opts.includeChipFields) {
@@ -135,6 +141,7 @@
                     value_resolvers: def.value_resolvers || {}, clickable: !!def.clickable,
                     category: def.category || 'identity', info_overlay: def.info_overlay || null,
                     tab_key: def.tab_key || null, action: def.action || null, _setting: false,
+                    setting: def,
                 });
             });
         }
@@ -251,7 +258,7 @@
         function dispatchClick(chip) {
             if (hasOnOpen && chip.tab_key) { opts.onOpen(chip.tab_key, chip.key); return; }
             if (chip.action && typeof opts.onAction === 'function') { opts.onAction(chip.action, chip, { store: store }); return; }
-            if (chip.info_overlay) overlayOpen(chip.info_overlay, effectiveForOverlay(chip));
+            if (chip.info_overlay) overlayOpen(chip.info_overlay, effectiveForOverlay(chip), chip);
         }
         function clickable(chip) {
             if (hasOnOpen && chip.tab_key) return true;

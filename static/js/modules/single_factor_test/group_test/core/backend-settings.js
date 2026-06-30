@@ -892,7 +892,7 @@
                 return filter && !fieldBelongsToEditor(row.field);
             });
             var scoped = nextRows.filter(function(row) {
-                return row && (row.product || row.value !== undefined && row.value !== '');
+                return row && (row.product || row.field || row.value !== undefined && row.value !== '');
             });
             writeValue(setting, mount, retained.concat(scoped));
             render();
