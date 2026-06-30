@@ -254,6 +254,10 @@
             return effective((chip.source_keys && chip.source_keys[0]) || chip.key);
         }
         function dispatchClick(chip) {
+            if (chip.info_overlay && overlayHas(chip.info_overlay)) {
+                overlayOpen(chip.info_overlay, effectiveForOverlay(chip), chip);
+                return;
+            }
             if (hasOnOpen && chip.tab_key) { opts.onOpen(chip.tab_key, chip.key); return; }
             if (chip.action && typeof opts.onAction === 'function') { opts.onAction(chip.action, chip, { store: store }); return; }
             if (chip.info_overlay) overlayOpen(chip.info_overlay, effectiveForOverlay(chip), chip);

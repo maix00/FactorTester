@@ -81,8 +81,16 @@ const indexManifest = {
       value: [],
       tab_key: 'engine',
       scope_policy: 'overridable',
-      serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
+      serialization: {
+        kind: 'custom_product_overrides',
+        storage_key: 'custom_product_fields',
+        fields: [
+          { value: 'MarginRatio', label: '保证金率', module: 'margin' },
+          { value: 'OpenRatioByMoney', label: '开仓费率', module: 'fee' },
+        ],
+      },
       chip_template: '自定义字段: {value}',
+      info_overlay: { type: 'custom_product_fields' },
       visible_when: { engine_mode: ['custom'] },
       editable_when: { engine_mode: ['custom'] },
     },
@@ -653,6 +661,34 @@ return GT.backendSettings.init().then(async () => {
   visibleStore.set('engine_mode', 'custom');
   assert.notEqual(visibleHost.childNodes[0].style.display, 'none');
   assert.equal(chipPlainText({ html: visibleHost.childNodes[0].innerHTML }), '自定义费用字段1项');
+
+  const overlayHost = domElement('custom-product-fields-overlay');
+  const overlayBody = domElement('custom-product-fields-overlay-body');
+  overlayHost.querySelector = () => overlayBody;
+  document.registerElement('custom-product-fields-overlay', overlayHost);
+  const overlayChipHost = domElement('overlay-chip-host');
+  const overlayStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: {
+      engine_mode: 'custom',
+      custom_product_fields: [
+        { product: 'P1', field: 'OpenRatioByMoney', value: 0.2 },
+      ],
+    },
+  });
+  let openCount = 0;
+  window.ChipRenderer.render(overlayChipHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: overlayStore,
+    settingKeys: ['custom_product_fields'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+    onOpen: () => { openCount += 1; },
+  });
+  assert.equal(chipPlainText({ html: overlayChipHost.childNodes[0].innerHTML }), '自定义字段1项');
+  overlayChipHost.childNodes[0].listeners.click[0]({});
+  assert.equal(openCount, 0);
+  assert.equal(overlayHost.style.display, 'flex');
+  assert.ok(overlayBody.innerHTML.indexOf('开仓费率') >= 0);
 
   console.log('PASS: backend settings owns field and chip registration');
 });
