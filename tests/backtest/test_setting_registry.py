@@ -81,7 +81,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine_mode": ["custom"],
     }
     assert index["defaults"]["custom_product_fields"]["label"] == "自定义字段"
-    assert index["defaults"]["custom_product_fields"]["visible_when"] == {}
+    assert index["defaults"]["custom_product_fields"]["visible_when"] == {
+        "engine_mode": ["custom"],
+    }
     assert index["defaults"]["custom_product_fields"]["editable_when"] == {
         "engine_mode": ["custom"],
     }

@@ -21,6 +21,7 @@ class CustomProductModule(ExecutableModule):
             default=[],
             control_template="custom_product_overrides",
             tab="market_rules",
+            visible_when={"engine_mode": ("custom",)},
             editable_when={"engine_mode": ("custom",)},
             chip_template="自定义字段: {value}",
             info_overlay={"type": "custom_product_fields"},

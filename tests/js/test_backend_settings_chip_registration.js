@@ -77,6 +77,15 @@ const indexManifest = {
       editable_when: { engine_mode: ['custom'] },
       default_when: { engine_mode: { basic: 'zero', auto: 'auto', exact: 'exact' } },
     },
+    custom_product_fields: {
+      value: [],
+      tab_key: 'market_rules',
+      scope_policy: 'overridable',
+      chip_template: '自定义字段: {value}',
+      serialization: { kind: 'custom_product_overrides' },
+      visible_when: { engine_mode: ['custom'] },
+      editable_when: { engine_mode: ['custom'] },
+    },
     start_date: {
       value: '2026-01-01',
       tab_key: 'time',
@@ -604,6 +613,22 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用严格历史规则');
   conditionalStore.set('engine_mode', 'custom');
   assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自定义品种/合约');
+
+  const visibleHost = domElement('visible-chip-host');
+  const visibleStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: { engine_mode: 'auto', custom_product_fields: [{ product: 'P1', field: 'MarginRatio', value: 0.1 }] },
+  });
+  window.ChipRenderer.render(visibleHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: visibleStore,
+    settingKeys: ['custom_product_fields'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+  });
+  assert.equal(visibleHost.childNodes[0].style.display, 'none');
+  visibleStore.set('engine_mode', 'custom');
+  assert.notEqual(visibleHost.childNodes[0].style.display, 'none');
+  assert.equal(chipPlainText({ html: visibleHost.childNodes[0].innerHTML }), '自定义字段1项');
 
   console.log('PASS: backend settings owns field and chip registration');
 });
