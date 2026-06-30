@@ -281,7 +281,7 @@ class FieldHistoryProvider:
         )
         sort_columns = ["_effective_sort_key"]
         if "_contract_scope_priority" in candidates.columns:
-            sort_columns.insert(0, "_contract_scope_priority")
+            sort_columns.append("_contract_scope_priority")
         row = candidates.sort_values(by=sort_columns).iloc[-1]
         return HistoricalFieldValue(
             instrument=identity.product_code,
@@ -825,7 +825,7 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
             for codes in scopes.loc[scoped.index]
         ]
         scoped = scoped.sort_values(
-            by=["_contract_scope_priority", "effective_trading_day", "effective_timestamp"],
+            by=["effective_trading_day", "effective_timestamp", "_contract_scope_priority"],
         )
         return scoped
     return cast(pd.DataFrame, df[product_level].copy())
@@ -894,7 +894,7 @@ def _vectorized_values_from_subset(
     if candidates:
         all_candidates = pd.concat(candidates, ignore_index=True)
         all_candidates = all_candidates.sort_values(
-            ["_row", "_scope_priority", "_effective_sort_key"],
+            ["_row", "_effective_sort_key", "_scope_priority"],
             kind="mergesort",
         )
         best = all_candidates.groupby("_row", sort=False).tail(1)

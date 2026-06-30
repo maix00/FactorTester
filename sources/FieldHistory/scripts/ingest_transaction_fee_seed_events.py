@@ -31,7 +31,7 @@ FIELD_GROUP = "TransactionFee"
 
 
 def main() -> int:
-    events = list(_seed_events())
+    events = _dedupe_events(list(_seed_events()))
     hub = DataHub.get_instance()
     _ensure_store_registered(hub, "openctp")
     with hub.connect_store("openctp") as conn:
@@ -50,6 +50,59 @@ def main() -> int:
 
 
 def _seed_events() -> Iterable[dict[str, Any]]:
+    # DCE official notice: 大商所发〔2025〕243号.
+    # BZ futures were listed on 2025-07-08. The official listing notice sets
+    # the futures transaction fee to 0.01% of turnover. This is a product-level
+    # rule, so contract_codes is empty.
+    yield from _contract_money_fee_events(
+        data_source="DCE",
+        source_url="https://www.dce.com.cn/dce/content/2025/ywggytz/8637864.html",
+        source_notice_id="大商所发〔2025〕243号",
+        instrument="BZ",
+        instrument_label="纯苯",
+        effective_trading_day="2025-07-08",
+        effective_timestamp="2025-07-08 09:00:00",
+        contract_code="",
+        money_ratio=0.0001,
+        raw_note="纯苯期货交易手续费收取标准为成交金额的万分之1，套期保值交易手续费收取标准为成交金额的万分之0.5。",
+        evidence_text="四、交易手续费。纯苯期货交易手续费收取标准为成交金额的万分之1。",
+        parser_notes="期货交易手续费映射开仓/普通平仓/平今的金额比例字段；套保费率不是当前投机回测默认字段，暂不入库。",
+    )
+
+    # DCE official notice: 大商所发〔2025〕312号.
+    # Effective from the 2025-08-15 night session for trading day 2025-08-18.
+    # JM2601 intraday speculative fee changed to 0.02%; non-intraday remained
+    # 0.01%. In the FieldHistory fee model, intraday is represented by the
+    # CloseToday fields while open/normal close keep the non-intraday value.
+    yield from _contract_open_close_money_events(
+        data_source="DCE",
+        source_url="https://www.dce.com.cn/dce/content/2025/ywggytz/18620456.html",
+        source_notice_id="大商所发〔2025〕312号",
+        instrument="JM",
+        instrument_label="焦煤",
+        effective_trading_day="2025-08-18",
+        effective_timestamp="2025-08-15 21:00:00",
+        contract_code="2601",
+        money_ratio=0.0001,
+        raw_note="焦煤JM2601合约调整后投机日内交易为成交金额的万分之2，投机非日内交易为成交金额的万分之1。",
+        evidence_text="焦煤JM2601合约；调整后投机日内交易2，投机非日内交易1（成交金额的万分之X）。",
+        parser_notes="非日内交易映射Open/Close字段；平今字段由同一公告的日内交易值单独覆盖为万分之2。",
+    )
+    yield from _contract_close_today_money_events(
+        data_source="DCE",
+        source_url="https://www.dce.com.cn/dce/content/2025/ywggytz/18620456.html",
+        source_notice_id="大商所发〔2025〕312号",
+        instrument="JM",
+        instrument_label="焦煤",
+        effective_trading_day="2025-08-18",
+        effective_timestamp="2025-08-15 21:00:00",
+        contract_code="2601",
+        money_ratio=0.0002,
+        raw_note="焦煤JM2601合约调整后投机日内交易为成交金额的万分之2，投机非日内交易为成交金额的万分之1。",
+        evidence_text="焦煤JM2601合约；调整后投机日内交易2（成交金额的万分之X）。",
+        parser_notes="投机日内交易在回测费率字段中映射为CloseToday；按金额收费时CloseTodayRatioByVolume为0。",
+    )
+
     # GFEX official notice: 广期所发〔2025〕317号.
     # Effective from 2025-11-20 trading. LC2601 transaction fee and intraday
     # close-today fee were adjusted to 0.012% of turnover.
@@ -168,6 +221,44 @@ def _contract_money_fee_events(
         )
 
 
+def _contract_open_close_money_events(
+    *,
+    data_source: str,
+    source_url: str,
+    source_notice_id: str,
+    instrument: str,
+    instrument_label: str,
+    effective_trading_day: str,
+    effective_timestamp: str,
+    contract_code: str,
+    money_ratio: float,
+    raw_note: str,
+    evidence_text: str,
+    parser_notes: str,
+) -> Iterable[dict[str, Any]]:
+    for field_name, value in [
+        ("OpenRatioByMoney", money_ratio),
+        ("CloseRatioByMoney", money_ratio),
+        ("OpenRatioByVolume", 0.0),
+        ("CloseRatioByVolume", 0.0),
+    ]:
+        yield _event(
+            data_source=data_source,
+            source_url=source_url,
+            source_notice_id=source_notice_id,
+            instrument=instrument,
+            instrument_label=instrument_label,
+            field_name=field_name,
+            effective_trading_day=effective_trading_day,
+            effective_timestamp=effective_timestamp,
+            value=value,
+            contract_code=contract_code,
+            raw_note=raw_note,
+            evidence_text=evidence_text,
+            parser_notes=parser_notes,
+        )
+
+
 def _contract_close_today_money_events(
     *,
     data_source: str,
@@ -256,6 +347,7 @@ def _event(
     evidence_text: str,
     parser_notes: str,
 ) -> dict[str, Any]:
+    contract_codes = [contract_code] if contract_code else []
     base = {
         "data_source": data_source,
         "field_group": FIELD_GROUP,
@@ -270,7 +362,7 @@ def _event(
         "effective_trading_day": effective_trading_day,
         "effective_timestamp": effective_timestamp,
         "value": value,
-        "contract_codes": [contract_code],
+        "contract_codes": contract_codes,
         "source_notice_id": source_notice_id,
         "raw_note": raw_note,
         "evidence_text": evidence_text,
@@ -293,6 +385,16 @@ def _stable_event_id(event: dict[str, Any]) -> str:
         str(event["value"]),
     ]
     return "transaction_fee_" + sha1("|".join(parts).encode("utf-8")).hexdigest()[:24]
+
+
+def _dedupe_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_id = str(event["event_id"])
+        if event_id in deduped and deduped[event_id] != event:
+            raise ValueError(f"conflicting generated TransactionFee seed event_id={event_id}")
+        deduped[event_id] = event
+    return list(deduped.values())
 
 
 def _event_exists(conn: sqlite3.Connection, event: dict[str, Any]) -> bool:
