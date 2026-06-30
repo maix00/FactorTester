@@ -255,16 +255,6 @@
             var batchProgressHost = document.createElement('div');
             progressContainer.appendChild(batchProgressHost);
 
-            var replayProgress = document.createElement('div');
-            replayProgress.className = 'gt-progress-track';
-            replayProgress.style.cssText = 'display:none;margin-top:10px;';
-            replayProgress.innerHTML = '<div style="display:flex;align-items:center;gap:8px;width:100%;">'
-                + '<span data-replay-phase style="flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">交易账本回放</span>'
-                + '<span data-replay-count style="flex:0 0 auto;font-size:12px;color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">0/0</span>'
-                + '<span style="flex:0 0 24px;width:24px;height:22px;"></span></div>'
-                + '<div style="width:100%;margin-top:6px;"><div style="display:block;background:#e2e8f0;border-radius:999px;height:7px;overflow:hidden;">'
-                + '<div data-replay-fill style="display:block;height:100%;width:0;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .18s ease;border-radius:999px;"></div></div></div>'
-                + '<div data-replay-label style="margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">等待事件回放</div>';
             var progressNotice = document.createElement('div');
             progressNotice.className = 'gt-progress-notice';
             progressNotice.style.cssText = 'display:none;margin-top:10px;padding:8px 10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;line-height:1.5;';
@@ -291,23 +281,11 @@
                     pushProgressNotice('multi-session', '检测到持仓池内存在多时段/缺 bar/异步交易品种，已启用按可交易切片处理（涉及 ' + totalMissing + ' 个品种）。');
                 }
             }
-            function updateReplayProgress(payload) {
-                var completed = Number(payload.completed || 0);
-                var total = Number(payload.total || 0);
-                var percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
-                replayProgress.style.display = 'block';
-                replayProgress.querySelector('[data-replay-fill]').style.width = percent.toFixed(2) + '%';
-                replayProgress.querySelector('[data-replay-count]').textContent = completed + '/' + total;
-                replayProgress.querySelector('[data-replay-label]').textContent =
-                    (payload.event_timestamp || payload.message || '');
-            }
-
             var pendingGlobalProgress = [];
 
             var batchMgr = GT.groupSettings.runGroupBatch.createManager({
                 progressContainer: batchProgressHost,
             });
-            progressContainer.appendChild(replayProgress);
             progressContainer.appendChild(progressNotice);
 
             markProgressRowsDone = function(done, message) {
@@ -315,7 +293,13 @@
             };
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                if (event === 'start') {
+                if (event === 'activity_manifest') {
+                    batchMgr.registerActivityManifest(payload.phases || []);
+                } else if (event === 'activity') {
+                    batchMgr.recordActivity(payload);
+                } else if (event === 'signal_progress') {
+                    batchMgr.updateSignalProgress(payload);
+                } else if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
                     batchMgr.syncRows(newTotal);
                     // 后端告知的 phases：[{key, label, sub_steps?}, ...]
@@ -345,10 +329,6 @@
                     }
                 } else if (event === 'progress') {
                     updateProgressNotice(payload);
-                    if (payload.phase === 'event_replay') {
-                        updateReplayProgress(payload);
-                        return;
-                    }
                     var bi = payload.product_coverage_batch_index;
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));

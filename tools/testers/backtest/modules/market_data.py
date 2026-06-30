@@ -22,19 +22,23 @@ from typing import Any, ClassVar, cast
 
 import pandas as pd
 
+from tools.data.types import DataColumn
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.time_index_lookup import row_at
+from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
     HistoricalFieldLookupError,
     HistoricalFieldFallbackPolicy,
     FieldHistoryProvider,
     TradingDayResolver,
+    TRANSACTION_FEE_FIELD_NAMES,
+    build_trading_day_resolver_from_market_data,
     historical_fields_frame_for_products,
+    load_market_rule_field_provider,
     resolve_historical_fields_for_product,
 )
 
@@ -113,13 +117,27 @@ class MarketDataModule(ExecutableModule):
         ),
     }
 
+    check_market_data_coverage: ClassVar[Flow] = Flow(
+        "check_market_data_coverage", inputs=(), outputs=(),
+        phase=Phase.PRE_REPLAY, order=38,
+        compute=lambda account, ctx: _check_market_data_coverage(account, ctx),
+    )
     load_raw_market_data: ClassVar[Flow] = Flow(
         "load_raw_market_data", inputs=(EngineModule.engine_mode,), outputs=(
-            raw_prices, lot_sizes, margin_ratio, settlement_price, volume,
-            historical_field_provider, trading_day_resolver, historical_field_policy,
+            raw_prices, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
-        phase=Phase.PRE_REPLAY, order=40,
+        phase=Phase.PRE_REPLAY, order=40, after=(check_market_data_coverage,),
         compute=lambda account, ctx: _load_raw_market_data(account, ctx),
+    )
+    build_trading_day_resolver: ClassVar[Flow] = Flow(
+        "build_trading_day_resolver", inputs=(raw_prices,), outputs=(trading_day_resolver,),
+        phase=Phase.PRE_REPLAY, order=43, after=(load_raw_market_data,),
+        compute=lambda account, ctx: _build_trading_day_resolver(account, ctx),
+    )
+    load_historical_fields: ClassVar[Flow] = Flow(
+        "load_historical_fields", inputs=(raw_prices, trading_day_resolver), outputs=(historical_field_policy,),
+        phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
+        compute=lambda account, ctx: _load_historical_fields(account, ctx),
     )
     causal_valuation: ClassVar[Flow] = Flow(
         "causal_valuation", inputs=(raw_prices,), outputs=(),
@@ -163,41 +181,239 @@ class MarketDataModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        load_raw_market_data, causal_valuation,
+        check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
+        load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_volume_on_signal,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
     )
 
 
+_MARKET_RULE_FIELD_NAMES = (
+    "VolumeMultiple",
+    *TRANSACTION_FEE_FIELD_NAMES,
+)
+
+
+def _market_data_request(account) -> dict[str, Any]:
+    request = getattr(account, "market_data_request", None)
+    if not isinstance(request, dict):
+        raw = getattr(account, "raw_market_data", None)
+        if isinstance(raw, dict):
+            return {"raw_market_data": raw}
+        return {}
+    return request
+
+
+def _check_market_data_coverage(account, ctx) -> None:
+    request = _market_data_request(account)
+    if "raw_market_data" in request:
+        raw = request["raw_market_data"]
+        account._market_data_series_by_product = {
+            product: raw.get("raw_prices")[product]
+            for product in getattr(raw.get("raw_prices"), "columns", [])
+        }
+        account._market_data_excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+        return
+    products = list(request.get("products") or ())
+    start_dt = request.get("start_dt")
+    end_dt = request.get("end_dt")
+    missing_products: list[str] = []
+    excluded_out_of_range: list[str] = []
+    load_plan: list[tuple[Any, Any]] = []
+    for product in products:
+        try:
+            available_freqs = list(product.list_available_freqs())
+            if not available_freqs:
+                missing_products.append(str(getattr(product, "name", product)))
+                continue
+            current_freq = getattr(product, "current_freq", None)
+            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
+            load_plan.append((product, freq))
+        except (ValueError, KeyError):
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(str(getattr(product, "name", product)))
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+    if missing_products:
+        _raise_missing_market_data(missing_products, start_dt, end_dt)
+    account._market_data_load_plan = load_plan
+    account._market_data_excluded_out_of_range = tuple(sorted(set(excluded_out_of_range)))
+
+
 def _load_raw_market_data(account, ctx) -> None:
-    """Pass through whatever the data-prep stage already populated on the
-    account-level input — this Flow exists so the dependency graph has an
-    explicit producer for these fields; it does not perform I/O itself."""
-    raw = getattr(account, "raw_market_data", {})
+    request = _market_data_request(account)
+    if "raw_market_data" in request:
+        raw = request["raw_market_data"]
+        _publish_raw_market_data(account, ctx, raw)
+        return
+    start_dt = request.get("start_dt")
+    end_dt = request.get("end_dt")
+    warmup_window = request.get("warmup_window")
+    series_by_product: dict[Any, pd.Series] = {}
+    missing_products: list[str] = []
+    for product, freq in getattr(account, "_market_data_load_plan", ()):
+        try:
+            data_view = getattr(product, freq.name)
+            df = data_view.get_and_adjust_cols(
+                [DataColumn.CLOSE.name],
+                copy=False,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                warmup_window=warmup_window,
+            )
+        except (ValueError, KeyError):
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded: list[str] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded.append(str(getattr(product, "name", product)))
+                account._market_data_excluded_out_of_range = tuple(sorted(set(excluded)))
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        if df.empty or DataColumn.CLOSE.name not in df.columns:
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded: list[str] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded.append(str(getattr(product, "name", product)))
+                account._market_data_excluded_out_of_range = tuple(sorted(set(excluded)))
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        series_by_product[product] = df[DataColumn.CLOSE.name]
+    if missing_products:
+        _raise_missing_market_data(missing_products, start_dt, end_dt)
+    raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
+    raw = {
+        "raw_prices": raw_prices,
+        "historical_field_provider": load_market_rule_field_provider(),
+        "historical_field_policy": request.get("policy", "latest_available"),
+        "historical_field_names": _MARKET_RULE_FIELD_NAMES,
+        "included_products": tuple(series_by_product.keys()),
+        "excluded_out_of_range_products": tuple(getattr(account, "_market_data_excluded_out_of_range", ())),
+    }
+    _publish_raw_market_data(account, ctx, raw)
+
+
+def _build_trading_day_resolver(account, ctx) -> None:
+    raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
+    if raw_prices is None or raw_prices.empty:
+        ctx.set(MarketDataModule.trading_day_resolver, None)
+        account.trading_day_resolver = None
+        return
+    resolver = build_trading_day_resolver_from_market_data(raw_prices)
+    ctx.set(MarketDataModule.trading_day_resolver, resolver)
+    account.trading_day_resolver = resolver
+
+
+def _load_historical_fields(account, ctx) -> None:
+    raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
+    resolver = ctx.get(MarketDataModule.trading_day_resolver)
+    raw_policy = _market_data_request(account).get("policy", getattr(account, "historical_field_policy", None))
+    policy = _historical_field_policy_for_engine(account, raw_policy)
+    ctx.set(MarketDataModule.historical_field_policy, policy)
+    account.historical_field_policy = policy
+    field_names = tuple(getattr(account, "historical_field_names", _MARKET_RULE_FIELD_NAMES))
+    account.historical_field_names = field_names
+    if raw_prices is None or raw_prices.empty or resolver is None:
+        account.historical_field_frames = None
+        return
+    account.historical_field_frames = historical_field_frames_for_market_data(
+        list(raw_prices.columns),
+        signal_timestamps(raw_prices),
+        provider=cast(FieldHistoryProvider, getattr(account, "historical_field_provider")),
+        trading_day_resolver=resolver,
+        field_names=field_names,
+        policy=policy,
+    )
+
+
+def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.raw_prices, raw.get("raw_prices"))
     ctx.set(MarketDataModule.lot_sizes, raw.get("lot_sizes", {}))
     ctx.set(MarketDataModule.margin_ratio, raw.get("margin_ratio", {}))
     ctx.set(MarketDataModule.settlement_price, raw.get("settlement_price"))
     ctx.set(MarketDataModule.volume, raw.get("volume"))
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
-    ctx.set(MarketDataModule.trading_day_resolver, raw.get("trading_day_resolver"))
     raw_policy = raw.get("historical_field_policy")
-    policy = _historical_field_policy_for_engine(account, raw_policy)
-    ctx.set(MarketDataModule.historical_field_policy, policy)
     account.historical_field_provider = raw.get("historical_field_provider")
-    account.trading_day_resolver = raw.get("trading_day_resolver")
-    account.historical_field_policy = policy
     included_products = raw.get("included_products")
     account.backtest_included_products = (
         frozenset(included_products) if included_products is not None else None
     )
     account.backtest_excluded_out_of_range_products = tuple(raw.get("excluded_out_of_range_products", ()))
     account.historical_field_names = tuple(raw.get("historical_field_names", ()))
-    account.historical_field_frames = raw.get("historical_field_frames")
     account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last
                                                 # observed value forward"
+
+
+def _raise_missing_market_data(missing_products: list[str], start_dt: Any, end_dt: Any) -> None:
+    sample = ", ".join(sorted(set(missing_products))[:20])
+    suffix = "" if len(set(missing_products)) <= 20 else f" 等 {len(set(missing_products))} 个"
+    start_text = getattr(start_dt, "ts", start_dt)
+    end_text = getattr(end_dt, "ts", end_dt)
+    raise ValueError(
+        "回测产品池存在本地行情缺口，不能静默跳过或按 0 估值："
+        f"{sample}{suffix}；窗口={start_text} 到 {end_text}。"
+        "请检查产品路径是否包含已退市/无分钟数据品种，或先补齐对应行情数据。"
+    )
+
+
+def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
+    if not _supports_local_cnfutures_coverage(product):
+        return False
+    coverage = _product_data_coverage(product)
+    if coverage is None:
+        return False
+    data_start, data_end = coverage
+    start_key = _datetime_sort_key(getattr(start_dt, "sort_key", lambda: None)())
+    end_key = _datetime_sort_key(getattr(end_dt, "sort_key", lambda: None)())
+    if start_key is not None and data_end is not None and data_end < start_key:
+        return True
+    if end_key is not None and data_start is not None and data_start > end_key:
+        return True
+    return False
+
+
+def _supports_local_cnfutures_coverage(product: Any) -> bool:
+    try:
+        from sources.LocalCNFutures.CNFutures import CNFutures, CNFuturesContract
+        return isinstance(product, (CNFutures, CNFuturesContract))
+    except Exception:
+        return False
+
+
+def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    try:
+        frame = product.get_data()
+    except Exception:
+        return None
+    if frame is None or frame.empty:
+        return None
+    index = frame.index
+    try:
+        timestamps = DataIndex.event_timestamps_from_index(index)
+    except Exception:
+        timestamps = pd.DatetimeIndex(index)
+    timestamps = pd.DatetimeIndex(pd.to_datetime(timestamps, errors="coerce")).dropna()
+    if timestamps.empty:
+        return None
+    return cast(pd.Timestamp, timestamps.min()), cast(pd.Timestamp, timestamps.max())
+
+
+def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    if isinstance(value, tuple) and value:
+        value = value[-1]
+    try:
+        ts = pd.Timestamp(cast(Any, value))
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(None)
+    return cast(pd.Timestamp, ts)
 
 
 def _historical_field_policy_for_engine(account, raw_policy: object | None) -> str:

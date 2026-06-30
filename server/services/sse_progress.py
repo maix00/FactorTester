@@ -57,6 +57,21 @@ class SSEProgressEmitter:
         payload.update(extra)
         self._q.put(self._event("progress", payload))
 
+    def emit_activity_manifest(self, phases: List[dict]) -> None:
+        self._q.put(self._event("activity_manifest", {"phases": phases}))
+
+    def emit_activity(self, **payload: Any) -> None:
+        self._q.put(self._event("activity", payload))
+
+    def emit_signal_progress(self, *, completed: int, total: int, phase: str = "event_replay") -> None:
+        percent = 100.0 if total <= 0 else max(0.0, min(100.0, completed / total * 100.0))
+        self._q.put(self._event("signal_progress", {
+            "completed": completed,
+            "total": total,
+            "percent": percent,
+            "phase": phase,
+        }))
+
     def emit_runtime_info(
         self,
         message: str,

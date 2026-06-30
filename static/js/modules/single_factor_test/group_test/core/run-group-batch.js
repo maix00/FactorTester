@@ -1,29 +1,15 @@
 /**
- * core/run-group-batch.js — productCoverageBatch progress UI
+ * core/run-group-batch.js — native backtest activity UI.
  *
- * 管理与后端 product_coverage_batch_index 一一对应的运行批次进度条。
- * 每个 productCoverageBatch 在后端由 FactorGroupTester.build_overlap_batches() 确定，
- * 前端通过 SSE 事件中的 product_coverage_batch_index 字段接收进度。
- *
- * 进度条设计：
- * - 单条渐变色进度条，颜色随当前阶段变化
- * - 下拉列表（点击 ▼ 展开）显示每阶段的完成详情
- * - 布局：阶段名 + 计数 + ▼按钮，下一行显示全宽渐变进度条
- * - 进度永不回退（pct 只增不减）
- *
- * 挂载到 GT.groupSettings.runGroupBatch（内部模块，由 run-test.js 调用）。
+ * Public API intentionally keeps the old createManager shape used by
+ * run-test.js, but the UI is now one signal-progress bar plus a parallel
+ * flow-process diagram. There is no N/M display.
  */
 (function() {
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
-    var Progress = window.SingleFactorProgress;
-    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
 
-    // ═══════════════════════════════════════════════════════════════
-    // Helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    function _escapeProgressHtml(value) {
+    function escapeHtml(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -32,498 +18,316 @@
             .replace(/'/g, '&#39;');
     }
 
-    /** 根据阶段返回渐变色 */
-    function _phaseColor(phase) {
-        switch (phase) {
-            case 'simulate':    return 'linear-gradient(90deg,#ff9800,#ffc107)';
-            case 'trade_data':  return 'linear-gradient(90deg,#2196f3,#64b5f6)';
-            case 'membership':  return 'linear-gradient(90deg,#9c27b0,#ce93d8)';
-            case 'liquidity':   return 'linear-gradient(90deg,#00bcd4,#4dd0e1)';
-            case 'serialize':   return 'linear-gradient(90deg,#6366f1,#a5b4fc)';
-            case 'batch':       return 'linear-gradient(90deg,#607d8b,#90a4ae)';
-            default:            return 'linear-gradient(90deg,#4caf50,#81c784)';
-        }
+    function normalizePhaseKey(value) {
+        return String(value || '').trim();
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Factory
-    // ═══════════════════════════════════════════════════════════════
 
     function createProductCoverageBatchManager(opts) {
         var progressContainer = opts.progressContainer;
-        var phaseLabels = Object.assign({ init: '准备' }, opts.phaseLabels || {});
-        /** { phaseKey: { subStepKey: label, ... } }  — phases 元数据中的 sub_steps */
-        var subStepLabels = opts.subStepLabels || {};
-        var skipPhases = { info: true, product_coverage_batch: true, init: true };
-        // 不在下拉历史中显示的阶段（但仍参与进度条更新）
-        var hideInHistory = { batch: true };
+        var phases = [];
+        var phaseByKey = {};
+        var currentPhase = '';
+        var activityCache = {};
+        var rotateTimers = {};
+        var rotatePosition = {};
+        var row = buildShell(progressContainer);
 
-        var phaseOrder = [];           // 有序 phase key 列表
-        var seenPhases = {};           // 去重
-        var knownTotalPhases = 0;      // emit_start 告知的总阶段数
+        function buildShell(parent) {
+            var root = document.createElement('div');
+            root.className = 'gt-progress-track gt-activity-progress';
+            root.style.cssText = 'margin-bottom:10px;';
 
-        var coverageBatchRows = {};
-        var totalCoverageBatches = 0;
-
-        // ---- phase registration ----
-        function _registerPhase(phase) {
-            if (!phase || skipPhases[phase] || seenPhases[phase]) return;
-            seenPhases[phase] = true;
-            if (phaseLabels[phase] === undefined) phaseLabels[phase] = phase;
-            phaseOrder.push(phase);
-        }
-
-        /** 设置子步骤标签（由 run-test.js 传入 phases 元数据中的 sub_steps） */
-        function setSubStepLabels(labels) {
-            subStepLabels = Object.assign({}, labels || {});
-        }
-
-        /** 计算阶段全局进度百分比，永不回退。
-         *  均匀分配：每个非隐藏阶段占据相等的进度条宽度。
-         *  阶段内按 completed/total 线性填充。
-         *  当 phase 有子步骤时，completed/total 按所有子步骤聚合计算。 */
-        function _computePct(row, phase, completed, total) {
-            if (phase === 'info' || skipPhases[phase]) return row.pct;
-
-            var localCompleted = completed || 0;
-            var localTotal = total || 0;
-            if (row.phaseHistory[phase] && row.phaseHistory[phase].subSteps && !Progress.isEmptyObject(row.phaseHistory[phase].subSteps)) {
-                // 有子步骤：聚合所有子步骤的完成度
-                var agg = Progress.aggregateSubSteps(row.phaseHistory[phase].subSteps);
-                localCompleted = agg.completed;
-                localTotal = agg.total;
-            } else if (row.phaseHistory[phase]) {
-                var hist = row.phaseHistory[phase];
-                localCompleted = hist.completed;
-                localTotal = hist.total;
-            }
-
-            var hiddenPhases = Object.assign({}, skipPhases, hideInHistory);
-            row.pct = Progress.computeLinearPct(phaseOrder, hiddenPhases, phase, localCompleted, localTotal, row.pct);
-            return row.pct;
-        }
-
-        // ---- 下拉历史面板 ----
-        function _renderPhaseHistory(row) {
-            if (!row.historyEl) return;
-            var items = [];
-            for (var j = 0; j < phaseOrder.length; j++) {
-                var p = phaseOrder[j];
-                var h = row.phaseHistory[p];
-                if (!h || hideInHistory[p]) continue;
-                // 只显示已完成的阶段 + 当前进行中的阶段（未开始的跳过）
-                if (!h.done && p !== row.currentPhase) continue;
-                items.push({
-                    phase: p,
-                    label: _escapeProgressHtml(phaseLabels[p] || p),
-                    completed: h.completed,
-                    total: h.total,
-                    done: h.done,
-                    message: _escapeProgressHtml(h.message || ''),
-                    subSteps: h.subSteps || null,
-                    subStepKeys: h.subStepKeys || null
-                });
-            }
-            if (!items.length) {
-                row.historyEl.innerHTML = '<div style="color:#98a2b3;padding:4px 0;">暂无阶段记录</div>';
-                return;
-            }
-            var htmlParts = [];
-            for (var ii = 0; ii < items.length; ii++) {
-                var it = items[ii];
-                var count = it.total > 0 ? (it.completed + '/' + it.total) : '--';
-                var isReallyDone = it.done && it.total > 0 && it.completed >= it.total;
-                var status = isReallyDone ? '✓ 已完成' : '◷ 进行中';
-                var color = isReallyDone ? '#12a150' : '#0078d4';
-                htmlParts.push(
-                    '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
-                    + '<span style="font-weight:600;color:#475467;">' + it.label + '</span>'
-                    + '<span style="color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;" title="' + count + '">' + count + '</span>'
-                    + '<span style="color:' + color + ';white-space:nowrap;">' + status + '</span>'
-                    + '<span style="color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + it.message + '">' + it.message + '</span>'
-                    + '</div>'
-                );
-
-                // 渲染子步骤（缩进显示）
-                if (it.subSteps && it.subStepKeys) {
-                    for (var sk = 0; sk < it.subStepKeys.length; sk++) {
-                        var skey = it.subStepKeys[sk];
-                        var ss = it.subSteps[skey];
-                        if (!ss) continue;
-                        var phaseSubs = subStepLabels[it.phase] || {};
-                        var ssLabel = _escapeProgressHtml(phaseSubs[skey] || skey);
-                        var ssCount = ss.total > 0 ? (ss.completed + '/' + ss.total) : '--';
-                        var ssDone = ss.total > 0 && ss.completed >= ss.total;
-                        var ssStatus = ssDone ? '✓' : (it.done ? '✓' : '◷');
-                        var ssColor = ssDone ? '#12a150' : (it.done ? '#12a150' : '#0078d4');
-                        var ssMsg = _escapeProgressHtml(ss.message || '');
-                        htmlParts.push(
-                            '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:1px 0;font-size:10px;color:#667085;">'
-                            + '<span style="padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + ssLabel + '">└ ' + ssLabel + '</span>'
-                            + '<span style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;" title="' + ssCount + '">' + ssCount + '</span>'
-                            + '<span style="color:' + ssColor + ';white-space:nowrap;">' + ssStatus + '</span>'
-                            + '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + ssMsg + '">' + ssMsg + '</span>'
-                            + '</div>'
-                        );
-                    }
-                }
-            }
-            row.historyEl.innerHTML = htmlParts.join('');
-        }
-
-        function _recordPhaseProgress(row, phase, completed, total, message, subStep) {
-            if (!phase || skipPhases[phase]) return;
-
-            // info 类型：不创建新条目，只更新消息
-            if (phase === 'info') {
-                if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
-                    var cur = row.phaseHistory[row.currentPhase];
-                    cur.message = message || cur.message || '';
-                    _renderPhaseHistory(row);
-                }
-                return;
-            }
-
-            // 隐藏阶段：不记录历史，但标记前一个阶段完成（仅当前一个阶段确实已完成时）
-            if (hideInHistory[phase]) {
-                var prevPhase = row.phaseHistory[row.currentPhase];
-                if (row.currentPhase && prevPhase) {
-                    Progress.completePhaseRecord(prevPhase);
-                }
-                row.currentPhase = phase;
-                _renderPhaseHistory(row);
-                return;
-            }
-
-            // 切换阶段时，标记上一个阶段完成（仅当前一阶段确实已完成时）
-            if (row.currentPhase && row.currentPhase !== phase && row.phaseHistory[row.currentPhase]) {
-                var prev = row.phaseHistory[row.currentPhase];
-                Progress.completePhaseRecord(prev);
-            }
-            row.currentPhase = phase;
-
-            var existing = row.phaseHistory[phase] || {};
-            var normalized = Progress.normalizeProgress(completed, total, message);
-            var newCompleted = Math.max(existing.completed || 0, normalized.completed || 0);
-            var newTotal = Math.max(existing.total || 0, normalized.total || 0);
-            // 如果 phase 被重新进入（如 simulate 在多个 batch 中重复），done 必须重置
-            var isNowDone = normalized.terminal || (newTotal > 0 && newCompleted >= newTotal);
-            // 跳过类消息（total=0 表示"已有缓存跳过"）不覆盖已有的有意义消息
-            var skipLike = (total != null && total === 0) || (message && message.indexOf('跳过') >= 0);
-            var bestMessage = existing.message || '';
-            if (message && (!skipLike || !bestMessage)) {
-                bestMessage = message;
-            }
-
-            // 子步骤处理
-            var existingSubs = existing.subSteps || {};
-            var existingSubKeys = existing.subStepKeys || [];
-            if (subStep) {
-                var lastSubStep = existingSubKeys.length ? existingSubKeys[existingSubKeys.length - 1] : '';
-                if (lastSubStep && lastSubStep !== subStep && existingSubs[lastSubStep]) {
-                    Progress.completePhaseRecord(existingSubs[lastSubStep]);
-                }
-                var oldSub = existingSubs[subStep] || {};
-                var subComp = Math.max(oldSub.completed || 0, normalized.completed || 0);
-                var subTot = Math.max(oldSub.total || 0, normalized.total || 0);
-                var subDone = normalized.terminal || (subTot > 0 && subComp >= subTot);
-                existingSubs[subStep] = {
-                    completed: subComp,
-                    total: subTot,
-                    done: subDone,
-                    message: message || oldSub.message || ''
-                };
-                if (existingSubKeys.indexOf(subStep) < 0) {
-                    existingSubKeys.push(subStep);
-                }
-
-                // 有子步骤时，阶段的 completed/total 按聚合计算
-                var agg = Progress.aggregateSubSteps(existingSubs);
-                newCompleted = agg.completed;
-                newTotal = agg.total;
-                isNowDone = newTotal > 0 && newCompleted >= newTotal;
-            }
-
-            row.phaseHistory[phase] = {
-                completed: newCompleted,
-                total: newTotal,
-                message: bestMessage,
-                done: isNowDone,
-                subSteps: existingSubs,
-                subStepKeys: existingSubKeys.length > 0 ? existingSubKeys : null
-            };
-            _renderPhaseHistory(row);
-        }
-
-        // ---- DOM row management ----
-        function _ensureCoverageBatchRow(index, label) {
-            if (coverageBatchRows[index]) {
-                var r = coverageBatchRows[index];
-                if (label && r.labelEl) r.labelEl.textContent = label;
-                return r;
-            }
-
-            var row = document.createElement('div');
-            row.className = 'gt-progress-track';
-            row.style.cssText = 'margin-bottom:10px;';
-
-            // 第一行：阶段名 + 计数 + 展开按钮
             var line = document.createElement('div');
             line.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
 
-            // 兼容旧调用保留 labelEl，但单批运行不再展示 Batch 标签。
-            var labelEl = document.createElement('span');
-            labelEl.style.cssText = 'display:none;';
-            labelEl.textContent = label || '';
+            var title = document.createElement('span');
+            title.style.cssText = 'flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            title.textContent = '分组测试';
+            line.appendChild(title);
 
-            // 阶段名
-            var phaseEl = document.createElement('span');
-            phaseEl.style.cssText = 'flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-            phaseEl.textContent = '准备中';
-            line.appendChild(phaseEl);
-
-            // 计数
-            var textEl = document.createElement('span');
-            textEl.style.cssText = 'flex:0 0 auto;font-size:12px;color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;';
-            textEl.textContent = '0/0';
-            line.appendChild(textEl);
-
-            // 展开按钮
             var toggle = document.createElement('button');
             toggle.type = 'button';
             toggle.style.cssText = 'flex:0 0 24px;width:24px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#475467;font-size:12px;cursor:pointer;line-height:1;';
             toggle.textContent = '▾';
             line.appendChild(toggle);
+            root.appendChild(line);
 
-            row.appendChild(line);
-
-            // 单条全宽渐变色进度条，与交易账本回放进度条对齐。
             var barWrap = document.createElement('div');
             barWrap.style.cssText = 'width:100%;margin-top:6px;';
             var bar = document.createElement('div');
             bar.style.cssText = 'display:block;background:#e2e8f0;border-radius:999px;height:7px;overflow:hidden;';
             var fill = document.createElement('div');
-            fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:999px;';
+            fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#0f766e,#14b8a6);transition:width .28s ease;border-radius:999px;';
             bar.appendChild(fill);
             barWrap.appendChild(bar);
-            row.appendChild(barWrap);
+            root.appendChild(barWrap);
 
-            // 消息行
-            var messageEl = document.createElement('div');
-            messageEl.style.cssText = 'margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-            messageEl.textContent = '';
-            row.appendChild(messageEl);
+            var message = document.createElement('div');
+            message.style.cssText = 'margin-top:4px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            message.textContent = '等待回测开始';
+            root.appendChild(message);
 
-            // 下拉历史面板（默认隐藏）
-            var historyEl = document.createElement('div');
-            historyEl.style.cssText = 'display:none;margin-top:6px;padding:6px 8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;font-size:11px;';
-            row.appendChild(historyEl);
+            var diagram = document.createElement('div');
+            diagram.style.cssText = 'display:none;margin-top:8px;padding:8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;overflow-x:auto;';
+            root.appendChild(diagram);
 
             toggle.addEventListener('click', function() {
-                var open = historyEl.style.display === 'none';
-                historyEl.style.display = open ? 'block' : 'none';
+                var open = diagram.style.display === 'none';
+                diagram.style.display = open ? 'block' : 'none';
                 toggle.textContent = open ? '▴' : '▾';
             });
 
-            progressContainer.appendChild(row);
-
-            var newRow = {
-                rowEl: row,
-                labelEl: labelEl,
-                fillEl: fill,
-                textEl: textEl,
-                phaseEl: phaseEl,
-                messageEl: messageEl,
-                historyEl: historyEl,
-                phaseHistory: {},
-                currentPhase: '',
-                pct: 0,
-                _phaseTotalMax: {}   // phase -> max total seen（用于加权进度条）
+            parent.appendChild(root);
+            return {
+                root: root,
+                title: title,
+                fill: fill,
+                message: message,
+                diagram: diagram,
+                toggle: toggle
             };
-            coverageBatchRows[index] = newRow;
-            return newRow;
         }
 
-        function _updateCoverageBatchRow(index, phase, completed, total, message, subStep) {
-            var row = _ensureCoverageBatchRow(index, '');
+        function phaseLabel(key) {
+            var phase = phaseByKey[key];
+            return phase && phase.label ? phase.label : key;
+        }
 
-            _registerPhase(phase);
-            _recordPhaseProgress(row, phase, completed, total, message, subStep);
-            _computePct(row, phase, completed, total);
+        function registerActivityManifest(manifestPhases) {
+            if (!Array.isArray(manifestPhases)) return;
+            for (var i = 0; i < manifestPhases.length; i++) {
+                var phase = manifestPhases[i] || {};
+                var key = normalizePhaseKey(phase.key || phase.phase);
+                if (!key) continue;
+                var normalized = {
+                    key: key,
+                    label: phase.label || key,
+                    flows: Array.isArray(phase.flows) ? phase.flows.slice() : []
+                };
+                normalized.flows.sort(function(a, b) {
+                    return Number(a.display_order || 0) - Number(b.display_order || 0);
+                });
+                if (phaseByKey[key]) {
+                    phaseByKey[key].label = normalized.label || phaseByKey[key].label;
+                    mergeFlows(phaseByKey[key], normalized.flows);
+                } else {
+                    phaseByKey[key] = normalized;
+                    phases.push(normalized);
+                }
+            }
+            renderDiagram();
+        }
 
-            // 更新阶段名
-            if (phase && !skipPhases[phase] && row.phaseEl) {
-                row.phaseEl.textContent = phaseLabels[phase] || phase;
+        function mergeFlows(phase, newFlows) {
+            var seen = {};
+            for (var i = 0; i < phase.flows.length; i++) {
+                seen[phase.flows[i].flow_key] = true;
             }
-            // 更新消息行：如果有子步骤，显示 "阶段名 › 子步骤标签：消息"
-            if (row.messageEl) {
-                var displayMsg = message || '';
-                if (subStep && phase) {
-                    var phaseSubs = subStepLabels[phase] || {};
-                    var subLabel = phaseSubs[subStep] || subStep;
-                    displayMsg = (phaseLabels[phase] || phase) + ' › ' + subLabel + (message ? '：' + message : '');
-                }
-                if (displayMsg) {
-                    row.messageEl.textContent = displayMsg;
-                    row.messageEl.title = displayMsg;
+            for (var j = 0; j < newFlows.length; j++) {
+                if (!seen[newFlows[j].flow_key]) {
+                    phase.flows.push(newFlows[j]);
+                    seen[newFlows[j].flow_key] = true;
                 }
             }
-            // 更新进度条
-            if (!skipPhases[phase] && row.fillEl) {
-                row.fillEl.style.width = row.pct + '%';
-                row.fillEl.style.background = _phaseColor(phase);
+            phase.flows.sort(function(a, b) {
+                return Number(a.display_order || 0) - Number(b.display_order || 0);
+            });
+        }
+
+        function renderDiagram() {
+            if (!row.diagram) return;
+            if (!phases.length) {
+                row.diagram.innerHTML = '<div style="font-size:11px;color:#98a2b3;">等待流程注册</div>';
+                return;
             }
-            // 更新计数（仅当有意义的 progress 时更新）
-            if (!skipPhases[phase]) {
-                var history = row.phaseHistory[phase];
-                var displayCompleted = history ? history.completed : completed;
-                var displayTotal = history ? history.total : total;
-                if (displayTotal > 0) {
-                    row.textEl.textContent = displayCompleted + '/' + displayTotal;
+            var html = ['<div class="gt-flow-process" style="display:flex;align-items:stretch;gap:8px;min-width:max-content;">'];
+            for (var i = 0; i < phases.length; i++) {
+                var phase = phases[i];
+                var active = phase.key === currentPhase;
+                html.push(
+                    '<div data-phase="' + escapeHtml(phase.key) + '" class="gt-flow-phase' + (active ? ' is-active' : '') + '"'
+                    + ' style="position:relative;display:flex;flex-direction:column;gap:6px;padding:6px 8px 8px;border:1px solid ' + (active ? '#14b8a6' : '#d0d5dd') + ';border-radius:6px;background:' + (active ? '#f0fdfa' : '#f8fafc') + ';">'
+                    + '<div style="text-align:center;font-size:11px;font-weight:600;color:#475467;white-space:nowrap;">(' + escapeHtml(phase.label || phase.key) + ')</div>'
+                    + '<div style="display:flex;gap:6px;align-items:stretch;position:relative;">'
+                );
+                if (active) {
+                    html.push('<div class="gt-flow-phase-sweep" style="position:absolute;inset:0;border-radius:4px;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(20,184,166,.18),transparent);animation:gtFlowSweep 1.45s linear infinite;"></div>');
                 }
-            } else if (phase === 'info' && row.currentPhase) {
-                // info 消息不更新计数，保持上一个阶段的计数
+                var flows = phase.flows || [];
+                if (!flows.length) {
+                    html.push('<div style="font-size:11px;color:#98a2b3;padding:12px 4px;">暂无节点</div>');
+                }
+                for (var j = 0; j < flows.length; j++) {
+                    html.push(
+                        '<div class="gt-flow-node" style="position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:24px;min-height:92px;padding:4px 2px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;color:#475467;font-size:11px;line-height:1.1;writing-mode:vertical-rl;text-orientation:mixed;white-space:nowrap;">'
+                        + escapeHtml(flows[j].flow_label || flows[j].flow_name || flows[j].flow_key)
+                        + '</div>'
+                    );
+                }
+                html.push('</div></div>');
+            }
+            html.push('</div>');
+            row.diagram.innerHTML = html.join('');
+            ensureSweepStyle();
+        }
+
+        function ensureSweepStyle() {
+            if (document.getElementById('gt-flow-sweep-style')) return;
+            var style = document.createElement('style');
+            style.id = 'gt-flow-sweep-style';
+            style.textContent = '@keyframes gtFlowSweep{0%{transform:translateX(-60%);opacity:.25}50%{opacity:1}100%{transform:translateX(60%);opacity:.25}}';
+            document.head.appendChild(style);
+        }
+
+        function recordActivity(payload) {
+            if (!payload || !payload.phase) return;
+            var phase = normalizePhaseKey(payload.phase);
+            if (!phase) return;
+            currentPhase = phase;
+            if (!phaseByKey[phase]) {
+                registerActivityManifest([{ key: phase, label: payload.phase_label || phase, flows: [] }]);
+            }
+            if (payload.flow_key) {
+                activityCache[phase] = activityCache[phase] || {};
+                activityCache[phase][payload.flow_key] = {
+                    timestamp: payload.timestamp || '',
+                    label: payload.flow_label || payload.flow_name || payload.flow_key,
+                    message: payload.message || ''
+                };
+                var phaseSpec = phaseByKey[phase];
+                var exists = false;
+                for (var i = 0; i < phaseSpec.flows.length; i++) {
+                    if (phaseSpec.flows[i].flow_key === payload.flow_key) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    phaseSpec.flows.push({
+                        phase: phase,
+                        flow_key: payload.flow_key,
+                        flow_name: payload.flow_name || payload.flow_key,
+                        flow_label: payload.flow_label || payload.flow_key,
+                        display_order: payload.display_order || phaseSpec.flows.length + 1,
+                        event_kind: payload.event_kind || ''
+                    });
+                    phaseSpec.flows.sort(function(a, b) {
+                        return Number(a.display_order || 0) - Number(b.display_order || 0);
+                    });
+                }
+            }
+            renderDiagram();
+            scheduleRotation(phase);
+        }
+
+        function scheduleRotation(phase) {
+            if (rotateTimers[phase]) return;
+            rotateOne(phase);
+            rotateTimers[phase] = window.setInterval(function() {
+                rotateOne(phase);
+            }, 2000);
+        }
+
+        function rotateOne(phase) {
+            if (phase !== currentPhase) return;
+            var phaseSpec = phaseByKey[phase];
+            if (!phaseSpec || !phaseSpec.flows || !phaseSpec.flows.length) return;
+            var records = activityCache[phase] || {};
+            var flows = phaseSpec.flows;
+            var start = rotatePosition[phase] == null ? -1 : rotatePosition[phase];
+            for (var offset = 1; offset <= flows.length; offset++) {
+                var idx = (start + offset) % flows.length;
+                var flow = flows[idx];
+                var rec = records[flow.flow_key];
+                if (!rec) continue;
+                rotatePosition[phase] = idx;
+                var prefix = rec.timestamp ? rec.timestamp + ' ' : '';
+                var text = rec.message || (prefix + '正在' + rec.label);
+                row.message.textContent = text;
+                row.message.title = text;
+                row.title.textContent = phaseLabel(phase);
+                return;
             }
         }
 
-        // ---- Public API ----
+        function updateSignalProgress(payload) {
+            var percent = Number(payload && payload.percent);
+            if (!isFinite(percent)) {
+                var completed = Number(payload && payload.completed || 0);
+                var total = Number(payload && payload.total || 0);
+                percent = total > 0 ? completed / total * 100 : 0;
+            }
+            percent = Math.max(0, Math.min(100, percent));
+            row.fill.style.width = percent.toFixed(2) + '%';
+        }
+
+        function markAllDone(success, message) {
+            if (success) {
+                row.fill.style.width = '100%';
+                row.fill.style.background = 'linear-gradient(90deg,#12a150,#4caf50)';
+                row.title.textContent = '分组测试完成';
+                row.title.style.color = '#12a150';
+            } else {
+                row.fill.style.background = 'linear-gradient(90deg,#d92d20,#f97066)';
+                row.title.textContent = '分组测试失败';
+                row.title.style.color = '#d92d20';
+            }
+            if (message) {
+                row.message.textContent = message;
+                row.message.title = message;
+            }
+        }
+
         return {
-            ensureRow: _ensureCoverageBatchRow,
-            updateRow: _updateCoverageBatchRow,
-
-            updateAllRows: function(phase, completed, total, message, subStep) {
-                var keys = Object.keys(coverageBatchRows);
-                for (var k = 0; k < keys.length; k++) {
-                    _updateCoverageBatchRow(parseInt(keys[k]), phase, completed, total, message, subStep);
+            registerActivityManifest: registerActivityManifest,
+            recordActivity: recordActivity,
+            updateSignalProgress: updateSignalProgress,
+            markAllDone: markAllDone,
+            syncRows: function() {},
+            ensureRow: function() { return row; },
+            updateRow: function(_idx, phase, completed, total, message) {
+                updateSignalProgress({ completed: completed, total: total });
+                if (message) {
+                    recordActivity({
+                        phase: phase || 'event_replay',
+                        flow_key: (phase || 'event_replay') + '.legacy',
+                        flow_label: message,
+                        message: message
+                    });
                 }
             },
-
-            markAllDone: function(success, message) {
-                var indices = Object.keys(coverageBatchRows);
-                for (var i = 0; i < indices.length; i++) {
-                    var row = coverageBatchRows[indices[i]];
-                    if (!row) continue;
-                    // 标记当前阶段完成
-                    if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
-                        if (success) Progress.completePhaseRecord(row.phaseHistory[row.currentPhase]);
-                        else row.phaseHistory[row.currentPhase].done = false;
-                        if (message) row.phaseHistory[row.currentPhase].message = message;
-                    }
-                    if (success) {
-                        var phaseKeys = Object.keys(row.phaseHistory || {});
-                        for (var pk = 0; pk < phaseKeys.length; pk++) {
-                            Progress.completePhaseRecord(row.phaseHistory[phaseKeys[pk]]);
-                        }
-                    }
-                    if (success) {
-                        row.pct = 100;
-                        row.fillEl.style.width = '100%';
-                        row.fillEl.style.background = 'linear-gradient(90deg,#12a150,#4caf50)';
-                        row.phaseEl.textContent = '分组测试';
-                        row.phaseEl.style.color = '#12a150';
-                        row.textEl.textContent = '100%';
-                        // 完成后保留稳定标题，只更新消息和进度，避免整行视觉跳变。
-                        if (row.messageEl) {
-                            row.messageEl.style.display = '';
-                        }
-                    } else {
-                        row.phaseEl.textContent = '分组测试';
-                        row.phaseEl.style.color = '#d92d20';
-                        row.fillEl.style.background = 'linear-gradient(90deg,#d92d20,#f97066)';
-                    }
-                    if (message && row.messageEl) {
-                        row.messageEl.textContent = message;
-                        row.messageEl.title = message;
-                        row.messageEl.style.display = '';
-                    }
-                    _renderPhaseHistory(row);
-                    // 自动展开失败的历史
-                    if (!success && row.historyEl) {
-                        row.historyEl.style.display = 'block';
-                        var btn = row.rowEl && row.rowEl.querySelector('button');
-                        if (btn) btn.textContent = '▴';
-                    }
-                }
+            updateAllRows: function(phase, completed, total, message) {
+                this.updateRow(0, phase, completed, total, message);
             },
-
-            syncRows: function(nextTotal) {
-                var existingKeys = Object.keys(coverageBatchRows);
-                // 只删除超出范围的旧行，保留范围内的行（含其 phaseHistory 和 pct）
-                for (var i = 0; i < existingKeys.length; i++) {
-                    var idx = parseInt(existingKeys[i]);
-                    if (idx >= nextTotal) {
-                        var r = coverageBatchRows[idx];
-                        if (r && r.rowEl && r.rowEl.parentNode) {
-                            r.rowEl.parentNode.removeChild(r.rowEl);
-                        }
-                        delete coverageBatchRows[idx];
-                    }
-                }
-                totalCoverageBatches = nextTotal;
-                // 只创建缺失的行
-                for (var j = 0; j < nextTotal; j++) {
-                    _ensureCoverageBatchRow(j, '');
-                }
+            registerPhases: function(phaseKeys) {
+                if (!Array.isArray(phaseKeys)) return;
+                registerActivityManifest(phaseKeys.map(function(key) {
+                    return { key: key, label: key, flows: [] };
+                }));
             },
-
-            getRow: function(idx) { return coverageBatchRows[idx] || null; },
-
-            getIndices: function() { return Object.keys(coverageBatchRows).map(Number); },
-
-            getTotal: function() { return totalCoverageBatches; },
-
-            /** 设置后端告知的总阶段数（优先于动态发现） */
-            setTotalPhases: function(n) {
-                if (n > 0) knownTotalPhases = n;
-            },
-
-            /** 注册阶段列表（emit_start 告知）。
-             *  多次调用安全（seenPhases 去重），且总是用后端告知的 phaseOrder
-             *  长度更新 knownTotalPhases。 */
-            registerPhases: function(phases) {
-                if (!Array.isArray(phases)) return;
-                for (var pi = 0; pi < phases.length; pi++) {
-                    var p = phases[pi];
-                    if (!p || skipPhases[p] || seenPhases[p]) continue;
-                    _registerPhase(p);
-                }
-                // 总是用最新的后端告知的阶段数覆盖（可能比动态发现的多）
-                if (phaseOrder.length > 0) {
-                    knownTotalPhases = phaseOrder.length;
-                }
-            },
-
             setPhaseLabels: function(labels) {
-                if (!labels || typeof labels !== 'object') return;
+                labels = labels || {};
                 var keys = Object.keys(labels);
                 for (var i = 0; i < keys.length; i++) {
-                    phaseLabels[keys[i]] = labels[keys[i]];
+                    if (!phaseByKey[keys[i]]) registerActivityManifest([{ key: keys[i], label: labels[keys[i]], flows: [] }]);
+                    else phaseByKey[keys[i]].label = labels[keys[i]];
                 }
-                var indices = Object.keys(coverageBatchRows);
-                for (var j = 0; j < indices.length; j++) {
-                    _renderPhaseHistory(coverageBatchRows[indices[j]]);
-                }
+                renderDiagram();
             },
-
-            setSubStepLabels: setSubStepLabels,
-
-            getPhaseLabels: function() { return phaseLabels; },
-
-            // 诊断暴露
-            _debug_phaseOrder: phaseOrder,
-            get _debug_knownTotalPhases() { return knownTotalPhases; },
-            get _debug_coverageBatchRows() { return coverageBatchRows; },
-            get _debug_phaseLabels() { return phaseLabels; },
+            setSubStepLabels: function() {},
+            getIndices: function() { return [0]; },
+            getTotal: function() { return 1; },
+            getPhaseLabels: function() {
+                var labels = {};
+                for (var i = 0; i < phases.length; i++) labels[phases[i].key] = phases[i].label;
+                return labels;
+            },
+            getRow: function() { return row; }
         };
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Export
-    // ═══════════════════════════════════════════════════════════════
 
     GT.groupSettings = GT.groupSettings || {};
     GT.groupSettings.runGroupBatch = {
         createManager: createProductCoverageBatchManager,
     };
-
 })();

@@ -13,7 +13,7 @@ import heapq
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
 import pandas as pd
 
@@ -28,6 +28,53 @@ if TYPE_CHECKING:
 
 class SchedulerError(Exception):
     pass
+
+
+class ProgressSink(Protocol):
+    def emit_activity_manifest(self, phases: list[dict[str, Any]]) -> None: ...
+    def emit_activity(self, **payload: Any) -> None: ...
+    def emit_signal_progress(self, *, completed: int, total: int, phase: str = "event_replay") -> None: ...
+
+
+_PHASE_LABELS: dict[str, str] = {
+    "pre_replay": "回放准备",
+    "event_replay": "事件回放",
+    "post_replay": "结果整理",
+}
+
+
+_FLOW_LABELS: dict[str, str] = {
+    "check_market_data_coverage": "检查产品覆盖期",
+    "resolve_product_selection": "解析产品路径",
+    "expand_term_structure": "展开期限结构",
+    "load_raw_market_data": "装载行情数据",
+    "build_trading_day_resolver": "建立交易日映射",
+    "load_historical_fields": "加载历史交易规则字段",
+    "causal_valuation": "生成因果估值序列",
+    "initialize_ledgers": "初始化交易账本",
+    "schedule_bar_events": "登记行情事件",
+    "signal_live": "处理实时因子信号",
+    "signal_precomputed": "登记预计算信号",
+    "lookup_current_prices_on_signal": "读取信号时点价格",
+    "lookup_current_prices_on_bar": "读取行情时点价格",
+    "lookup_current_prices_on_order": "读取订单时点价格",
+    "lookup_volume_on_signal": "读取成交量",
+    "lookup_historical_fields_on_signal": "读取交易规则字段",
+    "lookup_historical_fields_on_order": "读取订单交易规则字段",
+    "group_quantile_membership": "计算分组隶属",
+    "equity_on_signal": "计算信号时点权益",
+    "size_order": "计算目标下单量",
+    "construct_orders": "构造订单",
+    "constrain_to_ledger_cash": "按现金约束调整订单",
+    "schedule_order_execution": "登记订单执行事件",
+    "cash_update": "更新现金与持仓",
+    "equity_on_order": "计算订单后权益",
+    "record_equity_on_signal": "记录信号时点净值",
+    "record_equity_on_order": "记录订单后净值",
+    "finalize_order": "确认订单终态",
+    "flush_equity_post_replay": "整理净值曲线",
+    "compute_risk_metrics": "计算风险指标",
+}
 
 
 # ── FlowRegistry ──────────────────────────────────────────────────
@@ -49,7 +96,12 @@ class ResolvedFlow:
 
     @property
     def effective_description(self) -> str:
-        return self.description or self.name
+        return self.description or _FLOW_LABELS.get(self.name, self.name)
+
+    @property
+    def activity_key(self) -> str:
+        event = self.event_kind.name.lower() if self.event_kind is not None else "once"
+        return f"{self.phase.value}.{event}.{self.name}"
 
 
 def _wrap(override_compute: Callable, base_compute: Callable) -> Callable:
@@ -265,6 +317,9 @@ class EventQueue:
         """O(1) -- `len()` on a list, not a heap walk."""
         return len(self._heap)
 
+    def pending_count_by_kind(self, kind: EventKind) -> int:
+        return sum(1 for _, draft_kind, _, _ in self._heap if draft_kind is kind)
+
     def run_until_drained(self) -> None:
         """Progress reporting lives in `make_dispatcher` (Flow-level), not
         here -- a batch can fan out across many strategies x Flows, and
@@ -285,45 +340,68 @@ class EventQueue:
 
 
 class _ProgressTracker:
-    """Shared across every phase/dispatcher in one `run()` call so progress
-    accumulates correctly instead of resetting per phase or per event kind.
-    Unit = one Flow.compute() call, not one event or one strategy -- a
-    single call already covers every applicable strategy internally, and
-    that's the actual unit of work the scheduler can see without forcing
-    every Flow body to report progress mid-loop (which would couple
-    business logic to progress-reporting infrastructure, see plan)."""
+    """Backtest activity reporter.
+
+    The UI progress bar is keyed to initial SIGNAL event completion. Flow
+    activity is a parallel stream used for text rotation and process display;
+    it deliberately does not expose completed/total flow counts.
+    """
 
     def __init__(
         self,
         callback: Callable[[int, int, str], None] | None,
-        pre_replay_count: int,
-        post_replay_count: int,
+        activity_sink: ProgressSink | None,
         event_queue: EventQueue,
     ) -> None:
         self._callback = callback
-        self._pre_replay_remaining = pre_replay_count
-        self._post_replay_remaining = post_replay_count
+        self._activity_sink = activity_sink
         self._event_queue = event_queue
         self._completed = 0
+        self._signal_total = 0
+        self._signal_completed = 0
+
+    def emit_manifest(self, groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]]) -> None:
+        if self._activity_sink is not None:
+            self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups))
+
+    def note_signal_queue_ready(self) -> None:
+        self._signal_total = self._event_queue.pending_count_by_kind(EventKind.SIGNAL)
+        self._signal_completed = 0
+        if self._activity_sink is not None:
+            self._activity_sink.emit_signal_progress(completed=0, total=self._signal_total)
+
+    def activity(self, flow: ResolvedFlow, *, timestamp: pd.Timestamp | None, phase: str | None = None) -> None:
+        if self._activity_sink is None:
+            return
+        activity_phase = phase or _activity_phase_for_flow(flow)
+        ts_text = timestamp.isoformat() if timestamp is not None else ""
+        self._activity_sink.emit_activity(
+            phase=activity_phase,
+            phase_label=_PHASE_LABELS.get(activity_phase, activity_phase),
+            flow_key=flow.activity_key,
+            flow_name=flow.name,
+            flow_label=flow.effective_description,
+            display_order=flow.order,
+            event_kind=flow.event_kind.name if flow.event_kind is not None else "",
+            timestamp=ts_text,
+            timezone=str(getattr(getattr(timestamp, "tzinfo", None), "zone", "") or ""),
+            message=_activity_message(ts_text, flow.effective_description),
+        )
 
     def tick(self, label: str, *, phase: Phase) -> None:
-        if self._callback is None:
-            return
-        if phase is Phase.PRE_REPLAY:
-            self._pre_replay_remaining -= 1
-        elif phase is Phase.POST_REPLAY:
-            self._post_replay_remaining -= 1
         self._completed += 1
-        # Each pending event will trigger at least one Flow call once
-        # popped -- a lower-bound, live-updating estimate, not a fixed
-        # upfront count (the PER_EVENT queue can still grow).
-        total = (
-            self._completed + self._pre_replay_remaining
-            + self._post_replay_remaining + self._event_queue.pending_count()
-        )
-        from tools.testers.backtest.engines.workers.runners.common import should_report_progress
-        if should_report_progress(self._completed, total):
-            self._callback(self._completed, total, label)
+        if self._callback is not None:
+            self._callback(self._completed, max(self._completed, 1), label)
+
+    def signal_batch_done(self, batch_size: int) -> None:
+        if batch_size <= 0:
+            return
+        self._signal_completed = min(self._signal_total, self._signal_completed + batch_size)
+        if self._activity_sink is not None:
+            self._activity_sink.emit_signal_progress(
+                completed=self._signal_completed,
+                total=self._signal_total,
+            )
 
 
 def make_dispatcher(
@@ -359,9 +437,13 @@ def make_dispatcher(
             if not applicable:
                 continue
             ctx.active_strategies = applicable
+            if tracker is not None:
+                tracker.activity(f, timestamp=timestamp, phase="event_replay")
             f.compute(account, ctx)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
+        if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
+            tracker.signal_batch_done(len(batch))
     return handler
 
 
@@ -383,6 +465,7 @@ def run(
     event_queue: EventQueue,
     resolved_flows: list[ResolvedFlow],
     progress: Callable[[int, int, str], None] | None = None,
+    activity_sink: ProgressSink | None = None,
 ) -> None:
     """Invariant: run() itself never calls event_queue.push_event directly
     — events are only ever registered by some Flow's compute via
@@ -390,14 +473,14 @@ def run(
     that wants to conveniently push an event from inside this function
     means the design has drifted — go fix a Flow, not this function.
 
-    `progress(completed, total, label)`, if given, fires once per
-    Flow.compute() call across ALL three phases (not just PER_EVENT) --
-    `label` is that Flow's qualified_name, `total` is a live, growing-as-
-    needed estimate (see _ProgressTracker), not a fixed upfront count."""
+    `progress(completed, total, label)` is kept for legacy coarse callers.
+    `activity_sink` is the native UI contract: manifest + activity +
+    signal-progress, with no flow-count totals exposed to the user."""
     groups = sort_and_validate(resolved_flows)
     pre_replay_flows = groups.get((Phase.PRE_REPLAY, None), ())
     post_replay_flows = groups.get((Phase.POST_REPLAY, None), ())
-    tracker = _ProgressTracker(progress, len(pre_replay_flows), len(post_replay_flows), event_queue)
+    tracker = _ProgressTracker(progress, activity_sink, event_queue)
+    tracker.emit_manifest(groups)
 
     for (phase, event_kind), ordered_flows in groups.items():
         if phase is Phase.PER_EVENT:
@@ -410,9 +493,11 @@ def run(
         if not applicable:
             continue
         ctx.active_strategies = applicable
+        tracker.activity(f, timestamp=None, phase="pre_replay")
         f.compute(account, ctx)
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
+    tracker.note_signal_queue_ready()
     event_queue.run_until_drained()
 
     ctx = FlowContext(timestamp=None, event_queue=event_queue)
@@ -421,5 +506,59 @@ def run(
         if not applicable:
             continue
         ctx.active_strategies = applicable
+        tracker.activity(f, timestamp=None, phase="post_replay")
         f.compute(account, ctx)
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
+
+
+def _activity_phase(phase: Phase) -> str:
+    if phase is Phase.PER_EVENT:
+        return "event_replay"
+    return phase.value
+
+
+def _activity_phase_for_flow(flow: ResolvedFlow) -> str:
+    return _activity_phase(flow.phase)
+
+
+def _activity_message(timestamp: str, label: str) -> str:
+    if timestamp:
+        return f"{timestamp} 正在{label}"
+    return f"正在{label}"
+
+
+def activity_manifest_from_groups(
+    groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
+) -> list[dict[str, Any]]:
+    phase_specs: list[dict[str, Any]] = []
+    pre_all = list(groups.get((Phase.PRE_REPLAY, None), ()))
+    phase_specs.append(_phase_spec("pre_replay", pre_all))
+
+    event_flows: list[ResolvedFlow] = []
+    for (phase, _kind), flows in groups.items():
+        if phase is Phase.PER_EVENT:
+            event_flows.extend(flows)
+    event_flows = sorted(event_flows, key=lambda f: (f.order, f.event_kind or EventKind.SIGNAL, f.name))
+    phase_specs.append(_phase_spec("event_replay", event_flows))
+
+    post = groups.get((Phase.POST_REPLAY, None), ())
+    phase_specs.append(_phase_spec("post_replay", post))
+    return phase_specs
+
+
+def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": _PHASE_LABELS.get(key, key),
+        "flows": [
+            {
+                "phase": key,
+                "flow_key": flow.activity_key,
+                "flow_name": flow.name,
+                "flow_label": flow.effective_description,
+                "display_order": idx,
+                "event_kind": flow.event_kind.name if flow.event_kind is not None else "",
+            }
+            for idx, flow in enumerate(flows, start=1)
+        ],
+    }

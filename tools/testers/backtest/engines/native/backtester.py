@@ -10,9 +10,11 @@ not changed here.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
-from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
+import pandas as pd
+
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, ProgressSink, run
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
 from tools.testers.backtest.modules.group_membership import target_trace_for
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
@@ -40,13 +42,14 @@ def run_backtest_task(
     settings_by_strategy: dict[str, dict[str, Any]],
     run_id: str,
     progress: Callable[[int, int, str], None] | None = None,
+    activity_sink: ProgressSink | None = None,
 ) -> dict[str, Any]:
     """Fixed task: runs the engine against an already-built AccountState,
     stores it on `state.account` for later snapshot/detail requests, and
     returns the `execution` dict shape group.py already consumes."""
     registry = _build_registry()
     queue = EventQueue()
-    run(account, queue, registry.resolve(), progress=progress)
+    run(account, queue, registry.resolve(), progress=progress, activity_sink=activity_sink)
 
     by_alias = {strategy.alias: strategy for strategy in account.strategy_configs}
     portfolios: dict[str, Any] = {}
@@ -54,7 +57,7 @@ def run_backtest_task(
     for group_id, strategy in by_alias.items():
         curve = equity_curve_for(account, strategy)
         portfolios[group_id] = {
-            "equity_curve": {ts.isoformat(): float(value) for ts, value in curve.items()},
+            "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
             "position_curve": position_curve_for(account, strategy),
             "execution_trace": {},  # TODO(issue-114): per-order delta/fill detail, not recorded yet
             "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,

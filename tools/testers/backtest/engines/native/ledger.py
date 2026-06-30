@@ -96,6 +96,7 @@ class AccountState:
             strategy_configs if strategy_configs is not None else {}
         )
         self.raw_market_data: dict[str, Any] = {}
+        self.market_data_request: dict[str, Any] = {}
         self.backtest_included_products: frozenset[Any] | None = None
         self.backtest_excluded_out_of_range_products: tuple[Any, ...] = ()
         self.historical_field_provider: Any = None

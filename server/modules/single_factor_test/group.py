@@ -8,13 +8,6 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.data.field_history import (
-    HistoricalFieldFallbackPolicy,
-    TRANSACTION_FEE_FIELD_NAMES,
-    build_trading_day_resolver_from_market_data,
-    load_market_rule_field_provider,
-)
-from tools.data.types import DataColumn
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.data.types.time_index import DataIndex
@@ -65,8 +58,6 @@ from tools.products.product_utils import product_display_name
 from tools.testers.settings import backtest_setting_registry
 from tools.testers.settings.resolver import resolve_group_settings
 from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
-from tools.testers.backtest.modules.market_data import historical_field_frames_for_market_data
-from tools.testers.backtest.modules.time_index_lookup import signal_timestamps
 from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
@@ -1887,170 +1878,6 @@ def _build_group_owner_rows(groups: list[dict], *, is_ls: bool) -> list[dict[str
     return rows
 
 
-_MARKET_RULE_FIELD_NAMES = (
-    "VolumeMultiple",
-    "MaxLimitOrderVolume",
-    "MaxMarketOrderVolume",
-    "MinLimitOrderVolume",
-    *TRANSACTION_FEE_FIELD_NAMES,
-)
-
-
-def _load_raw_market_data_for(
-    products: list,
-    start_dt: Any,
-    end_dt: Any,
-    *,
-    policy: str = "latest_available",
-    warmup_window: Any = None,
-) -> dict[str, Any]:
-    """Real I/O: per-product CLOSE series through ProductDataView.
-
-    The DataTime window and optional warm-up window are interpreted by the
-    shared data view layer so exact/trading-day slicing and left warm-up bars
-    follow the same rules as factor evaluation.
-    """
-    series_by_product: dict[Any, pd.Series] = {}
-    missing_products: list[str] = []
-    excluded_out_of_range: list[str] = []
-    for product in products:
-        try:
-            available_freqs = list(product.list_available_freqs())
-            if not available_freqs:
-                missing_products.append(str(getattr(product, "name", product)))
-                continue
-            current_freq = getattr(product, "current_freq", None)
-            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
-            data_view = getattr(product, freq.name)
-            df = data_view.get_and_adjust_cols(
-                [DataColumn.CLOSE.name],
-                copy=False,
-                start_dt=start_dt,
-                end_dt=end_dt,
-                warmup_window=warmup_window,
-            )
-        except (ValueError, KeyError):
-            if _product_outside_run_window(product, start_dt, end_dt):
-                excluded_out_of_range.append(str(getattr(product, "name", product)))
-            else:
-                missing_products.append(str(getattr(product, "name", product)))
-            continue
-        if df.empty or DataColumn.CLOSE.name not in df.columns:
-            if _product_outside_run_window(product, start_dt, end_dt):
-                excluded_out_of_range.append(str(getattr(product, "name", product)))
-            else:
-                missing_products.append(str(getattr(product, "name", product)))
-            continue
-        series_by_product[product] = df[DataColumn.CLOSE.name]
-    if missing_products:
-        sample = ", ".join(sorted(set(missing_products))[:20])
-        suffix = "" if len(set(missing_products)) <= 20 else f" 等 {len(set(missing_products))} 个"
-        start_text = getattr(start_dt, "ts", start_dt)
-        end_text = getattr(end_dt, "ts", end_dt)
-        raise ValueError(
-            "回测产品池存在本地行情缺口，不能静默跳过或按 0 估值："
-            f"{sample}{suffix}；窗口={start_text} 到 {end_text}。"
-            "请检查产品路径是否包含已退市/无分钟数据品种，或先补齐对应行情数据。"
-        )
-    raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
-    resolver = None
-    historical_provider = load_market_rule_field_provider()
-    historical_field_names = _MARKET_RULE_FIELD_NAMES
-    historical_field_frames = None
-    if not raw_prices.empty:
-        # raw_prices keeps its original (trading_day, ..., trade_time)
-        # MultiIndex -- a night-session bar's trading day differs from its
-        # calendar date, so the engine resolves trading days via this
-        # MultiIndex (through DataIndex) wherever it actually matters,
-        # rather than flattening it away up front. FieldHistoryProvider
-        # itself only wants the flat timestamp axis (it resolves trading
-        # day separately, through `resolver`, for its own bookkeeping).
-        resolver = build_trading_day_resolver_from_market_data(raw_prices)
-        historical_field_frames = historical_field_frames_for_market_data(
-            list(raw_prices.columns),
-            signal_timestamps(raw_prices),
-            provider=historical_provider,
-            trading_day_resolver=resolver,
-            field_names=historical_field_names,
-            policy=policy,
-        )
-    return {
-        "raw_prices": raw_prices,
-        "historical_field_provider": historical_provider,
-        "trading_day_resolver": resolver,
-        "historical_field_policy": policy,
-        "historical_field_names": historical_field_names,
-        "historical_field_frames": historical_field_frames,
-        "included_products": tuple(series_by_product.keys()),
-        "excluded_out_of_range_products": tuple(sorted(set(excluded_out_of_range))),
-    }
-
-
-def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
-    if not _supports_local_cnfutures_coverage(product):
-        return False
-    coverage = _product_data_coverage(product)
-    if coverage is None:
-        return False
-    data_start, data_end = coverage
-    start_key = _datetime_sort_key(getattr(start_dt, "sort_key", lambda: None)())
-    end_key = _datetime_sort_key(getattr(end_dt, "sort_key", lambda: None)())
-    if start_key is not None and data_end is not None and data_end < start_key:
-        return True
-    if end_key is not None and data_start is not None and data_start > end_key:
-        return True
-    return False
-
-
-def _supports_local_cnfutures_coverage(product: Any) -> bool:
-    """Only LocalCNFutures has the current file-coverage == tradability contract.
-
-    Other data sources/product types may expose different lifecycle metadata or
-    coverage semantics; until they register their own checker, an empty slice is
-    treated as missing market data rather than a safe candidate-pool removal.
-    """
-    try:
-        from sources.LocalCNFutures.CNFutures import CNFutures, CNFuturesContract
-        return isinstance(product, (CNFutures, CNFuturesContract))
-    except Exception:
-        return False
-
-
-def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
-    starts: list[pd.Timestamp] = []
-    ends: list[pd.Timestamp] = []
-    for freq in list(product.list_available_freqs()):
-        try:
-            data = getattr(product, freq.name).get_data(copy=False)
-        except Exception:
-            continue
-        if data.empty:
-            continue
-        index = DataIndex(data.index).signal_index
-        if len(index) == 0:
-            continue
-        start_key = _datetime_sort_key(index.min())
-        end_key = _datetime_sort_key(index.max())
-        if start_key is not None:
-            starts.append(start_key)
-        if end_key is not None:
-            ends.append(end_key)
-    if not starts or not ends:
-        return None
-    return min(starts), max(ends)
-
-
-def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
-    if value is None:
-        return None
-    ts = pd.Timestamp(value)
-    if pd.isna(ts):
-        return None
-    if ts.tzinfo is not None:
-        return cast(pd.Timestamp, ts.tz_convert("UTC").tz_localize(None))
-    return cast(pd.Timestamp, ts)
-
-
 def _live_market_data_warmup_window(account) -> pd.Timedelta | None:
     """Return the warm-up window needed by live factor BAR replay, if any."""
     from tools.testers.backtest.modules.factor import FactorModule
@@ -3008,17 +2835,29 @@ def run_group_test_stream():
                     if product not in seen_products:
                         seen_products.add(product)
                         all_products.append(product)
-            account.raw_market_data = _load_raw_market_data_for(
-                all_products,
-                start_dt,
-                end_dt,
-                policy=market_rule_fallback,
-                warmup_window=_live_market_data_warmup_window(account),
-            )
             runtime_info_rows: list[dict[str, Any]] = []
+            account.market_data_request = {
+                "products": all_products,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "policy": market_rule_fallback,
+                "warmup_window": _live_market_data_warmup_window(account),
+            }
+
+            tester = _get_or_create_group_test_tester(page_uuid)
+
+            def _on_progress(completed: int, total: int, label: str) -> None:
+                if active_run.cancelled.is_set():
+                    raise BacktestCancelled()
+
+            execution = tester.dispatch(
+                "backtest", account=account, group_owner=group_owner,
+                settings_by_strategy=resolved_settings_by_alias,
+                run_id=run_token, progress=_on_progress, activity_sink=emitter,
+            )
             excluded_products = tuple(cast(
                 tuple[Any, ...],
-                account.raw_market_data.get("excluded_out_of_range_products", ()),
+                getattr(account, "backtest_excluded_out_of_range_products", ()),
             ))
             if excluded_products:
                 excluded_product_displays = [
@@ -3052,19 +2891,6 @@ def run_group_test_stream():
                     code=row["code"],
                     row=row,
                 )
-
-            tester = _get_or_create_group_test_tester(page_uuid)
-
-            def _on_progress(completed: int, total: int, label: str) -> None:
-                if active_run.cancelled.is_set():
-                    raise BacktestCancelled()
-                emitter.emit_progress(completed=completed, total=total, phase="backtest", message=label)
-
-            execution = tester.dispatch(
-                "backtest", account=account, group_owner=group_owner,
-                settings_by_strategy=resolved_settings_by_alias,
-                run_id=run_token, progress=_on_progress,
-            )
             serialized_execution = _serialize_event_execution(
                 execution, settings_by_group=execution["settings_by_strategy"],
                 evaluation_split=evaluation_split, registry=run_registry,
