@@ -8,6 +8,11 @@ MarketDataModule reads those views.
 Field-group/data-source-specific instructions live in `AgentInstructions/` and
 must be named `<FieldGroup>_<DataSource>.md`.
 
+Cleaned field-change events are data, not code. Store them as JSONL under
+`events/<FieldGroup>/`. Python scripts in `scripts/` may validate, deduplicate,
+append, materialize, and rebuild views, but must not hardcode source-specific
+event payloads.
+
 Current instruction files:
 
 - `AgentInstructions/LimitOrderVolume_CFFEX.md`
@@ -162,4 +167,12 @@ After materialization, rebuild the relevant view, for example:
 ```python
 from sources.FieldHistory.views.LimitOrderVolume import save_unified_table
 save_unified_table()
+```
+
+For checked-in JSONL event files, use the generic importer:
+
+```bash
+PYTHONPATH=/path/to/repo python sources/FieldHistory/scripts/ingest_field_history_events.py \
+  sources/FieldHistory/events/TransactionFee/official_seed_events.jsonl \
+  --requester-key <runtime-secret-or-local-audit-key>
 ```
