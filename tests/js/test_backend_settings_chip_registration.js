@@ -81,10 +81,26 @@ const indexManifest = {
       value: [],
       tab_key: 'market_rules',
       scope_policy: 'overridable',
-      chip_template: '自定义字段: {value}',
-      serialization: { kind: 'custom_product_overrides' },
-      visible_when: { engine_mode: ['custom'] },
+      serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
+      visible_when: { engine_mode: ['__storage_only__'] },
       editable_when: { engine_mode: ['custom'] },
+    },
+    fee_custom_product_fields: {
+      value: [],
+      tab_key: 'cost',
+      scope_policy: 'overridable',
+      chip_template: '自定义费用字段: {value}',
+      serialization: {
+        kind: 'custom_product_overrides',
+        storage_key: 'custom_product_fields',
+        module_filter: 'fee',
+        fields: [
+          { value: 'MarginRatio', module: 'margin' },
+          { value: 'OpenRatioByMoney', module: 'fee' },
+        ],
+      },
+      visible_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
+      editable_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
     },
     start_date: {
       value: '2026-01-01',
@@ -617,18 +633,25 @@ return GT.backendSettings.init().then(async () => {
   const visibleHost = domElement('visible-chip-host');
   const visibleStore = window.FieldStore.create({
     defaults: indexManifest.defaults,
-    values: { engine_mode: 'auto', custom_product_fields: [{ product: 'P1', field: 'MarginRatio', value: 0.1 }] },
+    values: {
+      engine_mode: 'auto',
+      fee_mode: 'custom',
+      custom_product_fields: [
+        { product: 'P1', field: 'MarginRatio', value: 0.1 },
+        { product: 'P1', field: 'OpenRatioByMoney', value: 0.2 },
+      ],
+    },
   });
   window.ChipRenderer.render(visibleHost, {
     manifest: { defaults: indexManifest.defaults },
     store: visibleStore,
-    settingKeys: ['custom_product_fields'],
+    settingKeys: ['fee_custom_product_fields'],
     renderChipHtml: GT.backendSettings.renderChipHtml,
   });
   assert.equal(visibleHost.childNodes[0].style.display, 'none');
   visibleStore.set('engine_mode', 'custom');
   assert.notEqual(visibleHost.childNodes[0].style.display, 'none');
-  assert.equal(chipPlainText({ html: visibleHost.childNodes[0].innerHTML }), '自定义字段1项');
+  assert.equal(chipPlainText({ html: visibleHost.childNodes[0].innerHTML }), '自定义费用字段1项');
 
   console.log('PASS: backend settings owns field and chip registration');
 });

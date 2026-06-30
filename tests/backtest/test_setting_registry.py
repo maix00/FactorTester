@@ -82,12 +82,24 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["custom_product_fields"]["label"] == "自定义字段"
     assert index["defaults"]["custom_product_fields"]["visible_when"] == {
-        "engine_mode": ["custom"],
-    }
-    assert index["defaults"]["custom_product_fields"]["editable_when"] == {
-        "engine_mode": ["custom"],
+        "engine_mode": ["__storage_only__"],
     }
     assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
+    assert index["defaults"]["fee_custom_product_fields"]["tab_key"] == "cost"
+    assert index["defaults"]["fee_custom_product_fields"]["visible_when"] == {
+        "engine_mode": ["custom"],
+        "fee_mode": ["custom"],
+    }
+    assert index["defaults"]["fee_custom_product_fields"]["serialization"]["storage_key"] == "custom_product_fields"
+    assert index["defaults"]["fee_custom_product_fields"]["serialization"]["module_filter"] == "fee"
+    assert index["defaults"]["margin_custom_product_fields"]["tab_key"] == "margin"
+    assert index["defaults"]["margin_custom_product_fields"]["serialization"]["module_filter"] == "margin"
+    assert index["defaults"]["trading_rule_custom_product_fields"]["tab_key"] == "accounting"
+    assert index["defaults"]["trading_rule_custom_product_fields"]["visible_when"] == {
+        "engine_mode": ["custom"],
+        "accounting_mode": ["Custom"],
+    }
+    assert index["defaults"]["trading_rule_custom_product_fields"]["serialization"]["module_filter"] == "trading_rule"
     # money_unit_policy (with per-engine override: rqalpha forces
     # "engine_native", disabling "minor_units") was an execution-engine
     # dispatch concern spanning native/backtrader/qlib/rqalpha -- replaced

@@ -12,6 +12,7 @@ from typing import Any, ClassVar, cast
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
@@ -54,6 +55,16 @@ class FeeModule(ExecutableModule):
             public=True, default=0.0, control_template="number", tab="cost",
             visible_when={"fee_mode": ("fixed",)},
             chip_template="固定费率: {value}", tab_label="费用", tab_order=100,
+        ),
+        "fee_custom_product_fields": custom_product_editor_definition(
+            label="自定义费用字段",
+            tab="cost",
+            tab_label="费用",
+            tab_order=100,
+            module_filter="fee",
+            visible_when={"engine_mode": ("custom",), "fee_mode": ("custom",)},
+            chip_template="自定义费用字段: {value}",
+            display_order=95,
         ),
     }
 

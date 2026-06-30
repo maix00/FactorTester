@@ -42,6 +42,37 @@ global.fetch = () => Promise.resolve({
       calendar_frequency: { key: 'calendar_frequency', value: 'auto', tab_key: 'calendar', scope_policy: 'local_only' },
       initial_capital: { key: 'initial_capital', value: 100000000, tab_key: 'capital', scope_policy: 'overridable' },
       allocation_policy: { key: 'allocation_policy', value: 'inverse_volatility', tab_key: 'target_allocation', scope_policy: 'overridable' },
+      fee_mode: {
+        key: 'fee_mode',
+        value: 'auto',
+        tab_key: 'cost',
+        scope_policy: 'overridable',
+        editable_when: { engine_mode: ['custom'] },
+        default_when: { engine_mode: { basic: 'zero', auto: 'auto', exact: 'exact' } },
+      },
+      custom_product_fields: {
+        key: 'custom_product_fields',
+        value: [],
+        tab_key: 'market_rules',
+        scope_policy: 'overridable',
+        visible_when: { engine_mode: ['__storage_only__'] },
+        editable_when: { engine_mode: ['custom'] },
+        serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
+      },
+      fee_custom_product_fields: {
+        key: 'fee_custom_product_fields',
+        value: [],
+        tab_key: 'cost',
+        scope_policy: 'overridable',
+        visible_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
+        editable_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
+        serialization: {
+          kind: 'custom_product_overrides',
+          storage_key: 'custom_product_fields',
+          module_filter: 'fee',
+          fields: [{ value: 'OpenRatioByMoney', module: 'fee' }],
+        },
+      },
       accounting_mode: {
         key: 'accounting_mode',
         value: 'Auto',
@@ -115,6 +146,11 @@ return GT.backendSettings.init().then(() => {
   GT.backendSettings._state.localValues.allocation_policy = 'equal_notional';
   GT.backendSettings._state.localValues.volatility_lookback = 99;
   GT.backendSettings._state.localValues.rebalance_trigger = 'membership_change';
+  GT.backendSettings._state.localValues.engine_mode = 'custom';
+  GT.backendSettings._state.localValues.fee_mode = 'custom';
+  GT.backendSettings._state.localValues.custom_product_fields = [
+    { product: 'P1', field: 'OpenRatioByMoney', value: 0.01 },
+  ];
 
   const group = {
     id: 'g-run',
@@ -130,6 +166,10 @@ return GT.backendSettings.init().then(() => {
   const runPayload = GT.backendSettings.runPayload();
   assert.deepEqual(runPayload.local_settings.initial_capital, 123456);
   assert.deepEqual(runPayload.local_settings.allocation_policy, 'equal_notional');
+  assert.deepEqual(runPayload.local_settings.custom_product_fields, [
+    { product: 'P1', field: 'OpenRatioByMoney', value: 0.01 },
+  ]);
+  assert.equal(runPayload.local_settings.fee_custom_product_fields, undefined);
   assert.equal(runPayload.local_settings.start_date, undefined);
   assert.equal(runPayload.local_settings.end_date, undefined);
   assert.equal(runPayload.local_settings.time_precision, undefined);

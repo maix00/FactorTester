@@ -186,7 +186,7 @@
             if (BSP && !BSP.settingEditableForValues(setting, values)) {
                 return BSP.defaultValueForValues(setting, values);
             }
-            return effective(chip.key);
+            return effective(setting.serialization && setting.serialization.storage_key || chip.key);
         }
 
         function conditionKeysForSetting(key) {
@@ -206,6 +206,8 @@
         function subscribeKeysForChip(chip) {
             var keys = (chip.source_keys && chip.source_keys.length ? chip.source_keys : [chip.key]).slice();
             if (chip._setting) {
+                var storageKey = defaults[chip.key] && defaults[chip.key].serialization && defaults[chip.key].serialization.storage_key;
+                if (storageKey && keys.indexOf(storageKey) < 0) keys.push(storageKey);
                 conditionKeysForSetting(chip.key).forEach(function(key) {
                     if (keys.indexOf(key) < 0) keys.push(key);
                 });

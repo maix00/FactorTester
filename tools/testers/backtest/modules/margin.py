@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+from .custom_product import custom_product_editor_definition
 from .engine import engine_mode_for
 
 
@@ -44,6 +45,16 @@ class MarginModule(ExecutableModule):
             public=True, default=1.0, control_template="number", tab="margin",
             visible_when={"margin_mode": ("fixed", "auto", "exact", "custom")},
             chip_template="抵押比例: {value}", tab_label="保证金", tab_order=160,
+        ),
+        "margin_custom_product_fields": custom_product_editor_definition(
+            label="自定义保证金字段",
+            tab="margin",
+            tab_label="保证金",
+            tab_order=160,
+            module_filter="margin",
+            visible_when={"engine_mode": ("custom",), "margin_mode": ("custom",)},
+            chip_template="自定义保证金字段: {value}",
+            display_order=95,
         ),
     }
 

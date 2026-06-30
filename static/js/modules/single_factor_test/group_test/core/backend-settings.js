@@ -54,6 +54,32 @@
         return def ? def.tab_key : null;
     }
 
+    function settingStorageKey(setting) {
+        var serialization = setting && setting.serialization || {};
+        return serialization.storage_key || setting.key;
+    }
+
+    function customProductRowsForSetting(setting, value) {
+        var rows = Array.isArray(value) ? value : [];
+        var serialization = setting && setting.serialization || {};
+        var filter = serialization.module_filter;
+        if (!filter || serialization.kind !== 'custom_product_overrides') return rows;
+        var modulesByField = {};
+        (serialization.fields || []).forEach(function(item) {
+            modulesByField[String(item.value)] = String(item.module || '');
+        });
+        return rows.filter(function(row) {
+            return modulesByField[String(row && row.field)] === String(filter);
+        });
+    }
+
+    function hasVisibleStoredValue(def, source, key) {
+        var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
+        if (!hasUsableValue(source, storageKey)) return false;
+        if (storageKey === key) return true;
+        return customProductRowsForSetting(def, source[storageKey]).length > 0;
+    }
+
     function settingKeysForTab(tabKey) {
         var defaults = state.index && state.index.defaults || {};
         var keys = Object.keys(defaults).filter(function(key) {
@@ -503,7 +529,17 @@
         var keys = settingKeysForTab(tabKey);
         if (!keys.length) return;
         if (mount === LOCAL) {
-            keys.forEach(function(key) { delete state.localValues[key]; });
+            keys.forEach(function(key) {
+                var def = state.index && state.index.defaults && state.index.defaults[key] || {};
+                var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+                if (storageKey !== key && def.serialization && def.serialization.kind === 'custom_product_overrides') {
+                    var rows = Array.isArray(state.localValues[storageKey]) ? state.localValues[storageKey] : [];
+                    var scoped = customProductRowsForSetting(def, rows);
+                    state.localValues[storageKey] = rows.filter(function(row) { return scoped.indexOf(row) < 0; });
+                    return;
+                }
+                delete state.localValues[storageKey];
+            });
             return;
         }
         var groups = GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
@@ -511,7 +547,17 @@
             : [];
         groups.forEach(function(group) {
             var patch = {};
-            keys.forEach(function(key) { patch[key] = undefined; });
+            keys.forEach(function(key) {
+                var def = state.index && state.index.defaults && state.index.defaults[key] || {};
+                var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+                if (storageKey !== key && def.serialization && def.serialization.kind === 'custom_product_overrides') {
+                    var rows = Array.isArray(group[storageKey]) ? group[storageKey] : [];
+                    var scoped = customProductRowsForSetting(def, rows);
+                    patch[storageKey] = rows.filter(function(row) { return scoped.indexOf(row) < 0; });
+                    return;
+                }
+                patch[storageKey] = undefined;
+            });
             try { GT.groupSettings.groups.update(group.id, patch); } catch (error) {}
         });
     }
@@ -564,16 +610,17 @@
     function effectiveValue(setting, mount) {
         var node = activeNode();
         var conditionValues = effectiveValuesForNode(node);
+        var key = settingStorageKey(setting);
         if (!settingEditableForValues(setting, conditionValues)) {
             return window.BackendSettingsPanel.defaultValueForValues(setting, conditionValues);
         }
-        if (mount === GROUP && node && hasUsableValue(node.value, setting.key)) {
-            return node.value[setting.key];
+        if (mount === GROUP && node && hasUsableValue(node.value, key)) {
+            return node.value[key];
         }
-        if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
-            return state.localValues[setting.key];
+        if (Object.prototype.hasOwnProperty.call(state.localValues, key)) {
+            return state.localValues[key];
         }
-        return window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[setting.key], conditionValues);
+        return window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[key] || state.index.defaults[setting.key], conditionValues);
     }
 
     function defaultValuesForCurrentState() {
@@ -675,11 +722,12 @@
     }
 
     function writeValue(setting, mount, value) {
+        var key = settingStorageKey(setting);
         if (mount === GROUP) {
             var node = activeNode();
             if (!node) throw new Error('编辑组合设置前必须选择组合');
             var patch = {};
-            patch[setting.key] = value;
+            patch[key] = value;
             if (node.kind === 'group') {
                 var ctx = GT.modes && GT.modes.isMode && GT.modes.isMode('edit') && GT.modes.getEditContext
                     ? GT.modes.getEditContext()
@@ -696,9 +744,9 @@
                 GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
             }
         } else {
-            state.localValues[setting.key] = value;
+            state.localValues[key] = value;
             var store = ensureGtLocalStore();
-            if (store && typeof store.set === 'function') store.set(setting.key, value);
+            if (store && typeof store.set === 'function') store.set(key, value);
             else renderLocalSettingChips();
         }
     }
@@ -793,13 +841,13 @@
 
     function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled) {
         var host = document.createElement('div');
-        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;margin:0;';
         if (disabled) {
             host.style.opacity = '0.72';
             host.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
         }
         var table = document.createElement('div');
-        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0;width:100%;';
         var addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.textContent = '+ 字段';
@@ -813,15 +861,38 @@
             var value = effectiveValue(setting, mount);
             return Array.isArray(value) ? value.slice() : [];
         }
+        function moduleFilter() {
+            return setting.serialization && setting.serialization.module_filter || '';
+        }
+        function fieldBelongsToEditor(field) {
+            var filter = moduleFilter();
+            if (!filter) return true;
+            return String(selectedFieldMeta(field).module || '') === String(filter);
+        }
+        function visibleRows(allRows) {
+            return (allRows || []).filter(function(row) {
+                return row && fieldBelongsToEditor(row.field);
+            });
+        }
         function writeRows(nextRows) {
-            writeValue(setting, mount, nextRows.filter(function(row) {
+            var filter = moduleFilter();
+            var retained = rows().filter(function(row) {
+                return filter && !fieldBelongsToEditor(row.field);
+            });
+            var scoped = nextRows.filter(function(row) {
                 return row && (row.product || row.field || row.value !== undefined && row.value !== '');
-            }));
+            });
+            writeValue(setting, mount, retained.concat(scoped));
             render();
             rerenderAfterChange();
         }
         function fieldOptions() {
-            return (setting.serialization && setting.serialization.fields) || [];
+            var options = (setting.serialization && setting.serialization.fields) || [];
+            var filter = moduleFilter();
+            if (!filter) return options;
+            return options.filter(function(item) {
+                return String(item.module || '') === String(filter);
+            });
         }
         function selectedFieldMeta(field) {
             var options = fieldOptions();
@@ -858,7 +929,7 @@
         }
         function render() {
             table.innerHTML = '';
-            var current = rows();
+            var current = visibleRows(rows());
             if (!current.length) {
                 var empty = document.createElement('div');
                 empty.style.cssText = 'color:#64748b;font-size:12px;';
@@ -867,7 +938,7 @@
             }
             current.forEach(function(row, index) {
                 var line = document.createElement('div');
-                line.style.cssText = 'display:grid;grid-template-columns:minmax(90px,1.2fr) minmax(120px,1.4fr) minmax(80px,1fr) minmax(120px,1fr) minmax(120px,1fr) 28px;gap:6px;align-items:center;';
+                line.style.cssText = 'display:grid;grid-template-columns:minmax(120px,1.2fr) minmax(150px,1.4fr) minmax(90px,1fr) minmax(140px,1fr) minmax(140px,1fr) 28px;gap:6px;align-items:center;margin:0;width:100%;';
                 var productInput = cellInput('text', row.product || '', function(value) {
                     current[index] = Object.assign({}, current[index], { product: value });
                     writeRows(current);
@@ -931,7 +1002,7 @@
         }
         addBtn.addEventListener('click', function() {
             if (disabled) return;
-            var current = rows();
+            var current = visibleRows(rows());
             current.push({ product: '', field: (fieldOptions()[0] && fieldOptions()[0].value) || '', value: '' });
             writeRows(current);
         });
@@ -1756,13 +1827,13 @@
         var localValues = effectiveLocalValues();
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
-            if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
+            if (!def || !hasVisibleStoredValue(def, source, key)) return;
             if (def.scope_policy === 'local_only') return;
             if (!settingVisibleForValues(def, values)) return;
-            if (source[key] === '' || source[key] === null || source[key] === undefined) return;
-            if (def.scope_policy !== 'group_only' && valuesEqual(source[key], localValues[key]) && !parentFieldDiffers(source, key, source[key])) return;
-            if (def.scope_policy === 'group_only' && valuesEqual(source[key], def.value)) return;
-            out[key] = key === 'product_path_selection' ? compactProductPathSelection(source[key]) : source[key];
+            if (def.scope_policy !== 'group_only' && valuesEqual(source[storageKey], localValues[storageKey]) && !parentFieldDiffers(source, storageKey, source[storageKey])) return;
+            if (def.scope_policy === 'group_only' && valuesEqual(source[storageKey], def.value)) return;
+            out[storageKey] = storageKey === 'product_path_selection' ? compactProductPathSelection(source[storageKey]) : source[storageKey];
         });
         return out;
     }
@@ -1792,6 +1863,16 @@
             if (state.localValues[key] === '' || state.localValues[key] === null || state.localValues[key] === undefined) return;
             if (valuesEqual(state.localValues[key], def.value)) return;
             out[key] = state.localValues[key];
+        });
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+            if (storageKey === key || Object.prototype.hasOwnProperty.call(out, storageKey)) return;
+            if (!hasVisibleStoredValue(def, state.localValues, key)) return;
+            if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
+            out[storageKey] = state.localValues[storageKey];
         });
         return out;
     }
@@ -1833,6 +1914,19 @@
             if (value === '' || value === null || value === undefined) return;
             out[key] = value;
         });
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+            if (storageKey === key || Object.prototype.hasOwnProperty.call(out, storageKey)) return;
+            if (!hasVisibleStoredValue(def, state.localValues, key)) return;
+            var value = state.localValues[storageKey];
+            var visibilityValues = Object.assign({}, values, state.localValues);
+            visibilityValues[storageKey] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
+            out[storageKey] = value;
+        });
         Object.keys(pageWindow).forEach(function(key) {
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
@@ -1871,13 +1965,14 @@
         var source = group && group.value ? group.value : group || {};
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
             if (!def || def.scope_policy === 'local_only') return;
-            if (!hasUsableValue(source, key)) return;
+            if (!hasVisibleStoredValue(def, source, key)) return;
             if (!settingVisibleForValues(def, values)) return;
             if (!settingEditableForValues(def, values)) return;
-            var value = source[key];
-            if (def.scope_policy !== 'group_only' && valuesEqual(value, localValues[key]) && !parentFieldDiffers(source, key, value)) return;
-            out[key] = value;
+            var value = source[storageKey];
+            if (def.scope_policy !== 'group_only' && valuesEqual(value, localValues[storageKey]) && !parentFieldDiffers(source, storageKey, value)) return;
+            out[storageKey] = value;
         });
         return out;
     }

@@ -238,7 +238,19 @@
             return (Array.isArray(value) ? value.length : 0) + '项';
         }
         if (serializationKind === 'custom_product_overrides') {
-            return (Array.isArray(value) ? value.length : 0) + '项';
+            var rows = Array.isArray(value) ? value : [];
+            var filter = setting && setting.serialization && setting.serialization.module_filter;
+            if (filter) {
+                var fields = (setting.serialization && setting.serialization.fields) || [];
+                var modulesByField = {};
+                fields.forEach(function(item) {
+                    modulesByField[String(item.value)] = String(item.module || '');
+                });
+                rows = rows.filter(function(row) {
+                    return modulesByField[String(row && row.field)] === String(filter);
+                });
+            }
+            return rows.length + '项';
         }
         // 多选列表（复数 selections）：显示已选个数。
         if (serializationKind === 'product_path_selection_list'

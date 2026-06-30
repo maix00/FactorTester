@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 
 if TYPE_CHECKING:
@@ -44,6 +45,16 @@ class TradingRuleModule(ExecutableModule):
             public=True, default=False, control_template="boolean", tab="accounting",
             editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="整数持仓: {value}", tab_label="记账规则", tab_order=180,
+        ),
+        "trading_rule_custom_product_fields": custom_product_editor_definition(
+            label="自定义记账字段",
+            tab="accounting",
+            tab_label="记账规则",
+            tab_order=180,
+            module_filter="trading_rule",
+            visible_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            chip_template="自定义记账字段: {value}",
+            display_order=95,
         ),
     }
 
