@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import defaultdict
 from typing import Any
 
-from sources.ExchangeAnnouncements.store import append_exchange_announcements
+from sources.ExchangeAnnouncements.store import NOTICE_ID_PATTERN, append_exchange_announcements
 from tools.data.field_history import _ensure_store_registered
 from tools.data.field_history_agent_ingest import AGENT_EVENT_TABLE, ensure_agent_event_schema
 from tools.data.hub import DataHub
+
+
+NOTICE_ID_RE = re.compile(NOTICE_ID_PATTERN)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,10 +57,12 @@ def _announcement_rows_from_agent_events(*, store_key: str, field_group: str = "
         events = conn.execute(sql, params).fetchall()
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for event in events:
-        notice_key = str(event["source_notice_id"] or event["source_url"])
+        notice_key = str(event["source_notice_id"] or "")
+        if not NOTICE_ID_RE.fullmatch(notice_key):
+            continue
         key = (str(event["data_source"]), notice_key)
         row = grouped.setdefault(key, {
-            "announcement_id": f"{event['data_source']}:{notice_key}",
+            "announcement_id": notice_key,
             "exchange": str(event["data_source"]),
             "source_url": str(event["source_url"]),
             "source_accessed_at": str(event["source_accessed_at"]),

@@ -16,6 +16,11 @@ from tools.data.hub import DataHub
 
 EXCHANGE_ANNOUNCEMENTS_TABLE = "exchange_announcements"
 LIST_FIELDS = ("field_groups", "field_names", "products", "contracts")
+NOTICE_ID_PATTERN = (
+    r"(?:大商所发|郑商函|郑商所发|上期发|上期公告|上能发|"
+    r"上海期货交易所公告|上海期货交易所发|上海国际能源交易中心公告|上海国际能源交易中心发|"
+    r"广期所发|广期所公告|中金所发|中金所公告)〔\d{4}〕\d+号"
+)
 
 
 def append_exchange_announcements(
@@ -97,7 +102,17 @@ def ensure_exchange_announcements_schema(conn: sqlite3.Connection) -> None:
 
 def _normalise_row(row: Mapping[str, Any]) -> dict[str, Any]:
     item = dict(row)
-    required = ("announcement_id", "exchange", "source_url", "source_accessed_at", "title")
+    notice_id = str(item.get("notice_id") or "").strip()
+    if not notice_id:
+        raise ValueError("exchange announcement requires notice_id; pages without a notice number must not be stored")
+    import re
+    if re.fullmatch(NOTICE_ID_PATTERN, notice_id) is None:
+        raise ValueError(f"invalid exchange notice_id: {notice_id}")
+    item["notice_id"] = notice_id
+    item["announcement_id"] = str(item.get("announcement_id") or notice_id).strip()
+    if item["announcement_id"] != notice_id:
+        raise ValueError("announcement_id must equal notice_id")
+    required = ("announcement_id", "exchange", "source_url", "source_accessed_at", "notice_id", "title")
     missing = [key for key in required if key not in item or item[key] in (None, "")]
     if missing:
         raise ValueError(f"exchange announcement missing required keys: {', '.join(missing)}")

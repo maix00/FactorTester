@@ -1,9 +1,9 @@
 # ExchangeAnnouncements Agent Instructions
 
-`exchange_announcements` is the canonical catalog of exchange-published
-announcements. It is not limited to FieldHistory and must include all outward
-published exchange notices that an agent has crawled, including notices that do
-not change any field values.
+`exchange_announcements` is the canonical catalog of numbered
+exchange-published announcements. It is not limited to FieldHistory, but it is
+limited to official notices with a formal notice number such as
+`郑商函〔2021〕164号`.
 
 FieldHistory may later consume rows where `field_change_candidate = true`, but
 the announcement catalog itself is a broader data source.
@@ -11,6 +11,11 @@ the announcement catalog itself is a broader data source.
 ## Storage Rules
 
 - Store rows in SQLite table `exchange_announcements`.
+- Only store pages with a formal exchange notice number.
+- `announcement_id` is the formal notice number and must equal `notice_id`.
+- Do not use URL hashes, source-site numeric IDs, page titles, or source URLs as
+  `announcement_id`.
+- Pages without a formal notice number must not be inserted into this table.
 - Every row must include the source URL and the exact access time.
 - Do not store raw requester keys. Use the importer with `--requester-key`; it
   stores only a non-reversible fingerprint.
@@ -26,7 +31,7 @@ Each announcement row passed to `append_exchange_announcements()` must contain:
 
 ```json
 {
-  "announcement_id": "DCE:大商所发〔2025〕243号",
+  "announcement_id": "大商所发〔2025〕243号",
   "exchange": "DCE",
   "source_url": "https://www.dce.com.cn/dce/content/2025/ywggytz/8637864.html",
   "source_accessed_at": "2026-06-30T00:00:00+08:00",
@@ -50,8 +55,12 @@ Each announcement row passed to `append_exchange_announcements()` must contain:
 For every exchange and announcement list page:
 
 1. Crawl list pages by date/category, not only keyword search results.
-2. For each visible announcement, create one `exchange_announcements` row.
-3. Fetch the detail page and store:
+2. For each visible announcement, fetch the detail page and first identify its
+   formal notice number.
+3. If the page has no formal notice number, skip database insertion.
+4. For each numbered announcement, create one `exchange_announcements` row with
+   `announcement_id = notice_id`.
+5. Store:
    - `source_url`
    - `source_accessed_at`
    - `published_date`
@@ -59,16 +68,16 @@ For every exchange and announcement list page:
    - `title`
    - `category`
    - `raw_text` or the best available text/excerpt
-4. Judge whether it may contain field-value changes:
+6. Judge whether it may contain field-value changes:
    - transaction fee / 手续费
    - margin / 保证金
    - limit or market order size / 下单数量 / 限价单 / 市价单
    - trading hours / 交易时间
    - contract multiplier / 合约乘数
    - price tick / 最小变动价位
-5. If yes, fill `field_groups`, `field_names`, `products`, and `contracts` as
+7. If yes, fill `field_groups`, `field_names`, `products`, and `contracts` as
    string lists. These are candidate strings, not final normalized events.
-6. If no, leave those lists empty and set `field_change_candidate = false`.
+8. If no, leave those lists empty and set `field_change_candidate = false`.
 
 ## Direct Database Write
 
