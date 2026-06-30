@@ -50,6 +50,128 @@ def main() -> int:
 
 
 def _seed_events() -> Iterable[dict[str, Any]]:
+    # CZCE official notice repost: 郑商函〔2021〕164号.
+    # Effective from 2021-04-19 night session for trading day 2021-04-20.
+    yield from _contract_volume_fee_events(
+        data_source="CZCE",
+        source_url="https://www.htqhedu.com/col97/4873",
+        source_notice_id="郑商函〔2021〕164号",
+        instrument="ZC",
+        instrument_label="动力煤",
+        effective_trading_day="2021-04-20",
+        effective_timestamp="2021-04-19 21:00:00",
+        contract_code="2105",
+        volume_fee=10.0,
+        raw_note="自2021年4月19日当晚夜盘交易时起，动力煤期货2105合约交易手续费标准调整为10元/手，日内平今仓交易手续费标准调整为10元/手。",
+        evidence_text="动力煤期货2105合约；交易手续费标准10元/手；日内平今仓交易手续费标准10元/手。",
+        parser_notes="转载郑商函全文；交易手续费映射Open/Close，日内平今仓映射CloseToday。",
+    )
+
+    # CZCE official notice repost: 郑商函〔2021〕191号.
+    # Product-level ZC futures fee and close-today fee both changed to 10 CNY/lot.
+    yield from _contract_volume_fee_events(
+        data_source="CZCE",
+        source_url="https://www.jinxinqh.com/article/1621",
+        source_notice_id="郑商函〔2021〕191号",
+        instrument="ZC",
+        instrument_label="动力煤",
+        effective_trading_day="2021-05-06",
+        effective_timestamp="",
+        contract_code="",
+        volume_fee=10.0,
+        raw_note="自2021年5月6日起，动力煤期货合约交易手续费标准调整为10元/手，日内平今仓交易手续费标准调整为10元/手。",
+        evidence_text="动力煤期货合约；交易手续费标准10元/手；日内平今仓交易手续费标准10元/手。",
+        parser_notes="转载郑商函；产品级规则，contract_codes为空。",
+    )
+
+    # CZCE official notice repost: 郑商函〔2021〕332号.
+    # Product-level CJ close-today fee changed to 3 CNY/lot.
+    yield from _contract_close_today_volume_events(
+        data_source="CZCE",
+        source_url="https://www.guoshengqh.com/jiaoyisuotongzhi/5873.html",
+        source_notice_id="郑商函〔2021〕332号",
+        instrument="CJ",
+        instrument_label="红枣",
+        effective_trading_day="2021-07-22",
+        effective_timestamp="",
+        contract_code="",
+        volume_fee=3.0,
+        raw_note="自2021年7月22日起，红枣期货合约日内平今仓交易手续费标准调整为3元/手。",
+        evidence_text="红枣期货合约；日内平今仓交易手续费标准；3元/手。",
+        parser_notes="转载郑商函全文；公告只调整平今仓字段。",
+    )
+
+    # CZCE repost: red-date contract-specific fee change on 2021-07-27.
+    for contract_code in ("2109", "2112", "2201"):
+        yield from _contract_volume_fee_events(
+            data_source="CZCE",
+            source_url="https://www.bhfcc.com/m/p-customer-ques-deta_id_4023.html",
+            source_notice_id="郑商函〔2021〕351号",
+            instrument="CJ",
+            instrument_label="红枣",
+            effective_trading_day="2021-07-27",
+            effective_timestamp="",
+            contract_code=contract_code,
+            volume_fee=9.0,
+            raw_note="自2021年7月27日起，红枣期货2109、2112及2201合约的交易手续费标准调整为9元/手，日内平今仓交易手续费标准调整为9元/手。",
+            evidence_text=f"红枣期货{contract_code}合约；交易手续费标准9元/手；日内平今仓交易手续费标准9元/手。",
+            parser_notes="期货公司转载交易所通知；合同级规则一合约一事件。",
+        )
+
+    # CZCE official notice repost: 郑商函〔2021〕755号.
+    for contract_code in ("2202", "2203"):
+        yield from _contract_volume_fee_events(
+            data_source="CZCE",
+            source_url="https://www.guoshengqh.com/jiaoyisuotongzhi/7015.html",
+            source_notice_id="郑商函〔2021〕755号",
+            instrument="ZC",
+            instrument_label="动力煤",
+            effective_trading_day="2021-10-14",
+            effective_timestamp="2021-10-13 21:00:00",
+            contract_code=contract_code,
+            volume_fee=60.0,
+            raw_note="自2021年10月13日当晚夜盘交易时起，动力煤期货2202及2203合约的交易手续费标准调整为60元/手，日内平今仓交易手续费标准调整为60元/手。",
+            evidence_text=f"动力煤期货{contract_code}合约；交易手续费标准60元/手；日内平今仓交易手续费标准60元/手。",
+            parser_notes="夜盘属于下一交易日；合同级规则一合约一事件。",
+        )
+
+    # CZCE official notice repost: 郑商函〔2021〕824号.
+    for contract_code in (
+        "2111", "2112", "2201", "2202", "2203", "2204",
+        "2205", "2206", "2207", "2208", "2209", "2210",
+    ):
+        yield from _contract_volume_fee_events(
+            data_source="CZCE",
+            source_url="https://www.founderfu.com/fzzqqh_2019/details_247_39211.html",
+            source_notice_id="郑商函〔2021〕824号",
+            instrument="ZC",
+            instrument_label="动力煤",
+            effective_trading_day="2021-10-22",
+            effective_timestamp="2021-10-21 21:00:00",
+            contract_code=contract_code,
+            volume_fee=90.0,
+            raw_note="自2021年10月21日当晚夜盘交易时起，动力煤期货2111、2112、2201、2202、2203、2204、2205、2206、2207、2208、2209、2210合约的交易手续费标准调整为90元/手，日内平今仓交易手续费标准调整为90元/手。",
+            evidence_text=f"动力煤期货{contract_code}合约；交易手续费标准90元/手；日内平今仓交易手续费标准90元/手。",
+            parser_notes="夜盘属于下一交易日；合同级规则一合约一事件。",
+        )
+
+    # CZCE official notice repost: 郑商函〔2023〕826号.
+    for contract_code in ("2312", "2401", "2403", "2405", "2407", "2409"):
+        yield from _contract_volume_fee_events(
+            data_source="CZCE",
+            source_url="https://www.hicend.com.cn/Pc/CustomerService/jygg/10664",
+            source_notice_id="郑商函〔2023〕826号",
+            instrument="CJ",
+            instrument_label="红枣",
+            effective_trading_day="2023-11-08",
+            effective_timestamp="",
+            contract_code=contract_code,
+            volume_fee=10.0,
+            raw_note="自2023年11月8日起，红枣期货2312、2401、2403、2405、2407及2409合约的交易手续费标准和日内平今仓交易手续费标准均调整为10元/手。",
+            evidence_text=f"红枣期货{contract_code}合约；交易手续费标准和日内平今仓交易手续费标准均为10元/手。",
+            parser_notes="来源标注郑州商品交易所；合同级规则一合约一事件。",
+        )
+
     # DCE official notice: 大商所发〔2025〕243号.
     # BZ futures were listed on 2025-07-08. The official listing notice sets
     # the futures transaction fee to 0.01% of turnover. This is a product-level
@@ -241,6 +363,46 @@ def _contract_open_close_money_events(
         ("CloseRatioByMoney", money_ratio),
         ("OpenRatioByVolume", 0.0),
         ("CloseRatioByVolume", 0.0),
+    ]:
+        yield _event(
+            data_source=data_source,
+            source_url=source_url,
+            source_notice_id=source_notice_id,
+            instrument=instrument,
+            instrument_label=instrument_label,
+            field_name=field_name,
+            effective_trading_day=effective_trading_day,
+            effective_timestamp=effective_timestamp,
+            value=value,
+            contract_code=contract_code,
+            raw_note=raw_note,
+            evidence_text=evidence_text,
+            parser_notes=parser_notes,
+        )
+
+
+def _contract_volume_fee_events(
+    *,
+    data_source: str,
+    source_url: str,
+    source_notice_id: str,
+    instrument: str,
+    instrument_label: str,
+    effective_trading_day: str,
+    effective_timestamp: str,
+    contract_code: str,
+    volume_fee: float,
+    raw_note: str,
+    evidence_text: str,
+    parser_notes: str,
+) -> Iterable[dict[str, Any]]:
+    for field_name, value in [
+        ("OpenRatioByMoney", 0.0),
+        ("CloseRatioByMoney", 0.0),
+        ("CloseTodayRatioByMoney", 0.0),
+        ("OpenRatioByVolume", volume_fee),
+        ("CloseRatioByVolume", volume_fee),
+        ("CloseTodayRatioByVolume", volume_fee),
     ]:
         yield _event(
             data_source=data_source,
