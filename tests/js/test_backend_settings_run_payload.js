@@ -53,7 +53,7 @@ global.fetch = () => Promise.resolve({
       custom_product_fields: {
         key: 'custom_product_fields',
         value: [],
-        tab_key: 'market_rules',
+        tab_key: 'engine',
         scope_policy: 'overridable',
         visible_when: { engine_mode: ['__storage_only__'] },
         editable_when: { engine_mode: ['custom'] },

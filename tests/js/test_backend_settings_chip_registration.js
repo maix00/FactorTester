@@ -79,7 +79,7 @@ const indexManifest = {
     },
     custom_product_fields: {
       value: [],
-      tab_key: 'market_rules',
+      tab_key: 'engine',
       scope_policy: 'overridable',
       serialization: { kind: 'custom_product_overrides', storage_key: 'custom_product_fields' },
       visible_when: { engine_mode: ['__storage_only__'] },

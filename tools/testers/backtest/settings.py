@@ -73,7 +73,6 @@ def register_group_test_settings(app: Any) -> None:
             capabilities=("volume_participation",),
         ),
         SettingModule("margin", "保证金", "risk", 160),
-        SettingModule("market_rules", "市场规则", "market_data", 170),
         SettingModule("accounting", "记账", "accounting", 180),
     ):
         app.register_module(module)

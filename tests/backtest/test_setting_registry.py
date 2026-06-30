@@ -20,7 +20,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "time", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "cost", "order", "liquidity", "margin",
-        "market_rules", "accounting", "calendar", "evaluation",
+        "accounting", "calendar", "evaluation",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
@@ -30,7 +30,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "factor", "product_path_selection", "data_source", "frequency", "time",
         "capital", "target_allocation", "rebalance_trigger", "position_policy",
         "group_strategy", "cost", "order", "liquidity", "margin",
-        "market_rules", "accounting", "calendar", "evaluation",
+        "accounting", "calendar", "evaluation",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
@@ -119,7 +119,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "engine_mode",
+        "engine", "engine_mode", "historical_field_policy", "custom_product_fields",
     ]
     executable_public_fields = {
         key
@@ -311,7 +311,9 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert index.status_code == 200
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
-    assert [setting["key"] for setting in tab.get_json()["settings"]] == ["engine", "engine_mode"]
+    assert [setting["key"] for setting in tab.get_json()["settings"]] == [
+        "engine", "engine_mode", "historical_field_policy", "custom_product_fields",
+    ]
     assert missing.status_code == 404
 
 
@@ -647,7 +649,7 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
             "fee_mode": "auto",
             "liquidity_mode": "volume_participation",
             "participation_rate": 0.1,
-            "market_rule_fallback": "latest_available",
+            "historical_field_policy": "latest_available",
         },
         group_values={
             "combination-a:group-1": {

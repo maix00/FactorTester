@@ -79,7 +79,7 @@ class MarketDataModule(ExecutableModule):
             public=True,
             default=str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value),
             control_template="select",
-            tab="market_rules",
+            tab="engine",
             editable_when={"engine_mode": ("custom",)},
             default_when={
                 "engine_mode": {
@@ -89,8 +89,8 @@ class MarketDataModule(ExecutableModule):
                 },
             },
             chip_template="历史字段: {value}",
-            tab_label="市场规则",
-            tab_order=170,
+            tab_label="执行引擎",
+            tab_order=10,
             options=(
                 (str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value), "真实历史数据"),
                 (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "最新数据向前填充"),

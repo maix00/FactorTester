@@ -26,7 +26,6 @@ from .slippage import SlippageModule
 from .liquidity import LiquidityModule
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
-from .market_rules import MarketRuleModule
 from .custom_product import CustomProductModule
 from .position_sizing import PositionSizingModule
 from .cash_rescale import LedgerCashConstraintModule
@@ -67,7 +66,6 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     MarginModule,
     OrderExecutionModule,
     PositionSizingModule,
-    MarketRuleModule,
     CustomProductModule,
     LedgerCashConstraintModule,
     OrderLifecycleModule,
