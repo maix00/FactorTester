@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import AccountState
 
 _FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
+_LIVE_FACTOR_SUPPORT_FLOWS = {"schedule_bar_events"}
 
 
 def _all_flow_names() -> set[str]:
@@ -39,6 +40,8 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
     names = _all_flow_names()
     chosen = _select_factor_flow(resolved_settings)
     excluded = _FACTOR_MODE_FLOWS - {chosen}
+    if chosen != "signal_live":
+        excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
     return frozenset(names - excluded)
 
 

@@ -157,6 +157,52 @@ def test_flow_not_applicable_to_any_strategy_is_skipped():
     assert called == []
 
 
+def test_strategy_scoped_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
+    s = Strategy(alias="S")
+    called: list[str] = []
+
+    scoped = Flow(
+        "scoped_pre", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: called.append("scoped"),
+        strategy_scoped=True,
+    )
+    global_flow = Flow(
+        "global_pre", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: called.append("global"),
+    )
+
+    registry = FlowRegistry()
+    registry.register_flow(scoped)
+    registry.register_flow(global_flow)
+    account = _account([s], active_flow_names=frozenset())
+
+    run(account, EventQueue(), registry.resolve())
+
+    assert called == ["global"]
+
+
+def test_strategy_scoped_pre_replay_flow_runs_for_applicable_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    active_seen: list[frozenset[Strategy]] = []
+
+    scoped = Flow(
+        "scoped_pre", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: active_seen.append(ctx.active_strategies),
+        strategy_scoped=True,
+    )
+
+    registry = FlowRegistry()
+    registry.register_flow(scoped)
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"scoped_pre"})),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset()),
+    })
+
+    run(account, EventQueue(), registry.resolve())
+
+    assert active_seen == [frozenset({s1})]
+
+
 def test_make_dispatcher_processes_all_drafts_for_one_strategy_in_one_batch():
     """Regression: previously drafts_by_strategy was dict[Strategy, EventDraft]
     (one per strategy), so a batch with several drafts for the SAME

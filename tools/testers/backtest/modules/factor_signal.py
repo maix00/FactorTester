@@ -9,7 +9,7 @@ values up at SIGNAL events.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pandas as pd
 
@@ -82,11 +82,13 @@ class FactorSignalModule(ExecutableModule):
         "signal_live", inputs=(), outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         compute=lambda account, ctx: _schedule_signal_live_timestamps(account, ctx),
+        strategy_scoped=True,
     )
     signal_precomputed: ClassVar[Flow] = Flow(
         "signal_precomputed", inputs=(FactorModule.factor,), outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         compute=lambda account, ctx: _schedule_signal_precomputed_timestamps(account, ctx),
+        strategy_scoped=True,
     )
 
     signal_live_on_event: ClassVar[Flow] = Flow(
@@ -124,14 +126,15 @@ def normalize_signal_timestamp(raw_ts: pd.Timestamp, freq: "DataFreq", last_minu
     that's not a real intraday moment -- look up the session's last trading
     minute via `last_minute_lookup(raw_ts) -> pd.Timestamp` and use that
     instead."""
-    raw_ts = pd.Timestamp(raw_ts)
+    raw_ts = cast(pd.Timestamp, pd.Timestamp(raw_ts))
+    midnight = cast(pd.Timestamp, pd.Timestamp("00:00:00"))
     is_day_multiple = freq.is_day_multiple() if hasattr(freq, "is_day_multiple") else False
-    if is_day_multiple and raw_ts.time() == pd.Timestamp("00:00:00").time():
+    if is_day_multiple and raw_ts.time() == midnight.time():
         if last_minute_lookup is None:
             raise ValueError(
                 "day-level timestamp with no time-of-day component requires "
                 "last_minute_lookup to resolve the session's last trading minute")
-        raw_ts = pd.Timestamp(last_minute_lookup(raw_ts))
+        raw_ts = cast(pd.Timestamp, pd.Timestamp(last_minute_lookup(raw_ts)))
     return raw_ts.floor("min")
 
 
@@ -177,11 +180,12 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
             continue
         aligned = signal_align(
             data, freq, basepoint=basepoint, daily_basepoint=daily_basepoint,
-            end_session_skip=end_session_skip, end_session_gap=pd.Timedelta(end_session_gap),
+            end_session_skip=end_session_skip,
+            end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
         for ts in signal_timestamps(aligned):
             for strategy in strategies:
-                drafts.append(EventDraft(EventKind.SIGNAL, pd.Timestamp(ts), strategy))
+                drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
 
@@ -221,7 +225,7 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
                 tables[schedule_key] = _precomputed_schedule_table(table, config)
             table_keys[strategy] = schedule_key
             for ts in signal_timestamps(tables[schedule_key]):
-                drafts.append(EventDraft(EventKind.SIGNAL, pd.Timestamp(ts), strategy))
+                drafts.append(EventDraft(EventKind.SIGNAL, cast(pd.Timestamp, pd.Timestamp(ts)), strategy))
     ctx.set(FactorSignalModule.signal_value, drafts)
 
 
@@ -249,7 +253,7 @@ def _precomputed_schedule_table(table: pd.DataFrame, config) -> pd.DataFrame:
         basepoint=config.get(FactorSignalModule.basepoint, "last"),
         daily_basepoint=config.get(FactorSignalModule.daily_basepoint),
         end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
-        end_session_gap=pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h")),
+        end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
     )
 
 
@@ -300,7 +304,7 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue
         ctx.set_for(FactorSignalModule.signal_value, strategy,
-                     {product: float(row[product]) for product in table.columns})
+                     {product: float(cast(Any, row[product])) for product in table.columns})
 
 
 def _observe_signal_live_bar(account, ctx) -> None:
@@ -352,7 +356,7 @@ def _observe_signal_live_bar(account, ctx) -> None:
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:
-    timestamp = pd.Timestamp(timestamp)
+    timestamp = cast(pd.Timestamp, pd.Timestamp(timestamp))
     on_signal = getattr(factor, "on_signal", None)
     if callable(on_signal):
         return _row_to_signal_values(on_signal(timestamp, price_table))

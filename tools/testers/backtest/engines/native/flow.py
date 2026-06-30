@@ -38,6 +38,10 @@ class Flow:
         # every Flow has been given a real description yet, this lets the
         # rest of the engine read `effective_description` uniformly while
         # that fills in incrementally.
+    strategy_scoped: bool = False
+        # PRE/POST flows with strategy_scoped=True run only when at least one
+        # StrategyConfig activates the flow name. Generic setup/teardown flows
+        # keep the default and run once for the whole account.
 
     @property
     def qualified_name(self) -> str:

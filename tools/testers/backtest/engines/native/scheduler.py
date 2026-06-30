@@ -13,7 +13,7 @@ import heapq
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import pandas as pd
 
@@ -45,6 +45,7 @@ class ResolvedFlow:
     before: tuple[Flow, ...]
     compute: Callable[..., None]
     description: str = ""
+    strategy_scoped: bool = False
 
     @property
     def effective_description(self) -> str:
@@ -91,12 +92,13 @@ class FlowRegistry:
             inputs = set(base.inputs)
             for ov in self._overrides.get(name, ()):
                 inputs |= set(ov.extra_inputs)
-                compute = _wrap(ov.compute, compute)
+                if ov.compute is not None:
+                    compute = _wrap(ov.compute, compute)
             resolved.append(ResolvedFlow(
                 name=name, inputs=tuple(inputs), outputs=base.outputs,
                 phase=base.phase, event_kind=base.event_kind, order=base.order,
                 after=base.after, before=base.before, compute=compute,
-                description=base.description,
+                description=base.description, strategy_scoped=base.strategy_scoped,
             ))
         return resolved
 
@@ -348,6 +350,19 @@ def make_dispatcher(
     return handler
 
 
+def _strategies_using_flow(account: "AccountState", flow_name: str) -> frozenset["Strategy"]:
+    return frozenset(
+        strategy for strategy in account.strategy_configs
+        if flow_name in account.config_for(strategy).active_flow_names
+    )
+
+
+def _pre_post_applicable_strategies(account: "AccountState", flow: ResolvedFlow) -> frozenset["Strategy"]:
+    if not flow.strategy_scoped:
+        return frozenset(account.strategy_configs)
+    return _strategies_using_flow(account, flow.name)
+
+
 def run(
     account: "AccountState",
     event_queue: EventQueue,
@@ -372,10 +387,14 @@ def run(
     for (phase, event_kind), ordered_flows in groups.items():
         if phase is Phase.PER_EVENT:
             event_queue.set_dispatcher(
-                event_kind, make_dispatcher(ordered_flows, account, event_queue, tracker))
+                cast(EventKind, event_kind), make_dispatcher(ordered_flows, account, event_queue, tracker))
 
     ctx = FlowContext(timestamp=None, event_queue=event_queue)
     for f in pre_replay_flows:
+        applicable = _pre_post_applicable_strategies(account, f)
+        if not applicable:
+            continue
+        ctx.active_strategies = applicable
         f.compute(account, ctx)
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -383,5 +402,9 @@ def run(
 
     ctx = FlowContext(timestamp=None, event_queue=event_queue)
     for f in post_replay_flows:
+        applicable = _pre_post_applicable_strategies(account, f)
+        if not applicable:
+            continue
+        ctx.active_strategies = applicable
         f.compute(account, ctx)
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)

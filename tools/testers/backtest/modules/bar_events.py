@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pandas as pd
 
@@ -30,6 +30,7 @@ class BarEventModule(ExecutableModule):
         order=49,
         after=(MarketDataModule.causal_valuation,),
         compute=lambda account, ctx: _schedule_bar_events(account, ctx),
+        strategy_scoped=True,
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (schedule_bar_events,)
@@ -55,7 +56,7 @@ def _schedule_bar_events(account, ctx) -> None:
     if not representative_by_factor:
         return
     drafts = [
-        EventDraft(EventKind.BAR, pd.Timestamp(ts), strategy)
+        EventDraft(EventKind.BAR, cast(pd.Timestamp, pd.Timestamp(ts)), strategy)
         for ts in table.index
         for strategy in representative_by_factor.values()
     ]

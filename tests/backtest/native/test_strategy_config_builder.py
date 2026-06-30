@@ -59,6 +59,7 @@ def test_factor_mode_incremental_activates_signal_live_not_precomputed():
     configs = build_strategy_configs({"A1": {"factor_mode": "incremental", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_live")
+    assert config.uses_flow("schedule_bar_events")
     assert not config.uses_flow("signal_precomputed")
 
 
@@ -67,6 +68,7 @@ def test_factor_mode_precomputed_activates_signal_precomputed_not_live():
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
     assert not config.uses_flow("signal_live")
+    assert not config.uses_flow("schedule_bar_events")
 
 
 def test_factor_mode_auto_defaults_to_signal_precomputed():
@@ -74,6 +76,7 @@ def test_factor_mode_auto_defaults_to_signal_precomputed():
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
     assert not config.uses_flow("signal_live")
+    assert not config.uses_flow("schedule_bar_events")
 
 
 def test_factor_mode_auto_uses_live_for_non_vectorizable_factor():
@@ -85,6 +88,7 @@ def test_factor_mode_auto_uses_live_for_non_vectorizable_factor():
     })
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_live")
+    assert config.uses_flow("schedule_bar_events")
     assert not config.uses_flow("signal_precomputed")
 
 
