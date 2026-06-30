@@ -240,7 +240,7 @@ class FieldHistoryProvider:
                     == _series(eligible, "_contract_scope_priority").max()
                 ],
             )
-        row = eligible.iloc[-1]
+        row = _sort_history_candidates(eligible, effective_key="effective_trading_day").iloc[-1]
         return HistoricalFieldValue(
             instrument=identity.product_code,
             field_name=field_name,
@@ -300,8 +300,7 @@ class FieldHistoryProvider:
                     == _series(candidates, "_contract_scope_priority").max()
                 ],
             )
-        sort_columns = ["_effective_sort_key"]
-        row = candidates.sort_values(by=sort_columns).iloc[-1]
+        row = _sort_history_candidates(candidates, effective_key="_effective_sort_key").iloc[-1]
         return HistoricalFieldValue(
             instrument=identity.product_code,
             field_name=field_name,
@@ -930,6 +929,24 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
     return cast(pd.DataFrame, df[product_level].copy())
 
 
+def _field_provider_priority(provider: Any) -> int:
+    text = str(provider or "")
+    if text == OPENCTP_LATEST_FIELD_PROVIDER:
+        return 0
+    return 1
+
+
+def _sort_history_candidates(frame: pd.DataFrame, *, effective_key: str) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    candidates = frame.copy()
+    candidates["_provider_priority"] = _series(candidates, "provider").map(_field_provider_priority)
+    sort_columns = [effective_key, "_provider_priority"]
+    if "_contract_scope_priority" in candidates.columns:
+        sort_columns.insert(0, "_contract_scope_priority")
+    return cast(pd.DataFrame, candidates.sort_values(by=sort_columns, kind="mergesort"))
+
+
 def _nearest_by_trading_day(frame: pd.DataFrame, trading_day: pd.Timestamp) -> pd.DataFrame:
     if frame.empty:
         return frame
@@ -942,6 +959,9 @@ def _nearest_by_trading_day(frame: pd.DataFrame, trading_day: pd.Timestamp) -> p
     if "_contract_scope_priority" in candidates.columns:
         sort_columns.append("_contract_scope_priority")
         ascending.append(False)
+    candidates["_provider_priority"] = _series(candidates, "provider").map(_field_provider_priority)
+    sort_columns.append("_provider_priority")
+    ascending.append(False)
     return cast(pd.DataFrame, candidates.sort_values(by=sort_columns, ascending=ascending).head(1))
 
 
@@ -968,6 +988,9 @@ def _nearest_by_timestamp(
     if "_contract_scope_priority" in candidates.columns:
         sort_columns.append("_contract_scope_priority")
         ascending.append(False)
+    candidates["_provider_priority"] = _series(candidates, "provider").map(_field_provider_priority)
+    sort_columns.append("_provider_priority")
+    ascending.append(False)
     return cast(pd.DataFrame, candidates.sort_values(by=sort_columns, ascending=ascending).head(1))
 
 
@@ -1034,7 +1057,7 @@ def _vectorized_values_from_subset(
     if candidates:
         all_candidates = pd.concat(candidates, ignore_index=True)
         all_candidates = all_candidates.sort_values(
-            ["_row", "_scope_priority", "_effective_sort_key"],
+            ["_row", "_scope_priority", "_effective_sort_key", "_provider_priority"],
             kind="mergesort",
         )
         best = all_candidates.groupby("_row", sort=False).tail(1)
@@ -1083,6 +1106,7 @@ def _merge_asof_history_candidate(
         "value_type",
         "effective_trading_day",
         "effective_timestamp",
+        "provider",
     ]))
     right = cast(pd.DataFrame, records[right_columns].copy())
     right[record_key] = pd.to_datetime(right[record_key], errors="coerce").astype("datetime64[ns]")
@@ -1101,10 +1125,12 @@ def _merge_asof_history_candidate(
     merged["_effective_sort_key"] = _series(merged, "effective_timestamp").fillna(
         _series(merged, "effective_trading_day")
     )
+    merged["_provider_priority"] = _series(merged, "provider").map(_field_provider_priority)
     return cast(pd.DataFrame, merged[[
         "_row",
         "_scope_priority",
         "_effective_sort_key",
+        "_provider_priority",
         "value",
         "value_type",
     ]])
