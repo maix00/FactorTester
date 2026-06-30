@@ -24,6 +24,8 @@ class MarginModule(ExecutableModule):
         "margin_mode": FieldDefinition(
             public=True, default="auto", control_template="select", tab="margin",
             options=(("auto", "按市场规则自动"), ("fixed", "固定比例"), ("none", "关闭")),
+            editable_when={"accounting_mode": ("Auto", "Custom")},
+            default_when={"accounting_mode": {"Basic": "none"}},
             chip_template="保证金: {value}", tab_label="保证金", tab_order=160,
         ),
         "fixed_margin_ratio": FieldDefinition(

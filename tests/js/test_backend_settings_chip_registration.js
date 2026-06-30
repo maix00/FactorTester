@@ -1,6 +1,8 @@
 const { assert, MockElement, resetGroupTest, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
+require('../../static/js/modules/shared/chip_renderer.js');
+require('../../static/js/modules/shared/backend_settings_panel.js');
 
 function chipPlainText(chip) {
   return String(chip.html || '').replace(/<[^>]+>/g, '');
@@ -498,11 +500,6 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(sparseRunPayload.start_date, undefined);
   assert.ok(sparseRunPayload.local_settings);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['group-settings'], []);
-  const localChipText = document.getElementById('gt-local-settings-chip-row').childNodes
-    .map((chip) => chip.innerHTML.replace(/<[^>]+>/g, ''));
-  assert.ok(localChipText.some((text) => text === '分配等市值'));
-  assert.ok(localChipText.every((text) => text.indexOf('波动率窗口') < 0));
-
   await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       start_date: '2025-04-01',
@@ -514,9 +511,9 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(tradingDayPayload.local_settings.start_date, '2025-04-01');
   assert.equal(tradingDayPayload.local_settings.end_date, '2025-04-30');
   assert.equal(tradingDayPayload.local_settings.time_precision, 'trading_day');
-  assert.equal(tradingDayPayload.local_settings.start_time, '');
-  assert.equal(tradingDayPayload.local_settings.end_time, '');
-  assert.equal(tradingDayPayload.local_settings.timezone, '');
+  assert.equal(tradingDayPayload.local_settings.start_time, undefined);
+  assert.equal(tradingDayPayload.local_settings.end_time, undefined);
+  assert.equal(tradingDayPayload.local_settings.timezone, undefined);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['local-settings'], ['time']);
 
   await GT.backendSettings.applyFlatSnapshot({

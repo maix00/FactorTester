@@ -76,6 +76,8 @@ class SettingDefinition:
     engine_defaults: dict[str, Any] = field(default_factory=dict)
     disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
     visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    editable_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    default_when: dict[str, dict[Any, Any]] = field(default_factory=dict)
     serialization: dict[str, Any] = field(default_factory=dict)
     tab_label: str = ""
     tab_order: int | None = None
@@ -96,6 +98,18 @@ class SettingDefinition:
         value["tab_default_mount_points"] = [
             mount.value for mount in self.tab_default_mount_points
         ]
+        value["visible_when"] = {
+            key: list(values)
+            for key, values in self.visible_when.items()
+        }
+        value["editable_when"] = {
+            key: list(values)
+            for key, values in self.editable_when.items()
+        }
+        value["default_when"] = {
+            key: dict(values)
+            for key, values in self.default_when.items()
+        }
         # instance_class 是 Python 类，不能进 JSON manifest；只暴露"是否有实例信息"。
         value.pop("instance_class", None)
         value["has_instance"] = self.instance_class is not None

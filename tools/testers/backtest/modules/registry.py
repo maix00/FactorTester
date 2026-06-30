@@ -139,6 +139,11 @@ def register_all_module_settings(app: Any) -> None:
                 options=options,
                 chip_template=fd.chip_template or None,
                 visible_when=dict(fd.visible_when or {}),
+                editable_when=dict(fd.editable_when or {}),
+                default_when={
+                    key: dict(values)
+                    for key, values in (fd.default_when or {}).items()
+                },
                 tab_label=fd.tab_label,
                 tab_order=fd.tab_order,
                 tab_layout_template=fd.tab_layout_template,

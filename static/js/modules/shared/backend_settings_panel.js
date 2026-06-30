@@ -163,6 +163,30 @@
         return matchesConditions((setting && setting.visible_when) || {}, values);
     }
 
+    function settingEditableForValues(setting, values) {
+        return matchesConditions((setting && setting.editable_when) || {}, values);
+    }
+
+    function defaultValueForValues(setting, values) {
+        setting = setting || {};
+        values = values || {};
+        var conditional = setting.default_when || {};
+        var keys = Object.keys(conditional);
+        for (var i = 0; i < keys.length; i++) {
+            var sourceKey = keys[i];
+            var mapping = conditional[sourceKey] || {};
+            var sourceValue = values[sourceKey];
+            if (Object.prototype.hasOwnProperty.call(mapping, sourceValue)) {
+                return mapping[sourceValue];
+            }
+            var stringValue = String(sourceValue);
+            if (Object.prototype.hasOwnProperty.call(mapping, stringValue)) {
+                return mapping[stringValue];
+            }
+        }
+        return setting.value;
+    }
+
     function settingDisplayOrder(setting) {
         var order = setting && setting.serialization && setting.serialization.display_order;
         if (order != null) return Number(order);
@@ -251,6 +275,8 @@
         renderChooser: renderChooser,
         matchesConditions: matchesConditions,
         settingVisibleForValues: settingVisibleForValues,
+        settingEditableForValues: settingEditableForValues,
+        defaultValueForValues: defaultValueForValues,
         settingDisplayOrder: settingDisplayOrder,
         sortSettingKeysByDisplayOrder: sortSettingKeysByDisplayOrder,
         sortTabsByOrder: sortTabsByOrder,

@@ -160,6 +160,14 @@ class ApplicationSettings:
                         key: list(values)
                         for key, values in setting.visible_when.items()
                     },
+                    "editable_when": {
+                        key: list(values)
+                        for key, values in setting.editable_when.items()
+                    },
+                    "default_when": {
+                        key: dict(values)
+                        for key, values in setting.default_when.items()
+                    },
                     "disabled_values_by_engine": {
                         engine: list(values)
                         for engine, values in setting.disabled_values_by_engine.items()

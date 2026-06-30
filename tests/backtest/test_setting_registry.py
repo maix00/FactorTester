@@ -61,6 +61,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["collateral_fraction"]["visible_when"] == {
         "margin_mode": ["fixed", "auto"],
     }
+    assert index["defaults"]["margin_mode"]["value"] == "auto"
+    assert index["defaults"]["margin_mode"]["editable_when"] == {
+        "accounting_mode": ["Auto", "Custom"],
+    }
+    assert index["defaults"]["margin_mode"]["default_when"] == {
+        "accounting_mode": {"Basic": "none"},
+    }
     # money_unit_policy (with per-engine override: rqalpha forces
     # "engine_native", disabling "minor_units") was an execution-engine
     # dispatch concern spanning native/backtrader/qlib/rqalpha -- replaced

@@ -563,22 +563,39 @@
 
     function effectiveValue(setting, mount) {
         var node = activeNode();
+        var conditionValues = effectiveValuesForNode(node);
+        if (!settingEditableForValues(setting, conditionValues)) {
+            return window.BackendSettingsPanel.defaultValueForValues(setting, conditionValues);
+        }
         if (mount === GROUP && node && hasUsableValue(node.value, setting.key)) {
             return node.value[setting.key];
         }
         if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
             return state.localValues[setting.key];
         }
-        return state.index.defaults[setting.key].value;
+        return window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[setting.key], conditionValues);
+    }
+
+    function defaultValuesForCurrentState() {
+        var values = Object.create(null);
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            values[key] = defaults[key].value;
+        });
+        Object.keys(defaults).forEach(function(key) {
+            values[key] = window.BackendSettingsPanel.defaultValueForValues(defaults[key], values);
+        });
+        return values;
     }
 
     function effectiveLocalValues() {
-        var values = Object.create(null);
-        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
-            values[key] = state.index.defaults[key].value;
-        });
+        var values = defaultValuesForCurrentState();
         Object.keys(state.localValues || {}).forEach(function(key) {
             values[key] = state.localValues[key];
+        });
+        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
+            if (Object.prototype.hasOwnProperty.call(state.localValues || {}, key)) return;
+            values[key] = window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[key], values);
         });
         return values;
     }
@@ -602,6 +619,18 @@
     function settingVisible(setting, mount) {
         var node = mount === GROUP ? activeNode() : null;
         return settingVisibleForValues(setting, effectiveValuesForNode(node));
+    }
+
+    function settingEditableForValues(setting, values) {
+        var meta = setting && setting.key && state.index && state.index.defaults
+            ? state.index.defaults[setting.key]
+            : null;
+        return window.BackendSettingsPanel.settingEditableForValues(Object.assign({}, meta || {}, setting || {}), values);
+    }
+
+    function settingEditable(setting, mount) {
+        var node = mount === GROUP ? activeNode() : null;
+        return settingEditableForValues(setting, effectiveValuesForNode(node));
     }
 
     function hasMaterializableDefault(key) {
@@ -724,7 +753,7 @@
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
         control.value = effectiveValue(setting, mount);
-        control.disabled = mount === GROUP && !state.activeGroup;
+        control.disabled = (mount === GROUP && !state.activeGroup) || !settingEditable(setting, mount);
         control.addEventListener('change', function() {
             if (setting.control_template === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(control.value || '')) {
                 return;
@@ -1227,6 +1256,10 @@
         var values = effectiveValuesForNode(group);
         values[key] = value;
         if (!settingVisibleForValues(setting, values)) return null;
+        if (!settingEditableForValues(setting, values)) {
+            value = window.BackendSettingsPanel.defaultValueForValues(setting, values);
+            values[key] = value;
+        }
         if (!setting.chip_template) return null;
         return {
             label: 'backtest-' + key,
@@ -1250,9 +1283,15 @@
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
             if (scope === 'local_only') return null;
             if (!settingVisibleForValues(setting, values)) return null;
+            if (!settingEditableForValues(setting, values)) {
+                value = window.BackendSettingsPanel.defaultValueForValues(setting, values);
+            }
             var localValue = effectiveLocalValues()[key];
             var differsFromLocal = !valuesEqual(value, localValue);
-            var differsFromDefault = defaults[key] && !valuesEqual(value, defaults[key].value);
+            var defaultValue = defaults[key]
+                ? window.BackendSettingsPanel.defaultValueForValues(defaults[key], values)
+                : undefined;
+            var differsFromDefault = defaults[key] && !valuesEqual(value, defaultValue);
             var differsFromParent = parentFieldDiffers(group, key, value);
             if (!differsFromLocal && !differsFromDefault && !differsFromParent) return null;
             if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault && !differsFromParent) return null;
@@ -1578,6 +1617,7 @@
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
             if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
             if (state.localValues[key] === '' || state.localValues[key] === null || state.localValues[key] === undefined) return;
             if (valuesEqual(state.localValues[key], def.value)) return;
             out[key] = state.localValues[key];
@@ -1618,6 +1658,7 @@
             var visibilityValues = Object.assign({}, values, state.localValues);
             visibilityValues[key] = value;
             if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
             if (value === '' || value === null || value === undefined) return;
             out[key] = value;
         });
@@ -1631,6 +1672,7 @@
             var visibilityValues = Object.assign({}, values, pageWindow, out);
             visibilityValues[key] = value;
             if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
             out[key] = value;
         });
         Object.keys(pageSharedDefaultValues()).forEach(function(key) {
@@ -1644,6 +1686,7 @@
             var visibilityValues = Object.assign({}, values, out);
             visibilityValues[key] = value;
             if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
             out[key] = value;
         });
         return out;
@@ -1660,6 +1703,7 @@
             if (!def || def.scope_policy === 'local_only') return;
             if (!hasUsableValue(source, key)) return;
             if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
             var value = source[key];
             if (def.scope_policy !== 'group_only' && valuesEqual(value, localValues[key]) && !parentFieldDiffers(source, key, value)) return;
             out[key] = value;

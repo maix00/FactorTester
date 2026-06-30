@@ -58,6 +58,7 @@ def test_resolve_use_int_position_basic_false_auto_true_custom_reads_field():
 def test_resolve_margin_mode_defaults_auto_and_reads_field():
     assert _resolve_margin_mode(_config(accounting_mode="Basic")) == "none"
     assert _resolve_margin_mode(_config(accounting_mode="Auto")) == "auto"
+    assert _resolve_margin_mode(_config(accounting_mode="Custom")) == "auto"
     assert _resolve_margin_mode(_config(accounting_mode="Custom", margin_mode="fixed")) == "fixed"
 
 

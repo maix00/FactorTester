@@ -74,10 +74,9 @@ class FieldDefinition:
     visible_when: dict[str, tuple[Any, ...]] | None = None
     editable_when: dict[str, tuple[Any, ...]] | None = None  # field is always
         # shown; the control is only editable when this condition holds.
-        # When disabled, the control shows this field's own `default` — NOT
-        # a runtime-resolved value (e.g. TradingRuleModule's accounting_mode
-        # drives several fields' editability but the disabled display is
-        # always just `default`, never a computed effective value).
+        # When disabled, the control shows this field's declared default
+        # (optionally selected by `default_when`), not a user override.
+    default_when: dict[str, dict[Any, Any]] | None = None
     options: tuple[tuple[str, str], ...] = ()  # (value, label) pairs for select controls
 
 

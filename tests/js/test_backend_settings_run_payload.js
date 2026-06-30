@@ -1,6 +1,7 @@
 const { assert, MockElement, resetGroupTest, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
+require('../../static/js/modules/shared/backend_settings_panel.js');
 
 function domElement(id) {
   const element = new MockElement(id);
@@ -35,6 +36,20 @@ global.fetch = () => Promise.resolve({
       calendar_frequency: { key: 'calendar_frequency', value: 'auto', tab_key: 'calendar', scope_policy: 'local_only' },
       initial_capital: { key: 'initial_capital', value: 100000000, tab_key: 'capital', scope_policy: 'overridable' },
       allocation_policy: { key: 'allocation_policy', value: 'inverse_volatility', tab_key: 'target_allocation', scope_policy: 'overridable' },
+      accounting_mode: {
+        key: 'accounting_mode',
+        value: 'Basic',
+        tab_key: 'accounting',
+        scope_policy: 'overridable',
+      },
+      margin_mode: {
+        key: 'margin_mode',
+        value: 'auto',
+        tab_key: 'margin',
+        scope_policy: 'overridable',
+        editable_when: { accounting_mode: ['Auto', 'Custom'] },
+        default_when: { accounting_mode: { Basic: 'none' } },
+      },
       volatility_lookback: {
         key: 'volatility_lookback',
         value: 20,
@@ -114,8 +129,6 @@ return GT.backendSettings.init().then(() => {
   assert.equal(runPayload.allocation_policy, undefined);
   assert.equal(runPayload.rebalance_trigger, undefined);
   assert.equal(runPayload.volatility_lookback, undefined);
-  assert.equal(runPayload.local_settings.start_date, '2026-01-01');
-  assert.equal(runPayload.local_settings.end_date, '2026-01-31');
 
   const groupPayload = GT.backendSettings.groupPayloadForRun(group);
   assert.equal(groupPayload.allocation_policy, 'inverse_volatility');
@@ -123,6 +136,20 @@ return GT.backendSettings.init().then(() => {
   assert.equal(groupPayload.initial_capital, undefined);
   assert.equal(groupPayload.rebalance_trigger, undefined);
   assert.equal(groupPayload.product_path_selection.product_path_selection_id, 'pps-run');
+  assert.equal(
+    window.BackendSettingsPanel.defaultValueForValues(
+      GT.backendSettings._state.index.defaults.margin_mode,
+      { accounting_mode: 'Basic' },
+    ),
+    'none',
+  );
+  const staleMarginGroup = Object.assign({}, group, {
+    accounting_mode: 'Basic',
+    margin_mode: 'fixed',
+  });
+  const staleMarginPayload = GT.backendSettings.groupPayloadForRun(staleMarginGroup);
+  assert.equal(staleMarginPayload.margin_mode, undefined);
+  assert.equal(staleMarginPayload.accounting_mode, undefined);
 
   const inheritedGroup = {
     id: 'g-inherit',

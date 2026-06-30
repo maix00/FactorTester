@@ -34,4 +34,5 @@ def test_field_definition_defaults():
     assert fd.public is False
     assert fd.visible_when is None
     assert fd.editable_when is None
+    assert fd.default_when is None
     assert fd.options == ()
