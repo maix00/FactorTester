@@ -35,7 +35,9 @@ class RiskMetricsModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "evaluation_split": FieldDefinition(
-            public=True, default=None, control_template="date", tab="evaluation"),
+            public=True, default=None, control_template="date", tab="evaluation",
+            chip_template="样本切分: {value}", tab_label="样本划分", tab_order=200,
+        ),
     }
 
     compute_risk_metrics: ClassVar[Flow] = Flow(

@@ -8,6 +8,7 @@ from typing import Any
 from .contracts import (
     ChipDefinition,
     ResultTabDefinition,
+    ScopePolicy,
     SettingDefinition,
     SettingModule,
     SettingsSurface,
@@ -42,6 +43,7 @@ class ApplicationSettings:
     def register_setting(self, setting: SettingDefinition) -> None:
         if setting.key in self.settings:
             raise ValueError(f"duplicate setting: {setting.key}")
+        self._ensure_tab_for_setting(setting)
         if setting.tab not in self.tabs:
             raise ValueError(f"setting {setting.key} references unknown tab {setting.tab}")
         if setting.module not in self.modules:
@@ -49,6 +51,39 @@ class ApplicationSettings:
                 f"setting {setting.key} references unknown module {setting.module}"
             )
         self.settings[setting.key] = setting
+
+    def _ensure_tab_for_setting(self, setting: SettingDefinition) -> None:
+        if setting.tab in self.tabs:
+            return
+        self.tabs[setting.tab] = SettingTab(
+            key=setting.tab,
+            label=setting.tab_label or self._fallback_tab_label(setting),
+            mount_points=self._mount_points_for_scope(setting.scope_policy),
+            layout_template=setting.tab_layout_template or "settings-grid",
+            order=setting.tab_order if setting.tab_order is not None else self._next_tab_order(setting),
+            default_mount_points=setting.tab_default_mount_points,
+            summary_template=setting.tab_summary_template,
+            summary_keys=setting.tab_summary_keys,
+        )
+
+    def _fallback_tab_label(self, setting: SettingDefinition) -> str:
+        module = self.modules.get(setting.module)
+        if module is not None and module.key == setting.tab:
+            return module.label
+        return setting.tab.replace("_", " ").title()
+
+    def _mount_points_for_scope(self, scope: ScopePolicy) -> tuple[TabMountPoint, ...]:
+        if scope == ScopePolicy.LOCAL_ONLY:
+            return (TabMountPoint.LOCAL_SETTINGS,)
+        if scope == ScopePolicy.GROUP_ONLY:
+            return (TabMountPoint.GROUP_SETTINGS,)
+        return (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS)
+
+    def _next_tab_order(self, setting: SettingDefinition) -> int:
+        module = self.modules.get(setting.module)
+        if module is not None:
+            return module.order
+        return (len(self.tabs) + 1) * 10
 
     def register_chip_field(self, chip: ChipDefinition) -> None:
         if chip.key in self.chip_fields:

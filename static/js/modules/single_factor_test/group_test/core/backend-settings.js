@@ -439,6 +439,8 @@
         if (resolver === 'product_path_selection_label') return productPathSelectionLabel(source && source.product_path_selection);
         if (resolver === 'product_mask_count') return nodeProducts(group).length;
         if (resolver === 'product_mask_expand_symbol') return state.expandedProductMasks && state.expandedProductMasks[group.id] ? '▾' : '▸';
+        if (name === 'n_groups') return source && source.splitCount != null ? source.splitCount : '';
+        if (name === 'group_index') return source && source.groupIndex != null ? source.groupIndex : '';
         return source && source[name] != null ? source[name] : '';
     }
 
@@ -607,7 +609,7 @@
         var def = defaults[key];
         if (!def) return false;
         var scope = def.scope_policy;
-        if (scope !== 'group_override' && scope !== 'group_only') return false;
+        if (scope === 'local_only') return false;
         return def.value !== undefined && def.value !== null && def.value !== '';
     }
 
@@ -1201,7 +1203,7 @@
         var keys = Object.keys(defaults).filter(function(key) {
             var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
-            return (scope === 'group_override' || scope === 'group_only') && !!setting.chip_template;
+            return scope !== 'local_only' && !!setting.chip_template;
         });
         return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
     }
@@ -1246,7 +1248,7 @@
             if (value === undefined || value === null || value === '') return null;
             var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
-            if (scope !== 'group_override' && scope !== 'group_only') return null;
+            if (scope === 'local_only') return null;
             if (!settingVisibleForValues(setting, values)) return null;
             var localValue = effectiveLocalValues()[key];
             var differsFromLocal = !valuesEqual(value, localValue);
@@ -1324,7 +1326,7 @@
             var def = defaults[key];
             if (!def || !def.chip_template) return;
             var scope = def.scope_policy;
-            if (scope !== 'group_override' && scope !== 'group_only') return;
+            if (scope === 'local_only') return;
             var parentHasValue = hasUsableValue(parent, key);
             if (!parentHasValue || hasUsableValue(group, key)) return;
             var childValue = def.value;
@@ -1548,8 +1550,8 @@
             if (def.scope_policy === 'local_only') return;
             if (!settingVisibleForValues(def, values)) return;
             if (source[key] === '' || source[key] === null || source[key] === undefined) return;
-            if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key]) && !parentFieldDiffers(source, key, source[key])) return;
-            if (def.scope_policy !== 'group_override' && valuesEqual(source[key], def.value)) return;
+            if (def.scope_policy !== 'group_only' && valuesEqual(source[key], localValues[key]) && !parentFieldDiffers(source, key, source[key])) return;
+            if (def.scope_policy === 'group_only' && valuesEqual(source[key], def.value)) return;
             out[key] = key === 'product_path_selection' ? compactProductPathSelection(source[key]) : source[key];
         });
         return out;
@@ -1659,7 +1661,7 @@
             if (!hasUsableValue(source, key)) return;
             if (!settingVisibleForValues(def, values)) return;
             var value = source[key];
-            if (def.scope_policy === 'group_override' && valuesEqual(value, localValues[key]) && !parentFieldDiffers(source, key, value)) return;
+            if (def.scope_policy !== 'group_only' && valuesEqual(value, localValues[key]) && !parentFieldDiffers(source, key, value)) return;
             out[key] = value;
         });
         return out;

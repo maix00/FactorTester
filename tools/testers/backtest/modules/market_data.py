@@ -74,6 +74,9 @@ class MarketDataModule(ExecutableModule):
             default=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
             control_template="select",
             tab="market_rules",
+            chip_template="历史字段: {value}",
+            tab_label="市场规则",
+            tab_order=170,
             options=(
                 (str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value), "真实历史数据"),
                 (str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value), "最新数据向前填充"),
@@ -83,10 +86,16 @@ class MarketDataModule(ExecutableModule):
         "data_source": FieldDefinition(
             public=True, default="", control_template="select", tab="data_source",
             options=(("", "自动"),),
+            chip_template="数据源: {value}",
+            tab_label="数据源",
+            tab_order=35,
         ),
         "frequency": FieldDefinition(
             public=True, default="", control_template="select", tab="frequency",
             options=(("", "自动"),),
+            chip_template="Bar频率: {value}",
+            tab_label="数据频率",
+            tab_order=36,
         ),
     }
 

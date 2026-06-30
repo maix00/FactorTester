@@ -28,7 +28,7 @@ global.fetch = () => Promise.resolve({
       rebalance_trigger: {
         value: 'on_factor_signal',
         tab_key: 'rebalance_trigger',
-        scope_policy: 'group_override',
+        scope_policy: 'overridable',
         chip_template: '触发: {value}',
         options: [
           { value: 'on_factor_signal', label: '因子信号事件' },
@@ -38,7 +38,7 @@ global.fetch = () => Promise.resolve({
       productMask: {
         value: null,
         tab_key: 'market_universe',
-        scope_policy: 'group_override',
+        scope_policy: 'overridable',
         chip_template: null,
         options: [],
       },

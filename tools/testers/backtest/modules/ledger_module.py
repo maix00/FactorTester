@@ -33,8 +33,14 @@ class LedgerModule(ExecutableModule):
     base_currency: ClassVar[FieldRef[str]] = FieldRef("base_currency")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "initial_capital_major": FieldDefinition(public=True, control_template="number", default=100_000_000.0, tab="capital"),
-        "base_currency": FieldDefinition(public=True, control_template="select", default="CNY", tab="capital"),
+        "initial_capital_major": FieldDefinition(
+            public=True, control_template="number", default=100_000_000.0, tab="capital",
+            chip_template="初始资金: {value}", tab_label="资金", tab_order=50,
+        ),
+        "base_currency": FieldDefinition(
+            public=True, control_template="select", default="CNY", tab="capital",
+            chip_template="币种: {value}", tab_label="资金", tab_order=50,
+        ),
     }
 
     initialize_ledgers: ClassVar[Flow] = Flow(

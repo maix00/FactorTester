@@ -102,7 +102,7 @@ const indexManifest = {
     liquidity_mode: {
       value: 'infinite',
       tab_key: 'liquidity',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '流动性: {value}',
       options: [
         { value: 'infinite', label: '无限流动性' },
@@ -112,7 +112,7 @@ const indexManifest = {
     participation_rate: {
       value: 0.1,
       tab_key: 'liquidity',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '参与率: {value}',
       options: [],
       visible_when: { liquidity_mode: ['volume_participation'] },
@@ -120,14 +120,14 @@ const indexManifest = {
     initial_capital: {
       value: 100000000,
       tab_key: 'capital',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '资金: {value}',
       options: [],
     },
     allocation_policy: {
       value: 'inverse_volatility',
       tab_key: 'target_allocation',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '分配: {value}',
       options: [
         { value: 'inverse_volatility', label: '等风险' },
@@ -137,7 +137,7 @@ const indexManifest = {
     volatility_lookback: {
       value: 20,
       tab_key: 'target_allocation',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '波动率窗口: {value}',
       options: [],
       visible_when: { allocation_policy: ['inverse_volatility'] },
@@ -145,7 +145,7 @@ const indexManifest = {
     position_policy: {
       value: 'rebalance_to_target',
       tab_key: 'position_policy',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '持仓: {value}',
       options: [
         { value: 'rebalance_to_target', label: '按目标调仓' },

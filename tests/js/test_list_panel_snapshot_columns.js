@@ -28,7 +28,7 @@ global.fetch = () => Promise.resolve({
       productMask: {
         value: null,
         tab_key: 'market_universe',
-        scope_policy: 'group_override',
+        scope_policy: 'overridable',
         chip_template: null,
         options: [],
       },

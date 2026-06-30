@@ -45,14 +45,17 @@ class FeeModule(ExecutableModule):
                 ("fixed", "固定费率"),
                 ("zero", "不计费用"),
             ),
+            chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
             public=True, default=0.0, control_template="number", tab="cost",
             visible_when={"fee_mode": ("fixed",)},
+            chip_template="固定费率: {value}", tab_label="费用", tab_order=100,
         ),
         "custom_fee_overrides": FieldDefinition(
             public=True, default={}, control_template="custom", tab="cost",
             visible_when={"fee_mode": ("custom",)},
+            chip_template="自定义费用: {value}", tab_label="费用", tab_order=100,
         ),
     }
 

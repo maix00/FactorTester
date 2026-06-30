@@ -41,12 +41,26 @@ class FactorSignalModule(ExecutableModule):
         # consumed via StrategyConfig.get like an ordinary field).
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "signal_freq": FieldDefinition(public=True, control_template="select", default="1d", tab="frequency"),
-        "basepoint": FieldDefinition(public=True, control_template="select", default="last", tab="frequency"),
-        "daily_basepoint": FieldDefinition(public=True, control_template="text", default=None, tab="frequency"),
-        "end_session_skip": FieldDefinition(public=True, control_template="boolean", default=True, tab="frequency"),
+        "signal_freq": FieldDefinition(
+            public=True, control_template="select", default="1d", tab="frequency",
+            chip_template="信号频率: {value}", tab_label="数据频率", tab_order=36,
+        ),
+        "basepoint": FieldDefinition(
+            public=True, control_template="select", default="last", tab="frequency",
+            chip_template="信号点: {value}", tab_label="数据频率", tab_order=36,
+        ),
+        "daily_basepoint": FieldDefinition(
+            public=True, control_template="text", default=None, tab="frequency",
+            chip_template="日内点: {value}", tab_label="数据频率", tab_order=36,
+        ),
+        "end_session_skip": FieldDefinition(
+            public=True, control_template="boolean", default=True, tab="frequency",
+            chip_template="尾盘跳过: {value}", tab_label="数据频率", tab_order=36,
+        ),
         "end_session_gap": FieldDefinition(
-            public=True, control_template="text", default="3h", tab="frequency"),
+            public=True, control_template="text", default="3h", tab="frequency",
+            chip_template="尾盘间隔: {value}", tab_label="数据频率", tab_order=36,
+        ),
             # plain pd.Timedelta-parseable string ("3h" -> pd.Timedelta("3h"));
             # JSON-serializable as-is, parsed back via pd.Timedelta(value)
             # wherever this field is actually used (signal_align needs a real
@@ -54,6 +68,7 @@ class FactorSignalModule(ExecutableModule):
         "factor_mode": FieldDefinition(
             public=True, control_template="select", default="auto", tab="factor",
             options=(("auto", "自动选择"), ("precomputed", "预计算后按事件回放"), ("incremental", "随事件增量计算")),
+            chip_template="因子模式: {value}", tab_label="因子执行", tab_order=20,
         ),
     }
 

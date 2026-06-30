@@ -60,27 +60,37 @@ def register_run_window_base(
     tab: str = "time",
     scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
 ) -> None:
+    tab_kwargs = {
+        "tab_label": "时间范围",
+        "tab_order": 40,
+        "tab_summary_template": "{start_date} → {end_date} · {time_precision}",
+        "tab_summary_keys": ("start_date", "end_date", "time_precision"),
+    }
     app.register_setting(SettingDefinition(
         "start_date", "开始日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="开始日期: {value}",
         serialization={"display_order": 10},
+        **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "end_date", "结束日期", tab, "date", "", scope_policy,
         module="run_window", chip_template="结束日期: {value}",
         serialization={"display_order": 20},
+        **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "start_time", "开始时间", tab, "time", "00:00", scope_policy,
         module="run_window", chip_template="开始时间: {value}",
         visible_when={"time_precision": ("exact",)},
         serialization={"display_order": 40},
+        **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "end_time", "结束时间", tab, "time", "23:59", scope_policy,
         module="run_window", chip_template="结束时间: {value}",
         visible_when={"time_precision": ("exact",)},
         serialization={"display_order": 50},
+        **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "time_precision", "时间精度", tab, "select", "exact", scope_policy,
@@ -91,6 +101,7 @@ def register_run_window_base(
         ),
         chip_template="时间精度: {value}",
         serialization={"display_order": 30},
+        **tab_kwargs,
     ))
     app.register_setting(SettingDefinition(
         "timezone", "时区", tab, "select", "Asia/Shanghai", scope_policy,
@@ -104,6 +115,7 @@ def register_run_window_base(
         chip_template="时区: {value}",
         visible_when={"time_precision": ("exact",)},
         serialization={"display_order": 60},
+        **tab_kwargs,
     ))
 
 
@@ -152,6 +164,8 @@ def register_product_path_selection_base(
                 "paths",
             ),
         },
+        tab_label="产品路径",
+        tab_order=30,
     ))
 
 
@@ -227,6 +241,8 @@ def register_product_path_candidate_list_base(
             "dedupe_product_groups": True,
             "allow_duplicate_manual_candidates": True,
         },
+        tab_label="产品路径",
+        tab_order=30,
     ))
 
 
@@ -264,6 +280,8 @@ def register_factor_candidate_list_base(
                 "module": "module_candidates_only",
             },
         },
+        tab_label="因子执行",
+        tab_order=20,
     ))
 
 
@@ -292,6 +310,8 @@ def register_factor_selection_base(
             "id_keys": ("alias", "name", "factor_alias"),
             "label_keys": ("alias", "name", "label"),
         },
+        tab_label="因子执行",
+        tab_order=20,
     ))
 
 

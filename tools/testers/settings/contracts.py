@@ -15,7 +15,7 @@ class SettingScope(str, Enum):
 class ScopePolicy(str, Enum):
     LOCAL_ONLY = "local_only"
     GROUP_ONLY = "group_only"
-    GROUP_OVERRIDE = "group_override"
+    OVERRIDABLE = "overridable"
 
 
 class TabMountPoint(str, Enum):
@@ -77,6 +77,12 @@ class SettingDefinition:
     disabled_values_by_engine: dict[str, tuple[str, ...]] = field(default_factory=dict)
     visible_when: dict[str, tuple[Any, ...]] = field(default_factory=dict)
     serialization: dict[str, Any] = field(default_factory=dict)
+    tab_label: str = ""
+    tab_order: int | None = None
+    tab_layout_template: str = "settings-grid"
+    tab_default_mount_points: tuple[TabMountPoint, ...] = ()
+    tab_summary_template: str | None = None
+    tab_summary_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.key or not self.label or not self.tab or not self.control_template:
@@ -87,6 +93,9 @@ class SettingDefinition:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["scope_policy"] = self.scope_policy.value
+        value["tab_default_mount_points"] = [
+            mount.value for mount in self.tab_default_mount_points
+        ]
         # instance_class 是 Python 类，不能进 JSON manifest；只暴露"是否有实例信息"。
         value.pop("instance_class", None)
         value["has_instance"] = self.instance_class is not None
@@ -174,7 +183,7 @@ class SettingsSurface:
         scope), with select/expand/chips and a click-to-edit modal.
 
     A surface binds to an existing ``mount`` point, so it reuses the existing
-    ``tab_lists[mount]`` / scope_policy machinery — it only adds the panel-level
+    ``tab_lists[mount]`` / field-scope machinery — it only adds the panel-level
     declaration (label + list behavior) that was previously implicit/frontend-only.
     """
     key: str

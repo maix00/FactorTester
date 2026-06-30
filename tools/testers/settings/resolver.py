@@ -52,7 +52,7 @@ def resolve_group_settings(
                             "engine": engine,
                             "requested_value": requested_value,
                             "applied_value": value,
-                            "reason": "local_only_group_override",
+                            "reason": "local_only_group_value_ignored",
                         })
                 else:
                     value = overrides[key]

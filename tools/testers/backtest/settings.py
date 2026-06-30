@@ -15,7 +15,6 @@ from tools.testers.settings.contracts import (
     SettingDefinition,
     SettingModule,
     SettingOption,
-    SettingTab,
     TabMountPoint,
 )
 from tools.testers.settings.applications import (
@@ -36,9 +35,10 @@ from tools.testers.settings.applications import (
 def register_group_test_settings(app: Any) -> None:
     """Register all group_test infrastructure settings on an ApplicationSettings.
 
-    Covers SettingModules, SettingTabs, ChipDefinitions, and non-module
-    SettingDefinitions (engine, capital, allocation, rebalance, position,
-    order execution, market rules, accounting, evaluation, calendar).
+    Covers SettingModules, ChipDefinitions, and non-module SettingDefinitions
+    (engine, order execution, market rules, calendar). Tabs are materialized
+    from the registered setting/FieldDefinition metadata instead of being
+    maintained as a separate hardcoded list.
 
     Module-owned settings (fee, slippage, liquidity, margin) are registered
     separately by register_all_module_settings(app).
@@ -97,62 +97,6 @@ def register_group_test_settings(app: Any) -> None:
     ):
         app.register_module(module)
 
-    # ── SettingTabs ─────────────────────────────────────────
-    for tab in (
-        SettingTab("engine", "执行引擎", (TabMountPoint.LOCAL_SETTINGS,),
-                   "settings-grid", 10, (TabMountPoint.LOCAL_SETTINGS,)),
-        SettingTab("factor", "因子执行",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 12),
-        SettingTab("product_path_selection", "产品路径",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 13),
-        SettingTab("group_strategy", "分组数量",
-                   (TabMountPoint.GROUP_SETTINGS,), "settings-grid", 14),
-        SettingTab("data_source", "数据源",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 15),
-        SettingTab("frequency", "数据频率",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 16),
-        SettingTab("time", "时间范围",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 17,
-                   summary_template="{start_date} → {end_date} · {time_precision}",
-                   summary_keys=("start_date", "end_date", "time_precision")),
-        SettingTab("capital", "资金",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 20),
-        SettingTab("target_allocation", "目标分配",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 25),
-        SettingTab("rebalance_trigger", "调仓触发",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 30),
-        SettingTab("position_policy", "持仓政策",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 32),
-        SettingTab("cost", "费用",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 40),
-        SettingTab("order", "订单执行",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 45),
-        SettingTab("liquidity", "流动性",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 50),
-        SettingTab("margin", "保证金",
-                   (TabMountPoint.LOCAL_SETTINGS, TabMountPoint.GROUP_SETTINGS),
-                   "settings-grid", 55),
-        SettingTab("market_rules", "市场规则",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 60),
-        SettingTab("accounting", "记账规则",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 62),
-        SettingTab("calendar", "回测时钟",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 65),
-        SettingTab("evaluation", "样本划分",
-                   (TabMountPoint.LOCAL_SETTINGS,), "settings-grid", 70),
-    ):
-        app.register_tab(tab)
-
     # ── ChipDefinitions ─────────────────────────────────────
     for chip in (
         ChipDefinition("factor_alias", "因子", "identity",
@@ -198,21 +142,24 @@ def register_group_test_settings(app: Any) -> None:
             SettingOption("rqalpha", "RQAlpha 事件驱动回测工具"),
         ),
         chip_template="引擎: {value}",
+        tab_label="执行引擎",
+        tab_order=10,
+        tab_default_mount_points=(TabMountPoint.LOCAL_SETTINGS,),
     ))
     # factor_mode: registered by FactorSignalModule (issue-114), not
     # register_factor_execution_base -- it directly selects which
     # signal_live/signal_precomputed Flow this strategy activates.
-    register_factor_candidate_list_base(app)
-    register_factor_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
-    register_product_path_candidate_list_base(app)
-    register_product_path_selection_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
+    register_factor_candidate_list_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
+    register_factor_selection_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
+    register_product_path_candidate_list_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
+    register_product_path_selection_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
     # data_source/frequency: registered by MarketDataModule (issue-114) via
     # register_all_module_settings below, not register_market_data_base --
     # unlike product_path_selection/factor (resolved upstream by candidate-
     # list machinery this module only consumes), data_source/frequency have
     # no candidate-list/fallback metadata, so MarketDataModule is the real
     # owner here, not just a consumer.
-    register_run_window_base(app, scope_policy=ScopePolicy.GROUP_OVERRIDE)
+    register_run_window_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
 
     # splitCount/groupIndex/initial_capital/base_currency/allocation_policy/
     # volatility_lookback/volatility_warmup/rebalance_trigger/position_policy/
@@ -229,40 +176,49 @@ def register_group_test_settings(app: Any) -> None:
     # parallel settings for the same concept.
     app.register_setting(SettingDefinition(
         "currency_conversion_fee_rate", "换汇佣金率", "capital", "number", 0.0,
-        ScopePolicy.GROUP_OVERRIDE, module="portfolio_capital",
+        ScopePolicy.OVERRIDABLE, module="portfolio_capital",
         minimum=0.0, step=0.000001,
+        chip_template="换汇费率: {value}",
+        tab_label="资金",
+        tab_order=50,
     ))
     app.register_setting(SettingDefinition(
         "execution_price_basis", "执行价格", "order", "select", "open",
-        ScopePolicy.GROUP_OVERRIDE, module="order_execution",
+        ScopePolicy.OVERRIDABLE, module="order_execution",
         options=(
             SettingOption("close", "收盘/切片价格"),
             SettingOption("open", "开盘价"),
             SettingOption("vwap", "VWAP"),
         ),
         chip_template="价格: {value}",
+        tab_label="订单执行",
+        tab_order=120,
     ))
     app.register_setting(SettingDefinition(
         "order_type", "订单类型", "order", "select", "market",
-        ScopePolicy.GROUP_OVERRIDE, module="order_execution",
+        ScopePolicy.OVERRIDABLE, module="order_execution",
         options=(
             SettingOption("market", "市价单"),
             SettingOption("limit", "限价单"),
         ),
         chip_template="订单: {value}",
+        tab_label="订单执行",
+        tab_order=120,
     ))
     app.register_setting(SettingDefinition(
         "matching_model", "撮合模型", "order", "select", "next_bar_full_fill",
-        ScopePolicy.GROUP_OVERRIDE, module="order_matching",
+        ScopePolicy.OVERRIDABLE, module="order_matching",
         options=(
             SettingOption("next_bar_full_fill", "下一 bar 全额成交"),
             SettingOption("bar_volume_limited", "按 bar 成交量限制"),
         ),
         chip_template="撮合: {value}",
+        tab_label="订单执行",
+        tab_order=120,
     ))
     app.register_setting(SettingDefinition(
         "market_rule_fallback", "历史规则缺失处理", "market_rules",
-        "select", "latest_available", ScopePolicy.LOCAL_ONLY,
+        "select", "latest_available", ScopePolicy.OVERRIDABLE,
         module="market_rules",
         options=(
             SettingOption("latest_available", "使用最新规则并标记近似"),
@@ -270,10 +226,12 @@ def register_group_test_settings(app: Any) -> None:
             SettingOption("configured_default", "使用注册默认值并标记近似"),
         ),
         chip_template="规则回退: {value}",
+        tab_label="市场规则",
+        tab_order=170,
     ))
     app.register_setting(SettingDefinition(
         "calendar_frequency", "公共回测时钟", "calendar", "select", "auto",
-        ScopePolicy.LOCAL_ONLY, module="backtest_calendar",
+        ScopePolicy.OVERRIDABLE, module="backtest_calendar",
         options=(
             SettingOption("auto", "按因子频率自动判断"),
             SettingOption("1min", "1 分钟"),
@@ -281,4 +239,6 @@ def register_group_test_settings(app: Any) -> None:
             SettingOption("1day", "1 天"),
         ),
         chip_template="时钟: {value}",
+        tab_label="回测时钟",
+        tab_order=190,
     ))

@@ -102,7 +102,7 @@ def register_all_module_settings(app: Any) -> None:
     separate "accounting"/"margin" modules by design) get a SettingModule
     auto-registered here.
     """
-    from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption
+    from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption, TabMountPoint
 
     _SCOPE_MAP = {p.value: p for p in ScopePolicy}
     for cls in sorted(_ALL_MODULE_CLASSES, key=lambda c: getattr(c, "order", 0)):
@@ -123,8 +123,11 @@ def register_all_module_settings(app: Any) -> None:
                 # that registration resolves (via strategy_config_builder),
                 # not a second, competing owner of the setting itself.
                 continue
-            scope = _SCOPE_MAP.get(fd.scope_policy, ScopePolicy.GROUP_OVERRIDE)
+            scope = _SCOPE_MAP.get(fd.scope_policy, ScopePolicy.OVERRIDABLE)
             options = tuple(SettingOption(str(o[0]), str(o[1])) for o in fd.options)
+            tab_defaults = tuple(
+                TabMountPoint(value) for value in fd.tab_default_mount_points
+            )
             app.register_setting(SettingDefinition(
                 key=field_name,
                 label=fd.label or field_name,
@@ -134,7 +137,14 @@ def register_all_module_settings(app: Any) -> None:
                 module=cls.key,
                 scope_policy=scope,
                 options=options,
+                chip_template=fd.chip_template or None,
                 visible_when=dict(fd.visible_when or {}),
+                tab_label=fd.tab_label,
+                tab_order=fd.tab_order,
+                tab_layout_template=fd.tab_layout_template,
+                tab_default_mount_points=tab_defaults,
+                tab_summary_template=fd.tab_summary_template,
+                tab_summary_keys=fd.tab_summary_keys,
             ))
 
 

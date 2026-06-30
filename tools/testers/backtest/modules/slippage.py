@@ -25,10 +25,12 @@ class SlippageModule(ExecutableModule):
         "slippage_mode": FieldDefinition(
             public=True, default="none", control_template="select", tab="cost",
             options=(("none", "不计滑点"), ("fixed_bps", "固定基点")),
+            chip_template="滑点: {value}", tab_label="费用", tab_order=100,
         ),
         "slippage_bps": FieldDefinition(
             public=True, default=0.0, control_template="number", tab="cost",
             visible_when={"slippage_mode": ("fixed_bps",)},
+            chip_template="滑点bps: {value}", tab_label="费用", tab_order=100,
         ),
     }
 

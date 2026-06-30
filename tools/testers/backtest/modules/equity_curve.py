@@ -37,7 +37,10 @@ class EquityCurveModule(ExecutableModule):
     compute_live: ClassVar[FieldRef[bool]] = FieldRef("compute_live")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "compute_live": FieldDefinition(public=True, default=True, control_template="boolean", tab="evaluation"),
+        "compute_live": FieldDefinition(
+            public=True, default=True, control_template="boolean", tab="evaluation",
+            chip_template="实时净值: {value}", tab_label="样本划分", tab_order=200,
+        ),
     }
 
     record_equity_on_signal: ClassVar[Flow] = Flow(

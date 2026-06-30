@@ -16,21 +16,26 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
 
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "engine", "factor", "product_path_selection", "data_source", "frequency", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost",
-        "order", "liquidity", "margin", "market_rules", "accounting", "calendar", "evaluation",
+        "engine", "factor", "product_path_selection", "data_source", "frequency",
+        "time", "capital", "target_allocation", "rebalance_trigger",
+        "position_policy", "accounting", "margin", "cost", "evaluation",
+        "order", "liquidity", "market_rules", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "factor", "product_path_selection", "group_strategy", "time", "capital", "target_allocation", "rebalance_trigger", "position_policy", "cost", "order", "liquidity", "margin",
+        "factor", "product_path_selection", "data_source", "frequency", "time",
+        "capital", "target_allocation", "rebalance_trigger", "position_policy",
+        "group_strategy", "accounting", "margin", "cost", "evaluation", "order",
+        "liquidity", "market_rules", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["scope_policy"] == "local_only"
     assert index["defaults"]["engine"]["chip_template"] == "引擎: {value}"
-    assert index["defaults"]["start_date"]["scope_policy"] == "group_override"
+    assert index["defaults"]["start_date"]["scope_policy"] == "overridable"
     assert index["defaults"]["engine"]["options"][0] == {
         "value": "native",
         "label": "Native 事件驱动回测工具",
@@ -610,7 +615,7 @@ def test_group_settings_override_local_values_for_each_combination() -> None:
     assert resolved["combination-a:group-1"]["initial_capital_major"] == 1_000_000.0
 
 
-def test_local_only_group_override_falls_back_with_diagnostics() -> None:
+def test_local_only_group_value_is_ignored_with_diagnostics() -> None:
     application = backtest_setting_registry.get("group_test")
 
     resolved = resolve_group_settings(
@@ -627,7 +632,7 @@ def test_local_only_group_override_falls_back_with_diagnostics() -> None:
         "engine": "native",
         "requested_value": "backtrader",
         "applied_value": "native",
-        "reason": "local_only_group_override",
+        "reason": "local_only_group_value_ignored",
     }]
 
 

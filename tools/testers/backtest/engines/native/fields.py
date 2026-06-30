@@ -64,7 +64,13 @@ class FieldDefinition:
     tab: str = ""
     control_template: str = ""           # "select"/"number"/"date"/"boolean"/...
     chip_template: str = ""
-    scope_policy: str = "group_override"
+    tab_label: str = ""
+    tab_order: int | None = None
+    tab_layout_template: str = "settings-grid"
+    tab_default_mount_points: tuple[str, ...] = ()
+    tab_summary_template: str | None = None
+    tab_summary_keys: tuple[str, ...] = ()
+    scope_policy: str = "overridable"
     visible_when: dict[str, tuple[Any, ...]] | None = None
     editable_when: dict[str, tuple[Any, ...]] | None = None  # field is always
         # shown; the control is only editable when this condition holds.

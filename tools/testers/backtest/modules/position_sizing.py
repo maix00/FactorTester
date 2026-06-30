@@ -34,6 +34,7 @@ class PositionSizingModule(ExecutableModule):
         "quantity_rounding_policy": FieldDefinition(
             public=True, default="floor_to_lot", control_template="select", tab="order",
             options=(("floor_to_lot", "按最小买入手数向下取整"), ("nearest_lot", "按最小买入手数四舍五入")),
+            chip_template="数量取整: {value}", tab_label="订单执行", tab_order=120,
         ),
     }
 
