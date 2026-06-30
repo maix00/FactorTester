@@ -325,10 +325,30 @@ class FieldHistoryProvider:
         instrument_type: str | None = "future",
         fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
     ) -> pd.Series:
-        policy = HistoricalFieldFallbackPolicy(fallback)
+        query_frame = self.query_frame_for_index(
+            instrument,
+            index,
+            trading_day_resolver=trading_day_resolver,
+            instrument_type=instrument_type,
+        )
+        return self.values_for_query_frame(
+            instrument,
+            field_name,
+            query_frame,
+            fallback=fallback,
+        )
+
+    def query_frame_for_index(
+        self,
+        instrument: Any,
+        index: Iterable[Any],
+        *,
+        trading_day_resolver: TradingDayResolver,
+        instrument_type: str | None = "future",
+    ) -> pd.DataFrame:
         timestamps = [_normalise_timestamp_key(timestamp) for timestamp in index]
         if not timestamps:
-            return pd.Series([], index=pd.DatetimeIndex([]), name=field_name, dtype=object)
+            return pd.DataFrame(columns=["_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code"])
         trading_days = [
             trading_day_resolver.resolve_trading_day(timestamp, _instrument_name(instrument))
             for timestamp in timestamps
@@ -345,7 +365,21 @@ class FieldHistoryProvider:
             "instrument_type": [identity.instrument_type for identity in identities],
             "contract_code": [identity.contract_code or "" for identity in identities],
         })
-        result = pd.Series([None] * len(timestamps), index=pd.DatetimeIndex(timestamps), name=field_name, dtype=object)
+        return query_frame
+
+    def values_for_query_frame(
+        self,
+        instrument: Any,
+        field_name: str,
+        query_frame: pd.DataFrame,
+        *,
+        fallback: HistoricalFieldFallbackPolicy | str = HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+    ) -> pd.Series:
+        policy = HistoricalFieldFallbackPolicy(fallback)
+        if query_frame.empty:
+            return pd.Series([], index=pd.DatetimeIndex([]), name=field_name, dtype=object)
+        timestamps = list(_series(query_frame, "timestamp"))
+        row_values: list[pd.Series] = []
         for key, group in query_frame.groupby(["product_code", "instrument_type"], sort=False):
             product_code, resolved_type = cast(tuple[Any, Any], key)
             try:
@@ -364,8 +398,17 @@ class FieldHistoryProvider:
                 raw_instrument=_instrument_name(instrument),
                 field_name=field_name,
             )
-            for row_number, value in values.items():
-                result.iloc[int(cast(Any, row_number))] = value
+            row_values.append(values)
+        if row_values:
+            ordered_values = pd.concat(row_values).reindex(_series(query_frame, "_row"))
+        else:
+            ordered_values = pd.Series([None] * len(timestamps), index=_series(query_frame, "_row"), dtype=object)
+        result = pd.Series(
+            list(ordered_values),
+            index=pd.DatetimeIndex(timestamps),
+            name=field_name,
+            dtype=object,
+        )
         return result
 
     def frame_for_index(
@@ -1067,9 +1110,13 @@ def _vectorized_values_from_subset(
             kind="mergesort",
         )
         best = all_candidates.groupby("_row", sort=False).tail(1)
-        for _, row in best.iterrows():
-            row_number = int(cast(Any, row["_row"]))
-            result.at[row_number] = _decode_value(row["value"], row.get("value_type"))
+        row_numbers = [int(cast(Any, row_number)) for row_number in best["_row"]]
+        value_types = best["value_type"] if "value_type" in best.columns else pd.Series([""] * len(best))
+        decoded_values = [
+            _decode_value(value, value_type)
+            for value, value_type in zip(best["value"], value_types)
+        ]
+        result = pd.Series(decoded_values, index=pd.Index(row_numbers), dtype=object).reindex(queries["_row"])
 
     missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
     if missing_rows and policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
@@ -1339,17 +1386,29 @@ def historical_fields_frame_for_products(
     vectorized ``frame_for_index`` path.
     """
     timestamps = _timestamps_for_historical_field_index(index)
-    return {
-        str(field_name): provider.frame_for_index(
-            products,
-            str(field_name),
+    query_frames = {
+        _instrument_name(product): provider.query_frame_for_index(
+            product,
             timestamps,
             trading_day_resolver=trading_day_resolver,
             instrument_type=instrument_type,
-            fallback=fallback,
         )
-        for field_name in field_names
+        for product in products
     }
+    result: dict[str, pd.DataFrame] = {}
+    for field_name in field_names:
+        field = str(field_name)
+        columns = {
+            product_name: provider.values_for_query_frame(
+                product_name,
+                field,
+                query_frame,
+                fallback=fallback,
+            )
+            for product_name, query_frame in query_frames.items()
+        }
+        result[field] = pd.DataFrame(columns)
+    return result
 
 
 def _timestamps_for_historical_field_index(index: Iterable[Any]) -> list[Any]:
