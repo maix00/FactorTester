@@ -13,7 +13,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields
 
 # Constructed by hand (not imported from group_membership.py) to avoid a
 # module-level circular import: group_membership.py needs OrderBookModule
@@ -39,7 +39,8 @@ class OrderBookModule(ExecutableModule):
     size_order: ClassVar[Flow] = Flow(
         "size_order",
         inputs=(_TARGET_WEIGHTS_REF, LedgerModule.equity,
-                 MarketDataModule.current_prices, LedgerModule.positions),
+                 MarketDataModule.current_prices, MarketDataModule.current_historical_fields,
+                 LedgerModule.positions),
         outputs=(deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=20, after=(LedgerModule.equity_on_signal,),
         compute=lambda account, ctx: _basic_size_order(account, ctx),
@@ -59,6 +60,11 @@ def _basic_size_order(account, ctx) -> None:
     for strategy in ctx.active_strategies:
         ledger = account.ledgers[strategy]
         equity = ctx.get_for(LedgerModule.equity, strategy)
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
         target_weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
         positions = ledger.get(LedgerModule.positions, {})
         # Must cover every currently-held product, not just target_weights'
@@ -67,11 +73,11 @@ def _basic_size_order(account, ctx) -> None:
         # its current quantity sold off, which only happens if it's a key
         # here too.
         all_products = set(target_weights) | set(positions)
-        deltas = {
-            product: target_weights.get(product, 0.0) * equity / prices[product] - getattr(
-                positions.get(product), "quantity", 0.0)
-            for product in all_products
-        }
+        deltas = {}
+        for product in all_products:
+            multiplier = contract_multiplier_from_fields(historical_fields, product)
+            target_quantity = target_weights.get(product, 0.0) * equity / (prices[product] * multiplier)
+            deltas[product] = target_quantity - getattr(positions.get(product), "quantity", 0.0)
         ctx.set_for(OrderBookModule.deltas, strategy, deltas)
 
 

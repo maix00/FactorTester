@@ -166,6 +166,34 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
     assert cash_after == pytest.approx(1_000_000.0 - 10_000.0)
 
 
+def test_cash_update_and_equity_use_contract_multiplier():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = AccountState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    t = pd.Timestamp("2024-01-01")
+    prices = {p: 10.0}
+    historical_fields = {str(p): {"VolumeMultiple": 10.0}}
+    order = Order(instrument=p, timestamp=t, quantity=1000.0, intent_quantity=1000.0, strategy=s)
+    draft = EventDraft(EventKind.ORDER, t, s, order)
+    order_ctx = FlowContext(
+        timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, prices)
+    order_ctx.set(MarketDataModule.current_historical_fields, historical_fields)
+
+    _basic_cash_update(account, order_ctx)
+    _basic_equity(account, order_ctx)
+
+    assert account.ledgers[s].get(LedgerModule.cash).to_major() == pytest.approx(900_000.0)
+    assert order_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
+
+
 def test_two_strategies_independent_ledgers_do_not_cross_contaminate():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
     p = _product()

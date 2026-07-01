@@ -26,6 +26,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
 
@@ -50,12 +51,9 @@ class GroupMembershipModule(ExecutableModule):
         # a fixed schedule rather than at signal_align's factor-derived
         # timestamps, which doesn't exist yet.
     allocation_policy: ClassVar[FieldRef[str]] = FieldRef("allocation_policy")
-        # "equal_notional"|"inverse_volatility" -- "equal_margin" (the old
-        # third option, labeled "对照"/reference-only in the legacy UI) is
-        # not implemented: its exact intended semantics relative to the
-        # other two weren't well-defined enough to implement without
-        # guessing, and it was explicitly a "comparison baseline", not a
-        # mode anyone actually runs live.
+        # "equal_notional"|"inverse_volatility"|"equal_margin".  equal_margin
+        # is an explicit comparison allocator: equal margin budget, not equal
+        # risk and not the default research semantics.
     volatility_lookback: ClassVar[FieldRef[int]] = FieldRef("volatility_lookback")
     volatility_warmup: ClassVar[FieldRef[str]] = FieldRef("volatility_warmup")
         # "equal_notional"|"error" -- what to do for a product whose trailing
@@ -94,7 +92,7 @@ class GroupMembershipModule(ExecutableModule):
         ),
         "allocation_policy": FieldDefinition(
             public=True, label="分配", default="inverse_volatility", control_template="select", tab="target_allocation",
-            options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）")),
+            options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）"), ("equal_margin", "等保证金（对照）")),
             chip_template="分配: {value}", tab_label="目标分配", tab_order=60,
         ),
         "volatility_lookback": FieldDefinition(
@@ -224,6 +222,8 @@ def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
         return {}
     config = account.config_for(strategy)
     policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+    if policy == "equal_margin":
+        return _allocate_equal_margin(account, ctx, members)
     if policy != "inverse_volatility":
         weight = 1.0 / len(members)
         return {product: weight for product in members}
@@ -258,6 +258,33 @@ def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
         for product, iv in inv_vol.items():
             weights[product] = remaining_share * iv / total_inv_vol
     return weights
+
+
+def _allocate_equal_margin(account, ctx, members: frozenset) -> dict:
+    ratios = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+    raw: dict = {}
+    for product in members:
+        ratio = _margin_ratio_for_product(ratios, product)
+        if ratio is not None and ratio > 0:
+            raw[product] = 1.0 / ratio
+    total = sum(raw.values())
+    if total <= 0:
+        weight = 1.0 / len(members)
+        return {product: weight for product in members}
+    return {product: value / total for product, value in raw.items()}
+
+
+def _margin_ratio_for_product(fields: dict, product) -> float | None:
+    values = fields.get(str(product)) or fields.get(str(getattr(product, "name", product))) or {}
+    for key in ("LongMarginRatioByMoney", "ShortMarginRatioByMoney", "MarginRatio"):
+        raw = values.get(key)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
 
 
 def _trailing_volatility(table, product, timestamp, lookback: int) -> float | None:
@@ -297,14 +324,10 @@ def _schedule_order_execution(account, ctx) -> None:
     event kind.
 
     Only cancels a stale order whose own scheduled timestamp is STRICTLY
-    AFTER this SIGNAL's timestamp -- one scheduled to fire AT this exact
-    timestamp is already "in flight" (within EventKind ordering, SIGNAL
-    always precedes ORDER at the same timestamp, so that order hasn't
-    actually executed yet, but it's already past its decision point and
-    due right now). Cancelling it here would make any execution_delay_bars
-    >= 1 a structural no-op whenever signals recompute every period -- the
-    very next signal would always cancel the previous one's order before
-    it ever fires."""
+    AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
+    should already have been processed because ORDER has higher same-timestamp
+    priority than SIGNAL; if a test calls this helper directly, keep that
+    order intact rather than treating it as still-cancellable future work."""
     pending = getattr(account, "pending_orders", None)
     if pending is None:
         pending = {}

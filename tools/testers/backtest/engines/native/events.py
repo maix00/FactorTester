@@ -15,19 +15,19 @@ if TYPE_CHECKING:
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
-    scheduler.EventQueue). BAR before SIGNAL before ORDER: live factors first
-    observe market data, then strategies read signal values, then orders whose
-    action time has arrived are processed. Values are spaced so a future
-    EventKind can be inserted without renumbering everything after it."""
+    scheduler.EventQueue). BAR before ORDER before SIGNAL: the next-bar order
+    decided on the previous bar is filled before the current bar's signal
+    decides a new target from fresh ledger state. Values are spaced so a
+    future EventKind can be inserted without renumbering everything after it."""
     BAR = 0       # a market bar has arrived; live factors may update state
+    ORDER = 5     # an Order has reached its action moment (schedule/cancel/fill
+                  # are OrderStatus values inspected from the payload, not
+                  # separate EventKinds)
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     ORDER_NOTICE = 15  # an order/position lifecycle notification (e.g.
                        # contract rollover, auto-close/force-close warning).
                        # Domain modules interpret the payload and may emit
                        # ORDER events.
-    ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
-                  # are OrderStatus values inspected from the payload, not
-                  # separate EventKinds)
 
 
 @dataclass(frozen=True)

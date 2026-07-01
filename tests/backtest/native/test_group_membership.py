@@ -152,9 +152,9 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
 
 def test_schedule_order_execution_does_not_cancel_an_order_due_at_this_exact_timestamp():
     """A stale order scheduled to fire AT this exact timestamp is already
-    past its decision point (SIGNAL always precedes ORDER within the same
-    timestamp) -- cancelling it here would make any delay >= 1 a
-    structural no-op whenever signals recompute every period."""
+    due and should have been processed before SIGNAL in the real event queue.
+    Direct helper calls still leave it untouched rather than cancelling it as
+    future work."""
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={GroupMembershipModule.execution_timing: "same_bar"})

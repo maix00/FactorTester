@@ -41,6 +41,28 @@ def test_basic_size_order_computes_deltas_from_target_weights():
     assert deltas[p2] == pytest.approx(25.0)   # 0.5*1000/20
 
 
+def test_basic_size_order_uses_contract_multiplier_for_futures_notional():
+    s = Strategy(alias="S")
+    p = _product()
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {str(p): {"VolumeMultiple": 10.0}})
+    ctx.set_for(LedgerModule.equity, s, 1000.0)
+    ctx.set_for(GroupMembershipModule.target_weights, s, {p: 0.5})
+
+    class _FakeLedger:
+        def get(self, ref, default=None):
+            return {p: ProductPosition(quantity=0.0)}
+
+    class _FakeAccount:
+        ledgers = {s: _FakeLedger()}
+
+    _basic_size_order(_FakeAccount(), ctx)
+    deltas = ctx.get_for(OrderBookModule.deltas, s)
+    assert deltas[p] == pytest.approx(5.0)   # 0.5*1000/(10 price * 10 multiplier)
+
+
 def test_basic_size_order_subtracts_existing_position():
     s = Strategy(alias="S")
     p1 = _product()

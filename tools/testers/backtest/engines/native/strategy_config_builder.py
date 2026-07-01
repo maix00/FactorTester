@@ -34,6 +34,8 @@ _TERM_STRUCTURE_FLOWS = {
     "handle_delivery_force_close_notice",
     "handle_rollover_notice",
 }
+_GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
+_LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 
 
 def _all_flow_names() -> set[str]:
@@ -52,6 +54,11 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
     if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
         excluded |= _TERM_STRUCTURE_FLOWS
+    strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
+    if strategy_kind == "long_short":
+        excluded |= _GROUP_STRATEGY_FLOWS
+    else:
+        excluded |= _LONG_SHORT_STRATEGY_FLOWS
     return frozenset(names - excluded)
 
 

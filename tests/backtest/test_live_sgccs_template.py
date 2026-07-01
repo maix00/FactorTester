@@ -76,8 +76,9 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
     assert "time_data" not in snapshot
     assert "backendBacktestSettings" not in snapshot["local_settings"]
     assert "dates" not in snapshot["local_settings"]
-    # /replace_params removed — push each candidate via /add_factor_by_params instead
-    for params_row in snapshot["params_list"]:
+    # Templates now store factor_candidates.  Push each candidate through the
+    # same endpoint the frontend uses so page_factors becomes the single source.
+    for params_row in _template_factor_params(snapshot):
         resp = client.post("/add_factor_by_params", json={
             "factor_family_alias": FACTOR_FAMILY,
             "params": params_row,
@@ -311,8 +312,7 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     snapshot = template["snapshot"]
     local_values = snapshot["local_settings"]
 
-    # /replace_params removed — push each candidate via /add_factor_by_params instead
-    for params_row in snapshot["params_list"]:
+    for params_row in _template_factor_params(snapshot):
         resp = client.post("/add_factor_by_params", json={
             "factor_family_alias": FACTOR_FAMILY,
             "params": params_row,
@@ -434,6 +434,16 @@ def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict
             group["testerId"] = tester_ids[group["testerId"]]
         result.append(group)
     return result
+
+
+def _template_factor_params(snapshot: dict) -> list[dict]:
+    if isinstance(snapshot.get("factor_candidates"), list):
+        return [
+            dict(candidate.get("params") or {})
+            for candidate in snapshot["factor_candidates"]
+            if isinstance(candidate, dict) and isinstance(candidate.get("params"), dict)
+        ]
+    return list(snapshot.get("params_list") or [])
 
 
 def _resolve_ls_configs(configs: list[dict], groups: list[dict]) -> list[dict]:

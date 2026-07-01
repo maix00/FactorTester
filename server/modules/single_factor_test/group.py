@@ -1862,6 +1862,68 @@ def _resolve_group_strategy_settings(
     return group_settings
 
 
+def _resolve_long_short_leg_ids(config: dict[str, Any], key: str, legacy_key: str) -> list[dict[str, Any]]:
+    raw = config.get(key)
+    if not raw and config.get(legacy_key):
+        raw = [{"group_id": config.get(legacy_key), "weight": 1.0}]
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            group_id = str(item.get("group_id") or item.get("strategy_id") or item.get("id") or "")
+            weight = item.get("weight", 1.0)
+        else:
+            group_id = str(item or "")
+            weight = 1.0
+        if group_id:
+            result.append({"strategy_id": group_id, "group_id": group_id, "weight": weight})
+    return result
+
+
+def _resolve_long_short_strategy_settings(
+    config: dict[str, Any],
+    *,
+    resolved_backtest_settings: dict[str, dict[str, Any]],
+    source_settings_by_alias: dict[str, dict[str, Any]],
+    fallback_group_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a peer long-short strategy from source strategy ids.
+
+    Long-Short is a strategy composition lane.  It references already-created
+    source strategy ids and consumes their target weights at the same SIGNAL
+    timestamp.  It is not a quantile group and therefore must not require
+    splitCount/groupIndex/factorAlias in its own payload.
+    """
+    strategy_id = str(config.get("id") or config.get("strategy_id") or config.get("name") or "")
+    long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
+    short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
+    if not strategy_id:
+        raise ValueError("Long-Short 缺少 id")
+    if not long_legs or not short_legs:
+        raise ValueError(f"Long-Short {strategy_id} 缺少 long/short legs")
+
+    source_ids = [leg["strategy_id"] for leg in long_legs + short_legs]
+    first_source = next(
+        (source_settings_by_alias[source_id] for source_id in source_ids if source_id in source_settings_by_alias),
+        None,
+    )
+    if first_source is None:
+        raise ValueError(f"Long-Short {strategy_id} 引用的源策略不存在: {source_ids}")
+
+    settings = dict(fallback_group_settings)
+    settings.update(first_source)
+    settings.update({
+        key: value
+        for key, value in (resolved_backtest_settings.get(strategy_id) or {}).items()
+        if value not in (None, "")
+    })
+    settings["strategy_kind"] = "long_short"
+    settings["long_leg_strategy_ids"] = long_legs
+    settings["short_leg_strategy_ids"] = short_legs
+    return settings
+
+
 def _build_group_owner_rows(groups: list[dict], *, is_ls: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index, g in enumerate(groups):
@@ -1874,6 +1936,37 @@ def _build_group_owner_rows(groups: list[dict], *, is_ls: bool) -> list[dict[str
             "product_path_selection_id": _group_product_path_selection_id(g),
             "factor_alias": str(g.get('factorAlias', '')),
             "is_ls": is_ls,
+        })
+    return rows
+
+
+def _build_long_short_owner_rows(
+    ls_configs: list[dict],
+    *,
+    source_owner_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, config in enumerate(ls_configs):
+        if not isinstance(config, dict):
+            continue
+        group_id = str(config.get("id") or config.get("strategy_id") or f"ls-{index}")
+        long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
+        short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
+        first_source: dict[str, Any] = next(
+            (
+                source_owner_by_id.get(leg["strategy_id"])
+                for leg in long_legs + short_legs
+                if source_owner_by_id.get(leg["strategy_id"]) is not None
+            ),
+            {},
+        ) or {}
+        rows.append({
+            "group_id": group_id,
+            "group_name": str(config.get("shortAlias") or config.get("name") or group_id),
+            "group_index": -1,
+            "product_path_selection_id": str(first_source.get("product_path_selection_id") or ""),
+            "factor_alias": str(first_source.get("factor_alias") or ""),
+            "is_ls": True,
         })
     return rows
 
@@ -2807,19 +2900,21 @@ def run_group_test_stream():
                     selection_cache=selection_cache,
                 )
             group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))
+            group_owner_by_id = {str(row.get("group_id")): row for row in group_owner}
 
             # 步骤 2：处理 ls_configs
             for g in flat_ls_configs:
                 if not isinstance(g, dict):
                     continue
                 group_id = str(g.get('id') or f'ls-{len(resolved_settings_by_alias)}')
-                resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
-                    g, resolved_backtest_settings=resolved_backtest_settings,
+                resolved_settings_by_alias[group_id] = _resolve_long_short_strategy_settings(
+                    g,
+                    resolved_backtest_settings=resolved_backtest_settings,
+                    source_settings_by_alias=resolved_settings_by_alias,
                     fallback_group_settings=fallback_group_settings,
-                    page_uuid=page_uuid, data=payload, page_factors_dict=page_factors_dict,
-                    selection_cache=selection_cache,
                 )
-            group_owner.extend(_build_group_owner_rows(flat_ls_configs, is_ls=True))
+            group_owner.extend(_build_long_short_owner_rows(
+                flat_ls_configs, source_owner_by_id=group_owner_by_id))
 
             if not resolved_settings_by_alias:
                 raise ValueError('没有有效的分组配置')
@@ -2889,7 +2984,7 @@ def run_group_test_stream():
                 "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
                 "factor_alias": str(first_owner.get("factor_alias") or ""),
                 "product_path_selection_count": len(all_products),
-                "simulation_count": len(resolved_settings_by_alias),
+                "simulation_count": 1,
                 "cross_entry_ls_count": len(flat_ls_configs),
                 "errors": None,
                 "backtest_settings": {

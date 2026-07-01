@@ -12,7 +12,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
 
@@ -22,7 +22,7 @@ class LedgerCashConstraintModule(ExecutableModule):
 
     constrain_to_ledger_cash: ClassVar[Flow] = Flow(
         "constrain_to_ledger_cash",
-        inputs=(OrderBookModule.orders, MarketDataModule.current_prices),
+        inputs=(OrderBookModule.orders, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
         outputs=(OrderBookModule.orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=35,  # between construct_orders (30) and
@@ -42,8 +42,16 @@ def _constrain_to_ledger_cash(account, ctx) -> None:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
         if not orders:
             continue
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
         ledger = account.ledgers[strategy]
-        buy_cost = sum(o.quantity * prices[o.instrument] for o in orders if o.quantity > 0)
+        buy_cost = sum(
+            contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
+            for o in orders if o.quantity > 0
+        )
         if buy_cost <= 0:
             continue
         available = ledger.get(LedgerModule.cash).to_major()

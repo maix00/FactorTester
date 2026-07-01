@@ -44,6 +44,7 @@ from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
 from .group_membership import GroupMembershipModule
+from .long_short import LongShortCompositionModule
 from .order_lifecycle import OrderLifecycleModule
 from .equity_curve import EquityCurveModule
 from .risk_metrics import RiskMetricsModule
@@ -67,6 +68,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     FactorModule,
     FactorSignalModule,
     GroupMembershipModule,
+    LongShortCompositionModule,
     FeeModule,
     SlippageModule,
     LiquidityModule,

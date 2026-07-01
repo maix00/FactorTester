@@ -14,7 +14,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import ProductPosition, apply_quantity_delta
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.trading_rule import (
@@ -59,17 +59,17 @@ class LedgerModule(ExecutableModule):
         compute=lambda account, ctx: _initialize_ledgers(account, ctx),
     )
     equity_on_signal: ClassVar[Flow] = Flow(
-        "equity_on_signal", inputs=(MarketDataModule.current_prices, cash, positions),
+        "equity_on_signal", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=10, compute=lambda account, ctx: _basic_equity(account, ctx),
     )
     cash_update: ClassVar[Flow] = Flow(
-        "cash_update", inputs=(MarketDataModule.current_prices,), outputs=(positions, cash),
+        "cash_update", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         compute=lambda account, ctx: _basic_cash_update(account, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(
-        "equity_on_order", inputs=(MarketDataModule.current_prices, cash, positions),
+        "equity_on_order", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         order=900, after=(cash_update,), compute=lambda account, ctx: _basic_equity(account, ctx),
     )
@@ -124,7 +124,15 @@ def _basic_equity(account, ctx) -> None:
         ledger = account.ledgers[strategy]
         cash = ledger.get(LedgerModule.cash)
         positions = ledger.get(LedgerModule.positions, {})
-        market_value = sum(entry.quantity * prices[product] for product, entry in positions.items())
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
+        market_value = sum(
+            contract_notional(prices[product], entry.quantity, historical_fields, product)
+            for product, entry in positions.items()
+        )
         ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + market_value)
 
 
@@ -147,6 +155,11 @@ def _basic_cash_update(account, ctx) -> None:
         ledger = account.ledgers[strategy]
         positions = ledger.get(LedgerModule.positions, {})
         cash = ledger.get(LedgerModule.cash)
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
         for order in ctx.payloads_for(strategy):
             if order.status == OrderStatus.CANCELLED:
                 continue  # superseded before it fired (step 9) -- no ledger effect
@@ -155,7 +168,10 @@ def _basic_cash_update(account, ctx) -> None:
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             trade_cost = DataMoney.from_major(
-                order.quantity * price + fee_cost, currency=cash.currency, use_minor_units=cash.use_minor_units)
+                contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
+                currency=cash.currency,
+                use_minor_units=cash.use_minor_units,
+            )
             cash = cash - trade_cost
         ledger.set(LedgerModule.positions, positions)
         ledger.set(LedgerModule.cash, cash)

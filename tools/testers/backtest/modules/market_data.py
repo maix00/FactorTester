@@ -193,14 +193,19 @@ class MarketDataModule(ExecutableModule):
 
 _MARKET_RULE_FIELD_NAMES = (
     "VolumeMultiple",
-    *TRANSACTION_FEE_FIELD_NAMES,
+)
+_MARGIN_FIELD_NAMES = (
+    "LongMarginRatioByMoney",
+    "ShortMarginRatioByMoney",
+    "LongMarginRatioByVolume",
+    "ShortMarginRatioByVolume",
 )
 
 
 def _market_data_request(account) -> dict[str, Any]:
     request = getattr(account, "market_data_request", None)
     raw = getattr(account, "raw_market_data", None)
-    if isinstance(raw, dict) and (not isinstance(request, dict) or not request):
+    if isinstance(raw, dict) and raw.get("raw_prices") is not None:
         return {"raw_market_data": raw}
     if not isinstance(request, dict):
         return {}
@@ -298,7 +303,7 @@ def _load_raw_market_data(account, ctx) -> None:
         "raw_prices": raw_prices,
         "historical_field_provider": load_market_rule_field_provider(),
         "historical_field_policy": request.get("policy", "latest_available"),
-        "historical_field_names": _MARKET_RULE_FIELD_NAMES,
+        "historical_field_names": _required_market_rule_field_names(account),
         "included_products": tuple(series_by_product.keys()),
         "excluded_out_of_range_products": tuple(getattr(account, "_market_data_excluded_out_of_range", ())),
     }
@@ -307,6 +312,11 @@ def _load_raw_market_data(account, ctx) -> None:
 
 def _build_trading_day_resolver(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
+    provider = ctx.get(MarketDataModule.historical_field_provider)
+    if provider is None:
+        ctx.set(MarketDataModule.trading_day_resolver, None)
+        account.trading_day_resolver = None
+        return
     if raw_prices is None or raw_prices.empty:
         ctx.set(MarketDataModule.trading_day_resolver, None)
         account.trading_day_resolver = None
@@ -522,6 +532,22 @@ def _historical_field_policy_for_engine(account, raw_policy: object | None) -> s
     return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
 
 
+def _required_market_rule_field_names(account) -> tuple[str, ...]:
+    fields: list[str] = list(_MARKET_RULE_FIELD_NAMES)
+    fee_ref = FieldRef("fee_mode", owner="FeeModule")
+    margin_ref = FieldRef("margin_mode", owner="MarginModule")
+    allocation_ref = FieldRef("allocation_policy", owner="GroupMembershipModule")
+    for config in getattr(account, "strategy_configs", {}).values():
+        fee_mode = str(config.get(fee_ref, "auto") or "auto")
+        if fee_mode not in {"zero", "none"}:
+            fields.extend(TRANSACTION_FEE_FIELD_NAMES)
+        margin_mode = str(config.get(margin_ref, "auto") or "auto")
+        allocation = str(config.get(allocation_ref, "") or "")
+        if margin_mode not in {"none", "zero"} or allocation == "equal_margin":
+            fields.extend(_MARGIN_FIELD_NAMES)
+    return tuple(dict.fromkeys(fields))
+
+
 def _causal_valuation(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     account.current_prices_table = raw_prices.ffill()
@@ -697,3 +723,53 @@ def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> 
         if candidate in frame.columns:
             return candidate
     return None
+
+
+def historical_fields_for_product(
+    historical_fields: dict[str, dict[str, object]] | None,
+    product: Any,
+) -> dict[str, object]:
+    """Return current historical fields for a product using the same aliases
+    as FieldHistory frame lookup.
+
+    Consumers should not hand-roll product/name/symbol/code matching; futures
+    rules are often product-level even when a runtime object is contract-like.
+    """
+    if not historical_fields:
+        return {}
+    candidates: list[str] = [str(product)]
+    for attr_name in ("name", "symbol", "code"):
+        attr = getattr(product, attr_name, None)
+        if attr is not None:
+            candidates.append(str(attr))
+    for candidate in dict.fromkeys(candidates):
+        values = historical_fields.get(candidate)
+        if isinstance(values, dict):
+            return values
+    return {}
+
+
+def contract_multiplier_from_fields(
+    historical_fields: dict[str, dict[str, object]] | None,
+    product: Any,
+    *,
+    default: float = 1.0,
+) -> float:
+    fields = historical_fields_for_product(historical_fields, product)
+    value = fields.get("VolumeMultiple", default)
+    if value in (None, ""):
+        return default
+    try:
+        number = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return default
+    return default if number != number else number
+
+
+def contract_notional(
+    price: float,
+    quantity: float,
+    historical_fields: dict[str, dict[str, object]] | None,
+    product: Any,
+) -> float:
+    return float(quantity) * float(price) * contract_multiplier_from_fields(historical_fields, product)

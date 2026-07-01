@@ -27,7 +27,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 
 
 class EquityCurveModule(ExecutableModule):
@@ -44,13 +44,13 @@ class EquityCurveModule(ExecutableModule):
     }
 
     record_equity_on_signal: ClassVar[Flow] = Flow(
-        "record_equity_on_signal", inputs=(LedgerModule.equity,), outputs=(),
+        "record_equity_on_signal", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=20,
         after=(LedgerModule.equity_on_signal,),
         compute=lambda account, ctx: _record_equity(account, ctx),
     )
     record_equity_on_order: ClassVar[Flow] = Flow(
-        "record_equity_on_order", inputs=(LedgerModule.equity,), outputs=(),
+        "record_equity_on_order", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=920,
         after=(LedgerModule.equity_on_order,),
         compute=lambda account, ctx: _record_equity(account, ctx),
@@ -74,7 +74,7 @@ def _ensure_buffer(account) -> dict:
     return buffer
 
 
-def _snapshot_strategy_state(account, strategy, prices: dict) -> dict | None:
+def _snapshot_strategy_state(account, strategy, prices: dict, historical_fields: dict) -> dict | None:
     equity = None  # filled by caller; this only builds positions/notional/margin
     ledger = account.ledgers.get(strategy)
     if ledger is None:
@@ -90,7 +90,7 @@ def _snapshot_strategy_state(account, strategy, prices: dict) -> dict | None:
         positions[name] = entry.quantity
         price = prices.get(product)
         if price is not None:
-            notional[name] = entry.quantity * price
+            notional[name] = contract_notional(price, entry.quantity, historical_fields, product)
         if entry.equity_occupied is not None:
             margin[name] = entry.equity_occupied.to_major()
     record: dict = {"positions": positions, "notional": notional}
@@ -106,7 +106,12 @@ def _record_equity(account, ctx) -> None:
         equity = ctx.get_for(LedgerModule.equity, strategy)
         if equity is None:
             continue
-        record = _snapshot_strategy_state(account, strategy, prices) or {}
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
+        record = _snapshot_strategy_state(account, strategy, prices, historical_fields) or {}
         record["equity"] = equity
         buffer.setdefault(strategy, []).append((ctx.timestamp, record))
         if account.config_for(strategy).get(EquityCurveModule.compute_live, True):

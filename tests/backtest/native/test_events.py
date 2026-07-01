@@ -7,15 +7,15 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 
 
 def test_event_kind_values_and_ordering():
-    assert list(EventKind) == [EventKind.BAR, EventKind.SIGNAL, EventKind.ORDER_NOTICE, EventKind.ORDER]
+    assert list(EventKind) == [EventKind.BAR, EventKind.ORDER, EventKind.SIGNAL, EventKind.ORDER_NOTICE]
     assert EventKind.BAR == 0
+    assert EventKind.ORDER == 5
     assert EventKind.SIGNAL == 10
     assert EventKind.ORDER_NOTICE == 15
-    assert EventKind.ORDER == 20
+    assert EventKind.BAR < EventKind.ORDER
     assert EventKind.BAR < EventKind.SIGNAL
+    assert EventKind.ORDER < EventKind.SIGNAL
     assert EventKind.SIGNAL < EventKind.ORDER_NOTICE
-    assert EventKind.ORDER_NOTICE < EventKind.ORDER
-    assert EventKind.SIGNAL < EventKind.ORDER
 
 
 def test_event_draft_is_frozen_and_comparable():

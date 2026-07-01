@@ -15,7 +15,7 @@ from tools.testers.backtest.engines.native.flow import FlowOverride
 from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields
 
 
 _FEE_FIELDS = (
@@ -86,11 +86,17 @@ class FeeModule(ExecutableModule):
     )
 
 
-def _resolve_fixed_fee_cost(mode: str, fixed_rate: float, quantity: float, price: float) -> float | None:
+def _resolve_fixed_fee_cost(
+    mode: str,
+    fixed_rate: float,
+    quantity: float,
+    price: float,
+    multiplier: float,
+) -> float | None:
     if mode in {"zero", "none"}:
         return 0.0
     if mode == "fixed":
-        return abs(quantity) * price * fixed_rate
+        return abs(quantity) * price * multiplier * fixed_rate
     return None
 
 
@@ -111,7 +117,14 @@ def _apply_fee(account, ctx, base_compute) -> None:
         positions = account.ledgers[strategy].get(LedgerModule.positions, {})
         for order in ctx.payloads_for(strategy):
             price = order.get("effective_price", prices[order.instrument])
-            fixed_fee = _resolve_fixed_fee_cost(mode, float(fixed_rate or 0.0), order.quantity, price)
+            multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
+            fixed_fee = _resolve_fixed_fee_cost(
+                mode,
+                float(fixed_rate or 0.0),
+                order.quantity,
+                price,
+                multiplier,
+            )
             if fixed_fee is not None:
                 order.set("fee_cost", fixed_fee)
                 continue
