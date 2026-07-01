@@ -13,7 +13,8 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
-    _load_raw_market_data, current_prices_at, historical_fields_for_product,
+    _historical_fields_at_from_frames, _load_raw_market_data,
+    current_prices_at, historical_fields_for_product,
 )
 from tools.data.types.time import DataTime
 
@@ -224,3 +225,29 @@ def test_historical_fields_for_product_matches_product_and_string_keys():
 
     assert historical_fields_for_product({"RU.SHF": fields}, product) is fields
     assert historical_fields_for_product({product: fields}, "RU.SHF") is fields
+
+
+def test_historical_fields_at_uses_asof_for_causal_order_timestamp():
+    frame_ts = pd.Timestamp("2026-01-05 09:01:00")
+    event_ts = cast(pd.Timestamp, pd.Timestamp("2026-01-05 09:01:00.000000001", tz="Asia/Shanghai"))
+    frames = {
+        "OpenRatioByMoney": pd.DataFrame({"EG.DCE": [0.0001]}, index=pd.DatetimeIndex([frame_ts])),
+        "VolumeMultiple": pd.DataFrame({"EG.DCE": [10]}, index=pd.DatetimeIndex([frame_ts])),
+    }
+
+    fields = _historical_fields_at_from_frames(frames, ["EG.DCE"], event_ts)
+
+    assert fields["EG.DCE"]["OpenRatioByMoney"] == 0.0001
+    assert fields["EG.DCE"]["VolumeMultiple"] == 10
+
+
+def test_historical_fields_at_does_not_look_ahead_before_first_row():
+    frame_ts = pd.Timestamp("2026-01-05 09:01:00")
+    event_ts = cast(pd.Timestamp, pd.Timestamp("2026-01-05 09:00:59.999999999", tz="Asia/Shanghai"))
+    frames = {
+        "OpenRatioByMoney": pd.DataFrame({"EG.DCE": [0.0001]}, index=pd.DatetimeIndex([frame_ts])),
+    }
+
+    fields = _historical_fields_at_from_frames(frames, ["EG.DCE"], event_ts)
+
+    assert fields["EG.DCE"] == {}

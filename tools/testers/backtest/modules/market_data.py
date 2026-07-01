@@ -804,16 +804,29 @@ def _historical_fields_at_from_frames(
     for field_name, frame in frames.items():
         # FieldHistoryProvider stores its frames tz-naive (it normalises
         # every lookup key via _normalise_timestamp_key); event timestamps
-        # here are tz-aware, so align via DataIndex before indexing.
+        # here are tz-aware, so align via DataIndex before indexing. These
+        # fields are effective-time states, so an ORDER event shifted by a
+        # causal epsilon should read the latest rule row at or before it.
         lookup_timestamp = DataIndex(frame.index).tz_align(timestamp)
-        if lookup_timestamp not in frame.index:
+        row_pos = _historical_field_frame_asof_position(frame.index, lookup_timestamp)
+        if row_pos is None:
             continue
-        row = frame.loc[lookup_timestamp]
+        row = frame.iloc[row_pos]
         for instrument in instruments:
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:
                 result[instrument][str(field_name)] = row[str(column)]
     return result
+
+
+def _historical_field_frame_asof_position(index: pd.Index, timestamp: pd.Timestamp) -> int | None:
+    if len(index) == 0:
+        return None
+    index_ns = pd.DatetimeIndex(pd.DatetimeIndex(index).astype("datetime64[ns]")).asi8
+    pos = int(index_ns.searchsorted(timestamp.value, side="right") - 1)
+    if pos < 0:
+        return None
+    return pos
 
 
 def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> object | None:
