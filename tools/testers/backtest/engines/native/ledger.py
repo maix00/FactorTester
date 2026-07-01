@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+import warnings
 
 if TYPE_CHECKING:
     from tools.data.types.data_money import DataMoney
@@ -83,6 +84,27 @@ class StrategyConfig:
 
 
 class RunState:
+    _declared_runtime_attrs = frozenset({
+        "ledgers",
+        "strategy_configs",
+        "raw_market_data",
+        "market_data_request",
+        "backtest_included_products",
+        "backtest_excluded_out_of_range_products",
+        "runtime_info_rows",
+        "runtime_info_sink",
+        "_runtime_info_excluded_product_sets",
+        "historical_field_provider",
+        "trading_day_resolver",
+        "historical_field_policy",
+        "historical_field_names",
+        "historical_field_frames",
+        "volume_table",
+        "current_prices_table",
+        "market_price_tables",
+        "results",
+    })
+
     def __init__(
         self,
         ledgers: dict["Strategy", Ledger] | None = None,
@@ -93,6 +115,9 @@ class RunState:
             # local here purely to avoid widening this file's module-level
             # import surface for a peer (not core-state) concern.
 
+        self._initializing = True
+        self._audit_dynamic_writes = False
+        self._warned_dynamic_writes: set[str] = set()
         self.ledgers: dict["Strategy", Ledger] = ledgers if ledgers is not None else {}
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
@@ -113,9 +138,35 @@ class RunState:
         self.current_prices_table: Any = None
         self.market_price_tables: dict[str, Any] = {}
         self.results = ResultStore()
+        self._initializing = False
 
     def ledger_for(self, order: "Order") -> Ledger:
         return self.ledgers[order.strategy]
 
     def config_for(self, strategy: "Strategy") -> StrategyConfig:
         return self.strategy_configs[strategy]
+
+    def enable_dynamic_write_audit(self, enabled: bool = True) -> None:
+        self._audit_dynamic_writes = enabled
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        if not getattr(self, "_audit_dynamic_writes", False):
+            return
+        if name.startswith("_"):
+            return
+        if getattr(self, "_initializing", False):
+            return
+        if name in self._declared_runtime_attrs:
+            return
+        warned = getattr(self, "_warned_dynamic_writes", set())
+        if name in warned:
+            return
+        warned.add(name)
+        object.__setattr__(self, "_warned_dynamic_writes", warned)
+        warnings.warn(
+            f"RunState dynamic attribute write is not declared: {name!r}. "
+            "Move this state into FlowContext output or a domain store.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
