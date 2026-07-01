@@ -41,7 +41,7 @@ class _FakeFactor:
         self._table = table
         self.table = table
 
-    def evaluate(self, products) -> None:
+    def evaluate(self, products, **kwargs) -> None:
         self.table = self._table
 
 
@@ -142,6 +142,48 @@ def test_build_group_owner_rows_shape():
         {"group_id": "g2", "group_name": "G2", "group_index": 2,
          "product_path_selection_id": "sel-1", "factor_alias": "FactorA", "is_ls": False},
     ]
+
+
+def test_long_short_default_id_matches_settings_and_owner_rows():
+    source_settings = {
+        f"g{i}": {"strategy_id": f"g{i}", "factor": object(), "product_path_selection": object()}
+        for i in range(7)
+    }
+    ls_config = {
+        "name": "",
+        "long": [{"group_id": "g0", "weight": 1.0}],
+        "short": [{"group_id": "g6", "weight": 1.0}],
+    }
+    normalized = dict(ls_config)
+    strategy_id = group_module._long_short_strategy_id(normalized, 0)
+    normalized["strategy_id"] = strategy_id
+    normalized.setdefault("id", strategy_id)
+
+    settings = group_module._resolve_long_short_strategy_settings(
+        normalized,
+        resolved_backtest_settings={},
+        source_settings_by_alias=source_settings,
+        fallback_group_settings={},
+    )
+    owner_rows = group_module._build_long_short_owner_rows(
+        [normalized],
+        source_owner_by_id={
+            "g0": {
+                "group_id": "g0",
+                "product_path_selection_id": "sel-1",
+                "factor_alias": "FactorA",
+            },
+            "g6": {
+                "group_id": "g6",
+                "product_path_selection_id": "sel-1",
+                "factor_alias": "FactorA",
+            },
+        },
+    )
+
+    assert strategy_id == "ls-0"
+    assert settings["strategy_id"] == "ls-0"
+    assert owner_rows[0]["group_id"] == "ls-0"
 
 
 def test_get_or_create_group_test_tester_reuses_same_instance_per_page():

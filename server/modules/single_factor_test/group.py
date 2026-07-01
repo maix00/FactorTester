@@ -1932,7 +1932,7 @@ def _resolve_long_short_strategy_settings(
     timestamp.  It is not a quantile group and therefore must not require
     splitCount/groupIndex/factorAlias in its own payload.
     """
-    strategy_id = str(config.get("id") or config.get("strategy_id") or config.get("name") or "")
+    strategy_id = str(config.get("strategy_id") or config.get("id") or "")
     long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
     short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
     if not strategy_id:
@@ -1957,6 +1957,7 @@ def _resolve_long_short_strategy_settings(
         and key not in {"id", "strategy_id", "name", "long", "short", "longGroupId", "shortGroupId"}
     })
     settings["strategy_kind"] = "long_short"
+    settings["strategy_id"] = strategy_id
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
     return settings
@@ -1987,7 +1988,7 @@ def _build_long_short_owner_rows(
     for index, config in enumerate(ls_configs):
         if not isinstance(config, dict):
             continue
-        group_id = str(config.get("id") or config.get("strategy_id") or f"ls-{index}")
+        group_id = _long_short_strategy_id(config, index)
         long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
         short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
         first_source: dict[str, Any] = next(
@@ -2007,6 +2008,11 @@ def _build_long_short_owner_rows(
             "is_ls": True,
         })
     return rows
+
+
+def _long_short_strategy_id(config: dict[str, Any], index: int) -> str:
+    strategy_id = str(config.get("strategy_id") or config.get("id") or "").strip()
+    return strategy_id or f"ls-{index}"
 
 
 def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
@@ -2922,18 +2928,23 @@ def run_group_test_stream():
             group_owner_by_id = {str(row.get("group_id")): row for row in group_owner}
 
             # 步骤 2：处理 ls_configs
-            for g in flat_ls_configs:
+            normalized_ls_configs: list[dict[str, Any]] = []
+            for index, g in enumerate(flat_ls_configs):
                 if not isinstance(g, dict):
                     continue
-                group_id = str(g.get('id') or f'ls-{len(resolved_settings_by_alias)}')
+                normalized = dict(g)
+                group_id = _long_short_strategy_id(normalized, index)
+                normalized["strategy_id"] = group_id
+                normalized.setdefault("id", group_id)
+                normalized_ls_configs.append(normalized)
                 resolved_settings_by_alias[group_id] = _resolve_long_short_strategy_settings(
-                    g,
+                    normalized,
                     resolved_backtest_settings=resolved_backtest_settings,
                     source_settings_by_alias=resolved_settings_by_alias,
                     fallback_group_settings=fallback_group_settings,
                 )
             group_owner.extend(_build_long_short_owner_rows(
-                flat_ls_configs, source_owner_by_id=group_owner_by_id))
+                normalized_ls_configs, source_owner_by_id=group_owner_by_id))
 
             if not resolved_settings_by_alias:
                 raise ValueError('没有有效的分组配置')
