@@ -255,8 +255,12 @@ def auto_warmup_window(factor: Any) -> pd.Timedelta | None:
         required = getattr(obj, "required_warmup_window", None) or getattr(obj, "required_lookback", None)
         if callable(required):
             value = required()
+            if value is None or str(value).strip() == "":
+                continue
             return parse_warmup_window(value)
         if required is not None:
+            if str(required).strip() == "":
+                continue
             return parse_warmup_window(required)
         inferred = _infer_expr_warmup_window(obj)
         if inferred is not None:

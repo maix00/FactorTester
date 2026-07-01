@@ -59,6 +59,9 @@ def test_auto_warmup_unwraps_factor_evaluate_adapter_shape():
         def __init__(self, factor):
             self._factor = factor
 
+        def required_warmup_window(self):
+            return None
+
     assert auto_warmup_window(_Adapter(_Factor())) == pd.Timedelta("3D")
 
 
