@@ -41,17 +41,17 @@ class LiquidityModule(ExecutableModule):
         FlowOverride(
             flow_names=(OrderBookModule.size_order.name,),
             extra_inputs=(liquidity_mode, participation_rate, MarketDataModule.volume),
-            compute=lambda account, ctx, base_compute: _cap_to_liquidity(account, ctx, base_compute),
+            compute=lambda state, ctx, base_compute: _cap_to_liquidity(state, ctx, base_compute),
         ),
     )
 
 
-def _cap_to_liquidity(account, ctx, base_compute) -> None:
-    base_compute(account, ctx)
+def _cap_to_liquidity(state, ctx, base_compute) -> None:
+    base_compute(state, ctx)
     volume = ctx.get(MarketDataModule.volume, {})
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         if config.get(LiquidityModule.liquidity_mode, "infinite") != "volume_participation":
             continue
         rate = config.get(LiquidityModule.participation_rate, 0.1)

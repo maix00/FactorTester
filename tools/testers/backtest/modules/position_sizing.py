@@ -43,17 +43,17 @@ class PositionSizingModule(ExecutableModule):
         FlowOverride(
             flow_names=(OrderBookModule.size_order.name,),
             extra_inputs=(MarketDataModule.lot_sizes, quantity_rounding_policy),
-            compute=lambda account, ctx, base_compute: _round_to_lot_sizes(account, ctx, base_compute),
+            compute=lambda state, ctx, base_compute: _round_to_lot_sizes(state, ctx, base_compute),
         ),
     )
 
 
-def _round_to_lot_sizes(account, ctx, base_compute) -> None:
-    base_compute(account, ctx)  # compute the base deltas first
+def _round_to_lot_sizes(state, ctx, base_compute) -> None:
+    base_compute(state, ctx)  # compute the base deltas first
     lot_sizes = ctx.get(MarketDataModule.lot_sizes, {})
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
-        policy = account.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
+        policy = state.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
         deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
         rounded = {
             product: _round_one(quantity, lot_sizes.get(product), policy)

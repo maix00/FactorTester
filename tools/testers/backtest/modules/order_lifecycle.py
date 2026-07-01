@@ -36,14 +36,14 @@ class OrderLifecycleModule(ExecutableModule):
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         order=950, after=(LedgerModule.equity_on_order,),
         description="确认订单终态",
-        compute=lambda account, ctx: _finalize_order(account, ctx),
+        compute=lambda state, ctx: _finalize_order(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (finalize_order,)
 
 
-def _finalize_order(account, ctx) -> None:
-    store = order_flow_store_for(account)
+def _finalize_order(state, ctx) -> None:
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         for order in ctx.payloads_for(strategy):
             if order.status == OrderStatus.CANCELLED:

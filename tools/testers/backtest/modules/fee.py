@@ -86,7 +86,7 @@ class FeeModule(ExecutableModule):
         FlowOverride(
             flow_names=(LedgerModule.cash_update.name,),
             extra_inputs=(fee_mode, fixed_fee_rate),
-            compute=lambda account, ctx, base_compute: _apply_fee(account, ctx, base_compute),
+            compute=lambda state, ctx, base_compute: _apply_fee(state, ctx, base_compute),
         ),
     )
 
@@ -105,14 +105,14 @@ def _resolve_fixed_fee_cost(
     return None
 
 
-def _apply_fee(account, ctx, base_compute) -> None:
+def _apply_fee(state, ctx, base_compute) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         # mode/custom_rate are strategy-level (not order-level) -- resolved
         # once per strategy, not once per order, even when a strategy has
         # several simultaneous orders in this batch.
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         mode = _resolve_fee_mode(config)
         fixed_rate = _strategy_value(config, FeeModule.fixed_fee_rate, 0.0)
         historical_fields = ctx.get_for(
@@ -120,7 +120,7 @@ def _apply_fee(account, ctx, base_compute) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        positions = account.ledgers[strategy].get(LedgerModule.positions, {})
+        positions = state.ledgers[strategy].get(LedgerModule.positions, {})
         for order in ctx.payloads_for(strategy):
             price = order.get("effective_price", prices[order.instrument])
             multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
@@ -159,7 +159,7 @@ def _apply_fee(account, ctx, base_compute) -> None:
                 timestamp=ctx.timestamp,
                 details={"mode": mode},
             )
-    base_compute(account, ctx)
+    base_compute(state, ctx)
 
 
 def _market_fee_cost(order, *, price: float, fields: dict[str, object], current_quantity: float, fee_mode: str) -> float:

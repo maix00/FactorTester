@@ -58,7 +58,7 @@ class OrderExecutionModule(ExecutableModule):
         event_kind=EventKind.ORDER,
         order=5,
         description="解析订单成交价",
-        compute=lambda account, ctx: _resolve_execution_price(account, ctx),
+        compute=lambda state, ctx: _resolve_execution_price(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (resolve_execution_price,)
@@ -71,8 +71,8 @@ def _normalise_price_basis(value: object) -> str:
     return basis
 
 
-def _price_table(account: Any, basis: str) -> pd.DataFrame:
-    tables = market_price_tables_for(account)
+def _price_table(state: Any, basis: str) -> pd.DataFrame:
+    tables = market_price_tables_for(state)
     if isinstance(tables, dict):
         table = tables.get(basis)
         if isinstance(table, pd.DataFrame) and not table.empty:
@@ -80,21 +80,21 @@ def _price_table(account: Any, basis: str) -> pd.DataFrame:
     raise KeyError(f"market data does not provide execution price basis {basis!r}")
 
 
-def _execution_price_at(account: Any, order: Any, basis: str) -> float:
+def _execution_price_at(state: Any, order: Any, basis: str) -> float:
     timestamp = cast(pd.Timestamp, order.get("price_timestamp", order.timestamp))
-    table = _price_table(account, basis)
+    table = _price_table(state, basis)
     row = row_at(table, timestamp, asof=False)
     return float(cast(Any, row[order.instrument]))
 
 
-def _resolve_execution_price(account: Any, ctx: Any) -> None:
+def _resolve_execution_price(state: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         basis = _normalise_price_basis(config.get(OrderExecutionModule.execution_price_basis, "open"))
         prices: dict[Any, float] = {}
         for order in ctx.payloads_for(strategy):
-            price = _execution_price_at(account, order, basis)
+            price = _execution_price_at(state, order, basis)
             order.set("execution_price_basis", basis)
             order.set("effective_price", price)
             prices[order.instrument] = price

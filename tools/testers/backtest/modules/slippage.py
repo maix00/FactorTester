@@ -39,19 +39,19 @@ class SlippageModule(ExecutableModule):
         FlowOverride(
             flow_names=(LedgerModule.cash_update.name,),
             extra_inputs=(slippage_mode, slippage_bps),
-            compute=lambda account, ctx, base_compute: _apply_slippage(account, ctx, base_compute),
+            compute=lambda state, ctx, base_compute: _apply_slippage(state, ctx, base_compute),
         ),
     )
 
 
-def _apply_slippage(account, ctx, base_compute) -> None:
+def _apply_slippage(state, ctx, base_compute) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         # mode/bps are strategy-level -- resolved once per strategy, not
         # once per order, even when a strategy has several simultaneous
         # orders in this batch.
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         mode = config.get(SlippageModule.slippage_mode, "none")
         slippage_bps = config.get(SlippageModule.slippage_bps, 0.0) if mode == "fixed_bps" else 0.0
         for order in ctx.payloads_for(strategy):
@@ -73,4 +73,4 @@ def _apply_slippage(account, ctx, base_compute) -> None:
                     "base_price": float(price),
                 },
             )
-    base_compute(account, ctx)
+    base_compute(state, ctx)
