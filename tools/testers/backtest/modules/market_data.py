@@ -199,10 +199,10 @@ _MARKET_RULE_FIELD_NAMES = (
 
 def _market_data_request(account) -> dict[str, Any]:
     request = getattr(account, "market_data_request", None)
+    raw = getattr(account, "raw_market_data", None)
+    if isinstance(raw, dict) and (not isinstance(request, dict) or not request):
+        return {"raw_market_data": raw}
     if not isinstance(request, dict):
-        raw = getattr(account, "raw_market_data", None)
-        if isinstance(raw, dict):
-            return {"raw_market_data": raw}
         return {}
     return request
 
@@ -348,6 +348,7 @@ def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.volume, raw.get("volume"))
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
     raw_policy = raw.get("historical_field_policy")
+    account.raw_prices_table = raw.get("raw_prices")
     account.historical_field_provider = raw.get("historical_field_provider")
     included_products = raw.get("included_products")
     account.backtest_included_products = (

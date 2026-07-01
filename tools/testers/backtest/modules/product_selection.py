@@ -21,6 +21,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.products.product_path_selection import ProductPathSelection
+from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 if TYPE_CHECKING:
@@ -326,6 +327,7 @@ def _register_force_close_notices(account, ctx) -> None:
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="force_close", notice_reason="auto_close_date",
             account=account, reference_tz=_reference_timezone(account, strategy),
+            engine_mode=engine_mode_for(account.config_for(strategy)),
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
@@ -354,6 +356,7 @@ def _register_rollover_notices(account, ctx) -> None:
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="rollover", notice_reason="date_before_expiry",
             account=account, reference_tz=_reference_timezone(account, strategy),
+            engine_mode=engine_mode_for(config),
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(RolloverModule.rollover_notices, strategy, strategy_drafts)
@@ -386,6 +389,8 @@ def _resolve_tradable_target_weights(account, ctx) -> None:
                 timestamp=ctx.timestamp,
                 rollover_offset=rollover_offset,
                 force_close_offset=force_close_offset,
+                account=account,
+                engine_mode=engine_mode_for(config),
             )
             target = row.get("contract_object", product) if row is not None else product
             if target is None:
@@ -592,6 +597,8 @@ def _tradable_contract_row(
     timestamp: Any,
     rollover_offset: pd.Timedelta | None,
     force_close_offset: pd.Timedelta,
+    account: Any | None = None,
+    engine_mode: str = "auto",
 ) -> dict[str, Any] | None:
     product_name = getattr(product, "name", str(product))
     rows = [row for row in metadata if row.get("product") == product_name]
@@ -617,11 +624,15 @@ def _tradable_contract_row(
 
     row = rows[selected_idx]
     next_row = rows[selected_idx + 1] if selected_idx + 1 < len(rows) else None
-    force_close_ts = _event_timestamp_from_row(row, offset=force_close_offset)
+    force_close_ts = _event_timestamp_from_row(
+        row, offset=force_close_offset, account=account, peer_rows=rows, engine_mode=engine_mode,
+    )
     if force_close_ts is not None and ts >= _timestamp_sort_key(force_close_ts):
         return next_row
     if rollover_offset is not None:
-        rollover_ts = _event_timestamp_from_row(row, offset=rollover_offset)
+        rollover_ts = _event_timestamp_from_row(
+            row, offset=rollover_offset, account=account, peer_rows=rows, engine_mode=engine_mode,
+        )
         if rollover_ts is not None and ts >= _timestamp_sort_key(rollover_ts):
             return next_row or row
     return row
@@ -668,6 +679,7 @@ def _lifecycle_event_drafts(
     notice_reason: str,
     account: Any | None = None,
     reference_tz: str | None = None,
+    engine_mode: str = "auto",
 ) -> list[EventDraft]:
     drafts: list[EventDraft] = []
     start_key = _sort_key(start_dt)
@@ -675,7 +687,10 @@ def _lifecycle_event_drafts(
     for row in metadata:
         if row.get("is_identity"):
             continue
-        ts = _event_timestamp_from_row(row, offset=offset, account=account, reference_tz=reference_tz)
+        ts = _event_timestamp_from_row(
+            row, offset=offset, account=account, reference_tz=reference_tz,
+            peer_rows=metadata, engine_mode=engine_mode,
+        )
         if ts is None:
             continue
         ts_key = _timestamp_sort_key(ts)
@@ -698,14 +713,25 @@ def _event_timestamp_from_row(
     offset: pd.Timedelta,
     account: Any | None = None,
     reference_tz: str | None = None,
+    peer_rows: list[dict[str, Any]] | None = None,
+    engine_mode: str = "auto",
 ) -> pd.Timestamp | None:
-    base = _lifecycle_base_timestamp(row, reference_tz=reference_tz)
+    base = _lifecycle_base_timestamp(
+        row, reference_tz=reference_tz, account=account, peer_rows=peer_rows, engine_mode=engine_mode,
+    )
     if base is None:
         return None
     return _apply_lifecycle_offset(base, offset, account=account)
 
 
-def _lifecycle_base_timestamp(row: dict[str, Any], *, reference_tz: str | None) -> pd.Timestamp | None:
+def _lifecycle_base_timestamp(
+    row: dict[str, Any],
+    *,
+    reference_tz: str | None,
+    account: Any | None = None,
+    peer_rows: list[dict[str, Any]] | None = None,
+    engine_mode: str = "auto",
+) -> pd.Timestamp | None:
     for key in _LIFECYCLE_TS_KEYS:
         value = row.get(key)
         if value not in (None, ""):
@@ -724,7 +750,46 @@ def _lifecycle_base_timestamp(row: dict[str, Any], *, reference_tz: str | None) 
         if pd.isna(ts):
             continue
         return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
+    if str(engine_mode).lower() == "exact":
+        raise ValueError(
+            "exact engine_mode requires authoritative contract lifecycle dates "
+            f"for {row.get('contract_product') or row.get('contract') or row.get('uid')}"
+        )
+    inferred = _local_cnfutures_inferred_lifecycle(row, peer_rows=peer_rows, account=account)
+    if inferred is not None:
+        return _with_reference_timezone(inferred, reference_tz)
     return None
+
+
+def _local_cnfutures_inferred_lifecycle(
+    row: dict[str, Any],
+    *,
+    peer_rows: list[dict[str, Any]] | None,
+    account: Any | None,
+) -> pd.Timestamp | None:
+    raw_prices = getattr(account, "raw_prices_table", None) if account is not None else None
+    if not isinstance(raw_prices, pd.DataFrame):
+        raw_market_data = getattr(account, "raw_market_data", None) if account is not None else None
+        if isinstance(raw_market_data, dict):
+            raw_prices = raw_market_data.get("raw_prices")
+    if not isinstance(raw_prices, pd.DataFrame):
+        return None
+    try:
+        from sources.LocalCNFutures.lifecycle import infer_contract_end_from_coverage
+    except Exception:
+        return None
+    result = infer_contract_end_from_coverage(row, peer_rows or [row], raw_prices)
+    if result.get("status") != "ended":
+        return None
+    raw_ts = result.get("timestamp")
+    if raw_ts is None:
+        return None
+    ts = pd.Timestamp(raw_ts)
+    if pd.isna(ts):
+        return None
+    row.setdefault("lifecycle_source", result.get("source"))
+    row.setdefault("lifecycle_inference", result)
+    return cast(pd.Timestamp, ts)
 
 
 def _with_reference_timezone(ts: pd.Timestamp, reference_tz: str | None) -> pd.Timestamp:

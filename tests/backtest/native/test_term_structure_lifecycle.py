@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import cast
 
 import pandas as pd
+import pytest
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.ledger import AccountState, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.product_selection import (
     DeliveryForceCloseModule,
     ProductSelectionModule,
@@ -93,6 +95,26 @@ class _CoverageOnlyTermProduct(_TermProduct):
         }]
 
 
+class _CoverageOnlyTwoContractTermProduct(_TermProduct):
+    def get_contract_list(self, start_date=None, end_date=None):
+        return [
+            {
+                "uid": "P2601.DCE",
+                "contract": "P2601",
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "end_ts": _ms("2026-01-31 15:00"),
+            },
+            {
+                "uid": "P2602.DCE",
+                "contract": "P2602",
+                "start": "2026-01-20",
+                "end": "2026-02-28",
+                "end_ts": _ms("2026-02-28 15:00"),
+            },
+        ]
+
+
 def test_term_structure_registers_force_close_event_before_expiry():
     strategy = Strategy(alias="A")
     product = _TermProduct()
@@ -157,6 +179,86 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date():
     queue.run_until_drained()
 
     assert captured == []
+
+
+def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts():
+    strategy = Strategy(alias="A")
+    product = _CoverageOnlyTwoContractTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                EngineModule.engine_mode: "auto",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "0d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
+    ])
+    account.raw_prices_table = pd.DataFrame({
+        _Contract("P2601.DCE"): [1.0, 1.0, None],
+        _Contract("P2602.DCE"): [None, 2.0, 2.0],
+    }, index=idx)
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_rollover_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured
+    assert {item.payload["contract_object"] for item in captured} == {_Contract("P2601.DCE")}
+    assert captured[0].timestamp == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
+    assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
+    assert captured[0].payload["lifecycle_source"] == "LocalCNFutures coverage inference"
+
+
+def test_exact_mode_rejects_coverage_inferred_lifecycle_dates():
+    strategy = Strategy(alias="A")
+    product = _CoverageOnlyTwoContractTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                EngineModule.engine_mode: "exact",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "0d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
+    ])
+    account.raw_prices_table = pd.DataFrame({
+        _Contract("P2601.DCE"): [1.0, None],
+        _Contract("P2602.DCE"): [2.0, 2.0],
+    }, index=idx)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    with pytest.raises(ValueError, match="authoritative contract lifecycle"):
+        _register_rollover_notices(account, ctx)
 
 
 def test_term_structure_force_close_offset_accepts_intraday_window():
