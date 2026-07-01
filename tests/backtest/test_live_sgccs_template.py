@@ -342,7 +342,6 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
             "engine_mode": "basic",
             "fee_mode": "zero",
             "margin_mode": "none",
-            "liquidity_mode": "infinite",
         },
         "_runtime_window": {
             "start_date": local_values["start_date"],
@@ -377,6 +376,7 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
             "execution_delay_bars",
         }
     }
+    default_group = {**default_group, "liquidity_mode": "infinite"}
     status_code, default_body = _post_group_stream_result(
         client, {**base_payload, "groups": [default_group]}
     )
@@ -391,7 +391,7 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
 
     body_by_profile = {}
     for name, overrides in profiles.items():
-        payload = {**base_payload, "groups": [{**group, **overrides}]}
+        payload = {**base_payload, "groups": [{**group, "liquidity_mode": "infinite", **overrides}]}
         status_code, body = _post_group_stream_result(client, payload)
         assert status_code == 200, {"profile": name, "body": body}
         assert body["success"], body
