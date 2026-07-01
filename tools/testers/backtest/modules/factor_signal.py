@@ -32,6 +32,7 @@ from tools.testers.backtest.modules.run_window import (
     run_window_envelope_for_strategies,
     run_window_key_for_config,
     strategy_run_window_datetimes,
+    warmup_window_for_strategy,
     warmup_window_for_strategies,
 )
 from tools.testers.backtest.modules.time_index_lookup import (
@@ -225,21 +226,24 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
 
 
 def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
-    """Groups strategies by factor identity -- a shared factor's
-    `evaluate()` runs once for the whole backtest range, not once per
-    strategy. The resulting table's own index is the signal schedule
-    (already at the factor's native frequency, no separate signal_align
-    pass needed) and gets cached on `account.precomputed_factor_tables`
-    for the PER_EVENT lookup Flow to read."""
-    by_factor: dict[Any, list] = defaultdict(list)
-    factor_by_key: dict[Any, Any] = {}
+    """Evaluate precomputable factors by calculation key.
+
+    A factor object can be shared, but run-window and warm-up semantics are
+    strategy inputs.  Strategies only share one evaluated table when the
+    factor identity and calculation inputs match; schedule/alignment grouping
+    remains a second step over that table.
+    """
+    by_calculation: dict[tuple, list] = defaultdict(list)
+    factor_by_calculation: dict[tuple, Any] = {}
     for strategy in account.strategy_configs:
         if not account.config_for(strategy).uses_flow("signal_precomputed"):
             continue
-        factor = account.config_for(strategy).get(FactorModule.factor)
+        config = account.config_for(strategy)
+        factor = config.get(FactorModule.factor)
         factor_key = factor_runtime_key(factor)
-        by_factor[factor_key].append(strategy)
-        factor_by_key[factor_key] = factor
+        calculation_key = _factor_calculation_key(factor_key, config)
+        by_calculation[calculation_key].append(strategy)
+        factor_by_calculation[calculation_key] = factor
 
     tables = getattr(account, "precomputed_factor_tables", None)
     if tables is None:
@@ -251,11 +255,11 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
         account.precomputed_factor_table_keys = table_keys
 
     drafts: list[EventDraft] = []
-    for factor_key, strategies in by_factor.items():
-        factor = factor_by_key[factor_key]
+    for calculation_key, strategies in by_calculation.items():
+        factor = factor_by_calculation[calculation_key]
         table = _evaluate_factor_for_strategies(factor, strategies, account)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
-            factor_key, strategies, account,
+            calculation_key, strategies, account,
         ).items():
             first_config = account.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
@@ -281,30 +285,47 @@ def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEvent
 
 
 def _group_strategies_by_precomputed_schedule(
-    factor_key: Any,
+    calculation_key: tuple,
     strategies: list,
     account,
 ) -> dict[tuple, list]:
     groups: dict[tuple, list] = defaultdict(list)
     for strategy in strategies:
         config = account.config_for(strategy)
-        groups[_precomputed_schedule_key(factor_key, config)].append(strategy)
+        groups[_precomputed_schedule_key(calculation_key, config)].append(strategy)
     return groups
 
 
-def _precomputed_schedule_key(factor_key: Any, config) -> tuple:
-    calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
-    window_key = _strategy_run_window_key(config)
-    if not calendar_frequency or str(calendar_frequency) == "auto":
-        return (factor_key, "factor", window_key)
+def _factor_calculation_key(factor_key: Any, config) -> tuple:
     return (
         factor_key,
+        "calculation",
+        _strategy_run_window_key(config),
+        _strategy_warmup_key(config),
+    )
+
+
+def _strategy_warmup_key(config) -> tuple:
+    factor = config.get(FactorModule.factor)
+    window = warmup_window_for_strategy(config, factor)
+    return ("warmup", int(window.value))
+
+
+def _live_factor_state_key(factor: Any, config) -> tuple:
+    return _factor_calculation_key(factor_runtime_key(factor), config)
+
+
+def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
+    calendar_frequency = config.get(FactorSignalModule.calendar_frequency, "auto")
+    if not calendar_frequency or str(calendar_frequency) == "auto":
+        return (calculation_key, "factor")
+    return (
+        calculation_key,
         str(calendar_frequency),
         config.get(FactorSignalModule.basepoint, "last"),
         config.get(FactorSignalModule.daily_basepoint),
         config.get(FactorSignalModule.end_session_skip, True),
         config.get(FactorSignalModule.end_session_gap, "3h"),
-        window_key,
     )
 
 
@@ -391,6 +412,45 @@ def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.Dat
     return table.loc[mask]
 
 
+def _clip_table_to_strategy_warmup_window(table: pd.DataFrame, config) -> pd.DataFrame:
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if table.empty:
+        return table
+    if start_dt is None or end_dt is None:
+        return table
+    data_index = DataIndex(table.index)
+    mask = data_index.slice_by_datatime(start_dt, end_dt)
+    warmup_window = warmup_window_for_strategy(config, config.get(FactorModule.factor))
+    if warmup_window <= pd.Timedelta(0) or not mask.any():
+        return table.loc[mask]
+    positions = mask.nonzero()[0]
+    warmup_bars = _warmup_window_to_bars_for_table(warmup_window, table)
+    if warmup_bars <= 0:
+        return table.loc[mask]
+    expanded = mask.copy()
+    expanded[max(0, int(positions[0]) - warmup_bars):int(positions[0])] = True
+    return table.loc[expanded]
+
+
+def _warmup_window_to_bars_for_table(warmup_window: pd.Timedelta, table: pd.DataFrame) -> int:
+    data_freq = DataIndex(table.index).freq
+    if data_freq is None:
+        return 0
+    products = list(table.columns)
+    try:
+        from tools.factors.expr.rolling import _resolve_windows
+
+        common, periods, product_periods = _resolve_windows(warmup_window, data_freq, products)
+        if common:
+            return max(0, int(periods))
+        return max((int(value) for value in product_periods.values()), default=0)
+    except Exception:
+        freq_delta = DataFreq(data_freq).value
+        if freq_delta <= pd.Timedelta(0):
+            return 0
+        return max(0, int((warmup_window + freq_delta - pd.Timedelta(1, "ns")) / freq_delta))
+
+
 def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
     return strategy_run_window_datetimes(config)
 
@@ -410,10 +470,11 @@ def _evaluate_signal_live(account, ctx) -> None:
     by_factor: dict[Any, list] = defaultdict(list)
     factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
-        factor = account.config_for(strategy).get(FactorModule.factor)
-        factor_key = factor_runtime_key(factor)
-        by_factor[factor_key].append(strategy)
-        factor_by_key[factor_key] = factor
+        config = account.config_for(strategy)
+        factor = config.get(FactorModule.factor)
+        state_key = _live_factor_state_key(factor, config)
+        by_factor[state_key].append(strategy)
+        factor_by_key[state_key] = factor
 
     price_tables = getattr(account, "live_factor_price_tables", {})
     executors = getattr(account, "live_factor_executors", {})
@@ -437,7 +498,8 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
         factor = config.get(FactorModule.factor)
-        fallback_key = _precomputed_schedule_key(factor_runtime_key(factor), config)
+        calculation_key = _factor_calculation_key(factor_runtime_key(factor), config)
+        fallback_key = _precomputed_schedule_key(calculation_key, config)
         table = tables.get(table_keys.get(strategy, fallback_key))
         if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
@@ -469,10 +531,11 @@ def _observe_signal_live_bar(account, ctx) -> None:
     by_factor: dict[Any, list] = defaultdict(list)
     factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
-        factor = account.config_for(strategy).get(FactorModule.factor)
-        factor_key = factor_runtime_key(factor)
-        by_factor[factor_key].append(strategy)
-        factor_by_key[factor_key] = factor
+        config = account.config_for(strategy)
+        factor = config.get(FactorModule.factor)
+        state_key = _live_factor_state_key(factor, config)
+        by_factor[state_key].append(strategy)
+        factor_by_key[state_key] = factor
 
     row = pd.DataFrame([prices], index=[pd.Timestamp(ctx.timestamp)])
     for factor_key in by_factor:

@@ -111,7 +111,51 @@ def test_signal_precomputed_groups_by_factor_identity():
 
     assert shared_factor.calls == 1
     assert len(account.precomputed_factor_tables) == 1
-    assert (("object", id(shared_factor)), "factor", ("unbounded",)) in account.precomputed_factor_tables
+    assert (
+        (("object", id(shared_factor)), "calculation", ("unbounded",), ("warmup", 0)),
+        "factor",
+    ) in account.precomputed_factor_tables
+
+
+def test_signal_precomputed_splits_shared_factor_by_warmup_window():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+
+    class _FakeFactor:
+        def __init__(self):
+            self.calls: list[pd.Timedelta | None] = []
+
+        def evaluate(self, *, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append(warmup_window)
+            return pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-02 09:00")])
+
+    shared_factor = _FakeFactor()
+    base_fields = {
+        FactorModule.factor: shared_factor,
+        RunWindowModule.time_precision: "exact",
+        RunWindowModule.timezone: "Asia/Shanghai",
+        RunWindowModule.start_date: "2024-01-02",
+        RunWindowModule.end_date: "2024-01-02",
+        RunWindowModule.start_time: "08:00",
+        RunWindowModule.end_time: "10:00",
+        FactorSignalModule.warmup_mode: "fixed",
+    }
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(
+            strategy=s1,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={**base_fields, FactorSignalModule.warmup_window: "1d"},
+        ),
+        s2: StrategyConfig(
+            strategy=s2,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={**base_fields, FactorSignalModule.warmup_window: "2d"},
+        ),
+    })
+
+    _schedule_signal_precomputed_timestamps(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert shared_factor.calls == [pd.Timedelta("1D"), pd.Timedelta("2D")]
+    assert len(account.precomputed_factor_tables) == 2
 
 
 def test_signal_precomputed_clips_events_to_strategy_run_window():
@@ -173,7 +217,7 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
     )
     queue.run_until_drained()
 
-    assert factor.calls == 1
+    assert factor.calls == 2
     assert len(account.precomputed_factor_tables) == 2
     assert seen == [
         (pd.Timestamp("2024-01-01 09:00"), s1),
@@ -237,7 +281,7 @@ def test_signal_precomputed_merges_equivalent_exact_windows_across_timezones():
     assert len(account.precomputed_factor_tables) == 1
 
 
-def test_signal_precomputed_evaluates_factor_with_run_window_envelope():
+def test_signal_precomputed_splits_factor_evaluate_by_run_window():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
 
     class _FakeFactor:
@@ -280,9 +324,12 @@ def test_signal_precomputed_evaluates_factor_with_run_window_envelope():
 
     _schedule_signal_precomputed_timestamps(account, ctx)
 
-    assert len(factor.calls) == 1
+    assert len(factor.calls) == 2
     start_dt, end_dt = factor.calls[0]
     assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    start_dt, end_dt = factor.calls[1]
+    assert start_dt.ts == pd.Timestamp("2024-01-04 09:00", tz="Asia/Shanghai")
     assert end_dt.ts == pd.Timestamp("2024-01-05 15:00", tz="Asia/Shanghai")
 
 

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.factor import factor_runtime_key
+from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor_signal import (
+    _clip_table_to_strategy_warmup_window,
+    _live_factor_state_key,
+)
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.time_index_lookup import signal_event_times
 
@@ -39,33 +43,36 @@ class BarEventModule(ExecutableModule):
 
 
 def _schedule_bar_events(account, ctx) -> None:
-    """Register one BAR event per live factor and timestamp.
+    """Register one BAR event per live factor calculation group and timestamp.
 
     EventDraft still carries a representative strategy because the scheduler
-    dispatches through strategy-scoped batches. FactorSignalModule groups BAR
-    handlers by factor identity, so a shared factor executor is updated once.
+    dispatches through strategy-scoped batches.  Warm-up is strategy-local:
+    strategies only share BAR replay state when factor identity, formal run
+    window, and warm-up window all match.
     """
     table = getattr(account, "current_prices_table", None)
     if table is None:
         return
-    representative_by_factor: dict[Any, Any] = {}
+    representative_by_calculation: dict[Any, Any] = {}
     for strategy in account.strategy_configs:
         config = account.config_for(strategy)
         if not config.uses_flow("signal_live"):
             continue
-        factor = config.get(FieldRef("factor", owner="FactorModule"))
-        representative_by_factor.setdefault(factor_runtime_key(factor), strategy)
-    if not representative_by_factor:
+        factor = config.get(FactorModule.factor)
+        representative_by_calculation.setdefault(_live_factor_state_key(factor, config), strategy)
+    if not representative_by_calculation:
         return
-    drafts = [
-        EventDraft(
-            EventKind.BAR,
-            event_time.timestamp,
-            strategy,
-            index_key=event_time.index_key,
-            index_names=event_time.index_names,
+    drafts = []
+    for strategy in representative_by_calculation.values():
+        strategy_table = _clip_table_to_strategy_warmup_window(table, account.config_for(strategy))
+        drafts.extend(
+            EventDraft(
+                EventKind.BAR,
+                event_time.timestamp,
+                strategy,
+                index_key=event_time.index_key,
+                index_names=event_time.index_names,
+            )
+            for event_time in signal_event_times(strategy_table)
         )
-        for event_time in signal_event_times(table)
-        for strategy in representative_by_factor.values()
-    ]
     ctx.set(BarEventModule.dispatched_bar_events, drafts)

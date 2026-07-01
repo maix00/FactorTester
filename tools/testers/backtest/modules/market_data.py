@@ -267,7 +267,7 @@ def _load_raw_market_data(account, ctx) -> None:
         return
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
-    warmup_window = request.get("warmup_window")
+    warmup_window = _live_market_data_load_warmup_window(account)
     series_by_product: dict[Any, pd.Series] = {}
     price_columns = (
         ("open", DataColumn.OPEN.name),
@@ -330,6 +330,28 @@ def _load_raw_market_data(account, ctx) -> None:
         "excluded_out_of_range_products": tuple(getattr(account, "_market_data_excluded_out_of_range", ())),
     }
     _publish_raw_market_data(account, ctx, raw)
+
+
+def _live_market_data_load_warmup_window(account) -> pd.Timedelta | None:
+    """Warm-up data span needed by live factor BAR replay.
+
+    This is an I/O superset, not an account-level strategy setting: individual
+    strategies still clip BAR events with their own warm-up window later.
+    Precomputed factors do not use this path; their warm-up is passed to
+    factor.evaluate().
+    """
+    from tools.testers.backtest.modules.factor import FactorModule
+    from tools.testers.backtest.modules.run_window import warmup_window_for_strategy
+
+    windows: list[pd.Timedelta] = []
+    for strategy in getattr(account, "strategy_configs", {}):
+        config = account.config_for(strategy)
+        if not config.uses_flow("signal_live"):
+            continue
+        window = warmup_window_for_strategy(config, config.get(FactorModule.factor))
+        if window > pd.Timedelta(0):
+            windows.append(window)
+    return max(windows) if windows else None
 
 
 def _build_trading_day_resolver(account, ctx) -> None:

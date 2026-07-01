@@ -1969,25 +1969,6 @@ def _build_long_short_owner_rows(
     return rows
 
 
-def _live_market_data_warmup_window(account) -> pd.Timedelta | None:
-    """Return the warm-up window needed by live factor BAR replay, if any."""
-    from tools.testers.backtest.modules.factor import FactorModule
-    from tools.testers.backtest.modules.factor_signal import (
-        _warmup_window_for_strategies,
-    )
-
-    windows: list[pd.Timedelta] = []
-    for strategy in getattr(account, "strategy_configs", {}):
-        config = account.config_for(strategy)
-        if not config.uses_flow("signal_live"):
-            continue
-        factor = config.get(FactorModule.factor)
-        window = _warmup_window_for_strategies(factor, [strategy], account)
-        if window is not None:
-            windows.append(window)
-    return max(windows) if windows else None
-
-
 def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
     """Page-scoped singleton -- one FactorTester per page dispatches the
     "backtest" task, not one per product_path_selection like the old
@@ -2934,7 +2915,6 @@ def run_group_test_stream():
                 "start_dt": start_dt,
                 "end_dt": end_dt,
                 "policy": market_rule_fallback,
-                "warmup_window": _live_market_data_warmup_window(account),
             }
 
             tester = _get_or_create_group_test_tester(page_uuid)

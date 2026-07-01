@@ -56,7 +56,6 @@ class RunWindowModule(ExecutableModule):
     evaluation_split: ClassVar[FieldRef[str]] = FieldRef("evaluation_split")
     strategy_windows: ClassVar[FieldRef[dict[Any, StrategyRunWindow]]] = FieldRef("strategy_windows")
     run_window_envelope: ClassVar[FieldRef[tuple[DataTime | None, DataTime | None]]] = FieldRef("run_window_envelope")
-    warmup_window_envelope: ClassVar[FieldRef[pd.Timedelta]] = FieldRef("warmup_window_envelope")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "start_date": FieldDefinition(
@@ -105,7 +104,6 @@ class RunWindowModule(ExecutableModule):
         ),
         "strategy_windows": FieldDefinition(public=False),
         "run_window_envelope": FieldDefinition(public=False),
-        "warmup_window_envelope": FieldDefinition(public=False),
     }
 
     resolve_run_window: ClassVar[Flow] = Flow(
@@ -114,7 +112,7 @@ class RunWindowModule(ExecutableModule):
             start_date, end_date, start_time, end_time, timezone, time_precision,
             _FACTOR_REF, _WARMUP_MODE_REF, _WARMUP_WINDOW_REF,
         ),
-        outputs=(strategy_windows, run_window_envelope, warmup_window_envelope),
+        outputs=(strategy_windows, run_window_envelope),
         phase=Phase.PRE_REPLAY,
         order=10,
         compute=lambda account, ctx: _resolve_run_window(account, ctx),
@@ -130,20 +128,16 @@ def _resolve_run_window(account, ctx) -> None:
         strategy_windows[strategy] = resolve_strategy_run_window(account.config_for(strategy))
 
     start_dt, end_dt = run_window_envelope(strategy_windows.values())
-    warmup_window = warmup_window_envelope(strategy_windows.values())
 
     account.strategy_run_windows = strategy_windows
     account.run_window_envelope = (start_dt, end_dt)
-    account.market_data_warmup_window = warmup_window
     ctx.set(RunWindowModule.strategy_windows, strategy_windows)
     ctx.set(RunWindowModule.run_window_envelope, (start_dt, end_dt))
-    ctx.set(RunWindowModule.warmup_window_envelope, warmup_window)
 
     request = getattr(account, "market_data_request", None)
     if isinstance(request, dict):
         request.setdefault("start_dt", start_dt)
         request.setdefault("end_dt", end_dt)
-        request.setdefault("warmup_window", warmup_window)
 
 
 def resolve_strategy_run_window(config) -> StrategyRunWindow:
@@ -208,11 +202,6 @@ def run_window_envelope_for_strategies(strategies: Iterable[Any], account) -> tu
         else:
             windows.append(resolve_strategy_run_window(account.config_for(strategy)))
     return run_window_envelope(windows)
-
-
-def warmup_window_envelope(windows: Iterable[StrategyRunWindow]) -> pd.Timedelta:
-    values = [window.warmup_window for window in windows]
-    return max(values) if values else _zero_warmup()
 
 
 def warmup_window_for_strategies(strategies: Iterable[Any], account) -> pd.Timedelta:

@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.ledger import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.factor import FactorModule
+from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _load_raw_market_data, current_prices_at,
 )
@@ -96,6 +100,60 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert account.market_price_tables["close"][product].tolist() == [10.5, 20.5]
     assert account.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
     assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
+
+
+def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
+    class _Freq:
+        name = "min1"
+
+    class _Product:
+        name = "P1"
+        desc = "P1"
+
+        def __init__(self) -> None:
+            self.min1 = self
+            self.calls = []
+
+        def get_and_adjust_cols(self, columns, **kwargs):
+            self.calls.append(kwargs)
+            idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+            return pd.DataFrame({
+                "OPEN": [10.0, 20.0],
+                "HIGH": [11.0, 21.0],
+                "LOW": [9.0, 19.0],
+                "CLOSE": [10.5, 20.5],
+                "VWAP": [10.25, 20.25],
+            }, index=idx)[list(columns)]
+
+    live = Strategy(alias="live")
+    precomputed = Strategy(alias="pre")
+    product = _Product()
+    account = AccountState(strategy_configs={
+        live: StrategyConfig(
+            strategy=live,
+            active_flow_names=frozenset({"signal_live"}),
+            field_values={
+                FactorModule.factor: object(),
+                FactorSignalModule.warmup_mode: "fixed",
+                FactorSignalModule.warmup_window: "2d",
+            },
+        ),
+        precomputed: StrategyConfig(
+            strategy=precomputed,
+            active_flow_names=frozenset({"signal_precomputed"}),
+            field_values={
+                FactorModule.factor: object(),
+                FactorSignalModule.warmup_mode: "fixed",
+                FactorSignalModule.warmup_window: "30d",
+            },
+        ),
+    })
+    account.market_data_request = {"products": [product]}
+    setattr(account, "_market_data_load_plan", [(product, _Freq())])
+
+    _load_raw_market_data(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert product.calls[0]["warmup_window"] == pd.Timedelta("2D")
 
 
 def test_causal_valuation_ffills_gaps_and_never_looks_ahead():

@@ -47,7 +47,7 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert account.run_window_envelope == (window.start_dt, window.end_dt)
     assert account.market_data_request["start_dt"] == window.start_dt
     assert account.market_data_request["end_dt"] == window.end_dt
-    assert account.market_data_request["warmup_window"] == pd.Timedelta("2D")
+    assert "warmup_window" not in account.market_data_request
 
 
 def test_run_window_flow_orders_before_product_and_market_data_flows():
