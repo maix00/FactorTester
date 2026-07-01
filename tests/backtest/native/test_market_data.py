@@ -230,6 +230,43 @@ def test_check_market_data_coverage_rejects_same_product_with_conflicting_freque
         _check_market_data_coverage(account, ctx)
 
 
+def test_check_market_data_coverage_allows_disjoint_products_with_distinct_frequency(monkeypatch):
+    class _Product:
+        def __init__(self, name: str, freq: DataFreq) -> None:
+            self.name = name
+            self._freq = freq
+
+        def list_available_freqs(self):
+            return [self._freq]
+
+    p1 = _Product("P1", DataFreq.MIN1)
+    p2 = _Product("P2", DataFreq.DAY1)
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1),
+        s2: StrategyConfig(strategy=s2),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({p1}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({p2}))
+    ctx.set_for(MarketDataModule.required_frequency, s1, DataFreq.MIN1)
+    ctx.set_for(MarketDataModule.required_frequency, s2, DataFreq.DAY1)
+    ctx.set_for(MarketDataModule.required_data_source, s1, ())
+    ctx.set_for(MarketDataModule.required_data_source, s2, ())
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._select_required_product_source",
+        lambda selected_product, freq, required_source: None,
+    )
+
+    _check_market_data_coverage(account, ctx)
+
+    assert account.market_data_store.load_plan == [
+        (p1, DataFreq.MIN1, None),
+        (p2, DataFreq.DAY1, None),
+    ]
+
+
 def test_check_market_data_coverage_rejects_missing_required_data_source():
     class _Product:
         name = "P1"
@@ -325,6 +362,62 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert account.market_data_store.market_price_tables["close"][product].tolist() == [10.5, 20.5]
     assert account.market_data_store.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
     assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
+
+
+def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency():
+    class _DataView:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self.frame = frame
+            self.calls: list[dict[str, object]] = []
+
+        def get_and_adjust_cols(self, columns, **kwargs):
+            self.calls.append(kwargs)
+            return self.frame[list(columns)]
+
+    class _Product:
+        def __init__(self, name: str, freq: DataFreq, frame: pd.DataFrame) -> None:
+            self.name = name
+            self.desc = name
+            setattr(self, freq.name, _DataView(frame))
+
+    price_columns = {
+        "OPEN": [10.0, 20.0],
+        "HIGH": [11.0, 21.0],
+        "LOW": [9.0, 19.0],
+        "CLOSE": [10.5, 20.5],
+        "VWAP": [10.25, 20.25],
+    }
+    min1_frame = pd.DataFrame(
+        price_columns,
+        index=pd.date_range("2024-01-01 09:01", periods=2, freq="1min"),
+    )
+    day1_frame = pd.DataFrame(
+        {
+            "OPEN": [100.0],
+            "HIGH": [110.0],
+            "LOW": [90.0],
+            "CLOSE": [105.0],
+            "VWAP": [102.5],
+        },
+        index=pd.DatetimeIndex([pd.Timestamp("2024-01-01 15:00")]),
+    )
+    p1 = _Product("P1", DataFreq.MIN1, min1_frame)
+    p2 = _Product("P2", DataFreq.DAY1, day1_frame)
+    account = BacktestRunState()
+    account.market_data_store.load_plan = [
+        (p1, DataFreq.MIN1, None),
+        (p2, DataFreq.DAY1, None),
+    ]
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _load_raw_market_data(account, ctx)
+
+    raw_prices = ctx.get(MarketDataModule.raw_prices)
+    assert list(raw_prices.columns) == [p1, p2]
+    assert raw_prices[p1].dropna().tolist() == [10.5, 20.5]
+    assert raw_prices[p2].dropna().tolist() == [105.0]
+    assert account.market_data_store.market_price_tables["open"][p1].dropna().tolist() == [10.0, 20.0]
+    assert account.market_data_store.market_price_tables["open"][p2].dropna().tolist() == [100.0]
 
 
 def test_load_raw_market_data_expands_for_live_strategy_warmup_only():

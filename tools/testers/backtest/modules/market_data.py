@@ -1,14 +1,12 @@
 """MarketDataModule — owns market data observations and the causal
 (no-lookahead) valuation series derived from them.
 
-`raw_prices`/`lot_sizes`/`margin_ratio`/`settlement_price` are supplied by
-the data-prep stage that runs before the engine (same division of labor as
-the old payload-based runner: this engine never reads from disk/data
-sources directly — wiring the real data-prep pipeline into these fields is
-production rewiring, step 11). `causal_valuation` only knows how to turn an
-already-loaded, possibly-gappy raw_prices frame into a ffill'd, gap-free
-`current_prices` lookup — that's the part that's actually this module's own
-logic, not someone else's I/O.
+Market data can arrive either as an explicit `raw_market_data` payload (legacy
+test/adaptor path) or through this module's resolved load plan. The load plan
+is strategy-scoped up to the coverage stage and becomes a concrete
+product/frequency/source list before raw tables are read. `causal_valuation`
+then turns the already-loaded, possibly-gappy raw_prices frame into a ffill'd,
+gap-free `current_prices` lookup.
 
 The ffill'd table itself is stored in `account.market_data_store` (not `ctx`)
 because it's computed once in PRE_REPLAY but needs to survive into every later
