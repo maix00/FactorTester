@@ -160,17 +160,17 @@ class TermStructureExpandModule(ExecutableModule):
         after=(ProductSelectionModule.resolve_product_selection,),
         compute=lambda account, ctx: _expand_term_structure(account, ctx),
     )
-    force_close_expiring_contracts: ClassVar[Flow] = Flow(
-        "force_close_expiring_contracts",
+    handle_term_structure_notice: ClassVar[Flow] = Flow(
+        "handle_term_structure_notice",
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.FORCE_CLOSE,
+        event_kind=EventKind.NOTICE,
         order=15,
-        compute=lambda account, ctx: _force_close_expiring_contracts(account, ctx),
+        compute=lambda account, ctx: _handle_term_structure_notice(account, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure, force_close_expiring_contracts)
+    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure, handle_term_structure_notice)
 
 
 def _expand_term_structure(account, ctx) -> None:
@@ -203,7 +203,7 @@ def _expand_term_structure(account, ctx) -> None:
         ctx.set(TermStructureExpandModule.lifecycle_events, drafts)
 
 
-def _force_close_expiring_contracts(account, ctx) -> None:
+def _handle_term_structure_notice(account, ctx) -> None:
     for strategy in ctx.active_strategies:
         ledger = account.ledgers.get(strategy)
         if ledger is None:
@@ -212,6 +212,10 @@ def _force_close_expiring_contracts(account, ctx) -> None:
         orders: list[Order] = []
         for raw_payload in ctx.payloads_for(strategy):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
+            notice_type = str(payload.get("notice_type") or "")
+            if notice_type != "force_close":
+                _record_term_structure_notice(account, payload)
+                continue
             contract = payload.get("contract_object")
             if contract is None:
                 continue
@@ -232,12 +236,21 @@ def _force_close_expiring_contracts(account, ctx) -> None:
                 },
             )
             orders.append(order)
+            _record_term_structure_notice(account, payload)
         if orders:
             ctx.set_for(TermStructureExpandModule.forced_close_orders, strategy, orders)
             ctx.set(TermStructureExpandModule.lifecycle_events, [
                 EventDraft(EventKind.ORDER, ctx.timestamp, strategy, order)
                 for order in orders
             ])
+
+
+def _record_term_structure_notice(account, payload: dict[str, Any]) -> None:
+    notices = getattr(account, "term_structure_notices", None)
+    if notices is None:
+        notices = []
+        account.term_structure_notices = notices
+    notices.append(payload)
 
 
 def _datatime_date_text(value: Any) -> str | None:
@@ -308,7 +321,12 @@ def _lifecycle_event_drafts(
             continue
         if end_key is not None and ts_key > end_key:
             continue
-        drafts.append(EventDraft(EventKind.FORCE_CLOSE, ts, strategy, payload=row))
+        payload = {
+            **row,
+            "notice_type": "force_close",
+            "notice_reason": "auto_close_date",
+        }
+        drafts.append(EventDraft(EventKind.NOTICE, ts, strategy, payload=payload))
     return drafts
 
 

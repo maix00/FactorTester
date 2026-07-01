@@ -21,8 +21,9 @@ class EventKind(IntEnum):
     EventKind can be inserted without renumbering everything after it."""
     BAR = 0       # a market bar has arrived; live factors may update state
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
-    FORCE_CLOSE = 15  # a lifecycle/rule constraint requires existing positions
-                      # to be flattened before ordinary order execution
+    NOTICE = 15   # a non-price lifecycle notification (e.g. contract rollover,
+                  # auto-close/force-close warning). Domain modules interpret
+                  # the payload and may emit ORDER events.
     ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
                   # are OrderStatus values inspected from the payload, not
                   # separate EventKinds)

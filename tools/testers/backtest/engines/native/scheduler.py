@@ -65,7 +65,7 @@ _FLOW_LABELS: dict[str, str] = {
     "lookup_current_prices_on_signal": "读取信号时点价格",
     "lookup_current_prices_on_bar": "读取行情时点价格",
     "lookup_current_prices_on_order": "读取订单时点价格",
-    "force_close_expiring_contracts": "处理合约生命周期强平",
+    "handle_term_structure_notice": "处理合约生命周期通知",
     "lookup_volume_on_signal": "读取成交量",
     "lookup_historical_fields_on_signal": "读取交易规则字段",
     "lookup_historical_fields_on_order": "读取订单交易规则字段",

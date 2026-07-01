@@ -11,7 +11,7 @@ from tools.testers.backtest.modules.product_selection import (
     ProductSelectionModule,
     TermStructureExpandModule,
     _expand_term_structure,
-    _force_close_expiring_contracts,
+    _handle_term_structure_notice,
 )
 from tools.testers.backtest.modules.run_window import RunWindowModule, strategy_run_window_datetimes
 
@@ -66,7 +66,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.FORCE_CLOSE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.NOTICE, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue)
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -75,6 +75,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
 
     assert captured
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00")
+    assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
 
 
@@ -93,7 +94,10 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     order_events: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
     ts = pd.Timestamp("2026-01-29 15:00")
-    draft = EventDraft(EventKind.FORCE_CLOSE, ts, strategy, payload={"contract_object": contract})
+    draft = EventDraft(EventKind.NOTICE, ts, strategy, payload={
+        "notice_type": "force_close",
+        "contract_object": contract,
+    })
     ctx = FlowContext(
         timestamp=ts,
         event_queue=queue,
@@ -101,7 +105,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
         drafts_by_strategy={strategy: [draft]},
     )
 
-    _force_close_expiring_contracts(account, ctx)
+    _handle_term_structure_notice(account, ctx)
     queue.run_until_drained()
 
     assert len(order_events) == 1
