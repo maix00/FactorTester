@@ -85,7 +85,7 @@ class TermStructureExpandModule(ExecutableModule):
         phase=Phase.PRE_REPLAY, order=39,
         after=(ProductSelectionModule.resolve_product_selection,),
         description="展开期限结构",
-        compute=lambda account, ctx: _expand_term_structure(account, ctx),
+        compute=lambda state, ctx: _expand_term_structure(state, ctx),
         strategy_scoped=True,
     )
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
@@ -96,7 +96,7 @@ class TermStructureExpandModule(ExecutableModule):
         event_kind=EventKind.SIGNAL,
         order=15,
         description="解析可交易合约目标",
-        compute=lambda account, ctx: _resolve_tradable_target_weights(account, ctx),
+        compute=lambda state, ctx: _resolve_tradable_target_weights(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure, resolve_tradable_target_weights)
@@ -134,7 +134,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
         description="登记交割强平通知",
-        compute=lambda account, ctx: _register_force_close_notices(account, ctx),
+        compute=lambda state, ctx: _register_force_close_notices(state, ctx),
         strategy_scoped=True,
     )
     handle_delivery_force_close_notice: ClassVar[Flow] = Flow(
@@ -145,7 +145,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         event_kind=EventKind.ORDER_NOTICE,
         order=15,
         description="处理交割强平通知",
-        compute=lambda account, ctx: _handle_delivery_force_close_notice(account, ctx),
+        compute=lambda state, ctx: _handle_delivery_force_close_notice(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (register_force_close_notices, handle_delivery_force_close_notice)
@@ -198,7 +198,7 @@ class RolloverModule(ExecutableModule):
         order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
         description="登记换月通知",
-        compute=lambda account, ctx: _register_rollover_notices(account, ctx),
+        compute=lambda state, ctx: _register_rollover_notices(state, ctx),
         strategy_scoped=True,
     )
     handle_rollover_notice: ClassVar[Flow] = Flow(
@@ -209,20 +209,20 @@ class RolloverModule(ExecutableModule):
         event_kind=EventKind.ORDER_NOTICE,
         order=10,
         description="处理换月通知",
-        compute=lambda account, ctx: _handle_rollover_notice(account, ctx),
+        compute=lambda state, ctx: _handle_rollover_notice(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (register_rollover_notices, handle_rollover_notice)
 
 
-def _expand_term_structure(account, ctx) -> None:
+def _expand_term_structure(state, ctx) -> None:
     """Record contract candidates that intersect the formal run window."""
-    start_dt, end_dt = run_window_envelope_for_account(account)
+    start_dt, end_dt = run_window_envelope_for_account(state)
     start_date = _datatime_date_text(start_dt)
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
-    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
@@ -235,24 +235,24 @@ def _expand_term_structure(account, ctx) -> None:
         all_metadata[strategy] = tuple(metadata)
         ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, all_contracts[strategy])
         ctx.set_for(TermStructureExpandModule.contract_metadata, strategy, all_metadata[strategy])
-    account.term_structure_store.set_expansion(all_contracts, all_metadata)
+    state.term_structure_store.set_expansion(all_contracts, all_metadata)
 
 
-def _register_force_close_notices(account, ctx) -> None:
-    start_dt, end_dt = run_window_envelope_for_account(account)
+def _register_force_close_notices(state, ctx) -> None:
+    start_dt, end_dt = run_window_envelope_for_account(state)
     drafts: list[EventDraft] = []
-    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
         metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
         offset = _parse_time_offset(
-            account.config_for(strategy).get(DeliveryForceCloseModule.force_close_before_expiry, "0d"),
+            state.config_for(strategy).get(DeliveryForceCloseModule.force_close_before_expiry, "0d"),
             field_name="force_close_before_expiry",
         )
         strategy_drafts = _lifecycle_event_drafts(
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="force_close", notice_reason="auto_close_date",
-            account=account, reference_tz=_reference_timezone(account, strategy),
-            engine_mode=engine_mode_for(account.config_for(strategy)),
+            state=state, reference_tz=_reference_timezone(state, strategy),
+            engine_mode=engine_mode_for(state.config_for(strategy)),
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
@@ -260,12 +260,12 @@ def _register_force_close_notices(account, ctx) -> None:
         ctx.set(DeliveryForceCloseModule.force_close_notices, drafts)
 
 
-def _register_rollover_notices(account, ctx) -> None:
-    start_dt, end_dt = run_window_envelope_for_account(account)
+def _register_rollover_notices(state, ctx) -> None:
+    start_dt, end_dt = run_window_envelope_for_account(state)
     drafts: list[EventDraft] = []
-    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
         if policy == "none":
             ctx.set_for(RolloverModule.rollover_notices, strategy, [])
@@ -280,7 +280,7 @@ def _register_rollover_notices(account, ctx) -> None:
         strategy_drafts = _lifecycle_event_drafts(
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="rollover", notice_reason="date_before_expiry",
-            account=account, reference_tz=_reference_timezone(account, strategy),
+            state=state, reference_tz=_reference_timezone(state, strategy),
             engine_mode=engine_mode_for(config),
         )
         drafts.extend(strategy_drafts)
@@ -289,13 +289,13 @@ def _register_rollover_notices(account, ctx) -> None:
         ctx.set(RolloverModule.rollover_notices, drafts)
 
 
-def _resolve_tradable_target_weights(account, ctx) -> None:
+def _resolve_tradable_target_weights(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
         metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
         if not weights or not metadata:
             continue
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         rollover_policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
         rollover_offset = _parse_time_offset(
             config.get(RolloverModule.rollover_before_expiry, "5d"),
@@ -314,7 +314,7 @@ def _resolve_tradable_target_weights(account, ctx) -> None:
                 timestamp=ctx.timestamp,
                 rollover_offset=rollover_offset,
                 force_close_offset=force_close_offset,
-                account=account,
+                state=state,
                 engine_mode=engine_mode_for(config),
             )
             target = row.get("contract_object", product) if row is not None else product
@@ -325,20 +325,20 @@ def _resolve_tradable_target_weights(account, ctx) -> None:
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
         if mapping_trace:
-            account.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
+            state.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 
 
-def _handle_rollover_notice(account, ctx) -> None:
+def _handle_rollover_notice(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         for raw_payload in ctx.payloads_for(strategy):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             if str(payload.get("notice_type") or "") == "rollover":
-                _record_term_structure_notice(account, payload)
+                _record_term_structure_notice(state, payload)
 
 
-def _handle_delivery_force_close_notice(account, ctx) -> None:
+def _handle_delivery_force_close_notice(state, ctx) -> None:
     for strategy in ctx.active_strategies:
-        ledger = account.ledgers.get(strategy)
+        ledger = state.ledgers.get(strategy)
         if ledger is None:
             continue
         positions = ledger.get(_POSITIONS_REF, {})
@@ -347,7 +347,7 @@ def _handle_delivery_force_close_notice(account, ctx) -> None:
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             notice_type = str(payload.get("notice_type") or "")
             if notice_type != "force_close":
-                _record_term_structure_notice(account, payload)
+                _record_term_structure_notice(state, payload)
                 continue
             contract = payload.get("contract_object")
             if contract is None:
@@ -369,7 +369,7 @@ def _handle_delivery_force_close_notice(account, ctx) -> None:
                 },
             )
             orders.append(order)
-            _record_term_structure_notice(account, payload)
+            _record_term_structure_notice(state, payload)
         if orders:
             ctx.set_for(DeliveryForceCloseModule.forced_close_orders, strategy, orders)
             ctx.set(DeliveryForceCloseModule.forced_close_orders, [
@@ -378,12 +378,12 @@ def _handle_delivery_force_close_notice(account, ctx) -> None:
             ])
 
 
-def _record_term_structure_notice(account, payload: dict[str, Any]) -> None:
-    account.term_structure_store.record_notice(payload)
+def _record_term_structure_notice(state, payload: dict[str, Any]) -> None:
+    state.term_structure_store.record_notice(payload)
 
 
-def _reference_timezone(account, strategy: Any) -> str | None:
-    config = account.config_for(strategy)
+def _reference_timezone(state, strategy: Any) -> str | None:
+    config = state.config_for(strategy)
     precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
     if precision != "exact":
         return None
@@ -627,7 +627,7 @@ def _tradable_contract_row(
     timestamp: Any,
     rollover_offset: pd.Timedelta | None,
     force_close_offset: pd.Timedelta,
-    account: Any | None = None,
+    state: Any | None = None,
     engine_mode: str = "auto",
 ) -> dict[str, Any] | None:
     product_name = getattr(product, "name", str(product))
@@ -655,13 +655,13 @@ def _tradable_contract_row(
     row = rows[selected_idx]
     next_row = rows[selected_idx + 1] if selected_idx + 1 < len(rows) else None
     force_close_ts = _event_timestamp_from_row(
-        row, offset=force_close_offset, account=account, peer_rows=rows, engine_mode=engine_mode,
+        row, offset=force_close_offset, state=state, peer_rows=rows, engine_mode=engine_mode,
     )
     if force_close_ts is not None and ts >= _timestamp_sort_key(force_close_ts):
         return next_row
     if rollover_offset is not None:
         rollover_ts = _event_timestamp_from_row(
-            row, offset=rollover_offset, account=account, peer_rows=rows, engine_mode=engine_mode,
+            row, offset=rollover_offset, state=state, peer_rows=rows, engine_mode=engine_mode,
         )
         if rollover_ts is not None and ts >= _timestamp_sort_key(rollover_ts):
             return next_row or row
@@ -671,11 +671,12 @@ def _tradable_contract_row(
 def _row_start_value(row: dict[str, Any]) -> Any:
     for key in ("start_ts", "listed_ts"):
         value = row.get(key)
-        if value not in (None, ""):
-            try:
-                return pd.Timestamp(int(value), unit="ms")
-            except Exception:
-                pass
+        if value is None or value == "":
+            continue
+        try:
+            return pd.Timestamp(int(cast(Any, value)), unit="ms")
+        except Exception:
+            pass
     for key in ("start", "listed_date"):
         value = row.get(key)
         if value not in (None, ""):
@@ -686,11 +687,12 @@ def _row_start_value(row: dict[str, Any]) -> Any:
 def _row_end_value(row: dict[str, Any]) -> Any:
     for key in ("end_ts", "auto_close_ts", "last_trade_ts", "maturity_ts"):
         value = row.get(key)
-        if value not in (None, ""):
-            try:
-                return pd.Timestamp(int(value), unit="ms")
-            except Exception:
-                pass
+        if value is None or value == "":
+            continue
+        try:
+            return pd.Timestamp(int(cast(Any, value)), unit="ms")
+        except Exception:
+            pass
     for key in ("end", "auto_close_date", "last_trade_date", "maturity_date"):
         value = row.get(key)
         if value not in (None, ""):
@@ -707,7 +709,7 @@ def _lifecycle_event_drafts(
     offset: pd.Timedelta,
     notice_type: str,
     notice_reason: str,
-    account: Any | None = None,
+    state: Any | None = None,
     reference_tz: str | None = None,
     engine_mode: str = "auto",
 ) -> list[EventDraft]:
@@ -718,7 +720,7 @@ def _lifecycle_event_drafts(
         if row.get("is_identity"):
             continue
         ts = _event_timestamp_from_row(
-            row, offset=offset, account=account, reference_tz=reference_tz,
+            row, offset=offset, state=state, reference_tz=reference_tz,
             peer_rows=metadata, engine_mode=engine_mode,
         )
         if ts is None:
@@ -741,42 +743,43 @@ def _event_timestamp_from_row(
     row: dict[str, Any],
     *,
     offset: pd.Timedelta,
-    account: Any | None = None,
+    state: Any | None = None,
     reference_tz: str | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
 ) -> pd.Timestamp | None:
     base = _lifecycle_base_timestamp(
-        row, reference_tz=reference_tz, account=account, peer_rows=peer_rows, engine_mode=engine_mode,
+        row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
     )
     if base is None:
         return None
-    return _apply_lifecycle_offset(base, offset, account=account)
+    return _apply_lifecycle_offset(base, offset, state=state)
 
 
 def _lifecycle_base_timestamp(
     row: dict[str, Any],
     *,
     reference_tz: str | None,
-    account: Any | None = None,
+    state: Any | None = None,
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
 ) -> pd.Timestamp | None:
     for key in _LIFECYCLE_TS_KEYS:
         value = row.get(key)
-        if value not in (None, ""):
-            try:
-                ts = pd.Timestamp(int(value), unit="ms")
-                if pd.isna(ts):
-                    continue
-                return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
-            except Exception:
-                pass
+        if value is None or value == "":
+            continue
+        try:
+            ts = pd.Timestamp(int(cast(Any, value)), unit="ms")
+            if pd.isna(ts):
+                continue
+            return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
+        except Exception:
+            pass
     for key in _LIFECYCLE_DATE_KEYS:
         value = row.get(key)
         if value in (None, ""):
             continue
-        ts = pd.Timestamp(value)
+        ts = pd.Timestamp(cast(Any, value))
         if pd.isna(ts):
             continue
         return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
@@ -786,7 +789,7 @@ def _lifecycle_base_timestamp(
     # it only returns non-None when it can conclusively tell the contract has
     # stopped trading (a peer contract kept printing bars after this one went
     # quiet); "still might be alive" or "no data to check" both come back None.
-    inferred = _local_cnfutures_inferred_lifecycle(row, peer_rows=peer_rows, account=account)
+    inferred = _local_cnfutures_inferred_lifecycle(row, peer_rows=peer_rows, state=state)
     if inferred is not None:
         return _with_reference_timezone(inferred, reference_tz)
     if str(engine_mode).lower() == "exact":
@@ -804,11 +807,11 @@ def _local_cnfutures_inferred_lifecycle(
     row: dict[str, Any],
     *,
     peer_rows: list[dict[str, Any]] | None,
-    account: Any | None,
+    state: Any | None,
 ) -> pd.Timestamp | None:
-    raw_prices = _raw_prices_table_for(account)
+    raw_prices = _raw_prices_table_for(state)
     if not isinstance(raw_prices, pd.DataFrame):
-        raw_market_data = getattr(account, "raw_market_data", None) if account is not None else None
+        raw_market_data = getattr(state, "raw_market_data", None) if state is not None else None
         if isinstance(raw_market_data, dict):
             raw_prices = raw_market_data.get("raw_prices")
     if not isinstance(raw_prices, pd.DataFrame):
@@ -843,11 +846,11 @@ def _apply_lifecycle_offset(
     base: pd.Timestamp,
     offset: pd.Timedelta,
     *,
-    account: Any | None,
+    state: Any | None,
 ) -> pd.Timestamp:
     if offset <= pd.Timedelta(0):
         return base
-    table = _current_prices_table_for(account)
+    table = _current_prices_table_for(state)
     if isinstance(table, pd.DataFrame) and not table.empty:
         shifted = _shift_on_event_axis(base, offset, table)
         if shifted is not None:
@@ -855,18 +858,18 @@ def _apply_lifecycle_offset(
     return cast(pd.Timestamp, base - offset)
 
 
-def _raw_prices_table_for(account: Any | None) -> Any:
-    if account is None:
+def _raw_prices_table_for(state: Any | None) -> Any:
+    if state is None:
         return None
     from tools.testers.backtest.modules.market_data import raw_prices_table_for
-    return raw_prices_table_for(account)
+    return raw_prices_table_for(state)
 
 
-def _current_prices_table_for(account: Any | None) -> Any:
-    if account is None:
+def _current_prices_table_for(state: Any | None) -> Any:
+    if state is None:
         return None
     from tools.testers.backtest.modules.market_data import current_prices_table_for
-    return current_prices_table_for(account)
+    return current_prices_table_for(state)
 
 
 def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.DataFrame) -> pd.Timestamp | None:

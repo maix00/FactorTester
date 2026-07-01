@@ -129,25 +129,25 @@ class RunWindowModule(ExecutableModule):
         outputs=(strategy_windows, run_window_envelope),
         phase=Phase.PRE_REPLAY,
         order=10,
-        compute=lambda account, ctx: _resolve_run_window(account, ctx),
+        compute=lambda state, ctx: _resolve_run_window(state, ctx),
         description="解析运行时间窗口",
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (resolve_run_window,)
 
 
-def _resolve_run_window(account, ctx) -> None:
+def _resolve_run_window(state, ctx) -> None:
     strategy_windows: dict[Any, StrategyRunWindow] = {}
-    for strategy in account.strategy_configs:
-        strategy_windows[strategy] = resolve_strategy_run_window(account.config_for(strategy))
+    for strategy in state.strategy_configs:
+        strategy_windows[strategy] = resolve_strategy_run_window(state.config_for(strategy))
 
     start_dt, end_dt = run_window_envelope(strategy_windows.values())
 
-    store_run_windows(account, strategy_windows, (start_dt, end_dt))
+    store_run_windows(state, strategy_windows, (start_dt, end_dt))
     ctx.set(RunWindowModule.strategy_windows, strategy_windows)
     ctx.set(RunWindowModule.run_window_envelope, (start_dt, end_dt))
 
-    request = getattr(account, "market_data_request", None)
+    request = getattr(state, "market_data_request", None)
     if isinstance(request, dict):
         request.setdefault("start_dt", start_dt)
         request.setdefault("end_dt", end_dt)
@@ -206,42 +206,42 @@ def run_window_envelope(windows: Iterable[StrategyRunWindow]) -> tuple[DataTime 
     )
 
 
-def run_window_envelope_for_strategies(strategies: Iterable[Any], account) -> tuple[DataTime | None, DataTime | None]:
-    resolved = run_window_store_for(account).strategy_windows
+def run_window_envelope_for_strategies(strategies: Iterable[Any], state) -> tuple[DataTime | None, DataTime | None]:
+    resolved = run_window_store_for(state).strategy_windows
     windows: list[StrategyRunWindow] = []
     for strategy in strategies:
         if strategy in resolved:
             windows.append(resolved[strategy])
         else:
-            windows.append(resolve_strategy_run_window(account.config_for(strategy)))
+            windows.append(resolve_strategy_run_window(state.config_for(strategy)))
     return run_window_envelope(windows)
 
 
-def warmup_window_for_strategies(strategies: Iterable[Any], account) -> pd.Timedelta:
-    resolved = run_window_store_for(account).strategy_windows
+def warmup_window_for_strategies(strategies: Iterable[Any], state) -> pd.Timedelta:
+    resolved = run_window_store_for(state).strategy_windows
     values: list[pd.Timedelta] = []
     for strategy in strategies:
         if strategy in resolved:
             values.append(resolved[strategy].warmup_window)
         else:
-            values.append(resolve_strategy_run_window(account.config_for(strategy)).warmup_window)
+            values.append(resolve_strategy_run_window(state.config_for(strategy)).warmup_window)
     return max(values) if values else _zero_warmup()
 
 
-def run_window_store_for(account):
-    return account.run_window_store
+def run_window_store_for(state):
+    return state.run_window_store
 
 
 def store_run_windows(
-    account,
+    state,
     strategy_windows: dict[Any, StrategyRunWindow],
     envelope: tuple[DataTime | None, DataTime | None],
 ) -> None:
-    run_window_store_for(account).set_windows(strategy_windows, envelope)
+    run_window_store_for(state).set_windows(strategy_windows, envelope)
 
 
-def run_window_envelope_for_account(account) -> tuple[DataTime | None, DataTime | None]:
-    return run_window_store_for(account).envelope or (None, None)
+def run_window_envelope_for_account(state) -> tuple[DataTime | None, DataTime | None]:
+    return run_window_store_for(state).envelope or (None, None)
 
 
 def warmup_window_for_strategy(config, factor: Any | None = None) -> pd.Timedelta:
@@ -365,8 +365,10 @@ def _expr_operands(expr: Any) -> tuple[Any, ...]:
     operands = getattr(expr, "_operands", None)
     if operands is None:
         operands = getattr(expr, "operands", ())
+    if operands is None:
+        return ()
     try:
-        return tuple(operands)
+        return tuple(cast(Iterable[Any], operands))
     except TypeError:
         return ()
 

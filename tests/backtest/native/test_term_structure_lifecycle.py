@@ -261,7 +261,7 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
     peer_row = {"product": "P.DCE", "contract": "P2602", "uid": "P2602.DCE"}
 
     ts = term_structure._event_timestamp_from_row(
-        ended_row, offset=pd.Timedelta(0), account=account,
+        ended_row, offset=pd.Timedelta(0), state=account,
         peer_rows=[ended_row, peer_row], engine_mode="exact",
     )
 

@@ -62,25 +62,25 @@ class LedgerModule(ExecutableModule):
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
-        compute=lambda account, ctx: _initialize_ledgers(account, ctx),
+        compute=lambda state, ctx: _initialize_ledgers(state, ctx),
     )
     equity_on_signal: ClassVar[Flow] = Flow(
         "equity_on_signal", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算信号时点权益",
-        order=10, compute=lambda account, ctx: _basic_equity(account, ctx),
+        order=10, compute=lambda state, ctx: _basic_equity(state, ctx),
     )
     cash_update: ClassVar[Flow] = Flow(
         "cash_update", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="更新现金与持仓",
-        compute=lambda account, ctx: _basic_cash_update(account, ctx),
+        compute=lambda state, ctx: _basic_cash_update(state, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(
         "equity_on_order", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         description="计算订单后权益",
-        order=900, after=(cash_update,), compute=lambda account, ctx: _basic_equity(account, ctx),
+        order=900, after=(cash_update,), compute=lambda state, ctx: _basic_equity(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
@@ -88,10 +88,10 @@ class LedgerModule(ExecutableModule):
     )
 
 
-def _initialize_ledgers(account, ctx) -> None:
+def _initialize_ledgers(state, ctx) -> None:
     from tools.testers.backtest.engines.native.ledger import Ledger
 
-    for strategy, strategy_config in account.strategy_configs.items():
+    for strategy, strategy_config in state.strategy_configs.items():
         initial_capital = strategy_config.get(LedgerModule.initial_capital_major, 0.0)
         base_currency = strategy_config.get(LedgerModule.base_currency, "CNY")
         ledger = Ledger(strategy=strategy, base_currency=base_currency)
@@ -103,7 +103,7 @@ def _initialize_ledgers(account, ctx) -> None:
         zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=False)
 
         positions: dict = {}
-        products = _products_for_backtest_window(account, ctx, strategy)
+        products = _products_for_backtest_window(state, ctx, strategy)
         for product in products:
             method = _resolve_method(strategy_config, product)
             if method == "WeightAverage":
@@ -116,22 +116,22 @@ def _initialize_ledgers(account, ctx) -> None:
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
-        account.ledgers[strategy] = ledger
+        state.ledgers[strategy] = ledger
 
 
-def _products_for_backtest_window(account, ctx, strategy) -> frozenset:
+def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
     products = frozenset(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
     from tools.testers.backtest.modules.market_data import market_data_store_for
-    included = market_data_store_for(account).included_products
+    included = market_data_store_for(state).included_products
     if included is None:
         return products
     return frozenset(product for product in products if product in included)
 
 
-def _basic_equity(account, ctx) -> None:
+def _basic_equity(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     for strategy in ctx.active_strategies:
-        ledger = account.ledgers[strategy]
+        ledger = state.ledgers[strategy]
         cash = ledger.get(LedgerModule.cash)
         positions = ledger.get(LedgerModule.positions, {})
         historical_fields = ctx.get_for(
@@ -147,7 +147,7 @@ def _basic_equity(account, ctx) -> None:
         if margin_occupied > 0:
             floating_pnl = mark_to_market(
                 ledger,
-                account.config_for(strategy),
+                state.config_for(strategy),
                 prices,
                 historical_fields,
             ).to_major()
@@ -160,7 +160,7 @@ def _basic_equity(account, ctx) -> None:
         ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + market_value)
 
 
-def _basic_cash_update(account, ctx) -> None:
+def _basic_cash_update(state, ctx) -> None:
     """`order.fields["effective_price"]`/`order.fields["fee_cost"]` are
     optional hooks for FlowOverride layers (SlippageModule/FeeModule,
     step 6) to set before this base computation runs — absent either, this
@@ -175,9 +175,9 @@ def _basic_cash_update(account, ctx) -> None:
     from tools.testers.backtest.engines.native.order import OrderStatus
 
     prices = ctx.get(MarketDataModule.current_prices)
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
-        ledger = account.ledgers[strategy]
+        ledger = state.ledgers[strategy]
         positions = ledger.get(LedgerModule.positions, {})
         cash = ledger.get(LedgerModule.cash)
         historical_fields = ctx.get_for(
@@ -191,11 +191,11 @@ def _basic_cash_update(account, ctx) -> None:
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
-            if _uses_margin_accounting(account.config_for(strategy), historical_fields, order.instrument):
+            if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument):
                 cash = _apply_margin_accounting_fill(
                     cash,
                     positions,
-                    account.config_for(strategy),
+                    state.config_for(strategy),
                     order.instrument,
                     quantity=float(order.quantity),
                     price=float(price),

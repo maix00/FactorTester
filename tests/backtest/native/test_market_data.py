@@ -460,7 +460,7 @@ def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
 
         def __init__(self) -> None:
             self.MIN1 = self
-            self.calls = []
+            self.calls: list[dict[str, object]] = []
 
         def get_and_adjust_cols(self, columns, **kwargs):
             self.calls.append(kwargs)

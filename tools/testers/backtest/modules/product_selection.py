@@ -88,20 +88,20 @@ class ProductSelectionModule(ExecutableModule):
         "resolve_product_selection", inputs=(product_path_selection,), outputs=(products,),
         phase=Phase.PRE_REPLAY, order=15,
         description="解析产品路径",
-        compute=lambda account, ctx: _resolve_product_selection(account, ctx),
+        compute=lambda state, ctx: _resolve_product_selection(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (resolve_product_selection,)
 
 
-def _resolve_product_selection(account, ctx) -> None:
+def _resolve_product_selection(state, ctx) -> None:
     by_selection_id: dict[str, list] = defaultdict(list)
-    for strategy in account.strategy_configs:
-        selection = account.config_for(strategy).get(ProductSelectionModule.product_path_selection)
+    for strategy in state.strategy_configs:
+        selection = state.config_for(strategy).get(ProductSelectionModule.product_path_selection)
         by_selection_id[selection.selection_id].append(strategy)
 
     for selection_id, strategies in by_selection_id.items():
-        selection = account.config_for(strategies[0]).get(ProductSelectionModule.product_path_selection)
+        selection = state.config_for(strategies[0]).get(ProductSelectionModule.product_path_selection)
         resolved = frozenset(selection.products)  # parsed once per unique selection_id
         for strategy in strategies:
             ctx.set_for(ProductSelectionModule.products, strategy, resolved)
