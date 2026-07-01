@@ -129,6 +129,22 @@ def test_flow_context_records_undeclared_field_access():
     },)
 
 
+def test_flow_context_records_undeclared_field_read():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), audit_contract=True)
+    ctx.enter_flow(_resolved_flow(inputs=()))
+    with pytest.warns(RuntimeWarning, match="undeclared read"):
+        assert ctx.get(REF, "default") == "default"
+    ctx.exit_flow()
+
+    assert ctx.contract_violations() == ({
+        "flow": "TestModule.flow",
+        "phase": "pre_replay",
+        "event_kind": "",
+        "access": "read",
+        "field": "X.x",
+    },)
+
+
 def test_flow_context_strict_contract_raises():
     ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), enforce_contract=True)
     ctx.enter_flow(_resolved_flow(outputs=()))
