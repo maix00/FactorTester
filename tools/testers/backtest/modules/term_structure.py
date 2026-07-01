@@ -158,6 +158,7 @@ class RolloverModule(ExecutableModule):
     rollover_policy: ClassVar[FieldRef[str]] = FieldRef("rollover_policy")
     rollover_before_expiry: ClassVar[FieldRef[str]] = FieldRef("rollover_before_expiry")
     rollover_notices: ClassVar[FieldRef[Any]] = FieldRef("rollover_notices")
+    rollover_orders: ClassVar[FieldRef[Any]] = FieldRef("rollover_orders")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "rollover_policy": FieldDefinition(
@@ -188,6 +189,7 @@ class RolloverModule(ExecutableModule):
             help_text="按合约生命周期基准时点向前偏移登记换月通知；可填 5min、1h、5d 等任意非负时间间隔。",
         ),
         "rollover_notices": FieldDefinition(public=False),
+        "rollover_orders": FieldDefinition(public=False),
     }
 
     register_rollover_notices: ClassVar[Flow] = Flow(
@@ -203,8 +205,8 @@ class RolloverModule(ExecutableModule):
     )
     handle_rollover_notice: ClassVar[Flow] = Flow(
         "handle_rollover_notice",
-        inputs=(),
-        outputs=(),
+        inputs=(_POSITIONS_REF,),
+        outputs=(rollover_orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER_NOTICE,
         order=10,
@@ -330,10 +332,51 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
 
 def _handle_rollover_notice(state, ctx) -> None:
     for strategy in ctx.active_strategies:
+        ledger = state.ledgers.get(strategy)
+        positions = ledger.get(_POSITIONS_REF, {}) if ledger is not None else {}
+        orders: list[Order] = []
         for raw_payload in ctx.payloads_for(strategy):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
-            if str(payload.get("notice_type") or "") == "rollover":
-                _record_term_structure_notice(state, payload)
+            if str(payload.get("notice_type") or "") != "rollover":
+                continue
+            _record_term_structure_notice(state, payload)
+            old_contract = payload.get("contract_object")
+            next_contract = _next_contract_object_for_notice(state, strategy, payload)
+            if old_contract is None or next_contract is None:
+                continue
+            entry = positions.get(old_contract)
+            quantity = getattr(entry, "quantity", 0) if entry is not None else 0
+            if not quantity:
+                continue
+            close_order = Order(
+                instrument=old_contract,
+                timestamp=ctx.timestamp,
+                quantity=-quantity,
+                intent_quantity=-quantity,
+                strategy=strategy,
+                status=OrderStatus.SCHEDULED,
+                fields={"reason": "term_structure_rollover_close", "source": payload},
+            )
+            open_order = Order(
+                instrument=next_contract,
+                timestamp=ctx.timestamp,
+                quantity=quantity,
+                intent_quantity=quantity,
+                strategy=strategy,
+                status=OrderStatus.SCHEDULED,
+                fields={
+                    "reason": "term_structure_rollover_open",
+                    "source": payload,
+                    "rollover_from": old_contract,
+                },
+            )
+            orders.extend((close_order, open_order))
+        if orders:
+            ctx.set_for(RolloverModule.rollover_orders, strategy, orders)
+            ctx.set(RolloverModule.rollover_orders, [
+                EventDraft(EventKind.ORDER, ctx.timestamp, strategy, order)
+                for order in orders
+            ])
 
 
 def _handle_delivery_force_close_notice(state, ctx) -> None:
@@ -380,6 +423,23 @@ def _handle_delivery_force_close_notice(state, ctx) -> None:
 
 def _record_term_structure_notice(state, payload: dict[str, Any]) -> None:
     state.term_structure_store.record_notice(payload)
+
+
+def _next_contract_object_for_notice(state, strategy: Any, payload: dict[str, Any]) -> Any | None:
+    current = payload.get("contract_object")
+    product_name = payload.get("product")
+    metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
+    rows = [row for row in metadata if row.get("product") == product_name and not row.get("is_identity")]
+    if not rows:
+        return None
+    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+    for idx, row in enumerate(rows):
+        if row.get("contract_object") != current:
+            continue
+        if idx + 1 >= len(rows):
+            return None
+        return rows[idx + 1].get("contract_object")
+    return None
 
 
 def _reference_timezone(state, strategy: Any) -> str | None:

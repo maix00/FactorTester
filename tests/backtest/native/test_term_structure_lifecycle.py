@@ -19,6 +19,7 @@ from tools.testers.backtest.modules.term_structure import (
     TermStructureExpandModule,
     _expand_term_structure,
     _handle_delivery_force_close_notice,
+    _handle_rollover_notice,
     _register_force_close_notices,
     _register_rollover_notices,
     _resolve_tradable_target_weights,
@@ -647,6 +648,66 @@ def test_rollover_module_registers_rollover_notice_independently():
     assert captured[0].timestamp == pd.Timestamp("2026-01-26 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "rollover"
     assert captured[0].payload["notice_reason"] == "date_before_expiry"
+
+
+def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
+    strategy = Strategy(alias="A")
+    product = _TwoContractTermProduct()
+    old_contract = _Contract("P2601.DCE")
+    new_contract = _Contract("P2602.DCE")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    from tools.testers.backtest.engines.native.ledger import Ledger
+
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(LedgerModule.positions, {old_contract: ProductPosition(quantity=3)})
+    account.ledgers[strategy] = ledger
+
+    queue = EventQueue()
+    order_events: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
+    expand_ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    expand_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    _expand_term_structure(account, expand_ctx)
+
+    ts = pd.Timestamp("2026-01-26 15:00")
+    draft = EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload={
+        "notice_type": "rollover",
+        "notice_reason": "date_before_expiry",
+        "product": "P.DCE",
+        "contract_object": old_contract,
+    })
+    ctx = FlowContext(
+        timestamp=ts,
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+        drafts_by_strategy={strategy: [draft]},
+    )
+
+    _handle_rollover_notice(account, ctx)
+    queue.run_until_drained()
+
+    assert len(order_events) == 2
+    orders = [event.payload for event in order_events]
+    assert [(order.instrument, order.quantity) for order in orders] == [
+        (old_contract, -3),
+        (new_contract, 3),
+    ]
+    assert orders[0].get("reason") == "term_structure_rollover_close"
+    assert orders[1].get("reason") == "term_structure_rollover_open"
 
 
 def test_rollover_day_window_uses_trading_axis_not_calendar_days():

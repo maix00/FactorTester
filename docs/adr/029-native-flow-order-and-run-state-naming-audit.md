@@ -78,9 +78,10 @@ Flow callable 和模块 helper 中，表示整个 native run 容器的形参使�
 1. 处理换月通知。
 2. 处理交割强平通知。
 
-`ORDER_NOTICE` 语义上是订单意图通知，应与 SIGNAL 平行汇入后续 ORDER 处理链。
-当前实现仍需要继续审计：通知处理必须能够生成或调整订单，并最终走统一 ORDER
-执行链，而不能只是记录诊断。
+`ORDER_NOTICE` 语义上是订单意图通知，与 SIGNAL 平行汇入后续 ORDER 处理链。
+换月通知在旧合约存在持仓时生成“平旧合约、开下一合约”的 ORDER；交割强平通知在
+合约存在持仓时生成反向平仓 ORDER。两者都不直接改账本，后续成交价、手续费、滑点、
+账本更新和订单终态仍统一由 ORDER flow 处理。
 
 `PER_EVENT/ORDER`：
 
@@ -116,8 +117,6 @@ ORDER 阶段保持最后执行。默认订单执行语义固定为下一 bar 开
 
 ### 仍需继续拆解的语义缺口
 
-- `ORDER_NOTICE` 目前需要继续审计并补齐：换月/交割强平通知应能生成或修改订单，
-  并汇入统一 ORDER flow。
 - `FactorTesterState.account` 仍是结果详情链路的历史字段名。它不是 native flow
   内部命名，但后续若重构 snapshot/detail store，需要一起迁移为明确的 run-state
   挂载字段。
