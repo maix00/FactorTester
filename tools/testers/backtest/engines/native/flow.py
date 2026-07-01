@@ -41,7 +41,7 @@ class Flow:
     strategy_scoped: bool = False
         # PRE/POST flows with strategy_scoped=True run only when at least one
         # StrategyConfig activates the flow name. Generic setup/teardown flows
-        # keep the default and run once for the whole account.
+        # keep the default and run once for the whole run state.
 
     @property
     def qualified_name(self) -> str:
@@ -60,4 +60,4 @@ class FlowOverride:
     flow_names: tuple[str, ...]   # one override can target several same-algorithm Flow
                                    # registrations at once (e.g. equity_on_signal + equity_on_order)
     extra_inputs: tuple[FieldRef, ...] = ()
-    compute: Callable[..., None] | None = None  # (account, ctx, base_compute) -> None
+    compute: Callable[..., None] | None = None  # (state, ctx, base_compute) -> None
