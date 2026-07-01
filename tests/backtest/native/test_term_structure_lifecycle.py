@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
@@ -20,6 +22,10 @@ from tools.testers.backtest.modules.product_selection import (
 )
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, strategy_run_window_datetimes
+
+
+def _ms(value: str) -> int:
+    return int(cast(pd.Timestamp, pd.Timestamp(value)).timestamp() * 1000)
 
 
 class _Contract:
@@ -49,7 +55,8 @@ class _TermProduct:
             "contract": "P2601",
             "start": "2026-01-01",
             "end": "2026-01-31",
-            "end_ts": int(pd.Timestamp("2026-01-31 15:00").timestamp() * 1000),
+            "end_ts": _ms("2026-01-31 15:00"),
+            "last_trade_ts": _ms("2026-01-31 15:00"),
         }]
 
 
@@ -61,16 +68,29 @@ class _TwoContractTermProduct(_TermProduct):
                 "contract": "P2601",
                 "start": "2026-01-01",
                 "end": "2026-01-31",
-                "end_ts": int(pd.Timestamp("2026-01-31 15:00").timestamp() * 1000),
+                "end_ts": _ms("2026-01-31 15:00"),
+                "last_trade_ts": _ms("2026-01-31 15:00"),
             },
             {
                 "uid": "P2602.DCE",
                 "contract": "P2602",
                 "start": "2026-01-20",
                 "end": "2026-02-28",
-                "end_ts": int(pd.Timestamp("2026-02-28 15:00").timestamp() * 1000),
+                "end_ts": _ms("2026-02-28 15:00"),
+                "last_trade_ts": _ms("2026-02-28 15:00"),
             },
         ]
+
+
+class _CoverageOnlyTermProduct(_TermProduct):
+    def get_contract_list(self, start_date=None, end_date=None):
+        return [{
+            "uid": "P2601.DCE",
+            "contract": "P2601",
+            "start": "2026-01-01",
+            "end": "2026-01-31",
+            "end_ts": _ms("2026-01-31 15:00"),
+        }]
 
 
 def test_term_structure_registers_force_close_event_before_expiry():
@@ -104,6 +124,39 @@ def test_term_structure_registers_force_close_event_before_expiry():
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
+
+
+def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date():
+    strategy = Strategy(alias="A")
+    product = _CoverageOnlyTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_force_close_notices(account, ctx)
+    _register_rollover_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured == []
 
 
 def test_term_structure_force_close_offset_accepts_intraday_window():

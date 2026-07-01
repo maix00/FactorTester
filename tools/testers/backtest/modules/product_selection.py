@@ -10,6 +10,7 @@ window; it does not require each contract to cover the whole run window.
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pandas as pd
@@ -29,6 +30,24 @@ if TYPE_CHECKING:
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
 _TARGET_WEIGHTS_REF = FieldRef("target_weights", owner="GroupMembershipModule")
+_LIFECYCLE_TS_KEYS = (
+    "auto_close_ts",
+    "last_trade_ts",
+    "expire_ts",
+    "first_notice_ts",
+    "notice_ts",
+    "delivery_ts",
+    "maturity_ts",
+)
+_LIFECYCLE_DATE_KEYS = (
+    "auto_close_date",
+    "last_trade_date",
+    "expire_date",
+    "first_notice_date",
+    "notice_date",
+    "delivery_date",
+    "maturity_date",
+)
 
 
 class ProductSelectionModule(ExecutableModule):
@@ -485,15 +504,85 @@ def _expand_product_contracts(product: Any, *, start_date: str | None, end_date:
     for row in rows:
         uid = row.get("uid") or row.get("contract")
         contract = contract_cls(uid) if contract_cls is not None and uid else product
-        contracts.append(contract)
-        metadata.append({
+        metadata_row = _with_authoritative_lifecycle_fields({
             **row,
             "product": getattr(product, "name", str(product)),
             "contract_object": contract,
             "contract_product": getattr(contract, "name", str(contract)),
             "is_identity": False,
         })
+        contracts.append(contract)
+        metadata.append(metadata_row)
     return contracts, metadata
+
+
+@lru_cache(maxsize=1)
+def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
+    try:
+        from sources.OpenCTP.client import normalise_instrument_code, read_cnfutures_contract_specs_for_date
+    except Exception:
+        return {}
+    try:
+        specs = read_cnfutures_contract_specs_for_date(None, allow_latest_fallback=True)
+    except Exception:
+        return {}
+    if not isinstance(specs, pd.DataFrame) or specs.empty:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for _, spec in specs.iterrows():
+        keys = {
+            normalise_instrument_code(spec.get("InstrumentID")),
+            normalise_instrument_code(spec.get("NormalizedInstrumentID")),
+        }
+        row = {
+            "open_date": spec.get("OpenDate"),
+            "last_trade_date": spec.get("ExpireDate"),
+            "delivery_date": spec.get("DeliveryDate"),
+            "inst_life_phase": spec.get("InstLifePhase"),
+            "lifecycle_source": "OpenCTP latest contract snapshot",
+        }
+        for key in keys:
+            if key:
+                out[key] = row
+    return out
+
+
+def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
+    if any(row.get(key) not in (None, "") for key in _LIFECYCLE_TS_KEYS + _LIFECYCLE_DATE_KEYS):
+        return row
+    key = _normalised_contract_id(row)
+    if not key:
+        return row
+    spec = _openctp_lifecycle_specs_by_instrument().get(key)
+    if not spec:
+        return row
+    enriched = dict(row)
+    for field, value in spec.items():
+        if value not in (None, "") and enriched.get(field) in (None, ""):
+            enriched[field] = value
+    return enriched
+
+
+def _normalised_contract_id(row: dict[str, Any]) -> str:
+    try:
+        from sources.OpenCTP.client import normalise_instrument_code
+    except Exception:
+        def normalise_instrument_code(value: Any) -> str:
+            return "".join(ch for ch in str(value or "").upper().split(".")[0] if ch.isalnum())
+
+    for key in ("contract_product", "contract", "uid"):
+        value = row.get(key)
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if "|" in text:
+            parts = text.split("|")
+            if len(parts) >= 4:
+                return normalise_instrument_code(f"{parts[2]}{parts[3]}")
+        normalized = normalise_instrument_code(text)
+        if normalized:
+            return normalized
+    return ""
 
 
 def _tradable_contract_row(
@@ -617,7 +706,7 @@ def _event_timestamp_from_row(
 
 
 def _lifecycle_base_timestamp(row: dict[str, Any], *, reference_tz: str | None) -> pd.Timestamp | None:
-    for key in ("auto_close_ts", "first_notice_ts", "notice_ts", "delivery_ts", "maturity_ts", "end_ts"):
+    for key in _LIFECYCLE_TS_KEYS:
         value = row.get(key)
         if value not in (None, ""):
             try:
@@ -627,7 +716,7 @@ def _lifecycle_base_timestamp(row: dict[str, Any], *, reference_tz: str | None) 
                 return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
             except Exception:
                 pass
-    for key in ("auto_close_date", "first_notice_date", "notice_date", "delivery_date", "maturity_date", "end"):
+    for key in _LIFECYCLE_DATE_KEYS:
         value = row.get(key)
         if value in (None, ""):
             continue
