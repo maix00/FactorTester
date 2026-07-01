@@ -87,7 +87,7 @@ _EXCHANGE_SHORT_TO_OPENCTP = {
 
 @lru_cache(maxsize=512)
 def _openctp_product_desc(product_name: str) -> str:
-    """Return product Chinese name from OpenCTP SQLite cache; no sectors.csv fallback."""
+    """Return product Chinese name from the OpenCTP SQLite cache only."""
     if not product_name:
         return ""
     code, _, exchange_short = str(product_name).partition(".")
@@ -113,7 +113,19 @@ def _openctp_product_desc(product_name: str) -> str:
 
 
 def tester_to_dict(t):
-    """Convert FactorTester to frontend payload."""
+    """Convert ProductPathSelection or legacy FactorTester to frontend payload."""
+    if hasattr(t, "to_submission_dict") and hasattr(t, "products"):
+        base = t.to_submission_dict()
+        _, products_list = resolve_products(t.products, 'name', 'desc')
+        base.update({
+            'name': base.get('id', ''),
+            'product_count': len(products_list),
+            'products': products_list,
+            'factor_tester_name': '',
+            'factor_tester_serial': f"#{base.get('id', '')}",
+        })
+        return base
+
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
 
     selected_paths = getattr(t, 'selected_paths', None) or []
@@ -129,6 +141,8 @@ def tester_to_dict(t):
         'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
         'label':                getattr(t, 'label', '') or '',
         'product_group':        getattr(t, 'product_group', '') or '',
+        'source_type':          getattr(t, 'selection_source_type', '') or 'legacy_factor_tester',
+        'source_key':           getattr(t, 'selection_source_key', '') or '',
     }
 
 
@@ -137,9 +151,24 @@ def resolve_products_from_paths(raw_paths: list[str]):
     return resolve_selection_products(raw_paths, tree)
 
 
+# 把基于服务端产品树的解析器注入领域对象 ProductPathSelection（位于 tools 层），
+# 使该对象不反向依赖 server。本模块在 server 启动早期被导入。
+from tools.products.product_path_selection import set_product_resolver as _set_pps_resolver
+_set_pps_resolver(resolve_products_from_paths)
+
+
 def valid_testers(page_uuid=None):
-    """Return active testers that still hold products (via paths or direct products)."""
-    testers = runtime_state.iter_factor_testers(page_uuid)
+    """Return active submissions, preferring product selections over legacy testers."""
+    if not page_uuid:
+        return []
+    selections = runtime_state.iter_page_objects(runtime_state.PRODUCT_SELECTION, page_uuid=page_uuid)
+    if selections:
+        return [
+            selection for selection in selections
+            if getattr(selection, 'selected_paths', None)
+            or getattr(selection, 'products', None)
+        ]
+    testers = runtime_state.iter_page_objects(runtime_state.FACTOR_TESTER, page_uuid=page_uuid)
     return [
         t for t in testers
         if (getattr(t, 'selected_paths', None) and len(t.selected_paths) > 0)

@@ -35,12 +35,12 @@ from openpyxl.styles import Alignment, numbers
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.types import DataColumn
+from tools.data.types import DataColumn, DataTime
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorTester import FactorTester
-from tools.factors.tests.NextReturns import NextReturns
-from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
 
 from tests.calc import (
     HEADER_FILL,
@@ -159,9 +159,11 @@ def _iter_products(products: Iterable[str] | None = None) -> list[str]:
 
 
 def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
-    tester = FactorTester(products=[product])
+    start_dt = DataTime(ts=pd.Timestamp("2025-01-02 09:00:00", tz="Asia/Shanghai"))
+    end_dt = DataTime(ts=pd.Timestamp("2025-05-31 15:00:00", tz="Asia/Shanghai"))
+    tester = FactorTester(products=[product], start_dt=start_dt, end_dt=end_dt)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate([product])
+    factor.evaluate([product], start_dt=start_dt, end_dt=end_dt)
     next_returns = NextReturns().get_factor(
         SC=DataColumn.OPEN_ADJUSTED,
         RF=f'{rf_minutes}min',
@@ -443,7 +445,10 @@ def test_backend_ic_re_workbook_for_a_product():
     expected_rf = _read_test3a_rf(TEST_3A_DIR / 'A.xlsx') or DEFAULT_RF_MINUTES
     wb = load_workbook(out_path, read_only=True, data_only=False)
     try:
-        assert wb.sheetnames == [TEST_3A_RETURNS_SHEET, BACKEND_RE_SHEET, COMPARE_SHEET]
+        expected_sheets = [BACKEND_RE_SHEET, COMPARE_SHEET]
+        if _read_test3a_returns(TEST_3A_DIR / 'A.xlsx') is not None:
+            expected_sheets.insert(0, TEST_3A_RETURNS_SHEET)
+        assert wb.sheetnames == expected_sheets
         backend_ws = wb[BACKEND_RE_SHEET]
         compare_ws = wb[COMPARE_SHEET]
 
@@ -455,7 +460,8 @@ def test_backend_ic_re_workbook_for_a_product():
         assert compare_ws.cell(COMPARE_START_ROW - 1, 6).value == 'status'
         assert compare_ws.cell(COMPARE_START_ROW, 1).value == f'=ROW()-{COMPARE_START_ROW - BACKEND_DATA_START_ROW}'
         assert f'INDEX(BACKEND_RE!A:A,A{COMPARE_START_ROW})' in str(compare_ws.cell(COMPARE_START_ROW, 2).value)
-        assert f'INDEX(TEST_3A_RETURNS!B:B,MATCH(TEXT(B{COMPARE_START_ROW},"yyyy-mm-dd hh:mm:ss"),TEST_3A_RETURNS!$C:$C,0))' in str(compare_ws.cell(COMPARE_START_ROW, 4).value)
+        if TEST_3A_RETURNS_SHEET in wb.sheetnames:
+            assert f'INDEX(TEST_3A_RETURNS!B:B,MATCH(TEXT(B{COMPARE_START_ROW},"yyyy-mm-dd hh:mm:ss"),TEST_3A_RETURNS!$C:$C,0))' in str(compare_ws.cell(COMPARE_START_ROW, 4).value)
         assert f'IF(E{COMPARE_START_ROW}<=$B$3,"PASS","FAIL")' in str(compare_ws.cell(COMPARE_START_ROW, 6).value)
     finally:
         wb.close()

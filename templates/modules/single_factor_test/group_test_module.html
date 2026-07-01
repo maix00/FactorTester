@@ -3,16 +3,18 @@
     </style>
     <div class="section-title">分组测试</div>
 
-    <div class="group-test-layer" id="gt-layer-backtest-settings">
-        <div id="gt-local-settings-tab-bar"></div>
+    <div class="group-test-layer gt-backtest-settings-shell backend-settings-shell" id="gt-layer-backtest-settings">
+        <div id="gt-local-settings-tab-bar" class="gt-backtest-settings-tab-bar backend-settings-tab-bar"></div>
         <div
             id="gt-local-settings-chip-row"
-            style="display:none;gap:6px;flex-wrap:wrap;margin-top:6px;"
+            class="gt-backtest-settings-chip-row backend-settings-chip-row"
+            style="display:none;"
         ></div>
         <div
             id="gt-backtest-local-host"
             data-application="group_test"
-            style="display:none;margin-top:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"
+            class="gt-backtest-settings-host backend-settings-host"
+            style="display:none;"
         ></div>
     </div>
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -20,12 +22,12 @@
          ═══════════════════════════════════════════════════════════════════════ -->
     
     <!-- 2a. 可折叠标题行 -->
-    <div id="gt-section-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0f4f8;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-top:12px;user-select:none;">
-        <span id="gt-section-toggle" style="font-size:14px;transition:transform 0.2s;display:inline-block;">▼</span>
-        <span style="font-weight:600;font-size:14px;color:#1f2937;">📦 分组组合设置</span>
-        <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
-        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
-            <span id="group_test_status" style="font-size:12px;color:#888;"></span>
+    <div id="gt-section-header" class="gt-section-title-strip gt-section-title-strip-spaced">
+        <span id="gt-section-toggle" class="gt-section-toggle">▼</span>
+        <span class="gt-section-title-text">📦 分组组合设置</span>
+        <span id="gt-section-status" class="gt-section-title-meta" style="display:none;"></span>
+        <div class="gt-section-title-actions" onclick="event.stopPropagation()">
+            <span id="group_test_status" class="gt-section-title-meta"></span>
             <button id="cancel_group_test_btn" class="btn btn-outline-danger btn-sm" style="display:none;">取消测试</button>
             <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
         </div>
@@ -779,8 +781,7 @@
         color: #0f4c81;
         font-weight: 600;
     }
-    #group_test_module #gt-tab-actions .btn,
-    #group_test_module #gt-local-settings-tab-bar .btn {
+    #group_test_module #gt-tab-actions .btn {
         min-height: 28px;
         line-height: 1;
         display: inline-flex;
@@ -797,12 +798,12 @@
     }
     #group_test_module .gt-backtest-setting-row {
         display: grid;
-        grid-template-columns: minmax(92px, 132px) minmax(150px, 1fr);
+        grid-template-columns: minmax(90px, 0.35fr) minmax(160px, 0.65fr);
         align-items: center;
-        gap: 8px;
-        padding: 6px 0;
-        border-bottom: 1px solid #eef2f7;
-        font-size: 12px;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 11px;
         color: #334155;
     }
     #group_test_module .gt-backtest-setting-row:last-child {
@@ -810,7 +811,6 @@
     }
     #group_test_module .gt-backtest-setting-label {
         color: #64748b;
-        font-weight: 500;
         white-space: nowrap;
     }
     #group_test_module .gt-backtest-setting-control {
@@ -819,58 +819,14 @@
     #group_test_module .gt-backtest-setting-control select,
     #group_test_module .gt-backtest-setting-control input {
         width: 100%;
-        min-height: 28px;
-        padding: 4px 8px;
-        border: 1px solid #d0d5dd;
-        border-radius: 4px;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
         background: #fff;
         color: #1f2937;
-        font-size: 12px;
-        line-height: 1.2;
-    }
-    #group_test_module .gt-backtest-settings-chooser-intro {
-        color: #667085;
         font-size: 11px;
-        line-height: 1.45;
-        margin-bottom: 8px;
     }
-    #group_test_module .gt-backtest-settings-chooser-row {
-        display: flex;
-        align-items: flex-start;
-        gap: 7px;
-        padding: 6px 0;
-        border-top: 1px solid #eef2f7;
-        color: #344054;
-        cursor: pointer;
-        font-size: 12px;
-    }
-    #group_test_module .gt-backtest-settings-chooser-row input[type="checkbox"] {
-        margin-top: 2px;
-        width: 13px;
-        height: 13px;
-        flex: 0 0 auto;
-    }
-    #group_test_module .gt-backtest-settings-chooser-body {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: wrap;
-        min-width: 0;
-        flex: 1 1 auto;
-    }
-    #group_test_module .gt-backtest-settings-chooser-title {
-        color: #1f2937;
-        font-size: 12px;
-        font-weight: 600;
-        line-height: 1.25;
-    }
-    #group_test_module .gt-backtest-settings-chooser-defaults {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 0;
-    }
-
     /* Submission tabs in selector bar */
     #group_test_module .gt-submission-tab {
         padding: 4px 12px;
@@ -936,40 +892,6 @@
     }
     #group_test_module .gt-strategy-detail-cell {
         color: #344054;
-    }
-    #group_test_module .gt-backend-chip {
-        display: inline-flex;
-        align-items: baseline;
-        gap: 4px;
-        max-width: 100%;
-        padding: 2px 7px;
-        border: 1px solid #dbe4f0;
-        border-radius: 999px;
-        background: #f8fafc;
-        color: #344054;
-        font-size: 11px;
-        font-weight: 500;
-        line-height: 1.55;
-        white-space: nowrap;
-    }
-    #group_test_module .gt-backend-chip.is-primary {
-        border-color: #c7d2fe;
-        background: #eef2ff;
-    }
-    #group_test_module .gt-backend-chip.is-muted {
-        background: #f1f5f9;
-        color: #64748b;
-    }
-    #group_test_module .gt-backend-chip.unified-backend-chip {
-        cursor: pointer;
-    }
-    #group_test_module .gt-backend-chip-label {
-        color: #667085;
-        font-weight: 500;
-    }
-    #group_test_module .gt-backend-chip-value {
-        color: #1d2939;
-        font-weight: 600;
     }
     #group_test_module .gt-strategy-chip-list {
         display: flex;
@@ -1255,6 +1177,73 @@
         background: #eef2f8;
         color: #3a5a8c;
     }
+    #group_test_module .snapshot-main-tabs {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 8px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #fff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+    #group_test_module .snapshot-main-tab {
+        border: 1px solid #d0d5dd;
+        background: #fff;
+        color: #344054;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-main-tab.active {
+        background: #2563eb;
+        border-color: #2563eb;
+        color: #fff;
+    }
+    #group_test_module .snapshot-tab-content {
+        min-height: 120px;
+    }
+    #group_test_module .snapshot-order-flow-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 10px;
+        border-bottom: 1px solid #eef2f7;
+        background: #f9fafb;
+    }
+    #group_test_module .snapshot-order-flow-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    #group_test_module .snapshot-order-flow-table th,
+    #group_test_module .snapshot-order-flow-table td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 8px;
+        vertical-align: top;
+        white-space: nowrap;
+        color: #344054;
+    }
+    #group_test_module .snapshot-order-flow-table th {
+        background: #f8fafc;
+        color: #475467;
+        font-weight: 700;
+    }
+    #group_test_module .snapshot-order-step {
+        display: inline-block;
+        border: 1px solid #c7d2fe;
+        background: #eef2ff;
+        color: #3730a3;
+        border-radius: 4px;
+        padding: 2px 5px;
+        font-size: 11px;
+        font-weight: 700;
+    }
     #group_test_module .snapshot-empty-tab {
         padding: 24px;
         text-align: center;
@@ -1324,6 +1313,7 @@
         white-space: nowrap;
     }
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/fancytree/ui.fancytree.min.css') }}">
 
 <!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
@@ -1347,6 +1337,12 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
+    "https://code.jquery.com/jquery-3.6.0.min.js",
+    "{{ url_for('static', filename='vendor/fancytree/jquery.fancytree-all-deps.min.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}",
+    "{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}",
+    "{{ url_for('static', filename='js/modules/products/product_selector.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/group_chip_list.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}",
@@ -1362,7 +1358,7 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
-    "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/overlays/product_path_selection_products.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",

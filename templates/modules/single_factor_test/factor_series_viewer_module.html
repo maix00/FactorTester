@@ -1,0 +1,615 @@
+<div
+    class="module"
+    id="factor_series_viewer_module"
+    data-factor-family-alias="{{ factor_family_alias }}"
+    style="margin-top:24px;"
+>
+    <div class="section-title">因子序列查看</div>
+    <div
+        id="factor-series-viewer-root"
+    >
+        <div id="factor-series-header" class="gt-section-title-strip gt-section-title-strip-spaced">
+            <span id="factor-series-triangle" class="gt-section-toggle" aria-hidden="true">▼</span>
+            <span class="gt-section-title-text">产品序列 / 因子序列对比</span>
+            <div class="gt-section-title-actions" onclick="event.stopPropagation()">
+                <button
+                    type="button"
+                    id="factor-series-run-btn"
+                    class="btn btn-primary btn-sm"
+                >
+                    计算因子
+                </button>
+            </div>
+        </div>
+        <div id="factor-series-viewer-body" style="display:none;">
+            <div id="factor-series-settings-shell" class="factor-series-settings-shell backend-settings-shell">
+                <div id="factor-series-settings-tab-bar" class="factor-series-settings-tab-bar backend-settings-tab-bar"></div>
+                <div id="factor-series-settings-chip-row" class="factor-series-settings-chip-row backend-settings-chip-row"></div>
+                <div id="factor-series-settings-host" class="factor-series-settings-host backend-settings-host" style="display:none;"></div>
+            </div>
+            <div id="factor-series-result-panel" class="factor-series-result-panel">
+                <div class="factor-series-result-header">
+                    <div>
+                        <div id="factor-series-chart-title" class="factor-series-result-title">因子序列</div>
+                        <div id="factor-series-product-selected-summary" class="factor-series-result-summary"></div>
+                    </div>
+                    <span id="factor-series-status" class="factor-series-status"></span>
+                </div>
+                <div id="factor-series-result-chip-row" class="factor-series-settings-chip-row factor-series-result-chip-row"></div>
+                <div id="factor-series-progress" class="ic-progress-container" style="display:none;">
+                    <div class="ic-progress-bar-bg">
+                        <div id="factor-series-progress-bar" class="ic-progress-bar-fill"></div>
+                    </div>
+                    <span id="factor-series-progress-text" class="ic-progress-text">0%</span>
+                </div>
+                <div id="factor-series-product-row" class="factor-series-product-row"></div>
+                <div id="factor-series-chart-container" class="factor-series-main-chart"></div>
+                <div id="factor-series-term-table-container" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">期限结构表格</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table id="factor-series-term-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead>
+                                <tr>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">品种/期限</th>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>
+                                    <th style="position:sticky;top:0;background:#f6f8fa;padding:6px 12px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    #factor-series-viewer-root {
+        margin-top: 8px;
+    }
+
+    #factor-series-viewer-body {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .factor-series-control-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+    .factor-series-product-picker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    .factor-series-control-subtitle {
+        width: auto;
+        margin: 0;
+        font-size: 12px;
+        color: #64748b;
+        line-height: 1.4;
+    }
+    .factor-series-field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        font-size: 12px;
+        color: #64748b;
+    }
+    .factor-series-field select,
+    .factor-series-field input[type="search"] {
+        height: 28px;
+        min-width: 0;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 12px;
+        padding: 0 8px;
+    }
+    .factor-series-series-picker {
+        width: min(520px, 100%);
+    }
+    .factor-series-series-picker input,
+    .factor-series-series-picker select {
+        width: 100%;
+    }
+    .factor-series-status {
+        grid-column: 1 / -1;
+        align-self: start;
+        min-height: 0;
+    }
+    .factor-series-status:empty {
+        display: none;
+    }
+    .factor-series-secondary-action {
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #334155;
+        font-size: 12px;
+        padding: 0 10px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .factor-series-status {
+        font-size: 12px;
+        color: #64748b;
+    }
+    .factor-series-product-row {
+        margin-top: 8px;
+        max-width: 420px;
+    }
+    .factor-series-path-summary {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        font-size: 11px;
+        min-width: 0;
+    }
+    .factor-series-path-chip,
+    .factor-series-settings-chip {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .factor-series-result-panel {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .factor-series-setting-row {
+        display: grid;
+        grid-template-columns: minmax(90px, 0.35fr) minmax(160px, 0.65fr);
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 11px;
+    }
+    .factor-series-setting-row:last-child {
+        border-bottom: 0;
+    }
+    .factor-series-setting-row-wide {
+        display: block;
+        grid-template-columns: none;
+    }
+    .factor-series-setting-row-wide .factor-series-setting-control {
+        display: block;
+        width: 100%;
+    }
+    .factor-series-setting-label {
+        color: #64748b;
+    }
+    .factor-series-setting-control {
+        min-width: 0;
+    }
+    .factor-series-setting-control select,
+    .factor-series-setting-control input {
+        width: 100%;
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 11px;
+        padding: 0 8px;
+    }
+    .factor-series-result-panel {
+        padding: 12px;
+    }
+    .factor-series-result-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+    }
+    .factor-series-result-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .factor-series-main-chart {
+        width: 100%;
+        min-height: 520px;
+        border: 1px dashed #d8dee4;
+        border-radius: 8px;
+        background: #fafcff;
+    }
+    .factor-series-product-tab {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-height: 0;
+    }
+    .factor-series-tab-tree-wrap {
+        height: auto;
+        max-height: min(42vh, 360px);
+        min-height: 0;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #fff;
+        padding: 6px;
+    }
+    .factor-series-tab-tree {
+        width: 100%;
+        min-height: 0;
+        box-sizing: border-box;
+        font-size: 12px;
+        overflow: visible;
+    }
+    .factor-series-tab-tree .fancytree-container,
+    .factor-series-tab-tree .fancytree-title,
+    .factor-series-tab-tree .node-description {
+        font-size: 12px;
+    }
+    .factor-series-result-summary {
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .factor-series-contract-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    .factor-series-contract-table th {
+        position: sticky;
+        top: 0;
+        background: #f6f8fa;
+        z-index: 1;
+    }
+    .factor-series-contract-table td,
+    .factor-series-contract-table th {
+        padding: 6px 12px;
+        text-align: left;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+    .factor-series-contract-table a {
+        color: #0078d4;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .factor-series-contract-table a:hover {
+        text-decoration: underline;
+    }
+    #factor-series-chart-container {
+        margin-top: 10px;
+    }
+    #factor-series-term-table-container {
+        margin-top: 10px;
+    }
+    #factor-series-term-table th,
+    #factor-series-term-table td {
+        padding: 6px 12px;
+        text-align: left;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+    #factor-series-term-table a {
+        color: #0078d4;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    #factor-series-term-table a:hover {
+        text-decoration: underline;
+    }
+    #factor-series-term-table .contract-name-muted {
+        color: #8a94a6;
+    }
+    .factor-series-icon-btn {
+        width: 28px;
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #64748b;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+    }
+    @media (max-width: 900px) {
+        #factor-series-run-btn {
+            width: 100%;
+        }
+        .factor-series-controls {
+            grid-template-columns: 1fr;
+        }
+        .factor-series-tab-tree-wrap {
+            max-height: 38vh;
+        }
+    }
+</style>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/fancytree/ui.fancytree.min.css') }}">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/fancytree/jquery.fancytree-all-deps.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts/highstock.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts/boost.min.js') }}"></script>
+<script>
+    if (typeof Highcharts !== 'undefined') {
+        Highcharts.setOptions({
+            boost: {
+                enabled: true,
+                usePreallocated: true
+            },
+            plotOptions: {
+                series: { boostThreshold: 5000 }
+            },
+            global: {
+                useUTC: false
+            }
+        });
+    }
+</script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_series_viewer_module.js') }}"></script>
+
+<!-- ===================== 因子类型分析 ===================== -->
+<div
+    class="module"
+    id="factor_type_analysis_module"
+    data-factor-family-alias="{{ factor_family_alias }}"
+    style="margin-top:24px;"
+>
+    <div class="section-title">因子序列分析</div>
+    <div id="factor-type-analysis-root">
+        <div id="factor-type-analysis-header" class="gt-section-title-strip gt-section-title-strip-spaced">
+            <span id="factor-type-analysis-triangle" class="gt-section-toggle" aria-hidden="true">▼</span>
+            <span class="gt-section-title-text">因子类型分析</span>
+            <div class="gt-section-title-actions" onclick="event.stopPropagation()">
+                <button
+                    type="button"
+                    id="factor-type-analysis-run-btn"
+                    class="btn btn-primary btn-sm"
+                >
+                    分析因子类型
+                </button>
+            </div>
+        </div>
+        <div id="factor-type-analysis-body" style="display:none;">
+            <div id="factor-type-analysis-settings-shell" class="backend-settings-shell">
+                <div id="factor-type-analysis-tab-bar" class="backend-settings-tab-bar"></div>
+                <div id="factor-type-analysis-chip-row" class="backend-settings-chip-row"></div>
+                <div id="factor-type-analysis-settings-host" class="backend-settings-host" style="display:none;"></div>
+            </div>
+            <div id="factor-type-analysis-result-panel" class="factor-type-analysis-result-panel">
+                <div class="factor-type-analysis-result-header">
+                    <div>
+                        <div id="factor-type-analysis-title" class="factor-type-analysis-result-title">因子类型分析结果</div>
+                        <div id="factor-type-analysis-summary" class="factor-type-analysis-result-summary"></div>
+                    </div>
+                    <span id="factor-type-analysis-status" class="factor-type-analysis-status"></span>
+                </div>
+                <div id="factor-type-analysis-result-chip-row" class="backend-settings-chip-row"></div>
+                <div id="factor-type-analysis-progress" class="ic-progress-container" style="display:none;">
+                    <div class="ic-progress-bar-bg">
+                        <div id="factor-type-analysis-progress-bar" class="ic-progress-bar-fill"></div>
+                    </div>
+                    <span id="factor-type-analysis-progress-text" class="ic-progress-text">0%</span>
+                </div>
+
+                <!-- 最佳匹配类别卡片 -->
+                <div id="factor-type-analysis-best-match" class="factor-type-analysis-best-match" style="display:none;"></div>
+
+                <!-- 参照因子相关性表 -->
+                <div id="factor-type-analysis-ref-table" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">与参照因子相关性</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>参照因子</th>
+                                    <th>类别</th>
+                                    <th>相关系数</th>
+                                    <th>显著性(p值)</th>
+                                    <th>有效期数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-ref-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="factor-type-analysis-skipped-ref-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">未运行的已注册风格测试</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>参照测试</th>
+                                    <th>类别</th>
+                                    <th>原因</th>
+                                    <th>说明</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-skipped-ref-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 按类别聚合 -->
+                <div id="factor-type-analysis-category-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">因子类别聚合</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>因子类别</th>
+                                    <th>平均相关性</th>
+                                    <th>判断</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-category-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 品种相关性矩阵 -->
+                <div id="factor-type-analysis-product-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">品种相关性矩阵</div>
+                    <div id="factor-type-analysis-product-matrix" style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                    </div>
+                </div>
+
+                <!-- 产品类型画像 -->
+                <div id="factor-type-analysis-product-profile-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">产品类型画像</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>产品</th>
+                                    <th>最接近类型</th>
+                                    <th>类型强度</th>
+                                    <th>主要参照因子</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-product-profile-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 类型下产品排名 -->
+                <div id="factor-type-analysis-category-ranking-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">类型相关产品排名</div>
+                    <div id="factor-type-analysis-category-ranking" style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;"></div>
+                </div>
+
+                <!-- 产品摘要 -->
+                <div id="factor-type-analysis-product-summary-section" class="factor-type-analysis-table-wrap" style="display:none;">
+                    <div style="font-size:12px;color:#64748b;margin-bottom:6px;">产品数据摘要</div>
+                    <div style="overflow:auto;border:1px dashed #d8dee4;border-radius:8px;">
+                        <table class="factor-type-analysis-data-table">
+                            <thead>
+                                <tr>
+                                    <th>产品</th>
+                                    <th>有效期数</th>
+                                    <th>均值</th>
+                                    <th>标准差</th>
+                                </tr>
+                            </thead>
+                            <tbody id="factor-type-analysis-product-summary-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    #factor-type-analysis-root {
+        margin-top: 8px;
+    }
+    #factor-type-analysis-body {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .factor-type-analysis-result-panel {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px;
+    }
+    .factor-type-analysis-result-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+    }
+    .factor-type-analysis-result-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .factor-type-analysis-result-summary {
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 3px;
+    }
+    .factor-type-analysis-status {
+        font-size: 12px;
+        color: #64748b;
+    }
+    .factor-type-analysis-status:empty {
+        display: none;
+    }
+    .factor-type-analysis-best-match {
+        margin-top: 12px;
+        padding: 16px;
+        border-radius: 8px;
+        text-align: center;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    .factor-type-analysis-best-match.trend {
+        background: #e0f7fa;
+        color: #006064;
+    }
+    .factor-type-analysis-best-match.momentum {
+        background: #e8f5e9;
+        color: #1b5e20;
+    }
+    .factor-type-analysis-best-match.volatility {
+        background: #fff3e0;
+        color: #e65100;
+    }
+    .factor-type-analysis-best-match.position {
+        background: #fce4ec;
+        color: #880e4f;
+    }
+    .factor-type-analysis-best-match.price_volume {
+        background: #f3e5f5;
+        color: #4a148c;
+    }
+    .factor-type-analysis-table-wrap {
+        margin-top: 12px;
+    }
+    .factor-type-analysis-data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    .factor-type-analysis-data-table th,
+    .factor-type-analysis-data-table td {
+        padding: 6px 12px;
+        text-align: left;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+    .factor-type-analysis-data-table th {
+        position: sticky;
+        top: 0;
+        background: #f6f8fa;
+        z-index: 1;
+    }
+    .factor-type-analysis-matrix-cell {
+        padding: 4px 8px;
+        text-align: center;
+        font-size: 11px;
+        min-width: 60px;
+    }
+    .factor-type-analysis-matrix-row-label {
+        font-weight: 600;
+        font-size: 11px;
+        padding-right: 8px;
+    }
+</style>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_type_analysis_module.js') }}"></script>

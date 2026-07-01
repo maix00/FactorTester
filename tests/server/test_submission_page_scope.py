@@ -7,10 +7,26 @@ from flask import Flask
 
 import server.services.page_runtime as runtime_state
 from server.modules.shared import submissions as submission_routes
-from server.modules.shared import factor_data as factor_data_routes
+from server.modules.factors import data as factor_data_routes
 from server.modules.shared import page_lifecycle as page_lifecycle_routes
 from server.modules.single_factor_test import page as page_routes
 from server.modules.single_factor_test import view_helpers
+
+_FT = runtime_state.FACTOR_TESTER
+
+
+def _snapshot_page_objects() -> dict:
+    """深拷贝当前页对象注册表，用于测试前后保存/还原。"""
+    return {pu: {k: list(v) for k, v in kinds.items()} for pu, kinds in runtime_state.page_objects.items()}
+
+
+def _set_page_testers(mapping: dict) -> None:
+    """{page_uuid: [testers]} → 重置注册表为这些 FactorTester。"""
+    runtime_state.page_objects = {pu: {_FT.name: list(testers)} for pu, testers in mapping.items()}
+
+
+def _page_testers(page_uuid: str) -> list:
+    return runtime_state.iter_page_objects(_FT, page_uuid=page_uuid)
 
 
 @dataclass
@@ -40,18 +56,18 @@ def app():
 
 @pytest.fixture
 def two_page_testers():
-    original_page_factor_testers = dict(runtime_state.page_factor_testers)
+    original_page_objects = _snapshot_page_objects()
     original_page_owners = dict(runtime_state.page_owners)
     original_time_store = dict(runtime_state.page_time_store)
     page_a = [_Tester("a1", "page-a"), _Tester("a2", "page-a")]
     page_b = [_Tester("b1", "page-b"), _Tester("b2", "page-b")]
-    runtime_state.page_factor_testers = {"page-a": [page_a[0], page_a[1]], "page-b": [page_b[0], page_b[1]]}
+    _set_page_testers({"page-a": [page_a[0], page_a[1]], "page-b": [page_b[0], page_b[1]]})
     runtime_state.page_owners = {"page-a": "user-a", "page-b": "user-b"}
     runtime_state.page_time_store = {"page-a": ("start", "end", "start"), "page-b": ("start", "end", "start")}
     try:
         yield page_a, page_b
     finally:
-        runtime_state.page_factor_testers = original_page_factor_testers
+        runtime_state.page_objects = original_page_objects
         runtime_state.page_owners = original_page_owners
         runtime_state.page_time_store = original_time_store
 
@@ -82,8 +98,237 @@ def test_reorder_only_reorders_testers_from_current_page(app, two_page_testers):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    assert runtime_state.page_factor_testers["page-a"] == [page_a[1], page_a[0]]
-    assert runtime_state.page_factor_testers["page-b"] == page_b
+    assert _page_testers("page-a") == [page_a[0], page_a[1]]
+    assert _page_testers("page-b") == page_b
+
+
+def test_submit_selected_products_registers_selection_not_factor_tester(app, monkeypatch):
+    from tools.products.product_path_selection import ProductPathSelection
+
+    original_page_objects = _snapshot_page_objects()
+    runtime_state.page_objects = {}
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF", "AL.SHF"]),
+    )
+
+    try:
+        with app.test_request_context(
+            "/submit_selected_products",
+            method="POST",
+            json={
+                "id_time": "sel-1",
+                "selected_paths": ["Futures/Metals"],
+                "group_name": "Metals",
+                "page_uuid": "page-a",
+            },
+        ):
+            response = submission_routes.submit_selected_products()
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["submissions"][0]["product_path_selection_id"] == "sel-1"
+        assert payload["submissions"][0]["source_type"] == "user_product_group_template"
+        assert _page_testers("page-a") == []
+        selection = runtime_state.get_page_object(runtime_state.PRODUCT_SELECTION, "sel-1", page_uuid="page-a")
+        assert isinstance(selection, ProductPathSelection)
+        assert selection.product_group == "Metals"
+    finally:
+        runtime_state.page_objects = original_page_objects
+
+
+def test_runtime_tester_is_created_from_test_owned_product_selection(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import create_factor_tester_from_request
+
+    created = {}
+
+    class _RuntimeTester:
+        def __init__(self, *, products, alias, start_dt, end_dt, user):
+            created.update({
+                "products": products,
+                "alias": alias,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "user": user,
+            })
+            self.products = products
+            self.alias = alias
+            self.selected_paths = []
+
+    original_page_objects = _snapshot_page_objects()
+    original_time_store = dict(runtime_state.page_time_store)
+    runtime_state.page_objects = {}
+    runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user_obj",
+        lambda: "alice",
+    )
+    monkeypatch.setattr(
+        "tools.factors.FactorTester.FactorTester",
+        _RuntimeTester,
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime._as_data_time",
+        lambda value: value,
+    )
+
+    try:
+        tester = create_factor_tester_from_request(
+            {
+                "product_path_selection": {
+                    "product_path_selection_id": "sel-run",
+                    "selected_paths": ["Futures/Metals"],
+                    "product_group": "Metals",
+                },
+            },
+            page_uuid="page-a",
+        )
+
+        assert tester.alias == "sel-run"
+        assert tester.product_group == "Metals"
+        assert tester.selection_source_type == "manual_selection"
+        assert created == {
+            "products": ["CU.SHF"],
+            "alias": "sel-run",
+            "start_dt": "run-start",
+            "end_dt": "run-end",
+            "user": "alice",
+        }
+        assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, "sel-run", page_uuid="page-a") is tester
+    finally:
+        runtime_state.page_objects = original_page_objects
+        runtime_state.page_time_store = original_time_store
+
+
+def test_runtime_tester_rejects_missing_product_path_selection():
+    from server.modules.shared.factor_tester_runtime import selection_from_request
+
+    with pytest.raises(AssertionError, match="测试配置缺少产品组设置"):
+        selection_from_request({"submission_id": "missing"}, page_uuid="page-a")
+
+
+def test_runtime_tester_accepts_captured_user_outside_request(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import create_factor_tester_from_request
+
+    created = {}
+
+    class _RuntimeTester:
+        def __init__(self, *, products, alias, start_dt, end_dt, user):
+            created.update({"products": products, "alias": alias, "user": user})
+            self.products = products
+            self.alias = alias
+            self.selected_paths = []
+
+    original_page_objects = _snapshot_page_objects()
+    original_time_store = dict(runtime_state.page_time_store)
+    runtime_state.page_objects = {}
+    runtime_state.page_time_store = {"page-a": ("run-start", "run-end", "run-start")}
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user_obj",
+        lambda: (_ for _ in ()).throw(RuntimeError("request context touched")),
+    )
+    monkeypatch.setattr("tools.factors.FactorTester.FactorTester", _RuntimeTester)
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime._as_data_time",
+        lambda value: value,
+    )
+
+    try:
+        tester = create_factor_tester_from_request(
+            {
+                "product_path_selection": {
+                    "product_path_selection_id": "sel-run",
+                    "paths": ["Futures/Metals"],
+                    "path_id": "pg-metals",
+                },
+            },
+            page_uuid="page-a",
+            user="captured-user",
+        )
+
+        assert tester.alias == "sel-run"
+        assert tester.product_group_template_id == "pg-metals"
+        assert created == {"products": ["CU.SHF"], "alias": "sel-run", "user": "captured-user"}
+    finally:
+        runtime_state.page_objects = original_page_objects
+        runtime_state.page_time_store = original_time_store
+
+
+def test_product_path_selection_id_resolves_user_product_group_without_session(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
+
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.current_user",
+        lambda: (_ for _ in ()).throw(RuntimeError("request context touched")),
+    )
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.load_product_groups",
+        lambda username: [{
+            "id": "pg-day",
+            "name": "中国期货日盘",
+            "paths": ["Product/Futures/CNFutures/日夜盘/日盘"],
+            "product_names": ["AP.CZC"],
+        }] if username == "18717974771" else [],
+    )
+
+    selection = selection_for_product_path_selection(
+        {
+            "_group_owner_username": "18717974771",
+            "groups": [{
+                "id": "g1",
+                "product_path_selection": {"product_path_selection_id": "pg-day"},
+            }],
+        },
+        "pg-day",
+        page_uuid="page-a",
+    )
+
+    assert selection.selection_id == "pg-day"
+    assert selection.product_group == "中国期货日盘"
+    assert selection.selected_paths == ["Product/Futures/CNFutures/日夜盘/日盘"]
+    assert "AP.CZC" in [str(product.name) for product in selection.products]
+
+
+def test_product_path_selection_inherits_from_parent_group(monkeypatch):
+    from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
+
+    monkeypatch.setattr(
+        "tools.products.product_path_selection.resolve_products_from_paths",
+        lambda paths: (list(paths), ["CU.SHF"]),
+    )
+
+    selection = selection_for_product_path_selection(
+        {
+            "groups": [
+                {
+                    "id": "parent",
+                    "product_path_selection": {
+                        "product_path_selection_id": "sel-parent",
+                        "paths": ["Futures/Metals"],
+                        "path_id": "pg-metals",
+                    },
+                },
+                {
+                    "id": "child",
+                    "parentId": "parent",
+                },
+            ]
+        },
+        "sel-parent",
+        page_uuid="page-a",
+    )
+
+    assert selection.product_group_template_id == "pg-metals"
+    assert selection.selected_paths == ["Futures/Metals"]
 
 
 def test_scoped_mutation_cannot_target_another_page(app, two_page_testers):
@@ -106,10 +351,10 @@ def test_factor_tester_lookup_is_isolated_by_page(two_page_testers):
     page_a[0].alias = "user-a:same-submission"
     page_b[0].alias = "user-b:same-submission"
 
-    assert runtime_state.get_factor_tester(
+    assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
         "same-submission", page_uuid="page-a"
     ) is page_a[0]
-    assert runtime_state.get_factor_tester(
+    assert runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
         "same-submission", page_uuid="page-b"
     ) is page_b[0]
 
@@ -127,7 +372,8 @@ def test_factor_data_requires_page_uuid(app):
 
 
 def test_factor_data_rejects_another_users_page(app, two_page_testers, monkeypatch):
-    monkeypatch.setattr(factor_data_routes, "current_user", lambda: "user-b")
+    from server.modules.factors import _common
+    monkeypatch.setattr(_common, "current_user", lambda: "user-b")
     with app.test_request_context(
         "/get_factor_series",
         method="POST",
@@ -161,6 +407,52 @@ def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
         "owner": "alice@1",
         "page_kind": "single_factor_test",
         "factor_family_alias": "",
+    }
+
+
+def test_testers_modules_endpoint_serializes_full_tree(app):
+    from server.modules.single_factor_test import backtest_settings as backtest_settings_routes
+
+    with app.test_request_context("/api/testers/modules"):
+        response = backtest_settings_routes.get_testers_modules()
+
+    payload = response.get_json()
+    assert payload["success"] is True
+    top = payload["modules"]
+    assert [m["key"] for m in top] == ["single_factor_family_test"]
+    page = top[0]
+    assert [m["key"] for m in page["modules"]] == [
+        "single_factor_page", "factor_evaluation", "factor_type_analysis", "ic_test", "group_test",
+    ]
+    leaf = next(m for m in page["modules"] if m["key"] == "ic_test")
+    assert leaf["modules"] == []
+    group_test = next(m for m in page["modules"] if m["key"] == "group_test")
+    assert group_test["modules"]  # expanded executable-module manifest, not nested Modules
+    assert "phases" in group_test["modules"][0]
+
+
+def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, monkeypatch):
+    monkeypatch.setattr(page_routes.runtime_state, "create_page_uuid", lambda: "page-bootstrap")
+    captured = {}
+    monkeypatch.setattr(
+        page_routes.runtime_state,
+        "register_page",
+        lambda page_uuid, owner=None, **state: captured.update({"page_uuid": page_uuid, "owner": owner, **state}),
+    )
+    monkeypatch.setattr(page_routes, "current_user", lambda: "alice@1")
+
+    with app.test_request_context(
+        "/api/single_factor_test/page", method="POST", json={"factor": "Mm"},
+    ):
+        response = page_routes.single_factor_page_bootstrap_api()
+
+    payload = response.get_json()
+    assert payload == {"success": True, "page_uuid": "page-bootstrap"}
+    assert captured == {
+        "page_uuid": "page-bootstrap",
+        "owner": "alice@1",
+        "page_kind": "single_factor_test",
+        "factor_family_alias": "Mm",
     }
 
 
@@ -235,7 +527,7 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
     from server.services.factor_registry import page_families, page_factors
 
     tester = _Tester("alice:submission-1", "page-unload")
-    runtime_state.page_factor_testers["page-unload"] = [tester]
+    runtime_state.register_page_object(runtime_state.FACTOR_TESTER, tester, page_uuid="page-unload")
     runtime_state.page_owners["page-unload"] = "alice"
     runtime_state.page_states["page-unload"] = {"latest_group_execution": object()}
     runtime_state.page_time_store["page-unload"] = ("start", "end", "start")
@@ -252,7 +544,7 @@ def test_unload_unregisters_all_page_owned_objects(app, monkeypatch):
 
     assert response.status_code == 200
     assert tester.deleted is True
-    assert "page-unload" not in runtime_state.page_factor_testers
+    assert "page-unload" not in runtime_state.page_objects
     assert "page-unload" not in runtime_state.page_owners
     assert "page-unload" not in runtime_state.page_states
     assert "page-unload" not in runtime_state.page_time_store
@@ -368,11 +660,12 @@ def test_factor_main_section_does_not_build_defaults_when_session_params_empty(a
             return []
 
     monkeypatch.setattr(view_helpers, "get_factor_family_instance", lambda *args, **kwargs: _FakeFamily())
-    monkeypatch.setattr(view_helpers, "get_session_params", lambda *args, **kwargs: [])
+    monkeypatch.setattr(view_helpers, "page_factors", {})
     monkeypatch.setattr(view_helpers, "render_template", lambda template, **ctx: ctx)
 
     with app.test_request_context("/single_factor_test/api/content?page_uuid=page-x"):
         ctx = view_helpers.get_factor_main_section_html("Mm", page_uuid="page-x")
 
     assert ctx["factor_family_alias"] == "Mm"
-    assert captured == {"params_list": [], "page_uuid": "page-x"}
+    # Factors are now read directly from page_factors, not via get_factors(params_list=session_params)
+    assert captured == {}

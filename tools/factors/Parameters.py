@@ -5,21 +5,16 @@
 # 定义因子计算中共用的参数单例：
 #   ReturnFreqParam       - 收益率计算频率，${RF}，不出现在因子别名中
 #   FactorFreqParam       - 因子信号频率，F，出现在因子别名中
-#   StartCalcPointParam   - 计算起始点（DataTime），${SCP}，不出现在因子别名中
 #   FactorNextPeriodReturns - 下期收益类型枚举（OPEN到OPEN、CLOSE到CLOSE 等）
 # =============================================================================
 
 from enum import Enum
 from typing import Optional, Any
 
-FACTOR_WORKSPACE = True
+from tools.decorators import factor_workspace
+from tools.data.types import DataColumn
+from tools.parameters import Parameter, ValueSpace
 
-if FACTOR_WORKSPACE:
-    from tools.decorators import factor_workspace
-    from tools.data.types import DataColumn
-    from tools.parameters import Parameter, DataTimeParam, ValueSpace
-
-from settings import default_test_start_date
 
 def _to_rev_bool(value: Any) -> bool:
     """将多种输入规范化为是否反转：True/1/-1 表示反转，False/0 表示不反转。"""
@@ -94,21 +89,11 @@ def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = Non
         desc=desc or '因子信号频率，支持任意正时长（如 30min、1d、5d）',
     )
 
-def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DataTimeParam:
-    """
-    创建计算起始点参数（DataTimeParam，返回 DataTime）。
-    该参数全局公用一个实例，不出现在因子别名中，
-    用于过滤历史数据中的起始日期，避免将初期磨合期数据纳入计算。
-    """
-    return DataTimeParam(alias, default_value=default_value, **kwargs)
-
 # 全局单例参数对象
 # 这些对象被共享给周期内的所有 Factor / FactorFamily / Product 实例公用
 ReturnFreqParam  = get_return_freq_param(alias='$RF')
 # 因子信号频率参数（如 '1d'、'5d'），不对应 IC 计算的收益频率
 FactorFreqParam  = get_factor_freq_param(alias='$F')
-# 计算起始点，默认为设置中的默认测试起始日期
-StartCalcPointParam = get_StartCalcPointParam(alias='$SCP', default_value=default_test_start_date, isDate=True)
 # 因子反转参数：1/True/-1 表示反转；0/False 表示不反转
 ReverseParam = get_reverse_param(alias='$Rev')
 
@@ -131,6 +116,5 @@ class FactorNextPeriodReturns(Enum):
 __factor_workspace__ = (
     "ReturnFreqParam",
     "FactorFreqParam",
-    "StartCalcPointParam",
     "ReverseParam",
 )

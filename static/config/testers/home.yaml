@@ -1,0 +1,10 @@
+# 顶层测试模块注册表（tools/testers/home）。build_app 字段覆盖默认的
+# "<key>_settings" 命名约定——因为该 Module 的 key 是页面 id，复用的设置工厂叫
+# single_factor_page_settings。新增顶级页面只改这一处。
+version: 1
+modules:
+  - key: single_factor_family_test
+    label: 单因子家族测试
+    order: 10
+    build_app: single_factor_page
+    sub_registry: single_factor_family_test_module_registry

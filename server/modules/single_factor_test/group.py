@@ -1,40 +1,123 @@
 """Group test endpoint."""
+import hashlib
+import json
+import uuid
 import logging, math, time, traceback
+from copy import deepcopy
 from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
+from tools.data.types.time_index import DataIndex
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
-from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
-from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
-from tools.factors.tests.single_factor_test.group.detail import (
+
+
+def infer_periods_per_year(index_like) -> float:
+    """Infer strategy periods/year from realised signal timestamps."""
+    idx = DataIndex(pd.Index(index_like)).signal_index
+    idx = idx.dropna()
+    if len(idx) < 2:
+        return 252.0
+    per_day = pd.Series(1, index=idx.normalize()).groupby(level=0).sum()
+    median_per_day = float(per_day.median()) if not per_day.empty else 1.0
+    if median_per_day > 1:
+        return median_per_day * 252.0
+    unique_days = pd.DatetimeIndex(per_day.index).sort_values()
+    if len(unique_days) < 2:
+        return 252.0
+    business_days = np.busday_count(
+        unique_days[0].date().isoformat(),
+        (unique_days[-1] + pd.Timedelta(days=1)).date().isoformat(),
+    )
+    if business_days <= 0:
+        return 252.0
+    return max(1.0, len(unique_days) / business_days * 252.0)
+
+
+def _core_emit_progress(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
+    raise NotImplementedError(
+        "_emit_progress: pending issue-114 step 11 production rewiring")
+
+
+def ensure_group_factor_inputs(*args, **kwargs):  # noqa: ANN001 — issue-114 stub
+    raise NotImplementedError(
+        "ensure_group_factor_inputs: pending issue-114 step 11 production rewiring")
+from tools.factors.tester_calc.single_factor_test.group.detail import (
     build_group_detail,
     _build_product_fee_rates,
     _display_with_fee as _display_product_with_fee,
 )
-from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
-from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
+from tools.factors.tester_calc.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
+from tools.factors.tester_calc.single_factor_test.group.monotonicity import build_group_ranking_detail
 from tools.products.AdjustableTermStructure import resolve_term_structure_product
 from tools.products.Product import Product
 from tools.products.product_utils import product_display_name
-from tools.backtest.settings import backtest_setting_registry
-from tools.backtest.settings.resolver import resolve_group_settings
-from tools.backtest.settings.strategy_fields import (
-    ALLOCATION_POLICY,
-    POSITION_POLICY,
-    REBALANCE_TRIGGER,
-)
+from tools.testers.settings import backtest_setting_registry
+from tools.testers.settings.resolver import resolve_group_settings
+from tools.testers.backtest.modules.registry import GroupTestModuleRegistry
 from . import sft_bp
 import server.services.page_runtime as runtime_state
-from server.services.session_runtime import current_user, get_session_params
+from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
-from server.services.factor_registry import get_factor_family_instance
+from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
+
+
+_GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
+# Silent default keys now come from the registry — no hardcoded constant list
+
+
+def _group_product_path_selection_id(group: dict[str, Any]) -> str:
+    selection = group.get("product_path_selection")
+    if isinstance(selection, dict):
+        selection_id = str(
+            selection.get("product_path_selection_id")
+            or selection.get("selection_id")
+            or selection.get("id")
+            or ""
+        )
+        if selection_id:
+            return selection_id
+    return str(group.get("product_path_selection_id") or "")
+
+
+def _groups_with_parent_fallback(groups: list[dict]) -> list[dict]:
+    """Build the run-time view where derived groups inherit omitted parent fields."""
+    groups_by_id = {
+        str(group.get("id")): group
+        for group in groups
+        if isinstance(group, dict) and group.get("id")
+    }
+    resolving: set[str] = set()
+    resolved: dict[str, dict] = {}
+
+    def resolve(group: dict) -> dict:
+        group_id = str(group.get("id") or "")
+        if group_id and group_id in resolved:
+            return deepcopy(resolved[group_id])
+        if group_id:
+            if group_id in resolving:
+                return deepcopy(group)
+            resolving.add(group_id)
+        merged = deepcopy(group)
+        parent = groups_by_id.get(str(group.get("parentId") or ""))
+        if isinstance(parent, dict):
+            parent_view = resolve(parent)
+            for key, value in parent_view.items():
+                if key in _GROUP_INHERIT_UNIQUE_KEYS:
+                    continue
+                if merged.get(key) in (None, ""):
+                    merged[key] = deepcopy(value)
+        if group_id:
+            resolving.discard(group_id)
+            resolved[group_id] = deepcopy(merged)
+        return merged
+
+    return [resolve(group) if isinstance(group, dict) else group for group in groups]
 
 
 def _ensure_tester_factors_for_group(
@@ -42,30 +125,32 @@ def _ensure_tester_factors_for_group(
     factor_aliases: list[str],
     factor_family_alias: str | None,
     *,
-    params_list: list | None = None,
     username: str | None = None,
     page_uuid: str | None = None,
 ) -> None:
-    """Ensure direct group runs can resolve factors even when IC has not run."""
+    """Ensure direct group runs can resolve factors from page_factors.
+
+    Factors are the single source of truth — no session-scoped params dict.
+    When page_uuid is provided, factors are looked up from page_factors directly.
+    When page_uuid is absent, factors must already be on the tester (caller error).
+    """
     missing_aliases = [
         str(alias) for alias in factor_aliases
         if alias and tester.resolve_factor(str(alias)) is None
     ]
     if not missing_aliases:
         return
-    if not factor_family_alias:
+
+    if not page_uuid:
         return
 
-    factor_family = get_factor_family_instance(
-        str(factor_family_alias), username=username, page_uuid=page_uuid
-    )
-    if params_list is None:
-        params_list = get_session_params(str(factor_family_alias), factor_family)
-    factors = factor_family.get_factors(params_list=params_list, page_uuid=page_uuid)
+    from server.services.factor_registry import page_factors
+    page_dict = page_factors.get(str(page_uuid), {})
+
     existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
-    for factor in factors:
-        alias = getattr(factor, 'alias', '')
-        if not alias:
+    for alias in missing_aliases:
+        factor = page_dict.get(alias)
+        if factor is None:
             continue
         if alias in existing_by_alias:
             tester.factors[existing_by_alias[alias]] = factor
@@ -76,6 +161,19 @@ def _ensure_tester_factors_for_group(
 
 def _progress(message: str) -> None:
     print(f"[GroupTest] {message}", flush=True)
+
+
+# ── Module registry singleton ──────────────────────────────────
+
+_group_test_registry: GroupTestModuleRegistry | None = None
+
+
+def _get_group_test_registry() -> GroupTestModuleRegistry:
+    """Return the cached GroupTestModuleRegistry singleton."""
+    global _group_test_registry
+    if _group_test_registry is None:
+        _group_test_registry = GroupTestModuleRegistry()
+    return _group_test_registry
 
 
 def _get_metrics_meta() -> dict:
@@ -129,26 +227,21 @@ def _resolve_flat_backtest_settings(
 ) -> dict[str, dict[str, Any]]:
     app = backtest_setting_registry.get("group_test")
     setting_keys = set(app.settings)
-    runtime_window = payload.get("_runtime_window")
-    runtime_defaults = runtime_window if isinstance(runtime_window, dict) else {}
-    local_values = {
-        key: payload[key]
-        for key in setting_keys
-        if key in payload
-    }
-    for source_key, target_key in (
-        ("start_date", "start_date"),
-        ("end_date", "end_date"),
-        ("start_time", "start_time"),
-        ("end_time", "end_time"),
-        ("time_precision", "time_precision"),
-        ("timezone", "timezone"),
-    ):
-        if target_key not in local_values and source_key in runtime_defaults:
-            local_values[target_key] = runtime_defaults[source_key]
-    # Keep existing request aliases as local fields.
-    if "precision" in payload and "time_precision" not in local_values:
-        local_values["time_precision"] = payload["precision"]
+    raw_local_settings = payload.get("local_settings")
+    top_level_setting_keys = setting_keys.intersection(payload)
+    if top_level_setting_keys:
+        raise ValueError(
+            "registered settings must be nested under local_settings, "
+            f"not top-level: {sorted(top_level_setting_keys)}"
+        )
+    if isinstance(raw_local_settings, dict):
+        local_values = {
+            key: raw_local_settings[key]
+            for key in setting_keys
+            if key in raw_local_settings
+        }
+    else:
+        local_values = {}
 
     group_ids: list[str] = []
     group_values: dict[str, dict[str, Any]] = {}
@@ -169,11 +262,82 @@ def _resolve_flat_backtest_settings(
     )
 
 
+def _payload_local_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    local_settings = payload.get("local_settings")
+    return local_settings if isinstance(local_settings, dict) else {}
+
+
+def _setting_value_label(definition, value: Any) -> str:
+    text = str(value)
+    for option in definition.options:
+        if str(option.value) == text:
+            return option.label
+    return text
+
+
+def _silent_default_settings_for_run(
+    payload: dict[str, Any],
+    groups: list[dict[str, Any]],
+    ls_configs: list[dict[str, Any]],
+    resolved: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Summarize strategy defaults applied because the sparse request omitted them."""
+
+    app = backtest_setting_registry.get("group_test")
+    # Strategy setting keys whose silent defaults are shown when the frontend omits them.
+    silent_keys = (
+        "allocation_policy",
+        "rebalance_trigger",
+        "position_policy",
+    )
+    local_settings = _payload_local_settings(payload)
+    explicit_local = set(local_settings) if local_settings else set(payload)
+    explicit_by_group: dict[str, set[str]] = {}
+    for index, item in enumerate(list(groups) + list(ls_configs or [])):
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or f"group-{index}")
+        explicit_by_group[group_id] = set(item)
+
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for key in silent_keys:
+        definition = app.settings.get(key)
+        if definition is None or key in explicit_local:
+            continue
+        applied_values = []
+        any_explicit_group = False
+        for group_id, values in resolved.items():
+            if key in explicit_by_group.get(group_id, set()):
+                any_explicit_group = True
+                continue
+            if key in values:
+                applied_values.append(values[key])
+        if any_explicit_group or not applied_values:
+            continue
+        first = applied_values[0]
+        if any(value != first for value in applied_values[1:]):
+            continue
+        value_label = _setting_value_label(definition, first)
+        dedupe_key = (definition.label, value_label)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        result.append({
+            "setting_key": key,
+            "label": definition.label,
+            "value": str(first),
+            "value_label": value_label,
+            "module": definition.module,
+        })
+    return result
+
+
 def _runtime_time_value(payload: dict[str, Any], key: str, default: Any = None) -> Any:
-    runtime_window = payload.get("_runtime_window")
-    if isinstance(runtime_window, dict) and runtime_window.get(key) not in (None, ""):
-        return runtime_window[key]
-    return payload.get(key, default)
+    local_settings = _payload_local_settings(payload)
+    if local_settings.get(key) not in (None, ""):
+        return local_settings[key]
+    return default
 
 
 def _runtime_datetimes(payload: dict[str, Any]):
@@ -205,6 +369,28 @@ def _runtime_datetimes(payload: dict[str, Any]):
     if missing:
         raise ValueError("运行时间范围缺失: " + ", ".join(missing))
     return start_dt, end_dt
+
+
+def _settings_datetimes(settings: dict[str, Any]):
+    return _runtime_datetimes({"local_settings": settings})
+
+
+def _has_run_window_values(settings: dict[str, Any]) -> bool:
+    return bool(settings.get("start_date") and settings.get("end_date"))
+
+
+def _resolve_run_datetimes(
+    local_settings: dict[str, Any],
+    resolved_settings: dict[str, dict[str, Any]],
+):
+    return _settings_datetimes(local_settings)
+
+
+def _group_has_signal_window_override(group: dict[str, Any]) -> bool:
+    return any(
+        key in group and group.get(key) not in (None, "")
+        for key in ("start_date", "end_date", "start_time", "end_time", "time_precision", "timezone")
+    )
 
 
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
@@ -342,8 +528,9 @@ def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, f
     if product is not None:
         display = product_display_name(product)
         fee_display = _display_product_with_fee(product, fee_rates)
-        if fee_display.get('fee'):
-            display['fee'] = fee_display.get('fee')
+        fee_value = fee_display.get('fee')
+        if fee_value:
+            display['fee'] = str(fee_value)
     else:
         display = _display_product_with_fee(raw_name, fee_rates)
     name = display.get('name') or raw_name
@@ -365,6 +552,248 @@ def _cn_futures_contract_parent(product_ref: Any):
         return CNFutures.get_contract_parent(str(contract_uid))
     except Exception:
         return None
+
+
+def _product_parent_name(product_ref: Any) -> str:
+    raw = str(product_ref or "")
+    parts = raw.split("|")
+    if len(parts) >= 4:
+        exchange, _, code = parts[:3]
+        return f"{code}.{exchange}"
+    parent = _cn_futures_contract_parent(product_ref)
+    if parent is not None:
+        return str(getattr(parent, "name", parent))
+    name = raw
+    if "@" in name:
+        return name.split("@", 1)[0]
+    return name
+
+
+def _event_instrument_display(instrument: str, *, collapse_product: bool = False) -> dict[str, Any]:
+    if collapse_product:
+        display_ref = _product_parent_name(instrument)
+        display = _snapshot_product_display(display_ref)
+        if display_ref != instrument:
+            display["source_name"] = instrument
+        return display
+    parts = str(instrument or "").split("|")
+    if len(parts) >= 4:
+        exchange, _, code, delivery = parts[:4]
+        parent_name = _product_parent_name(instrument)
+        parent_display = _snapshot_product_display(parent_name)
+        return {
+            "name": f"{code}{delivery}.{exchange}",
+            "desc": parent_display.get("desc") or parent_display.get("name") or parent_name,
+            "source_name": instrument,
+        }
+    display = _snapshot_product_display(instrument)
+    return display
+
+
+def _first_finite(values: list[Any], default: float | None = None) -> float | None:
+    for value in values:
+        try:
+            number = float(value)
+        except Exception:
+            continue
+        if math.isfinite(number):
+            return number
+    return default
+
+
+def _event_market_rule_rows(payload: dict[str, Any]) -> dict[str, dict[str, float | None]]:
+    instruments = list(payload.get("instruments") or [])
+    rules = payload.get("market_rules") or {}
+    multipliers = rules.get("multipliers") or []
+    lot_sizes = rules.get("lot_sizes") or []
+    margin_ratios = rules.get("margin_ratios") or []
+    rows: dict[str, dict[str, float | None]] = {}
+    for idx, instrument in enumerate(instruments):
+        rows[str(instrument)] = {
+            "multiplier": _first_finite([row[idx] for row in multipliers if isinstance(row, list) and idx < len(row)]),
+            "lot_size": _first_finite([row[idx] for row in lot_sizes if isinstance(row, list) and idx < len(row)]),
+            "margin_ratio": _first_finite([row[idx] for row in margin_ratios if isinstance(row, list) and idx < len(row)]),
+        }
+    return rows
+
+
+def _event_fee_rate_rows(payload: dict[str, Any], fee_rate: float = 0.0) -> dict[str, dict[str, float]]:
+    instruments = list(payload.get("instruments") or [])
+    fee_rates = {}
+    for instrument in instruments:
+        fee_rates[str(instrument)] = {
+            "open": float(fee_rate or 0.0),
+            "close": float(fee_rate or 0.0),
+            "close_today": float(fee_rate or 0.0),
+            "close_yesterday": float(fee_rate or 0.0),
+            "total": float(fee_rate or 0.0) * 2.0,
+        }
+    return fee_rates
+
+
+def _event_position_contribution_rows(
+    *,
+    portfolio: dict[str, Any],
+    payload: dict[str, Any],
+    fee_rate: float,
+    collapse_product: bool,
+) -> list[dict[str, Any]]:
+    position_curve = portfolio.get("position_curve") or {}
+    notional_curve = portfolio.get("notional_curve") or {}
+    equity_curve = portfolio.get("equity_curve") or {}
+    if not position_curve:
+        return []
+    fee_rows = _event_fee_rate_rows(payload, fee_rate)
+    rule_rows = _event_market_rule_rows(payload)
+    accum: dict[str, dict[str, Any]] = {}
+    timestamps = sorted(position_curve.keys())
+    prev_equity: float | None = None
+    for timestamp in timestamps:
+        positions = position_curve.get(timestamp) or {}
+        notionals = notional_curve.get(timestamp) or {}
+        equity_raw = equity_curve.get(timestamp)
+        try:
+            equity = float(equity_raw) if equity_raw is not None else None
+        except Exception:
+            equity = None
+        if equity is None or not math.isfinite(equity):
+            continue
+        if prev_equity is None or prev_equity <= 0:
+            period_return = 0.0
+        else:
+            period_return = equity / prev_equity - 1.0
+        prev_equity = equity
+        active_total = 0.0
+        active_notionals: dict[str, float] = {}
+        for instrument, quantity in positions.items():
+            try:
+                qty = abs(float(quantity))
+            except Exception:
+                qty = 0.0
+            if qty <= 1e-12:
+                continue
+            notional = notionals.get(instrument)
+            try:
+                notional_value = abs(float(notional)) if notional is not None else 0.0
+            except Exception:
+                notional_value = 0.0
+            if notional_value <= 0:
+                notional_value = qty
+            active_notionals[str(instrument)] = notional_value
+            active_total += notional_value
+        if active_total <= 0:
+            continue
+        for instrument, notional_value in active_notionals.items():
+            key = _product_parent_name(instrument) if collapse_product else instrument
+            row = accum.setdefault(key, {
+                "display_ref": key,
+                "source_instruments": set(),
+                "active_period_count": 0,
+                "gross_contribution": 0.0,
+                "weight_sum": 0.0,
+                "fee_open_sum": 0.0,
+                "fee_close_sum": 0.0,
+                "fee_close_today_sum": 0.0,
+                "fee_close_yesterday_sum": 0.0,
+                "multiplier_sum": 0.0,
+                "lot_size_sum": 0.0,
+                "margin_ratio_sum": 0.0,
+            })
+            weight = notional_value / active_total
+            row["source_instruments"].add(instrument)
+            row["active_period_count"] += 1
+            row["gross_contribution"] += period_return * weight
+            row["weight_sum"] += weight
+            fee = fee_rows.get(instrument) or {}
+            rules = rule_rows.get(instrument) or {}
+            row["fee_open_sum"] += float(fee.get("open") or 0.0) * weight
+            row["fee_close_sum"] += float(fee.get("close") or 0.0) * weight
+            row["fee_close_today_sum"] += float(fee.get("close_today") or 0.0) * weight
+            row["fee_close_yesterday_sum"] += float(fee.get("close_yesterday") or fee.get("close") or 0.0) * weight
+            for source, target in (
+                ("multiplier", "multiplier_sum"),
+                ("lot_size", "lot_size_sum"),
+                ("margin_ratio", "margin_ratio_sum"),
+            ):
+                value = rules.get(source)
+                if value is not None and math.isfinite(float(value)):
+                    row[target] += float(value) * weight
+    rows = []
+    for key, item in accum.items():
+        weight_sum = float(item["weight_sum"] or 0.0)
+        product = _event_instrument_display(key, collapse_product=False)
+        product["fee"] = {
+            "open": item["fee_open_sum"] / weight_sum if weight_sum else None,
+            "close": item["fee_close_sum"] / weight_sum if weight_sum else None,
+            "close_today": item["fee_close_today_sum"] / weight_sum if weight_sum else None,
+            "close_yesterday": item["fee_close_yesterday_sum"] / weight_sum if weight_sum else None,
+            "_is_weighted": bool(collapse_product),
+        }
+        product["source_names"] = sorted(item["source_instruments"])
+        rows.append({
+            "product": product,
+            "active_period_count": int(item["active_period_count"]),
+            "gross_contribution": float(item["gross_contribution"]),
+            "mean_active_contribution": (
+                float(item["gross_contribution"]) / item["active_period_count"]
+                if item["active_period_count"] else None
+            ),
+            "mean_return": (
+                float(item["gross_contribution"]) / item["active_period_count"]
+                if item["active_period_count"] else None
+            ),
+            "market_rule": {
+                "multiplier": item["multiplier_sum"] / weight_sum if weight_sum else None,
+                "lot_size": item["lot_size_sum"] / weight_sum if weight_sum else None,
+                "margin_ratio": item["margin_ratio_sum"] / weight_sum if weight_sum else None,
+                "_is_weighted": bool(collapse_product),
+            },
+        })
+    return rows
+
+
+def _event_product_analysis(portfolio: dict[str, Any], payload: dict[str, Any], strategy_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        fee_rate = float((strategy_settings or {}).get("fee_rate") or 0.0)
+    except Exception:
+        fee_rate = 0.0
+    contract_rows = _event_position_contribution_rows(
+        portfolio=portfolio, payload=payload, fee_rate=fee_rate, collapse_product=False,
+    )
+    product_rows = _event_position_contribution_rows(
+        portfolio=portfolio, payload=payload, fee_rate=fee_rate, collapse_product=True,
+    )
+
+    def _pack(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        top = sorted(rows, key=lambda item: item["gross_contribution"], reverse=True)
+        bottom = sorted(rows, key=lambda item: item["gross_contribution"])
+        positive_total = sum(max(row["gross_contribution"], 0.0) for row in rows)
+        top1_ratio = (top[0]["gross_contribution"] / positive_total) if top and positive_total > 0 else None
+        top3_ratio = (
+            sum(max(row["gross_contribution"], 0.0) for row in top[:3]) / positive_total
+            if positive_total > 0 else None
+        )
+        return {
+            "rows": rows,
+            "top_products": top[:10],
+            "bottom_products": bottom[:10],
+            "top1_positive_contribution_ratio": top1_ratio,
+            "top3_positive_contribution_ratio": top3_ratio,
+            "is_concentrated": bool(
+                (top1_ratio is not None and top1_ratio >= 0.5)
+                or (top3_ratio is not None and top3_ratio >= 0.8)
+            ),
+        }
+
+    product_level = _pack(product_rows)
+    contract_level = _pack(contract_rows)
+    product_level_copy = dict(product_level)
+    product_level["by_level"] = {
+        "products": product_level_copy,
+        "contracts": contract_level,
+    }
+    product_level["default_level"] = "products"
+    return product_level
 
 
 def _snapshot_actual_quantity(
@@ -1161,8 +1590,15 @@ def _serialize_event_execution(
     *,
     settings_by_group: dict[str, dict[str, Any]],
     evaluation_split: str | None,
+    registry: Any | None = None,
+    group_result: Any = None,
 ) -> dict[str, Any]:
-    """Convert the selected framework's own ledger output to the UI contract."""
+    """Convert the selected framework's own ledger output to the UI contract.
+
+    Module-owned output fields (fee_costs, etc.) are collected via
+    `registry.collect_outputs(group_result, owner, settings)` so no
+    field name is hardcoded here.
+    """
 
     engine_result = execution["engine_result"]
     portfolios = engine_result.get("portfolios") or {}
@@ -1171,7 +1607,49 @@ def _serialize_event_execution(
     groups = []
     metrics = {}
     metrics_by_segment = {}
+    comparison_strategies = []
     split = pd.Timestamp(evaluation_split) if evaluation_split else None
+
+    def _trace_checksum(trace: Any) -> str | None:
+        if not trace:
+            return None
+        digest = hashlib.sha256()
+        if isinstance(trace, dict):
+            rows = [
+                {"timestamp": timestamp, "payload": payload or {}}
+                for timestamp, payload in trace.items()
+            ]
+        elif isinstance(trace, list):
+            rows = [
+                row if isinstance(row, dict) else {"payload": row}
+                for row in trace
+            ]
+        else:
+            rows = [{"payload": trace}]
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                str(row.get("timestamp") or ""),
+                str(row.get("order_id") or ""),
+                str(row.get("step") or ""),
+                json.dumps(row, ensure_ascii=False, sort_keys=True, default=str),
+            ),
+        )
+        for row in rows:
+            digest.update(str(row.get("timestamp") or "").encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(
+                json.dumps(
+                    row,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
+
     for owner in execution["group_owner"]:
         strategy_id = str(owner.get("group_id") or "")
         if strategy_id not in portfolios:
@@ -1188,23 +1666,46 @@ def _serialize_event_execution(
         returns = pd.Series(equity, index=index).pct_change().fillna(0.0)
         display_name = str(owner.get("group_name") or strategy_id)
         settings = settings_by_group[strategy_id]
+        strategy_target_trace = target_trace.get(strategy_id, {})
+        execution_trace = portfolio.get("execution_trace") or {}
+        comparison_strategies.append({
+            "strategy_id": strategy_id,
+            "display_name": display_name,
+            "final_value": round(float(equity[-1]), 10),
+            "equity_points": int(len(equity)),
+            "target_trace_points": int(len(strategy_target_trace)),
+            "target_trace_checksum": _trace_checksum(strategy_target_trace),
+            "execution_trace_points": int(
+                portfolio.get("execution_trace_count")
+                or len(execution_trace)
+            ),
+            "execution_trace_checksum": _trace_checksum(execution_trace),
+            "snapshot_points": int(len(portfolio.get("position_curve") or {})),
+        })
+        # ── Collect module-owned output fields via registry ──
+        module_outputs: dict[str, Any] = {}
+        if registry is not None:
+            module_outputs = registry.collect_outputs(
+                group_result=group_result,
+                owner=owner,
+                settings=settings,
+            )
+
         groups.append({
             "key": display_name,
             "name": display_name,
             "group_id": strategy_id,
             "group_index": int(owner.get("group_index") or 0),
-            "submission_id": str(owner.get("submission_id") or ""),
+            "product_path_selection_id": str(owner.get("product_path_selection_id") or ""),
             "factor_alias": str(owner.get("factor_alias") or ""),
             "timestamps": [int(value.timestamp() * 1000) for value in index],
             "total_equity": [round(float(value), 2) for value in equity],
             "gross_returns": _serialize_float_series(returns.to_numpy()),
-            "fee_costs": [0.0] * len(index),
-            "trade_notional_ratios": [0.0] * len(index),
             "engine": str(engine_result.get("engine") or ""),
-            "allocation_policy": settings[ALLOCATION_POLICY],
-            "rebalance_trigger": settings[REBALANCE_TRIGGER],
-            "position_policy": settings[POSITION_POLICY],
-            "target_trace": target_trace.get(strategy_id, {}),
+            "allocation_policy": settings["allocation_policy"],
+            "rebalance_trigger": settings["rebalance_trigger"],
+            "position_policy": settings["position_policy"],
+            "target_trace_available": bool(strategy_target_trace),
             "strategy_diagnostics": diagnostics.get(strategy_id, {}),
             "snapshot_available": bool(portfolio.get("position_curve")),
             "is_ls": bool(owner.get("is_ls")),
@@ -1212,6 +1713,7 @@ def _serialize_event_execution(
                 {"type": "long_short", "strategy_id": strategy_id}
                 if owner.get("is_ls") else None
             ),
+            **module_outputs,
         })
         metrics[display_name] = _compute_return_metrics(
             returns.to_numpy(), index_like=index
@@ -1270,6 +1772,13 @@ def _serialize_event_execution(
             "engine": engine_result.get("engine"),
             "event_count": engine_result.get("event_count"),
             "signal_kind": execution.get("signal_kind"),
+            "comparison": {
+                "schema_version": 1,
+                "engine": engine_result.get("engine"),
+                "event_count": engine_result.get("event_count"),
+                "signal_kind": execution.get("signal_kind"),
+                "strategies": comparison_strategies,
+            },
         },
     }
 
@@ -1301,435 +1810,257 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
-def _run_group_test_core(data: dict, cancel_event=None) -> tuple[bool, dict]:
+class _FactorEvaluateAdapter:
+    """Wraps a real Factor + its resolved product universe so
+    FactorSignalModule can evaluate it through an explicit run window while
+    the real `Factor.evaluate(products, ...)` signature keeps product and time
+    inputs mandatory."""
+
+    def __init__(self, factor: Any, products) -> None:
+        self._factor = factor
+        self._products = products
+
+    @property
+    def underlying_factor(self) -> Any:
+        return self._factor
+
+    @property
+    def expression(self) -> Any:
+        return (
+            getattr(self._factor, "expression", None)
+            or getattr(self._factor, "_expr", None)
+            or getattr(self._factor, "_source_expr", None)
+        )
+
+    def supports_vectorized(self) -> bool:
+        flag = getattr(self._factor, "supports_vectorized", None)
+        if callable(flag):
+            return bool(flag())
+        if flag is not None:
+            return bool(flag)
+        expr = self.expression
+        expr_flag = getattr(expr, "supports_vectorized", None)
+        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
+
+    def supports_incremental(self) -> bool:
+        flag = getattr(self._factor, "supports_incremental", None)
+        if callable(flag):
+            return bool(flag())
+        if flag is not None:
+            return bool(flag)
+        expr = self.expression
+        expr_flag = getattr(expr, "supports_incremental", None)
+        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
+
+    def required_warmup_window(self) -> Any:
+        required = getattr(self._factor, "required_warmup_window", None) or getattr(self._factor, "required_lookback", None)
+        if callable(required):
+            return required()
+        if required is not None:
+            return required
+        return None
+
+    def backtest_factor_cache_key(self) -> tuple:
+        factor_key = (
+            getattr(self._factor, "alias", None)
+            or getattr(self._factor, "name", None)
+            or id(self._factor)
+        )
+        product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
+        return ("factor_evaluate_adapter", factor_key, product_key)
+
+    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None, warmup_window=None) -> pd.DataFrame:
+        if run_window is not None and (start_dt is None or end_dt is None):
+            start_dt, end_dt = run_window
+        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
+        return self._factor.table
+
+
+def _resolve_group_strategy_settings(
+    g: dict,
+    *,
+    resolved_backtest_settings: dict[str, dict[str, Any]],
+    fallback_group_settings: dict[str, Any],
+    page_uuid: str,
+    data: dict,
+    page_factors_dict: dict,
+    selection_cache: dict[str, Any],
+) -> dict[str, Any]:
+    """Per-group bridge from the existing flat-settings resolution
+    (resolve_group_settings, scalar values only) to the resolved_settings
+    shape build_strategy_configs expects (product_path_selection/factor as
+    real resolved objects, group_index/split_count snake_case + 0-based)."""
+    from server.modules.shared.factor_tester_runtime import selection_for_product_path_selection
+
+    group_id = str(g.get('id') or '')
+    group_settings = dict(resolved_backtest_settings.get(group_id) or fallback_group_settings)
+
+    raw_split_count = g.get('splitCount')
+    if raw_split_count is None:
+        raise ValueError(f"缺少 splitCount: group={g.get('name') or group_id}")
+    group_settings['split_count'] = int(raw_split_count)
+    group_settings['group_index'] = int(g.get('groupIndex', 1)) - 1  # 前端 1-based -> 后端 0-based
+
+    selection_id = _group_product_path_selection_id(g)
+    if not selection_id:
+        raise ValueError(f"缺少 product_path_selection: group={g.get('name') or group_id}")
+    selection = selection_cache.get(selection_id)
+    if selection is None:
+        selection = selection_for_product_path_selection(data, selection_id, page_uuid=page_uuid)
+        selection_cache[selection_id] = selection
+    group_settings['product_path_selection'] = selection
+    product_list = _product_list_from_group_payload(g)
+    if product_list:
+        group_settings['product_mask_names'] = tuple(product_list)
+
+    factor_alias = str(g.get('factorAlias', ''))
+    factor = page_factors_dict.get(factor_alias)
+    if factor is None:
+        raise ValueError(f"未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。")
+    group_settings['factor'] = _FactorEvaluateAdapter(factor, selection.products)
+
+    return group_settings
+
+
+def _resolve_long_short_leg_ids(config: dict[str, Any], key: str, legacy_key: str) -> list[dict[str, Any]]:
+    raw = config.get(key)
+    if not raw and config.get(legacy_key):
+        raw = [{"group_id": config.get(legacy_key), "weight": 1.0}]
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            group_id = str(item.get("group_id") or item.get("strategy_id") or item.get("id") or "")
+            weight = item.get("weight", 1.0)
+        else:
+            group_id = str(item or "")
+            weight = 1.0
+        if group_id:
+            result.append({"strategy_id": group_id, "group_id": group_id, "weight": weight})
+    return result
+
+
+def _resolve_long_short_strategy_settings(
+    config: dict[str, Any],
+    *,
+    resolved_backtest_settings: dict[str, dict[str, Any]],
+    source_settings_by_alias: dict[str, dict[str, Any]],
+    fallback_group_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a peer long-short strategy from source strategy ids.
+
+    Long-Short is a strategy composition lane.  It references already-created
+    source strategy ids and consumes their target weights at the same SIGNAL
+    timestamp.  It is not a quantile group and therefore must not require
+    splitCount/groupIndex/factorAlias in its own payload.
     """
-    核心分组测试逻辑，由 /run_group_test_stream (SSE) 的 worker 调用。
-    
-    返回 (success, dict)
-    - success=True：dict 是成功响应
-    - success=False：dict 包含 error 和 status 字段
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
-    from tools.backtest.cancellation import BacktestCancelled
+    strategy_id = str(config.get("strategy_id") or config.get("id") or "")
+    long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
+    short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
+    if not strategy_id:
+        raise ValueError("Long-Short 缺少 id")
+    if not long_legs or not short_legs:
+        raise ValueError(f"Long-Short {strategy_id} 缺少 long/short legs")
 
-    def _check_cancelled() -> None:
-        if cancel_event is not None and cancel_event.is_set():
-            raise BacktestCancelled()
-
-    _check_cancelled()
-
-    flat_groups_raw = data.get('groups')
-    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
-        return False, {'success': False, 'error': 'groups 必须是非空数组', 'status': 400}
-    flat_ls_configs = data.get('ls_configs') or []
-    if not isinstance(flat_ls_configs, list):
-        flat_ls_configs = []
-
-    request_started = time.perf_counter()
-    _progress(
-        f"group simulations request start groups={len(flat_groups_raw)} "
-        f"ls_configs={len(flat_ls_configs)}"
+    source_ids = [leg["strategy_id"] for leg in long_legs + short_legs]
+    first_source = next(
+        (source_settings_by_alias[source_id] for source_id in source_ids if source_id in source_settings_by_alias),
+        None,
     )
+    if first_source is None:
+        raise ValueError(f"Long-Short {strategy_id} 引用的源策略不存在: {source_ids}")
 
-    try:
-        start_dt, end_dt = _runtime_datetimes(data)
-    except ValueError as exc:
-        return False, {'success': False, 'error': str(exc), 'status': 400}
+    settings = dict(fallback_group_settings)
+    settings.update(first_source)
+    settings.update({
+        key: value
+        for key, value in config.items()
+        if value not in (None, "")
+        and key not in {"id", "strategy_id", "name", "long", "short", "longGroupId", "shortGroupId"}
+    })
+    settings["strategy_kind"] = "long_short"
+    settings["strategy_id"] = strategy_id
+    settings["long_leg_strategy_ids"] = long_legs
+    settings["short_leg_strategy_ids"] = short_legs
+    return settings
 
-    try:
-        initial_capital = _parse_initial_capital(data.get('initial_capital'))
-        base_currency = _parse_currency_code(data.get('base_currency'))
-        currency_conversion_fee_rate = _parse_nonnegative_rate(data.get('currency_conversion_fee_rate'), 0.0)
-    except ValueError as e:
-        return False, {'success': False, 'error': str(e), 'status': 400}
 
-    resolved_backtest_settings = _resolve_flat_backtest_settings(data, flat_groups_raw, flat_ls_configs)
-    first_group_id = str(flat_groups_raw[0].get('id') or 'group-0')
-    common_backtest_settings = resolved_backtest_settings[first_group_id]
-
-    # ── Build _FactorGroupTestGroup from flat groups array ──
-    # Group by tester_id, then by factor_alias
-    tester_groups: dict[str, dict[str, list[dict]]] = {}  # tester_id → factor_alias → [group_dicts]
-    for g in flat_groups_raw:
+def _build_group_owner_rows(groups: list[dict], *, is_ls: bool) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, g in enumerate(groups):
         if not isinstance(g, dict):
             continue
-        tid = str(g.get('testerId', ''))
-        fa = str(g.get('factorAlias', ''))
-        if not tid or not fa:
-            continue
-        tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
-
-    # Determine the membership bucket count per (tester_id, factor_alias).
-    # This is not factor precomputation. It lets the group strategy build one
-    # membership tensor for the same tester/factor/split-count and then reuse
-    # it for multiple selected groups.
-    split_count_by_membership_key: dict[tuple[str, str], int] = {}
-    for tid, by_fa in tester_groups.items():
-        for fa, gs in by_fa.items():
-            split_count = None
-            missing = []
-            for g in gs:
-                raw_split_count = g.get('splitCount')
-                if raw_split_count is not None:
-                    split_count = max(split_count or 0, int(raw_split_count))
-                else:
-                    missing.append(g.get('name') or g.get('key') or g.get('groupIndex'))
-            if split_count is None:
-                raise ValueError(
-                    f"缺少 splitCount: tester_id={tid} factor_alias={fa} "
-                    f"groups={missing}"
-                )
-            split_count_by_membership_key[(tid, fa)] = split_count
-
-    # Build flat _FactorGroupTestGroup list
-    all_flat_groups: list[_FactorGroupTestGroup] = []
-    sim_index_by_group: dict[int, int] = {}
-    all_ls_configs_by_index: dict[int, list[dict] | None] = {}
-    factor_aliases_by_submission: dict[str, list[str]] = {}
-
-    sim_index = 0
-    for tid, by_fa in tester_groups.items():
-        for fa, gs in by_fa.items():
-            split_count = split_count_by_membership_key[(tid, fa)]
-            existing = factor_aliases_by_submission.get(tid) or []
-            if fa not in existing:
-                existing.append(fa)
-            factor_aliases_by_submission[tid] = existing
-            for g in gs:
-                # frontend groupIndex is 1-based → convert to 0-based
-                gi = int(g.get('groupIndex', 1)) - 1
-                if gi < 0 or gi >= split_count:
-                    raise ValueError(
-                        f"groupIndex out of range: {gi + 1} (1-based) not in [1, {split_count}], "
-                        f"tester_id={tid} factor_alias={fa}"
-                    )
-                name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
-                group_settings = resolved_backtest_settings.get(str(g.get('id') or '')) or common_backtest_settings
-                fg = _FactorGroupTestGroup(
-                    tester_id=tid,
-                    factor_alias=fa,
-                    n_groups=split_count,
-                    group_index=gi,
-                    key=name,
-                    name=name,
-                    product_list=_product_list_from_group_payload(g),
-                    fee_mode=group_settings.get('fee_mode'),
-                    fee_rate=group_settings.get('custom_fee_rate'),
-                    fee_modifications=g.get('feeModifications'),
-                    use_close_today=False,
-                    rebalance_trigger=group_settings[REBALANCE_TRIGGER],
-                    position_policy=group_settings[POSITION_POLICY],
-                    liquidity_mode=group_settings.get('liquidity_mode'),
-                    liquidity_percent=(
-                        float(group_settings.get('participation_rate') or 0) * 100
-                        if group_settings.get('liquidity_mode') == 'volume_participation'
-                        else None
-                    ),
-                    margin_mode=group_settings.get('margin_mode'),
-                    _id=str(g.get('id') or f'group-{len(all_flat_groups)}'),
-                )
-                offset = len(all_flat_groups)
-                sim_index_by_group[offset] = sim_index
-                all_flat_groups.append(fg)
-            all_ls_configs_by_index[sim_index] = flat_ls_configs if flat_ls_configs else None  # all LS configs visible to this spec
-            sim_index += 1
-
-    if not all_flat_groups:
-        return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
-    expected_flat_count = data.get('flatCount')
-    try:
-        expected_flat_count = int(expected_flat_count)
-    except (TypeError, ValueError):
-        expected_flat_count = len(flat_groups_raw)
-    if expected_flat_count != len(all_flat_groups):
-        return False, {
-            'success': False,
-            'error': (
-                f'前端传回 {expected_flat_count} 个扁平组，但后端只解析出 '
-                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少测试器/因子/组数继承字段。'
-            ),
-            'status': 400,
-        }
-
-    # ── Resolve factor_family_alias from page_uuid ──
-    page_uuid = str(data.get('page_uuid') or '')
-    factor_family_alias = ''
-    if page_uuid:
-        try:
-            page_state = runtime_state.get_page_state(page_uuid)
-            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
-        except Exception:
-            pass
-    # Allow override from request (same as SSE handler)
-    req_family = data.get('factor_family_alias')
-    if req_family:
-        factor_family_alias = str(req_family)
-
-    # ── Factor inputs & calendar ──
-    auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
-    requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
-    group_factor_params_list = data.get('_group_factor_params_list')
-    if not isinstance(group_factor_params_list, list):
-        group_factor_params_list = None
-    group_owner_username = data.get('_group_owner_username')
-    group_owner_username = str(group_owner_username) if group_owner_username else None
-
-    # Ensure testers and factors
-    tester0 = None
-    testers_by_id = {}
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(
-            submission_id, caller='run_group_test_prepare_factors', page_uuid=page_uuid
-        )
-        testers_by_id[submission_id] = tester
-        if tester0 is None:
-            tester0 = tester
-        _ensure_tester_factors_for_group(
-            tester,
-            factor_aliases,
-            factor_family_alias,
-            params_list=group_factor_params_list,
-            username=group_owner_username,
-            page_uuid=page_uuid,
-        )
-        for factor_alias in factor_aliases:
-            factor = tester.resolve_factor(str(factor_alias))
-            if factor is None:
-                return False, {
-                    'success': False,
-                    'error': f'未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。',
-                    'status': 400,
-                }
-            ensure_group_factor_inputs(
-                tester,
-                factor,
-                returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-            )
-
-    calendar_indices: list[pd.Index] = []
-    all_factor_freqs: list[Any] = []
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        try:
-            tester = runtime_state.get_factor_tester(
-                submission_id, caller='run_group_test_calendar', page_uuid=page_uuid
-            )
-        except Exception as exc:
-            _progress(f"calendar build skip submission={submission_id} error={exc}")
-            continue
-        tester_factor_freqs = tester.collect_group_factor_freqs(factor_aliases)
-        all_factor_freqs.extend(tester_factor_freqs)
-    try:
-        effective_group_calendar_freq = FactorTester.resolve_group_calendar_freq_from_factor_freqs(
-            all_factor_freqs,
-            'auto' if auto_group_calendar_freq else requested_group_calendar_freq,
-        )
-    except ValueError as exc:
-        return False, {'success': False, 'error': str(exc), 'status': 400}
-    _progress(
-        f"calendar resolve done effective_freq={effective_group_calendar_freq} "
-        f"factor_freq_count={len(all_factor_freqs)}"
-    )
-    for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(
-            submission_id, caller='run_group_test_calendar_build', page_uuid=page_uuid
-        )
-        tester_calendar = tester.build_group_calendar_index(
-            factor_aliases,
-            requested_calendar_freq=(
-                'auto' if auto_group_calendar_freq else effective_group_calendar_freq
-            ),
-        )
-        if len(tester_calendar) > 0:
-            calendar_indices.append(tester_calendar)
-    global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices) if tester0 else pd.Index([])
-    _core_emit_progress(
-        "signal_sequence",
-        (
-            f"公共信号时钟：{len(global_calendar_index)} 点，"
-            f"频率 {effective_group_calendar_freq}，因子频率数 {len(all_factor_freqs)}"
-        ),
-        completed=len(global_calendar_index),
-        total=max(len(global_calendar_index), 1),
-        calendar_count=len(global_calendar_index),
-        effective_group_calendar_freq=str(effective_group_calendar_freq),
-        factor_freq_count=len(all_factor_freqs),
-    )
-
-    # ── Legacy matrix fee bridge: use backend-registered settings, not group fields.
-    fee_uniform = (
-        float(common_backtest_settings.get('custom_fee_rate') or 0.0)
-        if common_backtest_settings.get('fee_mode') == 'custom'
-        else 0.0
-    )
-    fee_modifications = None
-    use_closetoday = False
-
-    # ── Run FactorGroupTester ──
-    overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
-    containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
-    merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
-    group_tester = FactorGroupTester.from_flat_groups(
-        all_flat_groups,
-        testers_by_id=testers_by_id,
-        spec_index_by_group=sim_index_by_group,
-        ls_configs_by_index=all_ls_configs_by_index,
-        start_dt=start_dt,
-        end_dt=end_dt,
-        calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
-        overlap_ratio=overlap_ratio,
-        containment_ratio=containment_ratio,
-        merge_cost_ratio=merge_cost_ratio,
-        progress_hook=_progress,
-        single_runtime=True,
-    )
-    _progress(
-        f"group tester batches overlap_ratio={overlap_ratio:.2f} "
-        f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
-        f"batches={group_tester.build_batch_labels()}"
-    )
-    from tools.backtest.orchestration import execute_group_plan
-
-    _core_emit_progress(
-        "init",
-        "事件回测准备开始",
-        total=1,
-        total_batches=1,
-        total_entries=len(group_tester.specs),
-        total_groups=len(all_flat_groups) + len(flat_ls_configs),
-        phases=GROUP_TEST_PHASES,
-    )
-
-    def _framework_progress(
-        phase: str,
-        message: str,
-        completed: int,
-        total: int,
-        extra: dict,
-    ) -> None:
-        _check_cancelled()
-        _core_emit_progress(
-            phase,
-            message,
-            completed=completed,
-            total=total,
-            **extra,
-        )
-
-    try:
-        execution = execute_group_plan(
-            group_tester,
-            engine=common_backtest_settings["engine"],
-            settings_by_group=resolved_backtest_settings,
-            initial_capital=initial_capital,
-            long_short_configs=flat_ls_configs,
-            progress=_framework_progress,
-            cancel_event=cancel_event,
-        )
-        _core_emit_progress(
-            "result_packaging",
-            "整理事件回测结果",
-            completed=0,
-            total=2 if page_uuid else 1,
-        )
-        serialized_execution = _serialize_event_execution(
-            execution,
-            settings_by_group=execution["settings_by_strategy"],
-            evaluation_split=common_backtest_settings["evaluation_split"] or None,
-        )
-        _core_emit_progress(
-            "result_packaging",
-            "事件回测结果序列化完成",
-            completed=1,
-            total=2 if page_uuid else 1,
-        )
-        if page_uuid:
-            runtime_state.update_page_state(
-                page_uuid,
-                latest_group_execution={
-                    "run_id": execution["payload"]["run_id"],
-                    "engine_result": execution["engine_result"],
-                    "group_owner": execution["group_owner"],
-                    "serialized_execution": serialized_execution,
-                },
-            )
-            _core_emit_progress(
-                "result_packaging",
-                "事件回测结果已保存到页面状态",
-                completed=2,
-                total=2,
-            )
-    except BacktestCancelled:
-        raise
-    except Exception as exc:
-        import traceback as _traceback
-        return False, {
-            "success": False,
-            "error": f"{common_backtest_settings['engine']} 事件回测失败: {exc}",
-            "traceback": _traceback.format_exc(),
-            "status": 500,
-        }
-    multi_session_entries = []
-    for position, entry in enumerate(group_tester.specs):
-        shared = entry.shared_inputs
-        if not bool(getattr(shared, "multi_session_active", False)):
-            continue
-        missing_products = [
-            str(value) for value in (getattr(shared, "multi_session_missing_products", []) or [])
-        ]
-        multi_session_entries.append({
-            "index": position,
-            "tester_alias": getattr(entry.tester, "alias", ""),
-            "factor_alias": getattr(entry.factor, "alias", ""),
-            "n_groups": int(getattr(entry, "n_groups", 0) or 0),
-            "missing_products": missing_products,
-            "missing_product_count": int(
-                getattr(shared, "multi_session_missing_count", len(missing_products)) or 0
-            ),
+        rows.append({
+            "group_id": str(g.get('id') or f'group-{index}'),
+            "group_name": str(g.get('shortAlias') or g.get('name') or g.get('key') or f'G{index}'),
+            "group_index": int(g.get('groupIndex', 1)) - 1,
+            "product_path_selection_id": _group_product_path_selection_id(g),
+            "factor_alias": str(g.get('factorAlias', '')),
+            "is_ls": is_ls,
         })
-    first_owner = execution["group_owner"][0]
-    return True, {
-        "success": True,
-        **serialized_execution,
-        "metrics_meta": _get_metrics_meta(),
-        "n_groups": len(serialized_execution["groups"]),
-        "multi_session_active": any(
-            bool(entry.shared_inputs.multi_session_active) for entry in group_tester.specs
-        ),
-        "multi_session_entries": multi_session_entries,
-        "submission_id": str(first_owner.get("submission_id") or ""),
-        "factor_alias": str(first_owner.get("factor_alias") or ""),
-        "tester_alias": getattr(group_tester.specs[0].tester, "alias", "?"),
-        "tester_product_count": len(group_tester.specs[0].tester.products),
-        "simulation_count": execution["simulation_count"],
-        "cross_entry_ls_count": len(flat_ls_configs),
-        "errors": None,
-        "backtest_settings": {
-            "engine": common_backtest_settings["engine"],
-            "factor_mode": common_backtest_settings["factor_mode"],
-            "market_rule_fallback": common_backtest_settings["market_rule_fallback"],
-            "groups": resolved_backtest_settings,
-        },
-        "evaluation_window": {
-            "start_ms": int(start_dt.ts.timestamp() * 1000),
-            "end_ms": int(end_dt.ts.timestamp() * 1000),
-            "split_ms": (
-                int(pd.Timestamp(
-                    common_backtest_settings["evaluation_split"], tz=start_dt.ts.tz
-                ).timestamp() * 1000)
-                if common_backtest_settings["evaluation_split"] else None
+    return rows
+
+
+def _build_long_short_owner_rows(
+    ls_configs: list[dict],
+    *,
+    source_owner_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, config in enumerate(ls_configs):
+        if not isinstance(config, dict):
+            continue
+        group_id = _long_short_strategy_id(config, index)
+        long_legs = _resolve_long_short_leg_ids(config, "long", "longGroupId")
+        short_legs = _resolve_long_short_leg_ids(config, "short", "shortGroupId")
+        first_source: dict[str, Any] = next(
+            (
+                source_owner_by_id.get(leg["strategy_id"])
+                for leg in long_legs + short_legs
+                if source_owner_by_id.get(leg["strategy_id"]) is not None
             ),
-        },
-    }
+            {},
+        ) or {}
+        rows.append({
+            "group_id": group_id,
+            "group_name": str(config.get("shortAlias") or config.get("name") or group_id),
+            "group_index": -1,
+            "product_path_selection_id": str(first_source.get("product_path_selection_id") or ""),
+            "factor_alias": str(first_source.get("factor_alias") or ""),
+            "is_ls": True,
+        })
+    return rows
+
+
+def _long_short_strategy_id(config: dict[str, Any], index: int) -> str:
+    strategy_id = str(config.get("strategy_id") or config.get("id") or "").strip()
+    return strategy_id or f"ls-{index}"
+
+
+def _get_or_create_group_test_tester(page_uuid: str) -> "FactorTester":
+    """Page-scoped singleton -- one FactorTester per page dispatches the
+    "backtest" task, not one per product_path_selection like the old
+    per-selection loop. A later snapshot/detail request on the same page
+    looks up this same instance to read back state.account."""
+    if page_uuid:
+        existing = runtime_state.find_page_object(
+            runtime_state.FACTOR_TESTER, "group_test", page_uuid=page_uuid)
+        if existing is not None:
+            return existing
+    tester = FactorTester(products=[], alias="group_test")
+    if page_uuid:
+        runtime_state.register_page_object(runtime_state.FACTOR_TESTER, tester, page_uuid=page_uuid)
+    return tester
+
 
 @sft_bp.route('/get_group_snapshot', methods=['POST'])
 def get_group_snapshot():
     """获取某个时刻各分组的产品列表及与上一时刻的进出变化。
     
     请求参数：
-        submission_id : 提交 ID
-        timestamp_ms  : 目标时刻（UTC epoch 毫秒）
+        product_path_selection_id : 产品路径选择 ID
+        timestamp_ms              : 目标时刻（UTC epoch 毫秒）
     
     返回：{
         groups: [{
@@ -1742,11 +2073,11 @@ def get_group_snapshot():
     }
     """
     data = request.get_json()
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     timestamp_ms  = data.get('timestamp_ms')
     page_uuid = str(data.get('page_uuid') or '')
-    if not submission_id or not timestamp_ms:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 timestamp_ms'}), 400
+    if not product_path_selection_id or not timestamp_ms:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 timestamp_ms'}), 400
 
     try:
         if page_uuid and runtime_state.get_page_owner(page_uuid) != current_user():
@@ -1756,12 +2087,12 @@ def get_group_snapshot():
         if event_execution:
             return jsonify(_event_group_snapshot(
                 event_execution,
-                str(submission_id),
+                str(product_path_selection_id),
                 int(timestamp_ms),
                 data.get("event_cursor"),
             ))
-        tester = runtime_state.get_factor_tester(
-            submission_id, caller='get_group_snapshot', page_uuid=page_uuid or None
+        tester = runtime_state.get_page_object(runtime_state.FACTOR_TESTER, 
+            product_path_selection_id, caller='get_group_snapshot', page_uuid=page_uuid
         )
 
         group_result = _latest_group_result(tester)
@@ -1892,9 +2223,33 @@ def get_group_snapshot():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
+@sft_bp.route('/get_group_order_flow', methods=['POST'])
+def get_group_order_flow():
+    """Return order lifecycle trace for one group from the latest event run."""
+    data = request.get_json() or {}
+    page_uuid = str(data.get('page_uuid') or '')
+    try:
+        if runtime_state.get_page_owner(page_uuid) != current_user():
+            return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        page_state = runtime_state.get_page_state(page_uuid)
+        event_execution = getattr(page_state, 'latest_group_execution', None)
+        if not event_execution:
+            return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
+        return jsonify(_event_order_flow_detail(
+            event_execution,
+            group_id=str(data.get('group_id') or '') or None,
+            product_path_selection_id=str(data.get('product_path_selection_id') or '') or None,
+            group_index=data.get('group_index'),
+            timestamp_ms=data.get('timestamp_ms'),
+            order_id=str(data.get('order_id') or '') or None,
+        ))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
 def _event_group_snapshot(
     execution: dict,
-    submission_id: str,
+    product_path_selection_id: str,
     timestamp_ms: int,
     event_cursor: str | None = None,
 ) -> dict:
@@ -1902,10 +2257,10 @@ def _event_group_snapshot(
     portfolios = engine_result.get("portfolios") or {}
     owners = [
         owner for owner in execution.get("group_owner") or []
-        if str(owner.get("submission_id") or "") == submission_id
+        if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
     ]
     if not owners:
-        raise ValueError("当前页面最近一次事件回测不包含该 submission_id")
+        raise ValueError("当前页面最近一次事件回测不包含该 product_path_selection_id")
     first = portfolios.get(str(owners[0].get("group_id") or "")) or {}
     first_curve = first.get("position_curve") or {}
     if not first_curve:
@@ -2286,6 +2641,13 @@ def _event_group_snapshot(
             "BAR_CLOSE": "时间片收盘",
         }[selected_event["event_type"]],
         "event_cursors": [event["cursor"] for event in events],
+        "order_flow_groups": [
+            {
+                "group_id": str(owner.get("group_id") or ""),
+                "group_name": str(owner.get("group_name") or owner.get("group_id") or ""),
+            }
+            for owner in owners
+        ],
         "all_timestamps_ms": all_ms,
         "has_prev": event_index > 0,
         "has_next": event_index + 1 < len(events),
@@ -2305,16 +2667,132 @@ def _event_group_snapshot(
     }
 
 
-def _event_group_detail(execution: dict, submission_id: str, group_index: int) -> dict:
+def _event_order_flow_detail(
+    execution: dict,
+    *,
+    group_id: str | None = None,
+    product_path_selection_id: str | None = None,
+    group_index: Any = None,
+    timestamp_ms: Any = None,
+    order_id: str | None = None,
+) -> dict[str, Any]:
+    owners = _event_order_flow_owners(
+        execution,
+        group_id=group_id,
+        product_path_selection_id=product_path_selection_id,
+        group_index=group_index,
+    )
+    engine_result = execution.get("engine_result") or {}
+    portfolios = engine_result.get("portfolios") or {}
+    target_timestamp = _timestamp_from_epoch_ms(timestamp_ms)
+    groups = []
+    for owner in owners:
+        strategy_id = str(owner.get("group_id") or "")
+        portfolio = portfolios.get(strategy_id) or {}
+        records = list(portfolio.get("execution_trace") or [])
+        if order_id:
+            records = [row for row in records if str(row.get("order_id") or "") == order_id]
+        if target_timestamp is not None:
+            records = [
+                row for row in records
+                if _same_epoch_millisecond(row.get("timestamp"), target_timestamp)
+            ]
+        records = sorted(
+            records,
+            key=lambda row: (
+                str(row.get("timestamp") or ""),
+                str(row.get("order_id") or ""),
+                str(row.get("step") or ""),
+            ),
+        )
+        groups.append({
+            "group_id": strategy_id,
+            "group_name": str(owner.get("group_name") or strategy_id),
+            "records": records,
+        })
+    return {
+        "success": True,
+        "groups": groups,
+        "record_count": sum(len(group["records"]) for group in groups),
+    }
+
+
+def _event_order_flow_owners(
+    execution: dict,
+    *,
+    group_id: str | None,
+    product_path_selection_id: str | None,
+    group_index: Any,
+) -> list[dict[str, Any]]:
     owners = [
         owner for owner in execution.get("group_owner") or []
-        if str(owner.get("submission_id") or "") == submission_id
-        and not owner.get("is_ls")
-        and int(owner.get("group_index") or 0) == group_index
+        if not owner.get("is_ls")
     ]
+    if group_id:
+        owners = [owner for owner in owners if str(owner.get("group_id") or "") == group_id]
+    elif product_path_selection_id:
+        owners = [
+            owner for owner in owners
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
+        ]
+        if group_index is not None:
+            index = int(group_index)
+            owners = [owner for owner in owners if int(owner.get("group_index") or 0) == index]
     if len(owners) != 1:
         raise ValueError(
-            f"事件回测中无法唯一定位分组：submission_id={submission_id}, "
+            f"事件回测中无法唯一定位订单流水：group_id={group_id or ''}, "
+            f"product_path_selection_id={product_path_selection_id or ''}, "
+            f"group_index={group_index}, matches={len(owners)}"
+        )
+    return owners
+
+
+def _timestamp_from_epoch_ms(value: Any) -> pd.Timestamp | None:
+    if value is None or value == "":
+        return None
+    timestamp = cast(pd.Timestamp, pd.Timestamp(int(value), unit="ms", tz="UTC"))
+    if pd.isna(timestamp):
+        return None
+    return timestamp
+
+
+def _same_epoch_millisecond(value: Any, target: pd.Timestamp) -> bool:
+    if value is None:
+        return False
+    current = cast(pd.Timestamp, pd.Timestamp(value))
+    if pd.isna(current):
+        return False
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    else:
+        current = current.tz_convert("UTC")
+    return int(current.timestamp() * 1000) == int(target.timestamp() * 1000)
+
+
+def _event_group_detail(
+    execution: dict,
+    product_path_selection_id: str,
+    group_index: int,
+    *,
+    group_id: str | None = None,
+) -> dict:
+    if group_id:
+        owners = [
+            owner for owner in execution.get("group_owner") or []
+            if str(owner.get("group_id") or "") == group_id
+            and not owner.get("is_ls")
+        ]
+    else:
+        owners = [
+            owner for owner in execution.get("group_owner") or []
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
+            and not owner.get("is_ls")
+            and int(owner.get("group_index") or 0) == group_index
+        ]
+    if len(owners) != 1:
+        raise ValueError(
+            f"事件回测中无法唯一定位分组：group_id={group_id or ''}, "
+            f"product_path_selection_id={product_path_selection_id}, "
             f"group_index={group_index}, matches={len(owners)}"
         )
     owner = owners[0]
@@ -2337,22 +2815,31 @@ def _event_group_detail(execution: dict, submission_id: str, group_index: int) -
             if abs(float(quantity)) > 1e-12
         ]
     serialized = execution.get("serialized_execution") or {}
+    detail_context = execution.get("detail_context") or {}
+    payload = execution.get("payload") or detail_context.get("payload") or {}
+    strategy_settings = (
+        execution.get("settings_by_strategy")
+        or detail_context.get("settings_by_strategy")
+        or {}
+    ).get(strategy_id) or {}
     display_name = str(owner.get("group_name") or strategy_id)
     summary = (serialized.get("metrics") or {}).get(display_name) or {}
-    return build_group_detail(
+    detail = build_group_detail(
         0,
         products_by_group,
         returns,
         index,
         summary,
     )
+    detail["product_analysis"] = _event_product_analysis(portfolio, payload, strategy_settings)
+    return detail
 
 
-def _event_group_ranking_detail(execution: dict, submission_id: str) -> dict:
+def _event_group_ranking_detail(execution: dict, product_path_selection_id: str) -> dict:
     owners = sorted(
         (
             owner for owner in execution.get("group_owner") or []
-            if str(owner.get("submission_id") or "") == submission_id
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
             and not owner.get("is_ls")
         ),
         key=lambda owner: int(owner.get("group_index") or 0),
@@ -2379,11 +2866,11 @@ def _event_group_ranking_detail(execution: dict, submission_id: str) -> dict:
 def get_group_detail():
     """Return first-phase detail analytics for one group from the latest run."""
     data = request.get_json() or {}
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     group_index = data.get('group_index')
     page_uuid = str(data.get('page_uuid') or '')
-    if submission_id is None or group_index is None:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
+    if product_path_selection_id is None or group_index is None:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id 或 group_index'}), 400
     try:
         group_index = int(group_index)
         if runtime_state.get_page_owner(page_uuid) != current_user():
@@ -2394,7 +2881,12 @@ def get_group_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_detail(event_execution, str(submission_id), group_index),
+            'detail': _event_group_detail(
+                event_execution,
+                str(product_path_selection_id),
+                group_index,
+                group_id=str(data.get('group_id') or '') or None,
+            ),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
@@ -2405,10 +2897,10 @@ def get_group_detail():
 def get_group_ranking_detail():
     """Return second-phase whole-test ranking analytics from the latest run."""
     data = request.get_json() or {}
-    submission_id = data.get('submission_id')
+    product_path_selection_id = data.get('product_path_selection_id')
     page_uuid = str(data.get('page_uuid') or '')
-    if submission_id is None:
-        return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
+    if product_path_selection_id is None:
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_id'}), 400
     try:
         if runtime_state.get_page_owner(page_uuid) != current_user():
             return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
@@ -2418,21 +2910,21 @@ def get_group_ranking_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_ranking_detail(event_execution, str(submission_id)),
+            'detail': _event_group_ranking_detail(event_execution, str(product_path_selection_id)),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
-@sft_bp.route('/get_tester_session_info', methods=['POST'])
-def get_tester_session_info():
-    """返回测试器会话摘要信息（供第3层策略通知表格使用）。
+@sft_bp.route('/get_product_path_selection_session_info', methods=['POST'])
+def get_product_path_selection_session_info():
+    """返回产品路径选择运行摘要信息（供第3层策略通知表格使用）。
 
-    请求：{submission_ids: [str, ...]}  或  {submission_id: str}
+    请求：{product_path_selection_ids: [str, ...]}
 
     返回：{
-        testers: [{
-            submission_id, tester_alias, product_count,
+        product_path_selections: [{
+            product_path_selection_id, runtime_context_alias, product_count,
             factors: [{
                 alias, name, freq,
                 n_groups: int,   // 上次分组测试用的组数
@@ -2448,20 +2940,16 @@ def get_tester_session_info():
         return jsonify({'success': False, 'error': '缺少 page_uuid'}), 400
     if runtime_state.get_page_owner(page_uuid) != current_user():
         return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
-    ids = data.get('submission_ids') or []
-    if not ids and data.get('submission_id'):
-        ids = [data['submission_id']]
+    ids = data.get('product_path_selection_ids') or []
     if not ids:
-        return jsonify({'success': False, 'error': '缺少 submission_ids'}), 400
+        return jsonify({'success': False, 'error': '缺少 product_path_selection_ids'}), 400
 
-    testers_info = []
+    selections_info = []
     for sid in ids:
         try:
-            tester = runtime_state.find_factor_tester(
-                str(sid), allow_suffix=True, page_uuid=page_uuid
-            )
+            tester = runtime_state.find_page_object(runtime_state.FACTOR_TESTER, str(sid), allow_suffix=True, page_uuid=page_uuid)
             if tester is None:
-                testers_info.append({'submission_id': str(sid), 'error': '未找到测试器实例'})
+                selections_info.append({'product_path_selection_id': str(sid), 'error': '未找到运行上下文'})
                 continue
             factors_info = []
             for f in (getattr(tester, 'factors', None) or []):
@@ -2485,16 +2973,16 @@ def get_tester_session_info():
                 else:
                     info['has_results'] = False
                 factors_info.append(info)
-            testers_info.append({
-                'submission_id': str(sid),
-                'tester_alias': getattr(tester, 'alias', '?'),
+            selections_info.append({
+                'product_path_selection_id': str(sid),
+                'runtime_context_alias': getattr(tester, 'alias', '?'),
                 'product_count': len(tester.products) if hasattr(tester, 'products') else 0,
                 'factors': factors_info,
             })
         except Exception as e:
-            testers_info.append({'submission_id': str(sid), 'error': str(e)})
+            selections_info.append({'product_path_selection_id': str(sid), 'error': str(e)})
 
-    return jsonify({'success': True, 'testers': testers_info})
+    return jsonify({'success': True, 'product_path_selections': selections_info})
 
 
 # ═══════════════════════════════════════════════════
@@ -2518,23 +3006,23 @@ def cancel_group_test():
 
 @sft_bp.route('/run_group_test_stream', methods=['POST'])
 def run_group_test_stream():
-    """SSE 流式分组测试——推送 batch/membership/simulate 进度 + 最终结果。"""
+    """SSE 流式分组测试：先处理 groups，再处理 ls_configs，然后把建好的
+    BacktestRunState 交给页面级 FactorTester，固定任务 "backtest"，由它调用
+    backtester（run_backtest_task）——三步串行，不绕 _FactorGroupTestGroup/
+    FactorGroupTester/execute_group_plan 这条已删除的旧链路。
+    """
     import threading
     import json as _json
-    from flask import Response, stream_with_context
+    from flask import Response
     from server.services.sse_progress import SSEProgressEmitter
-    from tools.factors.backtest_progress import BacktestProgressRegistry
-    from tools.factors.tests.single_factor_test.group.core import (
-        register_group_progress,
-        unregister_group_progress,
-    )
     from server.services import backtest_runs
-    from tools.backtest.cancellation import BacktestCancelled
-    import uuid
+    from server.services.factor_registry import page_factors
+    from tools.testers.backtest.engines.cancellation import BacktestCancelled
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
     data = request.get_json(silent=True) or {}
 
-    # ── 在主线程中完成 data 校验 ──
     flat_groups_raw = data.get('groups')
     if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         def _early_err():
@@ -2542,9 +3030,9 @@ def run_group_test_stream():
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
-    # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
     owner = str(current_user() or '')
+    run_user = current_user_obj()
     if not page_uuid or runtime_state.get_page_owner(page_uuid) != owner:
         return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
     run_token = str(data.get('run_token') or uuid.uuid4().hex)
@@ -2552,139 +3040,182 @@ def run_group_test_stream():
         active_run = backtest_runs.register(run_token, page_uuid, owner)
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
-    factor_family_alias = ''
-    if page_uuid:
-        try:
-            page_state = runtime_state.get_page_state(page_uuid)
-            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
-        except Exception:
-            pass
-    # Allow override from request
-    req_family = data.get('factor_family_alias')
-    if req_family:
-        factor_family_alias = str(req_family)
-    if factor_family_alias:
-        try:
-            factor_family = get_factor_family_instance(
-                factor_family_alias,
-                username=owner,
-                page_uuid=page_uuid,
-            )
-            data = dict(data)
-            data['_group_owner_username'] = owner
-            data['_group_factor_params_list'] = get_session_params(
-                factor_family_alias,
-                factor_family,
-            )
-        except Exception as exc:
-            backtest_runs.finish(run_token)
-            def _early_factor_err():
-                yield f"event: error\ndata: {_json.dumps({'success': False, 'error': f'准备分组测试因子参数失败: {exc}'}, default=str)}\n\n"
-            return Response(_early_factor_err(), mimetype='text/event-stream',
-                            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    data = dict(data)
+    data['_run_user'] = run_user
+    data['_group_owner_username'] = owner
 
     emitter = SSEProgressEmitter()
-    registry = BacktestProgressRegistry()
-
-    # ── 将 registry 的三个生命周期回调桥接到 SSE emitter ──
-    registry.register_before(
-        lambda total, groups, phase, extra: emitter.emit_start(
-            total=total, groups=groups, phase=phase, **extra,
-        )
-    )
-    registry.register_phase(
-        lambda phase, message, completed, total, extra: emitter.emit_progress(
-            completed=completed, total=total, phase=phase, message=message, **extra,
-        )
-    )
-    registry.register_after(
-        lambda success, data: emitter.emit_result(data) if success else emitter.emit_error(
-            data.get('error', '未知错误'),
-            traceback=data.get('traceback', ''),
-        )
-    )
 
     def _compute_and_emit():
         try:
-            # ── 将 registry 桥接到 core.py 的全局注册 ──
-            last_progress = {'completed': 0, 'total': 0}
-            last_progress_by_batch: dict[int, dict[str, int]] = {}
+            flat_groups = _groups_with_parent_fallback(flat_groups_raw)
+            payload = dict(data)
+            payload['groups'] = flat_groups
+            flat_ls_configs = payload.get('ls_configs') or []
+            if not isinstance(flat_ls_configs, list):
+                flat_ls_configs = []
 
-            def _progress_bridge(phase: str, message: str, extra: dict):
+            _progress(
+                f"group simulations request start groups={len(flat_groups)} "
+                f"ls_configs={len(flat_ls_configs)}"
+            )
+
+            local_settings = _payload_local_settings(payload)
+            data_source = str(local_settings.get('data_source') or '').strip()
+            frequency = str(local_settings.get('frequency') or '').strip()
+            if data_source and data_source != 'auto':
+                raise ValueError(f'当前分组测试不支持数据源 {data_source}，请使用自动')
+            if frequency and frequency != 'auto':
+                raise ValueError(f'当前分组测试不支持数据频率 {frequency}，请使用自动')
+            _parse_initial_capital(local_settings.get('initial_capital'))
+            _parse_currency_code(local_settings.get('base_currency'))
+
+            resolved_backtest_settings = _resolve_flat_backtest_settings(
+                payload, flat_groups, flat_ls_configs)
+            run_registry = _get_group_test_registry()
+            local_settings_by_module = run_registry.collect_local_only_settings(resolved_backtest_settings)
+            market_rule_fallback = local_settings_by_module.get(
+                "market_rules", {}).get("market_rule_fallback", "latest_available")
+            evaluation_split = local_settings_by_module.get(
+                "evaluation_range", {}).get("evaluation_split") or None
+            first_group_id = str(flat_groups[0].get('id') or 'group-0')
+            fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
+            factor_mode = fallback_group_settings.get("factor_mode", "auto")
+            start_dt, end_dt = _resolve_run_datetimes(local_settings, resolved_backtest_settings)
+
+            page_factors_dict = page_factors.get(page_uuid, {})
+            selection_cache: dict[str, Any] = {}
+            resolved_settings_by_alias: dict[str, dict[str, Any]] = {}
+            group_owner: list[dict[str, Any]] = []
+
+            # 步骤 1：处理 groups
+            for g in flat_groups:
+                if not isinstance(g, dict):
+                    continue
+                group_id = str(g.get('id') or f'group-{len(resolved_settings_by_alias)}')
+                resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
+                    g, resolved_backtest_settings=resolved_backtest_settings,
+                    fallback_group_settings=fallback_group_settings,
+                    page_uuid=page_uuid, data=payload, page_factors_dict=page_factors_dict,
+                    selection_cache=selection_cache,
+                )
+            group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))
+            group_owner_by_id = {str(row.get("group_id")): row for row in group_owner}
+
+            # 步骤 2：处理 ls_configs
+            normalized_ls_configs: list[dict[str, Any]] = []
+            for index, g in enumerate(flat_ls_configs):
+                if not isinstance(g, dict):
+                    continue
+                normalized = dict(g)
+                group_id = _long_short_strategy_id(normalized, index)
+                normalized["strategy_id"] = group_id
+                normalized.setdefault("id", group_id)
+                normalized_ls_configs.append(normalized)
+                resolved_settings_by_alias[group_id] = _resolve_long_short_strategy_settings(
+                    normalized,
+                    resolved_backtest_settings=resolved_backtest_settings,
+                    source_settings_by_alias=resolved_settings_by_alias,
+                    fallback_group_settings=fallback_group_settings,
+                )
+            group_owner.extend(_build_long_short_owner_rows(
+                normalized_ls_configs, source_owner_by_id=group_owner_by_id))
+
+            if not resolved_settings_by_alias:
+                raise ValueError('没有有效的分组配置')
+
+            # 步骤 3：建 BacktestRunState，交给页面级 FactorTester 调度 "backtest" 任务
+            account = BacktestRunState()
+            apply_strategy_configs(account, resolved_settings_by_alias)
+
+            all_products: list = []
+            seen_products: set = set()
+            for selection in selection_cache.values():
+                for product in selection.products:
+                    if product not in seen_products:
+                        seen_products.add(product)
+                        all_products.append(product)
+            account.runtime_info_sink = emitter
+            account.market_data_request = {
+                "products": all_products,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "policy": market_rule_fallback,
+            }
+
+            tester = _get_or_create_group_test_tester(page_uuid)
+
+            def _on_progress(completed: int, total: int, label: str) -> None:
                 if active_run.cancelled.is_set():
                     raise BacktestCancelled()
-                progress_extra = dict(extra)
-                completed = extra.get('completed')
-                total = extra.get('total', extra.get('total_batches'))
-                product_coverage_batch_index = extra.get('product_coverage_batch_index')
-                has_progress_count = completed is not None and total is not None
-                if phase == 'init':
-                    # init 阶段：发送 start 事件，携带 phases数据
-                    total_val = total or 0
-                    _phases = extra.get('phases', [])
-                    # 从 extra 中剥离已显式传递的 kwarg，避免与 emit_start 的显式参数冲突
-                    for k in ('total', 'groups', 'phase', 'phases'):
-                        progress_extra.pop(k, None)
-                    registry.emit_start(
-                        total=total_val, groups=extra.get('total_groups', 0),
-                        phase='product_coverage_batch',
-                        phases=_phases,
-                        **progress_extra,
-                    )
-                elif has_progress_count:
-                    last_progress['completed'] = completed
-                    last_progress['total'] = total
-                    if product_coverage_batch_index is not None:
-                        last_progress_by_batch[int(product_coverage_batch_index)] = {
-                            'completed': completed,
-                            'total': total,
-                        }
-                    # 剥离已显式传递的参数，避免与 emit_phase 的 keyword 参数冲突
-                    for k in ('completed', 'total', 'phase'):
-                        progress_extra.pop(k, None)
-                    # 所有带进度计数的 phase 直接 emit（包括 factor_eval, returns_eval 等）
-                    registry.emit_phase(
-                        phase, message=message,
-                        completed=completed, total=total,
-                        **progress_extra,
-                    )
-                elif phase == 'info':
-                    # info 是信息性消息，转换为当前批次的 progress 事件
-                    batch_progress = None
-                    if product_coverage_batch_index is not None:
-                        batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
-                    progress = batch_progress or last_progress
-                    if progress['completed'] != 0 or progress['total'] != 0:
-                        completed = progress['completed']
-                        total = progress['total']
-                        for k in ('completed', 'total', 'phase'):
-                            progress_extra.pop(k, None)
-                        registry.emit_phase(
-                            phase, message=message,
-                            completed=completed, total=total,
-                            **progress_extra,
-                        )
 
-            register_group_progress(_progress_bridge)
-
-            success, result = _run_group_test_core(
-                data, cancel_event=active_run.cancelled
+            execution = tester.dispatch(
+                "backtest", run_state=account, group_owner=group_owner,
+                settings_by_strategy=resolved_settings_by_alias,
+                run_id=run_token, progress=_on_progress, activity_sink=emitter,
             )
-            if success:
-                registry.emit_result(result)
-            else:
-                registry.emit_error(
-                    result.get('error', '未知错误'),
-                    traceback=result.get('traceback', ''),
-                )
+            runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
+            serialized_execution = _serialize_event_execution(
+                execution, settings_by_group=execution["settings_by_strategy"],
+                evaluation_split=evaluation_split, registry=run_registry,
+            )
+            runtime_state.update_page_state(
+                page_uuid,
+                latest_group_execution={
+                    "run_id": execution["payload"]["run_id"],
+                    "engine_result": execution["engine_result"],
+                    "group_owner": execution["group_owner"],
+                    "serialized_execution": serialized_execution,
+                    "detail_context": {
+                        "payload": {
+                            "instruments": execution["payload"].get("instruments") or [],
+                            "market_rules": execution["payload"].get("market_rules") or {},
+                        },
+                        "settings_by_strategy": execution["settings_by_strategy"],
+                    },
+                },
+            )
+
+            first_owner = group_owner[0]
+            result = {
+                "success": True,
+                **serialized_execution,
+                "metrics_meta": _get_metrics_meta(),
+                "n_groups": len(serialized_execution["groups"]),
+                "multi_session_active": False,
+                "multi_session_entries": [],
+                "runtime_info_rows": runtime_info_rows,
+                "product_path_selection_id": str(first_owner.get("product_path_selection_id") or ""),
+                "factor_alias": str(first_owner.get("factor_alias") or ""),
+                "product_path_selection_count": len(all_products),
+                "simulation_count": 1,
+                "cross_entry_ls_count": len(flat_ls_configs),
+                "errors": None,
+                "backtest_settings": {
+                    "engine": "native",
+                    "factor_mode": factor_mode,
+                    "market_rule_fallback": market_rule_fallback,
+                    "groups": resolved_backtest_settings,
+                },
+                "silent_default_settings": _silent_default_settings_for_run(
+                    payload, flat_groups, flat_ls_configs, resolved_backtest_settings,
+                ),
+                "evaluation_window": {
+                    "start_ms": int(cast(Any, start_dt).ts.timestamp() * 1000),
+                    "end_ms": int(cast(Any, end_dt).ts.timestamp() * 1000),
+                    "split_ms": (
+                        int(pd.Timestamp(evaluation_split, tz=cast(Any, start_dt).ts.tz).timestamp() * 1000)
+                        if evaluation_split else None
+                    ),
+                },
+            }
+            emitter.emit_result(result)
         except BacktestCancelled as exc:
             emitter.emit_error(str(exc), cancelled=True, run_token=run_token)
         except Exception as e:
             import traceback as _tb
-            registry.emit_error(str(e), traceback=_tb.format_exc())
+            emitter.emit_error(str(e), traceback=_tb.format_exc())
         finally:
-            unregister_group_progress()
-            registry.cleanup()
             backtest_runs.finish(run_token)
             emitter.close()
 

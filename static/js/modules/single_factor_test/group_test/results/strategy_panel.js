@@ -20,11 +20,11 @@
 
     function batchLabel(batch) {
         var batchIndex = Number.isFinite(Number(batch.index)) ? (Number(batch.index) + 1) : '';
-        var testerAlias = batch.tester_alias || batch.testerAlias || batch.submission_id || '';
+        var selectionLabel = batch.product_path_selection_label || batch.product_path_selection_id || '';
         var factorAlias = batch.factor_alias || batch.factorAlias || '';
         var groupText = batch.n_groups ? (' / ' + batch.n_groups + '组') : '';
         return (batchIndex ? ('Batch ' + batchIndex + ' · ') : '')
-            + [testerAlias, factorAlias].filter(Boolean).join(' / ')
+            + [selectionLabel, factorAlias].filter(Boolean).join(' / ')
             + groupText;
     }
 
@@ -34,7 +34,7 @@
             : [];
         if (!products.length) return '';
         var total = Number(batch.missing_product_count || products.length);
-        var sample = products.slice(0, 8).join('、');
+        var sample = products.slice(0, 8).map(_productDisplayText).join('、');
         if (total > products.length || products.length > 8) sample += ' 等';
         return '触发品种：' + sample + '（' + total + ' 个品种存在非头部缺 bar/交易时段差异）';
     }
@@ -42,6 +42,23 @@
     function _pushCapitalRows(rows, data) {
         if (!data) return;
         _pushRunSettingRows(rows, data);
+        var runtimeRows = Array.isArray(data.runtime_info_rows) ? data.runtime_info_rows : [];
+        for (var ri = 0; ri < runtimeRows.length; ri++) {
+            var item = runtimeRows[ri] || {};
+            var detail = item.detail || item.message || '';
+            if (Array.isArray(item.product_displays) && item.product_displays.length) {
+                var productText = item.product_displays.slice(0, 12).map(_productDisplayText).join('、');
+                if (item.product_displays.length > 12) productText += ' 等 ' + item.product_displays.length + ' 个';
+                detail = '以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除：' + productText;
+            }
+            if (!detail && !item.detailHtml) continue;
+            rows.push({
+                type: item.type || '运行信息',
+                status: item.status || _runtimeStatusLabel(item.level),
+                detail: detail,
+                detailHtml: item.detailHtml || '',
+            });
+        }
         if (data.capital_warning) {
             rows.push({
                 type: '资金约束',
@@ -87,8 +104,14 @@
                 type: '当前运行配置',
                 status: '默认',
                 detailHtml: '<div class="gt-strategy-chip-list">' + parts.map(function(part) {
-                    var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
-                        ? GT.backendSettings.renderChipHtml(part.label, part.value)
+                    var chipHtml = (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function')
+                        ? window.ChipRenderer.chipHtml(
+                            { chip_template: '{label}: {value}' },
+                            { valueOf: function(k) { return k === 'label' ? part.label : part.value; },
+                              escapeHTML: GT.escapeHTML,
+                              renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                                  ? GT.backendSettings.renderChipHtml : undefined }
+                        )
                         : (GT.escapeHTML(part.label) + ': ' + GT.escapeHTML(part.value));
                     return '<span class="gt-backend-chip">' + chipHtml + '</span>';
                 }).join('') + '</div>',
@@ -105,8 +128,14 @@
                 + '<div class="gt-strategy-chip-list">' + fallbacks.map(function(item) {
                 var label = String(item.setting_key || item.module || '设置');
                 var value = String(item.requested_value) + ' → ' + String(item.applied_value);
-                var chipHtml = GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
-                    ? GT.backendSettings.renderChipHtml(label, value)
+                var chipHtml = (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function')
+                    ? window.ChipRenderer.chipHtml(
+                        { chip_template: '{label}: {value}' },
+                        { valueOf: function(k) { return k === 'label' ? label : value; },
+                          escapeHTML: GT.escapeHTML,
+                          renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                              ? GT.backendSettings.renderChipHtml : undefined }
+                    )
                     : (GT.escapeHTML(label) + ': ' + GT.escapeHTML(value));
                 return '<span class="gt-backend-chip">' + chipHtml + '</span>';
             }).join('') + '</div>',
@@ -123,7 +152,9 @@
         return items.map(function(item) {
             if (!item) return null;
             var label = String(item.label || item.setting_key || item.module || '设置');
-            var value = item.value !== undefined && item.value !== null
+            var value = item.value_label !== undefined && item.value_label !== null
+                ? String(item.value_label)
+                : item.value !== undefined && item.value !== null
                 ? String(item.value)
                 : String(item.applied_value !== undefined ? item.applied_value : '');
             if (!value) return null;
@@ -139,6 +170,67 @@
             + '</tr>';
     }
 
+    function _productDisplayText(product) {
+        if (!product) return '';
+        if (typeof product === 'string') return product;
+        var name = String(product.name || product.alias || product.product || '');
+        var desc = String(product.desc || product.description || '');
+        return desc && desc !== name ? name + '(' + desc + ')' : name;
+    }
+
+    function _runtimeStatusLabel(level) {
+        if (level === 'warning') return '提示';
+        if (level === 'error') return '异常';
+        return '信息';
+    }
+
+    function _ensureTable() {
+        var layer = document.getElementById('gt-layer-strategy');
+        var head = document.getElementById('gt-strategy-head');
+        var body = document.getElementById('gt-strategy-body');
+        if (!layer || !head || !body) return null;
+        layer.style.display = '';
+        if (!head.innerHTML) {
+            head.innerHTML = '<tr><th class="gt-strategy-type-cell">类型</th><th class="gt-strategy-status-cell">状态</th><th class="gt-strategy-detail-cell">说明</th></tr>';
+        }
+        _clearPlaceholderRows(body);
+        return body;
+    }
+
+    function _clearPlaceholderRows(body) {
+        if (!body) return;
+        if (body.children.length !== 1) return;
+        var onlyRow = body.children[0];
+        if (!onlyRow || onlyRow.tagName !== 'TR') return;
+        var text = (onlyRow.textContent || '').trim();
+        if (text === '运行分组测试后这里展示各策略摘要') {
+            body.innerHTML = '';
+        }
+    }
+
+    function pushRuntimeInfo(row) {
+        var body = _ensureTable();
+        if (!body) return;
+        var normalized = row || {};
+        var key = normalized.code || normalized.detail || normalized.message || JSON.stringify(normalized);
+        if (!body._gtRuntimeInfoKeys) body._gtRuntimeInfoKeys = {};
+        if (body._gtRuntimeInfoKeys[key]) return;
+        body._gtRuntimeInfoKeys[key] = true;
+        var detail = normalized.detail || normalized.message || '';
+        if (Array.isArray(normalized.product_displays) && normalized.product_displays.length) {
+            var productText = normalized.product_displays.slice(0, 12).map(_productDisplayText).join('、');
+            if (normalized.product_displays.length > 12) productText += ' 等 ' + normalized.product_displays.length + ' 个';
+            detail = '以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除：' + productText;
+        }
+        if (!detail && !normalized.detailHtml) return;
+        body.insertAdjacentHTML('beforeend', _rowHtml({
+            type: normalized.type || '运行信息',
+            status: normalized.status || _runtimeStatusLabel(normalized.level),
+            detail: detail,
+            detailHtml: normalized.detailHtml || '',
+        }));
+    }
+
     function render(multiSessionActive, multiSessionBatches, capitalWarningData) {
         var layer = document.getElementById('gt-layer-strategy');
         var status = document.getElementById('gt-strategy-status');
@@ -149,9 +241,7 @@
 
         var rows = [];
         var hasMultiSession = !!multiSessionActive;
-        var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
-            ? multiSessionBatches
-            : [{ index: 0, tester_alias: '当前测试器', factor_alias: '当前因子', n_groups: null }];
+        var batches = Array.isArray(multiSessionBatches) ? multiSessionBatches : [];
         if (hasMultiSession) {
             for (var bi = 0; bi < batches.length; bi++) {
                 var batch = batches[bi];
@@ -195,5 +285,6 @@
     GT.results.strategyPanel = {
         render: render,
         update: updatePanel,
+        pushRuntimeInfo: pushRuntimeInfo,
     };
 })();

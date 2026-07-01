@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from tools.data.types import DataFreq
-from tools.factors.tests.single_factor_test import ic as ic_module
+from tools.factors.tester_calc.single_factor_test import ic as ic_module
 
 
 def test_ic_evaluation_reuses_computed_factor_source_frequency(monkeypatch):

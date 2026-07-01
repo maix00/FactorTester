@@ -1,0 +1,367 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from tools.data.field_history import (
+    FieldHistoryProvider,
+    HistoricalFieldFallbackPolicy,
+    MissingHistoricalField,
+    TimestampTradingDayResolver,
+    load_historical_field_provider,
+    save_historical_field_records,
+)
+from tools.data.hub import DataHub, SQLiteStore
+
+
+def _records() -> list[dict]:
+    return [
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_label": "纯苯",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-05",
+            "value": 500,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_label": "纯苯",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-06",
+            "effective_timestamp": "2026-01-05 21:00:00",
+            "value": 100,
+        },
+    ]
+
+
+def _resolver() -> TimestampTradingDayResolver:
+    return TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 20:59:00"): pd.Timestamp("2026-01-05"),
+        # 夜盘 21:00 属于下一个交易日。
+        pd.Timestamp("2026-01-05 21:00:00"): pd.Timestamp("2026-01-06"),
+        pd.Timestamp("2026-01-05 21:01:00"): pd.Timestamp("2026-01-06"),
+    })
+
+
+def test_field_history_resolves_by_timestamp_and_trading_day() -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+    resolver = _resolver()
+
+    before = provider.resolve_at(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.Timestamp("2026-01-05 20:59:00"),
+        trading_day_resolver=resolver,
+    )
+    at_night_open = provider.resolve_at(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.Timestamp("2026-01-05 21:00:00"),
+        trading_day_resolver=resolver,
+    )
+
+    assert before.value == 500
+    assert at_night_open.value == 100
+    assert at_night_open.effective_trading_day == pd.Timestamp("2026-01-06")
+    assert at_night_open.effective_timestamp == pd.Timestamp("2026-01-05 21:00:00")
+
+
+def test_field_history_values_for_index_preserves_timestamp_index() -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+    index = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-05 20:59:00"),
+        pd.Timestamp("2026-01-05 21:00:00"),
+        pd.Timestamp("2026-01-05 21:01:00"),
+    ])
+
+    values = provider.values_for_index(
+        "BZ",
+        "MaxLimitOrderVolume",
+        index,
+        trading_day_resolver=_resolver(),
+    )
+
+    assert list(values.index) == list(index)
+    assert values.tolist() == [500, 100, 100]
+
+
+def test_field_history_values_for_index_uses_vectorized_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+
+    def _unexpected_resolve_at(*args: object, **kwargs: object) -> None:
+        raise AssertionError("values_for_index must not call resolve_at for each timestamp")
+
+    monkeypatch.setattr(provider, "resolve_at", _unexpected_resolve_at)
+
+    values = provider.values_for_index(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.DatetimeIndex([
+            pd.Timestamp("2026-01-05 20:59:00"),
+            pd.Timestamp("2026-01-05 21:00:00"),
+            pd.Timestamp("2026-01-05 21:01:00"),
+        ]),
+        trading_day_resolver=_resolver(),
+    )
+
+    assert values.tolist() == [500, 100, 100]
+
+
+def test_field_history_tz_aware_market_timestamps_use_local_wall_clock() -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+    ts = pd.Timestamp("2026-01-05 21:01:00", tz="Asia/Shanghai")
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 21:01:00", tz="Asia/Shanghai"): pd.Timestamp("2026-01-06"),
+    })
+
+    resolved = provider.resolve_at(
+        "BZ",
+        "MaxLimitOrderVolume",
+        ts,
+        trading_day_resolver=resolver,
+    )
+
+    assert resolved.value == 100
+
+
+def test_field_history_strict_mode_raises_when_product_or_field_missing() -> None:
+    provider = FieldHistoryProvider.from_records(_records())
+
+    with pytest.raises(MissingHistoricalField):
+        provider.resolve_at(
+            "UNKNOWN",
+            "MaxLimitOrderVolume",
+            pd.Timestamp("2026-01-05 21:00:00"),
+            trading_day_resolver=_resolver(),
+            fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+        )
+
+
+def test_latest_available_fallback_uses_nearest_trading_day_not_last_row() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-10",
+            "value": 100,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-02-01",
+            "value": 900,
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day(
+        "BZ",
+        "MaxLimitOrderVolume",
+        "2026-01-08",
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert resolved.value == 100
+    assert resolved.effective_trading_day == pd.Timestamp("2026-01-10")
+    assert resolved.approximated is True
+
+
+def test_values_for_index_latest_available_fallback_uses_nearest_row_per_timestamp() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-10",
+            "value": 100,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-02-01",
+            "value": 900,
+        },
+    ])
+    timestamp = pd.Timestamp("2026-01-08 09:00:00")
+
+    values = provider.values_for_index(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.DatetimeIndex([timestamp]),
+        trading_day_resolver=TimestampTradingDayResolver({timestamp: pd.Timestamp("2026-01-08")}),
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert values.tolist() == [100]
+
+
+def test_field_history_store_roundtrip(tmp_path: Path) -> None:
+    db_path = tmp_path / "field_history.sqlite"
+    DataHub.get_instance().register_sqlite_store(SQLiteStore(
+        key="field_history_test",
+        label="field-history-test",
+        path_getter=lambda: str(db_path),
+    ))
+
+    save_historical_field_records(
+        _records(),
+        store_key="field_history_test",
+        replace_provider="test",
+        replace_source_key="test/rules",
+    )
+    provider = load_historical_field_provider(store_key="field_history_test")
+
+    resolved = provider.resolve_at(
+        "BZ",
+        "MaxLimitOrderVolume",
+        pd.Timestamp("2026-01-05 21:00:00"),
+        trading_day_resolver=_resolver(),
+    )
+    assert resolved.value == 100
+
+
+def test_field_history_separates_futures_and_options_for_same_code() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-05",
+            "value": 500,
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "option",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2026-01-05",
+            "value": 100,
+        },
+    ])
+
+    future_value = provider.resolve_by_trading_day("CU", "MaxLimitOrderVolume", "2026-01-06")
+    option_value = provider.resolve_by_trading_day(
+        "CU",
+        "MaxLimitOrderVolume",
+        "2026-01-06",
+        instrument_type="option",
+    )
+
+    assert future_value.value == 500
+    assert option_value.value == 100
+
+
+def test_field_history_contract_specific_rule_overrides_product_level_rule() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-06-23",
+            "value": 1,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-09",
+            "value": 4,
+            "contract_codes": ["2606"],
+        },
+    ])
+
+    product_value = provider.resolve_by_trading_day("BZ", "MinLimitOrderVolume", "2026-06-24")
+    contract_value = provider.resolve_by_trading_day("BZ2606.DCE", "MinLimitOrderVolume", "2026-06-24")
+
+    assert product_value.value == 1
+    assert contract_value.value == 4
+    assert contract_value.contract_code == "2606"
+
+
+def test_field_history_open_ended_baseline_applies_before_source_snapshot() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "CU",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "1900-01-01",
+            "value": 500,
+            "source_date": "2026-06-23",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("CU", "MaxLimitOrderVolume", "2026-03-10")
+
+    assert resolved.value == 500
+    assert resolved.effective_trading_day == pd.Timestamp("1900-01-01")
+
+
+def test_field_history_product_object_uses_main_contract_for_contract_specific_rule() -> None:
+    class DummyFutures:
+        name = "BZ.DCE"
+
+        def get_contract_id_from_trading_day(self, trading_day):
+            return "BZ2606.DCE"
+
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-06-23",
+            "value": 1,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "BZ",
+            "instrument_type": "future",
+            "field_name": "MinLimitOrderVolume",
+            "effective_trading_day": "2026-03-09",
+            "value": 4,
+            "contract_codes": ["2606"],
+        },
+    ])
+    index = pd.DatetimeIndex([pd.Timestamp("2026-06-24 09:01:00")])
+
+    values = provider.values_for_index(
+        DummyFutures(),
+        "MinLimitOrderVolume",
+        index,
+        trading_day_resolver=TimestampTradingDayResolver({
+            pd.Timestamp("2026-06-24 09:01:00"): pd.Timestamp("2026-06-24"),
+        }),
+    )
+
+    assert values.iloc[0] == 4

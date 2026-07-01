@@ -8,3 +8,4 @@ if FACTOR_WORKSPACE:
         DataProviderSync,
     )
     from .DataProviderProductTS import DataProviderProductTS
+    from .DataProviderProductTSBundle import DataProviderProductTSBundle

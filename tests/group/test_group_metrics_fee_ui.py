@@ -37,41 +37,8 @@ def test_sectioned_group_metrics_keep_backend_percent_units():
     subprocess.run(['node', '-e', script, str(table_js)], check=True)
 
 
-def test_group_fee_config_parses_uniform_and_closetoday_rates():
-    from server.modules.single_factor_test.group import _parse_group_fee_config
-
-    fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config({'fee': 0.03})
-    assert fee_uniform == 0.0003
-    # 模式1/2：fee_modifications 为空时，返回空列表
-    assert fee_modifications == []
-    assert use_closetoday is False
-
-    fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config({
-        'fee': 0,
-        'use_closetoday': True,
-        'fee_modifications': [
-            {
-                'variety_code': 'RB',
-                'fields': {
-                    'open_ratio': 0.0001,
-                    'close_yesterday_ratio': 0.0002,
-                    'close_today_ratio': 0.0005,
-                },
-            },
-        ],
-    })
-    assert fee_uniform == 0
-    assert use_closetoday is True
-    # 模式3：fee_modifications 按品种传递
-    assert len(fee_modifications) == 1
-    assert fee_modifications[0].variety_code == 'RB'
-    assert fee_modifications[0].fields['open_ratio'] == 0.0001
-    assert fee_modifications[0].fields['close_yesterday_ratio'] == 0.0002
-    assert fee_modifications[0].fields['close_today_ratio'] == 0.0005
-
-
 def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
-    from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+    from tools.factors.tester_calc.single_factor_test.group.detail import build_group_detail
 
     index = [np.datetime64('2025-01-01T09:00'), np.datetime64('2025-01-01T09:01')]
     detail = build_group_detail(

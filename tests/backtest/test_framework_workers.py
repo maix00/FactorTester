@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from tools.backtest.workers import (
+from tools.testers.backtest.engines.workers import (
     EngineWorkerDispatcher,
     WorkerExecutionError,
     WorkerRequest,
@@ -67,7 +67,7 @@ def test_rqalpha_worker_is_declared_without_native_fallback() -> None:
 
 
 def test_native_group_strategy_reports_setting_fallback_diagnostics() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     payload = {
         "timestamps": ["2024-01-01T00:00:00", "2024-01-02T00:00:00"],
@@ -209,7 +209,7 @@ def test_framework_worker_streams_event_time_progress() -> None:
 
 
 def test_framework_progress_is_bounded_for_long_replays() -> None:
-    from tools.backtest.workers.runners.common import should_report_progress
+    from tools.testers.backtest.engines.workers.runners.common import should_report_progress
 
     checkpoints = [
         completed for completed in range(1, 10_001)
@@ -221,8 +221,8 @@ def test_framework_progress_is_bounded_for_long_replays() -> None:
     assert len(checkpoints) <= 102
 
 
-def test_native_group_strategy_progress_counts_every_strategy() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy
+def test_native_group_strategy_progress_counts_every_bar() -> None:
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     events = []
     payload = {
@@ -262,12 +262,14 @@ def test_native_group_strategy_progress_counts_every_strategy() -> None:
         "timestamp": timestamp,
     }))
 
-    assert [event["completed"] for event in events] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    assert {event["total"] for event in events} == {9}
+    # The vectorized native engine advances every strategy together on each bar,
+    # so replay progress is reported per bar (not per strategy sub-step).
+    assert [event["completed"] for event in events] == [1, 2, 3]
+    assert {event["total"] for event in events} == {3}
 
 
 def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     dispatcher = EngineWorkerDispatcher()
     payload = {
@@ -343,6 +345,71 @@ def test_frameworks_calculate_identical_group_targets_inside_each_worker() -> No
     )
 
 
+def test_frameworks_preserve_equal_risk_and_equal_notional_equity_difference() -> None:
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
+
+    dispatcher = EngineWorkerDispatcher()
+    timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 7)]
+    payload = {
+        "timestamps": timestamps,
+        "instruments": ["volatile", "stable"],
+        "prices": {
+            "volatile": [100.0, 110.0, 99.0, 118.8, 95.04, 123.552],
+            "stable": [100.0, 101.0, 102.01, 103.0301, 104.060401, 105.10100501],
+        },
+        "membership": [[[True, True], [True, True]]] * 6,
+        "signal_updates": [[True, True]] * 6,
+        "initial_cash": 100_000.0,
+        "market_rules": {
+            "margin_ratios": [[1.0, 1.0]] * 6,
+            "multipliers": [[1.0, 1.0]] * 6,
+            "lot_sizes": [[0.000001, 0.000001]] * 6,
+        },
+        "strategy_configs": [
+            _strategy_settings(
+                strategy_id="equal-risk",
+                allocation_policy="inverse_volatility",
+                volatility_lookback=2,
+                membership_index=0,
+                execution_timing="same_bar",
+            ),
+            _strategy_settings(
+                strategy_id="equal-notional",
+                allocation_policy="equal_notional",
+                membership_index=1,
+                execution_timing="same_bar",
+            ),
+        ],
+    }
+
+    results = {
+        engine: dispatcher.dispatch(WorkerRequest(
+            f"allocation-equity-{engine}", engine, "run_group_strategy", payload
+        )).result
+        for engine in ("backtrader", "qlib", "zipline")
+    }
+    results["native"] = run_native(payload)
+
+    assert {
+        engine: result["target_trace"]
+        for engine, result in results.items()
+    } == {
+        engine: results["native"]["target_trace"]
+        for engine in results
+    }
+    for engine, result in results.items():
+        risk_trace = result["target_trace"]["equal-risk"]
+        notional_trace = result["target_trace"]["equal-notional"]
+        assert risk_trace[timestamps[-1]] != notional_trace[timestamps[-1]]
+        risk_equity = result["portfolios"]["equal-risk"]["equity_curve"]
+        notional_equity = result["portfolios"]["equal-notional"]["equity_curve"]
+        assert risk_equity != notional_equity, engine
+        assert (
+            result["portfolios"]["equal-risk"]["final_value"]
+            != result["portfolios"]["equal-notional"]["final_value"]
+        ), engine
+
+
 @pytest.mark.parametrize("engine", ["native", "backtrader", "qlib", "zipline"])
 def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine: str) -> None:
     dispatcher = EngineWorkerDispatcher()
@@ -372,7 +439,7 @@ def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine:
             }],
     }
     if engine == "native":
-        from tools.backtest.workers.runners.native import run_group_strategy
+        from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
         result = run_group_strategy(payload)
     else:
@@ -389,7 +456,7 @@ def test_framework_margin_plugin_scales_orders_without_rewriting_targets(engine:
 
 
 def test_framework_liquidity_plugin_limits_each_bar_without_changing_target() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 5)]
     payload = {
@@ -436,7 +503,7 @@ def test_framework_liquidity_plugin_limits_each_bar_without_changing_target() ->
 def test_framework_fee_and_slippage_plugins_are_consistent(
     overrides: dict, price: float, expected_position: float
 ) -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 4)]
     config = {
@@ -477,7 +544,7 @@ def test_framework_fee_and_slippage_plugins_are_consistent(
 
 
 def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     timestamps = [f"2024-01-0{day}T00:00:00" for day in range(1, 5)]
     payload = {
@@ -503,6 +570,7 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
             "rebalance_trigger": "on_factor_signal",
             "position_policy": "rebalance_to_target",
             "fee_rate": 0.001,
+            "collect_execution_trace": True,
         }],
     }
     dispatcher = EngineWorkerDispatcher()
@@ -569,7 +637,7 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
 
 
 def test_framework_execution_timing_changes_returns_without_changing_targets() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     base_payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 4)],
@@ -616,7 +684,7 @@ def test_framework_execution_timing_changes_returns_without_changing_targets() -
 
 
 def test_execution_delay_bars_is_a_matching_parameter_not_slippage() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy
 
     payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],
@@ -652,7 +720,7 @@ def test_execution_delay_bars_is_a_matching_parameter_not_slippage() -> None:
 
 
 def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> None:
-    from tools.backtest.workers.runners.native import run_group_strategy as run_native
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
     payload = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 5)],
@@ -681,6 +749,7 @@ def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> N
             "position_policy": "rebalance_to_target",
             "execution_timing": "next_bar",
             "fee_rate": 0.001,
+            "collect_execution_trace": True,
         }],
     }
     dispatcher = EngineWorkerDispatcher()

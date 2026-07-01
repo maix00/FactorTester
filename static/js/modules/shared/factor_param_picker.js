@@ -60,7 +60,7 @@
         overlay.style.display = 'flex';
         body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">加载因子库...</div>';
         try {
-            const resp = await fetch('/custom-factors/api/param-factor-overview?include_subordinates=1');
+            const resp = await fetch('/custom-factors/api/factor-library-overview?include_subordinates=1');
             const data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');
             items = data.factors || [];

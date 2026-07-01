@@ -230,21 +230,10 @@
         onPrecisionChange();
     };
 
-    // ---------- 解析运行时间范围（含 submission 日期 fallback） ----------
+    // ---------- 解析运行时间范围 ----------
     // savedStartDate/savedEndDate: 分组对象保存的日期
-    // fallbackTesterId: 当以上都没有时，从 window.submissions 按 testerId 查找日期
-    dateInputs.resolveGroupRunTimeRangeWithFallback = function(savedStartDate, savedEndDate, fallbackTesterId) {
-        var resolved = dateInputs.resolveGroupRunTimeRange(savedStartDate, savedEndDate);
-        if (resolved.startDate && resolved.endDate) return resolved;
-        // Fallback: 从全局 submissions 列表中按 testerId 查找
-        if (fallbackTesterId && window.submissions) {
-            var sub = window.submissions.find(function(s) { return String(s.id) === String(fallbackTesterId); });
-            if (sub) {
-                if (!resolved.startDate) resolved.startDate = sub.start_date || null;
-                if (!resolved.endDate) resolved.endDate = sub.end_date || null;
-            }
-        }
-        return resolved;
+    dateInputs.resolveGroupRunTimeRangeWithSavedValues = function(savedStartDate, savedEndDate) {
+        return dateInputs.resolveGroupRunTimeRange(savedStartDate, savedEndDate);
     };
 
     GT.core.dateInputs = dateInputs;

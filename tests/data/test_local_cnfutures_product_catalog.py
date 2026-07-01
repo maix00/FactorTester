@@ -22,7 +22,7 @@ SECTOR_COLUMNS = [
 ]
 
 
-def _build_data_dir(root: Path) -> None:
+def _build_data_dir(root: Path) -> pd.DataFrame:
     (root / "main_mink").mkdir()
     (root / "main_dayk").mkdir()
     minute_rows = []
@@ -43,19 +43,26 @@ def _build_data_dir(root: Path) -> None:
     pd.DataFrame(
         {"S_INFO_WINDCODE": ["BZ.DCE", "A.DCE", "WIND_ONLY.DCE"]}
     ).to_parquet(root / "wind_mapping.parquet")
-    pd.DataFrame(
+    return pd.DataFrame(
         [["大连商品交易所", "DCE", "豆一", "豆一", "农产品", "A", "1", "1",
           None, None, None, "09:00-15:00", None, 10, 1, None, None, None, None]],
         columns=SECTOR_COLUMNS,
-    ).to_csv(root / "sectors.csv", index=False)
+    )
+
+
+def _seed_sector_db(db_path: Path, sectors: pd.DataFrame) -> None:
+    with sqlite3.connect(db_path) as conn:
+        sectors.to_sql(SECTORS_TABLE, conn, if_exists="replace", index=False)
 
 
 def test_catalog_keeps_data_product_without_sector_metadata(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _build_data_dir(data_dir)
+    sectors = _build_data_dir(data_dir)
     db_path = tmp_path / "catalog.sqlite"
 
+    _seed_sector_db(db_path, sectors)
+    sync_product_catalog(data_dir=data_dir, db_path=db_path)
     catalog = load_product_catalog(data_dir=data_dir, db_path=db_path)
 
     bz = catalog[catalog["_product_name"] == "BZ.DCE"].iloc[0]
@@ -73,9 +80,10 @@ def test_catalog_keeps_data_product_without_sector_metadata(tmp_path: Path):
 def test_catalog_sync_is_idempotent_and_sectors_are_stored(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _build_data_dir(data_dir)
+    sectors = _build_data_dir(data_dir)
     db_path = tmp_path / "catalog.sqlite"
 
+    _seed_sector_db(db_path, sectors)
     sync_product_catalog(data_dir=data_dir, db_path=db_path)
     sync_product_catalog(data_dir=data_dir, db_path=db_path)
 
@@ -102,9 +110,10 @@ def test_catalog_sync_is_idempotent_and_sectors_are_stored(tmp_path: Path):
 def test_catalog_exposes_continuous_and_curve_variants_from_artifact_coverage(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _build_data_dir(data_dir)
+    sectors = _build_data_dir(data_dir)
     db_path = tmp_path / "catalog.sqlite"
     ensure_artifact_schema(db_path)
+    _seed_sector_db(db_path, sectors)
     with sqlite3.connect(db_path) as conn:
         conn.executemany(
             f'''INSERT INTO "{ARTIFACT_COVERAGE_TABLE}" (
@@ -117,6 +126,7 @@ def test_catalog_exposes_continuous_and_curve_variants_from_artifact_coverage(tm
             ],
         )
 
+    sync_product_catalog(data_dir=data_dir, db_path=db_path)
     catalog = load_product_catalog(data_dir=data_dir, db_path=db_path)
     bz = catalog[catalog["_product_name"] == "BZ.DCE"].iloc[0]
 

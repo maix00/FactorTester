@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from tools.backtest.settings import backtest_setting_registry
+from typing import Any
+
+from tools.testers.settings import backtest_setting_registry
 
 
-def build_snapshot_summary(snapshot: dict) -> dict:
+def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
     """Build a readable summary from a saved single-factor-test snapshot."""
-    summary = {}
+    summary: dict[str, Any] = {}
 
     local_settings = snapshot.get('local_settings') or {}
     backend_local = local_settings if isinstance(local_settings, dict) else {}
@@ -63,10 +65,10 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         if param_items:
             summary['params'] = param_items
 
-    submissions = snapshot.get('submissions', [])
-    if submissions:
+    selections = _snapshot_product_path_selections(snapshot)
+    if selections:
         submission_items = []
-        for index, submission in enumerate(submissions):
+        for index, submission in enumerate(selections):
             label = (
                 submission.get('product_group')
                 or submission.get('label')
@@ -82,21 +84,6 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         if submission_items:
             summary['products'] = submission_items
 
-    return_freqs = snapshot.get('return_freqs', [])
-    if return_freqs:
-        freq_items = []
-        for freq in return_freqs:
-            if freq.get('checked') is False:
-                continue
-            alias = freq.get('alias', '?')
-            return_freq = freq.get('return_freq', '')
-            if return_freq:
-                freq_items.append(f"{alias} · 收益率频率 {return_freq}")
-            else:
-                freq_items.append(f"{alias} · 收益率频率 默认")
-        if freq_items:
-            summary['return_freqs'] = freq_items
-
     group_settings = snapshot.get('group_settings', {})
     if group_settings:
         group_parts = []
@@ -110,7 +97,16 @@ def build_snapshot_summary(snapshot: dict) -> dict:
             group_parts.append(
                 f"共 {total_groups} 组{screen_note} · Long-Short {len(ls_configs)} 个"
             )
-            fee_labels = {'none': '无费用', 'market': '市场规则', 'custom': '自定义费率'}
+            fee_labels = {
+                'auto': '自动费率',
+                'close_yesterday': '平昨费率',
+                'close_today': '平今费率',
+                'custom': '自定义品种/合约',
+                'fixed': '固定费率',
+                'zero': '无费用',
+                'none': '无费用',
+                'market': '自动费率',
+            }
             trigger_labels = {
                 'on_factor_signal': '因子信号事件',
                 'membership_change': '成员变化事件',
@@ -126,11 +122,11 @@ def build_snapshot_summary(snapshot: dict) -> dict:
                 group_count_value = group.get('splitCount', '未设置')
                 factor_alias = group.get('factorAlias') or '因子未设置'
                 overrides = group if isinstance(group, dict) else {}
-                fee_mode_value = overrides.get('fee_mode') or '默认'
+                fee_mode_value = str(overrides.get('fee_mode') or '默认')
                 fee_text = fee_labels.get(fee_mode_value, fee_mode_value)
-                trigger = overrides.get('rebalance_trigger')
+                trigger = str(overrides.get('rebalance_trigger') or '')
                 trigger_text = trigger_labels.get(trigger, trigger or '默认触发')
-                position_policy = overrides.get('position_policy')
+                position_policy = str(overrides.get('position_policy') or '')
                 position_text = position_labels.get(position_policy, position_policy or '默认持仓')
                 group_parts.append(
                     f"{label} · 第{group_index}/{group_count_value}组 · 因子 {factor_alias} · {fee_text} · {trigger_text} · {position_text}"
@@ -149,8 +145,15 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         if group_count:
             group_parts.append(f"分组数={group_count}")
         fee_mode = group_settings.get('fee_mode', '')
-        if fee_mode and fee_mode != 'none':
-            fee_labels = {'none': '无费率', 'percent': '百分比', 'fixed': '固定', 'uniform': '统一费率', 'per_product': '分品种费率', 'custom': '自定义费率'}
+        if fee_mode and fee_mode not in ('none', 'zero'):
+            fee_labels = {
+                'auto': '自动费率',
+                'close_yesterday': '平昨费率',
+                'close_today': '平今费率',
+                'fixed': '固定费率',
+                'custom': '自定义品种/合约',
+                'market': '自动费率',
+            }
             group_parts.append(f"费率={fee_labels.get(fee_mode, fee_mode)}")
             if group_settings.get('fee_rate'):
                 group_parts.append(f"{group_settings.get('fee_rate')}")
@@ -174,6 +177,30 @@ def build_snapshot_summary(snapshot: dict) -> dict:
         elif group_end:
             group_parts.append(f"终末={group_end}")
         if group_parts:
-            summary['group_test'] = ', '.join(group_parts)
+            summary['group_test'] = [', '.join(group_parts)]
 
     return summary
+
+
+def _snapshot_product_path_selections(snapshot: dict) -> list[dict]:
+    selections: list[dict] = []
+    seen: set[str] = set()
+
+    def add(item):
+        if not isinstance(item, dict):
+            return
+        sid = str(item.get('product_path_selection_id') or item.get('id') or len(selections))
+        if sid in seen:
+            return
+        seen.add(sid)
+        selections.append(item)
+
+    local_settings = snapshot.get('local_settings')
+    if isinstance(local_settings, dict):
+        add(local_settings.get('product_path_selection'))
+    group_settings = snapshot.get('group_settings')
+    if isinstance(group_settings, dict):
+        for group in group_settings.get('groups') or []:
+            if isinstance(group, dict):
+                add(group.get('product_path_selection'))
+    return selections

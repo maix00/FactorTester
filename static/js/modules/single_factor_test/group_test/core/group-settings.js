@@ -139,8 +139,8 @@
         // ── Tree / lineage ──
         { key: 'parentId',     type: 'string',  default: null },
 
-        // ── Tester / factor scoping (root only; child inherit from parent chain) ──
-        { key: 'testerId',    type: 'string',  default: '' },
+        // ── Product path / factor scoping (root only; child inherit from parent chain) ──
+        { key: 'product_path_selection', type: 'object', default: null },
         { key: 'factorAlias', type: 'string',  default: '' },
         { key: 'splitCount',  type: 'number',  default: 5,
           validate: function(v) {
@@ -255,9 +255,9 @@
         }
 
         if (!hasParent) {
-            // Root nodes require testerId + factorAlias
-            if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
-                errors.push('testerId is required (non-empty string)');
+            // Root nodes require product_path_selection + factorAlias
+            if (!config.product_path_selection || typeof config.product_path_selection !== 'object') {
+                errors.push('product_path_selection is required');
             }
             if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
                 errors.push('factorAlias is required (non-empty string)');
@@ -347,7 +347,7 @@
     function _fillGroupFromConfig(item, config, hasParent) {
         var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
         var inheritedKeys = hasParent ? {
-            testerId: true,
+            product_path_selection: true,
             factorAlias: true,
             splitCount: true,
             groupIndex: true,
@@ -435,7 +435,7 @@
 
     function _groupsList() {
         return _groupItems.map(function(item) {
-            return { id: item.id, name: item.name, testerId: item.testerId, factorAlias: item.factorAlias };
+            return { id: item.id, name: item.name, product_path_selection: item.product_path_selection, factorAlias: item.factorAlias };
         });
     }
 
@@ -560,10 +560,18 @@
         if (node.parentId) {
             return _groupsEffectiveProductNames(_groupsGet(node.parentId), options, seen);
         }
-        // 根节点：用自身 products 或 testerId 解析
+        // 根节点：用自身 products 或 product_path_selection 解析
         if (Array.isArray(node.products) && node.products.length) return node.products.slice();
-        if (node.testerId && typeof options.getProductsForTester === 'function') {
-            return options.getProductsForTester(node.testerId) || [];
+        var selection = node.product_path_selection;
+        if (selection && Array.isArray(selection.products) && selection.products.length) {
+            return selection.products.map(function(item) {
+                return typeof item === 'string' ? item : (item && item.name);
+            }).filter(Boolean);
+        }
+        if (selection && Array.isArray(selection.product_groups) && selection.product_groups.length) {
+            return selection.product_groups.map(function(item) {
+                return typeof item === 'string' ? item : (item && item.name);
+            }).filter(Boolean);
         }
         return [];
     }
@@ -839,10 +847,12 @@
 
     function _settingsGroupSnapshot(group) {
         var out = _copyKeys(group || {}, [
-            'id', 'name', 'parentId', 'testerId', 'factorAlias', 'splitCount',
-            'groupIndex', 'isAllGroups', 'needsRegenerate', 'startDate', 'endDate',
-            'shortAlias', 'overrides', '_expanded', 'productMask',
+            'id', 'name', 'parentId', 'product_path_selection', 'factorAlias', 'splitCount',
+            'groupIndex', 'isAllGroups', 'shortAlias', 'productMask',
         ]);
+        if (out.product_path_selection && GT.backendSettings && typeof GT.backendSettings.compactProductPathSelection === 'function') {
+            out.product_path_selection = GT.backendSettings.compactProductPathSelection(out.product_path_selection);
+        }
         if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
             var backendFields = GT.backendSettings.flattenGroupForSnapshot(group || {});
             Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });

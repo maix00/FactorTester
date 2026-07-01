@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "_comment": "首页模块的唯一注册表 —— 跨客户端共享。web (templates/home.html) 与原生 App (apple/) 的 home 都从这里渲染。新增/调整模块只改这一处，所有端同步生效。字段：id 唯一标识；title 标题；desc 描述；icon 网页用 emoji 文本；sfSymbol 苹果原生用 SF Symbol 名；path 服务器路由；requiresAuth 是否需登录才能进入；roles 非空时仅这些角色可见（角色取自 /api/me 的 role）。",
+  "modules": [
+    {
+      "id": "single_factor_test",
+      "title": "单因子测试",
+      "desc": "IC 分析、分组回测、因子有效性评估",
+      "icon": "📊",
+      "sfSymbol": "chart.bar.xaxis",
+      "path": "/single_factor_test",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
+      "id": "products",
+      "title": "产品管理",
+      "desc": "产品组管理、品种价格序列查看",
+      "icon": "📈",
+      "sfSymbol": "chart.line.uptrend.xyaxis",
+      "path": "/products",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
+      "id": "sqlite_web",
+      "title": "sqlite-web",
+      "desc": "浏览 OpenCTP 与用户数据的 SQLite 数据库",
+      "icon": "SQL",
+      "sfSymbol": "cylinder.split.1x2",
+      "path": "/sqlite-web/",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
+      "id": "custom_factors",
+      "title": "因子管理",
+      "desc": "创建、编辑和管理自定义因子表达式",
+      "icon": "🧬",
+      "sfSymbol": "atom",
+      "path": "/custom-factors/editor",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
+      "id": "admin_users",
+      "title": "用户与机构管理",
+      "desc": "管理机构、用户层级与管理员权限",
+      "icon": "🏛",
+      "sfSymbol": "building.columns",
+      "path": "/admin/users",
+      "requiresAuth": true,
+      "roles": ["super_admin", "org_admin", "level_admin"]
+    },
+    {
+      "id": "docs",
+      "title": "技术文档",
+      "desc": "前后端架构、API 接口、因子说明",
+      "icon": "📖",
+      "sfSymbol": "book",
+      "path": "/docs",
+      "requiresAuth": false,
+      "roles": []
+    }
+  ]
+}

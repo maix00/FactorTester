@@ -1,0 +1,1 @@
+"""IC test application settings."""

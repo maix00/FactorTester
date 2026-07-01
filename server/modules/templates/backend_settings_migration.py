@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from tools.backtest.settings import backtest_setting_registry
+from tools.testers.settings import backtest_setting_registry
 
 
 STRUCTURAL_GROUP_KEYS = {
@@ -21,7 +21,10 @@ LEGACY_GROUP_KEYS = {
 }
 
 
-def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def migrate_snapshot_backend_settings(
+    snapshot: dict[str, Any],
+    product_groups: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], bool]:
     """Return a snapshot whose backtest settings live on flat group/strategy rows."""
     if not isinstance(snapshot, dict):
         return snapshot, False
@@ -29,10 +32,16 @@ def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[st
     before = deepcopy(migrated)
 
     defaults = _defaults()
+    product_path_selections = _migrate_product_path_selections(migrated, product_groups or [])
     local_defaults = _extract_local_values(migrated)
     backend_group_values = _extract_backend_group_values(migrated)
     group_settings = migrated.get("group_settings")
     if isinstance(group_settings, dict):
+        _attach_product_path_selections_to_groups(group_settings, product_path_selections)
+        _inherit_group_product_path_selections(group_settings.get("groups"))
+        _normalize_product_path_selection_fields(group_settings.get("groups"), product_groups or [])
+        _normalize_product_path_selection_fields(group_settings.get("lsConfigs"), product_groups or [])
+        _remove_legacy_group_tester_ids(group_settings.get("groups"))
         _migrate_items(group_settings.get("groups"), backend_group_values, defaults, STRUCTURAL_GROUP_KEYS)
         _migrate_items(group_settings.get("lsConfigs"), backend_group_values, defaults, STRUCTURAL_LS_KEYS)
 
@@ -41,6 +50,7 @@ def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[st
     local_settings = migrated.get("local_settings")
     if not isinstance(local_settings, dict):
         local_settings = {}
+    _normalize_product_path_selection(local_settings.get("product_path_selection"), product_groups or [])
     for key in list(local_settings.keys()):
         if key in LEGACY_LOCAL_KEYS or key == "backendBacktestSettings":
             local_settings.pop(key, None)
@@ -55,6 +65,165 @@ def migrate_snapshot_backend_settings(snapshot: dict[str, Any]) -> tuple[dict[st
         migrated.pop("local_settings", None)
 
     return migrated, migrated != before
+
+
+def _migrate_product_path_selections(snapshot: dict[str, Any], product_groups: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    raw_items = snapshot.get("submissions") or []
+    selections: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    for index, item in enumerate(raw_items if isinstance(raw_items, list) else []):
+        if not isinstance(item, dict):
+            continue
+        original_selection_id = str(
+            item.get("product_path_selection_id")
+            or item.get("selection_id")
+            or item.get("id")
+            or f"product-path-selection-{index + 1}"
+        )
+        paths = list(item.get("selected_paths") or item.get("paths") or [])
+        paths = _canonical_paths(paths)
+        matched_group = _match_product_group(paths, item, product_groups)
+        product_group = str((matched_group or {}).get("name") or item.get("product_group") or "")
+        template_id = str(
+            item.get("product_group_template_id")
+            or item.get("template_id")
+            or (matched_group or {}).get("id")
+            or ""
+        )
+        selection_id = template_id or original_selection_id
+        if selection_id in seen:
+            if original_selection_id and original_selection_id not in selections and selection_id in selections:
+                selections[original_selection_id] = selections[selection_id]
+            continue
+        seen.add(selection_id)
+        source_type = str(
+            item.get("source_type")
+            or ("user_product_group_template" if template_id else "manual_selection")
+        )
+        selection: dict[str, Any] = {
+            "product_path_selection_id": selection_id,
+        }
+        if not template_id and paths:
+            selection["paths"] = list(paths)
+        selections[selection_id] = selection
+        if original_selection_id and original_selection_id != selection_id:
+            selections[original_selection_id] = selection
+    snapshot.pop("submissions", None)
+    snapshot.pop("product_path_selections", None)
+    return selections
+
+
+def _attach_product_path_selections_to_groups(
+    group_settings: dict[str, Any],
+    selections_by_id: dict[str, dict[str, Any]],
+) -> None:
+    if not selections_by_id:
+        return
+    groups = group_settings.get("groups")
+    if not isinstance(groups, list):
+        return
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        selection_id = str(group.get("product_path_selection_id") or group.get("testerId") or "")
+        selection = selections_by_id.get(selection_id)
+        if selection is not None:
+            group["product_path_selection"] = selection
+
+
+def _normalize_product_path_selection_fields(items: Any, product_groups: list[dict[str, Any]]) -> None:
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if isinstance(item, dict):
+            _normalize_product_path_selection(item.get("product_path_selection"), product_groups)
+
+
+def _inherit_group_product_path_selections(groups: Any) -> None:
+    if not isinstance(groups, list):
+        return
+    groups_by_id = {
+        str(group.get("id")): group
+        for group in groups
+        if isinstance(group, dict) and group.get("id")
+    }
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        if isinstance(group.get("product_path_selection"), dict):
+            continue
+        parent = groups_by_id.get(str(group.get("parentId") or ""))
+        parent_selection = parent.get("product_path_selection") if isinstance(parent, dict) else None
+        if isinstance(parent_selection, dict):
+            group["product_path_selection"] = deepcopy(parent_selection)
+
+
+def _normalize_product_path_selection(selection: Any, product_groups: list[dict[str, Any]] | None = None) -> None:
+    if not isinstance(selection, dict):
+        return
+    selection_id = str(
+        selection.get("product_path_selection_id")
+        or selection.get("selection_id")
+        or selection.get("id")
+        or selection.get("product_group_template_id")
+        or selection.get("path_id")
+        or selection.get("template_id")
+        or ""
+    ).strip()
+    template_id = str(
+        selection.get("product_group_template_id")
+        or selection.get("path_id")
+        or selection.get("template_id")
+        or ""
+    ).strip()
+    is_product_group_ref = bool(template_id)
+    if template_id:
+        selection_id = template_id
+    normalized_paths: list[str] = []
+    paths = selection.get("paths") or selection.get("selected_paths")
+    if isinstance(paths, list):
+        normalized_paths = _canonical_paths(paths)
+        matched_group = _match_product_group(normalized_paths, selection, product_groups or [])
+        if matched_group:
+            template_id = str(matched_group.get("id") or "").strip()
+            if template_id:
+                selection_id = template_id
+                is_product_group_ref = True
+    if selection_id:
+        selection.clear()
+        selection["product_path_selection_id"] = selection_id
+        if normalized_paths and not is_product_group_ref:
+            selection["paths"] = list(normalized_paths)
+
+
+def _remove_legacy_group_tester_ids(groups: Any) -> None:
+    if not isinstance(groups, list):
+        return
+    for group in groups:
+        if isinstance(group, dict):
+            group.pop("testerId", None)
+
+
+def _canonical_paths(paths: Any) -> list[str]:
+    return sorted({str(path) for path in (paths or []) if str(path).strip()})
+
+
+def _match_product_group(paths: list[str], item: dict[str, Any], product_groups: list[dict[str, Any]]) -> dict[str, Any] | None:
+    template_id = str(item.get("product_group_template_id") or item.get("template_id") or "").strip()
+    if template_id:
+        for group in product_groups:
+            if str(group.get("id") or "") == template_id:
+                return group
+    wanted = set(paths)
+    for group in product_groups:
+        if set(_canonical_paths(group.get("paths") or [])) == wanted:
+            return group
+    name = str(item.get("product_group") or "").strip()
+    if name:
+        for group in product_groups:
+            if str(group.get("name") or "") == name:
+                return group
+    return None
 
 
 def _defaults() -> dict[str, Any]:
@@ -152,12 +321,16 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
     if "feeMode" in item:
         mode = str(item.get("feeMode") or "none")
         if mode == "none":
-            values["fee_mode"] = "none"
+            values["fee_mode"] = "zero"
         elif mode == "per_product" and not item.get("feeMap") and item.get("feeRate") in (None, ""):
-            values["fee_mode"] = "market"
+            values["fee_mode"] = "auto"
         else:
-            values["fee_mode"] = "custom"
-            _set(values, "custom_fee_rate", item.get("feeRate"))
+            if item.get("feeMap"):
+                values["fee_mode"] = "custom"
+                values["custom_fee_overrides"] = item.get("feeMap")
+            else:
+                values["fee_mode"] = "fixed"
+                _set(values, "fixed_fee_rate", item.get("feeRate"))
     if "rebalanceMode" in item:
         mapping = {
             "each_period": "on_factor_signal",
@@ -173,7 +346,7 @@ def _legacy_group_values(item: dict[str, Any]) -> dict[str, Any]:
         if mode in {"percent", "volume_participation"}:
             values["liquidity_mode"] = "volume_participation"
             try:
-                percent = float(item.get("liquidityPercent"))
+                percent = float(item.get("liquidityPercent") or 0.0)
                 values["participation_rate"] = percent / 100.0 if percent > 1 else percent
             except Exception:
                 pass

@@ -35,12 +35,24 @@
     function getMinimalPaths(tree) {
         if (!tree) return [];
         var sel = tree.getSelectedNodes();
+        if (!sel || !sel.length) return [];
         var keySet = {};
         sel.forEach(function(n) { keySet[n.key] = true; });
         return sel.filter(function(n) {
             var p = n.parent;
             while (p && p.key) { if (keySet[p.key]) return false; p = p.parent; }
             return true;
+        }).map(function(n) { return n.key; });
+    }
+
+    function getLeafOnlyPaths(tree) {
+        if (!tree) return [];
+        return tree.getSelectedNodes().filter(function(n) {
+            if (!n) return false;
+            if (typeof n.isFolder === 'function') {
+                return !n.isFolder();
+            }
+            return !n.folder;
         }).map(function(n) { return n.key; });
     }
 
@@ -58,11 +70,13 @@
 
     function createTree($container, opts) {
         opts = opts || {};
+        var onlyLeaf = !!opts.onlyLeaf;
+        var selectMode = opts.selectMode || 3;
         $container.empty();
         $container.fancytree({
             source: { url: '/api/product_tree?checkbox=1' },
             checkbox: true,
-            selectMode: 3,
+            selectMode: selectMode,
             init: function(e, data) {
                 var el = $container[0];
                 el.addEventListener('wheel', function(ev) {
@@ -87,7 +101,19 @@
                 data.result = { url: '/get_products', data: { path: node.key } };
             },
             select: function(e, data) {
-                if (opts.onSelect) opts.onSelect(getMinimalPaths(data.tree));
+                if (onlyLeaf && data.node && data.node.key && data.node.getParent) {
+                    var isFolder = typeof data.node.isFolder === 'function'
+                        ? data.node.isFolder()
+                        : !!data.node.folder;
+                    if (isFolder) {
+                        data.node.setSelected(false);
+                        return;
+                    }
+                }
+                if (opts.onSelect) {
+                    var paths = onlyLeaf ? getLeafOnlyPaths(data.tree) : getMinimalPaths(data.tree);
+                    opts.onSelect(paths);
+                }
             },
             renderNode: function(e, data) {
                 var desc = data.node.data.desc;
@@ -159,7 +185,7 @@
     function initLeftTree($container, treeOpts) {
         var $left = $container.find('.ps-left-content');
         $left.html('<div style="margin-bottom:8px;color:#586069;font-size:13px;">树状结构，勾选叶子节点或分类后提交</div>'
-            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;flex:1 1 0;min-height:0;overflow-x:auto;overflow-y:scroll;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
+            + '<div class="ps-tree-container product-tree-scrollbox" style="width:100%;box-sizing:border-box;flex:1 1 0;min-height:0;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
         createTree($left.find('.ps-tree-container'), treeOpts);
     }
 
@@ -480,6 +506,7 @@
         updateLeftHint: updateLeftHint,
         createTree: createTree,
         getMinimalPaths: getMinimalPaths,
+        getLeafOnlyPaths: getLeafOnlyPaths,
         restoreChecks: restoreChecks,
         clearChecks: clearChecks,
         renderSubmissionHistory: renderSubmissionHistory,

@@ -11,11 +11,11 @@
     GT.panels.list = GT.panels.list || {};
 
     // ── Expand caches ──
-    var _testerProductsCache = {};
+    var _productSelectionProductsCache = {};
     var _nodeFeeCache = {};
 
     function invalidateExpandCaches() {
-        _testerProductsCache = {};
+        _productSelectionProductsCache = {};
         _nodeFeeCache = {};
     }
 
@@ -28,42 +28,94 @@
     var CHIP_STYLE_PLAIN = '';
 
     function renderChipHtml(labelOrText, value) {
-        if (GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function') {
-            return GT.backendSettings.renderChipHtml(labelOrText, value);
+        if (window.ChipRenderer && typeof window.ChipRenderer.chipHtml === 'function') {
+            if (value !== undefined && value !== null && value !== '') {
+                return window.ChipRenderer.chipHtml(
+                    { chip_template: '{label}: {value}' },
+                    { valueOf: function(k) { return k === 'label' ? String(labelOrText || '') : String(value); },
+                      escapeHTML: escapeHTML,
+                      renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                          ? GT.backendSettings.renderChipHtml : undefined }
+                );
+            }
+            return window.ChipRenderer.chipHtml(
+                { chip_template: '{label}: {value}' },
+                { escapeHTML: escapeHTML,
+                  resolve: function() { return ''; },
+                  valueOf: function(k) { return k === 'value' ? String(labelOrText == null ? '' : labelOrText) : ''; },
+                  renderChipHtml: GT.backendSettings && typeof GT.backendSettings.renderChipHtml === 'function'
+                      ? GT.backendSettings.renderChipHtml : undefined }
+            );
         }
         return escapeHTML(value === undefined ? labelOrText : (labelOrText + ': ' + value));
     }
 
-    /** Get products list for a tester from window.submissions (cached) */
-    function testerProducts(testerId) {
-        if (_testerProductsCache[testerId]) return _testerProductsCache[testerId];
-        var subs = window.submissions || [];
-        var result = [];
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) === String(testerId)) {
-                var products = subs[i].products;
-                if (Array.isArray(products)) {
-                    result = products.map(function(p) {
-                        if (typeof p === 'string') return { name: p, desc: '' };
-                        return { name: p.name || '', desc: p.desc || '' };
-                    });
-                }
-                break;
+    function selectionId(selection) {
+        var utils = window.ProductPathSelectionUtils;
+        return utils && utils.selectionId ? utils.selectionId(selection)
+            : (selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '');
+    }
+
+    function resolveProductPathSelection(selectionOrId) {
+        var selection = (typeof selectionOrId === 'object' && selectionOrId) ? selectionOrId : null;
+        var sid = selection ? selectionId(selection) : String(selectionOrId || '');
+        var loaded = GT.backendSettings && typeof GT.backendSettings.getProductPathSelections === 'function'
+            ? GT.backendSettings.getProductPathSelections()
+            : [];
+        if (!sid && !selection) return selection;
+        for (var i = 0; i < loaded.length; i++) {
+            if (selectionId(loaded[i]) === sid) return loaded[i];
+        }
+        if (selection) {
+            var templateId = String(selection.product_group_template_id || selection.path_id || '').trim();
+            var productGroup = String(selection.product_group || selection.product_group_name || selection.label || selection.name || '').trim();
+            var paths = selection.paths || selection.selected_paths || [];
+            var pathKey = Array.isArray(paths) ? paths.map(function(path) { return String(path || '').trim(); }).filter(Boolean).sort().join('|') : '';
+            for (var j = 0; j < loaded.length; j++) {
+                var candidate = loaded[j] || {};
+                if (templateId && String(candidate.product_group_template_id || candidate.path_id || candidate.id || candidate.product_path_selection_id || '') === templateId) return candidate;
+                if (productGroup && String(candidate.product_group || candidate.product_group_name || candidate.label || candidate.name || '') === productGroup) return candidate;
+                var candidatePaths = candidate.paths || candidate.selected_paths || [];
+                var candidatePathKey = Array.isArray(candidatePaths) ? candidatePaths.map(function(path) { return String(path || '').trim(); }).filter(Boolean).sort().join('|') : '';
+                if (pathKey && candidatePathKey && pathKey === candidatePathKey) return candidate;
             }
         }
-        _testerProductsCache[testerId] = result;
+        return selection;
+    }
+
+    function nodeProductPathSelection(node) {
+        if (!node) return null;
+        if (node.parentId) {
+            return (GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField)
+                ? GT.groupSettings.groups.resolveRootField(node, 'product_path_selection') : null;
+        }
+        return node.product_path_selection || null;
+    }
+
+    /** Get products list from a product path selection (cached) */
+    function productPathSelectionProducts(selectionOrId) {
+        var selection = resolveProductPathSelection(selectionOrId);
+        var sid = selection ? selectionId(selection) : String(selectionOrId || '');
+        if (_productSelectionProductsCache[sid]) return _productSelectionProductsCache[sid];
+        var utils = window.ProductPathSelectionUtils;
+        var result = utils && utils.selectionProducts ? utils.selectionProducts(selection) : [];
+        _productSelectionProductsCache[sid] = result;
         return result;
     }
 
-    /** Look up a submission label by testerId */
-    function testerLabel(testerId) {
-        var subs = window.submissions || [];
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) === String(testerId)) {
-                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
-            }
+    function productPathSelectionLabel(selectionOrId) {
+        var selection = resolveProductPathSelection(selectionOrId);
+        var sid = selection ? selectionId(selection) : String(selectionOrId || '');
+        var utils = window.ProductPathSelectionUtils;
+        if (selection && utils && utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection) || '—';
+        if (selection && utils && utils.selectionLabel) return utils.selectionLabel(selection) || '—';
+        if (selection) {
+            var label = selection.product_group || selection.label || selection.name || sid;
+            if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
+            if (selection.path_id) return label + ' · 路径组';
+            return label || '—';
         }
-        return testerId || '—';
+        return sid || '—';
     }
 
     function dgName(id) {
@@ -79,18 +131,13 @@
         return (GT.groupSettings.groups && GT.groupSettings.groups.get) ? GT.groupSettings.groups.get(id) : null;
     }
 
-    function nodeTesterId(node) {
-        if (!node) return null;
-        if (node.parentId) {
-            return (GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) 
-                ? GT.groupSettings.groups.resolveRootField(node, 'testerId') : null;
-        }
-        return node.testerId || null;
+    function nodeProductPathSelectionId(node) {
+        return selectionId(nodeProductPathSelection(node)) || null;
     }
 
     function nodeProducts(node) {
-        var tid = nodeTesterId(node);
-        var allProds = tid ? testerProducts(tid) : [];
+        var selection = nodeProductPathSelection(node);
+        var allProds = selection ? productPathSelectionProducts(selection) : [];
         if (allProds.length === 0) return [];
         if (node.productMask && Object.keys(node.productMask).length > 0) {
             var filtered = [];
@@ -149,9 +196,12 @@
             ? GT.backendSettings.groupOverrideValues(node && node.id)
             : null;
         var mode = values && values.fee_mode;
-        if (mode === 'none' || !mode) return '—';
-        if (mode === 'market') return '市场规则';
-        if (mode === 'custom') return values.custom_fee_rate != null ? Number(values.custom_fee_rate).toFixed(6) : '自定义';
+        if (mode === 'none' || mode === 'zero' || !mode) return '—';
+        if (mode === 'market' || mode === 'auto') return '自动';
+        if (mode === 'close_yesterday') return '平昨';
+        if (mode === 'close_today') return '平今';
+        if (mode === 'fixed') return values.fixed_fee_rate != null ? Number(values.fixed_fee_rate).toFixed(6) : '固定';
+        if (mode === 'custom') return '自定义';
         return mode;
     }
 
@@ -202,8 +252,12 @@
     }
 
     /** Get addGroupBatchKey from addGroupBatch registry */
-    function addGroupBatchKey(testerId, factorAlias, splitCount) {
-        return GT.groupSettings.addGroupBatch.key(testerId, factorAlias, splitCount);
+    function addGroupBatchKey(selectionOrId, factorAlias, splitCount) {
+        return GT.groupSettings.addGroupBatch.key(
+            typeof selectionOrId === 'object' ? selectionId(selectionOrId) : selectionOrId,
+            factorAlias,
+            splitCount
+        );
     }
 
     /** Group base items into addGroupBatches (UI list display groups) */
@@ -213,9 +267,16 @@
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             if (item.parentId) continue;
-            var key = addGroupBatchKey(item.testerId, item.factorAlias, item.splitCount);
+            var key = addGroupBatchKey(item.product_path_selection, item.factorAlias, item.splitCount);
             if (!_addGroupBatchMap[key]) {
-                _addGroupBatchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, splitCount: item.splitCount, items: [] };
+                _addGroupBatchMap[key] = {
+                    key: key,
+                    product_path_selection: item.product_path_selection,
+                    product_path_selection_id: selectionId(item.product_path_selection),
+                    factorAlias: item.factorAlias,
+                    splitCount: item.splitCount,
+                    items: []
+                };
             }
             _addGroupBatchMap[key].items.push(item);
         }
@@ -239,7 +300,7 @@
         var ids = [];
         for (var i = 0; i < items.length; i++) {
             if (items[i].parentId) continue;
-            if (addGroupBatchKey(items[i].testerId, items[i].factorAlias, items[i].splitCount) === addGroupBatchKeyVal) {
+            if (addGroupBatchKey(items[i].product_path_selection, items[i].factorAlias, items[i].splitCount) === addGroupBatchKeyVal) {
                 ids.push(items[i].id);
             }
         }
@@ -284,7 +345,7 @@
         return html;
     }
 
-    function lsTesterLabel(dgId) {
+    function lsProductPathSelectionLabel(dgId) {
         if (!dgId) return '—';
         var dg = GT.groupSettings.groups && GT.groupSettings.groups.get(dgId);
         if (!dg) return '—';
@@ -294,8 +355,8 @@
             root = GT.groupSettings.groups.get(root.parentId);
             if (!root) break;
         }
-        if (!root || !root.testerId) return '—';
-        return testerLabel(root.testerId);
+        var selection = root && nodeProductPathSelection(root);
+        return selection ? productPathSelectionLabel(selection) : '—';
     }
 
     // -- 挂载 --
@@ -305,11 +366,13 @@
         CHIP_STYLE: CHIP_STYLE,
         CHIP_STYLE_PLAIN: CHIP_STYLE_PLAIN,
         renderChipHtml: renderChipHtml,
-        testerProducts: testerProducts,
-        testerLabel: testerLabel,
+        selectionId: selectionId,
+        productPathSelectionProducts: productPathSelectionProducts,
+        productPathSelectionLabel: productPathSelectionLabel,
         dgName: dgName,
         getGroup: getGroup,
-        nodeTesterId: nodeTesterId,
+        nodeProductPathSelectionId: nodeProductPathSelectionId,
+        nodeProductPathSelection: nodeProductPathSelection,
         nodeProducts: nodeProducts,
         synthGroupForChildNode: synthGroupResolved,
         synthGroupForDerivedNode: synthGroupResolved,
@@ -326,7 +389,7 @@
         addGroupBatchCommon: addGroupBatchCommon,
         deriveOverrideChips: deriveOverrideChips,
         renderAllChipsForGroup: renderAllChipsForGroup,
-        lsTesterLabel: lsTesterLabel,
+        lsProductPathSelectionLabel: lsProductPathSelectionLabel,
         invalidateExpandCaches: invalidateExpandCaches,
     };
 })();

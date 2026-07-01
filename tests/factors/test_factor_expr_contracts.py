@@ -158,7 +158,7 @@ def test_one_bar_normalized_time_center_is_neutral_on_observed_values():
     values = pd.DataFrame({"A": [4.0, float("nan")], "B": [2.0, 3.0]})
 
     result = RollingOp("rolling_argmin", ConstExpr(1), _FrameExpr(values)).evaluate(
-        ctx=EvaluateContext(["A", "B"], DataFreq.MIN1, None, {}, None, None)
+        ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={})
     )
 
     expected = pd.DataFrame({"A": [0.0, float("nan")], "B": [0.0, 0.0]})
@@ -171,6 +171,6 @@ def test_undefined_constant_cross_section_ic_propagates_as_nan():
 
     result = CrossSectionalOp(
         "cs_spearman", _FrameExpr(signal), _FrameExpr(returns),
-    ).evaluate(ctx=EvaluateContext(["A", "B"], DataFreq.MIN1, None, {}, None, None))
+    ).evaluate(ctx=EvaluateContext(products=["A", "B"], freq=DataFreq.MIN1, cache={}))
 
     assert result["IC"].isna().all()

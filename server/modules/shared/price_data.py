@@ -34,6 +34,29 @@ from server.modules.shared.price_services import (
 )
 
 
+def _range_bound(
+    date_value: str | None,
+    time_value: str | None,
+    *,
+    is_end: bool,
+    precision: str | None = None,
+) -> pd.Timestamp | None:
+    if not date_value:
+        return None
+    text = str(date_value).strip()
+    if not text:
+        return None
+    if precision == "trading_day":
+        time_part = "23:59:59.999" if is_end else "00:00:00"
+        return pd.Timestamp(f"{text} {time_part}")
+    if time_value:
+        return pd.Timestamp(f"{text} {time_value}")
+    ts = pd.Timestamp(text)
+    if is_end and len(text) <= 10:
+        return ts + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
+    return ts
+
+
 @shared_bp.route('/api/list_product_names')
 def list_product_names():
     """返回所有品种的中英文名称列表。"""
@@ -71,6 +94,21 @@ def get_product_tree():
         checkbox = request.args.get('checkbox', '').lower() in ('1', 'true')
         fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=checkbox)
         return jsonify(fancytree_data)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@shared_bp.route('/api/product_fields')
+def get_product_fields():
+    """返回单个品种的后端反射字段（类名 + 公开属性 + 费率字段），供信息弹层展示。"""
+    name = request.args.get('name')
+    if not name:
+        return jsonify({'success': False, 'error': '缺少 name 参数'}), 400
+    try:
+        product = _find_product(_cached_products(), name)
+        if product is None:
+            return jsonify({'success': False, 'error': f'未找到品种: {name}'}), 404
+        return jsonify({'success': True, 'name': name, 'fields': _product_public_fields(product)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
@@ -202,6 +240,9 @@ def get_price_data():
     data_source_alias = data.get('data_source')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+    time_precision = data.get('time_precision')
 
     if not product_name and not contract_uid:
         return jsonify({'success': False, 'error': '缺少 product_name 或 contract_uid'}), 400
@@ -255,11 +296,11 @@ def get_price_data():
                 time_col = 'trade_time'
 
             # 合约模式也要严格应用时间范围截断
-            if start_date:
-                start_ts = pd.Timestamp(start_date)
+            start_ts = _range_bound(start_date, start_time, is_end=False, precision=time_precision)
+            end_ts = _range_bound(end_date, end_time, is_end=True, precision=time_precision)
+            if start_ts is not None:
                 price_df = price_df[price_df[time_col] >= start_ts]
-            if end_date:
-                end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
+            if end_ts is not None:
                 price_df = price_df[price_df[time_col] <= end_ts]
 
             price_df = cast(pd.DataFrame, price_df)  # narrow from ndarray union
@@ -363,13 +404,11 @@ def get_price_data():
                 return jsonify({'success': False, 'error': f'数据源不可用于该品种和频率: {data_source_alias}'}), 400
 
         # 确定日期范围
-        if start_date:
-            start = pd.Timestamp(start_date)
-        else:
+        start = _range_bound(start_date, start_time, is_end=False, precision=time_precision)
+        end = _range_bound(end_date, end_time, is_end=True, precision=time_precision)
+        if start is None:
             start = pd.Timestamp('2000-01-01')
-        if end_date:
-            end = pd.Timestamp(end_date)
-        else:
+        if end is None:
             end = pd.Timestamp.now()
 
         # 获取价格数据
@@ -447,7 +486,7 @@ def get_price_data():
         if supports_term_structure:
             try:
                 from tools.products.product_utils import get_product_contracts
-                raw = get_product_contracts(product)
+                raw = get_product_contracts(product, start_date=start_date, end_date=end_date)
                 for c in raw:
                     contracts.append({
                         'contract': c['contract'],

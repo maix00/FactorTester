@@ -5,4 +5,4 @@ from flask import Blueprint
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
 
 def register_routes() -> None:
-    from server.modules.custom_factors import catalog_routes, crud_routes, editor_routes, param_config_routes  # noqa: F401
+    from server.modules.custom_factors import catalog_routes, crud_routes, editor_routes, factor_library_routes  # noqa: F401

@@ -20,6 +20,13 @@ from ..types import DataColumn, DataFreq
 from .DataProvider import DataProvider, _DataMultipleProviderMeta
 
 
+def _source_contains(source: Any, product: Any) -> bool:
+    try:
+        return bool(product in source)
+    except Exception:
+        return False
+
+
 class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
     """
     品种时序数据提供器。
@@ -63,8 +70,7 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
 
             # 如果未提供可用性检测函数，默认检查文件是否存在且非空
             if if_object_is_in_source is None:
-                import os
-                self._if_object_is_in_source_func = lambda obj: os.path.isfile(self.get_path(obj))
+                self._if_object_is_in_source_func = lambda obj: self._path_has_rows(self.get_path(obj))
             else:
                 self._if_object_is_in_source_func = if_object_is_in_source
             self.timezone = kwargs.get('timezone', None)
@@ -77,7 +83,7 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
         target_freq = DataFreq(freq) if freq is not None else None
         return [
             source for source in cls.all()
-            if product in source and (target_freq is None or source.freq == target_freq)
+            if (target_freq is None or source.freq == target_freq) and _source_contains(source, product)
         ]
 
     @classmethod
@@ -98,6 +104,32 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
     def get_path(self, obj: Any) -> str:
         """通过内部 PathResolver 获取对象路径。"""
         return self._path_resolver.get_path(self, obj)
+
+    @staticmethod
+    def _path_has_rows(path: Any) -> bool:
+        import os
+
+        if not isinstance(path, str) or not os.path.isfile(path):
+            return False
+        if os.path.getsize(path) <= 0:
+            return False
+        lower = path.lower()
+        try:
+            if lower.endswith(".parquet"):
+                from importlib import import_module
+
+                pq = import_module("pyarrow.parquet")
+                return bool(pq.ParquetFile(path).metadata.num_rows > 0)
+            if lower.endswith(".csv"):
+                with open(path, "rb") as handle:
+                    first = handle.readline()
+                    second = handle.readline()
+                return bool(first and second)
+            if lower.endswith(".xlsx"):
+                return True
+        except Exception:
+            return False
+        return True
 
     def __contains__(self, obj: Any) -> bool:
         """

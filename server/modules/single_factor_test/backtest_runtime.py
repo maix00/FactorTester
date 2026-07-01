@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from tools.backtest.settings import backtest_setting_registry, resolve_group_settings
+from tools.testers.settings import backtest_setting_registry, resolve_group_settings
 
 
 def resolve_request_settings(

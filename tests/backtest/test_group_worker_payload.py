@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from tools.backtest.strategies.group_worker import build_group_target_weight_payload
+from tools.testers.backtest.engines.strategies.group_worker import build_group_target_weight_payload
 
 
 def test_group_worker_payload_is_equal_notional_and_keeps_rebalance_semantics() -> None:

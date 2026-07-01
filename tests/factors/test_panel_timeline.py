@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.data.types import DataFreq
+from tools.data.types import DataFreq, DataTime
 from tools.factors.FactorExpr import FactorExpr, build_panel_timeline
 
 
@@ -62,6 +62,12 @@ def test_expression_evaluation_receives_observed_timeline_context():
         def _structural_key(self):
             return ("CaptureTimeline",)
 
-    received = _CaptureTimeline().evaluate([product], DataFreq.MIN1, panel_timeline=timeline)
+    received = _CaptureTimeline().evaluate(
+        [product],
+        DataFreq.MIN1,
+        start_dt=DataTime.from_dict({"date": "2026-05-25", "time": "21:00", "tz": "Asia/Shanghai"}, precision="exact"),
+        end_dt=DataTime.from_dict({"date": "2026-05-26", "time": "00:01", "tz": "Asia/Shanghai"}, precision="exact"),
+        panel_timeline=timeline,
+    )
 
     pd.testing.assert_frame_equal(received, timeline.observed_mask)

@@ -149,20 +149,20 @@
         html += '<label style="display:block;margin-bottom:12px;">';
         html += '<span style="display:block;font-size:13px;margin-bottom:4px;">品种筛选（留空=全选）</span>';
         html += '<div id="dg-f-product-mask" style="max-height:120px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;">';
-        var testerProds = [];
-        if (isEdit) { testerProds = H.nodeProducts(editData); }
-        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); testerProds = pn ? H.nodeProducts(pn) : []; }
+        var selectionProducts = [];
+        if (isEdit) { selectionProducts = H.nodeProducts(editData); }
+        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); selectionProducts = pn ? H.nodeProducts(pn) : []; }
         else {
             var allPs = {};
             for (var bi = 0; bi < bgs.length; bi++) {
-                var pp = H.testerProducts(bgs[bi].testerId);
+                var pp = H.productPathSelectionProducts(bgs[bi].product_path_selection);
                 for (var pi = 0; pi < pp.length; pi++) { allPs[pp[pi].name] = pp[pi]; }
             }
-            testerProds = Object.keys(allPs).map(function(k) { return allPs[k]; });
+            selectionProducts = Object.keys(allPs).map(function(k) { return allPs[k]; });
         }
         var existingMask = (editData && editData.productMask) ? editData.productMask : {};
-        for (var ti = 0; ti < testerProds.length; ti++) {
-            var pName = testerProds[ti].name;
+        for (var ti = 0; ti < selectionProducts.length; ti++) {
+            var pName = selectionProducts[ti].name;
             var checked = Object.keys(existingMask).length === 0 ? ' checked' : (existingMask[pName] ? ' checked' : '');
             html += '<label style="display:inline-block;margin-right:12px;font-size:12px;"><input type="checkbox" class="dg-f-prod" value="' + H.escapeHTML(pName) + '"' + checked + '> ' + H.escapeHTML(pName) + '</label>';
         }
@@ -237,29 +237,27 @@
 
             for (var i = 0; i < items.length; i++) {
                 var item = items[i];
+                var longDg = H.getGroup(item.longGroupId);
+                var shortDg = H.getGroup(item.shortGroupId);
+                var longLabel = longDg
+                    ? (H.deriveShortAlias(longDg) || longDg.shortAlias || longDg.name || item.longGroupId)
+                    : (item.longGroupId || '—');
+                var shortLabel = shortDg
+                    ? (H.deriveShortAlias(shortDg) || shortDg.shortAlias || shortDg.name || item.shortGroupId)
+                    : (item.shortGroupId || '—');
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + H.escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;">';
 
-                h += '<td style="padding:6px 8px;white-space:nowrap;">';
-                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + H.escapeHTML(item.shortAlias || item.name) + '</span>';
-                h += '</td>';
-
-                h += '<td style="padding:2px 4px;width:100%;">';
-                var longDg = H.getGroup(item.longGroupId);
-                var shortDg = H.getGroup(item.shortGroupId);
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#3b82f6;font-weight:600;margin-right:4px;">📈</span>';
-                if (longDg) h += H.renderAllChipsForGroup(longDg);
-                h += '</div>';
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#8b5cf6;font-weight:600;margin-right:4px;">📉</span>';
-                if (shortDg) h += H.renderAllChipsForGroup(shortDg);
-                h += '</div>';
+                h += '<td style="padding:6px 8px;width:100%;white-space:nowrap;">';
+                h += '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#4338ca;font-size:13px;">';
+                h += '<span style="font-size:11px;font-weight:700;color:#6366f1;">LS</span>';
+                h += '<span>' + H.escapeHTML(longLabel) + '/' + H.escapeHTML(shortLabel) + '</span>';
+                h += '</span>';
                 h += '</td>';
 
                 h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
-                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:1px 5px;font-size:13px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">🔄</button>';
-                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:2px 7px;font-size:12px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">交换</button>';
+                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:2px 7px;font-size:12px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">删除</button>';
                 h += '</td></tr>';
             }
             h += '</tbody></table>';
@@ -272,6 +270,20 @@
         return (GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function')
             ? GT.backendSettings.getAllChips(group)
             : [];
+    }
+
+    function _chipOwnedByBatch(chip, group, batch) {
+        if (!chip) return false;
+        // 哪些 chip 属于批次键由后端 ChipDefinition.batch_owned 声明（不再前端硬编码标签）。
+        var isProductPath = chip.label === 'product_path_selection' || chip.label === 'backtest-product_path_selection';
+        if (!chip.batch_owned && !isProductPath) return false;
+        if (!isProductPath) return true;
+        // 产品路径：仅当本组选择与批次选择一致时才归批次（组内可覆盖为不同产品路径）。
+        var groupSelection = group && group.product_path_selection;
+        if (!groupSelection) return true;
+        var groupId = H.selectionId ? H.selectionId(groupSelection) : '';
+        var batchId = batch && batch.product_path_selection_id || '';
+        return String(groupId || '') === String(batchId || '');
     }
 
     function _batchDiffConfigKeys(batch) {
@@ -335,7 +347,6 @@
                 }
             }
 
-            var testerLabel = H.testerLabel(batch.testerId);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
             var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
@@ -347,13 +358,26 @@
             h += '<span class="unified-batch-expand" style="margin-right:6px;width:20px;text-align:center;cursor:pointer;font-size:18px;line-height:1;">' + (isExpanded ? '▾' : '▸') + '</span>';
             h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap;">';
             if (batchLetter) {
-                h += '<span class="gt-backend-chip is-primary">' + H.renderChipHtml(batchLetter) + '</span>';
+                h += '<span class="unified-batch-letter" style="font-size:12px;font-weight:700;color:#4338ca;line-height:20px;padding:0 2px;">' + H.escapeHTML(batchLetter) + '</span>';
             }
-            h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.factorAlias) + '</span>';
-            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="tester-products" data-gid="' + H.escapeHTML(batch.items[0] && batch.items[0].id || '') + '" data-chip-label="tester">' + H.renderChipHtml(testerLabel) + '</span>';
-            h += '<span class="gt-backend-chip">' + H.renderChipHtml(batch.splitCount + '组') + '</span>';
+            // 批次头的 因子/产品路径/分组数 走后端 ChipDefinition（manifest 驱动），
+            // 与每组行同源：per-group 行用 _chipOwnedByBatch 把这些"批次自有"的 identity
+            // chip 排除，正由批次头在此渲染。产品路径保留点击打开产品 overlay 的动作。
+            var batchGroup = batch.items[0];
+            var batchHeaderChips = batchGroup ? _chipsForGroup(batchGroup).filter(function(c) {
+                return c.batch_owned;   // 批次键 chip 由后端 ChipDefinition.batch_owned 声明
+            }) : [];
+            for (var hci = 0; hci < batchHeaderChips.length; hci++) {
+                var hchip = batchHeaderChips[hci];
+                if (hchip.label === 'product_path_selection') {
+                    h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="'
+                        + H.escapeHTML(batchGroup && batchGroup.id || '') + '" data-chip-label="product-path-selection">' + hchip.html + '</span>';
+                } else {
+                    h += '<span class="gt-backend-chip unified-backend-chip">' + hchip.html + '</span>';
+                }
+            }
             h += '</span>';
-            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
+            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" title="删除批次" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑</button>';
             h += '</div>';
 
             if (isExpanded && !isCollapsed) {
@@ -377,7 +401,7 @@
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
-                        if (chip.label === 'factor_alias' || chip.label === 'tester') continue;
+                        if (_chipOwnedByBatch(chip, bg, batch)) continue;
                         if (chip.clickable) {
                             h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {
@@ -392,6 +416,7 @@
                         for (ci = 0; ci < allChips.length; ci++) {
                             chip = allChips[ci];
                             if (chip.category !== 'config') continue;
+                            if (_chipOwnedByBatch(chip, bg, batch)) continue;
                             renderedConfigLabels[chip.label] = true;
                             configChips.push(chip);
                         }
@@ -415,7 +440,7 @@
                         }
                         h += '</span>';
                     }
-                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" title="删除基础组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
                     h += '</div>';
                     h += _renderDerivedTreeForBase(bg.id, expandedBatches, showFullChips);
                 }
@@ -522,7 +547,7 @@
             }
             h += '</span>';
         }
-        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" title="删除派生组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
         h += '</div>';
 
         if (prodExpanded && products.length > 0) {

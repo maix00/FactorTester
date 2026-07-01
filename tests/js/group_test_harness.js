@@ -10,6 +10,8 @@ class MockElement {
     this.value = '';
     this.innerHTML = '';
     this.textContent = '';
+    this.childNodes = [];
+    this.children = this.childNodes;
     this.style = {};
     this.className = '';
     this.listeners = {};
@@ -38,7 +40,10 @@ class MockElement {
   querySelectorAll() { return []; }
   querySelector() { return null; }
   closest() { return null; }
-  appendChild() {}
+  appendChild(child) {
+    this.childNodes.push(child);
+    return child;
+  }
   remove() { this.removed = true; }
   scrollIntoView() {}
   removeAttribute() {}

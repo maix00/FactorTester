@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tools.backtest.strategies.targets import compile_group_target_payload
+from tools.testers.backtest.engines.strategies.targets import compile_group_target_payload
 
 
 def test_group_target_compiler_applies_per_strategy_policies_causally() -> None:

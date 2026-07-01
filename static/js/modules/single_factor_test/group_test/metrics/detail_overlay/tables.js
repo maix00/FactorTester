@@ -39,31 +39,50 @@
         return html + '</tbody></table>';
     }
 
-    function renderProductContributionRows(rows) {
+    function renderProductContributionRows(rows, options) {
+        options = options || {};
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         var feeLabel = F.isRealFee(rows[0]) ? ' (原始费率)' : '';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
+        if ((rows[0].product && rows[0].product.fee && rows[0].product.fee._is_weighted) || options.weighted) {
+            feeLabel = feeLabel || ' (加权)';
+        }
+        var entityLabel = options.level === 'contracts' ? '合约' : '品种';
+        var html = '<table class="group-detail-table"><thead><tr><th>' + entityLabel + '</th><th>描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>合约乘数</th><th>最小手数</th><th>保证金率</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
         rows.forEach(function(row) {
             var meanAct = row.mean_active_contribution;
             var fee = (row.product && row.product.fee) || {};
             var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
             var highlight = (meanAct != null && isFinite(meanAct) && meanAct > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
-            html += '<tr' + highlight + '>' + renderProductFeeCells(row.product)
+            html += '<tr' + highlight + '>' + renderProductFeeCells(row.product, row)
+                + renderMarketRuleCells(row.market_rule)
                 + '<td>' + row.active_period_count + '</td><td>'
                 + F.fmtPct(row.gross_contribution) + '</td><td>' + F.fmtFeeRate(meanAct) + '</td></tr>';
         });
         return html + '</tbody></table>';
     }
 
-    function renderProductFeeCells(product) {
+    function renderProductFeeCells(product, row) {
+        row = row || {};
         if (!product || typeof product === 'string') {
-            return '<td>' + (product || '—') + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">—</td><td>—</td><td>—</td><td>—</td>';
+            return '<td>' + (product || '—') + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">—</td><td>—</td><td>—</td><td>—</td><td>—</td>';
         }
         var name = product.name || '—';
         var desc = product.desc && product.desc !== name ? product.desc : '—';
         var fee = product.fee || {};
-        return '<td>' + name + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + desc + '</td><td>' + F.fmtFeeRate(fee.open)
+        var source = product.source_names && product.source_names.length ? '<div style="color:#98a2b3;font-size:10px;">' + product.source_names.join('、') + '</div>' : '';
+        return '<td>' + name + source + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + desc + '</td><td>' + F.fmtFeeRate(row.mean_return)
+            + '</td><td>' + F.fmtFeeRate(fee.open)
             + '</td><td>' + F.fmtFeeRate(fee.close_today) + '</td><td>' + F.fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>';
+    }
+
+    function renderMarketRuleCells(rule) {
+        rule = rule || {};
+        function fmtNumber(value, digits) {
+            if (value == null || isNaN(value) || !isFinite(value)) return '—';
+            return Number(value).toFixed(digits);
+        }
+        return '<td>' + fmtNumber(rule.multiplier, 4) + '</td><td>' + fmtNumber(rule.lot_size, 4)
+            + '</td><td>' + F.fmtPct(rule.margin_ratio) + '</td>';
     }
 
     function renderCalendarRows(rows, key) {
@@ -123,6 +142,7 @@
         renderDailyRows: renderDailyRows,
         renderProductContributionRows: renderProductContributionRows,
         renderProductFeeCells: renderProductFeeCells,
+        renderMarketRuleCells: renderMarketRuleCells,
         renderCalendarRows: renderCalendarRows,
         renderIntradayWindows: renderIntradayWindows,
         renderGroupDetailTable: renderGroupDetailTable,

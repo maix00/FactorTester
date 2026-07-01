@@ -32,12 +32,12 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment
 
 from sources.LocalCNFutures.CNFutures import CNFutures
-from tools.data.types import DataColumn
+from tools.data.types import DataColumn, DataTime
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester
-from tools.factors.tests.NextReturns import NextReturns
-from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
+from tools.factors.tester_calc.NextReturns import NextReturns
+from tools.factors.tester_calc.single_factor_test.ic import run_ic_for_factor
 
 from tests.calc import (
     HEADER_FILL,
@@ -170,9 +170,13 @@ def _resolve_series(table: pd.DataFrame, product) -> pd.Series:
 
 
 def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: pd.Timestamp, rf_minutes: int):
-    tester = FactorTester(products=products, time_range=(start, end))
+    tester = FactorTester(
+        products=products,
+        start_dt=DataTime(ts=start.tz_localize("Asia/Shanghai") if start.tzinfo is None else start),
+        end_dt=DataTime(ts=end.tz_localize("Asia/Shanghai") if end.tzinfo is None else end),
+    )
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
-    factor.evaluate(products)
+    factor.evaluate(products, start_dt=tester.start_dt, end_dt=tester.end_dt)
     next_returns = NextReturns().get_factor(
         SC=DataColumn.OPEN_ADJUSTED,
         RF=f'{rf_minutes}min',

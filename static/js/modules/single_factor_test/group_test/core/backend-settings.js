@@ -19,6 +19,10 @@
         settingDefs: Object.create(null),
         expandedProductMasks: Object.create(null),
         localDefaultProviders: Object.create(null),
+        productPathSelections: [],
+        productPathSelectionsLoaded: false,
+        productPathSelectionResolveRequests: Object.create(null),
+        inlineManagers: Object.create(null),
     };
 
     function requestJSON(url) {
@@ -51,11 +55,43 @@
         return def ? def.tab_key : null;
     }
 
+    function settingStorageKey(setting) {
+        var serialization = setting && setting.serialization || {};
+        return serialization.storage_key || setting.key;
+    }
+
+    function customProductRowsForSetting(setting, value) {
+        var rows = Array.isArray(value) ? value : [];
+        var serialization = setting && setting.serialization || {};
+        var filter = serialization.module_filter;
+        if (!filter || serialization.kind !== 'custom_product_overrides') return rows;
+        var modulesByField = {};
+        (serialization.fields || []).forEach(function(item) {
+            modulesByField[String(item.value)] = String(item.module || '');
+        });
+        return rows.filter(function(row) {
+            return modulesByField[String(row && row.field)] === String(filter);
+        });
+    }
+
+    function hasVisibleStoredValue(def, source, key) {
+        var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
+        if (!hasUsableValue(source, storageKey)) return false;
+        if (storageKey === key) return true;
+        return customProductRowsForSetting(def, source[storageKey]).length > 0;
+    }
+
     function settingKeysForTab(tabKey) {
         var defaults = state.index && state.index.defaults || {};
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             return defaults[key] && defaults[key].tab_key === tabKey;
         });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
+    }
+
+    function orderedMountedTabs(mount) {
+        var tabs = state.index && state.index.tab_lists ? (state.index.tab_lists[mount] || []) : [];
+        return window.BackendSettingsPanel.sortTabsByOrder(state.mountedTabs[mount] || [], tabs);
     }
 
     function settingIsShownInMountedTab(mount, key) {
@@ -82,41 +118,43 @@
     }
 
     function displayValue(setting, value) {
-        if (setting && Array.isArray(setting.options)) {
-            for (var i = 0; i < setting.options.length; i++) {
-                if (String(setting.options[i].value) === String(value)) return setting.options[i].label;
-            }
-        }
-        return value === undefined || value === null ? '' : String(value);
+        return window.BackendSettingsPanel.displaySettingValue(setting, value);
     }
 
     function escapeHTML(str) {
-        if (GT.escapeHTML) return GT.escapeHTML(str);
+        if (GT.escapeHTML) return GT.escapeHTML(str == null ? '' : String(str));
         return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    function chipText(setting, value) {
-        var template = setting && setting.chip_template ? setting.chip_template : ((setting && setting.key || '') + ': {value}');
-        return template.replace('{value}', displayValue(setting, value));
-    }
+    // chipText 已删除：chip HTML 统一由 ChipRenderer.chipHtml 渲染（见 gtSettingChipHtml）。
 
-    function chipParts(labelOrText, value) {
-        if (value !== undefined && value !== null && value !== '') {
-            return { label: String(labelOrText || ''), value: String(value) };
-        }
-        var text = String(labelOrText == null ? '' : labelOrText).trim();
-        var match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
-        if (match && match[2] && /^[A-Za-z0-9_\u4e00-\u9fa5 \-]+$/.test(match[1])) {
-            return { label: match[1], value: match[2] };
-        }
-        return { label: '', value: text };
-    }
+    // chipParts 已删除：chip HTML 统一由 ChipRenderer.chipHtml 渲染。
 
     function renderChipHtml(labelOrText, value) {
-        var parts = chipParts(labelOrText, value);
-        if (!parts.label) return '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
-        return '<span class="gt-backend-chip-label">' + escapeHTML(parts.label) + '</span>'
-            + '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+        if (value !== undefined && value !== null && value !== '') {
+            return window.ChipRenderer.chipHtml(
+                { chip_template: '{label}: {value}' },
+                { valueOf: function(k) { return k === 'label' ? String(labelOrText || '') : String(value); },
+                  escapeHTML: escapeHTML,
+                  renderChipHtml: function(l, v, esc) {
+                      return '<span class="gt-backend-chip-label">' + esc(l) + '</span>'
+                          + '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+                  },
+                }
+            );
+        }
+        return window.ChipRenderer.chipHtml(
+            { chip_template: '{label}: {value}' },
+            { escapeHTML: escapeHTML,
+              resolve: function() { return ''; },
+              valueOf: function(k) { return k === 'value' ? String(labelOrText == null ? '' : labelOrText) : ''; },
+              renderChipHtml: function(l, v, esc) {
+                  if (!l) return '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+                  return '<span class="gt-backend-chip-label">' + esc(l) + '</span>'
+                      + '<span class="gt-backend-chip-value">' + esc(v) + '</span>';
+              },
+            }
+        );
     }
 
     function valuesEqual(left, right) {
@@ -124,7 +162,16 @@
         if (left === undefined && right === null) return true;
         if (left === null && right === undefined) return true;
         if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right);
+        if ((left && typeof left === 'object') || (right && typeof right === 'object')) {
+            try { return JSON.stringify(left || null) === JSON.stringify(right || null); }
+            catch (error) { return false; }
+        }
         return String(left) === String(right);
+    }
+
+    function hasUsableValue(source, key) {
+        if (!source || !Object.prototype.hasOwnProperty.call(source, key)) return false;
+        return source[key] !== undefined && source[key] !== null && source[key] !== '';
     }
 
     function resolveRootGroup(group) {
@@ -138,29 +185,251 @@
         return current || group;
     }
 
-    function testerProducts(testerId) {
-        var subs = window.submissions || [];
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) !== String(testerId)) continue;
-            var raw = (Array.isArray(subs[si].products) && subs[si].products.length)
-                ? subs[si].products
-                : (subs[si].product_groups || []);
-            return raw.map(function(item) {
-                if (typeof item === 'string') return { name: item, desc: '' };
-                return item && item.name ? { name: item.name, desc: item.desc || '' } : null;
-            }).filter(Boolean);
-        }
-        return [];
+    function selectionId(selection) {
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
     }
 
-    function testerLabel(testerId) {
-        var subs = window.submissions || [];
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) === String(testerId)) {
-                return subs[si].product_group || subs[si].label || ('测试器 #' + subs[si].id);
-            }
+    function compactProductPathSelection(selection) {
+        var def = settingDef('product_path_selection') || {};
+        var utils = window.ProductPathSelectionUtils || {};
+        if (utils.compactSelection) return utils.compactSelection(selection, def.serialization || {});
+        var id = selectionId(selection);
+        if (!selection || !id) return null;
+        var serialization = def.serialization || {};
+        var idKeys = serialization.id_keys || ['product_path_selection_id', 'selection_id', 'id'];
+        var referenceKeys = serialization.product_group_reference_keys || ['product_group_template_id', 'path_id'];
+        var sourceType = serialization.product_group_source_type || 'user_product_group_template';
+        var manualPathKeys = serialization.manual_path_keys || ['paths', 'selected_paths'];
+        var productGroupId = '';
+        referenceKeys.forEach(function(key) {
+            if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+        });
+        if (!productGroupId && selection.source_type === sourceType) {
+            idKeys.forEach(function(key) {
+                if (!productGroupId && selection[key]) productGroupId = String(selection[key]);
+            });
         }
-        return testerId ? String(testerId) : '';
+        if (productGroupId) return { product_path_selection_id: productGroupId };
+        var paths = [];
+        manualPathKeys.forEach(function(key) {
+            if (!paths.length && Array.isArray(selection[key])) paths = selection[key];
+        });
+        var compact = { product_path_selection_id: id };
+        if (Array.isArray(paths) && paths.length) {
+            compact.paths = paths.map(function(path) { return String(path || '').trim(); }).filter(Boolean);
+        }
+        return compact;
+    }
+
+    function productPathSelectionProducts(selection) {
+        var raw = selection && ((Array.isArray(selection.products) && selection.products.length)
+            ? selection.products
+            : (selection.product_groups || []));
+        return (raw || []).map(function(item) {
+            if (typeof item === 'string') return { name: item, desc: '' };
+            return item && item.name ? { name: item.name, desc: item.desc || '' } : null;
+        }).filter(Boolean);
+    }
+
+    function findProductPathSelectionById(selectionIdValue) {
+        var sid = String(selectionIdValue || '');
+        if (!sid) return null;
+        for (var i = 0; i < state.productPathSelections.length; i++) {
+            if (selectionId(state.productPathSelections[i]) === sid) return state.productPathSelections[i];
+        }
+        return null;
+    }
+
+    function resolveProductPathSelectionReference(selection) {
+        if (!selection || typeof selection !== 'object') return selection;
+        var paths = selection.paths || selection.selected_paths || [];
+        if (Array.isArray(paths) && paths.length) return selection;
+        return findProductPathSelectionById(selectionId(selection)) || selection;
+    }
+
+    function resolveSnapshotProductPathReferences(groupSettings, local) {
+        local = local || {};
+        if (local.product_path_selection) {
+            local.product_path_selection = resolveProductPathSelectionReference(local.product_path_selection);
+        }
+        var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
+        groups.forEach(function(group) {
+            if (group && group.product_path_selection) {
+                group.product_path_selection = resolveProductPathSelectionReference(group.product_path_selection);
+            }
+        });
+        var lsConfigs = groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : [];
+        lsConfigs.forEach(function(config) {
+            if (config && config.product_path_selection) {
+                config.product_path_selection = resolveProductPathSelectionReference(config.product_path_selection);
+            }
+        });
+    }
+
+    function resolveSnapshotProductPathReferencesAsync(snapshot) {
+        snapshot = snapshot || {};
+        var groupSettings = snapshot.group_settings ? snapshot.group_settings : snapshot;
+        var local = snapshot.local_settings || {};
+        var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
+        var lsConfigs = groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : [];
+        var items = [local].concat(groups).concat(lsConfigs);
+        var ids = [];
+        items.forEach(function(item) {
+            var selection = item && item.product_path_selection;
+            if (selection && typeof selection === 'object' && selectionId(selection) && !selection.product_group && !selection.label && !selection.product_group_template_id && !(Array.isArray(selection.paths) && selection.paths.length)) {
+                ids.push(selectionId(selection));
+            }
+        });
+        var ready = ids.length ? resolveProductPathSelectionsByIds(ids) : Promise.resolve(state.productPathSelections);
+        return ready.catch(function(error) {
+            console.warn('[backend-settings] product path selection resolve failed:', error);
+            return state.productPathSelections;
+        }).then(function() {
+            resolveSnapshotProductPathReferences(groupSettings, local);
+            return snapshot;
+        });
+    }
+
+
+    function productPathSelectionLabel(selection) {
+        if (!selection) return '';
+        var utils = window.ProductPathSelectionUtils || {};
+        if (utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
+        var label = selection.product_group || selection.label || selection.name || selectionId(selection);
+        if (selection.product_group_template_id || selection.product_group || selection.product_group_name) return label + ' · 产品组';
+        if (selection.path_id) return label + ' · 路径组';
+        return label;
+    }
+
+    function productGroupToSelection(group) {
+        group = group || {};
+        var id = String(group.id || group.product_group_template_id || group.name || '');
+        var products = (group.product_names || group.products || []).map(function(item) {
+            return typeof item === 'string' ? { name: item, desc: '' } : item;
+        }).filter(Boolean);
+        return {
+            id: id,
+            product_path_selection_id: id,
+            product_group_template_id: id,
+            path_id: id,
+            product_group: group.name || group.product_group || id,
+            label: group.name || group.product_group || id,
+            selected_paths: (group.paths || group.selected_paths || []).slice(),
+            paths: (group.paths || group.selected_paths || []).slice(),
+            products: products,
+            product_groups: products,
+        };
+    }
+
+    function mergeProductPathSelections(selections) {
+        (selections || []).forEach(function(selection) {
+            var id = selectionId(selection);
+            if (!id) return;
+            var existingIndex = -1;
+            for (var i = 0; i < state.productPathSelections.length; i++) {
+                if (selectionId(state.productPathSelections[i]) === id) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+            if (existingIndex >= 0) state.productPathSelections[existingIndex] = selection;
+            else state.productPathSelections.push(selection);
+        });
+        if (selections && selections.length) {
+            document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+        }
+    }
+
+    function removeProductPathSelection(id) {
+        id = String(id || '');
+        state.productPathSelections = state.productPathSelections.filter(function(item) {
+            return selectionId(item) !== id;
+        });
+        if (selectionId(state.localValues.product_path_selection) === id) setDefaultProductPathSelection(null);
+        document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+    }
+
+    function isManualProductPathSelection(selection) {
+        return selection && (selection.source_type === 'runtime_manual_path_group' || !(selection.product_group_template_id || selection.product_group || selection.product_group_name || selection.path_id));
+    }
+
+    function resolveProductPathSelectionsByIds(ids) {
+        ids = (ids || []).map(function(id) { return String(id || '').trim(); }).filter(Boolean);
+        var unique = [];
+        ids.forEach(function(id) {
+            if (unique.indexOf(id) < 0 && !findProductPathSelectionById(id) && !state.productPathSelectionResolveRequests[id]) unique.push(id);
+        });
+        var pending = ids
+            .map(function(id) { return state.productPathSelectionResolveRequests[id]; })
+            .filter(Boolean);
+        if (!unique.length) {
+            return (pending.length ? Promise.all(pending) : Promise.resolve()).then(function() {
+                return state.productPathSelections;
+            });
+        }
+        var request = fetch('/api/product-groups/resolve', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ ids: unique }),
+        }).then(function(response) {
+            return response.json().catch(function() { return {}; }).then(function(payload) {
+                if (!response.ok || payload.success === false) {
+                    throw new Error(payload.error || ('HTTP ' + response.status));
+                }
+                mergeProductPathSelections((payload.groups || []).map(productGroupToSelection));
+                return state.productPathSelections;
+            });
+        }).finally(function() {
+            unique.forEach(function(id) { delete state.productPathSelectionResolveRequests[id]; });
+        });
+        unique.forEach(function(id) { state.productPathSelectionResolveRequests[id] = request; });
+        return Promise.all(pending.concat([request])).then(function() {
+            return state.productPathSelections;
+        });
+    }
+
+    function loadProductPathSelections(force) {
+        if (state.productPathSelectionsLoaded && !force) {
+            return Promise.resolve(state.productPathSelections);
+        }
+        var pageCandidates = pageProductPathCandidates();
+        if (pageCandidates.length) {
+            state.productPathSelections = [];
+            mergeProductPathSelections(pageCandidates);
+            state.productPathSelectionsLoaded = true;
+            return Promise.resolve(state.productPathSelections);
+        }
+        return requestJSON('/api/product-groups').then(function(payload) {
+            state.productPathSelections = [];
+            mergeProductPathSelections((payload.groups || []).map(productGroupToSelection));
+            state.productPathSelectionsLoaded = true;
+            return state.productPathSelections;
+        });
+    }
+
+    function pageProductPathCandidates() {
+        var serialization = candidateListSerialization();
+        var field = serialization.shared_page_field || 'product_path_candidates';
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return [];
+        var values = window.SingleFactorGlobalSettings.getDefaultValues([field]);
+        return Array.isArray(values[field]) ? values[field] : [];
+    }
+
+    function setDefaultProductPathSelection(selection) {
+        if (selection) state.localValues.product_path_selection = selection;
+        else delete state.localValues.product_path_selection;
+        renderLocalSettingChips();
+        document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+    }
+
+    function candidateListSerialization() {
+        var def = settingDef('product_path_candidates') || {};
+        return def.serialization || {};
     }
 
     function nodeProducts(group, seen) {
@@ -172,7 +441,7 @@
         if (group.parentId && GT.groupSettings && GT.groupSettings.groups) {
             inherited = nodeProducts(GT.groupSettings.groups.get(group.parentId), seen);
         } else {
-            inherited = testerProducts(group.testerId);
+            inherited = productPathSelectionProducts(group.product_path_selection);
         }
         var mask = group.productMask || {};
         if (!mask || Object.keys(mask).length === 0) return inherited;
@@ -187,22 +456,48 @@
         return true;
     }
 
-    function chipSourceGroup(group, chipDef) {
+    function chipSourceGroup(group, chipDef, options) {
+        if (options && options.useOwnValues) return group;
         return chipDef && chipDef.inherit_from_root ? resolveRootGroup(group) : group;
     }
 
     function resolveChipValue(name, group, source, resolvers) {
         var resolver = resolvers && resolvers[name];
-        if (resolver === 'tester_label') return testerLabel(source && source.testerId);
+        if (resolver === 'product_path_selection_label') return productPathSelectionLabel(source && source.product_path_selection);
         if (resolver === 'product_mask_count') return nodeProducts(group).length;
         if (resolver === 'product_mask_expand_symbol') return state.expandedProductMasks && state.expandedProductMasks[group.id] ? '▾' : '▸';
+        if (name === 'n_groups') return source && source.splitCount != null ? source.splitCount : '';
+        if (name === 'group_index') return source && source.groupIndex != null ? source.groupIndex : '';
         return source && source[name] != null ? source[name] : '';
     }
 
-    function renderChipTemplate(template, group, source, resolvers) {
-        return String(template || '').replace(/\{([^}]+)\}/g, function(_, key) {
-            return escapeHTML(resolveChipValue(key, group, source, resolvers));
-        }).replace(/\s+/g, ' ').trim();
+    // group_test 的 chip HTML 改由统一的 ChipRenderer.chipHtml 渲染（与各设置栏同一实现）。
+    // 这里提供其取值 ctx：valueOf 取 group/source 字段；resolve 复用 resolveChipValue 的
+    // resolver 分发；settingValueFn 用于"每设置一枚"的配置 chip（{value}→displayValue）。
+    function gtChipCtx(group, source, settingValueFn) {
+        return {
+            valueOf: function(name) {
+                if (settingValueFn) return settingValueFn(name);
+                return source && source[name] != null ? source[name] : '';
+            },
+            resolve: function(resolverName, name) {
+                var oneResolver = {}; oneResolver[name] = resolverName;
+                return resolveChipValue(name, group, source, oneResolver);
+            },
+            renderChipHtml: renderChipHtml,
+            escapeHTML: escapeHTML,
+        };
+    }
+
+    function gtChipHtml(template, valueResolvers, ctx) {
+        return window.ChipRenderer.chipHtml({ chip_template: template, value_resolvers: valueResolvers || {} }, ctx);
+    }
+
+    // "每设置一枚"的配置 chip：chip_template 里 {value} → displayValue(setting, value)。
+    function gtSettingChipHtml(setting, value) {
+        return gtChipHtml(setting.chip_template, {}, gtChipCtx(null, null, function(name) {
+            return name === 'value' ? displayValue(setting, value) : '';
+        }));
     }
 
     function summaryTabs() {
@@ -235,7 +530,17 @@
         var keys = settingKeysForTab(tabKey);
         if (!keys.length) return;
         if (mount === LOCAL) {
-            keys.forEach(function(key) { delete state.localValues[key]; });
+            keys.forEach(function(key) {
+                var def = state.index && state.index.defaults && state.index.defaults[key] || {};
+                var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+                if (storageKey !== key && def.serialization && def.serialization.kind === 'custom_product_overrides') {
+                    var rows = Array.isArray(state.localValues[storageKey]) ? state.localValues[storageKey] : [];
+                    var scoped = customProductRowsForSetting(def, rows);
+                    state.localValues[storageKey] = rows.filter(function(row) { return scoped.indexOf(row) < 0; });
+                    return;
+                }
+                delete state.localValues[storageKey];
+            });
             return;
         }
         var groups = GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.getAll
@@ -243,7 +548,17 @@
             : [];
         groups.forEach(function(group) {
             var patch = {};
-            keys.forEach(function(key) { patch[key] = undefined; });
+            keys.forEach(function(key) {
+                var def = state.index && state.index.defaults && state.index.defaults[key] || {};
+                var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+                if (storageKey !== key && def.serialization && def.serialization.kind === 'custom_product_overrides') {
+                    var rows = Array.isArray(group[storageKey]) ? group[storageKey] : [];
+                    var scoped = customProductRowsForSetting(def, rows);
+                    patch[storageKey] = rows.filter(function(row) { return scoped.indexOf(row) < 0; });
+                    return;
+                }
+                patch[storageKey] = undefined;
+            });
             try { GT.groupSettings.groups.update(group.id, patch); } catch (error) {}
         });
     }
@@ -276,17 +591,7 @@
         return state.tabRequests[tabKey];
     }
 
-    function defaultsForTab(tabKey) {
-        var out = [];
-        var defaults = state.index && state.index.defaults || {};
-        var values = effectiveLocalValues();
-        Object.keys(defaults).forEach(function(key) {
-            if (defaults[key].tab_key === tabKey && settingVisibleForValues(defaults[key], values)) {
-                out.push({ key: key, value: defaults[key].value });
-            }
-        });
-        return out;
-    }
+    // defaultsForTab 已删除：选择器改走统一的 manifest + store 路径（ChipRenderer 渲染）。
 
     function activeNode() {
         if (!state.activeGroup) return null;
@@ -305,22 +610,40 @@
 
     function effectiveValue(setting, mount) {
         var node = activeNode();
-        if (mount === GROUP && node && Object.prototype.hasOwnProperty.call(node.value, setting.key)) {
-            return node.value[setting.key];
+        var conditionValues = effectiveValuesForNode(node);
+        var key = settingStorageKey(setting);
+        if (!settingEditableForValues(setting, conditionValues)) {
+            return window.BackendSettingsPanel.defaultValueForValues(setting, conditionValues);
         }
-        if (Object.prototype.hasOwnProperty.call(state.localValues, setting.key)) {
-            return state.localValues[setting.key];
+        if (mount === GROUP && node && hasUsableValue(node.value, key)) {
+            return node.value[key];
         }
-        return state.index.defaults[setting.key].value;
+        if (Object.prototype.hasOwnProperty.call(state.localValues, key)) {
+            return state.localValues[key];
+        }
+        return window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[key] || state.index.defaults[setting.key], conditionValues);
+    }
+
+    function defaultValuesForCurrentState() {
+        var values = Object.create(null);
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            values[key] = defaults[key].value;
+        });
+        Object.keys(defaults).forEach(function(key) {
+            values[key] = window.BackendSettingsPanel.defaultValueForValues(defaults[key], values);
+        });
+        return values;
     }
 
     function effectiveLocalValues() {
-        var values = Object.create(null);
-        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
-            values[key] = state.index.defaults[key].value;
-        });
+        var values = defaultValuesForCurrentState();
         Object.keys(state.localValues || {}).forEach(function(key) {
             values[key] = state.localValues[key];
+        });
+        Object.keys(state.index && state.index.defaults || {}).forEach(function(key) {
+            if (Object.prototype.hasOwnProperty.call(state.localValues || {}, key)) return;
+            values[key] = window.BackendSettingsPanel.defaultValueForValues(state.index.defaults[key], values);
         });
         return values;
     }
@@ -328,7 +651,8 @@
     function effectiveValuesForNode(node) {
         var values = effectiveLocalValues();
         Object.keys((node && node.value) || node || {}).forEach(function(key) {
-            values[key] = ((node && node.value) || node)[key];
+            var source = (node && node.value) || node;
+            if (hasUsableValue(source, key)) values[key] = source[key];
         });
         return values;
     }
@@ -337,12 +661,7 @@
         var meta = setting && setting.key && state.index && state.index.defaults
             ? state.index.defaults[setting.key]
             : null;
-        var visibleWhen = (setting && setting.visible_when) || (meta && meta.visible_when);
-        if (!visibleWhen || !Object.keys(visibleWhen).length) return true;
-        return Object.keys(visibleWhen).every(function(depKey) {
-            var allowed = visibleWhen[depKey] || [];
-            return allowed.map(String).indexOf(String(values[depKey])) >= 0;
-        });
+        return window.BackendSettingsPanel.settingVisibleForValues(Object.assign({}, meta || {}, setting || {}), values);
     }
 
     function settingVisible(setting, mount) {
@@ -350,17 +669,89 @@
         return settingVisibleForValues(setting, effectiveValuesForNode(node));
     }
 
+    function settingEditableForValues(setting, values) {
+        var meta = setting && setting.key && state.index && state.index.defaults
+            ? state.index.defaults[setting.key]
+            : null;
+        return window.BackendSettingsPanel.settingEditableForValues(Object.assign({}, meta || {}, setting || {}), values);
+    }
+
+    function settingEditable(setting, mount) {
+        var scope = setting && setting.scope_policy;
+        if (mount === GROUP && scope === 'local_only') return false;
+        if (mount === LOCAL && scope === 'group_only') return false;
+        var node = mount === GROUP ? activeNode() : null;
+        return settingEditableForValues(setting, effectiveValuesForNode(node));
+    }
+
+    function hasMaterializableDefault(key) {
+        var defaults = state.index && state.index.defaults || {};
+        var def = defaults[key];
+        if (!def) return false;
+        var scope = def.scope_policy;
+        if (scope === 'local_only') return false;
+        return def.value !== undefined && def.value !== null && def.value !== '';
+    }
+
+    function materializeChildDefaultsForChangedKeys(parentId, keys, options) {
+        options = options || {};
+        if (!parentId || !GT.groupSettings || !GT.groupSettings.groups) return;
+        var groups = GT.groupSettings.groups;
+        if (!groups.getChildren || !groups.update) return;
+        var parent = groups.get(parentId);
+        if (!parent) return;
+        var skipIds = {};
+        (options.skipIds || []).forEach(function(id) {
+            if (id) skipIds[String(id)] = true;
+        });
+        var children = groups.getChildren(parentId) || [];
+        (children || []).forEach(function(child) {
+            if (!child || !child.id) return;
+            if (skipIds[String(child.id)]) return;
+            var patch = {};
+            (keys || []).forEach(function(key) {
+                if (!hasMaterializableDefault(key)) return;
+                if (!hasUsableValue(parent, key)) return;
+                if (hasUsableValue(child, key)) return;
+                var def = state.index.defaults[key];
+                if (valuesEqual(parent[key], def.value)) return;
+                patch[key] = def.value;
+            });
+            if (Object.keys(patch).length) {
+                patch.needsRegenerate = true;
+                try { groups.update(child.id, patch); }
+                catch (error) { console.warn('[backend-settings] materialize child defaults failed:', error); }
+            }
+        });
+    }
+
     function writeValue(setting, mount, value) {
+        var key = settingStorageKey(setting);
         if (mount === GROUP) {
             var node = activeNode();
             if (!node) throw new Error('编辑组合设置前必须选择组合');
             var patch = {};
-            patch[setting.key] = value;
-            if (node.kind === 'group') GT.groupSettings.groups.update(state.activeGroup, patch);
-            else GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
+            patch[key] = value;
+            if (node.kind === 'group') {
+                var ctx = GT.modes && GT.modes.isMode && GT.modes.isMode('edit') && GT.modes.getEditContext
+                    ? GT.modes.getEditContext()
+                    : null;
+                var targets = ctx && Array.isArray(ctx.groups) && ctx.groups.length > 1 ? ctx.groups : [node.value];
+                var selectedIds = targets.map(function(group) { return group && group.id; }).filter(Boolean);
+                targets.forEach(function(group) {
+                    if (group && group.id) {
+                        GT.groupSettings.groups.update(group.id, patch);
+                        materializeChildDefaultsForChangedKeys(group.id, [setting.key], { skipIds: selectedIds });
+                    }
+                });
+            } else {
+                GT.groupSettings.lsConfigs.update(state.activeGroup, patch);
+            }
         } else {
-            state.localValues[setting.key] = value;
-            renderLocalSettingChips();
+            state.localValues[key] = value;
+            var store = ensureGtLocalStore();
+            if (store && typeof store.set === 'function') store.set(key, value);
+            else renderLocalSettingChips();
         }
     }
 
@@ -373,6 +764,7 @@
 
     function makeControl(setting, mount, rerenderAfterChange) {
         var control;
+        var disabled = (mount === GROUP && !state.activeGroup) || !settingEditable(setting, mount);
         if (setting.control_template === 'select') {
             control = document.createElement('select');
             (setting.options || []).forEach(function(item) {
@@ -382,144 +774,448 @@
                 control.appendChild(option);
             });
         } else if (setting.control_template === 'date') {
-            control = makeDateControl(setting, mount);
-        } else if (setting.control_template === 'number' || setting.control_template === 'time') {
             control = document.createElement('input');
-            control.type = setting.control_template;
+            control.type = 'date';
+        } else if (setting.control_template === 'number' || setting.control_template === 'time' || setting.control_template === 'text') {
+            control = document.createElement('input');
+            control.type = setting.control_template === 'text' ? 'text' : setting.control_template;
             if (setting.control_template === 'time') control.step = '60';
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);
             });
+        } else if (setting.control_template === 'boolean') {
+            control = document.createElement('input');
+            control.type = 'checkbox';
+            control.style.width = '16px';
+            control.style.height = '16px';
+            control.style.margin = '0';
+        } else if (setting.control_template === 'custom_product_overrides') {
+            control = renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled);
+            return control;
+        } else if (setting.control_template === 'custom') {
+            // 自定义控件（候选/多选列表，如 factor_candidates / product_path_candidates /
+            // category_candidates）：行内不内联完整管理 UI，显示摘要 chip + "管理"按钮，
+            // 点击挂载并跳转到对应设置 tab。
+            control = document.createElement('div');
+            control.style.cssText = 'display:flex;align-items:center;gap:8px;';
+            var summary = document.createElement('span');
+            summary.className = 'gt-backend-chip unified-backend-chip';
+            try {
+                var summaryValue = effectiveValue(setting, mount);
+                if (mount === LOCAL) {
+                    var localStore = ensureGtLocalStore();
+                    if (localStore && typeof localStore.effective === 'function') summaryValue = localStore.effective(settingStorageKey(setting));
+                }
+                summary.innerHTML = renderChipHtml(setting.label || setting.key, window.BackendSettingsPanel.displaySettingValue(setting, summaryValue));
+            }
+            catch (e) { summary.textContent = '—'; }
+            control.appendChild(summary);
+            var manageBtn = document.createElement('button');
+            manageBtn.type = 'button';
+            manageBtn.textContent = '管理';
+            manageBtn.style.cssText = 'height:24px;padding:0 10px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+            var targetTab = setting.tab || setting.tab_key;
+            manageBtn.addEventListener('click', function() {
+                if (targetTab && GT.tabs && typeof GT.tabs.mountTab === 'function') GT.tabs.mountTab(targetTab);
+                if (mount === LOCAL && setting.serialization && setting.serialization.kind === 'factor_candidate_list') {
+                    state.inlineManagers[targetTab || setting.key] = !state.inlineManagers[targetTab || setting.key];
+                    rerenderAfterChange();
+                    return;
+                }
+            });
+            control.appendChild(manageBtn);
+            return control;
         } else {
             throw new Error('不支持的控件模板: ' + setting.control_template);
         }
-        control.value = effectiveValue(setting, mount);
-        control.disabled = mount === GROUP && !state.activeGroup;
+        if (setting.control_template === 'boolean') {
+            control.checked = !!effectiveValue(setting, mount);
+        } else {
+            control.value = effectiveValue(setting, mount);
+        }
+        control.disabled = disabled;
+        applyDisabledControlStyle(control, disabled);
         control.addEventListener('change', function() {
-            var nextValue = setting.control_template === 'number'
+            if (setting.control_template === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(control.value || '')) {
+                return;
+            }
+            var nextValue = setting.control_template === 'boolean'
+                ? !!control.checked
+                : setting.control_template === 'number'
                 ? Number(control.value)
                 : normalizeControlValue(setting, control.value);
-            control.value = nextValue;
+            if (setting.control_template !== 'boolean') control.value = nextValue;
             writeValue(setting, mount, nextValue);
             rerenderAfterChange();
         });
         return control;
     }
 
-    function makeDateControl(setting, mount) {
-        var wrap = document.createElement('span');
-        wrap.className = 'gt-backtest-date-control';
-        wrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
-        var year = makeDatePart('year', '年', 4, '72px');
-        var month = makeDatePart('month', '月', 2, '46px');
-        var day = makeDatePart('day', '日', 2, '46px');
-        wrap.appendChild(year);
-        wrap.appendChild(dateSep('-'));
-        wrap.appendChild(month);
-        wrap.appendChild(dateSep('-'));
-        wrap.appendChild(day);
-
-        function setValue(value) {
-            var parts = parseDateParts(value);
-            year.value = parts.year;
-            month.value = parts.month;
-            day.value = parts.day;
+    function applyDisabledControlStyle(control, disabled) {
+        if (!control) return;
+        if (disabled) {
+            control.classList.add('gt-backtest-setting-control-disabled');
+            control.style.background = '#f8fafc';
+            control.style.color = '#94a3b8';
+            control.style.borderColor = '#cbd5e1';
+            control.style.cursor = 'not-allowed';
+            control.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
+        } else {
+            control.classList.remove('gt-backtest-setting-control-disabled');
+            control.style.cursor = '';
+            control.title = '';
         }
-
-        function getValue() {
-            var y = sanitizeDigits(year.value).slice(-4);
-            var m = padDatePart(sanitizeDigits(month.value), 2);
-            var d = padDatePart(sanitizeDigits(day.value), 2);
-            if (y.length !== 4 || !m || !d) return '';
-            return y + '-' + m + '-' + d;
-        }
-
-        function normalizePart(part) {
-            part.value = sanitizeDigits(part.value).slice(part === year ? -4 : -2);
-            if (part === year) {
-                if (part.value.length === 4) {
-                    var y = clampNumber(part.value, 1900, 2100);
-                    part.value = String(y);
-                }
-                return;
-            }
-            if (part === month) {
-                part.value = padDatePart(clampNumber(part.value, 1, 12), 2);
-                normalizeDay();
-                return;
-            }
-            normalizeDay();
-        }
-
-        function normalizeDay() {
-            var y = parseInt(year.value, 10);
-            var m = parseInt(month.value, 10);
-            var maxDay = window.DateUtils && y && m ? window.DateUtils.getMaxDay(y, m) : 31;
-            day.value = padDatePart(clampNumber(day.value, 1, maxDay), 2);
-        }
-
-        [year, month, day].forEach(function(part) {
-            part.addEventListener('focus', function() { this.select(); });
-            part.addEventListener('input', function() {
-                this.value = sanitizeDigits(this.value).slice(this === year ? -4 : -2);
-            });
-            part.addEventListener('blur', function() {
-                normalizePart(this);
-                dispatchControlChange(wrap);
-            });
-            part.addEventListener('change', function() {
-                normalizePart(this);
-                dispatchControlChange(wrap);
-            });
-        });
-
-        Object.defineProperty(wrap, 'value', {
-            get: getValue,
-            set: setValue,
-        });
-        Object.defineProperty(wrap, 'disabled', {
-            get: function() { return year.disabled && month.disabled && day.disabled; },
-            set: function(disabled) {
-                [year, month, day].forEach(function(part) { part.disabled = !!disabled; });
-            },
-        });
-        wrap.value = effectiveValue(setting, mount);
-        return wrap;
     }
 
-    function dispatchControlChange(control) {
-        if (!control) return;
-        if (typeof Event === 'function' && typeof control.dispatchEvent === 'function') {
-            control.dispatchEvent(new Event('change', { bubbles: true }));
+    function renderCustomProductOverridesControl(setting, mount, rerenderAfterChange, disabled) {
+        var host = document.createElement('div');
+        host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;margin:0;box-sizing:border-box;overflow:hidden;';
+        if (disabled) {
+            host.style.opacity = '0.72';
+            host.title = '当前模式下使用后端默认值，切换到自定义模式后可编辑';
+        }
+        var table = document.createElement('div');
+        table.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0;width:100%;box-sizing:border-box;';
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.textContent = '+ 字段';
+        addBtn.style.cssText = 'align-self:flex-start;height:26px;margin:0;padding:0 10px;box-sizing:border-box;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;';
+        addBtn.disabled = !!disabled;
+        if (disabled) addBtn.style.cssText = 'align-self:flex-start;height:26px;margin:0;padding:0 10px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;font-size:12px;cursor:not-allowed;';
+        host.appendChild(table);
+        host.appendChild(addBtn);
+
+        function rows() {
+            var value = effectiveValue(setting, mount);
+            return Array.isArray(value) ? value.slice() : [];
+        }
+        function moduleFilter() {
+            return setting.serialization && setting.serialization.module_filter || '';
+        }
+        function fieldBelongsToEditor(field) {
+            var filter = moduleFilter();
+            if (!filter) return true;
+            return String(selectedFieldMeta(field).module || '') === String(filter);
+        }
+        function visibleRows(allRows) {
+            return (allRows || []).filter(function(row) {
+                return row && fieldBelongsToEditor(row.field);
+            });
+        }
+        function writeRows(nextRows) {
+            var filter = moduleFilter();
+            var retained = rows().filter(function(row) {
+                return filter && !fieldBelongsToEditor(row.field);
+            });
+            var scoped = nextRows.filter(function(row) {
+                return row && (row.product || row.field || row.value !== undefined && row.value !== '');
+            });
+            var nextAllRows = retained.concat(scoped);
+            writeValue(setting, mount, nextAllRows);
+            activateCustomProductModules(nextAllRows);
+            render();
+            rerenderAfterChange();
+        }
+        function fieldOptions() {
+            var options = (setting.serialization && setting.serialization.fields) || [];
+            var filter = moduleFilter();
+            if (!filter) return options;
+            return options.filter(function(item) {
+                return String(item.module || '') === String(filter);
+            });
+        }
+        function selectedFieldMeta(field) {
+            var options = fieldOptions();
+            for (var i = 0; i < options.length; i++) {
+                if (String(options[i].value) === String(field)) return options[i];
+            }
+            return {};
+        }
+        function customProductEditorForModule(moduleName) {
+            var defaults = state.index && state.index.defaults || {};
+            var keys = Object.keys(defaults);
+            for (var i = 0; i < keys.length; i++) {
+                var def = defaults[keys[i]] || {};
+                var serialization = def.serialization || {};
+                if (serialization.kind !== 'custom_product_overrides') continue;
+                if (serialization.module_filter && String(serialization.module_filter) === String(moduleName)) {
+                    return Object.assign({ key: keys[i] }, def);
+                }
+            }
+            return null;
+        }
+        function modePatchForCustomEditor(editor) {
+            var modeWhen = editor && editor.serialization && editor.serialization.module_editor
+                && editor.serialization.module_editor.mode_when || {};
+            var keys = Object.keys(modeWhen);
+            for (var i = 0; i < keys.length; i++) {
+                var values = Array.isArray(modeWhen[keys[i]]) ? modeWhen[keys[i]] : [modeWhen[keys[i]]];
+                if (values.length) return { key: keys[i], value: values[0] };
+            }
+            return null;
+        }
+        function activateCustomProductModules(allRows) {
+            var serialization = setting.serialization || {};
+            if (settingStorageKey(setting) !== 'custom_product_fields') return;
+            if (serialization.kind !== 'custom_product_overrides' || serialization.module_filter) return;
+            var activated = {};
+            (allRows || []).forEach(function(row) {
+                var moduleName = selectedFieldMeta(row && row.field).module;
+                if (!moduleName || activated[moduleName]) return;
+                activated[moduleName] = true;
+                var editor = customProductEditorForModule(moduleName);
+                if (!editor) return;
+                var tabKey = editor.tab_key || editor.tab || editor.serialization && editor.serialization.module_editor && editor.serialization.module_editor.tab;
+                if (tabKey && !isMounted(mount, tabKey)) toggleMounted(mount, tabKey, true);
+                var patch = modePatchForCustomEditor(editor);
+                if (!patch) return;
+                var defaults = state.index && state.index.defaults || {};
+                var modeDef = defaults[patch.key];
+                if (!modeDef) return;
+                var modeSetting = Object.assign({ key: patch.key }, modeDef);
+                if (effectiveValue(modeSetting, mount) !== patch.value) {
+                    writeValue(modeSetting, mount, patch.value);
+                }
+            });
+        }
+        function fieldLabel(field) {
+            return window.BackendSettingsPanel.customProductFieldLabel(setting, field);
+        }
+        function cellInput(type, value, onChange, placeholder) {
+            var input = document.createElement('input');
+            input.type = type || 'text';
+            input.value = value == null ? '' : value;
+            input.placeholder = placeholder || '';
+            input.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+            input.addEventListener('change', function() { onChange(input.value); });
+            return input;
+        }
+        function valueInput(meta, value, onChange) {
+            if (meta.value_type === 'select') {
+                var select = document.createElement('select');
+                select.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                (meta.value_options || []).forEach(function(item) {
+                    var option = document.createElement('option');
+                    option.value = Array.isArray(item) ? item[0] : item.value;
+                    option.textContent = Array.isArray(item) ? item[1] : item.label;
+                    select.appendChild(option);
+                });
+                select.value = value == null ? '' : value;
+                select.addEventListener('change', function() { onChange(select.value); });
+                return select;
+            }
+            return cellInput('number', value, function(nextValue) {
+                onChange(nextValue === '' ? '' : Number(nextValue));
+            }, '值');
+        }
+        function render() {
+            table.innerHTML = '';
+            var current = visibleRows(rows());
+            if (!current.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'color:#64748b;font-size:12px;margin:0;';
+                empty.textContent = disabled ? '无（切换到自定义模式后可编辑）' : '无';
+                table.appendChild(empty);
+            }
+            current.forEach(function(row, index) {
+                var line = document.createElement('div');
+                line.style.cssText = 'display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.35fr) minmax(0,.85fr) minmax(0,1fr) minmax(0,1fr) 26px;gap:6px;align-items:center;margin:0;width:100%;box-sizing:border-box;';
+                var productInput = cellInput('text', row.product || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { product: value });
+                    writeRows(current);
+                }, '产品/合约代码');
+                productInput.disabled = !!disabled;
+                applyDisabledControlStyle(productInput, disabled);
+                line.appendChild(productInput);
+                var select = document.createElement('select');
+                select.style.cssText = 'height:26px;margin:0;box-sizing:border-box;width:100%;border:1px solid #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;min-width:0;';
+                fieldOptions().forEach(function(item) {
+                    var option = document.createElement('option');
+                    option.value = item.value;
+                    option.textContent = fieldLabel(item.value);
+                    if (item.unit) option.title = String(item.unit);
+                    select.appendChild(option);
+                });
+                select.value = row.field || (fieldOptions()[0] && fieldOptions()[0].value) || '';
+                select.disabled = !!disabled;
+                applyDisabledControlStyle(select, disabled);
+                select.addEventListener('change', function() {
+                    current[index] = Object.assign({}, current[index], { field: select.value, start: '', end: '' });
+                    writeRows(current);
+                });
+                line.appendChild(select);
+                var meta = selectedFieldMeta(select.value);
+                var valueControl = valueInput(meta, row.value, function(value) {
+                    current[index] = Object.assign({}, current[index], { value: value });
+                    writeRows(current);
+                });
+                valueControl.disabled = !!disabled;
+                applyDisabledControlStyle(valueControl, disabled);
+                line.appendChild(valueControl);
+                var allowRange = meta.allow_time_range !== false;
+                var start = cellInput('datetime-local', row.start || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { start: value });
+                    writeRows(current);
+                });
+                var end = cellInput('datetime-local', row.end || '', function(value) {
+                    current[index] = Object.assign({}, current[index], { end: value });
+                    writeRows(current);
+                });
+                start.disabled = !allowRange || !!disabled;
+                end.disabled = !allowRange || !!disabled;
+                applyDisabledControlStyle(start, start.disabled);
+                applyDisabledControlStyle(end, end.disabled);
+                line.appendChild(start);
+                line.appendChild(end);
+                var remove = document.createElement('button');
+                remove.type = 'button';
+                remove.textContent = '×';
+                remove.style.cssText = 'height:26px;width:26px;margin:0;padding:0;box-sizing:border-box;border:1px solid #fecaca;border-radius:4px;background:#fff1f2;color:#be123c;cursor:pointer;';
+                remove.disabled = !!disabled;
+                if (disabled) remove.style.cssText = 'height:26px;width:26px;margin:0;padding:0;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;color:#94a3b8;cursor:not-allowed;';
+                remove.addEventListener('click', function() {
+                    if (disabled) return;
+                    current.splice(index, 1);
+                    writeRows(current);
+                });
+                line.appendChild(remove);
+                table.appendChild(line);
+            });
+        }
+        addBtn.addEventListener('click', function() {
+            if (disabled) return;
+            var current = visibleRows(rows());
+            current.push({ product: '', field: (fieldOptions()[0] && fieldOptions()[0].value) || '', value: '' });
+            writeRows(current);
+        });
+        render();
+        return host;
+    }
+
+    /**
+     * Render the product-path-selection management UI into `container`.
+     * `opts.getCurrent`/`opts.setCurrent` let callers scope "当前选中" to something
+     * other than the page-level local default (e.g. an add-draft or a specific group),
+     * so the same manager UI can be reused inside the group-add/edit chip-list panel.
+     */
+    function renderProductPathSelectionManager(container, opts) {
+        opts = opts || {};
+        var getCurrent = opts.getCurrent || function() { return state.localValues.product_path_selection; };
+        var setCurrent = opts.setCurrent || setDefaultProductPathSelection;
+        container.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载产品路径...</div>';
+        loadProductPathSelections().then(function(selections) {
+            if (!window.ProductPathSelectionUtils || typeof window.ProductPathSelectionUtils.renderSelectionSettingsTab !== 'function') {
+                container.textContent = '产品路径设置组件未加载';
+                return;
+            }
+            window.ProductPathSelectionUtils.renderSelectionSettingsTab({
+                host: container,
+                prefix: 'gt-pps',
+                selections: selections,
+                currentSelection: getCurrent(),
+                currentLabel: '当前默认',
+                manualTitle: '现场新增路径组',
+                createLabel: '新增',
+                createDefaultLabel: '新增并设为默认',
+                escapeHTML: escapeHTML,
+                productCount: function(selection) { return productPathSelectionProducts(selection).length; },
+                allowRemove: isManualProductPathSelection,
+                onOpen: function(selected) {
+                    if (!selected || !GT.overlays || !GT.overlays.productPathSelectionProducts) return;
+                    GT.overlays.productPathSelectionProducts.open(
+                        productPathSelectionLabel(selected),
+                        productPathSelectionProducts(selected),
+                        selected
+                    );
+                },
+                onSetDefault: function(selected) {
+                    setCurrent(selected);
+                    renderProductPathSelectionManager(container, opts);
+                },
+                onRemove: function(selected) {
+                    var id = selectionId(selected);
+                    var name = productPathSelectionLabel(selected);
+                    if (!name || !confirm('移除现场产品路径组 "' + name + '"？')) return;
+                    removeProductPathSelection(id);
+                    renderProductPathSelectionManager(container, opts);
+                },
+                onCreate: function(selection, meta) {
+                    mergeProductPathSelections([selection]);
+                    if (meta && meta.setAsDefault) setCurrent(selection);
+                    renderProductPathSelectionManager(container, opts);
+                },
+            });
+        }).catch(function(error) {
+            container.textContent = '加载失败：' + error.message;
+        });
+    }
+
+    function renderFactorManager(container, opts) {
+        opts = opts || {};
+        var multiple = !!opts.multiple;
+        var hasExternalToggle = typeof opts.onToggle === 'function';
+        var utils = window.FactorParamSelectionUtils;
+        if (!utils || typeof utils.renderFactorStoreManager !== 'function') {
+            container.textContent = '因子参数设置组件未加载';
             return;
         }
-        var listeners = control.listeners && control.listeners.change;
-        if (Array.isArray(listeners)) {
-            listeners.forEach(function(listener) {
-                listener.call(control, { type: 'change', target: control });
+        var store = opts.store || ensureGtLocalStore();
+        var ffAlias = window.factorFamilyAlias || '';
+        var libraryPromise = function() { return ffAlias
+            ? requestJSON('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).catch(function() { return { factors: [] }; })
+            : Promise.resolve({ factors: [] }); };
+        utils.renderFactorStoreManager({
+            host: container,
+            prefix: opts.prefix || 'gt-fps',
+            store: store,
+            candidateKey: opts.candidateKey || 'factor_candidates',
+            factorKey: opts.factorKey || 'factor',
+            factorFamilyAlias: ffAlias,
+            paramDefs: opts.paramDefs || [],
+            multiple: multiple,
+            selected: opts.selected,
+            onToggle: hasExternalToggle ? function(alias) { opts.onToggle(alias); } : undefined,
+            onSetDefault: hasExternalToggle ? function(alias) { opts.onToggle(alias); } : undefined,
+            loadLibraryParams: function() {
+                return libraryPromise().then(function(payload) {
+            var libraryItems = Array.isArray(payload.factors) ? payload.factors : [];
+                    return libraryItems.map(function(item) {
+                return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
             });
-        }
+                });
+            },
+            onRegisterParam: function(param) {
+                if (!param || !ffAlias) return param;
+                return addFactorByParams(ffAlias, param.params || {}).then(function(data) {
+                    if (data && data.factor_alias) {
+                        return Object.assign({}, param, { factor_alias: data.factor_alias });
+                    }
+                    return param;
+                });
+            },
+            escapeHTML: escapeHTML,
+        });
     }
 
-    function makeDatePart(part, placeholder, maxLength, width) {
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.inputMode = 'numeric';
-        input.setAttribute('data-date-part', part);
-        input.placeholder = placeholder;
-        input.style.cssText = 'width:' + width + ';text-align:center;padding:5px 6px;border:1px solid #d8dee4;border-radius:6px;font-size:12px;';
-        input.min = part === 'year' ? '1900' : '1';
-        input.max = part === 'year' ? '2100' : (part === 'month' ? '12' : '31');
-        input.step = '1';
-        input.setAttribute('maxlength', String(maxLength));
-        return input;
-    }
-
-    function dateSep(text) {
-        var sep = document.createElement('span');
-        sep.textContent = text;
-        sep.style.cssText = 'color:#94a3b8;font-size:12px;';
-        return sep;
+    // 新增一个因子候选：POST /add_factor_by_params（写入 page_factors），
+    // 成功后刷新 window.factorList（与 IC 共用同一全局列表与刷新入口）。
+    function addFactorByParams(factorFamilyAlias, params) {
+        return fetch('/add_factor_by_params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factor_family_alias: factorFamilyAlias,
+                params: params || {},
+                page_uuid: window._pageUuid || '',
+            }),
+        }).then(function(res) { return res.json(); }).then(function(data) {
+            if (data && data.success && data.factor_alias && typeof window.refreshICModule === 'function') {
+                return Promise.resolve(window.refreshICModule()).then(function() { return data; });
+            }
+            return data;
+        }).catch(function(err) {
+            console.error('[gt factor-manager] add_factor_by_params failed:', err);
+        });
     }
 
     function parseDateParts(value) {
@@ -562,6 +1258,10 @@
     }
 
     function renderManifest(manifest, mount, container) {
+        if (mount === LOCAL && manifest.tab && manifest.tab.key === 'product_path_selection') {
+            renderProductPathSelectionManager(container);
+            return;
+        }
         if (!manifest.tab || manifest.tab.layout_template !== 'settings-grid') {
             throw new Error('不支持的页签布局模板: ' + (manifest.tab && manifest.tab.layout_template));
         }
@@ -580,7 +1280,10 @@
                     var node = activeNode();
                     if (!node || !Object.prototype.hasOwnProperty.call(node.value, setting.key)) return;
                 }
-                chips.appendChild(chip(chipText(setting, effectiveValue(setting, mount)), false));
+                var node = document.createElement('span');
+                node.className = 'gt-backend-chip';
+                node.innerHTML = gtSettingChipHtml(setting, effectiveValue(setting, mount));
+                chips.appendChild(node);
             });
             chips.style.display = chips.childNodes.length ? 'flex' : 'none';
         }
@@ -601,9 +1304,26 @@
             row.appendChild(controlWrap);
             grid.appendChild(row);
         });
-        renderChips();
-        container.appendChild(chips);
+        if (mount !== LOCAL) {
+            renderChips();
+            container.appendChild(chips);
+        }
         container.appendChild(grid);
+        if (mount === LOCAL && manifest.tab && state.inlineManagers[manifest.tab.key]) {
+            var hasFactorCandidates = (manifest.settings || []).some(function(setting) {
+                return setting && setting.serialization && setting.serialization.kind === 'factor_candidate_list';
+            });
+            if (hasFactorCandidates) {
+                var managerWrap = document.createElement('div');
+                managerWrap.style.cssText = 'margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;';
+                container.appendChild(managerWrap);
+                renderFactorManager(managerWrap, {
+                    multiple: false,
+                    store: ensureGtLocalStore(),
+                    selected: (ensureGtLocalStore() && ensureGtLocalStore().effective('factor')) || '',
+                });
+            }
+        }
     }
 
     function activateTab(tabKey, mount, container) {
@@ -622,45 +1342,39 @@
     }
 
     function toggleMounted(mount, tabKey, enabled) {
-        var tabs = state.mountedTabs[mount];
-        var index = tabs.indexOf(tabKey);
-        if (enabled && index < 0) tabs.push(tabKey);
-        if (!enabled && index >= 0) {
-            tabs.splice(index, 1);
-            clearTabOverrides(mount, tabKey);
-        }
-        if (mount === LOCAL) renderLocalTabs();
-        if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+        if (!window.BackendSettingsPanel) return;
+        window.BackendSettingsPanel.toggleMountedTab({
+            mountedTabs: state.mountedTabs[mount],
+            tabKey: tabKey,
+            enabled: enabled,
+            clearTabValues: function(key) {
+                clearTabOverrides(mount, key);
+            },
+            afterChange: function() {
+                if (mount === LOCAL) renderLocalTabs();
+                if (mount === GROUP && GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+            },
+        });
     }
 
     function renderChooser(mount, container) {
-        container.innerHTML = '';
-        var intro = document.createElement('div');
-        intro.className = 'gt-backtest-settings-chooser-intro';
-        intro.textContent = '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。';
-        container.appendChild(intro);
-        availableTabs(mount).forEach(function(tab) {
-            var row = document.createElement('label');
-            row.className = 'gt-backtest-settings-chooser-row';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = isMounted(mount, tab.key);
-            checkbox.addEventListener('change', function() { toggleMounted(mount, tab.key, checkbox.checked); });
-            var body = document.createElement('div');
-            body.className = 'gt-backtest-settings-chooser-body';
-            var title = document.createElement('div');
-            title.textContent = tab.label;
-            title.className = 'gt-backtest-settings-chooser-title';
-            body.appendChild(title);
-            var defaults = document.createElement('div');
-            defaults.className = 'gt-backtest-settings-chooser-defaults';
-            defaultsForTab(tab.key).forEach(function(item) {
-                defaults.appendChild(chip(item.key + ': ' + item.value, true));
-            });
-            body.appendChild(defaults);
-            row.appendChild(checkbox);
-            row.appendChild(body);
-            container.appendChild(row);
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+        // 统一走 manifest + store 路径（与其它模块的选择器一致），chip 由 ChipRenderer 渲染。
+        window.BackendSettingsPanel.renderChooser({
+            host: container,
+            manifest: state.index,
+            store: ensureGtLocalStore(),
+            tabs: availableTabs(mount),
+            mountedTabs: state.mountedTabs[mount],
+            introText: '选择要挂载到此栏的回测设置。未挂载项继续使用下列默认值。',
+            introClassName: 'backend-settings-chooser-intro gt-backtest-settings-chooser-intro',
+            rowClassName: 'backend-settings-chooser-row gt-backtest-settings-chooser-row',
+            bodyClassName: 'backend-settings-chooser-body gt-backtest-settings-chooser-body',
+            titleClassName: 'backend-settings-chooser-title gt-backtest-settings-chooser-title',
+            defaultsClassName: 'backend-settings-chooser-defaults gt-backtest-settings-chooser-defaults',
+            onToggle: function(tab, enabled) { toggleMounted(mount, tab.key, enabled); },
+            escapeHTML: escapeHTML,
+            renderChipHtml: renderChipHtml,
         });
     }
 
@@ -668,42 +1382,47 @@
 
     function localChipRow() { return document.getElementById('gt-local-settings-chip-row'); }
 
+    // 响应式 chip：manifest 建 FieldStore（backing = state.localValues），ChipRenderer 订阅。
+    // 这是"tab/内容"那条 chip 行——点击 chip 打开/关闭对应设置 tab（保留 onOpen=openLocal）。
+    var gtLocalStore = null, gtLocalChipUnbind = null;
+    function ensureGtLocalStore() {
+        if (!gtLocalStore && state.index && window.FieldStore) {
+            gtLocalStore = window.FieldStore.create({ defaults: state.index.defaults, values: state.localValues, parent: window._singleFactorPageStore || null });
+        }
+        if (gtLocalStore && window._singleFactorPageStore && gtLocalStore.setParent) {
+            gtLocalStore.setParent(window._singleFactorPageStore);
+        }
+        return gtLocalStore;
+    }
+
     function renderLocalSettingChips() {
         var row = document.getElementById('gt-local-settings-chip-row');
         if (!row) return;
-        row.innerHTML = '';
-        if (!state.index) {
-            row.style.display = 'none';
-            return;
+        if (!state.index) { row.style.display = 'none'; return; }
+        var store = ensureGtLocalStore();
+        if (store) store.setMany(state.localValues);
+        if (gtLocalChipUnbind) { gtLocalChipUnbind(); gtLocalChipUnbind = null; }
+        var keys = [];
+        orderedMountedTabs(LOCAL).forEach(function(tabKey) {
+            settingKeysForTab(tabKey).forEach(function(key) {
+                if ((state.index.defaults[key] || {}).chip_template) keys.push(key);
+            });
+        });
+        if (window.ChipRenderer && store) {
+            gtLocalChipUnbind = window.ChipRenderer.render(row, {
+                manifest: { defaults: state.index.defaults },
+                store: store,
+                settingKeys: keys,
+                tabOf: function(key) { return (state.index.defaults[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openLocal(tabKey); },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
+            });
+        } else {
+            row.innerHTML = '';
         }
-        var missing = [];
-        (state.mountedTabs[LOCAL] || []).forEach(function(tabKey) {
-            var manifest = state.tabCache[tabKey];
-            if (!manifest) {
-                missing.push(tabKey);
-                return;
-            }
-            (manifest.settings || []).forEach(function(setting) {
-                if (!setting.chip_template) return;
-                if (!settingVisible(setting, LOCAL)) return;
-                var value = effectiveValue(setting, LOCAL);
-                if (value === undefined || value === null || value === '') return;
-                var chipNode = chip(chipText(setting, value), false);
-                chipNode.setAttribute('data-backtest-local-chip', setting.key);
-                chipNode.title = '打开' + ((manifest.tab && manifest.tab.label) || setting.tab_key || tabKey);
-                chipNode.style.cursor = 'pointer';
-                chipNode.addEventListener('click', function() { openLocal(tabKey); });
-                row.appendChild(chipNode);
-            });
-        });
-        row.style.display = row.childNodes.length ? 'flex' : 'none';
-        missing.forEach(function(tabKey) {
-            loadTab(tabKey).then(function() {
-                renderLocalSettingChips();
-            }).catch(function(error) {
-                console.error('[backend-settings] local chip load failed:', tabKey, error);
-            });
-        });
+        var anyVisible = Array.prototype.some.call(row.children, function(c) { return c.style.display !== 'none'; });
+        row.style.display = anyVisible ? 'flex' : 'none';
     }
 
     function deactivateLocal() {
@@ -717,19 +1436,40 @@
 
     function openLocal(tabKey) {
         var host = localHost();
-        if (state.activeLocalTab === tabKey && host && host.style.display !== 'none') {
-            deactivateLocal();
+        if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
+            if (state.activeLocalTab === tabKey && host && host.style.display !== 'none') {
+                deactivateLocal();
+                return;
+            }
+        }
+        var toggleResult = window.BackendSettingsPanel && window.BackendSettingsPanel.toggleContent
+            ? window.BackendSettingsPanel.toggleContent({
+                key: tabKey,
+                host: host,
+                getActiveKey: function() { return state.activeLocalTab; },
+                setActiveKey: function(value) { state.activeLocalTab = value; },
+                buttonSelector: '[data-backtest-local-tab]',
+                buttonKeyAttribute: 'data-backtest-local-tab',
+                panelSelector: '[data-local-settings-tab-panel]',
+                panelKeyAttribute: 'data-local-settings-tab-panel',
+                beforeOpen: function() {
+                    document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
+                },
+            })
+            : { opened: true };
+        if (!toggleResult.opened) {
             return;
         }
-        document.querySelectorAll('[data-local-settings-tab-panel]').forEach(function(panel) { panel.style.display = 'none'; });
-        document.querySelectorAll('[data-local-settings-tab-btn]').forEach(function(button) { button.classList.remove('active'); });
-        host.style.display = '';
-        state.activeLocalTab = tabKey;
-        document.querySelectorAll('[data-backtest-local-tab]').forEach(function(button) {
-            button.classList.toggle('active', button.getAttribute('data-backtest-local-tab') === tabKey);
-        });
         if (tabKey === '__manage__') renderChooser(LOCAL, host);
         else activateTab(tabKey, LOCAL, host).catch(function(error) { console.error(error); });
+    }
+
+    function openLocalTab(tabKey) {
+        if (!tabKey || !tabExists(LOCAL, tabKey)) return false;
+        ensureMounted(LOCAL, tabKey);
+        renderLocalTabs();
+        openLocal(tabKey);
+        return true;
     }
 
     function renderLocalTabs() {
@@ -740,7 +1480,7 @@
             if (!isMounted(LOCAL, tab.key)) return;
             var button = document.createElement('button');
             button.type = 'button';
-            button.className = 'btn btn-sm btn-outline-secondary';
+            button.className = '';
             button.textContent = tab.label;
             button.setAttribute('data-backtest-local-tab', tab.key);
             button.addEventListener('click', function() { openLocal(tab.key); });
@@ -748,7 +1488,7 @@
         });
         var manage = document.createElement('button');
         manage.type = 'button';
-        manage.className = 'btn btn-sm btn-outline-secondary';
+        manage.className = '';
         manage.textContent = '+ 回测设置';
         manage.setAttribute('data-backtest-local-tab', '__manage__');
         manage.addEventListener('click', function() { openLocal('__manage__'); });
@@ -807,18 +1547,27 @@
         return state.settingDefs[key] || Object.assign({ key: key }, defaults[key] || {});
     }
 
+    function parentFieldDiffers(group, key, value) {
+        var source = group && group.value ? group.value : group;
+        if (!source || !source.parentId || !GT.groupSettings || !GT.groupSettings.groups || !GT.groupSettings.groups.get) return false;
+        var parent = GT.groupSettings.groups.get(source.parentId);
+        if (!parent || !hasUsableValue(parent, key)) return false;
+        return !valuesEqual(parent[key], value);
+    }
+
     function configSettingKeys() {
         var defaults = state.index && state.index.defaults || {};
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
-            return (scope === 'group_override' || scope === 'group_only') && !!setting.chip_template;
+            return scope !== 'local_only' && !!setting.chip_template;
         });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults);
     }
 
     function effectiveSettingValueForGroup(group, key) {
         var source = group && group.value ? group.value : group;
-        if (source && Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+        if (hasUsableValue(source, key)) return source[key];
         if (source && source.parentId && GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) {
             var inherited = GT.groupSettings.groups.resolveRootField(source, key);
             if (inherited !== undefined && inherited !== null && inherited !== '') return inherited;
@@ -835,10 +1584,14 @@
         var values = effectiveValuesForNode(group);
         values[key] = value;
         if (!settingVisibleForValues(setting, values)) return null;
+        if (!settingEditableForValues(setting, values)) {
+            value = window.BackendSettingsPanel.defaultValueForValues(setting, values);
+            values[key] = value;
+        }
         if (!setting.chip_template) return null;
         return {
             label: 'backtest-' + key,
-            html: renderChipHtml(chipText(setting, value)),
+            html: gtSettingChipHtml(setting, value),
             category: 'config',
             style: null,
         };
@@ -848,31 +1601,39 @@
         if (!group) return [];
         var defaults = state.index && state.index.defaults || {};
         var values = effectiveValuesForNode(group);
-        return Object.keys(defaults).filter(function(key) {
+        var keys = Object.keys(defaults).filter(function(key) {
             return Object.prototype.hasOwnProperty.call(group, key);
-        }).map(function(key) {
+        });
+        return window.BackendSettingsPanel.sortSettingKeysByDisplayOrder(keys, defaults).map(function(key) {
             var value = group[key];
             if (value === undefined || value === null || value === '') return null;
             var setting = settingDef(key);
             var scope = setting.scope_policy || (defaults[key] && defaults[key].scope_policy);
-            if (scope !== 'group_override' && scope !== 'group_only') return null;
+            if (scope === 'local_only') return null;
             if (!settingVisibleForValues(setting, values)) return null;
+            if (!settingEditableForValues(setting, values)) {
+                value = window.BackendSettingsPanel.defaultValueForValues(setting, values);
+            }
             var localValue = effectiveLocalValues()[key];
             var differsFromLocal = !valuesEqual(value, localValue);
-            var differsFromDefault = defaults[key] && !valuesEqual(value, defaults[key].value);
-            if (!differsFromLocal && !differsFromDefault) return null;
-            if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault) return null;
+            var defaultValue = defaults[key]
+                ? window.BackendSettingsPanel.defaultValueForValues(defaults[key], values)
+                : undefined;
+            var differsFromDefault = defaults[key] && !valuesEqual(value, defaultValue);
+            var differsFromParent = parentFieldDiffers(group, key, value);
+            if (!differsFromLocal && !differsFromDefault && !differsFromParent) return null;
+            if (settingIsShownInMountedTab(GROUP, key) && !differsFromLocal && !differsFromDefault && !differsFromParent) return null;
             if (!setting.chip_template) return null;
             return {
                 label: 'backtest-' + key,
-                html: renderChipHtml(chipText(setting, value)),
+                html: gtSettingChipHtml(setting, value),
                 category: 'config',
                 style: null,
             };
         }).filter(Boolean);
     }
 
-    function manifestChips(group, categories) {
+    function manifestChips(group, categories, options) {
         if (!group || !state.index) return [];
         var filter = null;
         if (categories) {
@@ -882,7 +1643,7 @@
         var chips = [];
         (state.index.chip_fields || []).forEach(function(def) {
             if (filter && !filter[def.category]) return;
-            var source = chipSourceGroup(group, def);
+            var source = chipSourceGroup(group, def, options);
             if (!source) return;
             var missing = (def.source_keys || []).some(function(key) {
                 return source[key] === undefined || source[key] === null || source[key] === '';
@@ -892,15 +1653,15 @@
                 var ownMask = group.productMask || {};
                 if (!group.parentId || Object.keys(ownMask).length === 0) return;
                 var products = nodeProducts(group);
-                if (!products.length) return;
                 var parent = GT.groupSettings && GT.groupSettings.groups ? GT.groupSettings.groups.get(group.parentId) : null;
                 if (parent && sameProductNames(nodeProducts(parent), products)) return;
             }
             chips.push({
                 label: def.key,
-                html: renderChipHtml(renderChipTemplate(def.chip_template, group, source, def.value_resolvers || {})),
+                html: gtChipHtml(def.chip_template, def.value_resolvers || {}, gtChipCtx(group, source)),
                 category: def.category,
                 clickable: !!def.clickable,
+                batch_owned: !!def.batch_owned,
                 action: def.key === 'tester' ? 'tester-products' : (def.key === 'product_mask' ? 'toggle-product-mask' : ''),
                 style: null,
             });
@@ -908,8 +1669,8 @@
         return chips;
     }
 
-    function getAllChips(group, categories) {
-        var chips = manifestChips(group, categories);
+    function getAllChips(group, categories, options) {
+        var chips = manifestChips(group, categories, options);
         if (!categories || categories === 'config' || (Array.isArray(categories) && categories.indexOf('config') >= 0)) {
             chips = chips.concat(backendSettingChips(group));
         }
@@ -920,8 +1681,37 @@
         if (!group || !group.parentId || !GT.groupSettings || !GT.groupSettings.groups) return [];
         var parent = GT.groupSettings.groups.get(group.parentId);
         var base = {};
-        getAllChips(parent, ['config', 'derived']).forEach(function(chip) { base[chip.label] = chip.html; });
-        return getAllChips(group, ['config', 'derived']).filter(function(chip) {
+        var categories = ['identity', 'config', 'derived'];
+        var options = { useOwnValues: true };
+        getAllChips(parent, categories, options).forEach(function(chip) { base[chip.label] = chip.html; });
+        var childChips = getAllChips(group, categories, options);
+        var childChipLabels = {};
+        childChips.forEach(function(chip) { childChipLabels[chip.label] = true; });
+        var defaults = state.index && state.index.defaults || {};
+        Object.keys(defaults).forEach(function(key) {
+            if (childChipLabels['backtest-' + key]) return;
+            var def = defaults[key];
+            if (!def || !def.chip_template) return;
+            var scope = def.scope_policy;
+            if (scope === 'local_only') return;
+            var parentHasValue = hasUsableValue(parent, key);
+            if (!parentHasValue || hasUsableValue(group, key)) return;
+            var childValue = def.value;
+            var parentValue = parent[key];
+            if (childValue === undefined || childValue === null || childValue === '') return;
+            if (valuesEqual(childValue, parentValue)) return;
+            var values = effectiveValuesForNode(group);
+            values[key] = childValue;
+            if (!settingVisibleForValues(def, values)) return;
+            childChips.push({
+                label: 'backtest-' + key,
+                html: gtSettingChipHtml(settingDef(key), childValue),
+                category: 'config',
+                style: null,
+            });
+            childChipLabels['backtest-' + key] = true;
+        });
+        return childChips.filter(function(chip) {
             return base[chip.label] !== chip.html;
         });
     }
@@ -943,6 +1733,7 @@
         return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
             state.index = index;
             copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
+            copyLocalDefaultsFromProvider('page_shared_defaults', { skipUserValues: true });
             registerBackendFields(index);
             var defaults = index.default_mounted_tabs || {};
             [LOCAL, GROUP].forEach(function(mount) {
@@ -959,17 +1750,14 @@
     function registerBuiltInDefaultProviders() {
         if (state.localDefaultProviders.page_time_range) return;
         registerLocalDefaultProvider('page_time_range', function() {
-            if (typeof window.getSharedRuntimeTimeRange !== 'function') return null;
-            var source = window.getSharedRuntimeTimeRange();
-            if (!source) return null;
-            return {
-                start_date: source.start_date || '',
-                end_date: source.end_date || '',
-                start_time: source.start_time || '',
-                end_time: source.end_time || '',
-                timezone: source.timezone || '',
-                time_precision: source.is_trading_day ? 'trading_day' : 'exact',
-            };
+            if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return null;
+            return window.SingleFactorGlobalSettings.getDefaultValues(RUN_WINDOW_KEYS);
+        });
+        registerLocalDefaultProvider('page_shared_defaults', function() {
+            if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return null;
+            return window.SingleFactorGlobalSettings.getDefaultValues(
+                (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || []
+            );
         });
     }
 
@@ -1025,7 +1813,7 @@
             api.registerField({
                 key: key,
                 type: type,
-                default: item.value,
+                default: null,
             });
         });
         (index.chip_fields || []).forEach(function(chipDef) {
@@ -1051,53 +1839,6 @@
         if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
     }
 
-    function syncAppliedTimeRange() {
-        var values = effectiveLocalValues();
-        if (!values.start_date || !values.end_date) return Promise.resolve(null);
-        var precision = values.time_precision || 'exact';
-        var tradingDayMode = precision === 'trading_day';
-        var timePayload = {
-            factor_family_alias: window.factorFamilyAlias || window._sftCurrentFactorId || '',
-            page_uuid: window._pageUuid || '',
-            start_date: values.start_date || '',
-            start_time: tradingDayMode ? '' : (values.start_time || '09:00'),
-            end_date: values.end_date || '',
-            end_time: tradingDayMode ? '' : (values.end_time || '15:00'),
-            timezone: tradingDayMode ? 'UTC' : (values.timezone || 'Asia/Shanghai'),
-            time_precision: tradingDayMode ? 'trading_day' : precision,
-            is_trading_day: tradingDayMode,
-            is_cn_futures_day: false,
-            is_cn_futures_night: false,
-        };
-        if (typeof window.applySharedRuntimeTimeRange === 'function') {
-            window.applySharedRuntimeTimeRange(timePayload);
-        }
-        return fetch('/set_time_range', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(timePayload),
-        }).then(function(response) {
-            return response.json().catch(function() { return {}; });
-        }).then(function(data) {
-            if (data.page_uuid) {
-                if (typeof window.rememberSingleFactorPageUuid === 'function') {
-                    window.rememberSingleFactorPageUuid(data.page_uuid);
-                } else {
-                    window._pageUuid = data.page_uuid;
-                }
-            }
-            document.dispatchEvent(new CustomEvent('pageTimeRangeChanged', {
-                detail: {
-                    start_date: values.start_date,
-                    start_time: values.start_time,
-                    end_date: values.end_date,
-                    end_time: values.end_time,
-                },
-            }));
-            return data;
-        });
-    }
-
     function applyFlatSnapshot(snapshot) {
         var groupSettings = snapshot && snapshot.group_settings ? snapshot.group_settings : snapshot;
         var groups = groupSettings && Array.isArray(groupSettings.groups) ? groupSettings.groups : [];
@@ -1112,13 +1853,56 @@
         state.mountedTabs[LOCAL] = [];
         state.mountedTabs[GROUP] = [];
         deactivateLocal();
-        mountTabsForSnapshotValues(LOCAL, local);
-        groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
-            mountTabsForSnapshotValues(GROUP, item || {});
+        return resolveSnapshotProductPathReferencesAsync({ group_settings: groupSettings, local_settings: local }).then(function() {
+            mountTabsForSnapshotValues(LOCAL, local);
+            groups.concat(groupSettings && Array.isArray(groupSettings.lsConfigs) ? groupSettings.lsConfigs : []).forEach(function(item) {
+                mountTabsForSnapshotValues(GROUP, item || {});
+            });
+            clearLoadedLocalEchoOverrides(local);
+            renderLocalTabs();
+            if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
+            if (GT.events && GT.events.emit) GT.events.emit('groupsChanged');
+            return null;
         });
-        renderLocalTabs();
-        if (GT.tabs && GT.tabs.refreshTabBar) GT.tabs.refreshTabBar();
-        return syncAppliedTimeRange();
+    }
+
+    function clearLoadedLocalEchoOverrides(local) {
+        var defaults = state.index && state.index.defaults || {};
+        var clearKeys = Object.keys(defaults).filter(function(key) {
+            var def = defaults[key];
+            return def && def.scope_policy !== 'group_only' && def.scope_policy !== 'local_only';
+        });
+        if (!clearKeys.length || !GT.groupSettings) return;
+        function patchFor(item) {
+            var patch = {};
+            clearKeys.forEach(function(key) {
+                if (!Object.prototype.hasOwnProperty.call(item || {}, key)) return;
+                if (valuesEqual(item[key], local[key])) patch[key] = null;
+            });
+            Object.keys(defaults).forEach(function(key) {
+                var def = defaults[key];
+                if (def && def.scope_policy === 'local_only' && Object.prototype.hasOwnProperty.call(item || {}, key)) {
+                    patch[key] = null;
+                }
+            });
+            return patch;
+        }
+        if (GT.groupSettings.groups && GT.groupSettings.groups.getAll && GT.groupSettings.groups.update) {
+            GT.groupSettings.groups.getAll().forEach(function(group) {
+                var patch = patchFor(group);
+                if (Object.keys(patch).length) {
+                    try { GT.groupSettings.groups.update(group.id, patch); } catch (error) { console.warn('[backend-settings] clear group echo override failed:', error); }
+                }
+            });
+        }
+        if (GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.getAll && GT.groupSettings.lsConfigs.update) {
+            GT.groupSettings.lsConfigs.getAll().forEach(function(config) {
+                var patch = patchFor(config);
+                if (Object.keys(patch).length) {
+                    try { GT.groupSettings.lsConfigs.update(config.id, patch); } catch (error) { console.warn('[backend-settings] clear ls echo override failed:', error); }
+                }
+            });
+        }
     }
 
     function flattenGroupForSnapshot(group) {
@@ -1129,13 +1913,13 @@
         var localValues = effectiveLocalValues();
         Object.keys(defaults).forEach(function(key) {
             var def = defaults[key];
-            if (!def || !Object.prototype.hasOwnProperty.call(source, key)) return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
+            if (!def || !hasVisibleStoredValue(def, source, key)) return;
             if (def.scope_policy === 'local_only') return;
             if (!settingVisibleForValues(def, values)) return;
-            if (source[key] === '' || source[key] === null || source[key] === undefined) return;
-            if (def.scope_policy === 'group_override' && valuesEqual(source[key], localValues[key])) return;
-            if (def.scope_policy !== 'group_override' && valuesEqual(source[key], def.value)) return;
-            out[key] = source[key];
+            if (def.scope_policy !== 'group_only' && valuesEqual(source[storageKey], localValues[storageKey]) && !parentFieldDiffers(source, storageKey, source[storageKey])) return;
+            if (def.scope_policy === 'group_only' && valuesEqual(source[storageKey], def.value)) return;
+            out[storageKey] = storageKey === 'product_path_selection' ? compactProductPathSelection(source[storageKey]) : source[storageKey];
         });
         return out;
     }
@@ -1150,7 +1934,7 @@
     }
 
     function groupPayloadForRun(group) {
-        return Object.assign(stripRegisteredSettings(group), flattenGroupForSnapshot(group));
+        return Object.assign(stripRegisteredSettings(group), groupOverridesForRun(group));
     }
 
     function collectLocalSettings() {
@@ -1161,9 +1945,120 @@
             var def = defaults[key];
             if (!def || def.scope_policy === 'group_only') return;
             if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
             if (state.localValues[key] === '' || state.localValues[key] === null || state.localValues[key] === undefined) return;
             if (valuesEqual(state.localValues[key], def.value)) return;
             out[key] = state.localValues[key];
+        });
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+            if (storageKey === key || Object.prototype.hasOwnProperty.call(out, storageKey)) return;
+            if (!hasVisibleStoredValue(def, state.localValues, key)) return;
+            if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
+            out[storageKey] = state.localValues[storageKey];
+        });
+        return out;
+    }
+
+    function pageRunWindowValues() {
+        var provider = state.localDefaultProviders && state.localDefaultProviders.page_time_range;
+        var values = typeof provider === 'function' ? provider() : null;
+        if (!values || typeof values !== 'object') return {};
+        return values;
+    }
+
+    function pageSharedDefaultValues() {
+        var provider = state.localDefaultProviders && state.localDefaultProviders.page_shared_defaults;
+        var values = typeof provider === 'function' ? provider() : null;
+        if (!values || typeof values !== 'object') return {};
+        return values;
+    }
+
+    function shouldUsePageRunWindowForLocalSettings() {
+        return !RUN_WINDOW_KEYS.some(function(key) {
+            return Object.prototype.hasOwnProperty.call(state.localValues || {}, key);
+        });
+    }
+
+    function collectRunLocalSettings() {
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        var values = effectiveLocalValues();
+        var pageWindow = shouldUsePageRunWindowForLocalSettings() ? pageRunWindowValues() : {};
+        Object.keys(state.localValues || {}).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection') return;
+            var value = state.localValues[key];
+            var visibilityValues = Object.assign({}, values, state.localValues);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
+            if (value === '' || value === null || value === undefined) return;
+            out[key] = value;
+        });
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def));
+            if (storageKey === key || Object.prototype.hasOwnProperty.call(out, storageKey)) return;
+            if (!hasVisibleStoredValue(def, state.localValues, key)) return;
+            var value = state.localValues[storageKey];
+            var visibilityValues = Object.assign({}, values, state.localValues);
+            visibilityValues[storageKey] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
+            out[storageKey] = value;
+        });
+        Object.keys(pageWindow).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection') return;
+            if (Object.prototype.hasOwnProperty.call(out, key)) return;
+            var value = normalizeControlValue(def, pageWindow[key]);
+            if (value === '' || value === null || value === undefined) return;
+            var visibilityValues = Object.assign({}, values, pageWindow, out);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
+            out[key] = value;
+        });
+        Object.keys(pageSharedDefaultValues()).forEach(function(key) {
+            var def = defaults[key];
+            if (!def || def.scope_policy === 'group_only') return;
+            if (key === 'product_path_selection' || RUN_WINDOW_KEYS.indexOf(key) >= 0) return;
+            if (Object.prototype.hasOwnProperty.call(out, key)) return;
+            if (Object.prototype.hasOwnProperty.call(state.localValues || {}, key)) return;
+            var value = normalizeControlValue(def, pageSharedDefaultValues()[key]);
+            if (value === '' || value === null || value === undefined) return;
+            var visibilityValues = Object.assign({}, values, out);
+            visibilityValues[key] = value;
+            if (!settingVisibleForValues(def, visibilityValues)) return;
+            if (!settingEditableForValues(def, visibilityValues)) return;
+            out[key] = value;
+        });
+        return out;
+    }
+
+    function groupOverridesForRun(group) {
+        var out = {};
+        var defaults = state.index && state.index.defaults || {};
+        var values = effectiveValuesForNode(group);
+        var localValues = effectiveLocalValues();
+        var source = group && group.value ? group.value : group || {};
+        Object.keys(defaults).forEach(function(key) {
+            var def = defaults[key];
+            var storageKey = settingStorageKey(Object.assign({ key: key }, def || {}));
+            if (!def || def.scope_policy === 'local_only') return;
+            if (!hasVisibleStoredValue(def, source, key)) return;
+            if (!settingVisibleForValues(def, values)) return;
+            if (!settingEditableForValues(def, values)) return;
+            var value = source[storageKey];
+            if (def.scope_policy !== 'group_only' && valuesEqual(value, localValues[storageKey]) && !parentFieldDiffers(source, storageKey, value)) return;
+            out[storageKey] = value;
         });
         return out;
     }
@@ -1175,22 +2070,8 @@
     function collect() { return collectLocalSettings(); }
 
     function runPayload() {
-        var values = effectiveLocalValues();
-        var calendar = String(values.calendar_frequency || 'auto');
-        var precision = values.time_precision || 'exact';
-        var tradingDayMode = precision === 'trading_day';
-        return Object.assign({}, collectLocalSettings(), {
-            _runtime_window: {
-                start_date: values.start_date,
-                end_date: values.end_date,
-                start_time: tradingDayMode ? '' : values.start_time,
-                end_time: tradingDayMode ? '' : values.end_time,
-                time_precision: tradingDayMode ? 'trading_day' : precision,
-                timezone: tradingDayMode ? '' : (values.timezone || 'Asia/Shanghai'),
-            },
-            auto_group_calendar_freq: calendar === 'auto',
-            group_calendar_freq: calendar === 'auto' ? null : calendar,
-        });
+        var localSettings = collectRunLocalSettings();
+        return { local_settings: localSettings };
     }
 
     function groupOverrideValues(groupId) {
@@ -1200,13 +2081,16 @@
     }
 
     function syncPageTimeDefaults() {
-        var pageUuid = encodeURIComponent(window._pageUuid || '');
-        return requestJSON('/api/backtest/settings/' + encodeURIComponent(state.application) + '?page_uuid=' + pageUuid).then(function(index) {
-            state.index = index;
-            copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
-            renderLocalTabs();
-            return index;
-        });
+        copyLocalDefaultsFromProvider('page_time_range', { blockOnUserKeys: RUN_WINDOW_KEYS });
+        renderLocalTabs();
+        return Promise.resolve(state.index);
+    }
+
+    function syncPageSharedDefaults() {
+        copyLocalDefaultsFromProvider('page_shared_defaults', { skipUserValues: true });
+        renderLocalTabs();
+        renderLocalSettingChips();
+        return Promise.resolve(state.index);
     }
 
     document.addEventListener('timeRangeDefaultLoaded', function() {
@@ -1219,6 +2103,14 @@
         });
     });
 
+    document.addEventListener('singleFactorGlobalSettingsChanged', function() {
+        syncPageSharedDefaults().then(function() {
+            document.dispatchEvent(new CustomEvent('groupTestProductPathSelectionsChanged'));
+        }).catch(function(error) {
+            console.error('[backend-settings] sync page shared defaults failed:', error);
+        });
+    });
+
     GT.backendSettings = {
         init: init,
         attachGroupTabs: attachGroupTabs,
@@ -1227,19 +2119,36 @@
         flattenGroupForSnapshot: flattenGroupForSnapshot,
         groupPayloadForRun: groupPayloadForRun,
         collectLocalSettings: collectLocalSettings,
+        materializeChildDefaultsForChangedKeys: materializeChildDefaultsForChangedKeys,
         registerSnapshot: registerSnapshot,
         runPayload: runPayload,
         groupOverrideValues: groupOverrideValues,
+        compactProductPathSelection: compactProductPathSelection,
+        resolveSnapshotProductPathReferences: resolveSnapshotProductPathReferencesAsync,
         syncPageTimeDefaults: syncPageTimeDefaults,
+        syncPageSharedDefaults: syncPageSharedDefaults,
         registerLocalDefaultProvider: registerLocalDefaultProvider,
         copyLocalDefaultsFromProvider: copyLocalDefaultsFromProvider,
         applyLocalDefaultValues: applyLocalDefaultValues,
+        openLocalTab: openLocalTab,
+        loadProductPathSelections: loadProductPathSelections,
+        getProductPathSelections: function() { return state.productPathSelections.slice(); },
+        renderProductPathManager: renderProductPathSelectionManager,
+        renderFactorManager: renderFactorManager,
+        productPathSelectionProducts: productPathSelectionProducts,
+        productPathSelectionLabel: productPathSelectionLabel,
+        getDefaultProductPathSelection: function() {
+            var def = settingDef('product_path_selection') || {};
+            return state.localValues.product_path_selection || def.value || null;
+        },
+        setDefaultProductPathSelection: setDefaultProductPathSelection,
         getAllChips: getAllChips,
         getOverrideChips: getOverrideChips,
         configSettingKeys: configSettingKeys,
         effectiveSettingValueForGroup: effectiveSettingValueForGroup,
         configChipForGroupKey: configChipForGroupKey,
         renderChipHtml: renderChipHtml,
+        ensureGtLocalStore: ensureGtLocalStore,
         toggleProductMask: toggleProductMask,
         isProductMaskExpanded: isProductMaskExpanded,
         _state: state,

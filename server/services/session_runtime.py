@@ -9,11 +9,8 @@ import uuid
 from flask import session
 
 from tools.data.account_manage import accounts_lock, load_accounts
-from server.modules.shared.param_config import normalize_param_rows
 
 
-params_store: dict = {}
-params_store_lock = threading.Lock()
 user_file_locks: dict[str, threading.Lock] = {}
 user_file_locks_meta = threading.Lock()
 
@@ -64,10 +61,6 @@ def cleanup_session_resource(sid: str) -> None:
         IdleResourceManager.get_instance().registry.remove(session_resource_id(sid))
     except Exception:
         pass
-    with params_store_lock:
-        keys_to_remove = [key for key in params_store if key[0] == sid]
-        for key in keys_to_remove:
-            params_store.pop(key, None)
 
 
 def current_user() -> str | None:
@@ -92,32 +85,7 @@ def require_user() -> str:
     return username
 
 
-def get_session_params(ff_alias: str, ff) -> list:
-    store_key = (get_session_id(), ff_alias)
-    with params_store_lock:
-        stored = list(params_store.get(store_key, []))
-    if not stored:
-        return stored
-    valid_aliases = {param.alias for param in getattr(ff, 'params', [])}
-    pruned = [
-        {key: value for key, value in row.items() if key in valid_aliases}
-        for row in stored
-        if isinstance(row, dict)
-    ]
-    try:
-        normalized = normalize_param_rows(ff, pruned)
-    except Exception:
-        normalized = []
-    if normalized != stored:
-        with params_store_lock:
-            params_store[store_key] = list(normalized)
-    return normalized
 
-
-def save_session_params(ff_alias: str, params_list: list) -> None:
-    store_key = (get_session_id(), ff_alias)
-    with params_store_lock:
-        params_store[store_key] = list(params_list)
 
 
 def get_user_file_lock(username: str) -> threading.Lock:

@@ -119,13 +119,27 @@ def discover_products(data_dir: str | Path) -> pd.DataFrame:
     )
 
 
-def _load_sectors(path: Path) -> pd.DataFrame:
-    if not path.is_file():
-        return pd.DataFrame(columns=_SECTOR_COLUMNS)
-    frame = pd.read_csv(path)
+def _empty_sectors() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(_SECTOR_COLUMNS))
+
+
+def _ensure_sectors_table(conn: sqlite3.Connection) -> None:
+    columns_sql = ", ".join(f'"{column}" TEXT' for column in _SECTOR_COLUMNS)
+    conn.execute(f'CREATE TABLE IF NOT EXISTS "{SECTORS_TABLE}" ({columns_sql})')
+
+
+def _load_sectors_from_db(db_path: str | Path) -> pd.DataFrame:
+    with connect_sqlite(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (SECTORS_TABLE,),
+        ).fetchone()
+        if exists is None:
+            return _empty_sectors()
+        frame = pd.read_sql_query(f'SELECT * FROM "{SECTORS_TABLE}"', conn)
     missing = set(_SECTOR_COLUMNS) - set(frame.columns)
     if missing:
-        raise ValueError(f"sectors.csv 缺少字段: {sorted(missing)}")
+        raise ValueError(f"{SECTORS_TABLE} 缺少字段: {sorted(missing)}")
     return frame.loc[:, list(_SECTOR_COLUMNS)]
 
 
@@ -225,8 +239,8 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
             o.observed_day_sessions AS "_observed_day_sessions",
             o.observed_night_session AS "_observed_night_session",
             CASE
-                WHEN s."品种代码" IS NOT NULL THEN 'sectors'
                 WHEN o.product_name IS NOT NULL THEN 'observed'
+                WHEN s."品种代码" IS NOT NULL THEN 'sectors'
                 ELSE 'unknown'
             END AS "_session_source",
             COALESCE(s."交易所", d.sector_exchange_code) AS "交易所",
@@ -240,8 +254,8 @@ def _create_products_view(conn: sqlite3.Connection) -> None:
             s."变动后代码" AS "变动后代码",
             s."代码注" AS "代码注",
             s."集合竞价" AS "集合竞价",
-            COALESCE(s."日盘时间", o.observed_day_sessions) AS "日盘时间",
-            COALESCE(s."夜盘时间", o.observed_night_session) AS "夜盘时间",
+            COALESCE(o.observed_day_sessions, s."日盘时间") AS "日盘时间",
+            COALESCE(o.observed_night_session, s."夜盘时间") AS "夜盘时间",
             s."合约乘数" AS "合约乘数",
             s."最小跳动" AS "最小跳动",
             s."标准合约上市日" AS "标准合约上市日",
@@ -280,7 +294,7 @@ def sync_product_catalog(
     ensure_artifact_schema(db_path)
     root = Path(data_dir)
     discovered = discover_products(root)
-    sectors = _load_sectors(root / "sectors.csv")
+    sectors = _load_sectors_from_db(db_path)
     observed = infer_observed_sessions(
         data_dir=root,
         discovered=discovered,
@@ -289,7 +303,7 @@ def sync_product_catalog(
     )
     with connect_sqlite(db_path) as conn:
         replace_dataframe(conn, DISCOVERED_TABLE, discovered)
-        replace_dataframe(conn, SECTORS_TABLE, sectors)
+        _ensure_sectors_table(conn)
         replace_dataframe(conn, OBSERVED_SESSIONS_TABLE, observed)
         conn.execute(
             f'CREATE UNIQUE INDEX IF NOT EXISTS "idx_{DISCOVERED_TABLE}_name" '
@@ -318,7 +332,7 @@ def sync_observed_trading_sessions(
     ensure_artifact_schema(db_path)
     root = Path(data_dir)
     discovered = discover_products(root)
-    sectors = _load_sectors(root / "sectors.csv")
+    sectors = _load_sectors_from_db(db_path)
     observed = infer_observed_sessions(
         data_dir=root,
         discovered=discovered,
@@ -329,7 +343,7 @@ def sync_observed_trading_sessions(
     )
     with connect_sqlite(db_path) as conn:
         replace_dataframe(conn, DISCOVERED_TABLE, discovered)
-        replace_dataframe(conn, SECTORS_TABLE, sectors)
+        _ensure_sectors_table(conn)
         replace_dataframe(conn, OBSERVED_SESSIONS_TABLE, observed)
         _create_products_view(conn)
     return observed
@@ -339,7 +353,7 @@ def load_product_catalog(
     *,
     data_dir: str | Path = SOURCE_DATA_DIR,
     db_path: str | Path = CACHE_DB_PATH,
-    sync: bool = True,
+    sync: bool = False,
 ) -> pd.DataFrame:
     if sync:
         sync_product_catalog(data_dir=data_dir, db_path=db_path)

@@ -92,12 +92,12 @@
 
     /**
      * 标记因子运行状态徽章
-     * @param {string} submissionId
+     * @param {string} productPathSelectionId
      * @param {string} factorAlias
      * @param {string} status — '' | 'done' | 'error'
      */
-    ui.markGroupFactorStatus = function(submissionId, factorAlias, status) {
-        var btn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + ui.cssEscape(String(submissionId)) + '"][data-factor-alias="' + ui.cssEscape(String(factorAlias)) + '"]');
+    ui.markGroupFactorStatus = function(productPathSelectionId, factorAlias, status) {
+        var btn = document.querySelector('.group-factor-nav-btn[data-product-path-selection-id="' + ui.cssEscape(String(productPathSelectionId)) + '"][data-factor-alias="' + ui.cssEscape(String(factorAlias)) + '"]');
         if (!btn) return;
         btn.setAttribute('data-run-status', status || '');
         var badge = btn.querySelector('.group-factor-run-status');
@@ -108,10 +108,10 @@
     };
 
     /**
-     * 清除提交下所有因子运行状态
+     * 清除产品路径选择下所有因子运行状态
      */
-    ui.clearGroupFactorStatuses = function(submissionId) {
-        document.querySelectorAll('.group-factor-nav-btn[data-submission-id="' + ui.cssEscape(String(submissionId)) + '"]').forEach(function(btn) {
+    ui.clearGroupFactorStatuses = function(productPathSelectionId) {
+        document.querySelectorAll('.group-factor-nav-btn[data-product-path-selection-id="' + ui.cssEscape(String(productPathSelectionId)) + '"]').forEach(function(btn) {
             btn.setAttribute('data-run-status', '');
             var badge = btn.querySelector('.group-factor-run-status');
             if (badge) badge.textContent = '';

@@ -18,20 +18,20 @@ from .product_group import (
     load_product_groups,
     save_product_groups,
 )
-from .param_config import (
+from .factor_param_config import (
     DEFAULT_SCOPE_KEY,
-    delete_param_config,
+    delete_factor_param_config,
     delete_scope,
-    ensure_param_config_schema,
+    ensure_factor_param_config_schema,
     ensure_scope_exists,
-    list_all_aliases_across_scopes,
-    list_param_config_aliases,
-    list_param_config_scopes,
-    load_param_config,
+    list_all_factor_param_aliases_across_scopes,
+    list_factor_param_config_aliases,
+    list_factor_param_config_scopes,
+    load_factor_param_config,
     normalize_product_group,
     rename_scope,
-    save_param_config,
-    save_param_config_payload,
+    save_factor_param_config,
+    save_factor_param_config_payload,
 )
 from .user_template import (
     delete_user_template_collections,
@@ -51,7 +51,7 @@ def ensure_account_manager_sqlite_store() -> str:
         ensure_user_schema(conn)
         ensure_user_level_schema(conn)
         ensure_product_group_schema(conn)
-        ensure_param_config_schema(conn)
+        ensure_factor_param_config_schema(conn)
         ensure_user_template_schema(conn)
     return str(Settings.CACHE_DB_PATH)
 

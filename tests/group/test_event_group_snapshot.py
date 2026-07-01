@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 from server.modules.single_factor_test.group import (
@@ -12,13 +14,13 @@ def _execution() -> dict:
         "run_id": "run-1",
         "group_owner": [
             {
-                "submission_id": "submission-1",
+                "product_path_selection_id": "submission-1",
                 "group_id": "group-1",
                 "group_name": "第一组",
                 "group_index": 0,
             },
             {
-                "submission_id": "submission-1",
+                "product_path_selection_id": "submission-1",
                 "group_id": "group-2",
                 "group_name": "第二组",
                 "group_index": 1,
@@ -103,6 +105,10 @@ def test_event_snapshot_exposes_position_and_target_tabs() -> None:
     assert result["matrices"][0]["cells"][2][0]["delta_margin_amount"] == 20.0
     assert result["matrices"][2]["cells"][0][0]["selected"] is True
     assert result["default_matrix_key"] == "positions_contracts"
+    assert result["order_flow_groups"] == [
+        {"group_id": "group-1", "group_name": "第一组"},
+        {"group_id": "group-2", "group_name": "第二组"},
+    ]
 
     fill = _event_group_snapshot(
         execution,
@@ -130,6 +136,24 @@ def test_event_detail_uses_ledger_positions_and_equity() -> None:
     assert detail["summary"]["Total Return"] == 10.0
     assert detail["entry_frequency"][0]["product"]["name"] == "A"
     assert detail["return_series"][-1]["return"] == pytest.approx(0.02)
+
+
+def test_event_detail_accepts_nanosecond_order_timestamps() -> None:
+    execution = copy.deepcopy(_execution())
+    portfolio = execution["engine_result"]["portfolios"]["group-1"]
+    portfolio["equity_curve"] = {
+        "2026-01-05T09:01:00+08:00": 100.0,
+        "2026-01-05T09:01:00.000000001+08:00": 101.0,
+    }
+    portfolio["position_curve"] = {
+        "2026-01-05T09:01:00+08:00": {"A": 0.0},
+        "2026-01-05T09:01:00.000000001+08:00": {"A": 1.0},
+    }
+
+    detail = _event_group_detail(execution, "submission-1", 0, group_id="group-1")
+
+    assert detail["return_series"][-1]["return"] == pytest.approx(0.01)
+    assert detail["intraday_analysis"]["rows"][0]["time"] == "09:01"
 
 
 def test_event_ranking_aligns_framework_equity_curves() -> None:

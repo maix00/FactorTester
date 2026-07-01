@@ -1,6 +1,9 @@
 const { assert, MockElement, resetGroupTest, load } = require('./group_test_harness');
 
 const GT = resetGroupTest();
+require('../../static/js/modules/shared/field_store.js');
+require('../../static/js/modules/shared/chip_renderer.js');
+require('../../static/js/modules/shared/backend_settings_panel.js');
 
 function chipPlainText(chip) {
   return String(chip.html || '').replace(/<[^>]+>/g, '');
@@ -47,6 +50,66 @@ const indexManifest = {
         { value: 'native', label: 'Native' },
         { value: 'qlib', label: 'Qlib' },
       ],
+    },
+    engine_mode: {
+      value: 'auto',
+      tab_key: 'engine',
+      scope_policy: 'overridable',
+      chip_template: '模式: {value}',
+      options: [
+        { value: 'basic', label: '基础' },
+        { value: 'auto', label: '自动兼容' },
+        { value: 'custom', label: '自定义' },
+        { value: 'exact', label: '严格' },
+      ],
+    },
+    fee_mode: {
+      value: 'auto',
+      tab_key: 'cost',
+      scope_policy: 'overridable',
+      chip_template: '费用: {value}',
+      options: [
+        { value: 'zero', label: '不计费用' },
+        { value: 'auto', label: '自动' },
+        { value: 'custom', label: '自定义品种/合约' },
+        { value: 'exact', label: '严格历史规则' },
+      ],
+      editable_when: { engine_mode: ['custom'] },
+      default_when: { engine_mode: { basic: 'zero', auto: 'auto', exact: 'exact' } },
+    },
+    custom_product_fields: {
+      value: [],
+      tab_key: 'engine',
+      scope_policy: 'overridable',
+      serialization: {
+        kind: 'custom_product_overrides',
+        storage_key: 'custom_product_fields',
+        fields: [
+          { value: 'MarginRatio', label: '保证金率', module: 'margin' },
+          { value: 'OpenRatioByMoney', label: '开仓费率', module: 'fee' },
+        ],
+      },
+      chip_template: '自定义字段: {value}',
+      info_overlay: { type: 'custom_product_fields' },
+      visible_when: { engine_mode: ['custom'] },
+      editable_when: { engine_mode: ['custom'] },
+    },
+    fee_custom_product_fields: {
+      value: [],
+      tab_key: 'cost',
+      scope_policy: 'overridable',
+      serialization: {
+        kind: 'custom_product_overrides',
+        storage_key: 'custom_product_fields',
+        module_filter: 'fee',
+        module_editor: { tab: 'cost', mode_when: { fee_mode: ['custom'] } },
+        fields: [
+          { value: 'MarginRatio', module: 'margin' },
+          { value: 'OpenRatioByMoney', module: 'fee' },
+        ],
+      },
+      visible_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
+      editable_when: { engine_mode: ['custom'], fee_mode: ['custom'] },
     },
     start_date: {
       value: '2026-01-01',
@@ -102,7 +165,7 @@ const indexManifest = {
     liquidity_mode: {
       value: 'infinite',
       tab_key: 'liquidity',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '流动性: {value}',
       options: [
         { value: 'infinite', label: '无限流动性' },
@@ -112,7 +175,7 @@ const indexManifest = {
     participation_rate: {
       value: 0.1,
       tab_key: 'liquidity',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '参与率: {value}',
       options: [],
       visible_when: { liquidity_mode: ['volume_participation'] },
@@ -120,14 +183,14 @@ const indexManifest = {
     initial_capital: {
       value: 100000000,
       tab_key: 'capital',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '资金: {value}',
       options: [],
     },
     allocation_policy: {
       value: 'inverse_volatility',
       tab_key: 'target_allocation',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '分配: {value}',
       options: [
         { value: 'inverse_volatility', label: '等风险' },
@@ -137,7 +200,7 @@ const indexManifest = {
     volatility_lookback: {
       value: 20,
       tab_key: 'target_allocation',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '波动率窗口: {value}',
       options: [],
       visible_when: { allocation_policy: ['inverse_volatility'] },
@@ -145,7 +208,7 @@ const indexManifest = {
     position_policy: {
       value: 'rebalance_to_target',
       tab_key: 'position_policy',
-      scope_policy: 'group_override',
+      scope_policy: 'overridable',
       chip_template: '持仓: {value}',
       options: [
         { value: 'rebalance_to_target', label: '按目标调仓' },
@@ -158,7 +221,7 @@ const indexManifest = {
       key: 'factor_alias',
       label: '因子',
       category: 'identity',
-      chip_template: '{factorAlias}',
+      chip_template: '因子: {factorAlias}',
       source_keys: ['factorAlias'],
       order: 10,
       inherit_from_root: true,
@@ -166,10 +229,23 @@ const indexManifest = {
       clickable: false,
     },
     {
+      key: 'product_path_selection',
+      label: '产品路径',
+      category: 'identity',
+      chip_template: '产品路径: {productPathSelectionLabel}',
+      source_keys: ['product_path_selection'],
+      order: 20,
+      inherit_from_root: true,
+      value_resolvers: {
+        productPathSelectionLabel: 'product_path_selection_label',
+      },
+      clickable: true,
+    },
+    {
       key: 'product_mask',
       label: '品种范围',
       category: 'derived',
-      chip_template: '📋 {productCount}品种 {expandSymbol}',
+      chip_template: '品种范围: {productCount}品种 {expandSymbol}',
       source_keys: ['productMask'],
       order: 40,
       inherit_from_root: false,
@@ -179,15 +255,48 @@ const indexManifest = {
       },
       clickable: true,
     },
+    {
+      key: 'group_index',
+      label: '分组序号',
+      category: 'identity',
+      chip_template: '分组: {groupIndex}/{splitCount}',
+      source_keys: ['groupIndex', 'splitCount'],
+      order: 30,
+      inherit_from_root: true,
+      value_resolvers: {},
+      clickable: false,
+    },
   ],
   tab_url_template: '/api/backtest/settings/group_test/tabs/{tab_key}',
 };
 
+let productGroupListCalls = 0;
+let productGroupResolveCalls = 0;
+
 global.fetch = (url) => Promise.resolve({
   ok: true,
   json: () => {
-    if (String(url).indexOf('/set_time_range') >= 0) {
-      return Promise.resolve({ ok: true, page_uuid: 'page-1' });
+    if (String(url).indexOf('/api/product-groups/resolve') >= 0) {
+      productGroupResolveCalls += 1;
+      return Promise.resolve({
+        groups: [{
+          id: 'pg-day',
+          name: '中国期货日盘',
+          paths: ['Product/Futures/CNFutures/日夜盘/日盘'],
+          products: [{ name: 'AP.CZC', desc: '苹果' }],
+        }],
+      });
+    }
+    if (String(url).indexOf('/api/product-groups') >= 0) {
+      productGroupListCalls += 1;
+      return Promise.resolve({
+        groups: [{
+          id: 'pg-day',
+          name: '中国期货日盘',
+          paths: ['Product/Futures/CNFutures/日夜盘/日盘'],
+          products: [{ name: 'AP.CZC', desc: '苹果' }],
+        }],
+      });
     }
     if (String(url).indexOf('/tabs/time') >= 0) {
       return Promise.resolve({
@@ -228,6 +337,20 @@ global.getSharedRuntimeTimeRange = () => ({
   timezone: 'Asia/Shanghai',
   is_trading_day: false,
 });
+window.BacktestTimeWindowSettings = {
+  pageRuntimeTimeRangeValues: () => global.getSharedRuntimeTimeRange(),
+};
+window.SingleFactorGlobalSettings = {
+  getDefaultValues: (keys) => {
+    const values = global.getSharedRuntimeTimeRange();
+    const out = {};
+    keys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(values, key)) out[key] = values[key];
+    });
+    return out;
+  },
+  sharedDefaultKeys: () => ['start_date', 'end_date', 'start_time', 'end_time', 'timezone', 'time_precision'],
+};
 
 return GT.backendSettings.init().then(async () => {
   load('panels/list/selection-state.js');
@@ -244,9 +367,9 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(GT.backendSettings._state.index.defaults.start_time.value, '09:01');
   assert.equal(GT.backendSettings._state.index.defaults.end_time.value, '14:59');
   assert.equal(GT.backendSettings.collectLocalSettings().start_date, undefined);
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2025-05-06');
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2025-05-06');
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       start_date: '2024-01-02',
       end_date: '2024-01-31',
@@ -256,6 +379,7 @@ return GT.backendSettings.init().then(async () => {
       timezone: 'Asia/Shanghai',
     },
   });
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2024-01-02');
   global.getSharedRuntimeTimeRange = () => ({
     start_date: '2025-09-01',
     end_date: '2025-09-30',
@@ -270,8 +394,8 @@ return GT.backendSettings.init().then(async () => {
     }),
     false,
   );
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.start_date, '2024-01-02');
-  assert.equal(GT.backendSettings.runPayload()._runtime_window.timezone, 'Asia/Shanghai');
+  assert.equal(GT.backendSettings.runPayload().local_settings.start_date, '2024-01-02');
+  assert.equal(GT.backendSettings.runPayload().local_settings.timezone, 'Asia/Shanghai');
 
   window.submissions = [{
     id: 'tester-chip-order',
@@ -284,7 +408,13 @@ return GT.backendSettings.init().then(async () => {
   const baseId = GT.groupSettings.groups.add({
     id: 'chip-order-group',
     name: 'Chip Order Group',
-    testerId: 'tester-chip-order',
+    product_path_selection: {
+      product_path_selection_id: 'tester-chip-order',
+      products: [
+        { name: 'IF', desc: '股指' },
+        { name: 'RB', desc: '螺纹钢' },
+      ],
+    },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 1,
@@ -299,13 +429,59 @@ return GT.backendSettings.init().then(async () => {
     parentId: baseId,
     productMask: { IF: true },
   });
+  const maskOnlyChildId = GT.groupSettings.groups.add({
+    id: 'chip-order-mask-child',
+    name: 'Mask Child',
+    parentId: baseId,
+    productMask: { IF: true },
+  });
+  const selectedSkipChildId = GT.groupSettings.groups.add({
+    id: 'chip-order-selected-child',
+    name: 'Selected Child',
+    parentId: baseId,
+    productMask: { IF: true },
+  });
 
   const configChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'config');
   assert.ok(configChips.some((chip) => chipPlainText(chip) === '流动性成交量参与率'));
   assert.ok(configChips.some((chip) => chipPlainText(chip) === '参与率0.02'));
   assert.ok(configChips.every((chip) => chip.html.indexOf('gt-backend-chip-value') >= 0));
+  GT.groupSettings.groups.update(childId, {
+    product_path_selection: {
+      product_path_selection_id: 'tester-child-path',
+      label: '子路径',
+      products: [{ name: 'IC', desc: '中证' }],
+    },
+    factorAlias: 'FactorChild',
+    splitCount: 7,
+    groupIndex: 2,
+  });
+  let overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(childId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('因子FactorChild'));
+  assert.ok(overrideTexts.includes('产品路径子路径'));
+  assert.ok(overrideTexts.includes('分组2/7'));
+  GT.groupSettings.groups.update(baseId, { factorAlias: 'FactorParentChanged' });
+  overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(childId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('因子FactorChild'));
+  GT.groupSettings.groups.update(baseId, {
+    product_path_selection: {
+      product_path_selection_id: 'tester-rb-only',
+      label: '父路径变更',
+      products: [{ name: 'RB', desc: '螺纹钢' }],
+    },
+  });
+  GT.backendSettings.materializeChildDefaultsForChangedKeys(baseId, ['liquidity_mode'], { skipIds: [selectedSkipChildId] });
+  assert.equal(GT.groupSettings.groups.get(maskOnlyChildId).liquidity_mode, 'infinite');
+  assert.equal(GT.groupSettings.groups.get(selectedSkipChildId).liquidity_mode, null);
+  assert.equal(
+    GT.backendSettings.groupPayloadForRun(GT.groupSettings.groups.get(maskOnlyChildId)).liquidity_mode,
+    'infinite',
+  );
+  overrideTexts = GT.backendSettings.getOverrideChips(GT.groupSettings.groups.get(maskOnlyChildId)).map(chipPlainText);
+  assert.ok(overrideTexts.includes('品种范围0品种 ▸'));
+  assert.ok(overrideTexts.includes('流动性无限流动性'));
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     group_settings: {
       groups: [{
         id: baseId,
@@ -318,10 +494,34 @@ return GT.backendSettings.init().then(async () => {
   assert.ok(mountedConfigChips.some((chip) => chipPlainText(chip) === '流动性成交量参与率'));
 
   const identityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(baseId), 'identity');
-  assert.ok(identityChips.some((chip) => chipPlainText(chip) === 'FactorChipOrder'));
+  assert.ok(identityChips.some((chip) => chipPlainText(chip) === '因子FactorParentChanged'));
+
+  const compactSnapshot = {
+    group_settings: {
+      groups: [{
+        id: 'compact-product-group',
+        name: 'Compact Product Group',
+        product_path_selection: { product_path_selection_id: 'pg-day' },
+        factorAlias: 'FactorChipOrder',
+        splitCount: 5,
+        groupIndex: 1,
+      }],
+    },
+  };
+  await GT.backendSettings.resolveSnapshotProductPathReferences(compactSnapshot);
+  assert.equal(productGroupResolveCalls, 1);
+  assert.equal(productGroupListCalls, 0);
+  assert.equal(compactSnapshot.group_settings.groups[0].product_path_selection.product_group, '中国期货日盘');
+  GT.groupSettings.groups.add(compactSnapshot.group_settings.groups[0]);
+  const compactIdentityChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get('compact-product-group'), 'identity');
+  assert.ok(compactIdentityChips.some((chip) => chipPlainText(chip) === '产品路径中国期货日盘 · 产品组'));
+  await GT.backendSettings.resolveSnapshotProductPathReferences({
+    group_settings: { groups: [{ product_path_selection: { product_path_selection_id: 'pg-day' } }] },
+  });
+  assert.equal(productGroupResolveCalls, 1);
 
   const derivedChips = GT.backendSettings.getAllChips(GT.groupSettings.groups.get(childId), 'derived');
-  assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('1品种') >= 0 && chip.clickable));
+  assert.ok(derivedChips.some((chip) => chipPlainText(chip).indexOf('0品种') >= 0 && chip.clickable));
 
   const flat = GT.backendSettings.flattenGroupForSnapshot(GT.groupSettings.groups.get(baseId));
   assert.equal(flat.engine, undefined);
@@ -336,7 +536,7 @@ return GT.backendSettings.init().then(async () => {
   const hiddenDependentId = GT.groupSettings.groups.add({
     id: 'hidden-dependent-group',
     name: 'Hidden Dependent',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 2,
@@ -347,25 +547,20 @@ return GT.backendSettings.init().then(async () => {
   assert.equal(hiddenPayload.liquidity_mode, undefined);
   assert.equal(hiddenPayload.participation_rate, undefined);
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       allocation_policy: 'equal_notional',
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const sparseRunPayload = GT.backendSettings.runPayload();
-  assert.equal(sparseRunPayload.allocation_policy, 'equal_notional');
+  assert.equal(sparseRunPayload.local_settings.allocation_policy, 'equal_notional');
   assert.equal(sparseRunPayload.initial_capital, undefined);
   assert.equal(sparseRunPayload.base_currency, undefined);
   assert.equal(sparseRunPayload.currency_conversion_fee_rate, undefined);
   assert.equal(sparseRunPayload.start_date, undefined);
-  assert.ok(sparseRunPayload._runtime_window);
+  assert.ok(sparseRunPayload.local_settings);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['group-settings'], []);
-  const localChipText = document.getElementById('gt-local-settings-chip-row').childNodes
-    .map((chip) => chip.innerHTML.replace(/<[^>]+>/g, ''));
-  assert.ok(localChipText.some((text) => text === '分配等市值'));
-  assert.ok(localChipText.every((text) => text.indexOf('波动率窗口') < 0));
-
   await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       start_date: '2025-04-01',
@@ -374,15 +569,15 @@ return GT.backendSettings.init().then(async () => {
     },
   });
   const tradingDayPayload = GT.backendSettings.runPayload();
-  assert.equal(tradingDayPayload._runtime_window.start_date, '2025-04-01');
-  assert.equal(tradingDayPayload._runtime_window.end_date, '2025-04-30');
-  assert.equal(tradingDayPayload._runtime_window.time_precision, 'trading_day');
-  assert.equal(tradingDayPayload._runtime_window.start_time, '');
-  assert.equal(tradingDayPayload._runtime_window.end_time, '');
-  assert.equal(tradingDayPayload._runtime_window.timezone, '');
+  assert.equal(tradingDayPayload.local_settings.start_date, '2025-04-01');
+  assert.equal(tradingDayPayload.local_settings.end_date, '2025-04-30');
+  assert.equal(tradingDayPayload.local_settings.time_precision, 'trading_day');
+  assert.equal(tradingDayPayload.local_settings.start_time, undefined);
+  assert.equal(tradingDayPayload.local_settings.end_time, undefined);
+  assert.equal(tradingDayPayload.local_settings.timezone, undefined);
   assert.deepEqual(GT.backendSettings._state.mountedTabs['local-settings'], ['time']);
 
-  GT.backendSettings.applyFlatSnapshot({
+  await GT.backendSettings.applyFlatSnapshot({
     local_settings: {
       allocation_policy: 'equal_notional',
     },
@@ -391,7 +586,7 @@ return GT.backendSettings.init().then(async () => {
   const hiddenVolatilityId = GT.groupSettings.groups.add({
     id: 'hidden-volatility-group',
     name: 'Hidden Volatility',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'FactorChipOrder',
     splitCount: 5,
     groupIndex: 3,
@@ -406,7 +601,7 @@ return GT.backendSettings.init().then(async () => {
   const defaultPositionId = GT.groupSettings.groups.add({
     id: 'position-default-group',
     name: 'Position Default',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'PositionFactor',
     splitCount: 2,
     groupIndex: 1,
@@ -414,7 +609,7 @@ return GT.backendSettings.init().then(async () => {
   const buyHoldPositionId = GT.groupSettings.groups.add({
     id: 'position-buy-hold-group',
     name: 'Position Buy Hold',
-    testerId: 'tester-chip-order',
+    product_path_selection: { product_path_selection_id: 'tester-chip-order' },
     factorAlias: 'PositionFactor',
     splitCount: 2,
     groupIndex: 2,
@@ -424,6 +619,75 @@ return GT.backendSettings.init().then(async () => {
   const buyHoldPositionChip = GT.backendSettings.configChipForGroupKey(GT.groupSettings.groups.get(buyHoldPositionId), 'position_policy');
   assert.equal(chipPlainText(defaultPositionChip), '持仓按目标调仓');
   assert.equal(chipPlainText(buyHoldPositionChip), '持仓买入持有');
+
+  const conditionalHost = domElement('conditional-chip-host');
+  const conditionalStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: { engine_mode: 'auto', fee_mode: 'custom' },
+  });
+  window.ChipRenderer.render(conditionalHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: conditionalStore,
+    settingKeys: ['fee_mode'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+  });
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自动');
+  conditionalStore.set('engine_mode', 'basic');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用不计费用');
+  conditionalStore.set('engine_mode', 'exact');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用严格历史规则');
+  conditionalStore.set('engine_mode', 'custom');
+  assert.equal(chipPlainText({ html: conditionalHost.childNodes[0].innerHTML }), '费用自定义品种/合约');
+
+  const visibleHost = domElement('visible-chip-host');
+  const visibleStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: {
+      engine_mode: 'auto',
+      fee_mode: 'custom',
+      custom_product_fields: [
+        { product: 'P1', field: 'MarginRatio', value: 0.1 },
+        { product: 'P1', field: 'OpenRatioByMoney', value: 0.2 },
+      ],
+    },
+  });
+  window.ChipRenderer.render(visibleHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: visibleStore,
+    settingKeys: ['fee_custom_product_fields'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+  });
+  assert.equal(visibleHost.childNodes.length, 0);
+  visibleStore.set('engine_mode', 'custom');
+  assert.equal(visibleHost.childNodes.length, 0);
+
+  const overlayHost = domElement('custom-product-fields-overlay');
+  const overlayBody = domElement('custom-product-fields-overlay-body');
+  overlayHost.querySelector = () => overlayBody;
+  document.registerElement('custom-product-fields-overlay', overlayHost);
+  const overlayChipHost = domElement('overlay-chip-host');
+  const overlayStore = window.FieldStore.create({
+    defaults: indexManifest.defaults,
+    values: {
+      engine_mode: 'custom',
+      custom_product_fields: [
+        { product: 'P1', field: 'OpenRatioByMoney', value: 0.2 },
+      ],
+    },
+  });
+  let openCount = 0;
+  window.ChipRenderer.render(overlayChipHost, {
+    manifest: { defaults: indexManifest.defaults },
+    store: overlayStore,
+    settingKeys: ['custom_product_fields'],
+    renderChipHtml: GT.backendSettings.renderChipHtml,
+    onOpen: () => { openCount += 1; },
+  });
+  assert.equal(chipPlainText({ html: overlayChipHost.childNodes[0].innerHTML }), '自定义字段1项');
+  overlayChipHost.childNodes[0].listeners.click[0]({});
+  assert.equal(openCount, 0);
+  assert.equal(overlayHost.style.display, 'flex');
+  assert.ok(overlayBody.innerHTML.indexOf('开仓费率') >= 0);
 
   console.log('PASS: backend settings owns field and chip registration');
 });

@@ -28,7 +28,7 @@ global.fetch = () => Promise.resolve({
       rebalance_trigger: {
         value: 'on_factor_signal',
         tab_key: 'rebalance_trigger',
-        scope_policy: 'group_override',
+        scope_policy: 'overridable',
         chip_template: '触发: {value}',
         options: [
           { value: 'on_factor_signal', label: '因子信号事件' },
@@ -38,7 +38,7 @@ global.fetch = () => Promise.resolve({
       productMask: {
         value: null,
         tab_key: 'market_universe',
-        scope_policy: 'group_override',
+        scope_policy: 'overridable',
         chip_template: null,
         options: [],
       },
@@ -48,7 +48,7 @@ global.fetch = () => Promise.resolve({
         key: 'factor_alias',
         label: '因子',
         category: 'identity',
-        chip_template: '{factorAlias}',
+        chip_template: '因子: {factorAlias}',
         source_keys: ['factorAlias'],
         order: 10,
         inherit_from_root: true,
@@ -59,7 +59,7 @@ global.fetch = () => Promise.resolve({
         key: 'tester',
         label: '测试器',
         category: 'identity',
-        chip_template: '{testerLabel}',
+        chip_template: '测试器: {testerLabel}',
         source_keys: ['testerId'],
         order: 20,
         inherit_from_root: true,
@@ -70,7 +70,7 @@ global.fetch = () => Promise.resolve({
         key: 'group_index',
         label: '分组序号',
         category: 'identity',
-        chip_template: '{groupIndex}/{splitCount}',
+        chip_template: '分组: {groupIndex}/{splitCount}',
         source_keys: ['groupIndex', 'splitCount'],
         order: 30,
         inherit_from_root: true,
@@ -81,7 +81,7 @@ global.fetch = () => Promise.resolve({
         key: 'product_mask',
         label: '品种范围',
         category: 'derived',
-        chip_template: '📋 {productCount}品种 {expandSymbol}',
+        chip_template: '品种范围: {productCount}品种 {expandSymbol}',
         source_keys: ['productMask'],
         order: 40,
         inherit_from_root: false,
@@ -121,6 +121,16 @@ return GT.backendSettings.init().then(() => {
     id: 'base-list',
     name: 'List',
     testerId: 'tester-list',
+    product_path_selection: {
+      product_path_selection_id: 'pg-list',
+      product_group_template_id: 'pg-list',
+      product_group: '测试路径',
+      label: '测试路径',
+      products: [
+        { name: 'IF', desc: '沪深300' },
+        { name: 'IH', desc: '上证50' },
+      ],
+    },
     factorAlias: 'FactorList',
     splitCount: 5,
     groupIndex: 1,
@@ -139,6 +149,7 @@ return GT.backendSettings.init().then(() => {
   GT.panels.list.index.mount(container);
 
   assert.match(container.innerHTML, /FactorList/);
+  assert.match(container.innerHTML, /产品组/);
   assert.doesNotMatch(container.innerHTML, /rebalanceMode/);
   assert.match(container.innerHTML, /显示设置/);
   assert.doesNotMatch(container.innerHTML, /成员变化事件/);

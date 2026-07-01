@@ -1,38 +1,8 @@
-<!-- 收益率频率设置摘要行 -->
-<div class="setting-summary-row" id="ic-freq-summary-row" onclick="document.getElementById('ic-freq-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
-    <span class="setting-summary-label">📊 收益率频率设置</span>
-    <span class="setting-summary-value" id="ic-freq-summary-text">默认使用因子$F</span>
-    <span class="setting-summary-arrow">编辑 ▶</span>
-</div>
-
-<!-- 收益率频率设置抽屉 -->
-<div class="settings-drawer-overlay" id="ic-freq-drawer"
-     onclick="if(event.target===this){this.classList.remove('open');document.getElementById('user-badge').style.display=''}">
-    <div class="settings-drawer-panel ic-freq-drawer-panel">
-        <button class="drawer-close-btn"
-                onclick="document.getElementById('ic-freq-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
-        <div class="module">
-            <div class="section-title">收益率频率设置</div>
-            <div style="color:#666;font-size:13px;margin-bottom:12px;">为每个因子设置收益率频率($RF)，留空则默认使用因子$F。</div>
-            <div class="ic-freq-actions" style="margin-bottom:10px;display:flex;gap:8px;">
-                <button class="btn btn-sm btn-outline-primary" id="ic-freq-select-all">全选</button>
-                <button class="btn btn-sm btn-outline-primary" id="ic-freq-deselect-all">全不选</button>
-                <button class="btn btn-sm btn-outline-primary" id="ic-freq-reset">清空收益率频率</button>
-            </div>
-            <div id="ic-freq-table-wrap">
-                <table class="factor-config-table ic-freq-table">
-                    <thead><tr><th>因子名称</th><th>类别</th><th>收益率频率($RF，留空默认使用因子$F)</th></tr></thead>
-                    <tbody id="ic-freq-table-body">
-                        <tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
+<!-- 旧的隐藏频率抽屉(ic-freq-state)已删除：因子选择 + 每因子 return_freq 现由
+     IC 设置里的"因子"tab 与"收益率频率"tab 直接管理 factor_selections。 -->
 <div class="module" id="ic_test_module" style="margin-top:24px;">
     <div class="section-title">IC测试</div>
+    <div id="ic-settings-container" class="backend-settings-shell" style="margin-bottom:10px;"></div>
     <div id="ic-tab-container">
         <!-- 选项卡和面板将由 JavaScript 动态生成 -->
         <div style="color:#888; padding:20px; text-align:center;">请先完成产品类别设置并提交。</div>
@@ -163,38 +133,6 @@
         padding: 4px 8px;
         border-radius: 4px;
         border: 1px solid #ccc;
-    }
-    /* 收益率频率抽屉表格样式 */
-    .ic-freq-actions {
-        margin-bottom: 8px;
-        display: flex;
-        gap: 8px;
-    }
-    .ic-freq-drawer-panel {
-        width: min(680px, calc(100vw - 32px));
-    }
-    #ic-freq-table-wrap {
-        max-height: 52vh;
-        overflow-y: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-    }
-    .ic-freq-table {
-        width: auto;
-        min-width: 100%;
-        table-layout: auto;
-    }
-    .ic-freq-table th:nth-child(1),
-    .ic-freq-table td:nth-child(1) {
-        width: 210px;
-    }
-    .ic-freq-table th:nth-child(2),
-    .ic-freq-table td:nth-child(2) {
-        width: 110px;
-    }
-    .ic-freq-table th:nth-child(3),
-    .ic-freq-table td:nth-child(3) {
-        width: 300px;
     }
     .factor-config-table {
         width: 100%;

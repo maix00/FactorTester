@@ -3,9 +3,17 @@
  * 支持因子级选择和频率配置
  */
 (function() {
+    const Progress = window.SingleFactorProgress;
+    if (!Progress) throw new Error('SingleFactorProgress bootstrap not loaded');
+
     // 全局变量
     let factorFamilyAlias = window.factorFamilyAlias || '';
     let factorList = [];  // 存储因子列表 [{alias, name, freq}]
+    let icProductPathSelections = [];
+    let icSettingsManifest = null;
+    let icSettingValues = {};
+    let icActiveSettingsTab = null;
+    let icMountedSettingsTabs = ['factor', 'product_path_selection'];
     let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
     let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
@@ -32,6 +40,573 @@
         } catch (err) {
             console.error('获取因子列表异常:', err);
             return [];
+        }
+    }
+
+    function selectionId(selection) {
+        const utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionId) return utils.selectionId(selection);
+        return selection ? String(selection.product_path_selection_id || selection.selection_id || selection.id || '') : '';
+    }
+
+    function selectionLabel(selection) {
+        const utils = window.ProductPathSelectionUtils;
+        if (utils && utils.selectionDisplayLabel) return utils.selectionDisplayLabel(selection);
+        return selection ? (selection.product_group || selection.label || selection.name || selectionId(selection)) : '';
+    }
+
+    function selectionById(id) {
+        const target = String(id || '');
+        return icProductPathSelections.find(selection => selectionId(selection) === target) || null;
+    }
+
+    function createIcProgressController(progressBarId) {
+        return Progress.createSimpleProgressController({
+            resolve: function() {
+                return {
+                    wrapper: document.getElementById(progressBarId),
+                    bar: document.getElementById(`${progressBarId}-fill`),
+                    text: document.getElementById(`${progressBarId}-text`),
+                };
+            },
+        });
+    }
+
+    // ── 候选回退已由 FieldStore.effective() + pageStore wired parent 统一处理，
+    //    不再需要 ad-hoc productGroupToSelection / loadSharedProductPathSelections。
+
+    // 委托到共用 DomUtils（页面已先加载）；保留薄封装以免改动各调用点。
+    function escapeHTML(value) {
+        return window.DomUtils.escapeHTML(value);
+    }
+
+    function chipParts(labelOrText, value) {
+        if (value !== undefined && value !== null && value !== '') {
+            return { label: String(labelOrText || ''), value: String(value) };
+        }
+        const text = String(labelOrText == null ? '' : labelOrText).trim();
+        const match = text.match(/^([^:：]{1,16})[:：]\s*(.*)$/);
+        if (match && match[2]) return { label: match[1], value: match[2] };
+        return { label: '', value: text };
+    }
+
+    function renderChipHtml(labelOrText, value) {
+        const parts = chipParts(labelOrText, value);
+        if (!parts.label) return '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+        return '<span class="gt-backend-chip-label">' + escapeHTML(parts.label) + '</span>'
+            + '<span class="gt-backend-chip-value">' + escapeHTML(parts.value) + '</span>';
+    }
+
+    function settingVisible(setting) {
+        const values = Object.assign({}, icSettingValues);
+        return window.BackendSettingsPanel.settingVisibleForValues(setting, values);
+    }
+
+    // ── 响应式 chip：用 manifest 建 FieldStore，运行态值同步进去，chip 订阅字段 ──
+    var icStore = null;
+    var icChipUnbind = null;
+    function ensureICStore() {
+        if (!icStore && icSettingsManifest && window.FieldStore) {
+            icStore = window.FieldStore.create({ defaults: icSettingsManifest.defaults, values: icSettingValues, parent: window._singleFactorPageStore || null });
+        }
+        // 延迟绑定：如果创建时 pageStore 未就绪，后续 sync 时补绑
+        if (icStore && window._singleFactorPageStore && icStore.setParent) {
+            icStore.setParent(window._singleFactorPageStore);
+        }
+        return icStore;
+    }
+    // 把运行态候选/选择推进 store（标量字段经 store.set 写入，见控件 change）。
+    function syncICStore() {
+        var s = ensureICStore();
+        if (!s) return;
+        s.setMany({
+            product_path_selections: (icProductPathSelections || []).slice(),
+            product_path_candidates: Array.isArray(icSettingValues.product_path_candidates) ? icSettingValues.product_path_candidates.slice() : [],
+            factor_candidates: (factorList || []).slice(),
+            factor_selections: collectFactorSelections(),
+            category_candidates: Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates.slice() : [],
+        });
+    }
+
+    function mergeICProductPathCandidates(selections) {
+        if (!Array.isArray(selections)) return icSettingValues.product_path_candidates || [];
+        icSettingValues.product_path_candidates = Array.isArray(icSettingValues.product_path_candidates) ? icSettingValues.product_path_candidates.slice() : [];
+        for (var i = 0; i < selections.length; i++) {
+            var sel = selections[i];
+            var sid = selectionId(sel);
+            if (!sid) continue;
+            var exists = icSettingValues.product_path_candidates.some(function(c) { return selectionId(c) === sid; });
+            if (!exists) icSettingValues.product_path_candidates.push(sel);
+        }
+        syncICStore();
+        return icSettingValues.product_path_candidates;
+    }
+
+    function isTabMounted(tabKey) {
+        return icMountedSettingsTabs.indexOf(tabKey) >= 0;
+    }
+
+    function resetTabValues(tabKey, defaults) {
+        Object.keys(defaults || {}).forEach(key => {
+            const meta = defaults[key] || {};
+            if (meta.tab_key === tabKey) icSettingValues[key] = meta.value;
+        });
+    }
+
+    async function loadICSettingsManifest() {
+        if (icSettingsManifest) return icSettingsManifest;
+        const pageUuid = encodeURIComponent(window._pageUuid || '');
+        const resp = await fetch('/api/backtest/settings/ic_test?page_uuid=' + pageUuid, {
+            headers: { Accept: 'application/json' },
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.success === false) {
+            throw new Error(data.error || ('HTTP ' + resp.status));
+        }
+        icSettingsManifest = data;
+        icSettingValues = {};
+        Object.keys(data.defaults || {}).forEach(key => {
+            icSettingValues[key] = data.defaults[key].value;
+        });
+        applyGlobalICDefaults();
+        return data;
+    }
+
+    function applyGlobalICDefaults() {
+        if (!window.SingleFactorGlobalSettings || typeof window.SingleFactorGlobalSettings.getDefaultValues !== 'function') return false;
+        const sharedKeys = (window.SingleFactorGlobalSettings.sharedDefaultKeys && window.SingleFactorGlobalSettings.sharedDefaultKeys()) || [];
+        const values = window.SingleFactorGlobalSettings.getDefaultValues(sharedKeys);
+        // 候选回退由 FieldStore.effective() 通过 shared_page_field→parent 自动处理，不再手动合并。
+        let changed = false;
+        ['data_source', 'frequency'].forEach(key => {
+            if (!Object.prototype.hasOwnProperty.call(icSettingValues, key)) return;
+            if (values[key] === undefined || values[key] === null || values[key] === '') return;
+            if (String(icSettingValues[key]) === String(values[key])) return;
+            icSettingValues[key] = values[key];
+            changed = true;
+        });
+        return changed;
+    }
+
+    function enabledResultTabs(manifest) {
+        const defaults = manifest && manifest.defaults ? manifest.defaults : {};
+        const values = {};
+        Object.keys(defaults).forEach(key => { values[key] = defaults[key].value; });
+        Object.keys(icSettingValues || {}).forEach(key => { values[key] = icSettingValues[key]; });
+        return (manifest && manifest.result_tabs || []).filter(tab => {
+            const requires = tab.requires || {};
+            return window.BackendSettingsPanel.matchesConditions(requires, values);
+        });
+    }
+
+    function renderICResultTabs(subId, manifest) {
+        const tabs = enabledResultTabs(manifest);
+        if (!tabs.length) return '';
+        return '<div class="ic-result-tabs" data-product-path-selection-id="' + subId + '" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px;">'
+            + tabs.map((tab, idx) => '<button type="button" class="ic-result-tab-btn' + (idx === 0 || tab.default ? ' active' : '') + '" data-result-tab="' + tab.key + '" style="height:26px;padding:0 9px;border:1px solid ' + (idx === 0 || tab.default ? '#2563eb' : '#cbd5e1') + ';border-radius:6px;background:' + (idx === 0 || tab.default ? '#eff6ff' : '#fff') + ';color:' + (idx === 0 || tab.default ? '#1d4ed8' : '#475569') + ';font-size:12px;cursor:pointer;">' + tab.label + '</button>').join('')
+            + '</div>';
+    }
+
+    function renderICSettingsPanel(manifest) {
+        const host = document.getElementById('ic-settings-container');
+        if (!host || !manifest) return;
+        const defaults = manifest.defaults || {};
+        const tabs = (manifest.tab_lists && manifest.tab_lists['local-settings'] || []);
+        const settingsByTab = {};
+        Object.keys(defaults).forEach(key => {
+            const meta = defaults[key];
+            if (!settingsByTab[meta.tab_key]) settingsByTab[meta.tab_key] = [];
+            settingsByTab[meta.tab_key].push({ key, meta });
+        });
+        Object.keys(settingsByTab).forEach(tabKey => {
+            settingsByTab[tabKey].sort((a, b) => {
+                const ao = window.BackendSettingsPanel.settingDisplayOrder(a.meta);
+                const bo = window.BackendSettingsPanel.settingDisplayOrder(b.meta);
+                if (ao == null && bo == null) return 0;
+                if (ao == null) return 1;
+                if (bo == null) return -1;
+                return ao - bo;
+            });
+        });
+        function renderChooser() {
+            if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.renderChooser !== 'function') return;
+            window.BackendSettingsPanel.renderChooser({
+                host: contentHost,
+                manifest: manifest,
+                store: icStore,
+                tabs,
+                mountedTabs: icMountedSettingsTabs,
+                introText: '选择要挂载到 IC 测试的设置。未挂载项使用后端默认值。',
+                isVisible: function(tab) {
+                    return !!(settingsByTab[tab.key] || []).length;
+                },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
+                onToggle: function(tab, enabled) {
+                    const tabKey = tab.key;
+                    const index = icMountedSettingsTabs.indexOf(tabKey);
+                    if (enabled && index < 0) icMountedSettingsTabs.push(tabKey);
+                    if (!enabled && index >= 0) {
+                        icMountedSettingsTabs.splice(index, 1);
+                        resetTabValues(tabKey, defaults);
+                        if (icActiveSettingsTab === tabKey) icActiveSettingsTab = '__manage__';
+                    }
+                    icActiveSettingsTab = '__manage__';
+                    if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
+                    else renderICSettingsPanel(manifest);
+                },
+            });
+        }
+        host.innerHTML = ''
+            + '<div class="backend-settings-tab-bar" id="ic-settings-tab-bar"></div>'
+            + '<div class="backend-settings-chip-row" id="ic-settings-chip-row"></div>'
+            + '<div class="backend-settings-host" id="ic-settings-host" style="display:none;"></div>';
+        const tabBar = document.getElementById('ic-settings-tab-bar');
+        const chipRow = document.getElementById('ic-settings-chip-row');
+        const contentHost = document.getElementById('ic-settings-host');
+
+        let tabHtml = '';
+        tabs.forEach(tab => {
+            const rows = settingsByTab[tab.key] || [];
+            if (!rows.length || !isTabMounted(tab.key)) return;
+            tabHtml += '<button type="button" data-ic-settings-tab="' + escapeHTML(tab.key) + '" class="' + (icActiveSettingsTab === tab.key ? 'active' : '') + '">'
+                + escapeHTML(tab.label || tab.key) + '</button>';
+        });
+        tabHtml += '<button type="button" data-ic-settings-tab="__manage__" class="' + (icActiveSettingsTab === '__manage__' ? 'active' : '') + '">+ 设置</button>';
+        tabBar.innerHTML = tabHtml;
+
+        // chip 栏：manifest 驱动，订阅 FieldStore 字段，字段变更（含 fallback）自动回刷。
+        ensureICStore();
+        syncICStore();
+        const chipKeys = [];
+        tabs.forEach(tab => {
+            if (!isTabMounted(tab.key)) return;
+            (settingsByTab[tab.key] || []).forEach(row => {
+                if ((row.meta || {}).chip_template) chipKeys.push(row.key);
+            });
+        });
+        if (icChipUnbind) { icChipUnbind(); icChipUnbind = null; }
+        if (window.ChipRenderer && icStore) {
+            icChipUnbind = window.ChipRenderer.render(chipRow, {
+                manifest: icSettingsManifest,
+                store: icStore,
+                settingKeys: chipKeys,
+                tabOf: function(key) { return (icSettingsManifest.defaults[key] || {}).tab_key || key; },
+                onOpen: function(tabKey) { openTab(tabKey); },
+                escapeHTML: escapeHTML,
+                renderChipHtml: renderChipHtml,
+            });
+        }
+
+        function renderTabContent(tabKey) {
+            const tab = tabs.find(item => item.key === tabKey);
+            const rows = settingsByTab[tabKey] || [];
+            if (tabKey === '__manage__') {
+                renderChooser();
+                return;
+            }
+            if (tabKey === 'product_path_selection') {
+                renderICProductPathSelectionTab();
+                return;
+            }
+            if (tabKey === 'factor') {
+                renderICFactorSelectionTab();
+                return;
+            }
+            if (tabKey === 'return_frequency') {
+                renderICReturnFreqTab();
+                return;
+            }
+            if (tabKey === 'category') {
+                renderICCategoryTab();
+                return;
+            }
+            if (!tab || !rows.length || !isTabMounted(tabKey)) {
+                contentHost.innerHTML = '';
+                return;
+            }
+            let html = '<div class="backend-settings-grid">';
+            rows.forEach(row => {
+                const meta = Object.assign({ key: row.key }, row.meta || {});
+                if (!settingVisible(meta)) return;
+                const value = icSettingValues[row.key];
+                html += '<label class="gt-backtest-setting-row">';
+                html += '<span class="gt-backtest-setting-label">' + escapeHTML(meta.label || row.key) + '</span>';
+                html += '<span class="gt-backtest-setting-control">';
+                if (meta.control_template === 'custom') {
+                    html += '<span class="backend-input" style="height:auto;min-height:28px;display:flex;align-items:center;color:#475569;background:#f8fafc;">'
+                        + escapeHTML(window.BackendSettingsPanel.displaySettingValue(meta, value))
+                        + '</span>';
+                } else if ((meta.options || []).length || meta.control_template === 'select') {
+                    html += '<select data-ic-setting="' + row.key + '">';
+                    (meta.options || []).forEach(option => {
+                        html += '<option value="' + escapeHTML(option.value) + '"' + (String(option.value) === String(value) ? ' selected' : '') + '>' + escapeHTML(option.label) + '</option>';
+                    });
+                    html += '</select>';
+                } else {
+                    const type = meta.control_template === 'date' || meta.control_template === 'time' || meta.control_template === 'number'
+                        ? meta.control_template
+                        : 'text';
+                    html += '<input data-ic-setting="' + row.key + '" type="' + type + '" value="' + escapeHTML(value == null ? '' : value) + '"'
+                        + (meta.step != null ? ' step="' + escapeHTML(meta.step) + '"' : '')
+                        + (meta.minimum != null ? ' min="' + escapeHTML(meta.minimum) + '"' : '')
+                        + (meta.maximum != null ? ' max="' + escapeHTML(meta.maximum) + '"' : '')
+                        + '>';
+                }
+                html += '</span></label>';
+            });
+            html += '</div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('[data-ic-setting]').forEach(control => {
+                control.addEventListener('change', function() {
+                    const key = this.getAttribute('data-ic-setting');
+                    const meta = defaults[key] || {};
+                    const v = meta.control_template === 'number' ? Number(this.value) : this.value;
+                    icSettingValues[key] = v;
+                    if (icStore) icStore.set(key, v);  // 通知订阅该字段的 chip 即时回刷
+                    if (icProductPathSelections.length) window.renderICTabs(icProductPathSelections);
+                    else renderICSettingsPanel(manifest);
+                });
+            });
+        }
+
+        // 分类(Category)管理：列表初始来自数据源(数据库)，可叠加 自定义/现场；
+        // 每项可启用/停用（是否用于产品树类别筛选），可选中作为默认 category。
+        // 新建分类（提交互不相交的多个路径组、命名、其余归"其他"）是更复杂的流程，
+        // 这里先做"列表 + 启停 + 选默认"，新建入口先占位。
+        function icCategoryCandidates() {
+            return Array.isArray(icSettingValues.category_candidates) ? icSettingValues.category_candidates : [];
+        }
+        function renderICCategoryTab() {
+            var cats = icCategoryCandidates();
+            if (!cats.length) {
+                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载分类候选...</div>';
+                fetch('/api/data_source_categories', { headers: { Accept: 'application/json' } })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        icSettingValues.category_candidates = (d && d.categories) || [];
+                        renderICCategoryTab();
+                    })
+                    .catch(function() { contentHost.innerHTML = '<div style="font-size:12px;color:#b91c1c;">分类加载失败</div>'; });
+                return;
+            }
+            var selectedName = icSettingValues.category || '';
+            var html = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row"><span class="gt-backtest-setting-label">分类（用于 by_group IC）</span>'
+                + '<span class="gt-backtest-setting-control"><span class="gt-backend-chip unified-backend-chip">' + renderChipHtml('候选', String(cats.length)) + '</span></span></div>'
+                + '<div style="grid-column:1 / -1;max-height:300px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            cats.forEach(function(cat, i) {
+                var name = cat.name || ('分类' + (i + 1));
+                var src = cat.source || '数据库';
+                var srcColor = src === '数据库' ? '#1e40af' : (src === '自定义' ? '#7a4b00' : '#92400e');
+                var srcBg = src === '数据库' ? '#dbeafe' : (src === '自定义' ? '#fff8e6' : '#fef3c7');
+                var enabled = cat.enabled !== false;
+                var isDefault = name === selectedName;
+                html += '<div class="ic-cat-row" data-cat-idx="' + i + '" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #f0f2f5;font-size:12px;' + (isDefault ? 'background:#e8f4fd;' : '') + '">'
+                    + '<span class="ic-cat-default" data-cat-idx="' + i + '" title="选为默认" style="width:16px;text-align:center;cursor:pointer;color:' + (isDefault ? '#0078d4' : '#ccc') + ';">' + (isDefault ? '●' : '○') + '</span>'
+                    + '<span style="flex:1;min-width:0;"><b>' + escapeHTML(name) + '</b>'
+                    + ' <span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;font-weight:600;background:' + srcBg + ';color:' + srcColor + ';">' + escapeHTML(src) + '</span>'
+                    + ' <span style="color:#94a3b8;">' + escapeHTML((cat.categories || []).join('、')) + '</span>'
+                    + (cat.product_paths && cat.product_paths.length ? ' <span style="color:#cbd5e1;">· ' + escapeHTML(cat.product_paths.join(', ')) + '</span>' : '')
+                    + '</span>'
+                    + '<button type="button" class="ic-cat-toggle" data-cat-idx="' + i + '" style="height:22px;padding:0 9px;border:1px solid ' + (enabled ? '#86efac' : '#cbd5e1') + ';border-radius:4px;background:' + (enabled ? '#f0fdf4' : '#fff') + ';color:' + (enabled ? '#15803d' : '#64748b') + ';font-size:11px;cursor:pointer;">' + (enabled ? '已启用' : '已停用') + '</button>'
+                    + '</div>';
+            });
+            html += '</div>'
+                + '<div style="grid-column:1 / -1;margin-top:8px;"><button type="button" id="ic-cat-add" style="height:26px;padding:0 12px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;font-size:12px;cursor:pointer;">+ 新增分类（现场）</button>'
+                + '<span style="margin-left:10px;color:#94a3b8;font-size:11px;">新建：提交互不相交的多个路径组并命名，其余产品归"其他"（待实现）</span></div>'
+                + '</div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('.ic-cat-default').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var c = icCategoryCandidates()[parseInt(el.getAttribute('data-cat-idx'), 10)];
+                    icSettingValues.category = c ? (c.name || '') : '';
+                    renderICCategoryTab();
+                });
+            });
+            contentHost.querySelectorAll('.ic-cat-toggle').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var c = icCategoryCandidates()[parseInt(el.getAttribute('data-cat-idx'), 10)];
+                    if (c) c.enabled = c.enabled === false;  // 启停：是否用于产品树类别筛选
+                    renderICCategoryTab();
+                });
+            });
+            var addBtn = document.getElementById('ic-cat-add');
+            if (addBtn) addBtn.addEventListener('click', function() {
+                alert('新建分类（提交互不相交路径组 + 命名 + 其余归"其他"）流程待实现。');
+            });
+        }
+
+        // IC 因子（多选）：从因子列表多选，直接写 factor_selections（不再经频率抽屉）。
+        // 因子管理：照搬"因子家族测试设置"模块的因子管理界面（同一个 FactorParamSelectionUtils
+        // 组件），selectionMode='multi'。候选 = factorList（page_factors，与页面/分组测试同源），
+        // 可从因子库新增到 page_factors；选择 = factor_selections（IC 的计算输入）。
+        function renderICFactorSelectionTab() {
+            if (!factorList.length) {
+                contentHost.innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px;">正在加载因子...</div>';
+                fetchFactorList().then(function() { ensureFactorSelectionsDefault(); renderICFactorSelectionTab(); });
+                return;
+            }
+            ensureFactorSelectionsDefault();
+            var utils = window.FactorParamSelectionUtils;
+            if (!utils || typeof utils.renderFactorParamSettingsTab !== 'function') {
+                contentHost.textContent = '因子参数设置组件未加载';
+                return;
+            }
+            var currentParams = factorList.map(function(f) {
+                return { factor_alias: f.alias || f.name || '', scope_key: '', params: {} };
+            });
+            fetch('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(factorFamilyAlias))
+                .then(function(res) { return res.json(); })
+                .catch(function() { return { factors: [] }; })
+                .then(function(payload) {
+                    var libraryItems = Array.isArray(payload.factors) ? payload.factors : [];
+                    var libraryParams = libraryItems.map(function(item) {
+                        return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
+                    });
+                    utils.renderFactorParamSettingsTab({
+                        host: contentHost,
+                        prefix: 'ic-fps',
+                        paramDefs: [],
+                        currentFactorParams: currentParams,
+                        libraryFactorParams: libraryParams,
+                        selectionMode: 'multi',
+                        selectedIds: getFactorSelections().map(function(s) { return s.alias; }),
+                        onToggle: function(alias) { toggleFactorSelection(alias); renderICFactorSelectionTab(); },
+                        manualTitle: '现场新增因子参数',
+                        addLabel: '新增到参数列表',
+                        escapeHTML: escapeHTML,
+                        onAddParam: function(alias, params) {
+                            if (!alias || !factorFamilyAlias) return;
+                            addFactorByParams(params).then(renderICFactorSelectionTab);
+                        },
+                        onLoadFromLibrary: function(param) {
+                            if (!param || !factorFamilyAlias) return;
+                            addFactorByParams(param.params || {}).then(renderICFactorSelectionTab);
+                        },
+                    });
+                });
+        }
+
+        // 新增一个因子候选：POST /add_factor_by_params（写入 page_factors），成功后刷新 factorList。
+        function addFactorByParams(params) {
+            return fetch('/add_factor_by_params', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    factor_family_alias: factorFamilyAlias,
+                    params: params || {},
+                    page_uuid: window._pageUuid || '',
+                }),
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                if (data && data.success) return fetchFactorList();
+                return data;
+            }).catch(function(err) {
+                console.error('[IC factor-manager] add_factor_by_params failed:', err);
+            });
+        }
+
+        // IC 收益率频率：从选中的 factor_selections 出发，一行一个因子一个频率输入框，
+        // 默认占位 $F（跟随因子频率），用户可填自定义频率（文本框，非下拉）。
+        function renderICReturnFreqTab() {
+            ensureFactorSelectionsDefault();
+            var sel = getFactorSelections();
+            var html = '<div class="backend-settings-grid">'
+                + '<div class="gt-backtest-setting-row"><span class="gt-backtest-setting-label">收益率频率（每因子）</span>'
+                + '<span class="gt-backtest-setting-control" style="font-size:11px;color:#94a3b8;">默认 $F = 跟随因子频率；可填自定义如 1d / 5m</span></div>'
+                + '<div style="grid-column:1 / -1;max-height:300px;overflow:auto;border:1px solid #e8eaed;border-radius:6px;">';
+            if (!sel.length) {
+                html += '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px;">未选因子，请先在"因子"tab 选择</div>';
+            } else {
+                sel.forEach(function(s) {
+                    html += '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f0f2f5;font-size:12px;">'
+                        + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(s.alias) + '</span>'
+                        + '<input type="text" class="ic-freq-input" data-factor-alias="' + escapeHTML(s.alias) + '" value="' + escapeHTML(s.return_freq || '') + '" placeholder="$F" style="width:120px;height:26px;padding:0 8px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;">'
+                        + '</div>';
+                });
+            }
+            html += '</div></div>';
+            contentHost.innerHTML = html;
+            contentHost.querySelectorAll('.ic-freq-input').forEach(function(inp) {
+                inp.addEventListener('input', function() {
+                    setFactorReturnFreq(inp.getAttribute('data-factor-alias'), inp.value.trim());
+                });
+            });
+        }
+
+        // IC 产品路径（多选）：复用共享的 renderSelectionSettingsTab（多选模式），
+        // 以便统一管理 + 现场新增路径组。每个选中项对应一个结果 tab。
+        function renderICProductPathSelectionTab() {
+            var s = ensureICStore();
+            var selections = (s && s.effective('product_path_candidates')) || [];
+            var utils = window.ProductPathSelectionUtils;
+            if (!utils || typeof utils.renderSelectionSettingsTab !== 'function') {
+                contentHost.textContent = '产品路径设置组件未加载';
+                return;
+            }
+            utils.renderSelectionSettingsTab({
+                host: contentHost,
+                prefix: 'ic-pps',
+                selections: selections,
+                multiSelect: true,
+                selectedIds: icProductPathSelections.map(selectionId),
+                currentLabel: 'IC 产品路径（多选）',
+                manualTitle: 'IC 现场新增路径组',
+                createLabel: '新增',
+                createDefaultLabel: '新增并选中',
+                escapeHTML: escapeHTML,
+                onToggle: function(selection) {
+                    var sid = selectionId(selection);
+                    var i = icProductPathSelections.findIndex(function(s) { return selectionId(s) === sid; });
+                    if (i >= 0) icProductPathSelections.splice(i, 1);
+                    else icProductPathSelections.push(selection);
+                    window.renderICTabs(icProductPathSelections.slice());
+                },
+                onCreate: function(selection) {
+                    mergeICProductPathCandidates([selection]);  // 现场新增进候选池
+                    icProductPathSelections.push(selection);    // 并默认选中
+                    window.renderICTabs(icProductPathSelections.slice());
+                },
+            });
+        }
+
+        function openTab(tabKey) {
+            const toggleResult = window.BackendSettingsPanel && typeof window.BackendSettingsPanel.toggleContent === 'function'
+                ? window.BackendSettingsPanel.toggleContent({
+                    key: tabKey,
+                    host: contentHost,
+                    getActiveKey: function() { return icActiveSettingsTab; },
+                    setActiveKey: function(value) { icActiveSettingsTab = value; },
+                    buttonSelector: '#ic-settings-tab-bar [data-ic-settings-tab], #ic-settings-chip-row [data-ic-settings-tab]',
+                    buttonKeyAttribute: 'data-ic-settings-tab',
+                })
+                : { opened: true };
+            if (!window.BackendSettingsPanel || typeof window.BackendSettingsPanel.toggleContent !== 'function') {
+                if (icActiveSettingsTab === tabKey && contentHost.style.display !== 'none') {
+                    icActiveSettingsTab = null;
+                    contentHost.style.display = 'none';
+                    return;
+                }
+                icActiveSettingsTab = tabKey;
+                contentHost.style.display = '';
+            }
+            if (!toggleResult.opened) return;
+            renderTabContent(tabKey);
+        }
+
+        host.querySelectorAll('[data-ic-settings-tab]').forEach(control => {
+            control.addEventListener('click', function(event) {
+                event.preventDefault();
+                openTab(this.getAttribute('data-ic-settings-tab'));
+            });
+        });
+
+        if (icActiveSettingsTab && tabs.some(tab => tab.key === icActiveSettingsTab)) {
+            contentHost.style.display = '';
+            renderTabContent(icActiveSettingsTab);
+        } else if (icActiveSettingsTab === '__manage__') {
+            contentHost.style.display = '';
+            renderChooser();
         }
     }
 
@@ -725,10 +1300,18 @@
         var icDecayHtml = '';
         var rollingIcHtml = '';
         if (factor.ic_decay && factor.ic_decay.length > 0) {
-            icDecayHtml = '<div style="margin-top:20px;"><h6>IC 衰减分析（多周期）</h6><div id="ic-decay-chart-' + subId + '-' + idx + '" style="width:100%; height:300px;"></div></div>';
+            icDecayHtml = '<div class="ic-result-section" data-result-section="ic_decay" style="margin-top:20px;"><h6>IC 衰减分析（多周期）</h6><div id="ic-decay-chart-' + subId + '-' + idx + '" style="width:100%; height:300px;"></div></div>';
+        } else {
+            icDecayHtml = '<div class="ic-result-section" data-result-section="ic_decay" style="margin-top:20px;color:#94a3b8;font-size:13px;">暂无 IC 衰减数据（运行前在设置中配置 ic_decay_lags）</div>';
         }
         if (factor.rolling_ic && factor.rolling_ic.dates && factor.rolling_ic.dates.length > 0) {
-            rollingIcHtml = '<div style="margin-top:20px;"><h6>滚动窗口 IC（窗口=' + factor.rolling_ic.window + '）</h6><div id="ic-rolling-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>';
+            rollingIcHtml = '<div class="ic-result-section" data-result-section="rolling_ic" style="margin-top:20px;"><h6>滚动窗口 IC（窗口=' + factor.rolling_ic.window + '）</h6><div id="ic-rolling-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>';
+        } else {
+            rollingIcHtml = '<div class="ic-result-section" data-result-section="rolling_ic" style="margin-top:20px;color:#94a3b8;font-size:13px;">暂无滚动 IC 数据（运行前在设置中配置 rolling_window）</div>';
+        }
+        // 未实现的结果分析：显式占位而非隐藏。
+        function _notImplemented(key, label) {
+            return '<div class="ic-result-section" data-result-section="' + key + '" style="margin-top:20px;padding:24px;text-align:center;color:#94a3b8;border:1px dashed #d8dee4;border-radius:8px;background:#fafcff;font-size:13px;">🚧 ' + label + '：未实现</div>';
         }
         container.innerHTML = ''
             + '<!-- 因子切换导航条 -->'
@@ -737,44 +1320,16 @@
             + '<span style="font-size:12px;color:#888;">点击统计表表头切换因子</span>'
             + (allFactors && allFactors.length > 1 ? '<span style="font-size:12px;color:#666;">（共' + allFactors.length + '个因子，当前第' + (idx + 1) + '个）</span>' : '')
             + '</div>'
-            // IC 序列图 & 自相关衰减图
-            + '<div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:16px;">'
+            // IC 序列图 & 自相关衰减图（rank/pearson 主视图）
+            + '<div class="ic-result-section" data-result-section="cross_sectional_rank_ic cross_sectional_pearson_ic ic_summary" style="display:flex; flex-wrap:wrap; gap:20px; margin-top:16px;">'
             + '<div style="flex:1;min-width:45%;"><h6>IC 序列</h6><div id="ic-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>'
             + '<div style="flex:1;min-width:45%;"><h6>IC 自相关衰减</h6><div id="ic-acf-chart-' + subId + '-' + idx + '" style="width:100%; height:350px;"></div></div>'
             + '</div>'
             + icDecayHtml
             + rollingIcHtml
-            // 产品选择、加载按钮
-            + '<div style="margin-top:16px;">'
-            + '<label>主产品(用于因子/收益率)：</label>'
-            + '<select id="primary-product-select-' + subId + '-' + idx + '" class="form-select" style="width:240px; display:inline-block; margin-left:8px;">' + productOptions + '</select>'
-            + '<button class="btn btn-sm btn-outline-primary" data-sub="' + subId + '" data-idx="' + idx + '" data-factor-name="' + factor.name + '" data-factor-alias="' + factor.alias + '">加载因子和收益</button>'
-            + '<span id="adjust-wrap-' + subId + '-' + idx + '" style="margin-left:12px;display:none;">'
-            + '<label style="margin:0;"><input type="checkbox" id="adjust-price-' + subId + '-' + idx + '"> 复权价格</label>'
-            + '</span>'
-            + '<span id="show-volume-wrap-' + subId + '-' + idx + '" style="margin-left:12px;display:none;">'
-            + '<label><input type="checkbox" id="show-volume-' + subId + '-' + idx + '" checked onchange="window.icRedrawComparison(' + subId + ',' + idx + ')"> 📊 成交量</label>'
-            + '</span>'
-            + '<span id="show-oi-wrap-' + subId + '-' + idx + '" style="margin-left:8px;display:none;">'
-            + '<label><input type="checkbox" id="show-oi-' + subId + '-' + idx + '" checked onchange="window.icRedrawComparison(' + subId + ',' + idx + ')"> 📈 持仓量</label>'
-            + '</span>'
-            + '<div style="margin-top:6px;color:#666;font-size:12px;">期限合约请在下方点击表格选择</div>'
-            + '</div>'
-            + '<div id="contract-table-wrap-' + subId + '-' + idx + '" style="margin-top:10px;display:none;border:1px solid #e1e4e8;border-radius:6px;background:#fff;max-height:220px;overflow:auto;">'
-            + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-            + '<thead><tr style="position:sticky;top:0;background:#f6f8fa;z-index:1;">'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>'
-            + '<th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>'
-            + '</tr></thead>'
-            + '<tbody id="contract-table-body-' + subId + '-' + idx + '"></tbody>'
-            + '</table>'
-            + '</div>'
-            // 价格/因子值/收益率三联图容器
-            + '<div style="margin-top:8px;">'
-            + '<p style="font-size:11px;color:#888;margin:0 0 4px 0;">💡 点击图中 <b style="color:#0078d4;">因子值</b> 曲线上的数据点可查看该时刻的截面分布</p>'
-            + '<div id="factor-chart-' + subId + '-' + idx + '" style="width:100%;"></div>'
-            + '</div>';
+            + _notImplemented('by_group_ic', '分组 IC（by_group）')
+            + _notImplemented('coverage_missing', 'Coverage / Missing 覆盖率')
+            + '<div style="margin-top:14px;padding:10px 12px;border:1px dashed #d8dee4;border-radius:8px;color:#64748b;font-size:12px;background:#fafcff;">产品级因子值、价格、收益标签和合约/期限对比已拆到上方“因子序列查看”模块。</div>';
 
         // 绘制 IC 图表
         if (factor.ic_series && factor.ic_series.dates && factor.ic_series.values) {
@@ -790,31 +1345,11 @@
             drawRollingICChart('ic-rolling-chart-' + subId + '-' + idx, factor.rolling_ic);
         }
 
-        // 初始化期限合约表格
-        var primarySelect = document.getElementById('primary-product-select-' + subId + '-' + idx);
-        if (primarySelect) {
-            populateContractTable(subId, idx, primarySelect.value);
-            primarySelect.addEventListener('change', function() {
-                populateContractTable(subId, idx, primarySelect.value);
-            });
-        }
-
-        // 绑定加载按钮事件
-        var loadBtns = document.querySelectorAll('[data-sub="' + subId + '"][data-idx="' + idx + '"]');
-        loadBtns.forEach(function(btn) {
-            btn.removeEventListener('click', loadHandler);
-            btn.addEventListener('click', loadHandler);
-        });
-        async function loadHandler(e) {
-            var sub = e.currentTarget.getAttribute('data-sub');
-            var ix = e.currentTarget.getAttribute('data-idx');
-            var fName = e.currentTarget.getAttribute('data-factor-name');
-            var fAlias = e.currentTarget.getAttribute('data-factor-alias');
-            try {
-                await loadFactorAndReturn(sub, ix, fName, fAlias);
-            } catch (err) {
-                console.error('loadFactorAndReturn 失败:', err);
-            }
+        // 应用当前选中的结果分析 tab（默认第一个），只显示对应 section
+        var resultBar = document.querySelector('.ic-result-tabs[data-product-path-selection-id="' + subId + '"]');
+        if (resultBar) {
+            var activeBtn = resultBar.querySelector('.ic-result-tab-btn.active') || resultBar.querySelector('.ic-result-tab-btn');
+            if (activeBtn) applyICResultTabFilter(subId, activeBtn.getAttribute('data-result-tab'));
         }
     }
 
@@ -832,9 +1367,9 @@
         factorChartDiv.style.height = 'auto';
         factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:18px 0;">加载价格与因子值...</div>';
 
-        const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
-        if (!submission) { 
-            factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">未找到提交记录</div>'; 
+        const selection = selectionById(subId);
+        if (!selection) {
+            factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">未找到产品路径选择</div>';
             return; 
         }
 
@@ -851,7 +1386,8 @@
                 fetch('/get_factor_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: subId,
+                        product_path_selection_id: selectionId(selection),
+                        product_path_selection: selection,
                         factor_family_alias: factorFamilyAlias,
                         factor_name: factorName,
                         factor_alias: factorAlias,
@@ -862,12 +1398,13 @@
                 fetch('/get_return_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: subId,
+                        product_path_selection_id: selectionId(selection),
+                        product_path_selection: selection,
                         factor_name: factorName,
                         factor_alias: factorAlias,
                         factor_family_alias: factorFamilyAlias,
                         product: testerPrimary || product,
-                        paths: submission.paths,
+                        paths: selection.paths || selection.selected_paths || [],
                         page_uuid: window._pageUuid || ''
                     })
                 }).then(r => _safeJson(r, 'get_return_series'))
@@ -897,7 +1434,7 @@
             // 主价格序列改为复用价格查看模块链路，保证连续性
             const priceApi = await fetch('/api/get_price_data', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, submission, adjusted, isTermContractProduct, freq))
+                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, selection, adjusted, isTermContractProduct, freq))
             }).then(r => r.json());
 
             const priceData = priceApiToSeries(priceApi);
@@ -919,7 +1456,7 @@
                 const selectedContractUids = Array.from(icContractSelection[key] || []);
                 const contractSeriesList = adjusted
                     ? []
-                    : await fetchContractSeriesForOverlay(selectedContractUids, submission, adjusted);
+                    : await fetchContractSeriesForOverlay(selectedContractUids, selection, adjusted);
                 priceData.contract_series_list = contractSeriesList;
 
                 // 缓存数据以便 Volume/OI 复选框切换时重绘
@@ -951,14 +1488,14 @@
         const key = `${subId}-${factorIdx}`;
         icContractSelection[key] = new Set();
         try {
-            const submission = window.submissions ? window.submissions.find(s => String(s.id) === String(subId)) : null;
+            const selection = selectionById(subId);
             const primarySelect = document.getElementById(`primary-product-select-${subId}-${factorIdx}`);
             const selectedOption = primarySelect ? primarySelect.options[primarySelect.selectedIndex] : null;
             const isTermContractProduct = selectedOption ? selectedOption.getAttribute('data-is-term-contract') === '1' : false;
             if (isTermContractProduct) return;
             const q = new URLSearchParams({ product: productName });
-            if (submission && submission.start_date) q.set('start_date', submission.start_date);
-            if (submission && submission.end_date) q.set('end_date', submission.end_date);
+            if (selection && selection.start_date) q.set('start_date', selection.start_date);
+            if (selection && selection.end_date) q.set('end_date', selection.end_date);
             const resp = await fetch('/api/get_contracts?' + q.toString());
             const data = await resp.json();
             if (!data.success || !Array.isArray(data.contracts)) return;
@@ -1082,62 +1619,23 @@
         });
     };
 
-    // 运行 IC 测试（核心修改）
-    async function resolveSubmissionIdForIC(subId, submission) {
-        try {
-            const pageUuid = encodeURIComponent(window._pageUuid || '');
-            const resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
-            const data = await resp.json();
-            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
-                return String(subId);
-            }
-
-            const targetId = String(subId);
-            const exact = data.submissions.find(s => String(s.id) === targetId);
-            if (exact) return String(exact.id);
-
-            const localPaths = new Set((submission?.paths || []).map(String));
-            if (localPaths.size > 0) {
-                const matched = data.submissions.find(s => {
-                    const sp = new Set((s.selected_paths || []).map(String));
-                    if (sp.size !== localPaths.size) return false;
-                    for (const p of localPaths) {
-                        if (!sp.has(p)) return false;
-                    }
-                    return true;
-                });
-                if (matched) return String(matched.id);
-            }
-        } catch (e) {
-            console.warn('resolveSubmissionIdForIC failed:', e);
-        }
-        return String(subId);
-    }
-
+    // 运行 IC 测试
     window.runIC = async function(subId) {
         const btn = document.getElementById(`run-ic-btn-${subId}`);
         const statusSpan = document.getElementById(`ic-status-${subId}`);
         const resultDiv = document.getElementById(`ic-result-${subId}`);
         if (!btn || !statusSpan || !resultDiv) return;
 
-        // 收集选中的因子及频率（从全局抽屉读取）
-        const selectedFactors = [];
-        const checkboxes = document.querySelectorAll('#ic-freq-table-body .factor-checkbox:checked');
-        if (checkboxes.length === 0) {
+        // 收集选中的因子及频率（factor_selections，与快照/抽屉同一来源）
+        const selectedFactors = collectFactorSelections();
+        if (selectedFactors.length === 0) {
             statusSpan.innerText = '请至少选择一个因子';
             statusSpan.style.color = '#d40000';
             return;
         }
-        checkboxes.forEach(cb => {
-            const alias = cb.getAttribute('data-factor-alias');
-            const allFreqInputs = document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input');
-            const freqInput = Array.from(allFreqInputs).find(input => input.getAttribute('data-factor-alias') === alias) || null;
-            const return_freq = freqInput ? freqInput.value.trim() : '';
-            selectedFactors.push({ alias, return_freq });
-        });
-        const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
-        if (!submission) {
-            statusSpan.innerText = '错误：未找到提交';
+        const selection = selectionById(subId);
+        if (!selection) {
+            statusSpan.innerText = '错误：未找到产品路径选择';
             btn.disabled = false;
             return;
         }
@@ -1147,22 +1645,20 @@
         resultDiv.innerHTML = '';
 
         // 读取 IC 衰减和滚动窗口参数
-        const decayLagsInput = document.getElementById(`ic-decay-lags-${subId}`);
-        const rollingWinInput = document.getElementById(`ic-rolling-window-${subId}`);
         let ic_decay_lags = null;
         let rolling_window = null;
-        if (decayLagsInput && decayLagsInput.value.trim()) {
-            const parts = decayLagsInput.value.trim().split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+        const decaySetting = icSettingValues.ic_decay_lags;
+        const rollingSetting = icSettingValues.rolling_window;
+        if (decaySetting != null && String(decaySetting).trim()) {
+            const parts = String(decaySetting).trim().split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
             if (parts.length > 0) ic_decay_lags = parts;
         }
-        if (rollingWinInput && rollingWinInput.value.trim()) {
-            const w = parseInt(rollingWinInput.value.trim(), 10);
+        if (rollingSetting != null && String(rollingSetting).trim()) {
+            const w = parseInt(String(rollingSetting).trim(), 10);
             if (!isNaN(w) && w > 1) rolling_window = w;
         }
 
         try {
-            const effectiveSubmissionId = await resolveSubmissionIdForIC(subId, submission);
-
             // 显示进度条
             const progressBarId = `ic-progress-${subId}`;
             let progressDiv = document.getElementById(progressBarId);
@@ -1178,14 +1674,31 @@
                 `;
                 resultDiv.parentNode.insertBefore(progressDiv, resultDiv);
             }
+            const progressUi = createIcProgressController(progressBarId);
+            // 单根进度条只由节点级 eval 进度（累计、单调）驱动；组完成只作文字标注，
+            // 避免节点/组两套分母互相竞态。
+            let nodeCompleted = 0, nodeTotal = 0, groupDone = 0, groupTotal = 0;
+            const renderICProgress = () => {
+                const pct = nodeTotal > 0 ? (nodeCompleted / nodeTotal * 100) : 0;
+                const parts = [];
+                if (nodeTotal > 0) parts.push(nodeCompleted + '/' + nodeTotal + ' 节点');
+                if (groupTotal > 0) parts.push('第 ' + groupDone + '/' + groupTotal + ' 组');
+                progressUi.set(pct, parts.join(' · ') || '准备中…');
+            };
 
             const body = JSON.stringify({
-                submission_id: effectiveSubmissionId,
+                product_path_selection_id: selectionId(selection),
+                product_path_selection: selection,
                 factor_family_alias: factorFamilyAlias,
-                paths: submission.paths,
+                paths: selection.paths || selection.selected_paths || [],
                 factors: selectedFactors,
                 ic_decay_lags: ic_decay_lags,
                 rolling_window: rolling_window,
+                ic_lag: icSettingValues.ic_lag,
+                ic_correlation: icSettingValues.ic_correlation,
+                return_frequency_mode: icSettingValues.return_frequency_mode,
+                return_price_basis: icSettingValues.return_price_basis,
+                settings: icSettingValues,
                 page_uuid: window._pageUuid || ''
             });
 
@@ -1222,26 +1735,19 @@
                         try {
                             const payload = JSON.parse(line.slice(6));
                             if (lastEvent === 'start') {
-                                const fill = document.getElementById(`${progressBarId}-fill`);
-                                const text = document.getElementById(`${progressBarId}-text`);
-                                if (fill) fill.style.width = '0%';
-                                if (text) {
-                                    const groups = payload.groups || payload.total;
-                                    text.textContent = `0/${payload.total} 节点 (${groups} 组)`;
-                                }
+                                nodeTotal = payload.total || 0;
+                                groupTotal = payload.groups || 0;
+                                nodeCompleted = 0; groupDone = 0;
+                                renderICProgress();
                             } else if (lastEvent === 'progress') {
-                                const fill = document.getElementById(`${progressBarId}-fill`);
-                                const text = document.getElementById(`${progressBarId}-text`);
                                 const phase = payload.phase || '';
                                 if (phase === 'eval') {
-                                    // 节点级进度：显示 completed/total 节点
-                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
-                                    if (text) text.textContent = `${payload.completed}/${payload.total} 节点`;
+                                    nodeCompleted = payload.completed; nodeTotal = payload.total;
                                 } else {
-                                    // group_done 等其他阶段：显示组级进度
-                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
-                                    if (text) text.textContent = `第 ${payload.completed}/${payload.total} 组完成`;
+                                    // group_done 等：只更新组计数文字，不改进度分数
+                                    groupDone = payload.completed; groupTotal = payload.total;
                                 }
+                                renderICProgress();
                             } else if (lastEvent === 'result') {
                                 data = payload;
                             } else if (lastEvent === 'error') {
@@ -1351,29 +1857,12 @@
                                 cachedFactors.splice(dragOverColIdx, 0, moved);
                             }
 
-                            // 同步后端 session 参数顺序
-                            fetch('/reorder_params', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    factor_family_alias: factorFamilyAlias,
-                                    from_idx: dragStartColIdx,
-                                    to_idx: dragOverColIdx
-                                })
-                            })
-                            .then(res => res.json())
-                            .then(resData => {
-                                if (resData.success) {
-                                    // 只刷新参数模块（不重新跑 IC 测试）
-                                    if (typeof window.reloadParamModule === 'function') {
-                                        window.reloadParamModule();
-                                    }
-                                    // 同步更新因子列表缓存
-                                    fetchFactorList();
-                                } else {
-                                    alert('排序失败: ' + (resData.error || '未知错误'));
-                                }
-                            });
+                            // Frontend manages candidate order locally — no backend call needed.
+                            // Reorder is tracked in local state by the settings panel.
+                            if (typeof window.reloadParamModule === 'function') {
+                                window.reloadParamModule();
+                            }
+                            fetchFactorList();
                         }
                     });
                 });
@@ -1388,121 +1877,81 @@
         }
     };
 
-    // 填充收益率频率设置抽屉
-    function populateFreqDrawer(factors) {
-        const tbody = document.getElementById('ic-freq-table-body');
-        const summaryText = document.getElementById('ic-freq-summary-text');
-        const summaryRow = document.getElementById('ic-freq-summary-row');
-        if (!tbody || !summaryText) return;
-        if (!factors || factors.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
-            summaryText.textContent = '暂无因子数据';
-            return;
-        }
-        // 如果摘要行隐藏，显示它
-        if (summaryRow) summaryRow.style.display = '';
-        let rows = '';
-        let customCount = 0;
-        factors.forEach(f => {
-            const defaultReturnFreq = f.default_return_freq || '';
-            const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
-            const cat = (f.category || '').trim();
-            rows += `<tr>
-                <td><label><input type="checkbox" class="factor-checkbox" data-factor-alias="${f.alias}" checked> ${f.name}</label></td>
-                <td style="color:#667085;font-size:12px;">${cat}</td>
-                <td>
-                    <input
-                        type="text"
-                        class="factor-return-freq-input form-control form-control-sm"
-                        data-factor-alias="${f.alias}"
-                        value=""
-                        placeholder="留空则使用${defaultHint}"
-                        title="留空则使用${defaultHint}；也可手动填写如 5min、1H、1D"
-                        style="width:220px; display:inline-block;"
-                    >
-                    <div style="margin-top:4px; font-size:12px; color:#6b7280;">${defaultHint}</div>
-                </td>
-            </tr>`;
-        });
-        tbody.innerHTML = rows;
-        // 更新摘要
-        updateFreqSummary();
-        // 监听输入变化更新摘要
-        tbody.querySelectorAll('.factor-return-freq-input').forEach(inp => {
-            inp.addEventListener('input', updateFreqSummary);
-        });
-        tbody.querySelectorAll('.factor-checkbox').forEach(cb => {
-            cb.addEventListener('change', updateFreqSummary);
-        });
-    }
-    
-    function updateFreqSummary() {
-        const summaryText = document.getElementById('ic-freq-summary-text');
-        if (!summaryText) return;
-        const tbody = document.getElementById('ic-freq-table-body');
-        if (!tbody) return;
-        const inputs = tbody.querySelectorAll('.factor-return-freq-input');
-        let customCount = 0;
-        inputs.forEach(inp => { if (inp.value.trim()) customCount++; });
-        const checkedCount = tbody.querySelectorAll('.factor-checkbox:checked').length;
-        if (customCount > 0) {
-            summaryText.textContent = `${customCount}个因子设置了自定义频率，${checkedCount}个因子参与测试`;
-        } else {
-            summaryText.textContent = `默认使用因子$F，${checkedCount}个因子参与测试`;
-        }
-    }
-    window.updateFreqSummary = updateFreqSummary;
+    // 旧的频率抽屉（populateFreqDrawer/updateFreqSummary/抽屉勾选框）已删除：
+    // 因子选择 + 每因子 return_freq 现由"因子"tab 与"收益率频率"tab 直接管理
+    // factor_selections（见 renderICFactorSelectionTab / renderICReturnFreqTab）。
+    window.updateFreqSummary = function() {};  // 兼容旧调用（global_template 摘要刷新）
 
     // 弃用旧的内联面板生成，保留兼容性（返回空字符串）
     function buildFactorConfigPanel(subId, factors) {
         return '';
     }
 
+    // 按后端 manifest serialization.fallback 声明，将空 selections 回退到 candidates
+    function applyFallbackSelectionsFromCandidates() {
+        var s = ensureICStore();
+        if (!s || !icSettingsManifest) return;
+        var defs = icSettingsManifest.defaults || {};
+        Object.keys(defs).forEach(function(key) {
+            var meta = defs[key] || {};
+            var ser = meta.serialization || {};
+            if (ser.fallback !== 'candidates') return;
+            if (!ser.candidate_field) return;
+            var selections = icSettingValues[key];
+            if (Array.isArray(selections) && selections.length > 0) return;
+            // 从 candidate_field 对应的值回退：先 icSettingValues，再 effective（parent 回退）
+            var candidates = s.effective(ser.candidate_field);
+            if (!Array.isArray(candidates) || !candidates.length) return;
+            // 全选候选
+            icSettingValues[key] = candidates.slice();
+            if (key === 'product_path_selections') {
+                icProductPathSelections = candidates.slice();
+            }
+        });
+    }
+
     // 渲染主选项卡（外部调用）
-    window.renderICTabs = async function(submissions) {
+    window.renderICTabs = async function(productPathSelections) {
         const container = document.getElementById('ic-tab-container');
         if (!container) return;
-        if (!submissions || submissions.length === 0) {
-            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请先完成产品类别设置并提交。</div>';
+        icProductPathSelections = Array.isArray(productPathSelections) ? productPathSelections.slice() : [];
+        if (window.FactorSeriesViewer && typeof window.FactorSeriesViewer.setSelections === 'function') {
+            window.FactorSeriesViewer.setSelections({ product_path_selection: icProductPathSelections[0] || null });
+        }
+        const settingsManifest = await loadICSettingsManifest();
+        applyFallbackSelectionsFromCandidates();
+        syncICStore();
+        renderICSettingsPanel(settingsManifest);
+        if (icProductPathSelections.length === 0) {
+            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请在 IC 测试设置中选择产品路径。</div>';
             return;
         }
-        // 获取因子列表（如果尚未获取）
+        // 获取因子列表（如果尚未获取），并确保 factor_selections 默认全选
         if (factorList.length === 0) await fetchFactorList();
-        // 填充收益率频率抽屉（全局，所有tab共享）
-        populateFreqDrawer(factorList);
+        ensureFactorSelectionsDefault();
         let tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         let panelsHtml = '<div class="tab-content" id="icTabContent">';
-        submissions.forEach((sub, idx) => {
+        icProductPathSelections.forEach((sub, idx) => {
+            const subId = selectionId(sub);
             const activeClass = idx === 0 ? 'active' : '';
             const showClass = idx === 0 ? 'show active' : '';
-            const tabId = `ic-tab-${sub.id}`;
-            const panelId = `ic-panel-${sub.id}`;
-            const tabLabel = sub.product_group || sub.label || sub.factor_tester_serial || ('测试器' + (idx+1));
+            const tabId = `ic-tab-${subId}`;
+            const panelId = `ic-panel-${subId}`;
+            const tabLabel = selectionLabel(sub) || ('产品路径' + (idx+1));
             const pgPrefix = sub.product_group ? '📦 ' : '';
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-submission-id="${sub.id}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
+            // tab 名用 chip 渲染
+            const tabChip = '<span class="gt-backend-chip" style="pointer-events:none;">' + renderChipHtml('产品路径', pgPrefix + tabLabel) + '</span>';
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-product-path-selection-id="${subId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${tabChip}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
-                            <button class="btn btn-primary btn-sm" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
-                            <span id="ic-status-${sub.id}" class="ic-status"></span>
+                            <button class="btn btn-primary btn-sm" id="run-ic-btn-${subId}" onclick="runIC('${subId}')">运行IC测试</button>
+                            <span id="ic-status-${subId}" class="ic-status"></span>
                         </div>
-                        <!-- IC 衰减 & 滚动窗口 参数 -->
-                        <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
-                            <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
-                            <label style="font-size:12px; margin:0; white-space:nowrap;">
-                                IC衰减滞后期
-                                <input type="text" id="ic-decay-lags-${sub.id}" value="" placeholder="1,2,3,5,10,20"
-                                       style="width:110px; font-size:12px; padding:2px 6px; vertical-align:center; margin:0;" title="逗号分隔的滞后期数，计算各周期IC统计量">
-                            </label>
-                            <label style="font-size:12px; margin:0; white-space:nowrap;">
-                                滚动窗口
-                                <input type="number" id="ic-rolling-window-${sub.id}" value="" placeholder="如60"
-                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px; vertical-align:center;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
-                            </label>
-                        </div>
-                        <div id="ic-result-${sub.id}"></div>
-                        <div id="chart-container-${sub.id}" style="width:100%; margin-top:14px;"></div>
+                        ${renderICResultTabs(subId, settingsManifest)}
+                        <div id="ic-result-${subId}"></div>
+                        <div id="chart-container-${subId}" style="width:100%; margin-top:14px;"></div>
                     </div>
                 </div>
             `;
@@ -1517,38 +1966,138 @@
                 trigger.addEventListener('click', (e) => { e.preventDefault(); tab.show(); });
             });
         }
-        if (typeof window.renderGroupTabs === 'function') {
-            window.renderGroupTabs(submissions);
-        }
+        // 结果分析 tab（rank/pearson/summary/decay/rolling/by_group/coverage）：
+        // 点击切换显示对应 data-result-section，未实现的显式占位。委托绑定一次。
+        container.querySelectorAll('.ic-result-tabs').forEach(function(bar) {
+            bar.addEventListener('click', function(e) {
+                var btn = e.target.closest('.ic-result-tab-btn');
+                if (!btn) return;
+                applyICResultTabFilter(bar.getAttribute('data-product-path-selection-id'), btn.getAttribute('data-result-tab'));
+            });
+        });
     };
 
+    // 在某 product_path 的结果区内，只显示与 tabKey 匹配的 result section。
+    function applyICResultTabFilter(subId, tabKey) {
+        if (!subId || !tabKey) return;
+        var resultDiv = document.getElementById('ic-result-' + subId);
+        if (!resultDiv) return;
+        resultDiv.querySelectorAll('.ic-result-section').forEach(function(sec) {
+            var keys = (sec.getAttribute('data-result-section') || '').split(/\s+/);
+            sec.style.display = keys.indexOf(tabKey) >= 0 ? '' : 'none';
+        });
+        // 高亮当前 result tab 按钮
+        var bar = resultDiv.parentNode && resultDiv.parentNode.querySelector('.ic-result-tabs[data-product-path-selection-id="' + subId + '"]');
+        if (bar) {
+            bar.querySelectorAll('.ic-result-tab-btn').forEach(function(b) {
+                var on = b.getAttribute('data-result-tab') === tabKey;
+                b.style.borderColor = on ? '#2563eb' : '#cbd5e1';
+                b.style.background = on ? '#eff6ff' : '#fff';
+                b.style.color = on ? '#1d4ed8' : '#475569';
+            });
+        }
+    }
+    window.applyICResultTabFilter = applyICResultTabFilter;
+
     // 页面加载完成后，如果已有 submissions，则渲染
-    // 收益率频率抽屉的按钮事件
-    function initFreqDrawerButtons() {
-        const selectAll = document.getElementById('ic-freq-select-all');
-        const deselectAll = document.getElementById('ic-freq-deselect-all');
-        const resetFreq = document.getElementById('ic-freq-reset');
-        if (selectAll) selectAll.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = true);
-            updateFreqSummary();
-        };
-        if (deselectAll) deselectAll.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = false);
-            updateFreqSummary();
-        };
-        if (resetFreq) resetFreq.onclick = () => {
-            document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input').forEach(input => input.value = '');
-            updateFreqSummary();
+    // 频率抽屉已删除——因子/收益率频率改由设置 tab 管理。保留空函数兼容旧调用。
+    function initFreqDrawerButtons() {}
+
+    // 因子选择(factor_selections)：从频率抽屉读勾选的因子 [{alias, return_freq}]，
+    // ── 因子选择(factor_selections) 唯一真源（取代旧频率抽屉）──────────────────
+    // 形如 [{alias, return_freq}]，return_freq 空 = 跟随因子频率 $F。
+    function getFactorSelections() {
+        if (!Array.isArray(icSettingValues.factor_selections)) icSettingValues.factor_selections = [];
+        return icSettingValues.factor_selections;
+    }
+    function setFactorSelections(list) {
+        icSettingValues.factor_selections = (Array.isArray(list) ? list : []).map(function(it) {
+            return { alias: it.alias, return_freq: it.return_freq || '' };
+        });
+    }
+    // 未选时默认选中全部因子（return_freq 默认空 = $F）。
+    function ensureFactorSelectionsDefault() {
+        if (!getFactorSelections().length && factorList.length) {
+            setFactorSelections(factorList.map(function(f) { return { alias: f.alias || f.name, return_freq: '' }; }));
+        }
+    }
+    function collectFactorSelections() {
+        ensureFactorSelectionsDefault();
+        return getFactorSelections().slice();
+    }
+    function applyFactorSelections(list) {
+        if (Array.isArray(list)) setFactorSelections(list);
+    }
+    function toggleFactorSelection(alias) {
+        var sel = getFactorSelections();
+        var i = sel.findIndex(function(s) { return s.alias === alias; });
+        if (i >= 0) sel.splice(i, 1);
+        else sel.push({ alias: alias, return_freq: '' });
+    }
+    function setFactorReturnFreq(alias, freq) {
+        var hit = getFactorSelections().find(function(s) { return s.alias === alias; });
+        if (hit) hit.return_freq = freq;
+    }
+
+    // ── 模板快照：把 IC 的设置/选择注册进因子家族设置模板 ──────────────────
+    function collectICSnapshot() {
+        return {
+            settings: Object.assign({}, icSettingValues),
+            product_path_selections: (icProductPathSelections || []).slice(),
+            factor_selections: collectFactorSelections(),
+            mounted_tabs: (icMountedSettingsTabs || []).slice(),
         };
     }
 
-    async function initICModule() {
-        initFreqDrawerButtons();
-        await fetchFactorList();
-        populateFreqDrawer(factorList);
-        if (window.submissions && window.submissions.length) {
-            await window.renderICTabs(window.submissions);
+    async function applyICSnapshot(data) {
+        if (!data || typeof data !== 'object') return;
+        await loadICSettingsManifest();
+        if (data.settings && typeof data.settings === 'object') {
+            Object.keys(data.settings).forEach(function(k) { icSettingValues[k] = data.settings[k]; });
         }
+        if (Array.isArray(data.mounted_tabs) && data.mounted_tabs.length) {
+            icMountedSettingsTabs = data.mounted_tabs.slice();
+        }
+        if (Array.isArray(data.product_path_selections) && data.product_path_selections.length) {
+            icProductPathSelections = data.product_path_selections.slice();
+            mergeICProductPathCandidates(icProductPathSelections);
+        }
+        // factor_selections 现在是纯字段，须在渲染前恢复，因子/频率 tab 才显示正确。
+        if (Array.isArray(data.factor_selections)) applyFactorSelections(data.factor_selections);
+        renderICSettingsPanel(icSettingsManifest);
+        await window.renderICTabs(icProductPathSelections);
+    }
+
+    function registerICSnapshot() {
+        if (!window._snapshotRegistry || typeof window._snapshotRegistry.register !== 'function') return false;
+        window._snapshotRegistry.register({
+            key: 'ic_test',
+            order: 60,   // 在页面设置 / 分组之后再 apply（IC 依赖页面产品路径作回退）
+            label: 'IC 测试',
+            icon: '📈',
+            collect: collectICSnapshot,
+            apply: applyICSnapshot,
+            summarize: function(d) {
+                var s = (d && d.settings) || {};
+                var lines = [];
+                var n = (d && d.product_path_selections || []).length;
+                if (n) lines.push('产品路径选择: ' + n + ' 个');
+                var fn = (d && d.factor_selections || []).length;
+                if (fn) lines.push('因子选择: ' + fn + ' 个');
+                ['ic_correlation', 'ic_lag', 'return_price_basis', 'return_frequency_mode', 'by_group', 'group_adjust', 'min_cross_section_count'].forEach(function(k) {
+                    if (s[k] !== undefined && s[k] !== '' && s[k] !== null) lines.push(k + ': ' + s[k]);
+                });
+                return lines.length ? lines : null;
+            },
+        });
+        return true;
+    }
+
+    async function initICModule() {
+        registerICSnapshot();
+        await fetchFactorList();
+        ensureFactorSelectionsDefault();
+        await window.renderICTabs(icProductPathSelections);
     }
 
     if (document.readyState === 'loading') {
@@ -1557,55 +2106,37 @@
         initICModule();
     }
 
-    // ── Submission bus subscriptions ────────────────────────────────────────────
-    (function() {
-        var bus = window._submissionBus;
-        if (!bus) return;
-
-        // React to tester deletion: clear IC caches for removed tester
-        bus.on(bus.EVENTS.REMOVED, function(data) {
-            if (!data || !data.id_time) return;
-            var removedId = String(data.id_time);
-
-            // Clear _icComparisonCache entries for this tester (keys are "subId-idx")
-            if (window._icComparisonCache) {
-                var prefix = removedId + '-';
-                Object.keys(window._icComparisonCache).forEach(function(key) {
-                    if (key.indexOf(prefix) === 0) {
-                        delete window._icComparisonCache[key];
-                    }
-                });
-            }
-
-            // Clear _icDataFactors entry for this tester
-            if (window._icDataFactors && window._icDataFactors[removedId]) {
-                delete window._icDataFactors[removedId];
-            }
-        });
-
-        // React to any change: re-render IC tabs
-        bus.on('*', function(event) {
-            if (window.submissions && window.submissions.length > 0) {
-                window.renderICTabs(window.submissions);
-            }
-        });
-    })();
-
     // 供参数模块调用，刷新因子列表和 IC 选项卡
     window.refreshICModule = async function() {
         console.log('刷新 IC 模块因子列表');
         await fetchFactorList();  // 重新获取因子列表
-        populateFreqDrawer(factorList);  // 刷新收益率频率抽屉
-        if (window.submissions && window.submissions.length) {
-            await window.renderICTabs(window.submissions);
-        }
+        ensureFactorSelectionsDefault();
+        await window.renderICTabs(icProductPathSelections);
         window.factorList = factorList;
-        if (typeof window.renderGroupTabs === 'function' && window.submissions && window.submissions.length) {
-            window.renderGroupTabs(window.submissions);
-        }
     };
 
     window.factorList = factorList;
+
+    document.addEventListener('groupTestProductPathSelectionsChanged', function() {
+        if (icProductPathSelections.length) {
+            window.renderICTabs(icProductPathSelections).catch(function(error) {
+                console.error('[IC] refresh product path selection failed:', error);
+            });
+        } else {
+            renderICSettingsPanel(icSettingsManifest);
+        }
+    });
+
+    document.addEventListener('singleFactorGlobalSettingsChanged', function() {
+        const changed = applyGlobalICDefaults();
+        if (changed) {
+            window.renderICTabs(icProductPathSelections).catch(function(error) {
+                console.error('[IC] refresh global defaults failed:', error);
+            });
+        } else {
+            renderICSettingsPanel(icSettingsManifest);
+        }
+    });
 
     // ========== 因子截面分布可视化 ==========
 
@@ -1621,11 +2152,13 @@
         chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">加载中...</div>';
 
         try {
+            const selection = selectionById(subId);
             const res = await fetch('/get_factor_distribution', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    submission_id: String(subId),
+                    product_path_selection_id: selectionId(selection),
+                    product_path_selection: selection,
                     factor_family_alias: factorFamilyAlias,
                     factor_name: factorName,
                     factor_alias: factorAlias,

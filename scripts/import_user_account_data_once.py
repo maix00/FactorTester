@@ -25,11 +25,11 @@ from tools.data.account_manage import (
     save_levels,
     save_organizations,
 )
-from tools.data.account_manage import list_param_config_scopes
+from tools.data.account_manage import list_factor_param_config_scopes
 from tools.data.sqlite.account_manager import (
     ensure_scope_exists,
-    load_param_config,
-    save_param_config_payload,
+    load_factor_param_config,
+    save_factor_param_config_payload,
     save_user_template_payload,
 )
 from tools.data.account_manage import save_product_groups
@@ -157,7 +157,7 @@ def _import_product_groups(username: str, user_dir: str) -> int:
     return len(groups)
 
 
-def _iter_param_configs(user_dir: str) -> list[tuple[str, str, dict[str, Any]]]:
+def _iter_factor_param_configs(user_dir: str) -> list[tuple[str, str, dict[str, Any]]]:
     root = os.path.join(user_dir, "factor_library_param_configs")
     if not os.path.isdir(root):
         return []
@@ -181,12 +181,12 @@ def _iter_param_configs(user_dir: str) -> list[tuple[str, str, dict[str, Any]]]:
     return items
 
 
-def _import_param_configs(username: str, user_dir: str) -> tuple[int, int]:
-    items = _iter_param_configs(user_dir)
+def _import_factor_param_configs(username: str, user_dir: str) -> tuple[int, int]:
+    items = _iter_factor_param_configs(user_dir)
     scopes = set()
     for scope_key, ff_alias, payload in items:
         ensure_scope_exists(username, scope_key)
-        save_param_config_payload(username, ff_alias, payload, scope_key)
+        save_factor_param_config_payload(username, ff_alias, payload, scope_key)
         scopes.add(scope_key)
     return len(scopes), len(items)
 
@@ -241,7 +241,7 @@ def import_user_account_data_once(source_root: str | None = None) -> dict[str, A
             result["template_collections"] += collections
             result["templates"] += templates
             result["product_groups"] += _import_product_groups(username, user_dir)
-            scope_count, config_count = _import_param_configs(username, user_dir)
+            scope_count, config_count = _import_factor_param_configs(username, user_dir)
             result["param_scopes"] += scope_count
             result["param_configs"] += config_count
         except Exception:
@@ -312,12 +312,12 @@ def verify_user_account_data_import(source_root: str | None = None) -> dict[str,
                     actual = load_user_templates(username, kind, ff_alias=ff_alias, scope_key=child)
                     if actual != expected:
                         mismatches.append(f"{username}:template:{kind}:{child}:{ff_alias}")
-        source_configs = _iter_param_configs(user_dir)
+        source_configs = _iter_factor_param_configs(user_dir)
         seen_scopes = {scope_key for scope_key, _, _ in source_configs}
         for scope_key, ff_alias, payload in source_configs:
-            if load_param_config(username, ff_alias, scope_key) != payload:
+            if load_factor_param_config(username, ff_alias, scope_key) != payload:
                 mismatches.append(f"{username}:param:{scope_key}:{ff_alias}")
-        actual_scopes = set(list_param_config_scopes(username))
+        actual_scopes = set(list_factor_param_config_scopes(username))
         if seen_scopes and actual_scopes.intersection(seen_scopes) != seen_scopes:
             missing = ",".join(sorted(seen_scopes - actual_scopes))
             mismatches.append(f"{username}:param_scopes:{missing}")
