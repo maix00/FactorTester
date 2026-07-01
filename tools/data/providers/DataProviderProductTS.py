@@ -20,6 +20,13 @@ from ..types import DataColumn, DataFreq
 from .DataProvider import DataProvider, _DataMultipleProviderMeta
 
 
+def _source_contains(source: Any, product: Any) -> bool:
+    try:
+        return bool(product in source)
+    except Exception:
+        return False
+
+
 class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
     """
     品种时序数据提供器。
@@ -76,7 +83,7 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
         target_freq = DataFreq(freq) if freq is not None else None
         return [
             source for source in cls.all()
-            if product in source and (target_freq is None or source.freq == target_freq)
+            if (target_freq is None or source.freq == target_freq) and _source_contains(source, product)
         ]
 
     @classmethod
@@ -109,7 +116,9 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
         lower = path.lower()
         try:
             if lower.endswith(".parquet"):
-                import pyarrow.parquet as pq
+                from importlib import import_module
+
+                pq = import_module("pyarrow.parquet")
                 return bool(pq.ParquetFile(path).metadata.num_rows > 0)
             if lower.endswith(".csv"):
                 with open(path, "rb") as handle:

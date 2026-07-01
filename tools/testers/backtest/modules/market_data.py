@@ -24,12 +24,15 @@ from typing import Any, ClassVar, cast
 import pandas as pd
 
 from tools.data.types import DataColumn
+from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
+from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
@@ -43,6 +46,7 @@ from tools.data.field_history import (
     load_market_rule_field_provider,
     resolve_historical_fields_for_product,
 )
+from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 
 
 class MarketDataModule(ExecutableModule):
@@ -59,14 +63,19 @@ class MarketDataModule(ExecutableModule):
     historical_field_policy: ClassVar[FieldRef[str]] = FieldRef("historical_field_policy")
     current_historical_fields: ClassVar[FieldRef[dict[Any, dict[str, object]]]] = FieldRef("current_historical_fields")
     current_prices: ClassVar[FieldRef[Any]] = FieldRef("current_prices")  # dict[Product, float], looked up per-timestamp
+    data_source_mode: ClassVar[FieldRef[str]] = FieldRef("data_source_mode")
     data_source: ClassVar[FieldRef[str]] = FieldRef("data_source")
         # which raw data source the data-prep stage should load raw_prices/
         # volume/etc. from -- read by that upstream stage (via
         # strategy_config_builder), not by any Flow in this module itself
+    freq_mode: ClassVar[FieldRef[str]] = FieldRef("freq_mode")
+    freq_fixed: ClassVar[FieldRef[str]] = FieldRef("freq_fixed")
     frequency: ClassVar[FieldRef[str]] = FieldRef("frequency")
         # bar granularity of the underlying market data (distinct from
         # FactorSignalModule.signal_freq, which is how often the strategy
         # rebalances -- a strategy can rebalance daily on top of minute bars)
+    required_data_source: ClassVar[FieldRef[Any]] = FieldRef("required_data_source")
+    required_frequency: ClassVar[FieldRef[DataFreq]] = FieldRef("required_frequency")
 
     _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
     _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
@@ -103,25 +112,60 @@ class MarketDataModule(ExecutableModule):
             ),
         ),
         "current_historical_fields": FieldDefinition(public=False),
+        "data_source_mode": FieldDefinition(
+            public=True, label="数据源模式", default="auto", control_template="select", tab="data_source",
+            options=(("auto", "自动选择"), ("list", "指定列表")),
+            chip_template="数据源模式: {value}",
+            tab_label="数据源",
+            tab_order=35,
+        ),
         "data_source": FieldDefinition(
             public=True, label="数据源", default="", control_template="select", tab="data_source",
-            options=(("", "自动"),),
+            visible_when={"data_source_mode": ("list",)},
+            options=(("", "自动"), ("Local", "Local")),
             chip_template="数据源: {value}",
             tab_label="数据源",
             tab_order=35,
         ),
+        "freq_mode": FieldDefinition(
+            public=True, label="频率模式", default="auto", control_template="select", tab="frequency",
+            options=(("auto", "自动推断"), ("fixed", "固定频率")),
+            chip_template="频率模式: {value}",
+            tab_label="数据频率",
+            tab_order=36,
+        ),
+        "freq_fixed": FieldDefinition(
+            public=True, label="固定频率", default="MIN1", control_template="text", tab="frequency",
+            visible_when={"freq_mode": ("fixed",)},
+            chip_template="固定频率: {value}",
+            tab_label="数据频率",
+            tab_order=36,
+        ),
         "frequency": FieldDefinition(
-            public=True, label="Bar频率", default="", control_template="select", tab="frequency",
+            public=False, label="Bar频率", default="", control_template="select", tab="frequency",
             options=(("", "自动"),),
             chip_template="Bar频率: {value}",
             tab_label="数据频率",
             tab_order=36,
         ),
+        "required_frequency": FieldDefinition(public=False),
+        "required_data_source": FieldDefinition(public=False),
     }
+
+    resolve_market_data_request: ClassVar[Flow] = Flow(
+        "resolve_market_data_request",
+        inputs=(data_source_mode, data_source, freq_mode, freq_fixed, frequency, FactorModule.factor),
+        outputs=(required_data_source, required_frequency),
+        phase=Phase.PRE_REPLAY, order=37,
+        after=(RunWindowModule.resolve_run_window, ProductSelectionModule.resolve_product_selection),
+        compute=lambda account, ctx: _resolve_market_data_request(account, ctx),
+        strategy_scoped=True,
+        description="解析行情数据源与频率",
+    )
 
     check_market_data_coverage: ClassVar[Flow] = Flow(
         "check_market_data_coverage", inputs=(), outputs=(),
-        phase=Phase.PRE_REPLAY, order=38,
+        phase=Phase.PRE_REPLAY, order=38, after=(resolve_market_data_request,),
         compute=lambda account, ctx: _check_market_data_coverage(account, ctx),
     )
     load_raw_market_data: ClassVar[Flow] = Flow(
@@ -183,7 +227,7 @@ class MarketDataModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
+        resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_volume_on_signal,
@@ -212,6 +256,140 @@ def _market_data_request(account) -> dict[str, Any]:
     return request
 
 
+def _resolve_market_data_request(account, ctx) -> None:
+    request = _market_data_request(account)
+    if "raw_market_data" in request:
+        return
+    frequencies_by_strategy: dict[Any, DataFreq] = {}
+    sources_by_strategy: dict[Any, tuple[str, ...]] = {}
+    for strategy in account.strategy_configs:
+        products = list(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+        if not products:
+            continue
+        config = account.config_for(strategy)
+        source = _required_data_source_for_strategy(config)
+        frequency = _required_frequency_for_strategy(config, products)
+        sources_by_strategy[strategy] = source
+        frequencies_by_strategy[strategy] = frequency
+        ctx.set_for(MarketDataModule.required_data_source, strategy, source)
+        ctx.set_for(MarketDataModule.required_frequency, strategy, frequency)
+
+    unique_sources = {source for source in sources_by_strategy.values()}
+    if len(unique_sources) > 1:
+        labels = ", ".join(_data_source_key_label(source) for source in sorted(unique_sources))
+        raise ValueError(
+            "当前 native 行情表仍要求同一批回测使用同一个数据源集合；"
+            f"解析到多个数据源集合: {labels}。请拆分批次，或等待按数据源分组的事件队列实现。"
+        )
+    unique = {freq.name: freq for freq in frequencies_by_strategy.values()}
+    if len(unique) > 1:
+        labels = ", ".join(sorted(unique))
+        raise ValueError(
+            "当前 native 行情表仍要求同一批回测使用同一个 Bar 频率；"
+            f"解析到多个频率: {labels}。请拆分批次，或等待按频率分组的事件队列实现。"
+        )
+    account.market_data_required_sources = sources_by_strategy
+    account.market_data_required_source = next(iter(unique_sources), ())
+    account.market_data_required_frequencies = frequencies_by_strategy
+    account.market_data_required_frequency = next(iter(unique.values()), None)
+
+
+def _required_data_source_for_strategy(config) -> tuple[str, ...]:
+    mode = str(config.get(MarketDataModule.data_source_mode, "") or "").strip().lower()
+    values = _parse_data_source_values(config.get(MarketDataModule.data_source))
+    if not mode:
+        mode = "list" if values else "auto"
+    if mode == "auto":
+        return ()
+    if mode != "list":
+        raise ValueError(f"不支持的数据源模式: {mode!r}")
+    if not values:
+        raise ValueError("数据源模式为指定列表时，必须至少选择一个数据源")
+    return values
+
+
+def _parse_data_source_values(raw: Any) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",")]
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        values = [str(item).strip() for item in raw]
+    else:
+        values = [str(raw).strip()]
+    return tuple(dict.fromkeys(item for item in values if item and item != "auto"))
+
+
+def _data_source_key_label(source: tuple[str, ...]) -> str:
+    return "auto" if not source else "+".join(source)
+
+
+def _required_frequency_for_strategy(config, products: list[Any]) -> DataFreq:
+    mode = str(config.get(MarketDataModule.freq_mode, "") or "").strip().lower()
+    legacy_frequency = str(config.get(MarketDataModule.frequency, "") or "").strip()
+    if not mode:
+        mode = "fixed" if legacy_frequency else "auto"
+    if mode == "fixed":
+        return DataFreq(config.get(MarketDataModule.freq_fixed) or legacy_frequency or "MIN1")
+    if mode != "auto":
+        raise ValueError(f"不支持的数据频率模式: {mode!r}")
+    return _infer_required_frequency_from_factor(config.get(FactorModule.factor), products)
+
+
+def _infer_required_frequency_from_factor(factor: Any, products: list[Any]) -> DataFreq:
+    desired_freqs = _desired_factor_frequencies(factor)
+    available_set: set[DataFreq] | None = None
+    for product in products:
+        freqs = set(_product_available_freqs(product))
+        if desired_freqs and not _has_compatible_frequency(freqs, desired_freqs):
+            continue
+        available_set = freqs if available_set is None else available_set & freqs
+    available = sorted(available_set or set(), key=lambda item: item.value, reverse=True)
+    if not available:
+        raise ValueError("产品数据没有公共可用频率，无法确定 Bar 频率")
+    if desired_freqs:
+        frequency = next((freq for freq in available if _frequency_compatible(freq, desired_freqs)), None)
+        if frequency is None:
+            desired_text = ", ".join(sorted(freq.name for freq in desired_freqs))
+            available_text = ", ".join(sorted(freq.name for freq in available))
+            raise ValueError(f"期望频率 {{{desired_text}}} 与产品可用频率 {{{available_text}}} 不兼容")
+        return frequency
+    return available[-1]
+
+
+def _desired_factor_frequencies(factor: Any) -> set[DataFreq]:
+    factor_obj = getattr(factor, "underlying_factor", None) or getattr(factor, "_factor", None) or factor
+    desired: set[DataFreq] = set()
+    signal_freq = getattr(factor_obj, "freq", None) or getattr(factor_obj, "_freq", None)
+    if signal_freq is not None:
+        desired.add(DataFreq(signal_freq))
+    expr = (
+        getattr(factor_obj, "_expr", None)
+        or getattr(factor_obj, "expression", None)
+        or getattr(factor, "expression", None)
+    )
+    for const_ref in getattr(expr, "const_refs", ()) or ():
+        try:
+            desired.add(DataFreq(getattr(const_ref, "value")))
+        except Exception:
+            continue
+    if not desired:
+        desired.add(DataFreq("MIN1"))
+    return desired
+
+
+def _product_available_freqs(product: Any) -> list[DataFreq]:
+    return [_coerce_data_freq(freq) for freq in product.list_available_freqs()]
+
+
+def _frequency_compatible(available: DataFreq, desired_freqs: set[DataFreq]) -> bool:
+    return all(desired.value.total_seconds() % available.value.total_seconds() == 0 for desired in desired_freqs)
+
+
+def _has_compatible_frequency(available_freqs: set[DataFreq], desired_freqs: set[DataFreq]) -> bool:
+    return any(_frequency_compatible(available, desired_freqs) for available in available_freqs)
+
+
 def _check_market_data_coverage(account, ctx) -> None:
     request = _market_data_request(account)
     if "raw_market_data" in request:
@@ -226,9 +404,13 @@ def _check_market_data_coverage(account, ctx) -> None:
     products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
+    required_frequency = getattr(account, "market_data_required_frequency", None)
+    required_source = getattr(account, "market_data_required_source", ())
     missing_products: list[str] = []
+    missing_frequency_products: list[str] = []
+    missing_source_products: list[str] = []
     excluded_out_of_range: list[Any] = []
-    load_plan: list[tuple[Any, Any]] = []
+    load_plan: list[tuple[Any, Any, Any | None]] = []
     for product in products:
         try:
             available_freqs = list(product.list_available_freqs())
@@ -238,9 +420,15 @@ def _check_market_data_coverage(account, ctx) -> None:
                 else:
                     missing_products.append(str(getattr(product, "name", product)))
                 continue
-            current_freq = getattr(product, "current_freq", None)
-            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
-            load_plan.append((product, freq))
+            freq = _select_required_product_frequency(product, available_freqs, required_frequency)
+            if freq is None:
+                missing_frequency_products.append(str(getattr(product, "name", product)))
+                continue
+            source = _select_required_product_source(product, freq, required_source)
+            if source is _MISSING_DATA_SOURCE:
+                missing_source_products.append(str(getattr(product, "name", product)))
+                continue
+            load_plan.append((product, freq, source))
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
                 excluded_out_of_range.append(product)
@@ -248,9 +436,87 @@ def _check_market_data_coverage(account, ctx) -> None:
                 missing_products.append(str(getattr(product, "name", product)))
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
+    if missing_frequency_products:
+        required = getattr(required_frequency, "name", str(required_frequency))
+        raise ValueError(
+            f"产品缺少所需 Bar 频率 {required}: "
+            f"{'、'.join(missing_frequency_products)}"
+        )
+    if missing_source_products:
+        required = _data_source_key_label(tuple(required_source or ()))
+        raise ValueError(
+            f"产品缺少所需数据源 {required}: "
+            f"{'、'.join(missing_source_products)}"
+        )
     account._market_data_load_plan = load_plan
     account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
     _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
+
+
+def _select_required_product_frequency(product: Any, available_freqs: list[Any], required_frequency: DataFreq | None) -> Any | None:
+    if required_frequency is None:
+        current_freq = getattr(product, "current_freq", None)
+        if current_freq is not None and current_freq in available_freqs:
+            return current_freq
+        return None
+    required_name = required_frequency.name
+    for freq in available_freqs:
+        if _coerce_data_freq(freq).name == required_name:
+            return freq
+    return None
+
+
+def _coerce_data_freq(freq: Any) -> DataFreq:
+    return DataFreq(freq)
+
+
+_MISSING_DATA_SOURCE = object()
+
+
+def _select_required_product_source(product: Any, freq: Any, required_source: tuple[str, ...] | None) -> Any | None:
+    available = DataProviderProductTS.available_for_product(product, freq)
+    if not required_source:
+        return available[0] if available else None
+    for candidate in _expand_data_source_selection(required_source):
+        resolved = _resolve_candidate_data_source(candidate, product, freq, available)
+        if resolved is not None:
+            return resolved
+    return _MISSING_DATA_SOURCE
+
+
+def _expand_data_source_selection(source_keys: tuple[str, ...]) -> tuple[Any, ...]:
+    result: list[Any] = []
+    for key in source_keys:
+        result.extend(_data_sources_for_key_or_bundle(key))
+    deduped: list[Any] = []
+    for source in result:
+        if source not in deduped:
+            deduped.append(source)
+    return tuple(deduped)
+
+
+def _data_sources_for_key_or_bundle(key: str) -> tuple[Any, ...]:
+    try:
+        return (DataProviderProductTS[key],)
+    except KeyError:
+        return _data_sources_for_bundle(key)
+
+
+def _resolve_candidate_data_source(candidate: Any, product: Any, freq: Any, available: list[Any]) -> Any | None:
+    resolve = getattr(candidate, "resolve_for_product", None)
+    if callable(resolve):
+        resolved = resolve(product, freq)
+        if resolved in available:
+            return resolved
+    return candidate if candidate in available else None
+
+
+def _data_sources_for_bundle(key: str) -> tuple[Any, ...]:
+    try:
+        from sources.Local import data_sources_for_bundle
+    except Exception:
+        return ()
+    return data_sources_for_bundle(key)
 
 
 def _products_from_selection_context(account, ctx) -> list[Any]:
@@ -283,7 +549,8 @@ def _load_raw_market_data(account, ctx) -> None:
         basis: {} for basis, _column in price_columns
     }
     missing_products: list[str] = []
-    for product, freq in getattr(account, "_market_data_load_plan", ()):
+    for plan_item in getattr(account, "_market_data_load_plan", ()):
+        product, freq, source = _unpack_market_data_load_plan_item(plan_item)
         try:
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
@@ -292,6 +559,7 @@ def _load_raw_market_data(account, ctx) -> None:
                 start_dt=start_dt,
                 end_dt=end_dt,
                 warmup_window=warmup_window,
+                source=source,
             )
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
@@ -333,6 +601,13 @@ def _load_raw_market_data(account, ctx) -> None:
         "excluded_out_of_range_products": tuple(getattr(account, "_market_data_excluded_out_of_range", ())),
     }
     _publish_raw_market_data(account, ctx, raw)
+
+
+def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | None]:
+    if isinstance(plan_item, tuple) and len(plan_item) == 3:
+        return plan_item
+    product, freq = plan_item
+    return product, freq, None
 
 
 def _live_market_data_load_warmup_window(account) -> pd.Timedelta | None:

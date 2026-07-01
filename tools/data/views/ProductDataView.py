@@ -210,7 +210,7 @@ class ProductDataView(UniqueNameObject):
             # 直接使用传入数据，不走缓存
             df = loaded_data
             if not df.empty:
-                ds = self.get_current_source()
+                ds = self.set_current_source(source) if source is not None else self.get_current_source()
                 if time_cols_mapping is not None:
                     ds.set_time_cols_mapping(time_cols_mapping)
                 if data_cols_mapping is not None:
@@ -227,7 +227,7 @@ class ProductDataView(UniqueNameObject):
 
         # 通过 DataHub 缓存（传自定义 reader 保留实例上下文）
         hub = DataHub.get_instance()
-        resource_key = self._resource_id()
+        resource_key = self._resource_id_for_source(source)
 
         return hub.load(
             namespace=_DATAMETA_NAMESPACE,
@@ -243,6 +243,11 @@ class ProductDataView(UniqueNameObject):
                 filter_object_attr=filter_object_attr,
             ),
         )
+
+    def _resource_id_for_source(self, source: Optional[Any]) -> str:
+        if source is None:
+            return self._resource_id()
+        return f"{source.key}:{self.object.name}:{self.freq.name}"
     
     def get_data(
         self,
@@ -384,6 +389,7 @@ class ProductDataView(UniqueNameObject):
         start_dt: Optional[Any] = None,
         end_dt: Optional[Any] = None,
         warmup_window: Optional[Any] = None,
+        source: Optional[Any] = None,
     ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
@@ -391,7 +397,13 @@ class ProductDataView(UniqueNameObject):
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
+        df = self.get_data(
+            copy=copy,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            warmup_window=warmup_window,
+            source=source,
+        )
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

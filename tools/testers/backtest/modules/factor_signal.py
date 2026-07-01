@@ -21,6 +21,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
     _expr_operands as _run_window_expr_operands,
@@ -302,7 +303,31 @@ def _factor_calculation_key(factor_key: Any, config) -> tuple:
         "calculation",
         _strategy_run_window_key(config),
         _strategy_warmup_key(config),
+        _strategy_market_data_key(config),
     )
+
+
+def _strategy_market_data_key(config) -> tuple:
+    return (
+        "market_data",
+        str(config.get(MarketDataModule.data_source_mode, "auto") or "auto"),
+        _market_data_source_key(config.get(MarketDataModule.data_source)),
+        str(config.get(MarketDataModule.freq_mode, "auto") or "auto"),
+        str(config.get(MarketDataModule.freq_fixed, "") or ""),
+        str(config.get(MarketDataModule.frequency, "") or ""),
+    )
+
+
+def _market_data_source_key(raw: Any) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",")]
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        values = [str(item).strip() for item in raw]
+    else:
+        values = [str(raw).strip()]
+    return tuple(dict.fromkeys(item for item in values if item and item != "auto"))
 
 
 def _strategy_warmup_key(config) -> tuple:
@@ -332,6 +357,8 @@ def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
 def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> pd.DataFrame:
     start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
     warmup_window = _warmup_window_for_strategies(factor, strategies, account)
+    frequency = _market_data_frequency_for_strategies(strategies, account)
+    _market_data_source_for_strategies(strategies, account)
     evaluate = getattr(factor, "evaluate")
     if start_dt is None or end_dt is None:
         return evaluate()
@@ -344,11 +371,37 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> p
     kwargs: dict[str, Any] = {}
     if accepts_kwargs or "warmup_window" in params:
         kwargs["warmup_window"] = warmup_window
+    if frequency is not None and (accepts_kwargs or "freq" in params):
+        kwargs["freq"] = frequency
     if accepts_kwargs or "start_dt" in params or "end_dt" in params:
         return evaluate(start_dt=start_dt, end_dt=end_dt, **kwargs)
     if "run_window" in params:
         return evaluate(run_window=(start_dt, end_dt), **kwargs)
     return evaluate()
+
+
+def _market_data_frequency_for_strategies(strategies: list, account) -> Any | None:
+    by_strategy = getattr(account, "market_data_required_frequencies", {}) or {}
+    frequencies = [by_strategy.get(strategy) for strategy in strategies if by_strategy.get(strategy) is not None]
+    unique = {getattr(freq, "name", str(freq)): freq for freq in frequencies}
+    if len(unique) > 1:
+        labels = ", ".join(sorted(unique))
+        raise ValueError(f"同一因子计算组包含多个 Bar 频率: {labels}")
+    return next(iter(unique.values()), None)
+
+
+def _market_data_source_for_strategies(strategies: list, account) -> tuple[str, ...] | None:
+    by_strategy = getattr(account, "market_data_required_sources", {}) or {}
+    sources = [
+        _market_data_source_key(source)
+        for strategy in strategies
+        if (source := by_strategy.get(strategy)) is not None
+    ]
+    unique = set(sources)
+    if len(unique) > 1:
+        labels = ", ".join("auto" if not source else "+".join(source) for source in sorted(unique))
+        raise ValueError(f"同一因子计算组包含多个数据源集合: {labels}")
+    return next(iter(unique), None)
 
 
 def _warmup_window_for_strategies(factor: Any, strategies: list, account) -> pd.Timedelta | None:

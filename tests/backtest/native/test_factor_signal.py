@@ -16,8 +16,9 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
     FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
-    normalize_signal_timestamp,
+    _factor_calculation_key, normalize_signal_timestamp,
 )
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -54,6 +55,40 @@ def test_normalize_signal_timestamp_day_level_midnight_without_lookup_raises():
     import pytest
     with pytest.raises(ValueError):
         normalize_signal_timestamp(pd.Timestamp("2024-01-01"), _FakeDayFreq())
+
+
+def test_factor_calculation_key_separates_market_data_source_and_frequency():
+    factor_key = ("factor", "A")
+    base = StrategyConfig(
+        strategy=Strategy(alias="base"),
+        field_values={
+            MarketDataModule.data_source_mode: "list",
+            MarketDataModule.data_source: ["SRC1"],
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        },
+    )
+    different_source = StrategyConfig(
+        strategy=Strategy(alias="src"),
+        field_values={
+            MarketDataModule.data_source_mode: "list",
+            MarketDataModule.data_source: ["SRC2"],
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        },
+    )
+    different_frequency = StrategyConfig(
+        strategy=Strategy(alias="freq"),
+        field_values={
+            MarketDataModule.data_source_mode: "list",
+            MarketDataModule.data_source: ["SRC1"],
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "DAY1",
+        },
+    )
+
+    assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_source)
+    assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_frequency)
 
 
 def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
@@ -111,10 +146,8 @@ def test_signal_precomputed_groups_by_factor_identity():
 
     assert shared_factor.calls == 1
     assert len(account.precomputed_factor_tables) == 1
-    assert (
-        (("object", id(shared_factor)), "calculation", ("unbounded",), ("warmup", 0)),
-        "factor",
-    ) in account.precomputed_factor_tables
+    expected_key = _factor_calculation_key(("object", id(shared_factor)), configs[s1])
+    assert (expected_key, "factor") in account.precomputed_factor_tables
 
 
 def test_signal_precomputed_splits_shared_factor_by_warmup_window():

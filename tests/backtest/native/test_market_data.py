@@ -14,9 +14,11 @@ from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
     _historical_fields_at_from_frames, _load_raw_market_data,
-    current_prices_at, historical_fields_for_product,
+    _resolve_market_data_request, current_prices_at, historical_fields_for_product,
 )
 from tools.data.types.time import DataTime
+from tools.data.types.time_freq import DataFreq
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
@@ -30,17 +32,14 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
 
 
 def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
-    class _Freq:
-        name = "min1"
-
     class _Product:
         def __init__(self, name: str):
             self.name = name
             self.desc = name
-            self.min1 = self
+            self.MIN1 = self
 
         def list_available_freqs(self):
-            return [_Freq()]
+            return [DataFreq.MIN1]
 
         def get_and_adjust_cols(self, *args, **kwargs):
             raise ValueError("outside")
@@ -49,7 +48,7 @@ def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
     p2 = _Product("ME.CZC")
     account = AccountState()
     account.market_data_request = {"products": [p1, p2]}
-    setattr(account, "_market_data_load_plan", [(p1, _Freq()), (p2, _Freq())])
+    setattr(account, "_market_data_load_plan", [(p1, DataFreq.MIN1), (p2, DataFreq.MIN1)])
     account.runtime_info_rows = []
     monkeypatch.setattr(
         "tools.testers.backtest.modules.market_data._product_outside_run_window",
@@ -102,16 +101,157 @@ def test_check_market_data_coverage_excludes_lifecycle_ended_product_without_fre
     assert account.runtime_info_rows[0]["details"]["product_names"] == ["FU.SHF@1"]
 
 
-def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
-    class _Freq:
-        name = "min1"
+def test_check_market_data_coverage_uses_resolved_frequency_not_first_available():
+    class _Product:
+        name = "P1"
+        current_freq = DataFreq.DAY1
 
+        def list_available_freqs(self):
+            return [DataFreq.DAY1, DataFreq.MIN1]
+
+    product = _Product()
+    account = AccountState()
+    account.market_data_request = {"products": [product]}
+    account.market_data_required_frequency = DataFreq.MIN1
+
+    _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, None)]
+
+
+def test_check_market_data_coverage_rejects_missing_resolved_frequency():
+    import pytest
+
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.DAY1]
+
+    account = AccountState()
+    account.market_data_request = {"products": [_Product()]}
+    account.market_data_required_frequency = DataFreq.MIN1
+
+    with pytest.raises(ValueError, match="缺少所需 Bar 频率 MIN1"):
+        _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+
+def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
+    import pytest
+
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1, DataFreq.DAY1]
+
+    product = _Product()
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, field_values={
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        }),
+        s2: StrategyConfig(strategy=s2, field_values={
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "DAY1",
+        }),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
+
+    with pytest.raises(ValueError, match="多个频率"):
+        _resolve_market_data_request(account, ctx)
+
+    account = AccountState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, field_values={
+            MarketDataModule.data_source_mode: "list",
+            MarketDataModule.data_source: ["A"],
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        }),
+        s2: StrategyConfig(strategy=s2, field_values={
+            MarketDataModule.data_source_mode: "list",
+            MarketDataModule.data_source: ["B"],
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        }),
+    })
+
+    with pytest.raises(ValueError, match="多个数据源集合"):
+        _resolve_market_data_request(account, ctx)
+
+
+def test_check_market_data_coverage_rejects_missing_required_data_source():
+    import pytest
+
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    account = AccountState()
+    account.market_data_request = {"products": [_Product()]}
+    account.market_data_required_frequency = DataFreq.MIN1
+    account.market_data_required_source = ("MissingSource",)
+
+    with pytest.raises(ValueError, match="缺少所需数据源 MissingSource"):
+        _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+
+def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(monkeypatch):
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    product = _Product()
+    source = object()
+    account = AccountState()
+    account.market_data_request = {"products": [product]}
+    account.market_data_required_frequency = DataFreq.MIN1
+    account.market_data_required_source = ("Local",)
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data.DataProviderProductTS.available_for_product",
+        lambda selected_product, freq: [source] if selected_product is product and DataFreq(freq) == DataFreq.MIN1 else [],
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._data_sources_for_key_or_bundle",
+        lambda key: (type("_Bundle", (), {
+            "resolve_for_product": lambda self, selected_product, freq: source
+            if selected_product is product and DataFreq(freq) == DataFreq.MIN1 else None,
+        })(),) if key == "Local" else (),
+    )
+
+    _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, source)]
+
+
+def test_data_source_bundle_does_not_pollute_available_frequencies():
+    from tools.data.providers.DataProviderProductTSBundle import DataProviderProductTSBundle
+
+    class _Product:
+        name = "P1"
+
+    product = _Product()
+    bundle = DataProviderProductTSBundle(key="TestBundleNoFreq", members=())
+
+    assert product not in bundle
+    assert bundle.freq == DataFreq("0")
+
+
+def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     class _Product:
         name = "P1"
         desc = "P1"
 
         def __init__(self) -> None:
-            self.min1 = self
+            self.MIN1 = self
 
         def get_and_adjust_cols(self, columns, **kwargs):
             idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
@@ -127,7 +267,7 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     product = _Product()
     account = AccountState()
     account.market_data_request = {"products": [product]}
-    setattr(account, "_market_data_load_plan", [(product, _Freq())])
+    setattr(account, "_market_data_load_plan", [(product, DataFreq.MIN1)])
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _load_raw_market_data(account, ctx)
@@ -142,15 +282,12 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
 
 
 def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
-    class _Freq:
-        name = "min1"
-
     class _Product:
         name = "P1"
         desc = "P1"
 
         def __init__(self) -> None:
-            self.min1 = self
+            self.MIN1 = self
             self.calls = []
 
         def get_and_adjust_cols(self, columns, **kwargs):
@@ -188,7 +325,7 @@ def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
         ),
     })
     account.market_data_request = {"products": [product]}
-    setattr(account, "_market_data_load_plan", [(product, _Freq())])
+    setattr(account, "_market_data_load_plan", [(product, DataFreq.MIN1)])
 
     _load_raw_market_data(account, FlowContext(timestamp=None, event_queue=EventQueue()))
 
