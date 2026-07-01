@@ -410,10 +410,10 @@ def _check_market_data_coverage(account, ctx) -> None:
     missing_frequency_products: list[str] = []
     missing_source_products: list[str] = []
     excluded_out_of_range: list[Any] = []
-    load_plan: list[tuple[Any, Any, Any | None]] = []
+    load_plan: list[tuple[Any, DataFreq, Any | None]] = []
     for product in products:
         try:
-            available_freqs = list(product.list_available_freqs())
+            available_freqs = _product_available_freqs(product)
             if not available_freqs:
                 if _product_outside_run_window(product, start_dt, end_dt):
                     excluded_out_of_range.append(product)
@@ -453,15 +453,21 @@ def _check_market_data_coverage(account, ctx) -> None:
     _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
 
 
-def _select_required_product_frequency(product: Any, available_freqs: list[Any], required_frequency: DataFreq | None) -> Any | None:
+def _select_required_product_frequency(
+    product: Any,
+    available_freqs: list[DataFreq],
+    required_frequency: DataFreq | None,
+) -> DataFreq | None:
     if required_frequency is None:
         current_freq = getattr(product, "current_freq", None)
-        if current_freq is not None and current_freq in available_freqs:
-            return current_freq
+        if current_freq is not None:
+            current_data_freq = _coerce_data_freq(current_freq)
+            if current_data_freq in available_freqs:
+                return current_data_freq
         return None
     required_name = required_frequency.name
     for freq in available_freqs:
-        if _coerce_data_freq(freq).name == required_name:
+        if freq.name == required_name:
             return freq
     return None
 
