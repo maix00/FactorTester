@@ -49,7 +49,7 @@ def _compute_risk_metrics(state, ctx) -> None:
         result = {f"{k}": v for k, v in in_sample_metrics.items()}
 
         if split_raw:
-            split = pd.Timestamp(split_raw)
+            split = _split_timestamp_for_index(split_raw, equity.index)
             in_equity = cast(pd.Series, equity.loc[equity.index <= split])
             in_returns = cast(pd.Series, returns.loc[returns.index <= split])
             out_equity = cast(pd.Series, equity.loc[equity.index > split])
@@ -59,6 +59,18 @@ def _compute_risk_metrics(state, ctx) -> None:
             result.update({f"out_of_sample_{k}": v for k, v in out_metrics.items()})
 
         state.results.set_final(strategy, **result)
+
+
+def _split_timestamp_for_index(value: Any, index: pd.Index) -> pd.Timestamp:
+    split = pd.Timestamp(value)
+    tz = getattr(index, "tz", None)
+    if tz is None:
+        if split.tzinfo is not None:
+            return split.tz_convert(None)
+        return split
+    if split.tzinfo is None:
+        return split.tz_localize(tz)
+    return split.tz_convert(tz)
 
 
 def compute_metrics(equity: pd.Series, returns: pd.Series) -> dict:

@@ -45,3 +45,20 @@ def test_split_separates_in_and_out_of_sample_metrics():
     assert final["max_drawdown"] == pytest.approx(0.0)  # in-sample segment is flat
     assert "out_of_sample_max_drawdown" in final
     assert final["out_of_sample_win_rate"] > final["win_rate"]  # out-of-sample trends up, in-sample flat
+
+
+def test_split_localizes_naive_timestamp_to_equity_curve_timezone():
+    s = Strategy(alias="S")
+    idx = pd.date_range("2024-01-01 09:00", periods=10, freq="D", tz="Asia/Shanghai")
+    config = StrategyConfig(strategy=s, field_values={
+        RunWindowModule.evaluation_split: "2024-01-05 09:00",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    equity_values = [100.0] * 5 + [100.0 + i * 5 for i in range(1, 6)]
+    _seed_equity(account, s, list(zip(idx, equity_values)))
+
+    _compute_risk_metrics(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+    final = account.results.get_final(s)
+
+    assert "out_of_sample_max_drawdown" in final
+    assert final["out_of_sample_win_rate"] > final["win_rate"]
