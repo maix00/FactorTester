@@ -36,6 +36,22 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 
 `BacktestRunState` 不应作为任意模块中间变量的动态属性容器。
 
+当前允许的 run-level store 清单保持收敛：
+
+- `RunWindowStore`：各策略正式运行窗口与全局 envelope。
+- `MarketDataStore`：行情请求、装载计划、原始/因果行情表、历史字段、运行提示。
+- `FactorSignalStore`：预计算信号表、预计算表绑定、实时因子状态。
+- `TargetStore`：各类 target-producing strategy 的已建立目标、选择签名和 target trace。
+- `OrderStore`：尚未执行或待取消的订单引用。
+- `EquityCurveStore`：事件回放中生成的净值/持仓缓冲。
+- `TermStructureStore`：期限结构展开结果、合约元数据、通知与映射 trace。
+
+新增 store 必须先回答“这个状态是否跨 phase/event batch 存活、是否有独立业务语义、
+是否不能归入现有 store”。不能因为某个模块有临时变量就机械新增顶层 store。
+例如 group membership 的成员集合缓存属于“target strategy 的选择签名”，在
+`TargetStore.strategy_selection_cache` 中表达，而不是让 `TargetStore` 暴露
+`membership` 这样的分组专有字段名。
+
 ### FlowContext
 
 `FlowContext` 是一次 flow 调度链的短生命周期字段总线：
