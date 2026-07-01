@@ -165,7 +165,7 @@ class TermStructureExpandModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.NOTICE,
+        event_kind=EventKind.ORDER_NOTICE,
         order=15,
         compute=lambda account, ctx: _handle_term_structure_notice(account, ctx),
     )
@@ -326,7 +326,7 @@ def _lifecycle_event_drafts(
             "notice_type": "force_close",
             "notice_reason": "auto_close_date",
         }
-        drafts.append(EventDraft(EventKind.NOTICE, ts, strategy, payload=payload))
+        drafts.append(EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload=payload))
     return drafts
 
 

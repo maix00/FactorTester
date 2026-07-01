@@ -66,7 +66,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue)
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -94,7 +94,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     order_events: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
     ts = pd.Timestamp("2026-01-29 15:00")
-    draft = EventDraft(EventKind.NOTICE, ts, strategy, payload={
+    draft = EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload={
         "notice_type": "force_close",
         "contract_object": contract,
     })
