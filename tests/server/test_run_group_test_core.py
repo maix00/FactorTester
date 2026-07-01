@@ -203,6 +203,65 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     assert strategy["execution_trace_checksum"]
 
 
+def test_event_order_flow_detail_filters_by_group_and_timestamp_ms():
+    execution = {
+        "group_owner": [
+            {
+                "group_id": "g1",
+                "group_name": "A1",
+                "group_index": 0,
+                "product_path_selection_id": "sel-1",
+                "is_ls": False,
+            },
+            {
+                "group_id": "g2",
+                "group_name": "A2",
+                "group_index": 1,
+                "product_path_selection_id": "sel-1",
+                "is_ls": False,
+            },
+        ],
+        "engine_result": {
+            "portfolios": {
+                "g1": {
+                    "execution_trace": [
+                        {
+                            "timestamp": "2026-01-01T09:01:00.000000001+08:00",
+                            "order_id": "o1",
+                            "step": "construct_order",
+                        },
+                        {
+                            "timestamp": "2026-01-01T09:02:00+08:00",
+                            "order_id": "o2",
+                            "step": "construct_order",
+                        },
+                    ],
+                },
+                "g2": {
+                    "execution_trace": [
+                        {
+                            "timestamp": "2026-01-01T09:01:00+08:00",
+                            "order_id": "other",
+                            "step": "construct_order",
+                        },
+                    ],
+                },
+            },
+        },
+    }
+
+    timestamp_ms = int(pd.Timestamp("2026-01-01T09:01:00+08:00").timestamp() * 1000)
+    detail = group_module._event_order_flow_detail(
+        execution,
+        group_id="g1",
+        timestamp_ms=timestamp_ms,
+    )
+
+    assert detail["success"] is True
+    assert detail["record_count"] == 1
+    assert detail["groups"][0]["records"][0]["order_id"] == "o1"
+
+
 def test_long_short_default_id_matches_settings_and_owner_rows():
     source_settings = {
         f"g{i}": {"strategy_id": f"g{i}", "factor": object(), "product_path_selection": object()}

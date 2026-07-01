@@ -2220,6 +2220,30 @@ def get_group_snapshot():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
+@sft_bp.route('/get_group_order_flow', methods=['POST'])
+def get_group_order_flow():
+    """Return order lifecycle trace for one group from the latest event run."""
+    data = request.get_json() or {}
+    page_uuid = str(data.get('page_uuid') or '')
+    try:
+        if runtime_state.get_page_owner(page_uuid) != current_user():
+            return jsonify({'success': False, 'error': 'page_uuid 不属于当前用户'}), 403
+        page_state = runtime_state.get_page_state(page_uuid)
+        event_execution = getattr(page_state, 'latest_group_execution', None)
+        if not event_execution:
+            return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
+        return jsonify(_event_order_flow_detail(
+            event_execution,
+            group_id=str(data.get('group_id') or '') or None,
+            product_path_selection_id=str(data.get('product_path_selection_id') or '') or None,
+            group_index=data.get('group_index'),
+            timestamp_ms=data.get('timestamp_ms'),
+            order_id=str(data.get('order_id') or '') or None,
+        ))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
 def _event_group_snapshot(
     execution: dict,
     product_path_selection_id: str,
@@ -2631,6 +2655,108 @@ def _event_group_snapshot(
             "total_prod_count": sum(column["count"] for column in positions_contracts["columns"]),
         },
     }
+
+
+def _event_order_flow_detail(
+    execution: dict,
+    *,
+    group_id: str | None = None,
+    product_path_selection_id: str | None = None,
+    group_index: Any = None,
+    timestamp_ms: Any = None,
+    order_id: str | None = None,
+) -> dict[str, Any]:
+    owners = _event_order_flow_owners(
+        execution,
+        group_id=group_id,
+        product_path_selection_id=product_path_selection_id,
+        group_index=group_index,
+    )
+    engine_result = execution.get("engine_result") or {}
+    portfolios = engine_result.get("portfolios") or {}
+    target_timestamp = _timestamp_from_epoch_ms(timestamp_ms)
+    groups = []
+    for owner in owners:
+        strategy_id = str(owner.get("group_id") or "")
+        portfolio = portfolios.get(strategy_id) or {}
+        records = list(portfolio.get("execution_trace") or [])
+        if order_id:
+            records = [row for row in records if str(row.get("order_id") or "") == order_id]
+        if target_timestamp is not None:
+            records = [
+                row for row in records
+                if _same_epoch_millisecond(row.get("timestamp"), target_timestamp)
+            ]
+        records = sorted(
+            records,
+            key=lambda row: (
+                str(row.get("timestamp") or ""),
+                str(row.get("order_id") or ""),
+                str(row.get("step") or ""),
+            ),
+        )
+        groups.append({
+            "group_id": strategy_id,
+            "group_name": str(owner.get("group_name") or strategy_id),
+            "records": records,
+        })
+    return {
+        "success": True,
+        "groups": groups,
+        "record_count": sum(len(group["records"]) for group in groups),
+    }
+
+
+def _event_order_flow_owners(
+    execution: dict,
+    *,
+    group_id: str | None,
+    product_path_selection_id: str | None,
+    group_index: Any,
+) -> list[dict[str, Any]]:
+    owners = [
+        owner for owner in execution.get("group_owner") or []
+        if not owner.get("is_ls")
+    ]
+    if group_id:
+        owners = [owner for owner in owners if str(owner.get("group_id") or "") == group_id]
+    elif product_path_selection_id:
+        owners = [
+            owner for owner in owners
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
+        ]
+        if group_index is not None:
+            index = int(group_index)
+            owners = [owner for owner in owners if int(owner.get("group_index") or 0) == index]
+    if len(owners) != 1:
+        raise ValueError(
+            f"事件回测中无法唯一定位订单流水：group_id={group_id or ''}, "
+            f"product_path_selection_id={product_path_selection_id or ''}, "
+            f"group_index={group_index}, matches={len(owners)}"
+        )
+    return owners
+
+
+def _timestamp_from_epoch_ms(value: Any) -> pd.Timestamp | None:
+    if value is None or value == "":
+        return None
+    timestamp = cast(pd.Timestamp, pd.Timestamp(int(value), unit="ms", tz="UTC"))
+    if pd.isna(timestamp):
+        return None
+    return timestamp
+
+
+def _same_epoch_millisecond(value: Any, target: pd.Timestamp) -> bool:
+    if value is None:
+        return False
+    current = cast(pd.Timestamp, pd.Timestamp(value))
+    if pd.isna(current):
+        return False
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    else:
+        current = current.tz_convert("UTC")
+    return int(current.timestamp() * 1000) == int(target.timestamp() * 1000)
 
 
 def _event_group_detail(
