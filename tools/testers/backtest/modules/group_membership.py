@@ -165,7 +165,10 @@ def _group_quantile_membership(account, ctx) -> None:
                 'rebalance_trigger="scheduled" requires a calendar-driven SIGNAL '
                 "schedule independent of factor timing, not implemented this round")
 
-        signal_value = ctx.get_for(FactorSignalModule.signal_value, strategy, {})
+        signal_value = _tradable_signal_values(
+            ctx.get_for(FactorSignalModule.signal_value, strategy, {}),
+            ctx.get(MarketDataModule.current_prices),
+        )
         n_groups = config.get(GroupMembershipModule.split_count, 1)
         group_index = config.get(GroupMembershipModule.group_index, 0)
         if not signal_value or n_groups <= 0:
@@ -187,6 +190,15 @@ def _group_quantile_membership(account, ctx) -> None:
         last_membership[strategy] = members
         established[strategy] = weights
         _record_target_trace(account, strategy, ctx.timestamp, weights)
+
+
+def _tradable_signal_values(signal_value: dict, current_prices: dict | None) -> dict:
+    if current_prices is None:
+        return signal_value
+    if not signal_value or not current_prices:
+        return {}
+    tradable = set(current_prices)
+    return {product: value for product, value in signal_value.items() if product in tradable}
 
 
 def _record_target_trace(account, strategy, timestamp, weights: dict) -> None:

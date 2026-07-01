@@ -16,6 +16,7 @@ from tools.testers.backtest.modules.group_membership import (
     GroupMembershipModule, _group_quantile_membership, _resolve_execution_schedule,
     _resolve_execution_timestamp, _schedule_order_execution, target_trace_for,
 )
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
@@ -40,6 +41,23 @@ def test_group_quantile_membership_selects_lowest_bucket():
     assert set(weights) == {products[0], products[1]}
     assert weights[products[0]] == pytest.approx(0.5)
     assert sum(weights.values()) == pytest.approx(1.0)
+
+
+def test_group_quantile_membership_ignores_products_without_current_price():
+    s = Strategy(alias="S")
+    tradable, removed = _product(), _product()
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+    })
+    account = AccountState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {tradable: 10.0})
+    ctx.set_for(FactorSignalModule.signal_value, s, {removed: 1.0, tradable: 2.0})
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, s)
+    assert weights == {tradable: pytest.approx(1.0)}
 
 
 def test_group_quantile_membership_selects_highest_bucket():
