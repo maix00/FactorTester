@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pandas as pd
 
+from tools.data.types.time_index import DataIndex
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
@@ -188,7 +189,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry),
         outputs=(force_close_notices,),
         phase=Phase.PRE_REPLAY,
-        order=39,
+        order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
         compute=lambda account, ctx: _register_force_close_notices(account, ctx),
         strategy_scoped=True,
@@ -250,7 +251,7 @@ class RolloverModule(ExecutableModule):
         inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry),
         outputs=(rollover_notices,),
         phase=Phase.PRE_REPLAY,
-        order=39,
+        order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
         compute=lambda account, ctx: _register_rollover_notices(account, ctx),
         strategy_scoped=True,
@@ -305,6 +306,7 @@ def _register_force_close_notices(account, ctx) -> None:
         strategy_drafts = _lifecycle_event_drafts(
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="force_close", notice_reason="auto_close_date",
+            account=account, reference_tz=_reference_timezone(account, strategy),
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
@@ -332,6 +334,7 @@ def _register_rollover_notices(account, ctx) -> None:
         strategy_drafts = _lifecycle_event_drafts(
             strategy, metadata, start_dt=start_dt, end_dt=end_dt,
             offset=offset, notice_type="rollover", notice_reason="date_before_expiry",
+            account=account, reference_tz=_reference_timezone(account, strategy),
         )
         drafts.extend(strategy_drafts)
         ctx.set_for(RolloverModule.rollover_notices, strategy, strategy_drafts)
@@ -436,6 +439,15 @@ def _record_term_structure_notice(account, payload: dict[str, Any]) -> None:
         notices = []
         account.term_structure_notices = notices
     notices.append(payload)
+
+
+def _reference_timezone(account, strategy: Any) -> str | None:
+    config = account.config_for(strategy)
+    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
+    if precision != "exact":
+        return None
+    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "").strip()
+    return timezone or None
 
 
 def _datatime_date_text(value: Any) -> str | None:
@@ -565,6 +577,8 @@ def _lifecycle_event_drafts(
     offset: pd.Timedelta,
     notice_type: str,
     notice_reason: str,
+    account: Any | None = None,
+    reference_tz: str | None = None,
 ) -> list[EventDraft]:
     drafts: list[EventDraft] = []
     start_key = _sort_key(start_dt)
@@ -572,7 +586,7 @@ def _lifecycle_event_drafts(
     for row in metadata:
         if row.get("is_identity"):
             continue
-        ts = _event_timestamp_from_row(row, offset=offset)
+        ts = _event_timestamp_from_row(row, offset=offset, account=account, reference_tz=reference_tz)
         if ts is None:
             continue
         ts_key = _timestamp_sort_key(ts)
@@ -589,20 +603,97 @@ def _lifecycle_event_drafts(
     return drafts
 
 
-def _event_timestamp_from_row(row: dict[str, Any], *, offset: pd.Timedelta) -> pd.Timestamp | None:
+def _event_timestamp_from_row(
+    row: dict[str, Any],
+    *,
+    offset: pd.Timedelta,
+    account: Any | None = None,
+    reference_tz: str | None = None,
+) -> pd.Timestamp | None:
+    base = _lifecycle_base_timestamp(row, reference_tz=reference_tz)
+    if base is None:
+        return None
+    return _apply_lifecycle_offset(base, offset, account=account)
+
+
+def _lifecycle_base_timestamp(row: dict[str, Any], *, reference_tz: str | None) -> pd.Timestamp | None:
     for key in ("auto_close_ts", "first_notice_ts", "notice_ts", "delivery_ts", "maturity_ts", "end_ts"):
         value = row.get(key)
         if value not in (None, ""):
             try:
-                return cast(pd.Timestamp, pd.Timestamp(int(value), unit="ms") - offset)
+                ts = pd.Timestamp(int(value), unit="ms")
+                if pd.isna(ts):
+                    continue
+                return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
             except Exception:
                 pass
     for key in ("auto_close_date", "first_notice_date", "notice_date", "delivery_date", "maturity_date", "end"):
         value = row.get(key)
         if value in (None, ""):
             continue
-        return cast(pd.Timestamp, pd.Timestamp(value) - offset)
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            continue
+        return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
     return None
+
+
+def _with_reference_timezone(ts: pd.Timestamp, reference_tz: str | None) -> pd.Timestamp:
+    if reference_tz:
+        if ts.tzinfo is None:
+            return cast(pd.Timestamp, ts.tz_localize(reference_tz))
+        return cast(pd.Timestamp, ts.tz_convert(reference_tz))
+    return ts
+
+
+def _apply_lifecycle_offset(
+    base: pd.Timestamp,
+    offset: pd.Timedelta,
+    *,
+    account: Any | None,
+) -> pd.Timestamp:
+    if offset <= pd.Timedelta(0):
+        return base
+    table = getattr(account, "current_prices_table", None) if account is not None else None
+    if isinstance(table, pd.DataFrame) and not table.empty:
+        shifted = _shift_on_event_axis(base, offset, table)
+        if shifted is not None:
+            return shifted
+    return cast(pd.Timestamp, base - offset)
+
+
+def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.DataFrame) -> pd.Timestamp | None:
+    data_index = DataIndex(table.index)
+    events = pd.DatetimeIndex(data_index.event_timestamps())
+    if events.empty:
+        return None
+    aligned_base = data_index.tz_align(base)
+    day_count = max(0, int(offset.days))
+    subday = cast(pd.Timedelta, offset - pd.Timedelta(days=day_count))
+    anchor = aligned_base
+    if day_count:
+        trading_days = pd.DatetimeIndex(data_index.trading_day_index())
+        pos = int(events.searchsorted(cast(Any, aligned_base), side="right")) - 1
+        if pos < 0:
+            return None
+        base_day = trading_days[pos]
+        unique_days = pd.DatetimeIndex(pd.unique(trading_days)).sort_values()
+        day_pos = int(unique_days.searchsorted(base_day, side="right")) - 1
+        target_day_pos = day_pos - day_count
+        if target_day_pos < 0:
+            return None
+        target_day = unique_days[target_day_pos]
+        day_positions = [i for i, day in enumerate(trading_days) if day == target_day and events[i] <= aligned_base]
+        if not day_positions:
+            day_positions = [i for i, day in enumerate(trading_days) if day == target_day]
+        if not day_positions:
+            return None
+        anchor = events[day_positions[-1]]
+    desired = cast(pd.Timestamp, anchor - subday)
+    final_pos = int(events.searchsorted(cast(Any, desired), side="right")) - 1
+    if final_pos < 0:
+        return None
+    return cast(pd.Timestamp, events[final_pos])
 
 
 def _parse_time_offset(value: Any, *, field_name: str) -> pd.Timedelta:

@@ -101,7 +101,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     queue.run_until_drained()
 
     assert captured
-    assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00")
+    assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
 
@@ -134,7 +134,7 @@ def test_term_structure_force_close_offset_accepts_intraday_window():
     queue.run_until_drained()
 
     assert captured
-    assert captured[0].timestamp == pd.Timestamp("2026-01-31 14:55")
+    assert captured[0].timestamp == pd.Timestamp("2026-01-31 14:55", tz="Asia/Shanghai")
 
 
 def test_force_close_event_emits_reverse_order_for_existing_position():
@@ -270,6 +270,49 @@ def test_rollover_module_registers_rollover_notice_independently():
     queue.run_until_drained()
 
     assert captured
-    assert captured[0].timestamp == pd.Timestamp("2026-01-26 15:00")
+    assert captured[0].timestamp == pd.Timestamp("2026-01-26 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "rollover"
     assert captured[0].payload["notice_reason"] == "date_before_expiry"
+
+
+def test_rollover_day_window_uses_trading_axis_not_calendar_days():
+    strategy = Strategy(alias="A")
+    product = _TermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    axis = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-21 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-22 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-23 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-27 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-28 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+    ])
+    account.current_prices_table = pd.DataFrame({"P2601.DCE": range(len(axis))}, index=axis)
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_rollover_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured
+    assert captured[0].timestamp == pd.Timestamp("2026-01-23 15:00", tz="Asia/Shanghai")
