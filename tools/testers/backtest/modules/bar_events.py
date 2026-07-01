@@ -36,14 +36,14 @@ class BarEventModule(ExecutableModule):
         order=49,
         after=(MarketDataModule.causal_valuation,),
         description="登记行情事件",
-        compute=lambda account, ctx: _schedule_bar_events(account, ctx),
+        compute=lambda state, ctx: _schedule_bar_events(state, ctx),
         strategy_scoped=True,
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (schedule_bar_events,)
 
 
-def _schedule_bar_events(account, ctx) -> None:
+def _schedule_bar_events(state, ctx) -> None:
     """Register one BAR event per live factor calculation group and timestamp.
 
     EventDraft still carries a representative strategy because the scheduler
@@ -51,21 +51,21 @@ def _schedule_bar_events(account, ctx) -> None:
     strategies only share BAR replay state when factor identity, formal run
     window, and warm-up window all match.
     """
-    table = current_prices_table_for(account)
+    table = current_prices_table_for(state)
     if table is None:
         return
     representative_by_calculation: dict[Any, Any] = {}
-    for strategy in account.strategy_configs:
-        config = account.config_for(strategy)
+    for strategy in state.strategy_configs:
+        config = state.config_for(strategy)
         if not config.uses_flow("signal_live"):
             continue
         factor = config.get(FactorModule.factor)
         representative_by_calculation.setdefault(_live_factor_state_key(factor, config), strategy)
     if not representative_by_calculation:
         return
-    drafts = []
+    drafts: list[EventDraft] = []
     for strategy in representative_by_calculation.values():
-        strategy_table = _clip_table_to_strategy_warmup_window(table, account.config_for(strategy))
+        strategy_table = _clip_table_to_strategy_warmup_window(table, state.config_for(strategy))
         drafts.extend(
             EventDraft(
                 EventKind.BAR,

@@ -138,7 +138,7 @@ class FactorSignalModule(ExecutableModule):
         "signal_live", inputs=(), outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记实时因子信号",
-        compute=lambda account, ctx: _schedule_signal_live_timestamps(account, ctx),
+        compute=lambda state, ctx: _schedule_signal_live_timestamps(state, ctx),
         strategy_scoped=True,
     )
     signal_precomputed: ClassVar[Flow] = Flow(
@@ -147,7 +147,7 @@ class FactorSignalModule(ExecutableModule):
         outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记预计算信号",
-        compute=lambda account, ctx: _schedule_signal_precomputed_timestamps(account, ctx),
+        compute=lambda state, ctx: _schedule_signal_precomputed_timestamps(state, ctx),
         strategy_scoped=True,
     )
 
@@ -155,19 +155,19 @@ class FactorSignalModule(ExecutableModule):
         "signal_live", inputs=(FactorModule.factor,), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取实时因子信号",
-        compute=lambda account, ctx: _evaluate_signal_live(account, ctx),
+        compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
     )
     signal_live_on_bar: ClassVar[Flow] = Flow(
         "signal_live", inputs=(FactorModule.factor,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=5,
         description="更新实时因子状态",
-        compute=lambda account, ctx: _observe_signal_live_bar(account, ctx),
+        compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
         "signal_precomputed", inputs=(), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
         description="读取预计算信号",
-        compute=lambda account, ctx: _evaluate_signal_precomputed(account, ctx),
+        compute=lambda state, ctx: _evaluate_signal_precomputed(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
@@ -201,10 +201,10 @@ def normalize_signal_timestamp(raw_ts: pd.Timestamp, freq: "DataFreq", last_minu
     return raw_ts.floor("min")
 
 
-def _group_strategies_by_signal_align_params(account):
+def _group_strategies_by_signal_align_params(state):
     groups: dict[tuple, list] = defaultdict(list)
-    for strategy in account.strategy_configs:
-        config = account.config_for(strategy)
+    for strategy in state.strategy_configs:
+        config = state.config_for(strategy)
         key = (
             _effective_signal_frequency(config),
             config.get(FactorSignalModule.basepoint, "last"),
@@ -224,7 +224,7 @@ def _effective_signal_frequency(config) -> Any:
     return config.get(FactorSignalModule.signal_freq, "1d")
 
 
-def _schedule_signal_live_timestamps(account, ctx) -> None:
+def _schedule_signal_live_timestamps(state, ctx) -> None:
     """Schedule live strategy SIGNAL timestamps.
 
     No factor value is computed here. BarEventModule schedules BAR events to
@@ -233,13 +233,13 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
-    data = current_prices_table_for(account)
+    data = current_prices_table_for(state)
     if data is None:
         return
     drafts: list[EventDraft] = []
-    groups = _group_strategies_by_signal_align_params(account)
+    groups = _group_strategies_by_signal_align_params(state)
     for (freq, basepoint, daily_basepoint, end_session_skip, end_session_gap, _window_key), strategies in groups.items():
-        strategies = [s for s in strategies if account.config_for(s).uses_flow("signal_live")]
+        strategies = [s for s in strategies if state.config_for(s).uses_flow("signal_live")]
         if not strategies:
             continue
         aligned = signal_align(
@@ -247,12 +247,12 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
             end_session_skip=end_session_skip,
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
-        scheduled = _clip_signal_table_to_strategy_window(aligned, account.config_for(strategies[0]))
+        scheduled = _clip_signal_table_to_strategy_window(aligned, state.config_for(strategies[0]))
         _append_signal_drafts(drafts, signal_event_times(scheduled), strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
 
-def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
+def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
     """Evaluate precomputable factors by calculation key.
 
     A factor object can be shared, but run-window and warm-up semantics are
@@ -262,27 +262,27 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     """
     by_calculation: dict[tuple, list] = defaultdict(list)
     factor_by_calculation: dict[tuple, Any] = {}
-    for strategy in account.strategy_configs:
-        if not account.config_for(strategy).uses_flow("signal_precomputed"):
+    for strategy in state.strategy_configs:
+        if not state.config_for(strategy).uses_flow("signal_precomputed"):
             continue
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         factor = config.get(FactorModule.factor)
         factor_key = factor_runtime_key(factor)
         calculation_key = _factor_calculation_key(factor_key, config)
         by_calculation[calculation_key].append(strategy)
         factor_by_calculation[calculation_key] = factor
 
-    store = account.factor_signal_store
+    store = state.factor_signal_store
     tables = store.precomputed_tables
 
     drafts: list[EventDraft] = []
     for calculation_key, strategies in by_calculation.items():
         factor = factor_by_calculation[calculation_key]
-        table = _evaluate_factor_for_strategies(factor, strategies, account, ctx)
+        table = _evaluate_factor_for_strategies(factor, strategies, state, ctx)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
-            calculation_key, strategies, account,
+            calculation_key, strategies, state,
         ).items():
-            first_config = account.config_for(scheduled_strategies[0])
+            first_config = state.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
                 store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config))
             for strategy in scheduled_strategies:
@@ -308,11 +308,11 @@ def _append_signal_drafts(drafts: list[EventDraft], event_times: list[IndexEvent
 def _group_strategies_by_precomputed_schedule(
     calculation_key: tuple,
     strategies: list,
-    account,
+    state,
 ) -> dict[tuple, list]:
     groups: dict[tuple, list] = defaultdict(list)
     for strategy in strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         groups[_precomputed_schedule_key(calculation_key, config)].append(strategy)
     return groups
 
@@ -374,9 +374,9 @@ def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
     )
 
 
-def _evaluate_factor_for_strategies(factor: Any, strategies: list, account, ctx) -> pd.DataFrame:
-    start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
-    warmup_window = _warmup_window_for_strategies(factor, strategies, account)
+def _evaluate_factor_for_strategies(factor: Any, strategies: list, state, ctx) -> pd.DataFrame:
+    start_dt, end_dt = _run_window_envelope_for_strategies(strategies, state)
+    warmup_window = _warmup_window_for_strategies(factor, strategies, state)
     frequency = _market_data_frequency_for_strategies(strategies, ctx)
     _market_data_source_for_strategies(strategies, ctx)
     evaluate = getattr(factor, "evaluate")
@@ -426,8 +426,8 @@ def _market_data_source_for_strategies(strategies: list, ctx) -> tuple[str, ...]
     return next(iter(unique), None)
 
 
-def _warmup_window_for_strategies(factor: Any, strategies: list, account) -> pd.Timedelta | None:
-    return warmup_window_for_strategies(strategies, account)
+def _warmup_window_for_strategies(factor: Any, strategies: list, state) -> pd.Timedelta | None:
+    return warmup_window_for_strategies(strategies, state)
 
 
 def _zero_warmup() -> pd.Timedelta:
@@ -458,8 +458,8 @@ def _max_timedelta(values: Any) -> pd.Timedelta | None:
     return _run_window_max_timedelta(values)
 
 
-def _run_window_envelope_for_strategies(strategies: list, account) -> tuple[DataTime | None, DataTime | None]:
-    return run_window_envelope_for_strategies(strategies, account)
+def _run_window_envelope_for_strategies(strategies: list, state) -> tuple[DataTime | None, DataTime | None]:
+    return run_window_envelope_for_strategies(strategies, state)
 
 
 def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
@@ -534,7 +534,7 @@ def _strategy_run_window_key(config) -> tuple:
     return run_window_key_for_config(config)
 
 
-def _evaluate_signal_live(account, ctx) -> None:
+def _evaluate_signal_live(state, ctx) -> None:
     """Publish the current live signal from per-factor BAR state.
 
     FactorExpr/Factor values are compiled into per-run incremental executors.
@@ -545,13 +545,13 @@ def _evaluate_signal_live(account, ctx) -> None:
     by_factor: dict[Any, list] = defaultdict(list)
     factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         factor = config.get(FactorModule.factor)
         state_key = _live_factor_state_key(factor, config)
         by_factor[state_key].append(strategy)
         factor_by_key[state_key] = factor
 
-    store = account.factor_signal_store
+    store = state.factor_signal_store
     price_tables = store.live_price_tables
     executors = store.live_executors
     for factor_key, strategies in by_factor.items():
@@ -565,13 +565,13 @@ def _evaluate_signal_live(account, ctx) -> None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, values)
 
 
-def _evaluate_signal_precomputed(account, ctx) -> None:
+def _evaluate_signal_precomputed(state, ctx) -> None:
     """Looks up a value from the table cached once in PRE_REPLAY
     (`BacktestRunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
     re-evaluation here."""
-    store = account.factor_signal_store
+    store = state.factor_signal_store
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         factor = config.get(FactorModule.factor)
         calculation_key = _factor_calculation_key(factor_runtime_key(factor), config)
         fallback_key = _precomputed_schedule_key(calculation_key, config)
@@ -589,19 +589,19 @@ def _evaluate_signal_precomputed(account, ctx) -> None:
                      {product: float(cast(Any, row[product])) for product in table.columns})
 
 
-def _observe_signal_live_bar(account, ctx) -> None:
+def _observe_signal_live_bar(state, ctx) -> None:
     """Feed one bar of current market data into each active live factor."""
     prices = ctx.get(FieldRef("current_prices", owner="MarketDataModule"), {})
     if not prices:
         return
-    store = account.factor_signal_store
+    store = state.factor_signal_store
     tables = store.live_price_tables
     executors = store.live_executors
 
     by_factor: dict[Any, list] = defaultdict(list)
     factor_by_key: dict[Any, Any] = {}
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         factor = config.get(FactorModule.factor)
         state_key = _live_factor_state_key(factor, config)
         by_factor[state_key].append(strategy)
@@ -622,7 +622,7 @@ def _observe_signal_live_bar(account, ctx) -> None:
                 factor,
                 by_factor[factor_key][0],
                 prices.keys(),
-                getattr(account, "source_freq", None),
+                getattr(state, "source_freq", None),
             )
             if executor is not None:
                 executors[factor_key] = executor
