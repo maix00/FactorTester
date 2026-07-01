@@ -1,4 +1,4 @@
-"""Unit-level coverage for the flattened groups -> ls_configs -> AccountState
+"""Unit-level coverage for the flattened groups -> ls_configs -> BacktestRunState
 pipeline that replaced _run_group_test_core (now inlined directly into
 /run_group_test_stream). These exercise the new glue helpers
 (_resolve_group_strategy_settings/_build_group_owner_rows/

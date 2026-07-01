@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from tools.factors.Factors import Factor
     from tools.factors.FactorRunResult import FactorRunResult
     from tools.products.Product import Product
-    from tools.testers.backtest.engines.native.ledger import AccountState
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
 
 
 class FactorTesterState:
@@ -72,8 +72,8 @@ class FactorTesterState:
 
         # Set once a "backtest" task has run against this state -- lets a
         # later request (snapshot/detail routes) read back the same
-        # AccountState instead of re-running anything.
-        self.account: Optional["AccountState"] = None
+        # BacktestRunState instead of re-running anything.
+        self.account: Optional["BacktestRunState"] = None
 
         self.logger.info(
             "factor_tester_initialized",

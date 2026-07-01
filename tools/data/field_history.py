@@ -1533,7 +1533,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import importlib.util
     from pathlib import Path
 
-    from tools.testers.backtest.engines.native.ledger import AccountState
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
     from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -1595,7 +1595,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy=str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
     )
 
-    account = AccountState()
+    account = BacktestRunState()
     setattr(account, "raw_market_data", {
         "raw_prices": raw_prices,
         "historical_field_provider": provider,

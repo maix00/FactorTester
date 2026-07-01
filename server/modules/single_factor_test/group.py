@@ -2832,7 +2832,7 @@ def cancel_group_test():
 @sft_bp.route('/run_group_test_stream', methods=['POST'])
 def run_group_test_stream():
     """SSE 流式分组测试：先处理 groups，再处理 ls_configs，然后把建好的
-    AccountState 交给页面级 FactorTester，固定任务 "backtest"，由它调用
+    BacktestRunState 交给页面级 FactorTester，固定任务 "backtest"，由它调用
     backtester（run_backtest_task）——三步串行，不绕 _FactorGroupTestGroup/
     FactorGroupTester/execute_group_plan 这条已删除的旧链路。
     """
@@ -2843,7 +2843,7 @@ def run_group_test_stream():
     from server.services import backtest_runs
     from server.services.factor_registry import page_factors
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
-    from tools.testers.backtest.engines.native.ledger import AccountState
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
     from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
     data = request.get_json(silent=True) or {}
@@ -2949,8 +2949,8 @@ def run_group_test_stream():
             if not resolved_settings_by_alias:
                 raise ValueError('没有有效的分组配置')
 
-            # 步骤 3：建 AccountState，交给页面级 FactorTester 调度 "backtest" 任务
-            account = AccountState()
+            # 步骤 3：建 BacktestRunState，交给页面级 FactorTester 调度 "backtest" 任务
+            account = BacktestRunState()
             apply_strategy_configs(account, resolved_settings_by_alias)
 
             all_products: list = []
