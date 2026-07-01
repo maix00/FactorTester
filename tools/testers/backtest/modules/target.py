@@ -21,8 +21,8 @@ class TargetStrategyModule(ExecutableModule):
 
 @dataclass
 class TargetStore:
-    strategy_target_cache: dict[Any, Any] = field(default_factory=dict)
-    strategy_membership_cache: dict[Any, Any] = field(default_factory=dict)
+    strategy_established_target_weights: dict[Any, Any] = field(default_factory=dict)
+    strategy_selection_cache: dict[Any, Any] = field(default_factory=dict)
     target_trace: dict[Any, dict[str, Any]] = field(default_factory=dict)
 
     def record_target_trace(self, strategy: Any, timestamp: Any, weights: dict[Any, Any]) -> None:

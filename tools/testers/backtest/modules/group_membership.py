@@ -151,8 +151,8 @@ def _group_quantile_membership(account, ctx) -> None:
     in or out of the group. "scheduled" is not implemented (see field
     docstring)."""
     store = account.target_store
-    established = store.strategy_target_cache
-    last_membership = store.strategy_membership_cache
+    established = store.strategy_established_target_weights
+    last_membership = store.strategy_selection_cache
 
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
