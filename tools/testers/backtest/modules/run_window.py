@@ -240,7 +240,7 @@ def store_run_windows(
     run_window_store_for(state).set_windows(strategy_windows, envelope)
 
 
-def run_window_envelope_for_account(state) -> tuple[DataTime | None, DataTime | None]:
+def run_window_envelope_for_state(state) -> tuple[DataTime | None, DataTime | None]:
     return run_window_store_for(state).envelope or (None, None)
 
 

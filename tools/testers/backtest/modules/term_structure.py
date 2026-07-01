@@ -15,7 +15,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
-from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_account
+from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
 
@@ -217,7 +217,7 @@ class RolloverModule(ExecutableModule):
 
 def _expand_term_structure(state, ctx) -> None:
     """Record contract candidates that intersect the formal run window."""
-    start_dt, end_dt = run_window_envelope_for_account(state)
+    start_dt, end_dt = run_window_envelope_for_state(state)
     start_date = _datatime_date_text(start_dt)
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
@@ -239,7 +239,7 @@ def _expand_term_structure(state, ctx) -> None:
 
 
 def _register_force_close_notices(state, ctx) -> None:
-    start_dt, end_dt = run_window_envelope_for_account(state)
+    start_dt, end_dt = run_window_envelope_for_state(state)
     drafts: list[EventDraft] = []
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
@@ -261,7 +261,7 @@ def _register_force_close_notices(state, ctx) -> None:
 
 
 def _register_rollover_notices(state, ctx) -> None:
-    start_dt, end_dt = run_window_envelope_for_account(state)
+    start_dt, end_dt = run_window_envelope_for_state(state)
     drafts: list[EventDraft] = []
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
