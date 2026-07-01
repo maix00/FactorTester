@@ -843,7 +843,29 @@ def historical_fields_for_product(
     values = historical_fields.get(product)
     if isinstance(values, dict):
         return values
+    product_keys = _historical_field_product_keys(product)
+    for instrument, values in historical_fields.items():
+        if not isinstance(values, dict):
+            continue
+        if product_keys & _historical_field_product_keys(instrument):
+            return values
     return {}
+
+
+def _historical_field_product_keys(product: Any) -> set[str]:
+    keys: set[str] = set()
+    if product is None:
+        return keys
+    for value in (
+        str(product),
+        getattr(product, "name", None),
+        getattr(product, "alias", None),
+        getattr(product, "symbol", None),
+        getattr(product, "code", None),
+    ):
+        if value is not None and str(value).strip():
+            keys.add(str(value).strip())
+    return keys
 
 
 def contract_multiplier_from_fields(

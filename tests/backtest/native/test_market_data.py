@@ -13,7 +13,7 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
-    _load_raw_market_data, current_prices_at,
+    _load_raw_market_data, current_prices_at, historical_fields_for_product,
 )
 from tools.data.types.time import DataTime
 
@@ -208,3 +208,19 @@ def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     assert current_prices_at(account, cast(pd.Timestamp, idx[2]))["P1"] == 10.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[3]))["P1"] == 40.0
     assert current_prices_at(account, cast(pd.Timestamp, idx[0]))["P1"] == 10.0
+
+
+def test_historical_fields_for_product_matches_product_and_string_keys():
+    class _Product:
+        name = "RU.SHF"
+        alias = "RU.SHF"
+        code = "RU"
+
+        def __str__(self) -> str:
+            return self.name
+
+    product = _Product()
+    fields: dict[str, object] = {"VolumeMultiple": 10.0}
+
+    assert historical_fields_for_product({"RU.SHF": fields}, product) is fields
+    assert historical_fields_for_product({product: fields}, "RU.SHF") is fields
