@@ -377,9 +377,13 @@ class _ProgressTracker:
         self._post_total = 0
         self._post_completed = 0
 
-    def emit_manifest(self, groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]]) -> None:
+    def emit_manifest(
+        self,
+        groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
+        account: "AccountState",
+    ) -> None:
         if self._activity_sink is not None:
-            self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups))
+            self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups, account))
 
     def set_phase_totals(self, *, pre_total: int, post_total: int) -> None:
         self._pre_total = max(0, pre_total)
@@ -544,7 +548,7 @@ def run(
     pre_replay_flows = groups.get((Phase.PRE_REPLAY, None), ())
     post_replay_flows = groups.get((Phase.POST_REPLAY, None), ())
     tracker = _ProgressTracker(progress, activity_sink, event_queue)
-    tracker.emit_manifest(groups)
+    tracker.emit_manifest(groups, account)
     applicable_pre_flows = [
         f for f in pre_replay_flows
         if _pre_post_applicable_strategies(account, f)
@@ -606,21 +610,55 @@ def _activity_message(timestamp: str, label: str) -> str:
 
 def activity_manifest_from_groups(
     groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
+    account: "AccountState",
 ) -> list[dict[str, Any]]:
     phase_specs: list[dict[str, Any]] = []
-    pre_all = list(groups.get((Phase.PRE_REPLAY, None), ()))
+    pre_all = [
+        flow for flow in groups.get((Phase.PRE_REPLAY, None), ())
+        if _flow_applicable_to_any_strategy(account, flow)
+    ]
     phase_specs.append(_phase_spec("pre_replay", pre_all))
 
     event_flows: list[ResolvedFlow] = []
     for (phase, _kind), flows in groups.items():
         if phase is Phase.PER_EVENT:
-            event_flows.extend(flows)
+            event_flows.extend(
+                flow for flow in flows
+                if _flow_applicable_to_any_strategy(account, flow)
+            )
     event_flows = sorted(event_flows, key=lambda f: (f.order, f.event_kind or EventKind.SIGNAL, f.name))
+    event_flows = _dedupe_manifest_flows(event_flows)
     phase_specs.append(_phase_spec("event_replay", event_flows))
 
-    post = groups.get((Phase.POST_REPLAY, None), ())
+    post = [
+        flow for flow in groups.get((Phase.POST_REPLAY, None), ())
+        if _flow_applicable_to_any_strategy(account, flow)
+    ]
     phase_specs.append(_phase_spec("post_replay", post))
     return phase_specs
+
+
+def _flow_applicable_to_any_strategy(account: "AccountState", flow: ResolvedFlow) -> bool:
+    return any(
+        flow.name in account.config_for(strategy).active_flow_names
+        for strategy in account.strategy_configs
+    )
+
+
+def _dedupe_manifest_flows(flows: list[ResolvedFlow]) -> list[ResolvedFlow]:
+    result: list[ResolvedFlow] = []
+    seen: set[str] = set()
+    for flow in flows:
+        # A logical flow can be registered under multiple event kinds (for
+        # example live factor handling observes BAR events and publishes SIGNAL
+        # values). The progress diagram should show the logical user-facing
+        # operation once.
+        key = flow.name
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(flow)
+    return result
 
 
 def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) -> dict[str, Any]:
