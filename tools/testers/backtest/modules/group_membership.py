@@ -350,10 +350,7 @@ def _schedule_order_execution(account, ctx) -> None:
     AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
     is already due at this signal boundary; keep it intact rather than treating
     it as still-cancellable future work."""
-    pending = getattr(account, "pending_orders", None)
-    if pending is None:
-        pending = {}
-        account.pending_orders = pending
+    pending = account.order_store.pending_orders
 
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:

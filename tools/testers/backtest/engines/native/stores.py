@@ -62,3 +62,8 @@ class TargetStore:
         if timestamp is None:
             return
         self.long_short_diagnostics.setdefault(strategy, {})[timestamp.isoformat()] = dict(diagnostics)
+
+
+@dataclass
+class OrderStore:
+    pending_orders: dict[Any, Any] = field(default_factory=dict)
