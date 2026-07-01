@@ -52,6 +52,20 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 `TargetStore.strategy_selection_cache` 中表达，而不是让 `TargetStore` 暴露
 `membership` 这样的分组专有字段名。
 
+### 命名迁移规则
+
+`BacktestRunState` 是类型名与领域语义名；新增跨模块 API、文档和测试说明应优先
+使用 `state` / `run_state`。但是旧 scheduler/flow callable 的统一形参
+`compute(account, ctx)` 可以暂时保留，不做全仓机械替换：
+
+- `account` 在这里是历史调用约定，表示传给 flow 的 run 容器，不再作为领域名称扩散。
+- 普通 flow 内部如果只是读取 `config_for`、`ledgers` 或明确 store，改名收益很低，
+  不应制造大规模无行为 diff。
+- 新增代码不得继续把行情、因子、期限结构、target trace 等非账户语义写成裸
+  `account.xxx` 动态属性；应写入对应 store/service 或 `FlowContext` output。
+- 当某个文件正在做语义迁移时，可以顺手把局部变量改成 `state` / `run_state`，
+  但必须保持小步提交，并以行为测试覆盖。
+
 ### FlowContext
 
 `FlowContext` 是一次 flow 调度链的短生命周期字段总线：
