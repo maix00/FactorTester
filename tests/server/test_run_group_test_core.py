@@ -144,6 +144,65 @@ def test_build_group_owner_rows_shape():
     ]
 
 
+def test_serialize_event_execution_accepts_orderflow_trace_list():
+    execution = {
+        "group_owner": [
+            {
+                "group_id": "g1",
+                "group_name": "A1",
+                "group_index": 0,
+                "product_path_selection_id": "sel-1",
+                "factor_alias": "FactorA",
+                "is_ls": False,
+            },
+        ],
+        "engine_result": {
+            "engine": "native",
+            "portfolios": {
+                "g1": {
+                    "equity_curve": {
+                        "2026-01-01T09:01:00+08:00": 100.0,
+                        "2026-01-01T09:02:00+08:00": 101.0,
+                    },
+                    "position_curve": {},
+                    "execution_trace": [
+                        {
+                            "timestamp": "2026-01-01T09:02:00+08:00",
+                            "order_id": "o2",
+                            "step": "finalize_order",
+                            "details": {"status": "filled"},
+                        },
+                        {
+                            "timestamp": "2026-01-01T09:01:00+08:00",
+                            "order_id": "o1",
+                            "step": "construct_order",
+                            "details": {"quantity": 1.0},
+                        },
+                    ],
+                },
+            },
+            "target_trace": {"g1": {}},
+            "strategy_diagnostics": {},
+        },
+    }
+
+    serialized = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={
+            "g1": {
+                "allocation_policy": "equal_notional",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
+            },
+        },
+        evaluation_split=None,
+    )
+
+    strategy = serialized["engine_result"]["comparison"]["strategies"][0]
+    assert strategy["execution_trace_points"] == 2
+    assert strategy["execution_trace_checksum"]
+
+
 def test_long_short_default_id_matches_settings_and_owner_rows():
     source_settings = {
         f"g{i}": {"strategy_id": f"g{i}", "factor": object(), "product_path_selection": object()}

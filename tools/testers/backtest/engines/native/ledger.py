@@ -96,6 +96,7 @@ class BacktestRunState:
         "factor_signal_store",
         "target_store",
         "order_store",
+        "order_flow_store",
         "equity_curve_store",
         "term_structure_store",
         "market_data_store",
@@ -125,6 +126,7 @@ class BacktestRunState:
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
         from tools.testers.backtest.modules.market_data import MarketDataStore
         from tools.testers.backtest.modules.order_lifecycle import OrderStore
+        from tools.testers.backtest.modules.order_flow import OrderFlowStore
         from tools.testers.backtest.modules.run_window import RunWindowStore
         from tools.testers.backtest.modules.target import TargetStore
         from tools.testers.backtest.modules.term_structure import TermStructureStore
@@ -132,6 +134,7 @@ class BacktestRunState:
         self.factor_signal_store = FactorSignalStore()
         self.target_store = TargetStore()
         self.order_store = OrderStore()
+        self.order_flow_store = OrderFlowStore()
         self.equity_curve_store = EquityCurveStore()
         self.term_structure_store = TermStructureStore()
         self.market_data_store = MarketDataStore()

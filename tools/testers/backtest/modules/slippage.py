@@ -12,6 +12,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import FlowOverride
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 class SlippageModule(ExecutableModule):
@@ -45,6 +46,7 @@ class SlippageModule(ExecutableModule):
 
 def _apply_slippage(account, ctx, base_compute) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         # mode/bps are strategy-level -- resolved once per strategy, not
         # once per order, even when a strategy has several simultaneous
@@ -58,5 +60,17 @@ def _apply_slippage(account, ctx, base_compute) -> None:
             # (lower) price -- sign of the adjustment follows the trade
             # direction, not the position direction
             sign = 1.0 if order.quantity > 0 else (-1.0 if order.quantity < 0 else 0.0)
-            order.set("effective_price", price * (1.0 + sign * slippage_bps / 10_000.0))
+            adjusted = price * (1.0 + sign * slippage_bps / 10_000.0)
+            order.set("effective_price", adjusted)
+            store.record(
+                order,
+                step="slippage",
+                label="计算滑点价格",
+                timestamp=ctx.timestamp,
+                details={
+                    "mode": mode,
+                    "slippage_bps": float(slippage_bps or 0.0),
+                    "base_price": float(price),
+                },
+            )
     base_compute(account, ctx)

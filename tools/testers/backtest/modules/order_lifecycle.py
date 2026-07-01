@@ -19,6 +19,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 @dataclass
@@ -42,13 +43,23 @@ class OrderLifecycleModule(ExecutableModule):
 
 
 def _finalize_order(account, ctx) -> None:
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         for order in ctx.payloads_for(strategy):
             if order.status == OrderStatus.CANCELLED:
+                store.record(order, step="finalize_order", label="订单已取消", timestamp=ctx.timestamp)
                 continue
             reject_reason = order.get("reject_reason")
             if reject_reason:
                 order.status = OrderStatus.REJECTED
                 order.reject_reason = reject_reason
+                store.record(
+                    order,
+                    step="finalize_order",
+                    label="订单拒绝",
+                    timestamp=ctx.timestamp,
+                    details={"reject_reason": str(reject_reason)},
+                )
             else:
                 order.status = OrderStatus.FILLED
+                store.record(order, step="finalize_order", label="订单成交", timestamp=ctx.timestamp)

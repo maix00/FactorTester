@@ -14,6 +14,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import FlowOverride
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 class LiquidityModule(ExecutableModule):
@@ -48,6 +49,7 @@ class LiquidityModule(ExecutableModule):
 def _cap_to_liquidity(account, ctx, base_compute) -> None:
     base_compute(account, ctx)
     volume = ctx.get(MarketDataModule.volume, {})
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
         if config.get(LiquidityModule.liquidity_mode, "infinite") != "volume_participation":
@@ -59,9 +61,28 @@ def _cap_to_liquidity(account, ctx, base_compute) -> None:
             for product, quantity in deltas.items()
         }
         ctx.set_for(OrderBookModule.deltas, strategy, capped)
+        if capped != deltas:
+            store.record_strategy_step(
+                strategy,
+                timestamp=ctx.timestamp,
+                step="liquidity_cap",
+                label="按流动性上限截断下单量",
+                details={
+                    "participation_rate": float(rate),
+                    "before": _stringify_deltas(deltas),
+                    "after": _stringify_deltas(capped),
+                },
+            )
 
 
 def _cap_one(quantity: float, capacity: float) -> float:
     if abs(quantity) <= capacity:
         return quantity
     return capacity if quantity > 0 else -capacity
+
+
+def _stringify_deltas(deltas: dict) -> dict[str, float]:
+    return {
+        str(getattr(product, "name", product)): float(quantity)
+        for product, quantity in deltas.items()
+    }

@@ -22,6 +22,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import FlowOverride
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 class PositionSizingModule(ExecutableModule):
@@ -50,6 +51,7 @@ class PositionSizingModule(ExecutableModule):
 def _round_to_lot_sizes(account, ctx, base_compute) -> None:
     base_compute(account, ctx)  # compute the base deltas first
     lot_sizes = ctx.get(MarketDataModule.lot_sizes, {})
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         policy = account.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
         deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
@@ -58,6 +60,14 @@ def _round_to_lot_sizes(account, ctx, base_compute) -> None:
             for product, quantity in deltas.items()
         }
         ctx.set_for(OrderBookModule.deltas, strategy, rounded)
+        if rounded != deltas:
+            store.record_strategy_step(
+                strategy,
+                timestamp=ctx.timestamp,
+                step="quantity_rounding",
+                label="按最小买入手数取整",
+                details={"policy": policy, "before": _stringify_deltas(deltas), "after": _stringify_deltas(rounded)},
+            )
 
 
 def _round_one(quantity: float, lot_size: float | None, policy: str) -> float:
@@ -67,3 +77,10 @@ def _round_one(quantity: float, lot_size: float | None, policy: str) -> float:
     rounded_lots = math.floor(lots) if policy == "floor_to_lot" else round(lots)
     sign = 1.0 if quantity > 0 else (-1.0 if quantity < 0 else 0.0)
     return sign * rounded_lots * lot_size
+
+
+def _stringify_deltas(deltas: dict) -> dict[str, float]:
+    return {
+        str(getattr(product, "name", product)): float(quantity)
+        for product, quantity in deltas.items()
+    }

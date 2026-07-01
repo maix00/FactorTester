@@ -37,6 +37,7 @@ class Order:
                                # Ledger it's accounted against
     status: OrderStatus = OrderStatus.DRAFT
     reject_reason: str | None = None
+    order_id: str = ""
     fields: dict[str, Any] = field(default_factory=dict)  # open annotation container,
                                                               # unrelated to any module's FieldRefs
 

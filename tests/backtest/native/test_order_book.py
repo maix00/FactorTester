@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import ProductPosition
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, ProductPosition
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
@@ -91,8 +91,11 @@ def test_construct_orders_skips_zero_deltas():
                        active_strategies=frozenset({s}))
     ctx.set_for(OrderBookModule.deltas, s, {p1: 0.0, p2: 12.5})
 
-    _construct_orders(None, ctx)
+    account = BacktestRunState()
+    _construct_orders(account, ctx)
     orders = ctx.get_for(OrderBookModule.orders, s)
     assert len(orders) == 1
     assert orders[0].instrument is p2
     assert orders[0].quantity == orders[0].intent_quantity == 12.5
+    assert orders[0].order_id
+    assert account.order_flow_store.records_for_order(orders[0].order_id)[0]["step"] == "construct_order"

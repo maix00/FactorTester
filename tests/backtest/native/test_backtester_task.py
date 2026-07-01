@@ -83,7 +83,9 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
     assert portfolio["equity_curve"]
     assert all(isinstance(k, str) for k in portfolio["equity_curve"])
     assert portfolio["position_curve"]
-    assert portfolio["execution_trace"] == {}
+    assert portfolio["execution_trace"]
+    steps = {row["step"] for row in portfolio["execution_trace"]}
+    assert {"construct_order", "ledger_update", "finalize_order"} <= steps
     assert portfolio["initial_value"] == pytest.approx(1_000_000.0, rel=0.05)
     assert portfolio["market_rule_approximation_count"] == 0
 

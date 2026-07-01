@@ -15,6 +15,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import ProductPosition, apply_quantity_delta
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.trading_rule import (
@@ -156,6 +157,7 @@ def _basic_cash_update(account, ctx) -> None:
     from tools.testers.backtest.engines.native.order import OrderStatus
 
     prices = ctx.get(MarketDataModule.current_prices)
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         ledger = account.ledgers[strategy]
         positions = ledger.get(LedgerModule.positions, {})
@@ -172,11 +174,24 @@ def _basic_cash_update(account, ctx) -> None:
             apply_quantity_delta(entry, order.quantity)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
+            cash_before = cash.to_major()
             trade_cost = DataMoney.from_major(
                 contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
             cash = cash - trade_cost
+            store.record(
+                order,
+                step="ledger_update",
+                label="更新账本",
+                timestamp=ctx.timestamp,
+                details={
+                    "price": float(price),
+                    "fee_cost": float(fee_cost or 0.0),
+                    "cash_before": float(cash_before),
+                    "cash_after": float(cash.to_major()),
+                },
+            )
         ledger.set(LedgerModule.positions, positions)
         ledger.set(LedgerModule.cash, cash)

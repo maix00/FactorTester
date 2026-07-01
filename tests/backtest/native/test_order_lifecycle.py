@@ -6,6 +6,7 @@ import pandas as pd
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -28,8 +29,10 @@ def test_order_without_reject_reason_is_filled():
     s = Strategy(alias="S")
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
-    _finalize_order(None, _ctx_for(order, s))
+    account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
+    _finalize_order(account, _ctx_for(order, s))
     assert order.status == OrderStatus.FILLED
+    assert account.order_flow_store.records_for_strategy(s)[0]["step"] == "finalize_order"
 
 
 def test_order_with_reject_reason_is_rejected():
@@ -37,7 +40,8 @@ def test_order_with_reject_reason_is_rejected():
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
     order.set("reject_reason", "insufficient margin")
-    _finalize_order(None, _ctx_for(order, s))
+    account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
+    _finalize_order(account, _ctx_for(order, s))
     assert order.status == OrderStatus.REJECTED
     assert order.reject_reason == "insufficient margin"
 
@@ -46,7 +50,8 @@ def test_cancelled_order_is_left_untouched():
     s = Strategy(alias="S")
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.CANCELLED)
-    _finalize_order(None, _ctx_for(order, s))
+    account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
+    _finalize_order(account, _ctx_for(order, s))
     assert order.status == OrderStatus.CANCELLED
 
 
@@ -64,6 +69,7 @@ def test_multiple_orders_in_one_batch_finalize_independently():
         timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
         active_strategies=frozenset({s1, s2}), drafts_by_strategy={s1: [draft1], s2: [draft2]},
     )
-    _finalize_order(None, ctx)
+    account = BacktestRunState(strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)})
+    _finalize_order(account, ctx)
     assert order1.status == OrderStatus.FILLED
     assert order2.status == OrderStatus.REJECTED

@@ -16,9 +16,11 @@ from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule, _apply_fee
 from tools.testers.backtest.modules.custom_product import CustomProductModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.ledger_module import _basic_cash_update
 from tools.testers.backtest.modules.liquidity import LiquidityModule, _cap_to_liquidity
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_lifecycle import _finalize_order
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.data.types.data_money import DataMoney
 
@@ -268,3 +270,48 @@ def test_cash_constraint_isolates_strategies():
     _constrain_to_ledger_cash(account, ctx)
     assert buy1.quantity == pytest.approx(1.0)   # 10 cash / 100 cost
     assert buy2.quantity == pytest.approx(10.0)  # untouched, plenty of cash
+
+
+def test_order_flow_records_fee_slippage_ledger_and_final_status():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-01 09:01"),
+        quantity=10.0,
+        intent_quantity=10.0,
+        strategy=s,
+        order_id="order-1",
+    )
+    config = StrategyConfig(strategy=s, field_values={
+        SlippageModule.slippage_mode: "fixed_bps",
+        SlippageModule.slippage_bps: 100.0,
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "fixed",
+        FeeModule.fixed_fee_rate: 0.01,
+    })
+    account = _account_with_ledger(s, config)
+    account.ledgers[s].set(LedgerModule.cash, DataMoney.from_major(10_000.0, currency="CNY", use_minor_units=False))
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01 09:01"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
+
+    _apply_slippage(account, ctx, lambda a, c: None)
+    _apply_fee(account, ctx, lambda a, c: None)
+    _basic_cash_update(account, ctx)
+    _finalize_order(account, ctx)
+
+    records = account.order_flow_store.records_for_order("order-1")
+    assert [row["step"] for row in records] == [
+        "slippage",
+        "fee",
+        "ledger_update",
+        "finalize_order",
+    ]
+    assert records[-1]["status"] == "filled"

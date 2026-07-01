@@ -67,7 +67,7 @@ def run_backtest_task(
         portfolios[group_id] = {
             "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
             "position_curve": position_curve_for(run_state, strategy),
-            "execution_trace": {},  # TODO(issue-114): per-order delta/fill detail, not recorded yet
+            "execution_trace": run_state.order_flow_store.records_for_strategy(strategy),
             "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,
             "market_rule_approximation_count": 0,
         }

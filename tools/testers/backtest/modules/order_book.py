@@ -14,6 +14,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.target import TargetStrategyModule
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
@@ -79,11 +80,21 @@ def _basic_size_order(account, ctx) -> None:
 
 
 def _construct_orders(account, ctx) -> None:
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
-        orders = [
-            Order(instrument=product, timestamp=ctx.timestamp, quantity=quantity,
-                  intent_quantity=quantity, strategy=strategy)
-            for product, quantity in deltas.items() if quantity != 0
-        ]
+        orders = []
+        for product, quantity in deltas.items():
+            if quantity == 0:
+                continue
+            order = Order(
+                instrument=product,
+                timestamp=ctx.timestamp,
+                quantity=quantity,
+                intent_quantity=quantity,
+                strategy=strategy,
+                order_id=store.next_order_id(strategy, ctx.timestamp),
+            )
+            store.record(order, step="construct_order", label="构造订单")
+            orders.append(order)
         ctx.set_for(OrderBookModule.orders, strategy, orders)

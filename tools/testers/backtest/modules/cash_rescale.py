@@ -14,6 +14,7 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 class LedgerCashConstraintModule(ExecutableModule):
@@ -39,6 +40,7 @@ class LedgerCashConstraintModule(ExecutableModule):
 
 def _constrain_to_ledger_cash(account, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
         if not orders:
@@ -61,4 +63,16 @@ def _constrain_to_ledger_cash(account, ctx) -> None:
         scale = available / buy_cost
         for o in orders:
             if o.quantity > 0:
+                before = float(o.quantity)
                 o.quantity *= scale
+                store.record(
+                    o,
+                    step="cash_rescale",
+                    label="按现金约束调整订单",
+                    timestamp=ctx.timestamp,
+                    details={
+                        "before_quantity": before,
+                        "scale": float(scale),
+                        "available_cash": float(available),
+                    },
+                )

@@ -20,6 +20,7 @@ from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
     historical_fields_for_product,
 )
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
 _FEE_FIELDS = (
@@ -106,6 +107,7 @@ def _resolve_fixed_fee_cost(
 
 def _apply_fee(account, ctx, base_compute) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
+    store = order_flow_store_for(account)
     for strategy in ctx.active_strategies:
         # mode/custom_rate are strategy-level (not order-level) -- resolved
         # once per strategy, not once per order, even when a strategy has
@@ -131,6 +133,13 @@ def _apply_fee(account, ctx, base_compute) -> None:
             )
             if fixed_fee is not None:
                 order.set("fee_cost", fixed_fee)
+                store.record(
+                    order,
+                    step="fee",
+                    label="计算手续费",
+                    timestamp=ctx.timestamp,
+                    details={"mode": mode, "fixed_rate": float(fixed_rate or 0.0)},
+                )
                 continue
             fields = historical_fields_for_product(historical_fields, order.instrument)
             order.set(
@@ -142,6 +151,13 @@ def _apply_fee(account, ctx, base_compute) -> None:
                     current_quantity=float(getattr(positions.get(order.instrument), "quantity", 0.0)),
                     fee_mode=mode,
                 ),
+            )
+            store.record(
+                order,
+                step="fee",
+                label="计算手续费",
+                timestamp=ctx.timestamp,
+                details={"mode": mode},
             )
     base_compute(account, ctx)
 

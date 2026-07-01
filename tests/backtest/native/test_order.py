@@ -25,7 +25,7 @@ def test_order_has_no_extra_named_fields():
     names = {f.name for f in dataclasses.fields(Order)}
     assert names == {
         "instrument", "timestamp", "quantity", "intent_quantity",
-        "strategy", "status", "reject_reason", "fields",
+        "strategy", "status", "reject_reason", "order_id", "fields",
     }
 
 

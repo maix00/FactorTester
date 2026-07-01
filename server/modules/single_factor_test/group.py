@@ -1610,17 +1610,37 @@ def _serialize_event_execution(
     comparison_strategies = []
     split = pd.Timestamp(evaluation_split) if evaluation_split else None
 
-    def _trace_checksum(trace: dict[str, Any]) -> str | None:
+    def _trace_checksum(trace: Any) -> str | None:
         if not trace:
             return None
         digest = hashlib.sha256()
-        for timestamp in sorted(trace):
-            digest.update(str(timestamp).encode("utf-8"))
+        if isinstance(trace, dict):
+            rows = [
+                {"timestamp": timestamp, "payload": payload or {}}
+                for timestamp, payload in trace.items()
+            ]
+        elif isinstance(trace, list):
+            rows = [
+                row if isinstance(row, dict) else {"payload": row}
+                for row in trace
+            ]
+        else:
+            rows = [{"payload": trace}]
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                str(row.get("timestamp") or ""),
+                str(row.get("order_id") or ""),
+                str(row.get("step") or ""),
+                json.dumps(row, ensure_ascii=False, sort_keys=True, default=str),
+            ),
+        )
+        for row in rows:
+            digest.update(str(row.get("timestamp") or "").encode("utf-8"))
             digest.update(b"\0")
-            payload = trace.get(timestamp) or {}
             digest.update(
                 json.dumps(
-                    payload,
+                    row,
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
