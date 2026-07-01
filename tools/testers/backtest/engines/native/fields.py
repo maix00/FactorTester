@@ -17,7 +17,10 @@ external code write `LedgerModule.cash` instead of a magic string.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from tools.testers.registry import Module
 
 T = TypeVar("T")
 
@@ -99,6 +102,9 @@ class ExecutableModule:
     `Module` subclass.
     """
 
+    key: ClassVar[str] = ""
+    label: ClassVar[str] = ""
+    order: ClassVar[int] = 100
     fields: ClassVar[dict[str, FieldDefinition]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:

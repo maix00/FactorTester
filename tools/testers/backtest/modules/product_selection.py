@@ -130,47 +130,128 @@ class TermStructureExpandModule(ExecutableModule):
     label: ClassVar[str] = "合约展开"
     expanded_contracts: ClassVar[FieldRef[dict[Any, frozenset]]] = FieldRef("expanded_contracts")
     contract_metadata: ClassVar[FieldRef[dict[Any, tuple[dict[str, Any], ...]]]] = FieldRef("contract_metadata")
-    lifecycle_events: ClassVar[FieldRef[Any]] = FieldRef("lifecycle_events")
-    forced_close_orders: ClassVar[FieldRef[Any]] = FieldRef("forced_close_orders")
-    force_close_before_expiry: ClassVar[FieldRef[str]] = FieldRef("force_close_before_expiry")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "expanded_contracts": FieldDefinition(public=False),
         "contract_metadata": FieldDefinition(public=False),
-        "lifecycle_events": FieldDefinition(public=False),
-        "forced_close_orders": FieldDefinition(public=False),
-        "force_close_before_expiry": FieldDefinition(
-            public=True,
-            label="到期强平提前量",
-            default="0d",
-            control_template="text",
-            tab="term_structure",
-            chip_template="到期强平提前量: {value}",
-            tab_label="期限结构",
-            tab_order=38,
-            help_text="按合约生命周期基准日向前偏移登记强平事件；若有 First Notice/交割风险日期则优先使用，否则使用合约窗口结束日。",
-        ),
     }
 
     expand_term_structure: ClassVar[Flow] = Flow(
         "expand_term_structure",
-        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope, force_close_before_expiry),
+        inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope),
         outputs=(expanded_contracts, contract_metadata),
         phase=Phase.PRE_REPLAY, order=39,
         after=(ProductSelectionModule.resolve_product_selection,),
         compute=lambda account, ctx: _expand_term_structure(account, ctx),
     )
-    handle_term_structure_notice: ClassVar[Flow] = Flow(
-        "handle_term_structure_notice",
+
+    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure,)
+
+
+class DeliveryForceCloseModule(ExecutableModule):
+    key: ClassVar[str] = "delivery_force_close"
+    label: ClassVar[str] = "交割强平"
+
+    force_close_before_expiry: ClassVar[FieldRef[str]] = FieldRef("force_close_before_expiry")
+    force_close_notices: ClassVar[FieldRef[Any]] = FieldRef("force_close_notices")
+    forced_close_orders: ClassVar[FieldRef[Any]] = FieldRef("forced_close_orders")
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "force_close_before_expiry": FieldDefinition(
+            public=True,
+            label="到期强平提前量",
+            default="0d",
+            control_template="text",
+            tab="delivery_force_close",
+            chip_template="到期强平提前量: {value}",
+            tab_label="交割强平",
+            tab_order=39,
+            help_text="按合约生命周期基准日向前偏移登记强平通知；若有 First Notice/交割风险日期则优先使用，否则使用合约窗口结束日。",
+        ),
+        "force_close_notices": FieldDefinition(public=False),
+        "forced_close_orders": FieldDefinition(public=False),
+    }
+
+    register_force_close_notices: ClassVar[Flow] = Flow(
+        "register_force_close_notices",
+        inputs=(TermStructureExpandModule.contract_metadata, force_close_before_expiry),
+        outputs=(force_close_notices,),
+        phase=Phase.PRE_REPLAY,
+        order=39,
+        after=(TermStructureExpandModule.expand_term_structure,),
+        compute=lambda account, ctx: _register_force_close_notices(account, ctx),
+    )
+    handle_delivery_force_close_notice: ClassVar[Flow] = Flow(
+        "handle_delivery_force_close_notice",
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER_NOTICE,
         order=15,
-        compute=lambda account, ctx: _handle_term_structure_notice(account, ctx),
+        compute=lambda account, ctx: _handle_delivery_force_close_notice(account, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure, handle_term_structure_notice)
+    flows: ClassVar[tuple[Flow, ...]] = (register_force_close_notices, handle_delivery_force_close_notice)
+
+
+class RolloverModule(ExecutableModule):
+    key: ClassVar[str] = "rollover"
+    label: ClassVar[str] = "换月"
+
+    rollover_policy: ClassVar[FieldRef[str]] = FieldRef("rollover_policy")
+    rollover_before_expiry: ClassVar[FieldRef[str]] = FieldRef("rollover_before_expiry")
+    rollover_notices: ClassVar[FieldRef[Any]] = FieldRef("rollover_notices")
+
+    fields: ClassVar[dict[str, FieldDefinition]] = {
+        "rollover_policy": FieldDefinition(
+            public=True,
+            label="换月规则",
+            default="none",
+            control_template="select",
+            tab="rollover",
+            chip_template="换月规则: {value}",
+            tab_label="换月",
+            tab_order=40,
+            options=(
+                ("none", "不自动换月"),
+                ("date_before_expiry", "到期前固定时间换月"),
+            ),
+            help_text="登记换月通知；换月通知不同于交割强平通知，策略可选择是否跟随换月。",
+        ),
+        "rollover_before_expiry": FieldDefinition(
+            public=True,
+            label="换月提前量",
+            default="5d",
+            control_template="text",
+            tab="rollover",
+            chip_template="换月提前量: {value}",
+            tab_label="换月",
+            tab_order=40,
+            visible_when={"rollover_policy": ("date_before_expiry",)},
+        ),
+        "rollover_notices": FieldDefinition(public=False),
+    }
+
+    register_rollover_notices: ClassVar[Flow] = Flow(
+        "register_rollover_notices",
+        inputs=(TermStructureExpandModule.contract_metadata, rollover_policy, rollover_before_expiry),
+        outputs=(rollover_notices,),
+        phase=Phase.PRE_REPLAY,
+        order=39,
+        after=(TermStructureExpandModule.expand_term_structure,),
+        compute=lambda account, ctx: _register_rollover_notices(account, ctx),
+    )
+    handle_rollover_notice: ClassVar[Flow] = Flow(
+        "handle_rollover_notice",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER_NOTICE,
+        order=10,
+        compute=lambda account, ctx: _handle_rollover_notice(account, ctx),
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (register_rollover_notices, handle_rollover_notice)
 
 
 def _expand_term_structure(account, ctx) -> None:
@@ -180,7 +261,6 @@ def _expand_term_structure(account, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
-    drafts: list[EventDraft] = []
     for strategy in account.strategy_configs:
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
@@ -193,17 +273,64 @@ def _expand_term_structure(account, ctx) -> None:
         all_metadata[strategy] = tuple(metadata)
         ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, all_contracts[strategy])
         ctx.set_for(TermStructureExpandModule.contract_metadata, strategy, all_metadata[strategy])
-        offset = _parse_force_close_offset(
-            account.config_for(strategy).get(TermStructureExpandModule.force_close_before_expiry, "0d")
-        )
-        drafts.extend(_lifecycle_event_drafts(strategy, metadata, start_dt=start_dt, end_dt=end_dt, offset=offset))
     account.term_structure_expanded_contracts = all_contracts
     account.term_structure_contract_metadata = all_metadata
+
+
+def _register_force_close_notices(account, ctx) -> None:
+    start_dt, end_dt = getattr(account, "run_window_envelope", (None, None))
+    drafts: list[EventDraft] = []
+    for strategy in account.strategy_configs:
+        metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
+        offset = _parse_time_offset(
+            account.config_for(strategy).get(DeliveryForceCloseModule.force_close_before_expiry, "0d"),
+            field_name="force_close_before_expiry",
+        )
+        strategy_drafts = _lifecycle_event_drafts(
+            strategy, metadata, start_dt=start_dt, end_dt=end_dt,
+            offset=offset, notice_type="force_close", notice_reason="auto_close_date",
+        )
+        drafts.extend(strategy_drafts)
+        ctx.set_for(DeliveryForceCloseModule.force_close_notices, strategy, strategy_drafts)
     if drafts:
-        ctx.set(TermStructureExpandModule.lifecycle_events, drafts)
+        ctx.set(DeliveryForceCloseModule.force_close_notices, drafts)
 
 
-def _handle_term_structure_notice(account, ctx) -> None:
+def _register_rollover_notices(account, ctx) -> None:
+    start_dt, end_dt = getattr(account, "run_window_envelope", (None, None))
+    drafts: list[EventDraft] = []
+    for strategy in account.strategy_configs:
+        config = account.config_for(strategy)
+        policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
+        if policy == "none":
+            ctx.set_for(RolloverModule.rollover_notices, strategy, [])
+            continue
+        if policy != "date_before_expiry":
+            raise ValueError(f"unsupported rollover_policy={policy!r}")
+        metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
+        offset = _parse_time_offset(
+            config.get(RolloverModule.rollover_before_expiry, "5d"),
+            field_name="rollover_before_expiry",
+        )
+        strategy_drafts = _lifecycle_event_drafts(
+            strategy, metadata, start_dt=start_dt, end_dt=end_dt,
+            offset=offset, notice_type="rollover", notice_reason="date_before_expiry",
+        )
+        drafts.extend(strategy_drafts)
+        ctx.set_for(RolloverModule.rollover_notices, strategy, strategy_drafts)
+    if drafts:
+        ctx.set(RolloverModule.rollover_notices, drafts)
+
+
+def _handle_rollover_notice(account, ctx) -> None:
+    for strategy in ctx.active_strategies:
+        for raw_payload in ctx.payloads_for(strategy):
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
+            if str(payload.get("notice_type") or "") == "rollover":
+                _record_term_structure_notice(account, payload)
+
+
+def _handle_delivery_force_close_notice(account, ctx) -> None:
     for strategy in ctx.active_strategies:
         ledger = account.ledgers.get(strategy)
         if ledger is None:
@@ -238,8 +365,8 @@ def _handle_term_structure_notice(account, ctx) -> None:
             orders.append(order)
             _record_term_structure_notice(account, payload)
         if orders:
-            ctx.set_for(TermStructureExpandModule.forced_close_orders, strategy, orders)
-            ctx.set(TermStructureExpandModule.lifecycle_events, [
+            ctx.set_for(DeliveryForceCloseModule.forced_close_orders, strategy, orders)
+            ctx.set(DeliveryForceCloseModule.forced_close_orders, [
                 EventDraft(EventKind.ORDER, ctx.timestamp, strategy, order)
                 for order in orders
             ])
@@ -306,6 +433,8 @@ def _lifecycle_event_drafts(
     start_dt: Any,
     end_dt: Any,
     offset: pd.Timedelta,
+    notice_type: str,
+    notice_reason: str,
 ) -> list[EventDraft]:
     drafts: list[EventDraft] = []
     start_key = _sort_key(start_dt)
@@ -323,8 +452,8 @@ def _lifecycle_event_drafts(
             continue
         payload = {
             **row,
-            "notice_type": "force_close",
-            "notice_reason": "auto_close_date",
+            "notice_type": notice_type,
+            "notice_reason": notice_reason,
         }
         drafts.append(EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload=payload))
     return drafts
@@ -346,7 +475,7 @@ def _event_timestamp_from_row(row: dict[str, Any], *, offset: pd.Timedelta) -> p
     return None
 
 
-def _parse_force_close_offset(value: Any) -> pd.Timedelta:
+def _parse_time_offset(value: Any, *, field_name: str) -> pd.Timedelta:
     if value not in (None, ""):
         try:
             text = str(value).strip()
@@ -357,7 +486,7 @@ def _parse_force_close_offset(value: Any) -> pd.Timedelta:
                 raise ValueError
             return delta
         except Exception:
-            raise ValueError(f"invalid force_close_before_expiry={value!r}; expected non-negative time such as '0d' or '2d'")
+            raise ValueError(f"invalid {field_name}={value!r}; expected non-negative time such as '0d' or '2d'")
     return cast(pd.Timedelta, pd.Timedelta(0))
 
 

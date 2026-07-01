@@ -32,7 +32,12 @@ from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
 from .order_book import OrderBookModule
 from .trading_rule import TradingRuleModule
-from .product_selection import ProductSelectionModule, TermStructureExpandModule
+from .product_selection import (
+    DeliveryForceCloseModule,
+    ProductSelectionModule,
+    RolloverModule,
+    TermStructureExpandModule,
+)
 from .market_data import MarketDataModule
 from .bar_events import BarEventModule
 from .minor_unit import MinorUnitModule
@@ -54,6 +59,8 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     TradingRuleModule,
     ProductSelectionModule,
     TermStructureExpandModule,
+    DeliveryForceCloseModule,
+    RolloverModule,
     MarketDataModule,
     BarEventModule,
     MinorUnitModule,
@@ -374,7 +381,7 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
         # Infrastructure phases first
         for phase in self._INFRA_PROGRESS_PHASES:
             key = str(phase["key"])
-            entry = {"key": key, "label": str(phase["label"])}
+            entry: dict[str, Any] = {"key": key, "label": str(phase["label"])}
             sub = phase.get("sub_steps")
             if sub:
                 entry["sub_steps"] = dict(sub)

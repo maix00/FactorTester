@@ -8,10 +8,14 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.product_selection import (
+    DeliveryForceCloseModule,
     ProductSelectionModule,
+    RolloverModule,
     TermStructureExpandModule,
     _expand_term_structure,
-    _handle_term_structure_notice,
+    _handle_delivery_force_close_notice,
+    _register_force_close_notices,
+    _register_rollover_notices,
 )
 from tools.testers.backtest.modules.run_window import RunWindowModule, strategy_run_window_datetimes
 
@@ -59,7 +63,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
                 RunWindowModule.end_date: "2026-02-05",
                 RunWindowModule.end_time: "15:00",
                 RunWindowModule.timezone: "Asia/Shanghai",
-                TermStructureExpandModule.force_close_before_expiry: "2d",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
             },
         ),
     })
@@ -71,6 +75,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
     _expand_term_structure(account, ctx)
+    _register_force_close_notices(account, ctx)
     queue.run_until_drained()
 
     assert captured
@@ -105,7 +110,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
         drafts_by_strategy={strategy: [draft]},
     )
 
-    _handle_term_structure_notice(account, ctx)
+    _handle_delivery_force_close_notice(account, ctx)
     queue.run_until_drained()
 
     assert len(order_events) == 1
@@ -113,3 +118,37 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     assert order.instrument == contract
     assert order.quantity == -3
     assert order.get("reason") == "term_structure_force_close"
+
+
+def test_rollover_module_registers_rollover_notice_independently():
+    strategy = Strategy(alias="A")
+    product = _TermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue)
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_rollover_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured
+    assert captured[0].timestamp == pd.Timestamp("2026-01-26 15:00")
+    assert captured[0].payload["notice_type"] == "rollover"
+    assert captured[0].payload["notice_reason"] == "date_before_expiry"
