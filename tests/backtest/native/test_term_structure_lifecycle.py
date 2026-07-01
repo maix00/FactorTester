@@ -132,7 +132,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
@@ -170,7 +170,7 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatc
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
@@ -206,7 +206,7 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     idx = pd.DatetimeIndex([
         pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
         pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
@@ -297,7 +297,7 @@ def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypa
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
@@ -471,7 +471,7 @@ def test_exact_mode_raises_when_coverage_inference_is_inconclusive(monkeypatch):
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -496,7 +496,7 @@ def test_term_structure_force_close_offset_accepts_intraday_window():
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
@@ -565,7 +565,7 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-01-10 09:01"),
         event_queue=EventQueue(),
@@ -599,7 +599,7 @@ def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time(
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-01-26 15:01"),
         event_queue=EventQueue(),
@@ -632,7 +632,7 @@ def test_rollover_module_registers_rollover_notice_independently():
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
@@ -666,7 +666,7 @@ def test_rollover_day_window_uses_trading_axis_not_calendar_days():
             },
         ),
     })
-    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     axis = pd.DatetimeIndex([
         pd.Timestamp("2026-01-21 15:00", tz="Asia/Shanghai"),
         pd.Timestamp("2026-01-22 15:00", tz="Asia/Shanghai"),

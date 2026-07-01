@@ -130,8 +130,7 @@ def _resolve_run_window(account, ctx) -> None:
 
     start_dt, end_dt = run_window_envelope(strategy_windows.values())
 
-    account.strategy_run_windows = strategy_windows
-    account.run_window_envelope = (start_dt, end_dt)
+    store_run_windows(account, strategy_windows, (start_dt, end_dt))
     ctx.set(RunWindowModule.strategy_windows, strategy_windows)
     ctx.set(RunWindowModule.run_window_envelope, (start_dt, end_dt))
 
@@ -195,10 +194,10 @@ def run_window_envelope(windows: Iterable[StrategyRunWindow]) -> tuple[DataTime 
 
 
 def run_window_envelope_for_strategies(strategies: Iterable[Any], account) -> tuple[DataTime | None, DataTime | None]:
-    resolved = getattr(account, "strategy_run_windows", None)
+    resolved = run_window_store_for(account).strategy_windows
     windows: list[StrategyRunWindow] = []
     for strategy in strategies:
-        if isinstance(resolved, dict) and strategy in resolved:
+        if strategy in resolved:
             windows.append(resolved[strategy])
         else:
             windows.append(resolve_strategy_run_window(account.config_for(strategy)))
@@ -206,14 +205,30 @@ def run_window_envelope_for_strategies(strategies: Iterable[Any], account) -> tu
 
 
 def warmup_window_for_strategies(strategies: Iterable[Any], account) -> pd.Timedelta:
-    resolved = getattr(account, "strategy_run_windows", None)
+    resolved = run_window_store_for(account).strategy_windows
     values: list[pd.Timedelta] = []
     for strategy in strategies:
-        if isinstance(resolved, dict) and strategy in resolved:
+        if strategy in resolved:
             values.append(resolved[strategy].warmup_window)
         else:
             values.append(resolve_strategy_run_window(account.config_for(strategy)).warmup_window)
     return max(values) if values else _zero_warmup()
+
+
+def run_window_store_for(account):
+    return account.run_window_store
+
+
+def store_run_windows(
+    account,
+    strategy_windows: dict[Any, StrategyRunWindow],
+    envelope: tuple[DataTime | None, DataTime | None],
+) -> None:
+    run_window_store_for(account).set_windows(strategy_windows, envelope)
+
+
+def run_window_envelope_for_account(account) -> tuple[DataTime | None, DataTime | None]:
+    return run_window_store_for(account).envelope or (None, None)
 
 
 def warmup_window_for_strategy(config, factor: Any | None = None) -> pd.Timedelta:
