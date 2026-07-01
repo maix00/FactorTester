@@ -2835,7 +2835,7 @@ def run_group_test_stream():
                     if product not in seen_products:
                         seen_products.add(product)
                         all_products.append(product)
-            runtime_info_rows: list[dict[str, Any]] = []
+            account.runtime_info_sink = emitter
             account.market_data_request = {
                 "products": all_products,
                 "start_dt": start_dt,
@@ -2855,42 +2855,7 @@ def run_group_test_stream():
                 settings_by_strategy=resolved_settings_by_alias,
                 run_id=run_token, progress=_on_progress, activity_sink=emitter,
             )
-            excluded_products = tuple(cast(
-                tuple[Any, ...],
-                getattr(account, "backtest_excluded_out_of_range_products", ()),
-            ))
-            if excluded_products:
-                excluded_product_displays = [
-                    _snapshot_product_display(product) for product in excluded_products
-                ]
-
-                def _display_text(item: dict[str, Any]) -> str:
-                    name = str(item.get("name") or "")
-                    desc = str(item.get("desc") or "")
-                    return f"{name}({desc})" if desc and desc != name else name
-
-                sample = "、".join(_display_text(item) for item in excluded_product_displays[:12])
-                if len(excluded_products) > 12:
-                    sample += f" 等 {len(excluded_products)} 个"
-                row = {
-                    "type": "产品路径",
-                    "status": "已移除",
-                    "detail": (
-                        "以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除："
-                        f"{sample}"
-                    ),
-                    "code": "product_out_of_run_window",
-                    "level": "info",
-                    "products": list(excluded_products),
-                    "product_displays": excluded_product_displays,
-                }
-                runtime_info_rows.append(row)
-                emitter.emit_runtime_info(
-                    row["detail"],
-                    level=row["level"],
-                    code=row["code"],
-                    row=row,
-                )
+            runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
             serialized_execution = _serialize_event_execution(
                 execution, settings_by_group=execution["settings_by_strategy"],
                 evaluation_split=evaluation_split, registry=run_registry,

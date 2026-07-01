@@ -220,7 +220,7 @@ def _check_market_data_coverage(account, ctx) -> None:
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
     missing_products: list[str] = []
-    excluded_out_of_range: list[str] = []
+    excluded_out_of_range: list[Any] = []
     load_plan: list[tuple[Any, Any]] = []
     for product in products:
         try:
@@ -233,13 +233,14 @@ def _check_market_data_coverage(account, ctx) -> None:
             load_plan.append((product, freq))
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded_out_of_range.append(str(getattr(product, "name", product)))
+                excluded_out_of_range.append(product)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     account._market_data_load_plan = load_plan
-    account._market_data_excluded_out_of_range = tuple(sorted(set(excluded_out_of_range)))
+    account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
+    _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
 
 
 def _load_raw_market_data(account, ctx) -> None:
@@ -265,17 +266,19 @@ def _load_raw_market_data(account, ctx) -> None:
             )
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded: list[str] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
-                excluded.append(str(getattr(product, "name", product)))
-                account._market_data_excluded_out_of_range = tuple(sorted(set(excluded)))
+                excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded.append(product)
+                account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
+                _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
         if df.empty or DataColumn.CLOSE.name not in df.columns:
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded: list[str] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
-                excluded.append(str(getattr(product, "name", product)))
-                account._market_data_excluded_out_of_range = tuple(sorted(set(excluded)))
+                excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded.append(product)
+                account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
+                _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
@@ -341,10 +344,75 @@ def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
         frozenset(included_products) if included_products is not None else None
     )
     account.backtest_excluded_out_of_range_products = tuple(raw.get("excluded_out_of_range_products", ()))
+    _record_excluded_out_of_range_products(account, account.backtest_excluded_out_of_range_products)
     account.historical_field_names = tuple(raw.get("historical_field_names", ()))
     account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last
                                                 # observed value forward"
+
+
+def _record_excluded_out_of_range_products(account, products: tuple[Any, ...]) -> None:
+    if not products:
+        return
+    seen_sets = getattr(account, "_runtime_info_excluded_product_sets", None)
+    if not isinstance(seen_sets, list):
+        seen_sets = []
+        account._runtime_info_excluded_product_sets = seen_sets
+    product_tuple = tuple(products)
+    if product_tuple in seen_sets:
+        return
+    seen_sets.append(product_tuple)
+    displays = [_product_display(product) for product in products]
+    sample = "、".join(_product_display_text(item) for item in displays[:12])
+    if len(displays) > 12:
+        sample += f" 等 {len(displays)} 个"
+    row = {
+        "type": "产品路径",
+        "status": "已移除",
+        "level": "warning",
+        "code": "market_data_out_of_range_products_removed",
+        "message": f"产品路径已移除 {len(displays)} 个超出行情覆盖期的产品",
+        "detail": (
+            "以下产品不在当前回测时间范围的可交易覆盖期内，进入回测前已从产品路径候选池移除："
+            f"{sample}"
+        ),
+        "details": {
+            "product_displays": displays,
+            "product_names": [item["name"] for item in displays],
+        },
+    }
+    runtime_rows = getattr(account, "runtime_info_rows", None)
+    if isinstance(runtime_rows, list):
+        runtime_rows.append(row)
+    sink = getattr(account, "runtime_info_sink", None)
+    emit = getattr(sink, "emit_runtime_info", None)
+    if callable(emit):
+        emit(row["message"], level=row["level"], code=row["code"], details=row["details"], row=row)
+
+
+def _dedupe_products(products: list[Any]) -> list[Any]:
+    result: list[Any] = []
+    for product in products:
+        if product not in result:
+            result.append(product)
+    return result
+
+
+def _product_display(product: Any) -> dict[str, str]:
+    name = str(getattr(product, "name", product) or "")
+    desc = ""
+    for attr in ("desc", "description", "display_name", "label"):
+        value = getattr(product, attr, None)
+        if value:
+            desc = str(value)
+            break
+    return {"name": name, "desc": desc}
+
+
+def _product_display_text(item: dict[str, str]) -> str:
+    name = str(item.get("name") or "")
+    desc = str(item.get("desc") or "")
+    return f"{name}({desc})" if desc and desc != name else name
 
 
 def _raise_missing_market_data(missing_products: list[str], start_dt: Any, end_dt: Any) -> None:

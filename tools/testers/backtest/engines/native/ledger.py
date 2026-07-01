@@ -99,6 +99,9 @@ class AccountState:
         self.market_data_request: dict[str, Any] = {}
         self.backtest_included_products: frozenset[Any] | None = None
         self.backtest_excluded_out_of_range_products: tuple[Any, ...] = ()
+        self.runtime_info_rows: list[dict[str, Any]] = []
+        self.runtime_info_sink: Any = None
+        self._runtime_info_excluded_product_sets: list[tuple[Any, ...]] = []
         self.historical_field_provider: Any = None
         self.trading_day_resolver: Any = None
         self.historical_field_policy: str | None = None
