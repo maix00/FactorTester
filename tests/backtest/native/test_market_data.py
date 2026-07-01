@@ -12,8 +12,10 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
-    MarketDataModule, _causal_valuation, _load_raw_market_data, current_prices_at,
+    MarketDataModule, _causal_valuation, _check_market_data_coverage,
+    _load_raw_market_data, current_prices_at,
 )
+from tools.data.types.time import DataTime
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
@@ -61,6 +63,42 @@ def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
     assert row["code"] == "market_data_out_of_range_products_removed"
     assert row["details"]["product_names"] == ["ER.CZC", "ME.CZC"]
     assert "ER.CZC" in row["detail"] and "ME.CZC" in row["detail"]
+
+
+def test_check_market_data_coverage_excludes_lifecycle_ended_product_without_freqs(monkeypatch):
+    class _Product:
+        name = "FU.SHF@1"
+        desc = "180燃料油"
+
+        def list_available_freqs(self):
+            return []
+
+    product = _Product()
+    account = AccountState()
+    account.market_data_request = {
+        "products": [product],
+        "start_dt": DataTime.parse("2026-01-01 09:00:00", tz="Asia/Shanghai"),
+        "end_dt": DataTime.parse("2026-01-31 15:00:00", tz="Asia/Shanghai"),
+    }
+    account.runtime_info_rows = []
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._supports_local_cnfutures_coverage",
+        lambda item: item is product,
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._product_data_coverage",
+        lambda item: None,
+    )
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._local_cnfutures_lifecycle_coverage",
+        lambda item: (None, pd.Timestamp("2018-06-26")),
+    )
+
+    _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+
+    assert getattr(account, "_market_data_load_plan") == []
+    assert getattr(account, "_market_data_excluded_out_of_range") == (product,)
+    assert account.runtime_info_rows[0]["details"]["product_names"] == ["FU.SHF@1"]
 
 
 def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():

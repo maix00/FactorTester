@@ -233,7 +233,10 @@ def _check_market_data_coverage(account, ctx) -> None:
         try:
             available_freqs = list(product.list_available_freqs())
             if not available_freqs:
-                missing_products.append(str(getattr(product, "name", product)))
+                if _product_outside_run_window(product, start_dt, end_dt):
+                    excluded_out_of_range.append(product)
+                else:
+                    missing_products.append(str(getattr(product, "name", product)))
                 continue
             current_freq = getattr(product, "current_freq", None)
             freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
@@ -494,7 +497,7 @@ def _raise_missing_market_data(missing_products: list[str], start_dt: Any, end_d
 def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
     if not _supports_local_cnfutures_coverage(product):
         return False
-    coverage = _product_data_coverage(product)
+    coverage = _product_data_coverage(product) or _local_cnfutures_lifecycle_coverage(product)
     if coverage is None:
         return False
     data_start, data_end = coverage
@@ -505,6 +508,61 @@ def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> boo
     if end_key is not None and data_start is not None and data_start > end_key:
         return True
     return False
+
+
+def _local_cnfutures_lifecycle_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    """Catalog lifecycle fallback for LocalCNFutures products without price files.
+
+    Versioned legacy products such as FU.SHF@1 can have no separate local
+    minute/day parquet but still have a catalog standard end date.  In auto
+    mode they should be removed before the price matrix is built when the
+    whole run window is after that end date.
+    """
+    try:
+        from sources.LocalCNFutures.CNFutures import (
+            _data,
+            code_col_name,
+            enddate_col_name,
+            exchange_code_col_name,
+            exchange_map,
+            version_col_name,
+        )
+    except Exception:
+        return None
+
+    code = str(getattr(product, "code", "") or "").strip().upper()
+    version = getattr(product, "version", None)
+    if version in (None, ""):
+        return None
+    alias = str(getattr(product, "alias", getattr(product, "name", "")) or "")
+    exchange_short = alias.split(".", 1)[1].upper() if "." in alias else ""
+    exchange_full = {v.upper(): k.upper() for k, v in exchange_map.items()}.get(
+        exchange_short,
+        exchange_short,
+    )
+    if not code:
+        return None
+
+    frame = cast(pd.DataFrame, _data)
+    code_series = cast(pd.Series, frame[code_col_name])
+    rows = frame.loc[code_series.astype(str).str.upper() == code]
+    if exchange_full:
+        exchange_series = cast(pd.Series, rows[exchange_code_col_name])
+        rows = rows.loc[exchange_series.astype(str).str.upper() == exchange_full]
+    version_series = cast(pd.Series, rows[version_col_name])
+    rows = rows.loc[version_series.astype(str) == str(version)]
+    if rows.empty:
+        return None
+    end_values = [
+        parsed
+        for value in rows[enddate_col_name].tolist()
+        if value is not None and not pd.isna(value) and str(value).strip()
+        for parsed in (_datetime_sort_key(value),)
+        if parsed is not None
+    ]
+    if not end_values:
+        return None
+    return None, max(end_values)
 
 
 def _supports_local_cnfutures_coverage(product: Any) -> bool:
