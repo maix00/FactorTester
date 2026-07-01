@@ -45,17 +45,17 @@ class LongShortCompositionModule(TargetStrategyModule):
         event_kind=EventKind.SIGNAL,
         order=15,
         after=(GroupMembershipModule.group_quantile_membership,),
-        compute=lambda account, ctx: _compose_long_short_target(account, ctx),
+        compute=lambda state, ctx: _compose_long_short_target(state, ctx),
         description="合成Long-Short目标",
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (compose_long_short_target,)
 
 
-def _compose_long_short_target(account, ctx) -> None:
-    strategy_by_alias = _strategy_by_alias(account)
+def _compose_long_short_target(state, ctx) -> None:
+    strategy_by_alias = _strategy_by_alias(state)
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         if str(config.get(LongShortCompositionModule.strategy_kind, "group")) != "long_short":
             continue
         long_legs = _resolve_leg_specs(
@@ -97,11 +97,11 @@ def _compose_long_short_target(account, ctx) -> None:
         target = {product: weight for product, weight in target.items() if abs(weight) > 1e-12}
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, target)
         ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
-        _record_target_trace(account, strategy, ctx.timestamp, target)
+        _record_target_trace(state, strategy, ctx.timestamp, target)
 
 
-def _strategy_by_alias(account) -> dict[str, Any]:
-    return {str(strategy.alias): strategy for strategy in account.strategy_configs}
+def _strategy_by_alias(state) -> dict[str, Any]:
+    return {str(strategy.alias): strategy for strategy in state.strategy_configs}
 
 
 def _resolve_leg_specs(raw: Any, strategy_by_alias: dict[str, Any]) -> list[dict[str, Any]]:
@@ -153,10 +153,10 @@ def _normalize_abs(weights: dict[Any, float], *, gross: float) -> dict[Any, floa
     return {product: gross * abs(float(value)) / total for product, value in weights.items()}
 
 
-def _record_target_trace(account, strategy, timestamp, weights: dict[Any, float]) -> None:
+def _record_target_trace(state, strategy, timestamp, weights: dict[Any, float]) -> None:
     if timestamp is None:
         return
-    account.target_store.record_target_trace(strategy, timestamp, weights)
+    state.target_store.record_target_trace(strategy, timestamp, weights)
 
 
 def _safe_float(raw: Any, default: float) -> float:

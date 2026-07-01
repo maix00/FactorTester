@@ -32,15 +32,15 @@ class LedgerCashConstraintModule(ExecutableModule):
                     # scheduled for execution, not after
         after=(OrderBookModule.construct_orders,),
         description="按现金约束调整订单",
-        compute=lambda account, ctx: _constrain_to_ledger_cash(account, ctx),
+        compute=lambda state, ctx: _constrain_to_ledger_cash(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (constrain_to_ledger_cash,)
 
 
-def _constrain_to_ledger_cash(account, ctx) -> None:
+def _constrain_to_ledger_cash(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
-    store = order_flow_store_for(account)
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
         if not orders:
@@ -50,7 +50,7 @@ def _constrain_to_ledger_cash(account, ctx) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        ledger = account.ledgers[strategy]
+        ledger = state.ledgers[strategy]
         buy_cost = sum(
             contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
             for o in orders if o.quantity > 0

@@ -40,23 +40,23 @@ class OrderBookModule(ExecutableModule):
         outputs=(deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=20, after=(LedgerModule.equity_on_signal,),
         description="计算目标下单量",
-        compute=lambda account, ctx: _basic_size_order(account, ctx),
+        compute=lambda state, ctx: _basic_size_order(state, ctx),
     )
     construct_orders: ClassVar[Flow] = Flow(
         "construct_orders", inputs=(deltas,), outputs=(orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=30, after=(size_order,),
         description="构造订单",
-        compute=lambda account, ctx: _construct_orders(account, ctx),
+        compute=lambda state, ctx: _construct_orders(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (size_order, construct_orders)
 
 
-def _basic_size_order(account, ctx) -> None:
+def _basic_size_order(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     for strategy in ctx.active_strategies:
-        ledger = account.ledgers[strategy]
+        ledger = state.ledgers[strategy]
         equity = ctx.get_for(LedgerModule.equity, strategy)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
@@ -79,8 +79,8 @@ def _basic_size_order(account, ctx) -> None:
         ctx.set_for(OrderBookModule.deltas, strategy, deltas)
 
 
-def _construct_orders(account, ctx) -> None:
-    store = order_flow_store_for(account)
+def _construct_orders(state, ctx) -> None:
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
         orders = []

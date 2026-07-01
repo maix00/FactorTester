@@ -124,20 +124,20 @@ class GroupMembershipModule(TargetStrategyModule):
         inputs=(FactorSignalModule.signal_value, split_count, group_index),
         outputs=(target_weights,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算分组隶属",
-        order=10, compute=lambda account, ctx: _group_quantile_membership(account, ctx),
+        order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
         "schedule_order_execution", inputs=(OrderBookModule.orders,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
         after=(OrderBookModule.construct_orders,),
         description="登记订单执行事件",
-        compute=lambda account, ctx: _schedule_order_execution(account, ctx),
+        compute=lambda state, ctx: _schedule_order_execution(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (group_quantile_membership, schedule_order_execution)
 
 
-def _group_quantile_membership(account, ctx) -> None:
+def _group_quantile_membership(state, ctx) -> None:
     """`position_policy="buy_and_hold"`: once a strategy has computed its
     first non-empty target_weights, every later SIGNAL event reuses that
     exact same allocation (cached on the shared target strategy store)
@@ -155,12 +155,12 @@ def _group_quantile_membership(account, ctx) -> None:
     needless turnover/fees on a signal that didn't actually change who's
     in or out of the group. "scheduled" is not implemented (see field
     docstring)."""
-    store = account.target_store
+    store = state.target_store
     established = store.strategy_established_target_weights
     last_membership = store.strategy_selection_cache
 
     for strategy in ctx.active_strategies:
-        config = account.config_for(strategy)
+        config = state.config_for(strategy)
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
         if policy == "buy_and_hold" and strategy in established:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established[strategy])
@@ -196,11 +196,11 @@ def _group_quantile_membership(account, ctx) -> None:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established.get(strategy, {}))
             continue
 
-        weights = _allocate_weights(account, ctx, strategy, members)
+        weights = _allocate_weights(state, ctx, strategy, members)
         ctx.set_for(GroupMembershipModule.target_weights, strategy, weights)
         last_membership[strategy] = members
         established[strategy] = weights
-        _record_target_trace(account, strategy, ctx.timestamp, weights)
+        _record_target_trace(state, strategy, ctx.timestamp, weights)
 
 
 def _tradable_signal_values(signal_value: dict, current_prices: dict | None) -> dict:
@@ -216,21 +216,21 @@ def _product_name(product: Any) -> str:
     return str(getattr(product, "name", product))
 
 
-def _record_target_trace(account, strategy, timestamp, weights: dict) -> None:
+def _record_target_trace(state, strategy, timestamp, weights: dict) -> None:
     """Only called on a genuinely fresh weights computation (not the
     buy_and_hold/membership_change "reuse the previous allocation" paths)
     -- matches the old target_trace contract where a trace entry's mere
     presence at a timestamp means "the target actually changed here"."""
     if timestamp is None:
         return
-    account.target_store.record_target_trace(strategy, timestamp, weights)
+    state.target_store.record_target_trace(strategy, timestamp, weights)
 
 
-def target_trace_for(account, strategy) -> dict:
-    return account.target_store.target_trace_for(strategy)
+def target_trace_for(state, strategy) -> dict:
+    return state.target_store.target_trace_for(strategy)
 
 
-def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
+def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
     """`allocation_policy="equal_notional"` (default): every selected
     product gets 1/n of the allocation, regardless of its volatility.
 
@@ -243,17 +243,17 @@ def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
     estimate volatility falls back per `volatility_warmup`."""
     if not members:
         return {}
-    config = account.config_for(strategy)
+    config = state.config_for(strategy)
     policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
     if policy == "equal_margin":
-        return _allocate_equal_margin(account, ctx, members)
+        return _allocate_equal_margin(state, ctx, members)
     if policy != "inverse_volatility":
         weight = 1.0 / len(members)
         return {product: weight for product in members}
 
     lookback = config.get(GroupMembershipModule.volatility_lookback, 20)
     warmup = config.get(GroupMembershipModule.volatility_warmup, "equal_notional")
-    table = current_prices_table_for(account)
+    table = current_prices_table_for(state)
     inv_vol: dict = {}
     fallback_equal: list = []
     for product in members:
@@ -283,7 +283,7 @@ def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
     return weights
 
 
-def _allocate_equal_margin(account, ctx, members: frozenset) -> dict:
+def _allocate_equal_margin(state, ctx, members: frozenset) -> dict:
     ratios = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
     raw: dict = {}
     for product in members:
@@ -327,11 +327,11 @@ def _trailing_volatility(table, product, timestamp, lookback: int) -> float | No
     return float(std) if pd.notna(std) else None
 
 
-def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp]:
+def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp]:
     if ctx.timestamp is None:
         raise ValueError("execution scheduling requires an event timestamp")
     current_ts = cast(pd.Timestamp, ctx.timestamp)
-    config = account.config_for(strategy)
+    config = state.config_for(strategy)
     timing = config.get(GroupMembershipModule.execution_timing, "next_bar")
     basis = str(config.get(OrderExecutionModule.execution_price_basis, "open") or "open").lower()
     if timing != "next_bar":
@@ -339,7 +339,7 @@ def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, p
     if basis != "open":
         raise ValueError("order execution is fixed to next-bar open")
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
-    table = current_prices_table_for(account)
+    table = current_prices_table_for(state)
     if table is None:
         return current_ts, current_ts
     index = signal_timestamps(table)
@@ -355,12 +355,12 @@ def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, p
     return event_ts, price_ts
 
 
-def _resolve_execution_timestamp(account, ctx, strategy) -> pd.Timestamp:
-    event_ts, _price_ts = _resolve_execution_schedule(account, ctx, strategy)
+def _resolve_execution_timestamp(state, ctx, strategy) -> pd.Timestamp:
+    event_ts, _price_ts = _resolve_execution_schedule(state, ctx, strategy)
     return event_ts
 
 
-def _schedule_order_execution(account, ctx) -> None:
+def _schedule_order_execution(state, ctx) -> None:
     """Cancellation of a still-pending order for the same (strategy,
     product) is done by mutating the queued Order object in place (the
     EventQueue holds the same object reference) -- not by emitting a new
@@ -370,12 +370,12 @@ def _schedule_order_execution(account, ctx) -> None:
     AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
     is already due at this signal boundary; keep it intact rather than treating
     it as still-cancellable future work."""
-    pending = account.order_store.pending_orders
+    pending = state.order_store.pending_orders
 
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
-        execution_ts, price_ts = _resolve_execution_schedule(account, ctx, strategy)
+        execution_ts, price_ts = _resolve_execution_schedule(state, ctx, strategy)
         for order in orders:
             key = (strategy, order.instrument)
             stale = pending.get(key)
