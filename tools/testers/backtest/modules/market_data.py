@@ -724,6 +724,7 @@ def _load_raw_market_data(account, ctx) -> None:
     price_series_by_basis: dict[str, dict[Any, pd.Series]] = {
         basis: {} for basis, _column in price_columns
     }
+    volume_series_by_product: dict[Any, pd.Series] = {}
     missing_products: list[str] = []
     store = market_data_store_for(account)
     for plan_item in store.load_plan:
@@ -731,7 +732,7 @@ def _load_raw_market_data(account, ctx) -> None:
         try:
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
-                [column for _basis, column in price_columns],
+                [column for _basis, column in price_columns] + [DataColumn.VOLUME.name],
                 copy=False,
                 start_dt=start_dt,
                 end_dt=end_dt,
@@ -748,7 +749,7 @@ def _load_raw_market_data(account, ctx) -> None:
             continue
         if df.empty or DataColumn.CLOSE.name not in df.columns:
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded: list[Any] = list(store.excluded_out_of_range)
+                excluded = list(store.excluded_out_of_range)
                 excluded.append(product)
                 store.excluded_out_of_range = tuple(_dedupe_products(excluded))
             else:
@@ -758,9 +759,12 @@ def _load_raw_market_data(account, ctx) -> None:
         for basis, column in price_columns:
             if column in df.columns:
                 price_series_by_basis[basis][product] = df[column]
+        if DataColumn.VOLUME.name in df.columns:
+            volume_series_by_product[product] = df[DataColumn.VOLUME.name]
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
+    volume = pd.DataFrame(volume_series_by_product) if volume_series_by_product else None
     price_tables = {
         basis: pd.DataFrame(values)
         for basis, values in price_series_by_basis.items()
@@ -776,6 +780,7 @@ def _load_raw_market_data(account, ctx) -> None:
         "historical_field_names": _required_market_rule_field_names(account),
         "included_products": tuple(series_by_product.keys()),
         "excluded_out_of_range_products": tuple(store.excluded_out_of_range),
+        "volume": volume,
     }
     _publish_raw_market_data(account, ctx, raw)
 
@@ -1286,7 +1291,7 @@ def _historical_fields_at_from_frames(
 def _historical_field_frame_asof_position(index: pd.Index, timestamp: pd.Timestamp) -> int | None:
     if len(index) == 0:
         return None
-    index_ns = pd.DatetimeIndex(pd.DatetimeIndex(index).astype("datetime64[ns]")).asi8
+    index_ns = cast(Any, pd.DatetimeIndex(pd.DatetimeIndex(index).astype("datetime64[ns]"))).asi8
     pos = int(index_ns.searchsorted(timestamp.value, side="right") - 1)
     if pos < 0:
         return None

@@ -215,6 +215,23 @@ def test_liquidity_caps_to_participation_rate_times_volume():
     assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(10.0)  # capped, 0.1*100
 
 
+def test_liquidity_requires_volume_for_each_product():
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.volume, {})
+
+    def base_compute(a, c):
+        c.set_for(OrderBookModule.deltas, s, {p: 50.0})
+
+    with pytest.raises(KeyError, match="requires MarketDataModule volume"):
+        _cap_to_liquidity(account, ctx, base_compute)
+
+
 def test_liquidity_does_not_defer_excess_to_next_bar():
     s = Strategy(alias="S")
     p = _product()

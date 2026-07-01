@@ -15,7 +15,12 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, ProgressSink, run
-from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
+from tools.testers.backtest.modules.equity_curve import (
+    equity_curve_for,
+    margin_curve_for,
+    notional_curve_for,
+    position_curve_for,
+)
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.group_membership import target_trace_for
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
@@ -67,6 +72,8 @@ def run_backtest_task(
         portfolios[group_id] = {
             "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
             "position_curve": position_curve_for(run_state, strategy),
+            "notional_curve": notional_curve_for(run_state, strategy),
+            "margin_curve": margin_curve_for(run_state, strategy),
             "execution_trace": run_state.order_flow_store.records_for_strategy(strategy),
             "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,
             "market_rule_approximation_count": 0,

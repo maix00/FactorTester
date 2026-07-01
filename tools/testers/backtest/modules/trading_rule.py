@@ -267,8 +267,9 @@ def _consume_lots_hifo(lots, quantity: float, fill_price: float, multiplier: flo
 
 
 def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
-                    current_prices: dict) -> "DataMoney":
+                    current_prices: dict, historical_fields: dict[object, dict[str, object]] | None = None) -> "DataMoney":
     from .ledger_module import LedgerModule
+    from .market_data import contract_multiplier_from_fields
 
     positions = ledger.get(LedgerModule.positions, {})
     total = 0.0
@@ -280,7 +281,8 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
         if price is None:
             continue
         if method == "WeightAverage" and entry.average_cost is not None:
-            total += entry.quantity * (price - entry.average_cost)
+            multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
+            total += entry.quantity * (price - entry.average_cost) * multiplier
         elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
             for lot in entry.lots:
                 total += lot.quantity * (price - lot.entry_price) * lot.multiplier

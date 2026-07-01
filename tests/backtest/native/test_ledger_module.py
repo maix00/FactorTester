@@ -5,9 +5,11 @@ import uuid
 import pandas as pd
 import pytest
 
+from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.fields import FieldRef
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -15,6 +17,7 @@ from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_cash_update, _basic_equity, _initialize_ledgers
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
@@ -23,12 +26,16 @@ def _product() -> Product:
 
 
 def _strategy_config(strategy, **trading_rule_values) -> StrategyConfig:
-    field_values = {
+    field_values: dict[FieldRef, object] = {
         LedgerModule.initial_capital_major: 1_000_000.0,
         LedgerModule.base_currency: "CNY",
     }
     for key, value in trading_rule_values.items():
-        ref = getattr(EngineModule, key, None) or getattr(TradingRuleModule, key)
+        ref = (
+            getattr(EngineModule, key, None)
+            or getattr(TradingRuleModule, key, None)
+            or getattr(MarginModule, key)
+        )
         field_values[ref] = value
     return StrategyConfig(strategy=strategy, field_values=field_values)
 
@@ -192,6 +199,100 @@ def test_cash_update_and_equity_use_contract_multiplier():
 
     assert account.ledgers[s].get(LedgerModule.cash).to_major() == pytest.approx(900_000.0)
     assert order_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
+
+
+def test_equity_uses_margin_and_floating_pnl_when_margin_is_tracked():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ledger = account.ledgers[s]
+    ledger.set(LedgerModule.cash, DataMoney.from_major(
+        990_000.0, currency="CNY", use_minor_units=False))
+    ledger.set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=10.0,
+            average_cost=100.0,
+            equity_occupied=DataMoney.from_major(
+                1_000.0, currency="CNY", use_minor_units=False),
+        )
+    })
+
+    signal_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    signal_ctx.set(MarketDataModule.current_prices, {p: 110.0})
+    signal_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
+
+    _basic_equity(account, signal_ctx)
+
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(991_200.0)
+
+
+def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(
+        s,
+        engine_mode="custom",
+        accounting_mode="Custom",
+        margin_mode="fixed",
+        fixed_margin_ratio=0.1,
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    open_ts = pd.Timestamp("2024-01-01")
+    open_order = Order(instrument=p, timestamp=open_ts, quantity=10.0, intent_quantity=10.0, strategy=s)
+    open_ctx = FlowContext(
+        timestamp=open_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, open_ts, s, open_order)]},
+    )
+    open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    open_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
+
+    _basic_cash_update(account, open_ctx)
+    _basic_equity(account, open_ctx)
+
+    assert account.ledgers[s].get(LedgerModule.cash).to_major() == pytest.approx(999_800.0)
+    assert open_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
+
+    signal_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-02"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    signal_ctx.set(MarketDataModule.current_prices, {p: 110.0})
+    signal_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
+    _basic_equity(account, signal_ctx)
+    assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+
+    close_ts = pd.Timestamp("2024-01-03")
+    close_order = Order(instrument=p, timestamp=close_ts, quantity=-10.0, intent_quantity=-10.0, strategy=s)
+    close_ctx = FlowContext(
+        timestamp=close_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, close_ts, s, close_order)]},
+    )
+    close_ctx.set(MarketDataModule.current_prices, {p: 110.0})
+    close_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
+
+    _basic_cash_update(account, close_ctx)
+    _basic_equity(account, close_ctx)
+
+    assert account.ledgers[s].get(LedgerModule.cash).to_major() == pytest.approx(1_000_200.0)
+    assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
 
 
 def test_two_strategies_independent_ledgers_do_not_cross_contaminate():

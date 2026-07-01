@@ -56,8 +56,14 @@ def _cap_to_liquidity(account, ctx, base_compute) -> None:
             continue
         rate = config.get(LiquidityModule.participation_rate, 0.1)
         deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
+        missing_volume_products = [product for product in deltas if product not in volume]
+        if missing_volume_products:
+            raise KeyError(
+                "volume_participation liquidity requires MarketDataModule volume for "
+                + ", ".join(str(getattr(product, "name", product)) for product in missing_volume_products)
+            )
         capped = {
-            product: _cap_one(quantity, rate * volume.get(product, 0.0))
+            product: _cap_one(quantity, rate * volume[product])
             for product, quantity in deltas.items()
         }
         ctx.set_for(OrderBookModule.deltas, strategy, capped)

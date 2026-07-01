@@ -64,6 +64,10 @@ class GroupMembershipModule(TargetStrategyModule):
     volatility_warmup: ClassVar[FieldRef[str]] = FieldRef("volatility_warmup")
         # "equal_notional"|"error" -- what to do for a product whose trailing
         # window doesn't have enough history yet to compute a volatility estimate
+    product_mask_names: ClassVar[FieldRef[Any]] = FieldRef("product_mask_names")
+        # Optional derived-group product filter.  It must be applied after the
+        # full-universe group membership bucket is computed, so derived groups
+        # mean "parent bucket intersected with mask", not "re-rank inside mask".
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "split_count": FieldDefinition(
@@ -112,6 +116,7 @@ class GroupMembershipModule(TargetStrategyModule):
             visible_when={"allocation_policy": ("inverse_volatility",)},
             chip_template="预热: {value}", tab_label="目标分配", tab_order=60,
         ),
+        "product_mask_names": FieldDefinition(public=False, label="品种范围", default=None),
     }
 
     group_quantile_membership: ClassVar[Flow] = Flow(
@@ -182,6 +187,10 @@ def _group_quantile_membership(account, ctx) -> None:
         end = round((group_index + 1) * bucket_size)
         bucket = ranked[start:end]
         members = frozenset(product for product, _ in bucket)
+        product_mask_names = config.get(GroupMembershipModule.product_mask_names)
+        if product_mask_names:
+            allowed = {str(name) for name in product_mask_names}
+            members = frozenset(product for product in members if _product_name(product) in allowed)
 
         if trigger == "membership_change" and last_membership.get(strategy) == members:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established.get(strategy, {}))
@@ -201,6 +210,10 @@ def _tradable_signal_values(signal_value: dict, current_prices: dict | None) -> 
         return {}
     tradable = set(current_prices)
     return {product: value for product, value in signal_value.items() if product in tradable}
+
+
+def _product_name(product: Any) -> str:
+    return str(getattr(product, "name", product))
 
 
 def _record_target_trace(account, strategy, timestamp, weights: dict) -> None:

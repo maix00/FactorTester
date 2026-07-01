@@ -60,6 +60,26 @@ def test_group_quantile_membership_ignores_products_without_current_price():
     assert weights == {tradable: pytest.approx(1.0)}
 
 
+def test_group_quantile_membership_applies_product_mask_after_full_bucket_selection():
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(4)]
+    signal_value = {p: float(i) for i, p in enumerate(products)}
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 2,
+        GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.product_mask_names: tuple(p.name for p in products[1:]),
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {p: 10.0 for p in products})
+    ctx.set_for(FactorSignalModule.signal_value, s, signal_value)
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, s)
+    assert weights == {products[1]: pytest.approx(1.0)}
+
+
 def test_group_quantile_membership_selects_highest_bucket():
     s = Strategy(alias="S")
     products = [_product() for _ in range(4)]

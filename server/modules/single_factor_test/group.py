@@ -1909,6 +1909,9 @@ def _resolve_group_strategy_settings(
         selection = selection_for_product_path_selection(data, selection_id, page_uuid=page_uuid)
         selection_cache[selection_id] = selection
     group_settings['product_path_selection'] = selection
+    product_list = _product_list_from_group_payload(g)
+    if product_list:
+        group_settings['product_mask_names'] = tuple(product_list)
 
     factor_alias = str(g.get('factorAlias', ''))
     factor = page_factors_dict.get(factor_alias)

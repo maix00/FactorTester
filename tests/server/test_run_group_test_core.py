@@ -40,8 +40,10 @@ class _FakeFactor:
     def __init__(self, table: pd.DataFrame) -> None:
         self._table = table
         self.table = table
+        self.last_products: list[Product] | None = None
 
     def evaluate(self, products, **kwargs) -> None:
+        self.last_products = list(products)
         self.table = self._table
 
 
@@ -110,6 +112,37 @@ def test_resolve_group_strategy_settings_reuses_cached_selection(monkeypatch):
         )
 
     assert calls == ["sel-shared"]  # only resolved once, second group reused the cache
+
+
+def test_resolve_group_strategy_settings_keeps_full_factor_pool_and_passes_product_mask(monkeypatch):
+    p1, p2, p3 = _product(), _product(), _product()
+    selection = _FakeSelection("sel-1", [p1, p2, p3])
+    monkeypatch.setattr(
+        "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
+        lambda data, selection_id, *, page_uuid: selection,
+    )
+    factor = _FakeFactor(pd.DataFrame({p1: [1.0], p2: [2.0], p3: [3.0]}))
+    g = {
+        "id": "group-1",
+        "product_path_selection_id": "sel-1",
+        "factorAlias": "FactorA",
+        "splitCount": 2,
+        "groupIndex": 1,
+        "productMask": {p2.name: True, p3.name: True},
+    }
+
+    settings = group_module._resolve_group_strategy_settings(
+        g, resolved_backtest_settings={}, fallback_group_settings={},
+        page_uuid="page-1", data={}, page_factors_dict={"FactorA": factor},
+        selection_cache={},
+    )
+
+    assert settings["product_path_selection"] is selection
+    assert settings["product_mask_names"] == (p2.name, p3.name)
+    adapter = settings["factor"]
+    adapter.evaluate()
+    assert factor.last_products == [p1, p2, p3]
+    assert factor.table is not None
 
 
 def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):

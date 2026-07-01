@@ -7,7 +7,7 @@ them."""
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.events import EventKind
@@ -15,11 +15,15 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import ProductPosition, apply_quantity_delta
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
+from tools.testers.backtest.modules.market_data import (
+    contract_multiplier_from_fields,
+    historical_fields_for_product,
+)
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_method, _resolve_use_int_position,
+    TradingRuleModule, _resolve_method, _resolve_use_int_position, mark_to_market,
 )
 
 
@@ -135,6 +139,20 @@ def _basic_equity(account, ctx) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
+        margin_occupied = sum(
+            entry.equity_occupied.to_major()
+            for entry in positions.values()
+            if entry.equity_occupied is not None and entry.equity_occupied.to_major() > 0
+        )
+        if margin_occupied > 0:
+            floating_pnl = mark_to_market(
+                ledger,
+                account.config_for(strategy),
+                prices,
+                historical_fields,
+            ).to_major()
+            ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + margin_occupied + floating_pnl)
+            continue
         market_value = sum(
             contract_notional(prices[product], entry.quantity, historical_fields, product)
             for product, entry in positions.items()
@@ -170,17 +188,29 @@ def _basic_cash_update(account, ctx) -> None:
         for order in ctx.payloads_for(strategy):
             if order.status == OrderStatus.CANCELLED:
                 continue  # superseded before it fired (step 9) -- no ledger effect
-            entry = positions.setdefault(order.instrument, ProductPosition())
-            apply_quantity_delta(entry, order.quantity)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
-            trade_cost = DataMoney.from_major(
-                contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
-                currency=cash.currency,
-                use_minor_units=cash.use_minor_units,
-            )
-            cash = cash - trade_cost
+            if _uses_margin_accounting(account.config_for(strategy), historical_fields, order.instrument):
+                cash = _apply_margin_accounting_fill(
+                    cash,
+                    positions,
+                    account.config_for(strategy),
+                    order.instrument,
+                    quantity=float(order.quantity),
+                    price=float(price),
+                    fee_cost=float(fee_cost or 0.0),
+                    historical_fields=historical_fields,
+                )
+            else:
+                entry = positions.setdefault(order.instrument, ProductPosition())
+                apply_quantity_delta(entry, order.quantity)
+                trade_cost = DataMoney.from_major(
+                    contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
+                    currency=cash.currency,
+                    use_minor_units=cash.use_minor_units,
+                )
+                cash = cash - trade_cost
             store.record(
                 order,
                 step="ledger_update",
@@ -195,3 +225,117 @@ def _basic_cash_update(account, ctx) -> None:
             )
         ledger.set(LedgerModule.positions, positions)
         ledger.set(LedgerModule.cash, cash)
+
+
+def _uses_margin_accounting(strategy_config, historical_fields: dict, product) -> bool:
+    from tools.testers.backtest.modules.margin import _resolve_margin_mode
+
+    mode = _resolve_margin_mode(strategy_config)
+    if mode in {"none", "zero"}:
+        return False
+    return True
+
+
+def _apply_margin_accounting_fill(
+    cash: DataMoney,
+    positions: dict,
+    strategy_config,
+    product,
+    *,
+    quantity: float,
+    price: float,
+    fee_cost: float,
+    historical_fields: dict,
+) -> DataMoney:
+    fields = historical_fields_for_product(historical_fields, product)
+    multiplier = contract_multiplier_from_fields(historical_fields, product)
+    margin_ratio = _resolved_margin_ratio_for_order(strategy_config, fields, quantity, price, multiplier)
+    entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
+    before_margin = _entry_margin_major(entry)
+    prior_quantity = float(entry.quantity or 0.0)
+    prior_cost = float(entry.average_cost or price)
+    new_quantity = prior_quantity + quantity
+    realized = 0.0
+
+    if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
+        new_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
+    else:
+        close_abs = min(abs(quantity), abs(prior_quantity))
+        realized = close_abs * (price - prior_cost) * _sign(prior_quantity) * multiplier
+        if abs(new_quantity) <= 1e-12:
+            new_quantity = 0.0
+            new_cost = 0.0
+        elif abs(quantity) > abs(prior_quantity):
+            new_cost = price
+        else:
+            new_cost = prior_cost
+
+    entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
+    entry.average_cost = new_cost
+    after_margin = abs(new_quantity) * price * multiplier * margin_ratio
+    entry.equity_occupied = DataMoney.from_major(
+        after_margin,
+        currency=cash.currency,
+        use_minor_units=cash.use_minor_units,
+    )
+    cash_delta = realized - fee_cost - (after_margin - before_margin)
+    return cash + DataMoney.from_major(
+        cash_delta,
+        currency=cash.currency,
+        use_minor_units=cash.use_minor_units,
+    )
+
+
+def _resolved_margin_ratio_for_order(strategy_config, fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float:
+    from tools.testers.backtest.modules.margin import _resolve_margin_ratio
+
+    market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
+    ratio = _resolve_margin_ratio(strategy_config, market_ratio)
+    return float(1.0 if ratio is None else ratio)
+
+
+def _market_margin_ratio(fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float | None:
+    if quantity < 0:
+        by_money = fields.get("ShortMarginRatioByMoney")
+        by_volume = fields.get("ShortMarginRatioByVolume")
+    else:
+        by_money = fields.get("LongMarginRatioByMoney")
+        by_volume = fields.get("LongMarginRatioByVolume")
+    ratio = _number_or_none(by_money)
+    if ratio is not None:
+        return ratio
+    fixed = _number_or_none(by_volume)
+    denominator = abs(price * multiplier)
+    if fixed is not None and denominator > 0:
+        return fixed / denominator
+    return None
+
+
+def _entry_margin_major(entry: ProductPosition) -> float:
+    if entry.equity_occupied is None:
+        return 0.0
+    return float(entry.equity_occupied.to_major())
+
+
+def _weighted_average_cost(prior_quantity: float, prior_cost: float, quantity: float, price: float) -> float:
+    total = abs(prior_quantity) + abs(quantity)
+    if total <= 1e-12:
+        return 0.0
+    return (abs(prior_quantity) * prior_cost + abs(quantity) * price) / total
+
+
+def _same_direction(left: float, right: float) -> bool:
+    return (left >= 0 and right >= 0) or (left <= 0 and right <= 0)
+
+
+def _sign(value: float) -> float:
+    return 1.0 if value >= 0 else -1.0
+
+
+def _number_or_none(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
