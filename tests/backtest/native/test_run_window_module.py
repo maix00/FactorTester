@@ -65,6 +65,23 @@ def test_auto_warmup_unwraps_factor_evaluate_adapter_shape():
     assert auto_warmup_window(_Adapter(_Factor())) == pd.Timedelta("3D")
 
 
+def test_auto_warmup_uses_longest_parallel_dependency_chain():
+    class _Factor:
+        _expr = (
+            ColumnRef(DataColumn.CLOSE).rolling_mean("2D")
+            + ColumnRef(DataColumn.OPEN).rolling_mean("5D")
+        )
+
+    assert auto_warmup_window(_Factor()) == pd.Timedelta("5D")
+
+
+def test_auto_warmup_adds_serial_nested_windows():
+    class _Factor:
+        _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
+
+    assert auto_warmup_window(_Factor()) == pd.Timedelta("3D")
+
+
 def test_run_window_flow_orders_before_product_and_market_data_flows():
     registry = FlowRegistry()
     for module in (RunWindowModule, ProductSelectionModule, TermStructureExpandModule, MarketDataModule):
