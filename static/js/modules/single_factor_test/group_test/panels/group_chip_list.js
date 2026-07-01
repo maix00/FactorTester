@@ -196,9 +196,29 @@
 
     function renderFactorChipList(container, options) {
         options = options || {};
+        var store = options.store || (GT.backendSettings && GT.backendSettings.ensureGtLocalStore ? GT.backendSettings.ensureGtLocalStore() : null);
+        var candidateKey = options.candidateKey || 'factor_candidates';
+        var factorKey = options.factorKey || 'factor';
+        var utils = window.FactorParamSelectionUtils || {};
         var factors = options.factors || [];
+        if (store && typeof store.effective === 'function' && typeof utils.normalizeFactorParamList === 'function') {
+            factors = utils.normalizeFactorParamList(store.effective(candidateKey), window.factorFamilyAlias || '').map(function(param) {
+                return {
+                    alias: param.factor_alias || param.factorAlias || '',
+                    name: param.factor_alias || param.factorAlias || '',
+                    params: param.params || {},
+                    scope_key: param.scope_key || '',
+                };
+            });
+        }
         var multiple = !!options.multiple;
         var selected = options.selected;
+        if ((selected === undefined || selected === null || (Array.isArray(selected) && !selected.length) || selected === '')
+            && store && typeof store.effective === 'function') {
+            var fallbackFactor = store.effective(factorKey);
+            if (multiple) selected = fallbackFactor ? [fallbackFactor] : [];
+            else selected = fallbackFactor || '';
+        }
         var manageOpen = !!options.manageOpen;
         var selectedSet = {};
         if (multiple) {
@@ -243,6 +263,25 @@
         }
 
         container.innerHTML = html;
+        if (container._factorChipListUnsubs) {
+            container._factorChipListUnsubs.forEach(function(fn) { try { fn(); } catch (e) {} });
+            container._factorChipListUnsubs = null;
+        }
+        if (store && typeof store.subscribe === 'function') {
+            var rerenderScheduled = false;
+            var scheduleRerender = function() {
+                if (rerenderScheduled) return;
+                rerenderScheduled = true;
+                requestAnimationFrame(function() {
+                    rerenderScheduled = false;
+                    renderFactorChipList(container, options);
+                });
+            };
+            container._factorChipListUnsubs = [
+                store.subscribe(candidateKey, scheduleRerender),
+                store.subscribe(factorKey, scheduleRerender),
+            ];
+        }
 
         // 标题 chip 用 ChipRenderer.render（DOM 模式，不再手动拼 HTML）
         var titleHost = container.querySelector('.gt-chiplist-title-chip[data-chip-kind="factor"]');
@@ -302,6 +341,9 @@
                 GT.backendSettings.renderFactorManager(host, {
                     multiple: multiple,
                     selected: selected,
+                    store: store,
+                    candidateKey: candidateKey,
+                    factorKey: factorKey,
                     onToggle: options.onToggle,
                 });
             }

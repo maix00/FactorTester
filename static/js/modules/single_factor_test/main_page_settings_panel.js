@@ -653,6 +653,7 @@
     // 测试模块单选 factor 为空时回退到此字段（manifest 的 shared_page_field）。
     function setFactorDefault(alias) {
         state.values.factor = alias || '';
+        syncPageStore();
         renderChips();
         renderFactorsTab();
         broadcastGlobalSettingsChanged();
@@ -767,6 +768,7 @@
     function setSessionFactorParams(params) {
         state._sessionParams = Array.isArray(params) ? params.slice() : [];
         syncFactorCandidatesValue();  // 工作候选列表随会话因子变化，chip 计数才正确
+        syncPageStore();
     }
 
     function renderFactorsTab() {

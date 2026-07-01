@@ -22,6 +22,7 @@
         productPathSelections: [],
         productPathSelectionsLoaded: false,
         productPathSelectionResolveRequests: Object.create(null),
+        inlineManagers: Object.create(null),
     };
 
     function requestJSON(url) {
@@ -799,7 +800,14 @@
             control.style.cssText = 'display:flex;align-items:center;gap:8px;';
             var summary = document.createElement('span');
             summary.className = 'gt-backend-chip unified-backend-chip';
-            try { summary.innerHTML = renderChipHtml(window.BackendSettingsPanel.displaySettingValue(setting, effectiveValue(setting, mount))); }
+            try {
+                var summaryValue = effectiveValue(setting, mount);
+                if (mount === LOCAL) {
+                    var localStore = ensureGtLocalStore();
+                    if (localStore && typeof localStore.effective === 'function') summaryValue = localStore.effective(settingStorageKey(setting));
+                }
+                summary.innerHTML = renderChipHtml(setting.label || setting.key, window.BackendSettingsPanel.displaySettingValue(setting, summaryValue));
+            }
             catch (e) { summary.textContent = '—'; }
             control.appendChild(summary);
             var manageBtn = document.createElement('button');
@@ -809,6 +817,11 @@
             var targetTab = setting.tab || setting.tab_key;
             manageBtn.addEventListener('click', function() {
                 if (targetTab && GT.tabs && typeof GT.tabs.mountTab === 'function') GT.tabs.mountTab(targetTab);
+                if (mount === LOCAL && setting.serialization && setting.serialization.kind === 'factor_candidate_list') {
+                    state.inlineManagers[targetTab || setting.key] = !state.inlineManagers[targetTab || setting.key];
+                    rerenderAfterChange();
+                    return;
+                }
             });
             control.appendChild(manageBtn);
             return control;
@@ -1137,61 +1150,50 @@
         });
     }
 
-    // 因子管理面板：照搬"因子家族测试设置"的因子管理界面（同一个 FactorParamSelectionUtils
-    // 组件），用 selectionMode 区分单选（编辑分组的因子）/多选（新建分组的因子）。
-    // 候选来自页面已加载的 window.factorList（与 IC/page 同源），可从因子库新增到 page_factors。
     function renderFactorManager(container, opts) {
         opts = opts || {};
         var multiple = !!opts.multiple;
-        var onToggle = opts.onToggle || function() {};
-        container.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载因子库...</div>';
+        var hasExternalToggle = typeof opts.onToggle === 'function';
+        var utils = window.FactorParamSelectionUtils;
+        if (!utils || typeof utils.renderFactorStoreManager !== 'function') {
+            container.textContent = '因子参数设置组件未加载';
+            return;
+        }
+        var store = opts.store || ensureGtLocalStore();
         var ffAlias = window.factorFamilyAlias || '';
-        var libraryPromise = ffAlias
+        var libraryPromise = function() { return ffAlias
             ? requestJSON('/custom-factors/api/factor-library-overview?factor_family_alias=' + encodeURIComponent(ffAlias)).catch(function() { return { factors: [] }; })
-            : Promise.resolve({ factors: [] });
-        libraryPromise.then(function(payload) {
-            var utils = window.FactorParamSelectionUtils;
-            if (!utils || typeof utils.renderFactorParamSettingsTab !== 'function') {
-                container.textContent = '因子参数设置组件未加载';
-                return;
-            }
+            : Promise.resolve({ factors: [] }); };
+        utils.renderFactorStoreManager({
+            host: container,
+            prefix: opts.prefix || 'gt-fps',
+            store: store,
+            candidateKey: opts.candidateKey || 'factor_candidates',
+            factorKey: opts.factorKey || 'factor',
+            factorFamilyAlias: ffAlias,
+            paramDefs: opts.paramDefs || [],
+            multiple: multiple,
+            selected: opts.selected,
+            onToggle: hasExternalToggle ? function(alias) { opts.onToggle(alias); } : undefined,
+            onSetDefault: hasExternalToggle ? function(alias) { opts.onToggle(alias); } : undefined,
+            loadLibraryParams: function() {
+                return libraryPromise().then(function(payload) {
             var libraryItems = Array.isArray(payload.factors) ? payload.factors : [];
-            var libraryParams = libraryItems.map(function(item) {
+                    return libraryItems.map(function(item) {
                 return utils.factorItemToParamSelection ? utils.factorItemToParamSelection(item) : item;
             });
-            var currentParams = (window.factorList || []).map(function(f) {
-                return { factor_alias: f.alias || f.name || '', scope_key: '', params: {} };
-            });
-            var selected = opts.selected;
-            utils.renderFactorParamSettingsTab({
-                host: container,
-                prefix: 'gt-fps',
-                paramDefs: [],
-                currentFactorParams: currentParams,
-                libraryFactorParams: libraryParams,
-                selectionMode: multiple ? 'multi' : 'single',
-                selectedIds: multiple ? (Array.isArray(selected) ? selected : []) : [],
-                currentSelection: multiple ? '' : (selected || ''),
-                onToggle: function(alias) { onToggle(alias); renderFactorManager(container, opts); },
-                onSetDefault: function(alias) { onToggle(alias); renderFactorManager(container, opts); },
-                manualTitle: '现场新增因子参数',
-                addLabel: '新增到参数列表',
-                escapeHTML: escapeHTML,
-                onAddParam: function(alias, params) {
-                    if (!alias || !ffAlias) return;
-                    addFactorByParams(ffAlias, params).then(function() {
-                        renderFactorManager(container, opts);
-                    });
-                },
-                onLoadFromLibrary: function(param) {
-                    if (!param || !ffAlias) return;
-                    addFactorByParams(ffAlias, param.params || {}).then(function() {
-                        renderFactorManager(container, opts);
-                    });
-                },
-            });
-        }).catch(function(error) {
-            container.textContent = '加载失败：' + error.message;
+                });
+            },
+            onRegisterParam: function(param) {
+                if (!param || !ffAlias) return param;
+                return addFactorByParams(ffAlias, param.params || {}).then(function(data) {
+                    if (data && data.factor_alias) {
+                        return Object.assign({}, param, { factor_alias: data.factor_alias });
+                    }
+                    return param;
+                });
+            },
+            escapeHTML: escapeHTML,
         });
     }
 
@@ -1208,7 +1210,7 @@
             }),
         }).then(function(res) { return res.json(); }).then(function(data) {
             if (data && data.success && data.factor_alias && typeof window.refreshICModule === 'function') {
-                return window.refreshICModule();
+                return Promise.resolve(window.refreshICModule()).then(function() { return data; });
             }
             return data;
         }).catch(function(err) {
@@ -1307,6 +1309,21 @@
             container.appendChild(chips);
         }
         container.appendChild(grid);
+        if (mount === LOCAL && manifest.tab && state.inlineManagers[manifest.tab.key]) {
+            var hasFactorCandidates = (manifest.settings || []).some(function(setting) {
+                return setting && setting.serialization && setting.serialization.kind === 'factor_candidate_list';
+            });
+            if (hasFactorCandidates) {
+                var managerWrap = document.createElement('div');
+                managerWrap.style.cssText = 'margin-top:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;';
+                container.appendChild(managerWrap);
+                renderFactorManager(managerWrap, {
+                    multiple: false,
+                    store: ensureGtLocalStore(),
+                    selected: (ensureGtLocalStore() && ensureGtLocalStore().effective('factor')) || '',
+                });
+            }
+        }
     }
 
     function activateTab(tabKey, mount, container) {

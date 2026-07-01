@@ -509,6 +509,141 @@
         }
     }
 
+    function normalizeFactorParamSelection(item, factorFamilyAlias) {
+        if (!item) return null;
+        if (item.factor_alias || item.factorAlias) return factorItemToParamSelection(item) || item;
+        var alias = item.alias || item.name || item.label || '';
+        if (!alias) return null;
+        var inLibrary = !!item.in_library;
+        var scope = item.scope_key || item.product_group || item.productGroup
+            || (inLibrary ? (item.library_product_group || 'default') : '现场');
+        return {
+            factor_alias: alias,
+            factor_family_alias: item.factor_family_alias || item.factorFamilyAlias || factorFamilyAlias || '',
+            owner_username: item.owner_username || item.ownerUsername || '',
+            owner_alias: item.owner_alias || item.ownerAlias || '',
+            scope_key: scope,
+            source_type: item.source_type || (inLibrary ? 'library' : 'session'),
+            params: item.params || {},
+            paramsSummary: alias
+        };
+    }
+
+    function candidateFromParamSelection(param) {
+        param = param || {};
+        var scope = param.scope_key || '';
+        var inLibrary = !!scope && scope !== '现场';
+        return {
+            alias: param.factor_alias || param.factorAlias || param.alias || '',
+            in_library: inLibrary,
+            library_product_group: (inLibrary && scope !== 'default' && scope !== '默认') ? scope : null,
+            params: clone(param.params || {})
+        };
+    }
+
+    function normalizeFactorParamList(items, factorFamilyAlias) {
+        return dedupe((Array.isArray(items) ? items : []).map(function(item) {
+            return normalizeFactorParamSelection(item, factorFamilyAlias);
+        }).filter(Boolean));
+    }
+
+    function renderFactorStoreManager(options) {
+        options = options || {};
+        var host = options.host;
+        if (!host) return;
+        var store = options.store;
+        if (!store || typeof store.effective !== 'function') {
+            host.textContent = '因子字段存储未初始化';
+            return;
+        }
+        var candidateKey = options.candidateKey || 'factor_candidates';
+        var factorKey = options.factorKey || 'factor';
+        var multiple = !!options.multiple;
+        var ffAlias = options.factorFamilyAlias || window.factorFamilyAlias || window._sftCurrentFactorId || '';
+        var paramDefs = options.paramDefs || [];
+        var escapeFn = options.escapeHTML || escapeHTML;
+        var currentParams = normalizeFactorParamList(store.effective(candidateKey), ffAlias);
+        var selected = options.selected !== undefined ? options.selected : store.effective(factorKey);
+        var selectedIds = multiple ? (Array.isArray(selected) ? selected : []) : [];
+        var currentSelection = multiple ? '' : String(selected || '');
+        var libraryPromise = typeof options.loadLibraryParams === 'function'
+            ? options.loadLibraryParams()
+            : Promise.resolve(options.libraryFactorParams || []);
+
+        host.innerHTML = '<div style="color:#64748b;font-size:12px;">正在加载因子库...</div>';
+        Promise.resolve(libraryPromise).then(function(libraryParams) {
+            renderFactorParamSettingsTab({
+                host: host,
+                prefix: options.prefix || 'factor-store-manager',
+                factorFamilyAlias: ffAlias,
+                paramDefs: paramDefs,
+                currentFactorParams: currentParams,
+                libraryFactorParams: normalizeFactorParamList(libraryParams, ffAlias),
+                selectionMode: multiple ? 'multi' : 'single',
+                selectedIds: selectedIds,
+                currentSelection: currentSelection,
+                manualTitle: options.manualTitle || '现场新增因子参数',
+                addLabel: options.addLabel || '新增到参数列表',
+                escapeHTML: escapeFn,
+                onToggle: function(alias) {
+                    if (typeof options.onToggle === 'function') options.onToggle(alias);
+                    else {
+                        var list = Array.isArray(store.effective(factorKey)) ? store.effective(factorKey).slice() : [];
+                        var idx = list.indexOf(alias);
+                        if (idx >= 0) list.splice(idx, 1); else list.push(alias);
+                        store.set(factorKey, list);
+                    }
+                    renderFactorStoreManager(options);
+                },
+                onSetDefault: function(alias) {
+                    if (typeof options.onSetDefault === 'function') options.onSetDefault(alias);
+                    else store.set(factorKey, alias || '');
+                    renderFactorStoreManager(options);
+                },
+                onRemoveParam: function(alias) {
+                    var next = currentParams.filter(function(p) { return p.factor_alias !== alias; }).map(candidateFromParamSelection);
+                    store.set(candidateKey, next);
+                    if (!multiple && String(store.effective(factorKey) || '') === String(alias || '')) store.set(factorKey, '');
+                    if (typeof options.onCandidatesChanged === 'function') options.onCandidatesChanged(next);
+                    renderFactorStoreManager(options);
+                },
+                onAddParam: function(alias, params) {
+                    if (!alias) return;
+                    var p = normalizeFactorParamSelection({
+                        alias: alias,
+                        factor_family_alias: ffAlias,
+                        scope_key: '现场',
+                        source_type: 'session',
+                        params: params || {}
+                    }, ffAlias);
+                    var registerResult = typeof options.onRegisterParam === 'function'
+                        ? options.onRegisterParam(p) : null;
+                    Promise.resolve(registerResult).then(function(registered) {
+                        var saved = normalizeFactorParamSelection(registered || p, ffAlias) || p;
+                        var next = dedupe(currentParams.concat([saved])).map(candidateFromParamSelection);
+                        store.set(candidateKey, next);
+                        if (typeof options.onCandidatesChanged === 'function') options.onCandidatesChanged(next);
+                        renderFactorStoreManager(options);
+                    });
+                },
+                onLoadFromLibrary: function(param) {
+                    if (!param) return;
+                    var registerResult = typeof options.onRegisterParam === 'function'
+                        ? options.onRegisterParam(param) : null;
+                    Promise.resolve(registerResult).then(function(registered) {
+                        var saved = normalizeFactorParamSelection(registered || param, ffAlias) || param;
+                        var next = dedupe(currentParams.concat([saved])).map(candidateFromParamSelection);
+                        store.set(candidateKey, next);
+                        if (typeof options.onCandidatesChanged === 'function') options.onCandidatesChanged(next);
+                        renderFactorStoreManager(options);
+                    });
+                }
+            });
+        }).catch(function(error) {
+            host.textContent = '加载失败：' + (error && error.message || error);
+        });
+    }
+
     /* ── public API ── */
 
     window.FactorParamSelectionUtils = {
@@ -527,6 +662,10 @@
         renderTableHeader: renderTableHeader,
         mountManualFactorParamBuilder: mountManualFactorParamBuilder,
         renderFactorParamSettingsTab: renderFactorParamSettingsTab,
+        normalizeFactorParamSelection: normalizeFactorParamSelection,
+        normalizeFactorParamList: normalizeFactorParamList,
+        candidateFromParamSelection: candidateFromParamSelection,
+        renderFactorStoreManager: renderFactorStoreManager,
         renderChipHtml: (window.ProductPathSelectionUtils && window.ProductPathSelectionUtils.renderChipHtml) || function(label, value, escapeFn) {
             escapeFn = escapeFn || escapeHTML;
             if (value !== undefined && value !== null && value !== '') {

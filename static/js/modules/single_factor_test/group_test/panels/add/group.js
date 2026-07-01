@@ -317,6 +317,7 @@
         if (factorHost && GT.panels.renderFactorChipList) {
             GT.panels.renderFactorChipList(factorHost, {
                 factors: factors,
+                store: GT.backendSettings && GT.backendSettings.ensureGtLocalStore ? GT.backendSettings.ensureGtLocalStore() : null,
                 selected: draft.selectedFactors || [],
                 multiple: true,
                 onToggle: function(alias) { _toggleFactor(alias, draft); },
@@ -624,6 +625,7 @@
         if (factorHost && GT.panels.renderFactorChipList) {
             GT.panels.renderFactorChipList(factorHost, {
                 factors: factors,
+                store: GT.backendSettings && GT.backendSettings.ensureGtLocalStore ? GT.backendSettings.ensureGtLocalStore() : null,
                 selected: factorAlias,
                 multiple: false,
                 onToggle: function(alias) { applyEditPatch({ factorAlias: alias }); },
