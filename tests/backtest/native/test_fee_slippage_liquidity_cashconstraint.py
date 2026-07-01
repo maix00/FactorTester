@@ -88,7 +88,7 @@ def test_fee_mode_custom_uses_unified_product_field_overrides():
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.01)
 
 
-def test_fee_mode_exact_without_historical_fields_raises_clearly():
+def test_engine_mode_exact_uses_auto_fee_and_requires_historical_fields():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -99,6 +99,7 @@ def test_fee_mode_exact_without_historical_fields_raises_clearly():
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
+    assert config.get(FeeModule.fee_mode) is None
     with pytest.raises(KeyError):
         _apply_fee(account, ctx, lambda a, c: None)
 

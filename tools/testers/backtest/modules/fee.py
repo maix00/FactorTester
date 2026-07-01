@@ -54,7 +54,6 @@ class FeeModule(ExecutableModule):
             public=True, label="费用", default="auto", control_template="select", tab="cost",
             options=(
                 ("auto", "自动"),
-                ("exact", "严格历史规则"),
                 ("custom", "自定义品种/合约"),
                 ("close_yesterday", "按平昨"),
                 ("close_today", "按平今"),
@@ -62,7 +61,7 @@ class FeeModule(ExecutableModule):
                 ("zero", "不计费用"),
             ),
             editable_when={"engine_mode": ("custom",)},
-            default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"}},
+            default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "auto"}},
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
@@ -233,10 +232,8 @@ def _resolve_fee_mode(config) -> str:
     engine_mode = engine_mode_for(config)
     if engine_mode == "basic":
         return "zero"
-    if engine_mode == "auto":
+    if engine_mode in {"auto", "exact"}:
         return "auto"
-    if engine_mode == "exact":
-        return "exact"
     return _normalise_fee_mode(config.get(FeeModule.fee_mode, "auto"))
 
 
