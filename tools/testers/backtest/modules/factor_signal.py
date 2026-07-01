@@ -258,7 +258,7 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
     drafts: list[EventDraft] = []
     for calculation_key, strategies in by_calculation.items():
         factor = factor_by_calculation[calculation_key]
-        table = _evaluate_factor_for_strategies(factor, strategies, account)
+        table = _evaluate_factor_for_strategies(factor, strategies, account, ctx)
         for schedule_key, scheduled_strategies in _group_strategies_by_precomputed_schedule(
             calculation_key, strategies, account,
         ).items():
@@ -354,11 +354,11 @@ def _precomputed_schedule_key(calculation_key: tuple, config) -> tuple:
     )
 
 
-def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> pd.DataFrame:
+def _evaluate_factor_for_strategies(factor: Any, strategies: list, account, ctx) -> pd.DataFrame:
     start_dt, end_dt = _run_window_envelope_for_strategies(strategies, account)
     warmup_window = _warmup_window_for_strategies(factor, strategies, account)
-    frequency = _market_data_frequency_for_strategies(strategies, account)
-    _market_data_source_for_strategies(strategies, account)
+    frequency = _market_data_frequency_for_strategies(strategies, ctx)
+    _market_data_source_for_strategies(strategies, ctx)
     evaluate = getattr(factor, "evaluate")
     if start_dt is None or end_dt is None:
         return evaluate()
@@ -380,9 +380,12 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> p
     return evaluate()
 
 
-def _market_data_frequency_for_strategies(strategies: list, account) -> Any | None:
-    by_strategy = getattr(account, "market_data_required_frequencies", {}) or {}
-    frequencies = [by_strategy.get(strategy) for strategy in strategies if by_strategy.get(strategy) is not None]
+def _market_data_frequency_for_strategies(strategies: list, ctx) -> Any | None:
+    frequencies = [
+        ctx.get_for(MarketDataModule.required_frequency, strategy)
+        for strategy in strategies
+        if ctx.get_for(MarketDataModule.required_frequency, strategy) is not None
+    ]
     unique = {getattr(freq, "name", str(freq)): freq for freq in frequencies}
     if len(unique) > 1:
         labels = ", ".join(sorted(unique))
@@ -390,12 +393,11 @@ def _market_data_frequency_for_strategies(strategies: list, account) -> Any | No
     return next(iter(unique.values()), None)
 
 
-def _market_data_source_for_strategies(strategies: list, account) -> tuple[str, ...] | None:
-    by_strategy = getattr(account, "market_data_required_sources", {}) or {}
+def _market_data_source_for_strategies(strategies: list, ctx) -> tuple[str, ...] | None:
     sources = [
         _market_data_source_key(source)
         for strategy in strategies
-        if (source := by_strategy.get(strategy)) is not None
+        if (source := ctx.get_for(MarketDataModule.required_data_source, strategy)) is not None
     ]
     unique = set(sources)
     if len(unique) > 1:

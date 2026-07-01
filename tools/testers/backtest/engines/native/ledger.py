@@ -97,10 +97,6 @@ class AccountState:
         )
         self.raw_market_data: dict[str, Any] = {}
         self.market_data_request: dict[str, Any] = {}
-        self.market_data_required_source: tuple[str, ...] = ()
-        self.market_data_required_sources: dict["Strategy", tuple[str, ...]] = {}
-        self.market_data_required_frequency: Any = None
-        self.market_data_required_frequencies: dict["Strategy", Any] = {}
         self.backtest_included_products: frozenset[Any] | None = None
         self.backtest_excluded_out_of_range_products: tuple[Any, ...] = ()
         self.runtime_info_rows: list[dict[str, Any]] = []

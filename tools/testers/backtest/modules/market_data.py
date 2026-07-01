@@ -288,10 +288,8 @@ def _resolve_market_data_request(account, ctx) -> None:
             "当前 native 行情表仍要求同一批回测使用同一个 Bar 频率；"
             f"解析到多个频率: {labels}。请拆分批次，或等待按频率分组的事件队列实现。"
         )
-    account.market_data_required_sources = sources_by_strategy
-    account.market_data_required_source = next(iter(unique_sources), ())
-    account.market_data_required_frequencies = frequencies_by_strategy
-    account.market_data_required_frequency = next(iter(unique.values()), None)
+    ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
+    ctx.set(MarketDataModule.required_frequency, next(iter(unique.values()), None))
 
 
 def _required_data_source_for_strategy(config) -> tuple[str, ...]:
@@ -404,8 +402,8 @@ def _check_market_data_coverage(account, ctx) -> None:
     products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
-    required_frequency = getattr(account, "market_data_required_frequency", None)
-    required_source = getattr(account, "market_data_required_source", ())
+    required_frequency = ctx.get(MarketDataModule.required_frequency)
+    required_source = ctx.get(MarketDataModule.required_data_source, ())
     missing_products: list[str] = []
     missing_frequency_products: list[str] = []
     missing_source_products: list[str] = []

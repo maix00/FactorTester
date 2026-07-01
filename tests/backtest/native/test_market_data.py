@@ -112,9 +112,10 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
     product = _Product()
     account = AccountState()
     account.market_data_request = {"products": [product]}
-    account.market_data_required_frequency = DataFreq.MIN1
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
 
-    _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+    _check_market_data_coverage(account, ctx)
 
     assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, None)]
 
@@ -130,10 +131,11 @@ def test_check_market_data_coverage_rejects_missing_resolved_frequency():
 
     account = AccountState()
     account.market_data_request = {"products": [_Product()]}
-    account.market_data_required_frequency = DataFreq.MIN1
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
 
     with pytest.raises(ValueError, match="缺少所需 Bar 频率 MIN1"):
-        _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+        _check_market_data_coverage(account, ctx)
 
 
 def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
@@ -195,11 +197,12 @@ def test_check_market_data_coverage_rejects_missing_required_data_source():
 
     account = AccountState()
     account.market_data_request = {"products": [_Product()]}
-    account.market_data_required_frequency = DataFreq.MIN1
-    account.market_data_required_source = ("MissingSource",)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
+    ctx.set(MarketDataModule.required_data_source, ("MissingSource",))
 
     with pytest.raises(ValueError, match="缺少所需数据源 MissingSource"):
-        _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+        _check_market_data_coverage(account, ctx)
 
 
 def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(monkeypatch):
@@ -213,8 +216,9 @@ def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(mon
     source = object()
     account = AccountState()
     account.market_data_request = {"products": [product]}
-    account.market_data_required_frequency = DataFreq.MIN1
-    account.market_data_required_source = ("Local",)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
+    ctx.set(MarketDataModule.required_data_source, ("Local",))
     monkeypatch.setattr(
         "tools.testers.backtest.modules.market_data.DataProviderProductTS.available_for_product",
         lambda selected_product, freq: [source] if selected_product is product and DataFreq(freq) == DataFreq.MIN1 else [],
@@ -227,7 +231,7 @@ def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(mon
         })(),) if key == "Local" else (),
     )
 
-    _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
+    _check_market_data_coverage(account, ctx)
 
     assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, source)]
 
