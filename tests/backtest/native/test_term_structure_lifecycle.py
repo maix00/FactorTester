@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import AccountState, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -119,7 +119,7 @@ class _CoverageOnlyTwoContractTermProduct(_TermProduct):
 def test_term_structure_registers_force_close_event_before_expiry():
     strategy = Strategy(alias="A")
     product = _TermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -155,7 +155,7 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatc
     monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -191,7 +191,7 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
     monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTwoContractTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -252,7 +252,7 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
         pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
         pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
     ])
-    account = AccountState(strategy_configs={})
+    account = RunState(strategy_configs={})
     account.raw_prices_table = pd.DataFrame({
         _Contract("P2601.DCE"): [1.0, 1.0, None],
         _Contract("P2602.DCE"): [None, 2.0, 2.0],
@@ -282,7 +282,7 @@ def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypa
     })
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -457,7 +457,7 @@ def test_exact_mode_raises_when_coverage_inference_is_inconclusive(monkeypatch):
     # No raw_prices_table at all: coverage inference has nothing to check
     # against, so it cannot conclude the contract has stopped trading either.
     product = _CoverageOnlyTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -483,7 +483,7 @@ def test_exact_mode_raises_when_coverage_inference_is_inconclusive(monkeypatch):
 def test_term_structure_force_close_offset_accepts_intraday_window():
     strategy = Strategy(alias="A")
     product = _TermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -514,7 +514,7 @@ def test_term_structure_force_close_offset_accepts_intraday_window():
 def test_force_close_event_emits_reverse_order_for_existing_position():
     strategy = Strategy(alias="A")
     contract = _Contract("P2601.DCE")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy),
     })
     from tools.testers.backtest.engines.native.ledger import Ledger
@@ -550,7 +550,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
 def test_signal_target_weights_map_abstract_product_to_current_contract():
     strategy = Strategy(alias="A")
     product = _TwoContractTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -584,7 +584,7 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
 def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time():
     strategy = Strategy(alias="A")
     product = _TwoContractTermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -618,7 +618,7 @@ def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time(
 def test_rollover_module_registers_rollover_notice_independently():
     strategy = Strategy(alias="A")
     product = _TermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={
@@ -652,7 +652,7 @@ def test_rollover_module_registers_rollover_notice_independently():
 def test_rollover_day_window_uses_trading_axis_not_calendar_days():
     strategy = Strategy(alias="A")
     product = _TermProduct()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.ledger import RunState
 from tools.testers.backtest.engines.native.scheduler import (
     FlowRegistry,
     activity_manifest_from_groups,
@@ -26,7 +26,7 @@ def _event_labels(manifest: list[dict]) -> list[str]:
 
 
 def test_activity_manifest_hides_long_short_flow_when_no_long_short_strategy():
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, {
         "A1": {
             "factor_mode": "precomputed",
@@ -41,7 +41,7 @@ def test_activity_manifest_hides_long_short_flow_when_no_long_short_strategy():
 
 
 def test_activity_manifest_dedupes_logical_live_signal_flow():
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, {
         "A1": {
             "factor_mode": "incremental",

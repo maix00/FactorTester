@@ -5,7 +5,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.ledger import RunState
 from tools.testers.backtest.engines.native.ledger import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -22,7 +22,7 @@ from tools.testers.backtest.modules.product_selection import ProductSelectionMod
 
 
 def test_load_raw_market_data_reads_from_account_supplied_input():
-    account = AccountState()
+    account = RunState()
     raw_prices = pd.DataFrame({"P1": [1.0, 2.0]}, index=pd.date_range("2024-01-01", periods=2))
     account.raw_market_data = {"raw_prices": raw_prices, "lot_sizes": {"P1": 5.0}}
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -46,7 +46,7 @@ def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
 
     p1 = _Product("ER.CZC")
     p2 = _Product("ME.CZC")
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [p1, p2]}
     setattr(account, "_market_data_load_plan", [(p1, DataFreq.MIN1), (p2, DataFreq.MIN1)])
     account.runtime_info_rows = []
@@ -74,7 +74,7 @@ def test_check_market_data_coverage_excludes_lifecycle_ended_product_without_fre
             return []
 
     product = _Product()
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {
         "products": [product],
         "start_dt": DataTime.parse("2026-01-01 09:00:00", tz="Asia/Shanghai"),
@@ -110,7 +110,7 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
             return [DataFreq.DAY1, DataFreq.MIN1]
 
     product = _Product()
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [product]}
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
@@ -129,7 +129,7 @@ def test_check_market_data_coverage_rejects_missing_resolved_frequency():
         def list_available_freqs(self):
             return [DataFreq.DAY1]
 
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [_Product()]}
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
@@ -150,7 +150,7 @@ def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
     product = _Product()
     s1 = Strategy(alias="S1")
     s2 = Strategy(alias="S2")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, field_values={
             MarketDataModule.freq_mode: "fixed",
             MarketDataModule.freq_fixed: "MIN1",
@@ -167,7 +167,7 @@ def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
     with pytest.raises(ValueError, match="多个频率"):
         _resolve_market_data_request(account, ctx)
 
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, field_values={
             MarketDataModule.data_source_mode: "list",
             MarketDataModule.data_source: ["A"],
@@ -195,7 +195,7 @@ def test_check_market_data_coverage_rejects_missing_required_data_source():
         def list_available_freqs(self):
             return [DataFreq.MIN1]
 
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [_Product()]}
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
@@ -214,7 +214,7 @@ def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(mon
 
     product = _Product()
     source = object()
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [product]}
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set(MarketDataModule.required_frequency, DataFreq.MIN1)
@@ -269,7 +269,7 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
             return frame[list(columns)]
 
     product = _Product()
-    account = AccountState()
+    account = RunState()
     account.market_data_request = {"products": [product]}
     setattr(account, "_market_data_load_plan", [(product, DataFreq.MIN1)])
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -308,7 +308,7 @@ def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
     live = Strategy(alias="live")
     precomputed = Strategy(alias="pre")
     product = _Product()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         live: StrategyConfig(
             strategy=live,
             active_flow_names=frozenset({"signal_live"}),
@@ -337,7 +337,7 @@ def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
 
 
 def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
-    account = AccountState()
+    account = RunState()
     idx = pd.date_range("2024-01-01", periods=4)
     raw_prices = pd.DataFrame({"P1": [10.0, np.nan, np.nan, 40.0]}, index=idx)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())

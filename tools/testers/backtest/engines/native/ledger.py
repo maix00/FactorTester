@@ -1,7 +1,9 @@
-"""Ledger/AccountState — per-strategy account state, isolated by Strategy.
-`Ledger` itself owns no named business fields (cash/positions are declared
-by LedgerModule, step 3.1) — it's a generic FieldRef-keyed bag, same
-pattern as FlowContext."""
+"""Ledger and RunState primitives for the native backtest engine.
+
+`Ledger` is per-strategy account state. `RunState` is the whole native run's
+long-lived container: strategy registry, ledgers, result store, and module
+caches that must survive across FlowContext batches.
+"""
 
 from __future__ import annotations
 
@@ -80,7 +82,7 @@ class StrategyConfig:
         return flow_name in self.active_flow_names
 
 
-class AccountState:
+class RunState:
     def __init__(
         self,
         ledgers: dict["Strategy", Ledger] | None = None,

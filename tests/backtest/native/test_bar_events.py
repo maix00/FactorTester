@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.events import EventKind
@@ -15,7 +15,7 @@ from tools.testers.backtest.modules.run_window import RunWindowModule
 def test_bar_events_only_registered_for_live_strategies():
     live = Strategy(alias="live")
     precomputed = Strategy(alias="pre")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         live: StrategyConfig(strategy=live, active_flow_names=frozenset({"signal_live"})),
         precomputed: StrategyConfig(strategy=precomputed, active_flow_names=frozenset({"signal_precomputed"})),
     })
@@ -36,7 +36,7 @@ def test_bar_events_only_registered_for_live_strategies():
 
 def test_bar_events_not_registered_when_every_strategy_is_precomputed():
     strategy = Strategy(alias="pre")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy, active_flow_names=frozenset({"signal_precomputed"})),
     })
     account.current_prices_table = pd.DataFrame(
@@ -56,7 +56,7 @@ def test_bar_events_deduplicate_strategies_sharing_one_live_factor():
     first = Strategy(alias="first")
     second = Strategy(alias="second")
     shared_factor = object()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         first: StrategyConfig(
             strategy=first,
             active_flow_names=frozenset({"signal_live"}),
@@ -98,7 +98,7 @@ def test_bar_events_split_shared_factor_by_strategy_warmup_window():
         RunWindowModule.end_time: "15:00",
         FactorSignalModule.warmup_mode: "fixed",
     }
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         first: StrategyConfig(
             strategy=first,
             active_flow_names=frozenset({"signal_live"}),
@@ -133,7 +133,7 @@ def test_bar_events_split_shared_factor_by_strategy_warmup_window():
 
 def test_bar_events_warmup_counts_actual_bars_not_calendar_time():
     strategy = Strategy(alias="live")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             active_flow_names=frozenset({"signal_live"}),

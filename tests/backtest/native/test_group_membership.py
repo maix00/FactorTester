@@ -7,7 +7,7 @@ import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -32,7 +32,7 @@ def test_group_quantile_membership_selects_lowest_bucket():
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set_for(FactorSignalModule.signal_value, s, signal_value)
 
@@ -49,7 +49,7 @@ def test_group_quantile_membership_ignores_products_without_current_price():
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {tradable: 10.0})
     ctx.set_for(FactorSignalModule.signal_value, s, {removed: 1.0, tradable: 2.0})
@@ -67,7 +67,7 @@ def test_group_quantile_membership_selects_highest_bucket():
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 1,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set_for(FactorSignalModule.signal_value, s, signal_value)
 
@@ -81,7 +81,7 @@ def test_resolve_execution_timestamp_rejects_same_bar_execution():
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.execution_timing: "same_bar",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue())
     with pytest.raises(ValueError, match="next-bar open"):
@@ -94,7 +94,7 @@ def test_resolve_execution_timestamp_next_bar_advances_by_delay():
         GroupMembershipModule.execution_timing: "next_bar",
         GroupMembershipModule.execution_delay_bars: 2,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {"P1": [1, 2, 3, 4]}, index=pd.date_range("2024-01-01", periods=4))
     t = pd.Timestamp("2024-01-01")
@@ -106,7 +106,7 @@ def test_resolve_execution_timestamp_next_bar_advances_by_delay():
 def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_boundary_event():
     s_open = Strategy(alias="open")
     idx = pd.date_range("2024-01-01 09:01", periods=3, freq="1min")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s_open: StrategyConfig(strategy=s_open, field_values={
             GroupMembershipModule.execution_timing: "next_bar",
             GroupMembershipModule.execution_delay_bars: 1,
@@ -125,7 +125,7 @@ def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_b
 def test_resolve_execution_schedule_rejects_non_open_price_basis():
     s = Strategy(alias="S")
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s: StrategyConfig(strategy=s, field_values={
             GroupMembershipModule.execution_timing: "next_bar",
             OrderExecutionModule.execution_price_basis: "close",
@@ -144,7 +144,7 @@ def test_resolve_execution_timestamp_clips_to_last_available_bar():
         GroupMembershipModule.execution_timing: "next_bar",
         GroupMembershipModule.execution_delay_bars: 10,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {"P1": [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     t = pd.Timestamp("2024-01-01")
@@ -161,7 +161,7 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
         GroupMembershipModule.execution_timing: "next_bar",
         OrderExecutionModule.execution_price_basis: "open",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
@@ -191,7 +191,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
         GroupMembershipModule.execution_timing: "next_bar",
         GroupMembershipModule.execution_delay_bars: 2,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {p: [1, 2, 3, 4]}, index=pd.date_range("2024-01-01", periods=4))
     queue = EventQueue()
@@ -225,7 +225,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
         GroupMembershipModule.execution_delay_bars: 1,
         OrderExecutionModule.execution_price_basis: "open",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
@@ -253,7 +253,7 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
         GroupMembershipModule.execution_timing: "next_bar",
         OrderExecutionModule.execution_price_basis: "open",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     account.current_prices_table = pd.DataFrame(
         {p1: [1, 2], p2: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
@@ -280,7 +280,7 @@ def test_buy_and_hold_freezes_target_weights_after_first_computation():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.position_policy: "buy_and_hold",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
 
     ctx1 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
@@ -304,7 +304,7 @@ def test_rebalance_to_target_recomputes_every_time():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.position_policy: "rebalance_to_target",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
 
     ctx1 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
@@ -326,7 +326,7 @@ def test_membership_change_trigger_skips_recompute_when_bucket_unchanged():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.rebalance_trigger: "membership_change",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
 
     ctx1 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
@@ -348,7 +348,7 @@ def test_membership_change_trigger_recomputes_when_bucket_actually_changes():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.rebalance_trigger: "membership_change",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
 
     ctx1 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
@@ -371,7 +371,7 @@ def test_scheduled_trigger_raises_not_implemented():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.rebalance_trigger: "scheduled",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
     with pytest.raises(NotImplementedError):
@@ -386,7 +386,7 @@ def test_inverse_volatility_allocates_more_to_calmer_product():
         GroupMembershipModule.allocation_policy: "inverse_volatility",
         GroupMembershipModule.volatility_lookback: 3,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=5)
     account.current_prices_table = pd.DataFrame({
         p_calm: [100.0, 101.0, 100.0, 101.0, 100.0],       # low volatility
@@ -411,7 +411,7 @@ def test_inverse_volatility_warmup_equal_notional_fallback_for_insufficient_hist
         GroupMembershipModule.volatility_lookback: 3,
         GroupMembershipModule.volatility_warmup: "equal_notional",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=5)
     account.current_prices_table = pd.DataFrame({
         p_established: [100.0, 101.0, 100.0, 101.0, 100.0],
@@ -436,7 +436,7 @@ def test_inverse_volatility_warmup_error_raises_for_insufficient_history():
         GroupMembershipModule.volatility_lookback: 10,
         GroupMembershipModule.volatility_warmup: "error",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=2)
     account.current_prices_table = pd.DataFrame({p_new: [100.0, 101.0]}, index=idx)
 
@@ -452,7 +452,7 @@ def test_target_trace_records_fresh_computation():
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     t = pd.Timestamp("2024-01-01")
 
     ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -471,7 +471,7 @@ def test_target_trace_not_recorded_when_membership_change_skips_recompute():
         GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
         GroupMembershipModule.rebalance_trigger: "membership_change",
     })
-    account = AccountState(strategy_configs={s: config})
+    account = RunState(strategy_configs={s: config})
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
 
     ctx1 = FlowContext(timestamp=t1, event_queue=EventQueue(), active_strategies=frozenset({s}))

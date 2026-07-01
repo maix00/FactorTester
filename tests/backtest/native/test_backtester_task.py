@@ -15,7 +15,7 @@ import pytest
 from tools.factors.factor_tester_state import FactorTesterState
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.backtester import run_backtest_task
-from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.ledger import RunState
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
 
@@ -56,7 +56,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
             "base_currency": "CNY", "engine_mode": "basic",
         },
     }
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
@@ -112,7 +112,7 @@ def test_run_backtest_task_rejects_non_native_engine_without_fallback():
             "engine_mode": "basic",
         },
     }
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": pd.DataFrame({p1: [10.0, 11.0]}, index=idx)}
 

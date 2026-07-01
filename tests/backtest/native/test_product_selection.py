@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule, _resolve_product_selection
@@ -29,7 +29,7 @@ def test_resolve_product_selection_dedups_by_selection_id():
         s2: StrategyConfig(strategy=s2, field_values={ProductSelectionModule.product_path_selection: shared}),
         s3: StrategyConfig(strategy=s3, field_values={ProductSelectionModule.product_path_selection: other}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     _resolve_product_selection(account, ctx)
 

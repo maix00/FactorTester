@@ -16,7 +16,7 @@ import pytest
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.FactorExpr import ColumnRef
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import AccountState
+from tools.testers.backtest.engines.native.ledger import RunState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
@@ -79,7 +79,7 @@ def test_full_engine_runs_two_product_two_day_backtest():
         },
     }
 
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
@@ -119,7 +119,7 @@ def test_full_engine_two_strategies_independent_results():
         "A2": {**base_settings, "group_index": 1},
     }
 
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, resolved_settings)
     account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
@@ -209,7 +209,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
     frontend_payload["A1"]["product_path_selection"] = selection
     frontend_payload["A1"]["factor"] = factor
 
-    account = AccountState()
+    account = RunState()
     apply_strategy_configs(account, frontend_payload)
     account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 

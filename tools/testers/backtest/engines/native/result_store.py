@@ -1,7 +1,7 @@
-"""ResultStore — the front-end-facing results container, kept separate from
-AccountState (account = mutable simulation state; results = the output
-read after the run, or incrementally during it). Keyed by Strategy so
-multi-strategy/multi-group results stay isolated, same pattern as Ledger.
+"""ResultStore — the front-end-facing results container.
+
+RunState owns one ResultStore for the run, but result rows stay isolated here
+by Strategy so multi-strategy/multi-group results do not leak into each other.
 """
 
 from __future__ import annotations

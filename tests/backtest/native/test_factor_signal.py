@@ -7,7 +7,7 @@ import pandas as pd
 from tools.data.types import DataColumn
 from tools.factors.expr import ColumnRef
 from tools.data.types.time_freq import DataFreq
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
@@ -101,7 +101,7 @@ def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
         s3: StrategyConfig(strategy=s3, active_flow_names=frozenset({"signal_live"}),
                             field_values={FactorSignalModule.signal_freq: "1h"}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     account.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0]}, index=pd.date_range("2024-01-01", periods=2))
 
     aligned = pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-01")])
@@ -139,7 +139,7 @@ def test_signal_precomputed_groups_by_factor_identity():
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
                             field_values={FactorModule.factor: shared_factor}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _schedule_signal_precomputed_timestamps(account, ctx)
@@ -172,7 +172,7 @@ def test_signal_precomputed_splits_shared_factor_by_warmup_window():
         RunWindowModule.end_time: "10:00",
         FactorSignalModule.warmup_mode: "fixed",
     }
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s1: StrategyConfig(
             strategy=s1,
             active_flow_names=frozenset({"signal_precomputed"}),
@@ -237,7 +237,7 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
             },
         ),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     queue = EventQueue()
     ctx = FlowContext(timestamp=None, event_queue=queue)
 
@@ -305,7 +305,7 @@ def test_signal_precomputed_merges_equivalent_exact_windows_across_timezones():
             },
         ),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _schedule_signal_precomputed_timestamps(account, ctx)
@@ -341,7 +341,7 @@ def test_signal_precomputed_splits_factor_evaluate_by_run_window():
         RunWindowModule.start_time: "09:00",
         RunWindowModule.end_time: "15:00",
     }
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s1: StrategyConfig(
             strategy=s1,
             active_flow_names=frozenset({"signal_precomputed"}),
@@ -385,7 +385,7 @@ def test_fixed_warmup_extends_evaluate_but_is_clipped_before_signal_align():
             )
 
     factor = _FakeFactor()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             active_flow_names=frozenset({"signal_precomputed"}),
@@ -440,7 +440,7 @@ def test_auto_warmup_infers_nested_time_windows_for_evaluate_warmup():
             )
 
     factor = _FakeFactor()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             active_flow_names=frozenset({"signal_precomputed"}),
@@ -483,7 +483,7 @@ def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
         RunWindowModule.start_time: "08:00",
         RunWindowModule.end_time: "10:00",
     }
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}), field_values=fields),
     })
@@ -519,7 +519,7 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
                            field_values={FactorModule.factor: factor}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     timestamp = pd.Timestamp("2026-03-09 21:00")
     index = pd.MultiIndex.from_tuples(
         [
@@ -576,7 +576,7 @@ def test_signal_precomputed_groups_by_adapter_cache_key():
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
                             field_values={FactorModule.factor: _Adapter(wrapped)}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _schedule_signal_precomputed_timestamps(account, ctx)
@@ -606,7 +606,7 @@ def test_signal_precomputed_does_not_share_different_adapter_cache_keys():
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"}),
                             field_values={FactorModule.factor: _Adapter("P2")}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _schedule_signal_precomputed_timestamps(account, ctx)
@@ -639,7 +639,7 @@ def test_signal_precomputed_calendar_frequency_aligns_schedule():
             FactorSignalModule.end_session_gap: "3h",
         },
     )
-    account = AccountState(strategy_configs={strategy: config})
+    account = RunState(strategy_configs={strategy: config})
     queue = EventQueue()
     ctx = FlowContext(timestamp=None, event_queue=queue)
 
@@ -678,7 +678,7 @@ def test_signal_live_observes_bars_then_signals_from_causal_price_table():
         s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: shared_factor}),
         s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: shared_factor}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     prices_ref = FieldRef("current_prices", owner="MarketDataModule")
 
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
@@ -722,7 +722,7 @@ def test_signal_live_on_event_does_not_call_zero_arg_evaluate_fallback():
         s1: StrategyConfig(strategy=s1, field_values={FactorModule.factor: shared_factor}),
         s2: StrategyConfig(strategy=s2, field_values={FactorModule.factor: shared_factor}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                       active_strategies=frozenset({s1, s2}))
 
@@ -739,7 +739,7 @@ def test_signal_live_compiles_factor_expr_executor_from_bar_events():
     configs = {
         strategy: StrategyConfig(strategy=strategy, field_values={FactorModule.factor: factor}),
     }
-    account = AccountState(strategy_configs=configs)
+    account = RunState(strategy_configs=configs)
     prices_ref = FieldRef("current_prices", owner="MarketDataModule")
 
     bar_ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),

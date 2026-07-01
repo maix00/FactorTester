@@ -4,7 +4,7 @@ import dataclasses
 
 import pandas as pd
 
-from tools.testers.backtest.engines.native.ledger import AccountState, Ledger
+from tools.testers.backtest.engines.native.ledger import RunState, Ledger
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.base import FieldRef
@@ -29,7 +29,7 @@ def test_account_state_ledger_for_isolates_strategies():
     s2 = Strategy(alias="S2")
     l1 = Ledger(strategy=s1, base_currency="CNY")
     l2 = Ledger(strategy=s2, base_currency="CNY")
-    account = AccountState(ledgers={s1: l1, s2: l2})
+    account = RunState(ledgers={s1: l1, s2: l2})
 
     o1 = Order(instrument="P1", timestamp=pd.Timestamp("2024-01-01"),
                quantity=1.0, intent_quantity=1.0, strategy=s1)

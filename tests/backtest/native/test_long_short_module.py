@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
@@ -25,7 +25,7 @@ def test_long_short_composes_peer_strategy_targets_without_group_fields():
     short_strategy = Strategy(alias="carry_short")
     ls_strategy = Strategy(alias="ls")
     p_long_a, p_long_b, p_short = _product(), _product(), _product()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         long_strategy: StrategyConfig(strategy=long_strategy),
         short_strategy: StrategyConfig(strategy=short_strategy),
         ls_strategy: StrategyConfig(strategy=ls_strategy, field_values={
@@ -57,7 +57,7 @@ def test_long_short_removes_overlapping_legs_and_reports_diagnostics():
     short_strategy = Strategy(alias="B")
     ls_strategy = Strategy(alias="LS")
     overlap, long_only, short_only = _product(), _product(), _product()
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         long_strategy: StrategyConfig(strategy=long_strategy),
         short_strategy: StrategyConfig(strategy=short_strategy),
         ls_strategy: StrategyConfig(strategy=ls_strategy, field_values={

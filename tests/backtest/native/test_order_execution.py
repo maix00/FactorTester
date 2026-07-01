@@ -6,7 +6,7 @@ import pandas as pd
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import AccountState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -22,7 +22,7 @@ def test_execution_price_uses_next_bar_open_price_timestamp():
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
     price_ts = idx[1]
     open_strategy = Strategy(alias="open")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         open_strategy: StrategyConfig(strategy=open_strategy, field_values={
             OrderExecutionModule.execution_price_basis: "open",
         }),
@@ -50,7 +50,7 @@ def test_execution_price_rejects_close_or_vwap_basis():
     idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
     price_ts = idx[1]
     strategy = Strategy(alias="close")
-    account = AccountState(strategy_configs={
+    account = RunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy, field_values={
             OrderExecutionModule.execution_price_basis: "close",
         }),
