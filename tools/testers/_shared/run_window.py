@@ -66,3 +66,8 @@ def register_run_window_base(
         visible_when={"time_precision": ("exact",)},
         serialization={"display_order": 60},
     ))
+    app.register_setting(SettingDefinition(
+        "evaluation_split", "样本切分", tab, "date", None, scope_policy,
+        module="run_window", chip_template="样本切分: {value}",
+        serialization={"display_order": 70},
+    ))

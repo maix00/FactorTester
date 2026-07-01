@@ -146,6 +146,12 @@ def register_run_window_base(
         serialization={"display_order": 60},
         **tab_kwargs,
     ))
+    app.register_setting(SettingDefinition(
+        "evaluation_split", "样本切分", tab, "date", None, scope_policy,
+        module="run_window", chip_template="样本切分: {value}",
+        serialization={"display_order": 70},
+        **tab_kwargs,
+    ))
 
 
 def register_product_path_selection_base(

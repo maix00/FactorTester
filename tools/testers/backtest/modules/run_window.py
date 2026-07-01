@@ -99,8 +99,9 @@ class RunWindowModule(ExecutableModule):
             serialization={"display_order": 60},
         ),
         "evaluation_split": FieldDefinition(
-            public=True, label="样本切分", default=None, control_template="date", tab="evaluation",
-            chip_template="样本切分: {value}", tab_label="样本划分", tab_order=200,
+            public=True, label="样本切分", default=None, control_template="date", tab="time",
+            chip_template="样本切分: {value}", tab_label="时间范围", tab_order=40,
+            serialization={"display_order": 70},
         ),
         "strategy_windows": FieldDefinition(public=False),
         "run_window_envelope": FieldDefinition(public=False),

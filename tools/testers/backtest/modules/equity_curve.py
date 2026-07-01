@@ -2,7 +2,7 @@
 margin over time into ResultStore. The recording itself always happens
 per-event (there is no separate "recompute the whole curve after the fact
 from scratch" algorithm -- the per-event state already computed by
-LedgerModule is the only source of truth). `compute_live` only controls
+LedgerModule is the only source of truth). `equity_compute_live` only controls
 whether ResultStore is also updated incrementally *during* the run (useful
 for a streaming UI) or only once, in POST_REPLAY, from the buffered history
 -- both modes produce the exact same final curves, since both read from the
@@ -34,12 +34,20 @@ class EquityCurveModule(ExecutableModule):
     key: ClassVar[str] = "equity_curve"
     label: ClassVar[str] = "净值曲线"
 
-    compute_live: ClassVar[FieldRef[bool]] = FieldRef("compute_live")
+    equity_compute_live: ClassVar[FieldRef[bool]] = FieldRef("equity_compute_live")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
-        "compute_live": FieldDefinition(
-            public=True, label="实时净值", default=True, control_template="boolean", tab="evaluation",
-            chip_template="实时净值: {value}", tab_label="样本划分", tab_order=200,
+        "equity_compute_live": FieldDefinition(
+            public=True,
+            label="净值实时计算",
+            default=True,
+            control_template="boolean",
+            tab="engine",
+            chip_template="净值实时计算: {value}",
+            tab_label="执行引擎",
+            tab_order=10,
+            help_text="控制回放过程中是否向结果存储实时写入净值曲线；关闭后仍会在回放结束后从事件缓冲生成同一条最终净值曲线。",
+            serialization={"display_order": 30},
         ),
     }
 
@@ -114,14 +122,14 @@ def _record_equity(account, ctx) -> None:
         record = _snapshot_strategy_state(account, strategy, prices, historical_fields) or {}
         record["equity"] = equity
         buffer.setdefault(strategy, []).append((ctx.timestamp, record))
-        if account.config_for(strategy).get(EquityCurveModule.compute_live, True):
+        if account.config_for(strategy).get(EquityCurveModule.equity_compute_live, True):
             account.results.append(strategy, ctx.timestamp, **record)
 
 
 def _flush_equity_post_replay(account, ctx) -> None:
     buffer = _ensure_buffer(account)
     for strategy, points in buffer.items():
-        if account.config_for(strategy).get(EquityCurveModule.compute_live, True):
+        if account.config_for(strategy).get(EquityCurveModule.equity_compute_live, True):
             continue  # already streamed in during PER_EVENT
         for timestamp, record in points:
             account.results.append(strategy, timestamp, **record)

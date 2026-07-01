@@ -776,9 +776,9 @@
         } else if (setting.control_template === 'date') {
             control = document.createElement('input');
             control.type = 'date';
-        } else if (setting.control_template === 'number' || setting.control_template === 'time') {
+        } else if (setting.control_template === 'number' || setting.control_template === 'time' || setting.control_template === 'text') {
             control = document.createElement('input');
-            control.type = setting.control_template;
+            control.type = setting.control_template === 'text' ? 'text' : setting.control_template;
             if (setting.control_template === 'time') control.step = '60';
             [['min', 'minimum'], ['max', 'maximum'], ['step', 'step']].forEach(function(pair) {
                 if (setting[pair[1]] !== null && setting[pair[1]] !== undefined) control.setAttribute(pair[0], setting[pair[1]]);

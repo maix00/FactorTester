@@ -20,7 +20,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "group_strategy", "cost", "order", "liquidity", "margin",
-        "accounting", "calendar", "evaluation",
+        "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
         "local-settings": ["engine"],
@@ -31,7 +31,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
         "rebalance_trigger", "position_policy",
         "group_strategy", "cost", "order", "liquidity", "margin",
-        "accounting", "calendar", "evaluation",
+        "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
     assert index["defaults"]["engine"]["tab_key"] == "engine"
@@ -45,6 +45,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["start_time"]["label"] == "开始时间"
     assert index["defaults"]["end_time"]["label"] == "结束时间"
     assert index["defaults"]["timezone"]["label"] == "时区"
+    assert index["defaults"]["evaluation_split"]["tab_key"] == "time"
+    assert index["defaults"]["equity_compute_live"]["label"] == "净值实时计算"
+    assert index["defaults"]["equity_compute_live"]["module"] == "equity_curve"
+    assert index["defaults"]["equity_compute_live"]["tab_key"] == "engine"
     assert index["defaults"]["engine"]["options"][0] == {
         "value": "native",
         "label": "Native 事件驱动回测工具",
@@ -155,7 +159,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "custom_product_fields",
+        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
     ]
     executable_public_fields = {
         key
@@ -358,7 +362,7 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
     assert [setting["key"] for setting in tab.get_json()["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "custom_product_fields",
+        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
     ]
     assert missing.status_code == 404
 
