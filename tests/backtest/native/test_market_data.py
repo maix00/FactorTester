@@ -4,6 +4,7 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from tools.testers.backtest.engines.native.ledger import BacktestRunState
 from tools.testers.backtest.engines.native.ledger import StrategyConfig
@@ -121,8 +122,6 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
 
 
 def test_check_market_data_coverage_rejects_missing_resolved_frequency():
-    import pytest
-
     class _Product:
         name = "P1"
 
@@ -138,9 +137,7 @@ def test_check_market_data_coverage_rejects_missing_resolved_frequency():
         _check_market_data_coverage(account, ctx)
 
 
-def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
-    import pytest
-
+def test_resolve_market_data_request_records_strategy_frequency_and_source_maps():
     class _Product:
         name = "P1"
 
@@ -164,8 +161,15 @@ def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
     ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
     ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
 
-    with pytest.raises(ValueError, match="多个频率"):
-        _resolve_market_data_request(account, ctx)
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_frequency, s1) == DataFreq.MIN1
+    assert ctx.get_for(MarketDataModule.required_frequency, s2) == DataFreq.DAY1
+    assert ctx.get(MarketDataModule.required_frequency) is None
+    assert account.market_data_store.required_frequency_by_strategy == {
+        s1: DataFreq.MIN1,
+        s2: DataFreq.DAY1,
+    }
 
     account = BacktestRunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, field_values={
@@ -181,14 +185,52 @@ def test_resolve_market_data_request_rejects_mixed_frequency_or_source():
             MarketDataModule.freq_fixed: "MIN1",
         }),
     })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
 
-    with pytest.raises(ValueError, match="多个数据源集合"):
-        _resolve_market_data_request(account, ctx)
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_data_source, s1) == ("A",)
+    assert ctx.get_for(MarketDataModule.required_data_source, s2) == ("B",)
+    assert ctx.get(MarketDataModule.required_data_source) is None
+    assert account.market_data_store.required_data_source_by_strategy == {
+        s1: ("A",),
+        s2: ("B",),
+    }
+
+
+def test_check_market_data_coverage_rejects_same_product_with_conflicting_frequency(monkeypatch):
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1, DataFreq.DAY1]
+
+    product = _Product()
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1),
+        s2: StrategyConfig(strategy=s2),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
+    ctx.set_for(MarketDataModule.required_frequency, s1, DataFreq.MIN1)
+    ctx.set_for(MarketDataModule.required_frequency, s2, DataFreq.DAY1)
+    ctx.set_for(MarketDataModule.required_data_source, s1, ())
+    ctx.set_for(MarketDataModule.required_data_source, s2, ())
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._select_required_product_source",
+        lambda selected_product, freq, required_source: None,
+    )
+
+    with pytest.raises(ValueError, match="多个行情请求"):
+        _check_market_data_coverage(account, ctx)
 
 
 def test_check_market_data_coverage_rejects_missing_required_data_source():
-    import pytest
-
     class _Product:
         name = "P1"
 

@@ -55,6 +55,8 @@ class MarketDataStore:
     raw_input: dict[str, Any] = field(default_factory=dict)
     request: dict[str, Any] = field(default_factory=dict)
     load_plan: list[Any] = field(default_factory=list)
+    required_data_source_by_strategy: dict[Any, tuple[str, ...]] = field(default_factory=dict)
+    required_frequency_by_strategy: dict[Any, DataFreq] = field(default_factory=dict)
     excluded_out_of_range: tuple[Any, ...] = ()
     series_by_product: dict[Any, Any] = field(default_factory=dict)
     raw_prices_table: Any = None
@@ -341,22 +343,15 @@ def _resolve_market_data_request(account, ctx) -> None:
         ctx.set_for(MarketDataModule.required_data_source, strategy, source)
         ctx.set_for(MarketDataModule.required_frequency, strategy, frequency)
 
+    store = market_data_store_for(account)
+    store.required_data_source_by_strategy = dict(sources_by_strategy)
+    store.required_frequency_by_strategy = dict(frequencies_by_strategy)
     unique_sources = {source for source in sources_by_strategy.values()}
-    if len(unique_sources) > 1:
-        labels = ", ".join(_data_source_key_label(source) for source in sorted(unique_sources))
-        raise ValueError(
-            "当前 native 行情表仍要求同一批回测使用同一个数据源集合；"
-            f"解析到多个数据源集合: {labels}。请拆分批次，或等待按数据源分组的事件队列实现。"
-        )
     unique = {freq.name: freq for freq in frequencies_by_strategy.values()}
-    if len(unique) > 1:
-        labels = ", ".join(sorted(unique))
-        raise ValueError(
-            "当前 native 行情表仍要求同一批回测使用同一个 Bar 频率；"
-            f"解析到多个频率: {labels}。请拆分批次，或等待按频率分组的事件队列实现。"
-        )
-    ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
-    ctx.set(MarketDataModule.required_frequency, next(iter(unique.values()), None))
+    if len(unique_sources) == 1:
+        ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
+    if len(unique) == 1:
+        ctx.set(MarketDataModule.required_frequency, next(iter(unique.values()), None))
 
 
 def _required_data_source_for_strategy(config) -> tuple[str, ...]:
@@ -387,6 +382,13 @@ def _parse_data_source_values(raw: Any) -> tuple[str, ...]:
 
 def _data_source_key_label(source: tuple[str, ...]) -> str:
     return "auto" if not source else "+".join(source)
+
+
+def _data_source_instance_label(source: Any | None) -> str:
+    if source is None:
+        return "auto"
+    key = getattr(source, "key", None) or getattr(source, "name", None)
+    return str(key or source)
 
 
 def _required_frequency_for_strategy(config, products: list[Any]) -> DataFreq:
@@ -467,17 +469,20 @@ def _check_market_data_coverage(account, ctx) -> None:
         store.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
         store.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         return
+    products_by_strategy = _products_by_strategy_from_selection_context(account, ctx)
     products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
-    required_frequency = ctx.get(MarketDataModule.required_frequency)
-    required_source = ctx.get(MarketDataModule.required_data_source, ())
+    global_required_frequency = ctx.get(MarketDataModule.required_frequency)
+    global_required_source = ctx.get(MarketDataModule.required_data_source, ())
     missing_products: list[str] = []
     missing_frequency_products: list[str] = []
     missing_source_products: list[str] = []
     excluded_out_of_range: list[Any] = []
     load_plan: list[tuple[Any, DataFreq, Any | None]] = []
-    for product in products:
+    planned_by_product: dict[Any, tuple[DataFreq, Any | None]] = {}
+
+    def plan_product(product: Any, required_frequency: DataFreq | None, required_source: tuple[str, ...] | None) -> None:
         try:
             available_freqs = _product_available_freqs(product)
             if not available_freqs:
@@ -485,31 +490,73 @@ def _check_market_data_coverage(account, ctx) -> None:
                     excluded_out_of_range.append(product)
                 else:
                     missing_products.append(str(getattr(product, "name", product)))
-                continue
+                return
             freq = _select_required_product_frequency(product, available_freqs, required_frequency)
             if freq is None:
                 missing_frequency_products.append(str(getattr(product, "name", product)))
-                continue
+                return
+            existing = planned_by_product.get(product)
+            if existing is not None and existing[0].name != freq.name:
+                old_freq, old_source = existing
+                raise _MarketDataPlanConflict(
+                    "同一产品在同一批 native 回测中解析出多个行情请求："
+                    f"{getattr(product, 'name', product)} "
+                    f"{old_freq.name}/{_data_source_instance_label(old_source)} 与 "
+                    f"{freq.name}/待解析数据源。"
+                    "请拆分批次，或等待按产品-频率-数据源分组的价格表实现。"
+                )
             source = _select_required_product_source(product, freq, required_source)
             if source is _MISSING_DATA_SOURCE:
                 missing_source_products.append(str(getattr(product, "name", product)))
-                continue
-            load_plan.append((product, freq, source))
+                return
+            if existing is not None and not _same_market_data_plan(existing, (freq, source)):
+                old_freq, old_source = existing
+                raise _MarketDataPlanConflict(
+                    "同一产品在同一批 native 回测中解析出多个行情请求："
+                    f"{getattr(product, 'name', product)} "
+                    f"{old_freq.name}/{_data_source_instance_label(old_source)} 与 "
+                    f"{freq.name}/{_data_source_instance_label(source)}。"
+                    "请拆分批次，或等待按产品-频率-数据源分组的价格表实现。"
+                )
+            if existing is None:
+                planned_by_product[product] = (freq, source)
+                load_plan.append((product, freq, source))
+        except _MarketDataPlanConflict:
+            raise
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
                 excluded_out_of_range.append(product)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
+
+    if products_by_strategy:
+        for strategy, strategy_products in products_by_strategy.items():
+            required_frequency = ctx.get_for(
+                MarketDataModule.required_frequency,
+                strategy,
+                global_required_frequency,
+            )
+            required_source = ctx.get_for(
+                MarketDataModule.required_data_source,
+                strategy,
+                global_required_source,
+            )
+            for product in strategy_products:
+                plan_product(product, required_frequency, required_source)
+    else:
+        for product in products:
+            plan_product(product, global_required_frequency, global_required_source)
+
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     if missing_frequency_products:
-        required = getattr(required_frequency, "name", str(required_frequency))
+        required = _required_frequency_label(global_required_frequency, ctx, products_by_strategy)
         raise ValueError(
             f"产品缺少所需 Bar 频率 {required}: "
             f"{'、'.join(missing_frequency_products)}"
         )
     if missing_source_products:
-        required = _data_source_key_label(tuple(required_source or ()))
+        required = _required_source_label(global_required_source, ctx, products_by_strategy)
         raise ValueError(
             f"产品缺少所需数据源 {required}: "
             f"{'、'.join(missing_source_products)}"
@@ -543,6 +590,10 @@ def _coerce_data_freq(freq: Any) -> DataFreq:
 
 
 _MISSING_DATA_SOURCE = object()
+
+
+class _MarketDataPlanConflict(ValueError):
+    pass
 
 
 def _select_required_product_source(product: Any, freq: Any, required_source: tuple[str, ...] | None) -> Any | None:
@@ -598,6 +649,57 @@ def _products_from_selection_context(account, ctx) -> list[Any]:
             if product not in products:
                 products.append(product)
     return products
+
+
+def _products_by_strategy_from_selection_context(account, ctx) -> dict[Any, tuple[Any, ...]]:
+    result: dict[Any, tuple[Any, ...]] = {}
+    for strategy in account.strategy_configs:
+        products = tuple(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+        if products:
+            result[strategy] = products
+    return result
+
+
+def _same_market_data_plan(
+    left: tuple[DataFreq, Any | None],
+    right: tuple[DataFreq, Any | None],
+) -> bool:
+    left_freq, left_source = left
+    right_freq, right_source = right
+    return left_freq.name == right_freq.name and left_source == right_source
+
+
+def _required_frequency_label(
+    global_frequency: Any,
+    ctx,
+    products_by_strategy: dict[Any, tuple[Any, ...]],
+) -> str:
+    if global_frequency is not None:
+        return getattr(global_frequency, "name", str(global_frequency))
+    labels = {
+        getattr(
+            ctx.get_for(MarketDataModule.required_frequency, strategy),
+            "name",
+            str(ctx.get_for(MarketDataModule.required_frequency, strategy)),
+        )
+        for strategy in products_by_strategy
+        if ctx.get_for(MarketDataModule.required_frequency, strategy) is not None
+    }
+    return "、".join(sorted(labels)) if labels else "auto"
+
+
+def _required_source_label(
+    global_source: Any,
+    ctx,
+    products_by_strategy: dict[Any, tuple[Any, ...]],
+) -> str:
+    if global_source is not None:
+        return _data_source_key_label(tuple(global_source or ()))
+    labels = {
+        _data_source_key_label(tuple(ctx.get_for(MarketDataModule.required_data_source, strategy, ()) or ()))
+        for strategy in products_by_strategy
+    }
+    return "、".join(sorted(labels)) if labels else "auto"
 
 
 def _load_raw_market_data(account, ctx) -> None:
