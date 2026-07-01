@@ -137,6 +137,39 @@ def test_check_market_data_coverage_rejects_missing_resolved_frequency():
         _check_market_data_coverage(account, ctx)
 
 
+def test_check_market_data_coverage_excludes_out_of_range_product_before_frequency_error(monkeypatch):
+    class _Product:
+        name = "ER.CZC"
+        desc = "早籼稻"
+
+        def list_available_freqs(self):
+            return [DataFreq.DAY1]
+
+    product = _Product()
+    s1 = Strategy(alias="A1")
+    s2 = Strategy(alias="A2")
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1),
+        s2: StrategyConfig(strategy=s2),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    for strategy in (s1, s2):
+        ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+        ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.MIN1)
+        ctx.set_for(MarketDataModule.required_data_source, strategy, ())
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._product_outside_run_window",
+        lambda item, start_dt, end_dt: item is product,
+    )
+
+    _check_market_data_coverage(account, ctx)
+
+    assert account.market_data_store.load_plan == []
+    assert account.market_data_store.excluded_out_of_range == (product,)
+    assert len(account.runtime_info_rows) == 1
+    assert account.runtime_info_rows[0]["details"]["product_names"] == ["ER.CZC"]
+
+
 def test_resolve_market_data_request_records_strategy_frequency_and_source_maps():
     class _Product:
         name = "P1"

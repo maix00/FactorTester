@@ -489,7 +489,10 @@ def _check_market_data_coverage(account, ctx) -> None:
                 return
             freq = _select_required_product_frequency(product, available_freqs, required_frequency)
             if freq is None:
-                missing_frequency_products.append(str(getattr(product, "name", product)))
+                if _product_outside_run_window(product, start_dt, end_dt):
+                    excluded_out_of_range.append(product)
+                else:
+                    missing_frequency_products.append(str(getattr(product, "name", product)))
                 return
             existing = planned_by_product.get(product)
             if existing is not None and existing[0].name != freq.name:
@@ -503,7 +506,10 @@ def _check_market_data_coverage(account, ctx) -> None:
                 )
             source = _select_required_product_source(product, freq, required_source)
             if source is _MISSING_DATA_SOURCE:
-                missing_source_products.append(str(getattr(product, "name", product)))
+                if _product_outside_run_window(product, start_dt, end_dt):
+                    excluded_out_of_range.append(product)
+                else:
+                    missing_source_products.append(str(getattr(product, "name", product)))
                 return
             if existing is not None and not _same_market_data_plan(existing, (freq, source)):
                 old_freq, old_source = existing
@@ -549,13 +555,13 @@ def _check_market_data_coverage(account, ctx) -> None:
         required = _required_frequency_label(global_required_frequency, ctx, products_by_strategy)
         raise ValueError(
             f"产品缺少所需 Bar 频率 {required}: "
-            f"{'、'.join(missing_frequency_products)}"
+            f"{'、'.join(_dedupe_names(missing_frequency_products))}"
         )
     if missing_source_products:
         required = _required_source_label(global_required_source, ctx, products_by_strategy)
         raise ValueError(
             f"产品缺少所需数据源 {required}: "
-            f"{'、'.join(missing_source_products)}"
+            f"{'、'.join(_dedupe_names(missing_source_products))}"
         )
     store.load_plan = load_plan
     store.excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
@@ -899,6 +905,14 @@ def _dedupe_products(products: list[Any]) -> list[Any]:
     for product in products:
         if product not in result:
             result.append(product)
+    return result
+
+
+def _dedupe_names(names: list[str]) -> list[str]:
+    result: list[str] = []
+    for name in names:
+        if name not in result:
+            result.append(name)
     return result
 
 
