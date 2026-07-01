@@ -38,7 +38,7 @@ def _build_registry() -> FlowRegistry:
 def run_backtest_task(
     state: "FactorTesterState",
     *,
-    account: "BacktestRunState",
+    run_state: "BacktestRunState",
     group_owner: list[dict[str, Any]],
     settings_by_strategy: dict[str, dict[str, Any]],
     run_id: str,
@@ -48,7 +48,7 @@ def run_backtest_task(
     """Fixed task: runs the engine against an already-built BacktestRunState,
     stores it on `state.account` for later snapshot/detail requests, and
     returns the `execution` dict shape group.py already consumes."""
-    requested_engine = _requested_engine(account)
+    requested_engine = _requested_engine(run_state)
     if requested_engine != "native":
         raise NotImplementedError(
             f"FactorTester.dispatch('backtest') currently owns only the native "
@@ -57,23 +57,23 @@ def run_backtest_task(
         )
     registry = _build_registry()
     queue = EventQueue()
-    run(account, queue, registry.resolve(), progress=progress, activity_sink=activity_sink)
+    run(run_state, queue, registry.resolve(), progress=progress, activity_sink=activity_sink)
 
-    by_alias = {strategy.alias: strategy for strategy in account.strategy_configs}
+    by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     portfolios: dict[str, Any] = {}
     target_trace: dict[str, Any] = {}
     for group_id, strategy in by_alias.items():
-        curve = equity_curve_for(account, strategy)
+        curve = equity_curve_for(run_state, strategy)
         portfolios[group_id] = {
             "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
-            "position_curve": position_curve_for(account, strategy),
+            "position_curve": position_curve_for(run_state, strategy),
             "execution_trace": {},  # TODO(issue-114): per-order delta/fill detail, not recorded yet
             "initial_value": float(curve.iloc[0]) if not curve.empty else 0.0,
             "market_rule_approximation_count": 0,
         }
-        target_trace[group_id] = target_trace_for(account, strategy)
+        target_trace[group_id] = target_trace_for(run_state, strategy)
 
-    state.account = account
+    state.account = run_state
     return {
         "run_id": run_id,
         "engine_result": {
@@ -90,8 +90,8 @@ def run_backtest_task(
     }
 
 
-def _requested_engine(account: "BacktestRunState") -> str:
-    configs = getattr(account, "strategy_configs", {}) or {}
+def _requested_engine(run_state: "BacktestRunState") -> str:
+    configs = getattr(run_state, "strategy_configs", {}) or {}
     values = {
         str(config.get(EngineModule.engine, "native") or "native").lower()
         for config in configs.values()

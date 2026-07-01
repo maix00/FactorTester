@@ -62,7 +62,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
 
     state = FactorTesterState(products=[])
     execution = run_backtest_task(
-        state, account=account,
+        state, run_state=account,
         group_owner=[{"group_id": "A1", "group_name": "A1", "group_index": 0,
                       "product_path_selection_id": "sel-1", "factor_alias": "f1", "is_ls": False}],
         settings_by_strategy=resolved_settings, run_id="run-1",
@@ -119,7 +119,7 @@ def test_run_backtest_task_rejects_non_native_engine_without_fallback():
     with pytest.raises(NotImplementedError, match="falling back to native"):
         run_backtest_task(
             FactorTesterState(products=[]),
-            account=account,
+            run_state=account,
             group_owner=[{
                 "group_id": "A1",
                 "group_name": "A1",

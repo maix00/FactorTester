@@ -1,4 +1,4 @@
-"""Step 3.0 bootstrap: builds `account.strategy_configs` from already-resolved
+"""Step 3.0 bootstrap: builds `state.strategy_configs` from already-resolved
 per-strategy settings dicts (the OLD ApplicationSettings/candidate-list/
 broadcast+override machinery in `tools/testers/settings` has already run by
 the time this is called — group/local settings resolution, factor/product-
@@ -194,5 +194,5 @@ def build_strategy_configs(
     return configs
 
 
-def apply_strategy_configs(account: "BacktestRunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
-    account.strategy_configs = build_strategy_configs(resolved_settings_by_alias)
+def apply_strategy_configs(state: "BacktestRunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
+    state.strategy_configs = build_strategy_configs(resolved_settings_by_alias)

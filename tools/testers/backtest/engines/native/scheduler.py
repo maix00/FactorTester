@@ -84,8 +84,8 @@ def _flow_qualified_name(flow: ResolvedFlow) -> str:
 
 
 def _wrap(override_compute: Callable, base_compute: Callable) -> Callable:
-    def wrapped(account, ctx) -> None:
-        override_compute(account, ctx, base_compute)
+    def wrapped(state, ctx) -> None:
+        override_compute(state, ctx, base_compute)
     return wrapped
 
 
@@ -398,11 +398,11 @@ class _ProgressTracker:
     def emit_manifest(
         self,
         groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
-        account: "BacktestRunState",
+        state: "BacktestRunState",
         flow_strategies: dict[str, frozenset["Strategy"]],
     ) -> None:
         if self._activity_sink is not None:
-            self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups, account, flow_strategies))
+            self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups, state, flow_strategies))
 
     def set_phase_totals(self, *, pre_total: int, post_total: int) -> None:
         self._pre_total = max(0, pre_total)
@@ -493,14 +493,14 @@ class _ProgressTracker:
 
 def make_dispatcher(
     ordered_flows: list[ResolvedFlow],
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     event_queue: EventQueue,
     tracker: "_ProgressTracker | None" = None,
     audit_contract: bool = False,
     enforce_contract: bool = False,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> Callable[[list[EventDraft]], None]:
-    applicable_by_flow = flow_strategies or _flow_strategy_sets(account, ordered_flows)
+    applicable_by_flow = flow_strategies or _flow_strategy_sets(state, ordered_flows)
 
     def handler(batch: list[EventDraft]) -> None:
         timestamp = batch[0].timestamp
@@ -530,7 +530,7 @@ def make_dispatcher(
             ctx.active_strategies = applicable
             if tracker is not None:
                 tracker.activity(f, timestamp=timestamp, phase="event_replay")
-            _compute_flow(f, account, ctx)
+            _compute_flow(f, state, ctx)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
@@ -539,52 +539,52 @@ def make_dispatcher(
 
 
 def _flow_strategy_sets(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...],
 ) -> dict[str, frozenset["Strategy"]]:
     flow_names = {flow.name for flow in flows}
     result: dict[str, set["Strategy"]] = {name: set() for name in flow_names}
-    for strategy, config in account.strategy_configs.items():
+    for strategy, config in state.strategy_configs.items():
         for flow_name in config.active_flow_names & flow_names:
             result.setdefault(flow_name, set()).add(strategy)
     return {name: frozenset(strategies) for name, strategies in result.items()}
 
 
 def _all_flow_strategy_sets(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
 ) -> dict[str, frozenset["Strategy"]]:
     flows: list[ResolvedFlow] = []
     for ordered_flows in groups.values():
         flows.extend(ordered_flows)
-    return _flow_strategy_sets(account, flows)
+    return _flow_strategy_sets(state, flows)
 
 
 def _strategies_using_flow(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     flow_name: str,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> frozenset["Strategy"]:
     if flow_strategies is not None:
         return flow_strategies.get(flow_name, frozenset())
     return frozenset(
-        strategy for strategy in account.strategy_configs
-        if flow_name in account.config_for(strategy).active_flow_names
+        strategy for strategy in state.strategy_configs
+        if flow_name in state.config_for(strategy).active_flow_names
     )
 
 
 def _pre_post_applicable_strategies(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     flow: ResolvedFlow,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> frozenset["Strategy"]:
     if not flow.strategy_scoped:
-        return frozenset(account.strategy_configs)
-    return _strategies_using_flow(account, flow.name, flow_strategies)
+        return frozenset(state.strategy_configs)
+    return _strategies_using_flow(state, flow.name, flow_strategies)
 
 
 def run(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     event_queue: EventQueue,
     resolved_flows: list[ResolvedFlow],
     progress: Callable[[int, int, str], None] | None = None,
@@ -604,16 +604,16 @@ def run(
     groups = sort_and_validate(resolved_flows)
     pre_replay_flows = groups.get((Phase.PRE_REPLAY, None), ())
     post_replay_flows = groups.get((Phase.POST_REPLAY, None), ())
-    flow_strategies = _all_flow_strategy_sets(account, groups)
+    flow_strategies = _all_flow_strategy_sets(state, groups)
     tracker = _ProgressTracker(progress, activity_sink, event_queue)
-    tracker.emit_manifest(groups, account, flow_strategies)
+    tracker.emit_manifest(groups, state, flow_strategies)
     applicable_pre_flows = [
         f for f in pre_replay_flows
-        if _pre_post_applicable_strategies(account, f, flow_strategies)
+        if _pre_post_applicable_strategies(state, f, flow_strategies)
     ]
     applicable_post_flows = [
         f for f in post_replay_flows
-        if _pre_post_applicable_strategies(account, f, flow_strategies)
+        if _pre_post_applicable_strategies(state, f, flow_strategies)
     ]
     tracker.set_phase_totals(pre_total=len(applicable_pre_flows), post_total=len(applicable_post_flows))
 
@@ -623,7 +623,7 @@ def run(
                 cast(EventKind, event_kind),
                 make_dispatcher(
                     ordered_flows,
-                    account,
+                    state,
                     event_queue,
                     tracker,
                     audit_flow_contract,
@@ -639,12 +639,12 @@ def run(
         enforce_contract=enforce_flow_contract,
     )
     for f in pre_replay_flows:
-        applicable = _pre_post_applicable_strategies(account, f, flow_strategies)
+        applicable = _pre_post_applicable_strategies(state, f, flow_strategies)
         if not applicable:
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay")
-        _compute_flow(f, account, ctx)
+        _compute_flow(f, state, ctx)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -659,21 +659,21 @@ def run(
         enforce_contract=enforce_flow_contract,
     )
     for f in post_replay_flows:
-        applicable = _pre_post_applicable_strategies(account, f, flow_strategies)
+        applicable = _pre_post_applicable_strategies(state, f, flow_strategies)
         if not applicable:
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay")
-        _compute_flow(f, account, ctx)
+        _compute_flow(f, state, ctx)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     tracker.complete()
 
 
-def _compute_flow(flow: ResolvedFlow, account: "BacktestRunState", ctx: FlowContext) -> None:
+def _compute_flow(flow: ResolvedFlow, state: "BacktestRunState", ctx: FlowContext) -> None:
     ctx.enter_flow(flow)
     try:
-        flow.compute(account, ctx)
+        flow.compute(state, ctx)
     finally:
         ctx.exit_flow()
 
@@ -696,13 +696,13 @@ def _activity_message(timestamp: str, label: str) -> str:
 
 def activity_manifest_from_groups(
     groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> list[dict[str, Any]]:
     phase_specs: list[dict[str, Any]] = []
     pre_all = [
         flow for flow in groups.get((Phase.PRE_REPLAY, None), ())
-        if _flow_applicable_to_any_strategy(account, flow, flow_strategies)
+        if _flow_applicable_to_any_strategy(state, flow, flow_strategies)
     ]
     phase_specs.append(_phase_spec("pre_replay", pre_all))
 
@@ -711,7 +711,7 @@ def activity_manifest_from_groups(
         if phase is Phase.PER_EVENT:
             event_flows.extend(
                 flow for flow in flows
-                if _flow_applicable_to_any_strategy(account, flow, flow_strategies)
+                if _flow_applicable_to_any_strategy(state, flow, flow_strategies)
             )
     event_flows = sorted(event_flows, key=lambda f: (f.order, f.event_kind or EventKind.SIGNAL, f.name))
     event_flows = _dedupe_manifest_flows(event_flows)
@@ -719,20 +719,20 @@ def activity_manifest_from_groups(
 
     post = [
         flow for flow in groups.get((Phase.POST_REPLAY, None), ())
-        if _flow_applicable_to_any_strategy(account, flow, flow_strategies)
+        if _flow_applicable_to_any_strategy(state, flow, flow_strategies)
     ]
     phase_specs.append(_phase_spec("post_replay", post))
     return phase_specs
 
 
 def _flow_applicable_to_any_strategy(
-    account: "BacktestRunState",
+    state: "BacktestRunState",
     flow: ResolvedFlow,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> bool:
     if not flow.strategy_scoped and flow.phase is not Phase.PER_EVENT:
-        return bool(account.strategy_configs) or not flow.strategy_scoped
-    return bool(_strategies_using_flow(account, flow.name, flow_strategies))
+        return bool(state.strategy_configs) or not flow.strategy_scoped
+    return bool(_strategies_using_flow(state, flow.name, flow_strategies))
 
 
 def _dedupe_manifest_flows(flows: list[ResolvedFlow]) -> list[ResolvedFlow]:

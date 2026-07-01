@@ -2975,7 +2975,7 @@ def run_group_test_stream():
                     raise BacktestCancelled()
 
             execution = tester.dispatch(
-                "backtest", account=account, group_owner=group_owner,
+                "backtest", run_state=account, group_owner=group_owner,
                 settings_by_strategy=resolved_settings_by_alias,
                 run_id=run_token, progress=_on_progress, activity_sink=emitter,
             )
