@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
@@ -20,6 +22,43 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
 
 
+def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
+    class _Freq:
+        name = "min1"
+
+    class _Product:
+        def __init__(self, name: str):
+            self.name = name
+            self.desc = name
+            self.min1 = self
+
+        def list_available_freqs(self):
+            return [_Freq()]
+
+        def get_and_adjust_cols(self, *args, **kwargs):
+            raise ValueError("outside")
+
+    p1 = _Product("ER.CZC")
+    p2 = _Product("ME.CZC")
+    account = AccountState()
+    account.market_data_request = {"products": [p1, p2]}
+    setattr(account, "_market_data_load_plan", [(p1, _Freq()), (p2, _Freq())])
+    account.runtime_info_rows = []
+    monkeypatch.setattr(
+        "tools.testers.backtest.modules.market_data._product_outside_run_window",
+        lambda product, start_dt, end_dt: True,
+    )
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _load_raw_market_data(account, ctx)
+
+    assert len(account.runtime_info_rows) == 1
+    row = account.runtime_info_rows[0]
+    assert row["code"] == "market_data_out_of_range_products_removed"
+    assert row["details"]["product_names"] == ["ER.CZC", "ME.CZC"]
+    assert "ER.CZC" in row["detail"] and "ME.CZC" in row["detail"]
+
+
 def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     account = AccountState()
     idx = pd.date_range("2024-01-01", periods=4)
@@ -30,7 +69,7 @@ def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
 
     # gap at idx[1]/idx[2] should be filled with the prior observed value (10.0),
     # not the future value (40.0) -- this is the no-lookahead guarantee
-    assert current_prices_at(account, idx[1])["P1"] == 10.0
-    assert current_prices_at(account, idx[2])["P1"] == 10.0
-    assert current_prices_at(account, idx[3])["P1"] == 40.0
-    assert current_prices_at(account, idx[0])["P1"] == 10.0
+    assert current_prices_at(account, cast(pd.Timestamp, idx[1]))["P1"] == 10.0
+    assert current_prices_at(account, cast(pd.Timestamp, idx[2]))["P1"] == 10.0
+    assert current_prices_at(account, cast(pd.Timestamp, idx[3]))["P1"] == 40.0
+    assert current_prices_at(account, cast(pd.Timestamp, idx[0]))["P1"] == 10.0

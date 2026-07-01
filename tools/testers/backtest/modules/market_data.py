@@ -279,7 +279,6 @@ def _load_raw_market_data(account, ctx) -> None:
                 excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
                 excluded.append(product)
                 account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
-                _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
@@ -288,7 +287,6 @@ def _load_raw_market_data(account, ctx) -> None:
                 excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
                 excluded.append(product)
                 account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
-                _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
