@@ -27,7 +27,7 @@ def test_execution_price_uses_next_bar_open_price_timestamp():
             OrderExecutionModule.execution_price_basis: "open",
         }),
     })
-    account.market_price_tables = {
+    account.market_data_store.market_price_tables = {
         "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
     }
     order = Order(instrument=product, timestamp=price_ts, quantity=1.0, intent_quantity=1.0, strategy=open_strategy)
@@ -55,7 +55,7 @@ def test_execution_price_rejects_close_or_vwap_basis():
             OrderExecutionModule.execution_price_basis: "close",
         }),
     })
-    account.market_price_tables = {
+    account.market_data_store.market_price_tables = {
         "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
         "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
     }

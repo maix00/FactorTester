@@ -10,10 +10,10 @@ already-loaded, possibly-gappy raw_prices frame into a ffill'd, gap-free
 `current_prices` lookup — that's the part that's actually this module's own
 logic, not someone else's I/O.
 
-The ffill'd table itself is stored on `account` (not `ctx`) because it's
-computed once in PRE_REPLAY but needs to survive into every later PER_EVENT
-dispatch — `ctx` is scoped to a single dispatch batch and is discarded
-right after, `account` is the only thing that lives for the whole run.
+The ffill'd table itself is stored in `account.market_data_store` (not `ctx`)
+because it's computed once in PRE_REPLAY but needs to survive into every later
+PER_EVENT dispatch — `ctx` is scoped to a single dispatch batch and is
+discarded right after, while RunState-owned stores live for the whole run.
 """
 
 from __future__ import annotations
@@ -258,6 +258,27 @@ def _market_data_request(account) -> dict[str, Any]:
     return request
 
 
+def market_data_store_for(account):
+    return account.market_data_store
+
+
+def raw_prices_table_for(account):
+    return market_data_store_for(account).raw_prices_table
+
+
+def current_prices_table_for(account):
+    store = market_data_store_for(account)
+    return store.current_prices_table
+
+
+def volume_table_for(account):
+    return market_data_store_for(account).volume_table
+
+
+def market_price_tables_for(account) -> dict[str, Any]:
+    return market_data_store_for(account).market_price_tables
+
+
 def _resolve_market_data_request(account, ctx) -> None:
     request = _market_data_request(account)
     if "raw_market_data" in request:
@@ -392,14 +413,15 @@ def _has_compatible_frequency(available_freqs: set[DataFreq], desired_freqs: set
 
 def _check_market_data_coverage(account, ctx) -> None:
     request = _market_data_request(account)
+    store = market_data_store_for(account)
     if "raw_market_data" in request:
         raw = request["raw_market_data"]
-        account._market_data_series_by_product = {
+        store.series_by_product = {
             product: raw.get("raw_prices")[product]
             for product in getattr(raw.get("raw_prices"), "columns", [])
         }
-        account._market_data_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-        account._market_data_excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+        store.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
+        store.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         return
     products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
     start_dt = request.get("start_dt")
@@ -448,9 +470,9 @@ def _check_market_data_coverage(account, ctx) -> None:
             f"产品缺少所需数据源 {required}: "
             f"{'、'.join(missing_source_products)}"
         )
-    account._market_data_load_plan = load_plan
-    account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
-    _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
+    store.load_plan = load_plan
+    store.excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
+    _record_excluded_out_of_range_products(account, store.excluded_out_of_range)
 
 
 def _select_required_product_frequency(
@@ -555,7 +577,8 @@ def _load_raw_market_data(account, ctx) -> None:
         basis: {} for basis, _column in price_columns
     }
     missing_products: list[str] = []
-    for plan_item in getattr(account, "_market_data_load_plan", ()):
+    store = market_data_store_for(account)
+    for plan_item in store.load_plan:
         product, freq, source = _unpack_market_data_load_plan_item(plan_item)
         try:
             data_view = getattr(product, freq.name)
@@ -569,17 +592,17 @@ def _load_raw_market_data(account, ctx) -> None:
             )
         except (ValueError, KeyError):
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded: list[Any] = list(store.excluded_out_of_range)
                 excluded.append(product)
-                account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
+                store.excluded_out_of_range = tuple(_dedupe_products(excluded))
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
         if df.empty or DataColumn.CLOSE.name not in df.columns:
             if _product_outside_run_window(product, start_dt, end_dt):
-                excluded: list[Any] = list(getattr(account, "_market_data_excluded_out_of_range", ()))
+                excluded: list[Any] = list(store.excluded_out_of_range)
                 excluded.append(product)
-                account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded))
+                store.excluded_out_of_range = tuple(_dedupe_products(excluded))
             else:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
@@ -604,7 +627,7 @@ def _load_raw_market_data(account, ctx) -> None:
         "historical_field_policy": request.get("policy", "latest_available"),
         "historical_field_names": _required_market_rule_field_names(account),
         "included_products": tuple(series_by_product.keys()),
-        "excluded_out_of_range_products": tuple(getattr(account, "_market_data_excluded_out_of_range", ())),
+        "excluded_out_of_range_products": tuple(store.excluded_out_of_range),
     }
     _publish_raw_market_data(account, ctx, raw)
 
@@ -641,35 +664,37 @@ def _live_market_data_load_warmup_window(account) -> pd.Timedelta | None:
 def _build_trading_day_resolver(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     provider = ctx.get(MarketDataModule.historical_field_provider)
+    store = market_data_store_for(account)
     if provider is None:
         ctx.set(MarketDataModule.trading_day_resolver, None)
-        account.trading_day_resolver = None
+        store.trading_day_resolver = None
         return
     if raw_prices is None or raw_prices.empty:
         ctx.set(MarketDataModule.trading_day_resolver, None)
-        account.trading_day_resolver = None
+        store.trading_day_resolver = None
         return
     resolver = build_trading_day_resolver_from_market_data(raw_prices)
     ctx.set(MarketDataModule.trading_day_resolver, resolver)
-    account.trading_day_resolver = resolver
+    store.trading_day_resolver = resolver
 
 
 def _load_historical_fields(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     resolver = ctx.get(MarketDataModule.trading_day_resolver)
-    raw_policy = _market_data_request(account).get("policy", getattr(account, "historical_field_policy", None))
+    store = market_data_store_for(account)
+    raw_policy = _market_data_request(account).get("policy", store.historical_field_policy)
     policy = _historical_field_policy_for_engine(account, raw_policy)
     ctx.set(MarketDataModule.historical_field_policy, policy)
-    account.historical_field_policy = policy
-    field_names = tuple(getattr(account, "historical_field_names", _MARKET_RULE_FIELD_NAMES))
-    account.historical_field_names = field_names
+    store.historical_field_policy = policy
+    field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
+    store.historical_field_names = field_names
     if raw_prices is None or raw_prices.empty or resolver is None:
-        account.historical_field_frames = None
+        store.historical_field_frames = None
         return
-    account.historical_field_frames = historical_field_frames_for_market_data(
+    store.historical_field_frames = historical_field_frames_for_market_data(
         list(raw_prices.columns),
         signal_timestamps(raw_prices),
-        provider=cast(FieldHistoryProvider, getattr(account, "historical_field_provider")),
+        provider=cast(FieldHistoryProvider, store.historical_field_provider),
         trading_day_resolver=resolver,
         field_names=field_names,
         policy=policy,
@@ -683,18 +708,10 @@ def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.settlement_price, raw.get("settlement_price"))
     ctx.set(MarketDataModule.volume, raw.get("volume"))
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
-    raw_policy = raw.get("historical_field_policy")
-    account.raw_prices_table = raw.get("raw_prices")
-    account.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-    account.historical_field_provider = raw.get("historical_field_provider")
-    included_products = raw.get("included_products")
-    account.backtest_included_products = (
-        frozenset(included_products) if included_products is not None else None
-    )
-    account.backtest_excluded_out_of_range_products = tuple(raw.get("excluded_out_of_range_products", ()))
-    _record_excluded_out_of_range_products(account, account.backtest_excluded_out_of_range_products)
-    account.historical_field_names = tuple(raw.get("historical_field_names", ()))
-    account.volume_table = raw.get("volume")  # not ffill'd -- a gap means zero
+    store = market_data_store_for(account)
+    store.publish_raw(raw)
+    _record_excluded_out_of_range_products(account, store.excluded_out_of_range)
+    # volume_table is not ffill'd -- a gap means zero
                                                 # traded volume, not "carry the last
                                                 # observed value forward"
 
@@ -702,10 +719,7 @@ def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
 def _record_excluded_out_of_range_products(account, products: tuple[Any, ...]) -> None:
     if not products:
         return
-    seen_sets = getattr(account, "_runtime_info_excluded_product_sets", None)
-    if not isinstance(seen_sets, list):
-        seen_sets = []
-        account._runtime_info_excluded_product_sets = seen_sets
+    seen_sets = market_data_store_for(account).runtime_info_excluded_product_sets
     product_tuple = tuple(products)
     if product_tuple in seen_sets:
         return
@@ -934,7 +948,7 @@ def _required_market_rule_field_names(account) -> tuple[str, ...]:
 
 def _causal_valuation(account, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
-    account.current_prices_table = raw_prices.ffill()
+    market_data_store_for(account).current_prices_table = raw_prices.ffill()
 
 
 def _set_current_historical_fields(account, ctx) -> None:
@@ -988,7 +1002,7 @@ def current_prices_at(account, timestamp: pd.Timestamp) -> dict:
     on exactly, so this uses an as-of lookup (last known row at or before
     `timestamp`) rather than requiring an exact hit.
     """
-    table = account.current_prices_table
+    table = current_prices_table_for(account)
     row = row_at(table, timestamp, asof=True)
     return {product: float(cast(Any, row[product])) for product in table.columns}
 
@@ -996,7 +1010,7 @@ def current_prices_at(account, timestamp: pd.Timestamp) -> dict:
 def current_volume_at(account, timestamp: pd.Timestamp) -> dict:
     """Look up this bar's traded volume per product — no ffill (a gap means
     zero volume traded, not "carry the last observed volume forward")."""
-    table = account.volume_table
+    table = volume_table_for(account)
     if table is None:
         return {}
     row = row_at(table, timestamp)
@@ -1010,26 +1024,27 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[Any, 
     OpenCTP 还是未来别的数据源。严格真实数据模式下，缺产品/缺交易日/缺字段会
     由 provider 直接抛出 MissingHistoricalField 或 MissingTradingDay。
     """
-    provider = cast(FieldHistoryProvider | None, getattr(account, "historical_field_provider", None))
+    store = market_data_store_for(account)
+    provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
     if provider is None:
         return {}
-    resolver = cast(TradingDayResolver | None, getattr(account, "trading_day_resolver", None))
+    resolver = cast(TradingDayResolver | None, store.trading_day_resolver)
     if resolver is None:
         from tools.data.field_history import MissingTradingDay
         raise MissingTradingDay("trading_day_resolver is required for MarketDataModule historical fields")
     policy = str(
         getattr(
-            account,
+            store,
             "historical_field_policy",
             str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value),
         )
     )
-    field_names = cast(tuple[object, ...], tuple(getattr(account, "historical_field_names", ())))
+    field_names = cast(tuple[object, ...], tuple(store.historical_field_names))
     if not field_names:
         return {}
-    table = getattr(account, "current_prices_table", None)
+    table = current_prices_table_for(account)
     instruments = list(table.columns) if table is not None else []
-    frames = getattr(account, "historical_field_frames", None)
+    frames = store.historical_field_frames
     if isinstance(frames, dict):
         return _historical_fields_at_from_frames(frames, instruments, timestamp)
     result: dict[Any, dict[str, object]] = {}

@@ -48,7 +48,7 @@ def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
     p2 = _Product("ME.CZC")
     account = RunState()
     account.market_data_request = {"products": [p1, p2]}
-    setattr(account, "_market_data_load_plan", [(p1, DataFreq.MIN1), (p2, DataFreq.MIN1)])
+    account.market_data_store.load_plan = [(p1, DataFreq.MIN1), (p2, DataFreq.MIN1)]
     account.runtime_info_rows = []
     monkeypatch.setattr(
         "tools.testers.backtest.modules.market_data._product_outside_run_window",
@@ -96,8 +96,8 @@ def test_check_market_data_coverage_excludes_lifecycle_ended_product_without_fre
 
     _check_market_data_coverage(account, FlowContext(timestamp=None, event_queue=EventQueue()))
 
-    assert getattr(account, "_market_data_load_plan") == []
-    assert getattr(account, "_market_data_excluded_out_of_range") == (product,)
+    assert account.market_data_store.load_plan == []
+    assert account.market_data_store.excluded_out_of_range == (product,)
     assert account.runtime_info_rows[0]["details"]["product_names"] == ["FU.SHF@1"]
 
 
@@ -117,7 +117,7 @@ def test_check_market_data_coverage_uses_resolved_frequency_not_first_available(
 
     _check_market_data_coverage(account, ctx)
 
-    assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, None)]
+    assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, None)]
 
 
 def test_check_market_data_coverage_rejects_missing_resolved_frequency():
@@ -233,7 +233,7 @@ def test_check_market_data_coverage_resolves_local_bundle_to_concrete_source(mon
 
     _check_market_data_coverage(account, ctx)
 
-    assert getattr(account, "_market_data_load_plan") == [(product, DataFreq.MIN1, source)]
+    assert account.market_data_store.load_plan == [(product, DataFreq.MIN1, source)]
 
 
 def test_data_source_bundle_does_not_pollute_available_frequencies():
@@ -271,17 +271,17 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     product = _Product()
     account = RunState()
     account.market_data_request = {"products": [product]}
-    setattr(account, "_market_data_load_plan", [(product, DataFreq.MIN1)])
+    account.market_data_store.load_plan = [(product, DataFreq.MIN1)]
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
 
     _load_raw_market_data(account, ctx)
 
-    assert set(account.market_price_tables) >= {"open", "high", "low", "close", "vwap"}
-    assert account.market_price_tables["open"][product].tolist() == [10.0, 20.0]
-    assert account.market_price_tables["high"][product].tolist() == [11.0, 21.0]
-    assert account.market_price_tables["low"][product].tolist() == [9.0, 19.0]
-    assert account.market_price_tables["close"][product].tolist() == [10.5, 20.5]
-    assert account.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
+    assert set(account.market_data_store.market_price_tables) >= {"open", "high", "low", "close", "vwap"}
+    assert account.market_data_store.market_price_tables["open"][product].tolist() == [10.0, 20.0]
+    assert account.market_data_store.market_price_tables["high"][product].tolist() == [11.0, 21.0]
+    assert account.market_data_store.market_price_tables["low"][product].tolist() == [9.0, 19.0]
+    assert account.market_data_store.market_price_tables["close"][product].tolist() == [10.5, 20.5]
+    assert account.market_data_store.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
     assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
 
 
@@ -329,7 +329,7 @@ def test_load_raw_market_data_expands_for_live_strategy_warmup_only():
         ),
     })
     account.market_data_request = {"products": [product]}
-    setattr(account, "_market_data_load_plan", [(product, DataFreq.MIN1)])
+    account.market_data_store.load_plan = [(product, DataFreq.MIN1)]
 
     _load_raw_market_data(account, FlowContext(timestamp=None, event_queue=EventQueue()))
 

@@ -95,7 +95,7 @@ def test_resolve_execution_timestamp_next_bar_advances_by_delay():
         GroupMembershipModule.execution_delay_bars: 2,
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1, 2, 3, 4]}, index=pd.date_range("2024-01-01", periods=4))
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue())
@@ -113,7 +113,7 @@ def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_b
             OrderExecutionModule.execution_price_basis: "open",
         }),
     })
-    account.current_prices_table = pd.DataFrame({"P1": [1, 2, 3]}, index=idx)
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1, 2, 3]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
 
     open_event_ts, open_price_ts = _resolve_execution_schedule(account, ctx, s_open)
@@ -131,7 +131,7 @@ def test_resolve_execution_schedule_rejects_non_open_price_basis():
             OrderExecutionModule.execution_price_basis: "close",
         }),
     })
-    account.current_prices_table = pd.DataFrame({"P1": [1, 2]}, index=idx)
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1, 2]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
 
     with pytest.raises(ValueError, match="next-bar open"):
@@ -145,7 +145,7 @@ def test_resolve_execution_timestamp_clips_to_last_available_bar():
         GroupMembershipModule.execution_delay_bars: 10,
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue())
@@ -162,7 +162,7 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
         OrderExecutionModule.execution_price_basis: "open",
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
@@ -192,7 +192,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
         GroupMembershipModule.execution_delay_bars: 2,
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {p: [1, 2, 3, 4]}, index=pd.date_range("2024-01-01", periods=4))
     queue = EventQueue()
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
@@ -226,7 +226,7 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
         OrderExecutionModule.execution_price_basis: "open",
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
@@ -254,7 +254,7 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
         OrderExecutionModule.execution_price_basis: "open",
     })
     account = RunState(strategy_configs={s: config})
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {p1: [1, 2], p2: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
@@ -388,7 +388,7 @@ def test_inverse_volatility_allocates_more_to_calmer_product():
     })
     account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=5)
-    account.current_prices_table = pd.DataFrame({
+    account.market_data_store.current_prices_table = pd.DataFrame({
         p_calm: [100.0, 101.0, 100.0, 101.0, 100.0],       # low volatility
         p_volatile: [100.0, 120.0, 90.0, 130.0, 80.0],      # high volatility
     }, index=idx)
@@ -413,7 +413,7 @@ def test_inverse_volatility_warmup_equal_notional_fallback_for_insufficient_hist
     })
     account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=5)
-    account.current_prices_table = pd.DataFrame({
+    account.market_data_store.current_prices_table = pd.DataFrame({
         p_established: [100.0, 101.0, 100.0, 101.0, 100.0],
         p_new: [None, None, None, None, 100.0],  # just appeared, no trailing history
     }, index=idx)
@@ -438,7 +438,7 @@ def test_inverse_volatility_warmup_error_raises_for_insufficient_history():
     })
     account = RunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=2)
-    account.current_prices_table = pd.DataFrame({p_new: [100.0, 101.0]}, index=idx)
+    account.market_data_store.current_prices_table = pd.DataFrame({p_new: [100.0, 101.0]}, index=idx)
 
     ctx = FlowContext(timestamp=idx[-1], event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set_for(FactorSignalModule.signal_value, s, {p_new: 1.0})

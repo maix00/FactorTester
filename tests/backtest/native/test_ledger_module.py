@@ -79,7 +79,7 @@ def test_initialize_ledgers_uses_effective_backtest_product_universe():
     in_range, out_of_range = _product(), _product()
     config = _strategy_config(s, engine_mode="basic")
     account = RunState(strategy_configs={s: config})
-    account.backtest_included_products = frozenset({in_range})
+    account.market_data_store.included_products = frozenset({in_range})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({in_range, out_of_range}))
 
@@ -103,7 +103,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
 
     t = pd.Timestamp("2024-01-01")
     prices = {p1: 10.0, p2: 20.0}
-    account.current_prices_table = pd.DataFrame({p1: [10.0], p2: [20.0]}, index=[t])
+    account.market_data_store.current_prices_table = pd.DataFrame({p1: [10.0], p2: [20.0]}, index=[t])
 
     # equity = cash = 1_000_000; target weights 0.5/0.5 -> buy
     # quantity[p1] = 0.5*1_000_000/10 = 50_000, quantity[p2] = 0.5*1_000_000/20 = 25_000

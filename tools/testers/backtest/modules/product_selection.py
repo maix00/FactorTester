@@ -880,7 +880,7 @@ def _local_cnfutures_inferred_lifecycle(
     peer_rows: list[dict[str, Any]] | None,
     account: Any | None,
 ) -> pd.Timestamp | None:
-    raw_prices = getattr(account, "raw_prices_table", None) if account is not None else None
+    raw_prices = _raw_prices_table_for(account)
     if not isinstance(raw_prices, pd.DataFrame):
         raw_market_data = getattr(account, "raw_market_data", None) if account is not None else None
         if isinstance(raw_market_data, dict):
@@ -921,12 +921,26 @@ def _apply_lifecycle_offset(
 ) -> pd.Timestamp:
     if offset <= pd.Timedelta(0):
         return base
-    table = getattr(account, "current_prices_table", None) if account is not None else None
+    table = _current_prices_table_for(account)
     if isinstance(table, pd.DataFrame) and not table.empty:
         shifted = _shift_on_event_axis(base, offset, table)
         if shifted is not None:
             return shifted
     return cast(pd.Timestamp, base - offset)
+
+
+def _raw_prices_table_for(account: Any | None) -> Any:
+    if account is None:
+        return None
+    from tools.testers.backtest.modules.market_data import raw_prices_table_for
+    return raw_prices_table_for(account)
+
+
+def _current_prices_table_for(account: Any | None) -> Any:
+    if account is None:
+        return None
+    from tools.testers.backtest.modules.market_data import current_prices_table_for
+    return current_prices_table_for(account)
 
 
 def _shift_on_event_axis(base: pd.Timestamp, offset: pd.Timedelta, table: pd.DataFrame) -> pd.Timestamp | None:

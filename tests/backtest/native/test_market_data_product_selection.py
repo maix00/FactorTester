@@ -30,4 +30,4 @@ def test_market_data_coverage_uses_resolved_product_selection_context():
     _resolve_market_data_request(account, ctx)
     _check_market_data_coverage(account, ctx)
 
-    assert getattr(account, "_market_data_load_plan") == [(selected, DataFreq.MIN1, None)]
+    assert account.market_data_store.load_plan == [(selected, DataFreq.MIN1, None)]

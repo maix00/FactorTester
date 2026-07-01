@@ -14,7 +14,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, market_price_tables_for
 from tools.testers.backtest.modules.time_index_lookup import row_at
 from .base import ExecutableModule, FieldDefinition, FieldRef
 
@@ -71,7 +71,7 @@ def _normalise_price_basis(value: object) -> str:
 
 
 def _price_table(account: Any, basis: str) -> pd.DataFrame:
-    tables = getattr(account, "market_price_tables", None)
+    tables = market_price_tables_for(account)
     if isinstance(tables, dict):
         table = tables.get(basis)
         if isinstance(table, pd.DataFrame) and not table.empty:

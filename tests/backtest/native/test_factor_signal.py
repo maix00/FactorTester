@@ -102,7 +102,7 @@ def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
                             field_values={FactorSignalModule.signal_freq: "1h"}),
     }
     account = RunState(strategy_configs=configs)
-    account.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0]}, index=pd.date_range("2024-01-01", periods=2))
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0]}, index=pd.date_range("2024-01-01", periods=2))
 
     aligned = pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-01")])
     queue = EventQueue()

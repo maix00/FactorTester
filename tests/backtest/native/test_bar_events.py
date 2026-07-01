@@ -19,7 +19,7 @@ def test_bar_events_only_registered_for_live_strategies():
         live: StrategyConfig(strategy=live, active_flow_names=frozenset({"signal_live"})),
         precomputed: StrategyConfig(strategy=precomputed, active_flow_names=frozenset({"signal_precomputed"})),
     })
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1.0, 2.0]},
         index=[pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")],
     )
@@ -39,7 +39,7 @@ def test_bar_events_not_registered_when_every_strategy_is_precomputed():
     account = RunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy, active_flow_names=frozenset({"signal_precomputed"})),
     })
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1.0]},
         index=[pd.Timestamp("2024-01-01")],
     )
@@ -68,7 +68,7 @@ def test_bar_events_deduplicate_strategies_sharing_one_live_factor():
             field_values={FactorModule.factor: shared_factor},
         ),
     })
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1.0, 2.0]},
         index=[pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")],
     )
@@ -79,7 +79,7 @@ def test_bar_events_deduplicate_strategies_sharing_one_live_factor():
 
     events = ctx.get(BarEventModule.dispatched_bar_events)
     assert len(events) == 2
-    assert [event.timestamp for event in events] == list(account.current_prices_table.index)
+    assert [event.timestamp for event in events] == list(account.market_data_store.current_prices_table.index)
     assert {event.strategy for event in events} == {first}
     assert queue.pending_count() == 2
 
@@ -110,7 +110,7 @@ def test_bar_events_split_shared_factor_by_strategy_warmup_window():
             field_values={**base_fields, FactorSignalModule.warmup_window: "2d"},
         ),
     })
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1.0, 2.0, 3.0]},
         index=pd.date_range("2024-01-01 09:00", periods=3, freq="D"),
     )
@@ -150,7 +150,7 @@ def test_bar_events_warmup_counts_actual_bars_not_calendar_time():
             },
         ),
     })
-    account.current_prices_table = pd.DataFrame(
+    account.market_data_store.current_prices_table = pd.DataFrame(
         {"P1": [1.0, 2.0, 3.0, 4.0]},
         index=pd.DatetimeIndex([
             "2024-01-01 14:59",

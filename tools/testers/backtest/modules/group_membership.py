@@ -26,7 +26,11 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
-from tools.testers.backtest.modules.market_data import MarketDataModule, historical_fields_for_product
+from tools.testers.backtest.modules.market_data import (
+    MarketDataModule,
+    current_prices_table_for,
+    historical_fields_for_product,
+)
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
@@ -233,7 +237,7 @@ def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
 
     lookback = config.get(GroupMembershipModule.volatility_lookback, 20)
     warmup = config.get(GroupMembershipModule.volatility_warmup, "equal_notional")
-    table = getattr(account, "current_prices_table", None)
+    table = current_prices_table_for(account)
     inv_vol: dict = {}
     fallback_equal: list = []
     for product in members:
@@ -319,7 +323,7 @@ def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, p
     if basis != "open":
         raise ValueError("order execution is fixed to next-bar open")
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
-    table = getattr(account, "current_prices_table", None)
+    table = current_prices_table_for(account)
     if table is None:
         return current_ts, current_ts
     index = signal_timestamps(table)

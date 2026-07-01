@@ -14,7 +14,7 @@ from tools.testers.backtest.modules.factor_signal import (
     _clip_table_to_strategy_warmup_window,
     _live_factor_state_key,
 )
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, current_prices_table_for
 from tools.testers.backtest.modules.time_index_lookup import signal_event_times
 
 
@@ -50,7 +50,7 @@ def _schedule_bar_events(account, ctx) -> None:
     strategies only share BAR replay state when factor identity, formal run
     window, and warm-up window all match.
     """
-    table = getattr(account, "current_prices_table", None)
+    table = current_prices_table_for(account)
     if table is None:
         return
     representative_by_calculation: dict[Any, Any] = {}

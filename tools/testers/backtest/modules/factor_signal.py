@@ -21,7 +21,7 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, current_prices_table_for
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
     _expr_operands as _run_window_expr_operands,
@@ -209,7 +209,7 @@ def _schedule_signal_live_timestamps(account, ctx) -> None:
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
-    data = getattr(account, "current_prices_table", None)
+    data = current_prices_table_for(account)
     if data is None:
         return
     drafts: list[EventDraft] = []

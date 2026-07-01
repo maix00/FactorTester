@@ -212,7 +212,7 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
         pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
         pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
     ])
-    account.raw_prices_table = pd.DataFrame({
+    account.market_data_store.raw_prices_table = pd.DataFrame({
         _Contract("P2601.DCE"): [1.0, 1.0, None],
         _Contract("P2602.DCE"): [None, 2.0, 2.0],
     }, index=idx)
@@ -253,7 +253,7 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
         pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
     ])
     account = RunState(strategy_configs={})
-    account.raw_prices_table = pd.DataFrame({
+    account.market_data_store.raw_prices_table = pd.DataFrame({
         _Contract("P2601.DCE"): [1.0, 1.0, None],
         _Contract("P2602.DCE"): [None, 2.0, 2.0],
     }, index=idx)
@@ -677,7 +677,7 @@ def test_rollover_day_window_uses_trading_axis_not_calendar_days():
         pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
         pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
     ])
-    account.current_prices_table = pd.DataFrame({"P2601.DCE": range(len(axis))}, index=axis)
+    account.market_data_store.current_prices_table = pd.DataFrame({"P2601.DCE": range(len(axis))}, index=axis)
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))

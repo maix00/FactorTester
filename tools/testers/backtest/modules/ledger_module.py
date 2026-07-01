@@ -112,7 +112,8 @@ def _initialize_ledgers(account, ctx) -> None:
 
 def _products_for_backtest_window(account, ctx, strategy) -> frozenset:
     products = frozenset(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
-    included = getattr(account, "backtest_included_products", None)
+    from tools.testers.backtest.modules.market_data import market_data_store_for
+    included = market_data_store_for(account).included_products
     if included is None:
         return products
     return frozenset(product for product in products if product in included)
