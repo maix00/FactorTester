@@ -57,7 +57,11 @@ def _constrain_to_ledger_cash(account, ctx) -> None:
         )
         if buy_cost <= 0:
             continue
-        available = ledger.get(LedgerModule.cash).to_major()
+        sell_proceeds = sum(
+            -contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
+            for o in orders if o.quantity < 0
+        )
+        available = ledger.get(LedgerModule.cash).to_major() + sell_proceeds
         if buy_cost <= available:
             continue
         scale = available / buy_cost
@@ -74,5 +78,6 @@ def _constrain_to_ledger_cash(account, ctx) -> None:
                         "before_quantity": before,
                         "scale": float(scale),
                         "available_cash": float(available),
+                        "same_batch_sell_proceeds": float(sell_proceeds),
                     },
                 )

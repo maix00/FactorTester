@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
@@ -15,6 +16,25 @@ if TYPE_CHECKING:
 
 AccountingMode = Literal["Basic", "Custom", "Auto"]
 CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"]
+
+_VALID_COST_BASIS_METHODS = {"WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"}
+_FEE_FIELDS = (
+    "OpenRatioByMoney",
+    "OpenRatioByVolume",
+    "CloseRatioByMoney",
+    "CloseRatioByVolume",
+    "CloseTodayRatioByMoney",
+    "CloseTodayRatioByVolume",
+)
+_CLOSE_FEE_PAIRS = (
+    ("CloseRatioByMoney", "CloseTodayRatioByMoney"),
+    ("CloseRatioByVolume", "CloseTodayRatioByVolume"),
+)
+_SETTLEMENT_FIELDS = (
+    "SettlementPrice",
+    "PreSettlementPrice",
+    "LastSettlementPrice",
+)
 
 _CUSTOM_TRADING_RULE_FIELDS = (
     {
@@ -85,19 +105,52 @@ def _effective_accounting_mode(strategy_config: "StrategyConfig") -> str:
     return "Auto"
 
 
-def _resolve_method(strategy_config: "StrategyConfig", product: "Product") -> str:
+def _resolve_method(
+    strategy_config: "StrategyConfig",
+    product: "Product",
+    historical_fields: Mapping[str, object] | None = None,
+    *,
+    require_exact: bool = False,
+) -> str:
     mode = _effective_accounting_mode(strategy_config)
     if mode == "Basic":
         return "WeightAverage"
     if mode == "Custom":
         return strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage")
-    # Auto: derive from the product's own trading spec, not a per-product
-    # "default_cost_basis_method" attribute (Product has no such field).
-    # Real-world convention: margin-traded instruments (futures) settle
-    # daily mark-to-market; non-margin instruments (equities/spot) default
-    # to FIFO (the standard tax-lot accounting default absent any explicit
-    # election, e.g. US IRS default method for securities).
-    return "DailyMarkToMarket" if getattr(product, "is_margin_traded", False) else "FIFO"
+    return infer_auto_cost_basis_method(historical_fields, require_exact=require_exact, product=product)
+
+
+def infer_auto_cost_basis_method(
+    historical_fields: Mapping[str, object] | None,
+    *,
+    require_exact: bool = False,
+    product: object | None = None,
+) -> CostBasisMethod:
+    fields = historical_fields or {}
+    explicit = fields.get("CostBasisMethod")
+    if explicit not in (None, ""):
+        method = str(explicit)
+        if method not in _VALID_COST_BASIS_METHODS:
+            raise ValueError(f"unsupported CostBasisMethod for {product}: {method}")
+        return cast(CostBasisMethod, method)
+    if require_exact:
+        raise KeyError(f"exact accounting requires historical CostBasisMethod for {product}")
+    if _has_daily_mark_to_market_indicator(fields):
+        return "DailyMarkToMarket"
+    if _has_any_fee_field(fields):
+        return "FIFO"
+    return "WeightAverage"
+
+
+def _has_any_fee_field(fields: Mapping[str, object]) -> bool:
+    return any(name in fields for name in _FEE_FIELDS)
+
+
+def _has_daily_mark_to_market_indicator(fields: Mapping[str, object]) -> bool:
+    return any(field in fields for field in _SETTLEMENT_FIELDS) or any(
+        today_field in fields for _, today_field in _CLOSE_FEE_PAIRS
+    )
+
 
 def _resolve_use_int_position(strategy_config: "StrategyConfig") -> bool:
     mode = _effective_accounting_mode(strategy_config)

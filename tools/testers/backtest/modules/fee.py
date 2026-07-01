@@ -54,6 +54,7 @@ class FeeModule(ExecutableModule):
             public=True, label="费用", default="auto", control_template="select", tab="cost",
             options=(
                 ("auto", "自动"),
+                ("exact", "严格交易规则"),
                 ("custom", "自定义品种/合约"),
                 ("close_yesterday", "按平昨"),
                 ("close_today", "按平今"),
@@ -61,7 +62,7 @@ class FeeModule(ExecutableModule):
                 ("zero", "不计费用"),
             ),
             editable_when={"engine_mode": ("custom",)},
-            default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "auto"}},
+            default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"}},
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
@@ -165,11 +166,13 @@ def _market_fee_cost(order, *, price: float, fields: dict[str, object], current_
     missing = [field for field in _FEE_FIELDS if field not in fields]
     if "VolumeMultiple" not in fields:
         missing.append("VolumeMultiple")
-    if missing:
+    if missing and _requires_complete_fee_fields(fee_mode):
         raise KeyError(
             f"market fee requires MarketDataModule historical fields for {order.instrument}: "
             f"missing {', '.join(missing)}"
         )
+    if not fields or not _has_any_fee_field(fields):
+        return 0.0
     multiplier = _number(fields.get("VolumeMultiple"), 1.0)
     quantity = float(order.quantity)
     open_qty, close_qty = _split_open_close_quantity(quantity, current_quantity)
@@ -214,6 +217,14 @@ def _is_close_today(order, policy: str) -> bool:
     return False
 
 
+def _requires_complete_fee_fields(mode: str) -> bool:
+    return mode in {"exact", "custom", "close_today", "close_yesterday"}
+
+
+def _has_any_fee_field(fields: dict[str, object]) -> bool:
+    return any(field in fields for field in _FEE_FIELDS)
+
+
 def _fee_part(quantity: float, *, price: float, multiplier: float, ratio: float, fixed: float) -> float:
     qty = abs(float(quantity))
     return qty * (price * multiplier * ratio + fixed)
@@ -232,8 +243,10 @@ def _resolve_fee_mode(config) -> str:
     engine_mode = engine_mode_for(config)
     if engine_mode == "basic":
         return "zero"
-    if engine_mode in {"auto", "exact"}:
+    if engine_mode == "auto":
         return "auto"
+    if engine_mode == "exact":
+        return "exact"
     return _normalise_fee_mode(config.get(FeeModule.fee_mode, "auto"))
 
 

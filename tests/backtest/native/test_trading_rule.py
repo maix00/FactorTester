@@ -9,7 +9,8 @@ from tools.testers.backtest.engines.native.ledger import Ledger, Lot, ProductPos
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, open_position,
+    TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, infer_auto_cost_basis_method,
+    open_position,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
@@ -39,14 +40,48 @@ def test_resolve_method_custom_reads_field():
     assert _resolve_method(config, _product()) == "FIFO"
 
 
-def test_resolve_method_auto_margin_traded_is_daily_mark_to_market():
+def test_resolve_method_auto_uses_explicit_historical_cost_basis_method():
     config = _config(engine_mode="auto")
-    assert _resolve_method(config, _product(margin_traded=True)) == "DailyMarkToMarket"
+    assert _resolve_method(config, _product(margin_traded=True), {"CostBasisMethod": "FIFO"}) == "FIFO"
 
 
-def test_resolve_method_auto_non_margin_falls_back_to_fifo():
+def test_resolve_method_auto_uses_daily_mark_to_market_when_close_today_field_exists():
     config = _config(engine_mode="auto")
-    assert _resolve_method(config, _product(margin_traded=False)) == "FIFO"
+    fields = {
+        "CloseRatioByMoney": 0.0001,
+        "CloseTodayRatioByMoney": 0.0001,
+    }
+    assert _resolve_method(config, _product(margin_traded=False), fields) == "DailyMarkToMarket"
+
+
+def test_resolve_method_auto_uses_daily_mark_to_market_when_settlement_field_exists():
+    config = _config(engine_mode="auto")
+    assert _resolve_method(config, _product(margin_traded=False), {"SettlementPrice": 10.0}) == "DailyMarkToMarket"
+
+
+def test_resolve_method_auto_uses_fifo_when_fee_exists_without_close_today_fields():
+    config = _config(engine_mode="auto")
+    fields = {
+        "OpenRatioByMoney": 0.0001,
+        "CloseRatioByMoney": 0.0001,
+    }
+    assert _resolve_method(config, _product(margin_traded=False), fields) == "FIFO"
+
+
+def test_resolve_method_auto_without_fee_information_falls_back_to_weight_average():
+    config = _config(engine_mode="auto")
+    assert _resolve_method(config, _product(margin_traded=True), {}) == "WeightAverage"
+
+
+def test_resolve_method_exact_requires_explicit_historical_cost_basis_method():
+    config = _config(engine_mode="exact")
+    with pytest.raises(KeyError):
+        _resolve_method(config, _product(), {}, require_exact=True)
+
+
+def test_infer_auto_cost_basis_rejects_unknown_explicit_method():
+    with pytest.raises(ValueError):
+        infer_auto_cost_basis_method({"CostBasisMethod": "Mystery"})
 
 
 def test_resolve_use_int_position_basic_false_auto_true_custom_reads_field():

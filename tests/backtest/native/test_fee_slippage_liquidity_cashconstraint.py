@@ -13,7 +13,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules.fee import FeeModule, _apply_fee
+from tools.testers.backtest.modules.fee import FeeModule, _apply_fee, _resolve_fee_mode
 from tools.testers.backtest.modules.custom_product import CustomProductModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_module import _basic_cash_update
@@ -88,7 +88,7 @@ def test_fee_mode_custom_uses_unified_product_field_overrides():
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.01)
 
 
-def test_engine_mode_exact_uses_auto_fee_and_requires_historical_fields():
+def test_engine_mode_exact_uses_exact_fee_and_requires_historical_fields():
     s = Strategy(alias="S")
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -100,6 +100,7 @@ def test_engine_mode_exact_uses_auto_fee_and_requires_historical_fields():
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
     assert config.get(FeeModule.fee_mode) is None
+    assert _resolve_fee_mode(config) == "exact"
     with pytest.raises(KeyError):
         _apply_fee(account, ctx, lambda a, c: None)
 
@@ -128,6 +129,22 @@ def test_fee_mode_auto_uses_historical_fields():
 
     _apply_fee(account, ctx, lambda a, c: None)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.002)
+
+
+def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_cost():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "auto"})
+    account = _account_with_ledger(s, config)
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 10.0}})
+
+    _apply_fee(account, ctx, lambda a, c: None)
+    assert order.get("fee_cost") == 0.0
 
 
 def test_slippage_zero_means_unadjusted_price():
@@ -247,6 +264,25 @@ def test_cash_constraint_does_not_touch_sell_orders():
 
     _constrain_to_ledger_cash(account, ctx)
     assert sell.quantity == -10.0
+
+
+def test_cash_constraint_counts_same_batch_sell_proceeds_before_scaling_buys():
+    s = Strategy(alias="S")
+    p_sell, p_buy = _product(), _product()
+    ledger = Ledger(strategy=s, base_currency="CNY")
+    ledger.set(LedgerModule.cash, DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
+    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+
+    sell = Order(instrument=p_sell, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
+    buy = Order(instrument=p_buy, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {p_sell: 10.0, p_buy: 10.0})
+    ctx.set_for(OrderBookModule.orders, s, [sell, buy])
+
+    _constrain_to_ledger_cash(account, ctx)
+
+    assert sell.quantity == pytest.approx(-10.0)
+    assert buy.quantity == pytest.approx(10.0)
 
 
 def test_cash_constraint_isolates_strategies():

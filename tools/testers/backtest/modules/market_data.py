@@ -1081,6 +1081,10 @@ def _historical_field_policy_for_engine(account, raw_policy: object | None) -> s
         mode = engine_mode_for(next(iter(configs.values())))
     if mode == "exact":
         return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
+    fee_ref = FieldRef("fee_mode", owner="FeeModule")
+    for config in getattr(account, "strategy_configs", {}).values():
+        if str(config.get(fee_ref, "") or "") == "exact":
+            return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
     if mode in {"auto", "custom"}:
         return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
     return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
@@ -1091,9 +1095,17 @@ def _required_market_rule_field_names(account) -> tuple[str, ...]:
     fee_ref = FieldRef("fee_mode", owner="FeeModule")
     margin_ref = FieldRef("margin_mode", owner="MarginModule")
     allocation_ref = FieldRef("allocation_policy", owner="GroupMembershipModule")
+    accounting_ref = FieldRef("accounting_mode", owner="TradingRuleModule")
     for config in getattr(account, "strategy_configs", {}).values():
-        fee_mode = str(config.get(fee_ref, "auto") or "auto")
+        from tools.testers.backtest.modules.fee import _resolve_fee_mode
+
+        fee_mode = _resolve_fee_mode(config)
         if fee_mode not in {"zero", "none"}:
+            fields.extend(TRANSACTION_FEE_FIELD_NAMES)
+        if fee_mode == "exact" or engine_mode_for(config) == "exact":
+            fields.append("CostBasisMethod")
+        accounting_mode = str(config.get(accounting_ref, "") or "")
+        if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
         margin_mode = str(config.get(margin_ref, "auto") or "auto")
         allocation = str(config.get(allocation_ref, "") or "")

@@ -74,10 +74,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine_mode": ["custom"],
     }
     assert index["defaults"]["fee_mode"]["default_when"] == {
-        "engine_mode": {"basic": "zero", "auto": "auto", "exact": "auto"},
+        "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
     }
     assert {option["value"] for option in index["defaults"]["fee_mode"]["options"]} == {
-        "auto", "custom", "close_yesterday", "close_today", "fixed", "zero",
+        "auto", "exact", "custom", "close_yesterday", "close_today", "fixed", "zero",
     }
     assert index["defaults"]["fixed_fee_rate"]["visible_when"] == {
         "fee_mode": ["fixed"],

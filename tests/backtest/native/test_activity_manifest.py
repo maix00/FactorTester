@@ -50,6 +50,50 @@ def test_activity_manifest_hides_long_short_flow_when_no_long_short_strategy():
     assert "合成Long-Short目标" not in _event_labels(manifest)
 
 
+def test_activity_manifest_hides_live_signal_flows_for_precomputed_factor():
+    account = BacktestRunState()
+    apply_strategy_configs(account, {
+        "A1": {
+            "factor_mode": "precomputed",
+            "split_count": 5,
+            "group_index": 0,
+        },
+    })
+
+    manifest = activity_manifest_from_groups(sort_and_validate(_registry().resolve()), account)
+
+    pre = next(item for item in manifest if item["key"] == "pre_replay")
+    pre_labels = [flow["flow_label"] for flow in pre["flows"]]
+    event_labels = _event_labels(manifest)
+    assert "登记实时因子事件" not in pre_labels
+    assert "登记 Bar 事件" not in pre_labels
+    assert "读取实时因子信号" not in event_labels
+    assert "读取预计算信号" in event_labels
+
+
+def test_activity_manifest_shows_long_short_flow_only_for_long_short_strategy():
+    account = BacktestRunState()
+    apply_strategy_configs(account, {
+        "A1": {
+            "factor_mode": "precomputed",
+            "split_count": 5,
+            "group_index": 0,
+        },
+        "LS A1/A5": {
+            "strategy_kind": "long_short",
+            "factor_mode": "precomputed",
+            "split_count": 5,
+            "group_index": 0,
+            "long_leg_strategy_ids": [{"strategy_id": "A1"}],
+            "short_leg_strategy_ids": [{"strategy_id": "A5"}],
+        },
+    })
+
+    manifest = activity_manifest_from_groups(sort_and_validate(_registry().resolve()), account)
+
+    assert "合成Long-Short目标" in _event_labels(manifest)
+
+
 def test_activity_manifest_dedupes_logical_live_signal_flow():
     account = BacktestRunState()
     apply_strategy_configs(account, {
