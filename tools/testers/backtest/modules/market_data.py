@@ -164,7 +164,9 @@ class MarketDataModule(ExecutableModule):
     )
 
     check_market_data_coverage: ClassVar[Flow] = Flow(
-        "check_market_data_coverage", inputs=(), outputs=(),
+        "check_market_data_coverage",
+        inputs=(required_data_source, required_frequency, ProductSelectionModule.products),
+        outputs=(),
         phase=Phase.PRE_REPLAY, order=38, after=(resolve_market_data_request,),
         compute=lambda account, ctx: _check_market_data_coverage(account, ctx),
     )

@@ -122,7 +122,9 @@ class FactorSignalModule(ExecutableModule):
         strategy_scoped=True,
     )
     signal_precomputed: ClassVar[Flow] = Flow(
-        "signal_precomputed", inputs=(FactorModule.factor,), outputs=(),
+        "signal_precomputed",
+        inputs=(FactorModule.factor, MarketDataModule.required_data_source, MarketDataModule.required_frequency),
+        outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         compute=lambda account, ctx: _schedule_signal_precomputed_timestamps(account, ctx),
         strategy_scoped=True,
