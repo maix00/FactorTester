@@ -14,7 +14,7 @@ wiring is added.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ class RiskMetricsModule(ExecutableModule):
     compute_risk_metrics: ClassVar[Flow] = Flow(
         "compute_risk_metrics", inputs=(), outputs=(),
         phase=Phase.POST_REPLAY, order=20,
+        description="计算风险指标",
         compute=lambda account, ctx: _compute_risk_metrics(account, ctx),
     )
 
@@ -40,8 +41,8 @@ class RiskMetricsModule(ExecutableModule):
 
 def _compute_risk_metrics(account, ctx) -> None:
     for strategy in account.strategy_configs:
-        equity = equity_curve_for(account, strategy)
-        returns = returns_for(account, strategy)
+        equity = cast(pd.Series, equity_curve_for(account, strategy))
+        returns = cast(pd.Series, returns_for(account, strategy))
         split_raw = account.config_for(strategy).get(RunWindowModule.evaluation_split)
 
         in_sample_metrics = compute_metrics(equity, returns)
@@ -49,8 +50,10 @@ def _compute_risk_metrics(account, ctx) -> None:
 
         if split_raw:
             split = pd.Timestamp(split_raw)
-            in_equity, in_returns = equity[equity.index <= split], returns[returns.index <= split]
-            out_equity, out_returns = equity[equity.index > split], returns[returns.index > split]
+            in_equity = cast(pd.Series, equity.loc[equity.index <= split])
+            in_returns = cast(pd.Series, returns.loc[returns.index <= split])
+            out_equity = cast(pd.Series, equity.loc[equity.index > split])
+            out_returns = cast(pd.Series, returns.loc[returns.index > split])
             result.update({f"{k}": v for k, v in compute_metrics(in_equity, in_returns).items()})
             out_metrics = compute_metrics(out_equity, out_returns)
             result.update({f"out_of_sample_{k}": v for k, v in out_metrics.items()})
@@ -68,25 +71,26 @@ def compute_metrics(equity: pd.Series, returns: pd.Series) -> dict:
 
     _EPS = 1e-12  # floating-point noise floor -- even bit-identical input returns
                    # rarely produce an exactly-0.0 std from pandas' variance algorithm
-    std = returns.std()
-    sharpe_ratio = float(returns.mean() / std) if pd.notna(std) and std > _EPS else 0.0
+    mean_return = float(cast(Any, returns.mean()))
+    std = float(cast(Any, returns.std()))
+    sharpe_ratio = mean_return / std if pd.notna(std) and std > _EPS else 0.0
 
     cummax = equity.cummax()
     drawdown = equity / cummax - 1.0
-    max_drawdown = float(drawdown.min())
+    max_drawdown = float(cast(Any, drawdown.min()))
 
     downside = returns[returns < 0]
-    downside_std = downside.std()  # NaN when fewer than 2 downside observations (sample std undefined)
+    downside_std = float(cast(Any, downside.std()))  # NaN when fewer than 2 downside observations (sample std undefined)
     sortino_ratio = (
-        float(returns.mean() / downside_std)
+        mean_return / downside_std
         if pd.notna(downside_std) and downside_std > _EPS else 0.0
     )
 
-    calmar_ratio = float(returns.mean() / abs(max_drawdown)) if max_drawdown else 0.0
+    calmar_ratio = mean_return / abs(max_drawdown) if max_drawdown else 0.0
 
-    win_rate = float((returns > 0).mean())
-    skewness = float(returns.skew()) if len(returns) >= 3 else 0.0
-    kurtosis = float(returns.kurt()) if len(returns) >= 4 else 0.0
+    win_rate = float(cast(Any, (returns > 0).mean()))
+    skewness = float(cast(Any, returns.skew())) if len(returns) >= 3 else 0.0
+    kurtosis = float(cast(Any, returns.kurt())) if len(returns) >= 4 else 0.0
     avg_turnover = 0.0  # requires trade-level notional history; not tracked this round
 
     return {

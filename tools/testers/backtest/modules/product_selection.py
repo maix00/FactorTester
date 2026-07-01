@@ -86,7 +86,9 @@ class ProductSelectionModule(ExecutableModule):
 
     resolve_product_selection: ClassVar[Flow] = Flow(
         "resolve_product_selection", inputs=(product_path_selection,), outputs=(products,),
-        phase=Phase.PRE_REPLAY, order=15, compute=lambda account, ctx: _resolve_product_selection(account, ctx),
+        phase=Phase.PRE_REPLAY, order=15,
+        description="解析产品路径",
+        compute=lambda account, ctx: _resolve_product_selection(account, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (resolve_product_selection,)

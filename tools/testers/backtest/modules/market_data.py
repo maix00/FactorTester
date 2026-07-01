@@ -201,6 +201,7 @@ class MarketDataModule(ExecutableModule):
         inputs=(required_data_source, required_frequency, ProductSelectionModule.products),
         outputs=(),
         phase=Phase.PRE_REPLAY, order=38, after=(resolve_market_data_request,),
+        description="检查产品覆盖期",
         compute=lambda account, ctx: _check_market_data_coverage(account, ctx),
     )
     load_raw_market_data: ClassVar[Flow] = Flow(
@@ -208,42 +209,50 @@ class MarketDataModule(ExecutableModule):
             raw_prices, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
         phase=Phase.PRE_REPLAY, order=40, after=(check_market_data_coverage,),
+        description="装载行情数据",
         compute=lambda account, ctx: _load_raw_market_data(account, ctx),
     )
     build_trading_day_resolver: ClassVar[Flow] = Flow(
         "build_trading_day_resolver", inputs=(raw_prices,), outputs=(trading_day_resolver,),
         phase=Phase.PRE_REPLAY, order=43, after=(load_raw_market_data,),
+        description="建立交易日映射",
         compute=lambda account, ctx: _build_trading_day_resolver(account, ctx),
     )
     load_historical_fields: ClassVar[Flow] = Flow(
         "load_historical_fields", inputs=(raw_prices, trading_day_resolver), outputs=(historical_field_policy,),
         phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
+        description="加载历史交易规则字段",
         compute=lambda account, ctx: _load_historical_fields(account, ctx),
     )
     causal_valuation: ClassVar[Flow] = Flow(
         "causal_valuation", inputs=(raw_prices,), outputs=(),
         phase=Phase.PRE_REPLAY, order=45, after=(load_raw_market_data,),
+        description="生成因果估值序列",
         compute=lambda account, ctx: _causal_valuation(account, ctx),
     )
 
     lookup_current_prices_on_signal: ClassVar[Flow] = Flow(
         "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
+        description="读取信号时点价格",
         compute=lambda account, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(account, ctx.timestamp)),
     )
     lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
         "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices,),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
+        description="读取行情时点价格",
         compute=lambda account, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(account, ctx.timestamp)),
     )
     lookup_current_prices_on_order: ClassVar[Flow] = Flow(
         "lookup_current_prices_on_order", inputs=(), outputs=(current_prices,),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
+        description="读取订单时点价格",
         compute=lambda account, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(account, ctx.timestamp)),
     )
     lookup_volume_on_signal: ClassVar[Flow] = Flow(
         "lookup_volume_on_signal", inputs=(), outputs=(volume,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
+        description="读取成交量",
         compute=lambda account, ctx: ctx.set(MarketDataModule.volume, current_volume_at(account, ctx.timestamp)),
     )
     lookup_historical_fields_on_signal: ClassVar[Flow] = Flow(
@@ -251,6 +260,7 @@ class MarketDataModule(ExecutableModule):
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
+        description="读取交易规则字段",
         compute=lambda account, ctx: _set_current_historical_fields(account, ctx),
     )
     lookup_historical_fields_on_order: ClassVar[Flow] = Flow(
@@ -258,6 +268,7 @@ class MarketDataModule(ExecutableModule):
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
+        description="读取订单交易规则字段",
         compute=lambda account, ctx: _set_current_historical_fields(account, ctx),
     )
 

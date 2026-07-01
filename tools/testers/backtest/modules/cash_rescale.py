@@ -30,6 +30,7 @@ class LedgerCashConstraintModule(ExecutableModule):
                     # must haircut buy-side quantities BEFORE they're
                     # scheduled for execution, not after
         after=(OrderBookModule.construct_orders,),
+        description="按现金约束调整订单",
         compute=lambda account, ctx: _constrain_to_ledger_cash(account, ctx),
     )
 

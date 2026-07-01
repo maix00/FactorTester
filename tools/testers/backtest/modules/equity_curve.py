@@ -61,17 +61,20 @@ class EquityCurveModule(ExecutableModule):
         "record_equity_on_signal", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=20,
         after=(LedgerModule.equity_on_signal,),
+        description="记录信号时点净值",
         compute=lambda account, ctx: _record_equity(account, ctx),
     )
     record_equity_on_order: ClassVar[Flow] = Flow(
         "record_equity_on_order", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=920,
         after=(LedgerModule.equity_on_order,),
+        description="记录订单后净值",
         compute=lambda account, ctx: _record_equity(account, ctx),
     )
     flush_equity_post_replay: ClassVar[Flow] = Flow(
         "flush_equity_post_replay", inputs=(), outputs=(),
         phase=Phase.POST_REPLAY, order=10,
+        description="整理净值曲线",
         compute=lambda account, ctx: _flush_equity_post_replay(account, ctx),
     )
 

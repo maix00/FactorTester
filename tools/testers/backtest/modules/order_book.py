@@ -38,12 +38,14 @@ class OrderBookModule(ExecutableModule):
                  LedgerModule.positions),
         outputs=(deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=20, after=(LedgerModule.equity_on_signal,),
+        description="计算目标下单量",
         compute=lambda account, ctx: _basic_size_order(account, ctx),
     )
     construct_orders: ClassVar[Flow] = Flow(
         "construct_orders", inputs=(deltas,), outputs=(orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=30, after=(size_order,),
+        description="构造订单",
         compute=lambda account, ctx: _construct_orders(account, ctx),
     )
 

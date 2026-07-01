@@ -84,6 +84,7 @@ class TermStructureExpandModule(ExecutableModule):
         outputs=(expanded_contracts, contract_metadata),
         phase=Phase.PRE_REPLAY, order=39,
         after=(ProductSelectionModule.resolve_product_selection,),
+        description="展开期限结构",
         compute=lambda account, ctx: _expand_term_structure(account, ctx),
         strategy_scoped=True,
     )
@@ -94,6 +95,7 @@ class TermStructureExpandModule(ExecutableModule):
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=15,
+        description="解析可交易合约目标",
         compute=lambda account, ctx: _resolve_tradable_target_weights(account, ctx),
     )
 
@@ -131,6 +133,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         phase=Phase.PRE_REPLAY,
         order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
+        description="登记交割强平通知",
         compute=lambda account, ctx: _register_force_close_notices(account, ctx),
         strategy_scoped=True,
     )
@@ -141,6 +144,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER_NOTICE,
         order=15,
+        description="处理交割强平通知",
         compute=lambda account, ctx: _handle_delivery_force_close_notice(account, ctx),
     )
 
@@ -193,6 +197,7 @@ class RolloverModule(ExecutableModule):
         phase=Phase.PRE_REPLAY,
         order=46,
         after=(TermStructureExpandModule.expand_term_structure,),
+        description="登记换月通知",
         compute=lambda account, ctx: _register_rollover_notices(account, ctx),
         strategy_scoped=True,
     )
@@ -203,6 +208,7 @@ class RolloverModule(ExecutableModule):
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER_NOTICE,
         order=10,
+        description="处理换月通知",
         compute=lambda account, ctx: _handle_rollover_notice(account, ctx),
     )
 

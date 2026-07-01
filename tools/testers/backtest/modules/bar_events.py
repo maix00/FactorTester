@@ -35,6 +35,7 @@ class BarEventModule(ExecutableModule):
         phase=Phase.PRE_REPLAY,
         order=49,
         after=(MarketDataModule.causal_valuation,),
+        description="登记行情事件",
         compute=lambda account, ctx: _schedule_bar_events(account, ctx),
         strategy_scoped=True,
     )

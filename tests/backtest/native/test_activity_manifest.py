@@ -25,6 +25,16 @@ def _event_labels(manifest: list[dict]) -> list[str]:
     return [flow["flow_label"] for flow in phase["flows"]]
 
 
+def test_registered_native_flows_all_have_chinese_descriptions():
+    missing = []
+    for cls in _ALL_MODULE_CLASSES:
+        for flow in getattr(cls, "flows", ()):
+            if not flow.description:
+                missing.append(f"{cls.__name__}.{flow.name}")
+
+    assert missing == []
+
+
 def test_activity_manifest_hides_long_short_flow_when_no_long_short_strategy():
     account = BacktestRunState()
     apply_strategy_configs(account, {
@@ -53,4 +63,4 @@ def test_activity_manifest_dedupes_logical_live_signal_flow():
     manifest = activity_manifest_from_groups(sort_and_validate(_registry().resolve()), account)
 
     labels = _event_labels(manifest)
-    assert labels.count("处理实时因子信号") == 1
+    assert labels.count("读取实时因子信号") == 1

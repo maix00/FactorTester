@@ -34,6 +34,7 @@ class OrderLifecycleModule(ExecutableModule):
         "finalize_order", inputs=(), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         order=950, after=(LedgerModule.equity_on_order,),
+        description="确认订单终态",
         compute=lambda account, ctx: _finalize_order(account, ctx),
     )
 

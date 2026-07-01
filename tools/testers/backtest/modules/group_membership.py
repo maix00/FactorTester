@@ -118,12 +118,14 @@ class GroupMembershipModule(TargetStrategyModule):
         "group_quantile_membership",
         inputs=(FactorSignalModule.signal_value, split_count, group_index),
         outputs=(target_weights,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        description="计算分组隶属",
         order=10, compute=lambda account, ctx: _group_quantile_membership(account, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
         "schedule_order_execution", inputs=(OrderBookModule.orders,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
         after=(OrderBookModule.construct_orders,),
+        description="登记订单执行事件",
         compute=lambda account, ctx: _schedule_order_execution(account, ctx),
     )
 

@@ -57,6 +57,7 @@ class OrderExecutionModule(ExecutableModule):
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
         order=5,
+        description="解析订单成交价",
         compute=lambda account, ctx: _resolve_execution_price(account, ctx),
     )
 

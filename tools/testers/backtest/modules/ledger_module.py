@@ -56,21 +56,25 @@ class LedgerModule(ExecutableModule):
                  TradingRuleModule.use_int_position, ProductSelectionModule.products),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
+        description="初始化交易账本",
         compute=lambda account, ctx: _initialize_ledgers(account, ctx),
     )
     equity_on_signal: ClassVar[Flow] = Flow(
         "equity_on_signal", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        description="计算信号时点权益",
         order=10, compute=lambda account, ctx: _basic_equity(account, ctx),
     )
     cash_update: ClassVar[Flow] = Flow(
         "cash_update", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
+        description="更新现金与持仓",
         compute=lambda account, ctx: _basic_cash_update(account, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(
         "equity_on_order", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
+        description="计算订单后权益",
         order=900, after=(cash_update,), compute=lambda account, ctx: _basic_equity(account, ctx),
     )
 

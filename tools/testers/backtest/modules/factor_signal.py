@@ -137,6 +137,7 @@ class FactorSignalModule(ExecutableModule):
     signal_live: ClassVar[Flow] = Flow(
         "signal_live", inputs=(), outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
+        description="登记实时因子信号",
         compute=lambda account, ctx: _schedule_signal_live_timestamps(account, ctx),
         strategy_scoped=True,
     )
@@ -145,6 +146,7 @@ class FactorSignalModule(ExecutableModule):
         inputs=(FactorModule.factor, MarketDataModule.required_data_source, MarketDataModule.required_frequency),
         outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
+        description="登记预计算信号",
         compute=lambda account, ctx: _schedule_signal_precomputed_timestamps(account, ctx),
         strategy_scoped=True,
     )
@@ -152,16 +154,19 @@ class FactorSignalModule(ExecutableModule):
     signal_live_on_event: ClassVar[Flow] = Flow(
         "signal_live", inputs=(FactorModule.factor,), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
+        description="读取实时因子信号",
         compute=lambda account, ctx: _evaluate_signal_live(account, ctx),
     )
     signal_live_on_bar: ClassVar[Flow] = Flow(
         "signal_live", inputs=(FactorModule.factor,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=5,
+        description="更新实时因子状态",
         compute=lambda account, ctx: _observe_signal_live_bar(account, ctx),
     )
     signal_precomputed_on_event: ClassVar[Flow] = Flow(
         "signal_precomputed", inputs=(), outputs=(signal_value,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=5,
+        description="读取预计算信号",
         compute=lambda account, ctx: _evaluate_signal_precomputed(account, ctx),
     )
 
