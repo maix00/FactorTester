@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 from server.modules.single_factor_test.group import (
@@ -130,6 +132,24 @@ def test_event_detail_uses_ledger_positions_and_equity() -> None:
     assert detail["summary"]["Total Return"] == 10.0
     assert detail["entry_frequency"][0]["product"]["name"] == "A"
     assert detail["return_series"][-1]["return"] == pytest.approx(0.02)
+
+
+def test_event_detail_accepts_nanosecond_order_timestamps() -> None:
+    execution = copy.deepcopy(_execution())
+    portfolio = execution["engine_result"]["portfolios"]["group-1"]
+    portfolio["equity_curve"] = {
+        "2026-01-05T09:01:00+08:00": 100.0,
+        "2026-01-05T09:01:00.000000001+08:00": 101.0,
+    }
+    portfolio["position_curve"] = {
+        "2026-01-05T09:01:00+08:00": {"A": 0.0},
+        "2026-01-05T09:01:00.000000001+08:00": {"A": 1.0},
+    }
+
+    detail = _event_group_detail(execution, "submission-1", 0, group_id="group-1")
+
+    assert detail["return_series"][-1]["return"] == pytest.approx(0.01)
+    assert detail["intraday_analysis"]["rows"][0]["time"] == "09:01"
 
 
 def test_event_ranking_aligns_framework_equity_curves() -> None:

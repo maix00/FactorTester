@@ -105,13 +105,14 @@
         return null;
     }
 
-    async function loadBaseGroupDetail(productPathSelectionId, groupIndex) {
+    async function loadBaseGroupDetail(productPathSelectionId, groupIndex, groupId) {
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 product_path_selection_id: productPathSelectionId,
                 group_index: groupIndex,
+                group_id: groupId || '',
                 page_uuid: window._pageUuid || ''
             }),
         });
@@ -167,7 +168,9 @@
             var metric = (lastMetrics || {})[group.key]
                 || (lastMetrics || {})[key] || {};
             var isLsGroup = !!group.is_ls;
-            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(productPathSelectionId, groupIndex);
+            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(
+                productPathSelectionId, groupIndex, group.group_id || group.key || key
+            );
             if (!detail) {
                 throw new Error('未获取到分组详情数据');
             }

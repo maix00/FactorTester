@@ -2613,16 +2613,30 @@ def _event_group_snapshot(
     }
 
 
-def _event_group_detail(execution: dict, product_path_selection_id: str, group_index: int) -> dict:
-    owners = [
-        owner for owner in execution.get("group_owner") or []
-        if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
-        and not owner.get("is_ls")
-        and int(owner.get("group_index") or 0) == group_index
-    ]
+def _event_group_detail(
+    execution: dict,
+    product_path_selection_id: str,
+    group_index: int,
+    *,
+    group_id: str | None = None,
+) -> dict:
+    if group_id:
+        owners = [
+            owner for owner in execution.get("group_owner") or []
+            if str(owner.get("group_id") or "") == group_id
+            and not owner.get("is_ls")
+        ]
+    else:
+        owners = [
+            owner for owner in execution.get("group_owner") or []
+            if str(owner.get("product_path_selection_id") or "") == product_path_selection_id
+            and not owner.get("is_ls")
+            and int(owner.get("group_index") or 0) == group_index
+        ]
     if len(owners) != 1:
         raise ValueError(
-            f"事件回测中无法唯一定位分组：product_path_selection_id={product_path_selection_id}, "
+            f"事件回测中无法唯一定位分组：group_id={group_id or ''}, "
+            f"product_path_selection_id={product_path_selection_id}, "
             f"group_index={group_index}, matches={len(owners)}"
         )
     owner = owners[0]
@@ -2711,7 +2725,12 @@ def get_group_detail():
             return jsonify({'success': False, 'error': '当前页面尚无事件回测结果，请先运行分组测试'}), 400
         return jsonify({
             'success': True,
-            'detail': _event_group_detail(event_execution, str(product_path_selection_id), group_index),
+            'detail': _event_group_detail(
+                event_execution,
+                str(product_path_selection_id),
+                group_index,
+                group_id=str(data.get('group_id') or '') or None,
+            ),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

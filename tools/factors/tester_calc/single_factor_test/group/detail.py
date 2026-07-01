@@ -19,6 +19,14 @@ def _safe_bool(obj) -> bool:
     return bool(obj)
 
 
+def _parse_return_timestamps(values: Any) -> pd.Series:
+    """Parse event timestamps that may include nanosecond order offsets."""
+    try:
+        return pd.to_datetime(values, format='mixed')
+    except (TypeError, ValueError):
+        return pd.to_datetime(values)
+
+
 def build_group_detail(
     group_index: int,
     products_by_group: dict,
@@ -252,7 +260,7 @@ def _build_intraday_analysis(return_series: list[dict[str, Any]]) -> dict[str, A
         return {'rows': [], 'top_times': [], 'bottom_times': []}
 
     df = pd.DataFrame(return_series)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['timestamp'] = _parse_return_timestamps(df['timestamp'])
     df['time'] = df['timestamp'].dt.strftime('%H:%M')
     grouped = df.groupby('time')['return'].agg(count='count', mean='mean', sum='sum', std='std').reset_index()
     grouped['t_like'] = grouped.apply(
@@ -285,7 +293,7 @@ def _build_daily_analysis(return_series: list[dict[str, Any]]) -> dict[str, Any]
     if not return_series:
         return {'rows': [], 'top_days': [], 'bottom_days': [], 'return_without_top1_day': None, 'return_without_top5_days': None}
     df = pd.DataFrame(return_series)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['timestamp'] = _parse_return_timestamps(df['timestamp'])
     df['date'] = df['timestamp'].dt.strftime('%Y-%m-%d')
     grouped = df.groupby('date')['return'].agg(count='count', sum='sum', mean='mean').reset_index()
     rows = [
@@ -421,7 +429,7 @@ def _build_calendar_analysis(return_series: list[dict[str, Any]]) -> dict[str, A
     if not return_series:
         return {'month_rows': [], 'day_rows': [], 'year_rows': [], 'month_concentration_ratio': None}
     df = pd.DataFrame(return_series)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['timestamp'] = _parse_return_timestamps(df['timestamp'])
     df['month'] = df['timestamp'].dt.strftime('%m')
     df['day'] = df['timestamp'].dt.strftime('%d')
     df['year'] = df['timestamp'].dt.strftime('%Y')
