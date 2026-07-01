@@ -8,50 +8,72 @@ const GT = resetGroupTest();
 global.SingleFactorProgress = undefined;
 require(sharedProgressPath);
 
-const container = new MockElement('progress-container');
-container.children = [];
-container.appendChild = (child) => {
-  container.children.push(child);
-  child.parentNode = container;
-  return child;
-};
+function createContainer(id) {
+  const container = new MockElement(id);
+  container.children = [];
+  container.appendChild = (child) => {
+    container.children.push(child);
+    child.parentNode = container;
+    return child;
+  };
+  return container;
+}
 
 load('core/run-group-batch.js');
 
+const container = createContainer('activity-progress-container');
 const manager = GT.groupSettings.runGroupBatch.createManager({
   progressContainer: container,
-  phaseLabels: { trade_data: '数据准备', simulate: '交易账本模拟' },
-  subStepLabels: { trade_data: { calendar: '交易日历' } },
 });
 
-manager.registerPhases(['trade_data', 'simulate']);
-manager.syncRows(1);
-manager.updateRow(0, 'trade_data', 0, 1, '加载收益', 'load_returns');
-manager.updateRow(0, 'trade_data', 0, 1, '加载价格', 'load_prices');
-let row = manager.getRow(0);
-let tradeData = row.phaseHistory.trade_data;
-assert.equal(tradeData.subSteps.load_returns.done, true);
-assert.equal(tradeData.subSteps.load_returns.completed, 1);
-assert.equal(tradeData.subSteps.load_returns.total, 1);
-assert.equal(tradeData.completed, 1);
-assert.equal(tradeData.total, 2);
+manager.registerActivityManifest([
+  {
+    key: 'pre_replay',
+    label: '回放准备',
+    flows: [
+      { flow_key: 'prepare.window', flow_label: '解析窗口', display_order: 1 },
+    ],
+  },
+  {
+    key: 'event_replay',
+    label: '事件回放',
+    flows: [
+      { flow_key: 'signal.flow', flow_label: '读取信号', event_kind: 'SIGNAL', display_order: 1 },
+      { flow_key: 'notice.flow', flow_label: '处理通知', event_kind: 'ORDER_NOTICE', display_order: 2 },
+      { flow_key: 'order.flow', flow_label: '处理订单', event_kind: 'ORDER', display_order: 3 },
+    ],
+  },
+  {
+    key: 'post_replay',
+    label: '回放收尾',
+    flows: [
+      { flow_key: 'risk.flow', flow_label: '计算指标', display_order: 1 },
+    ],
+  },
+]);
 
-manager.updateRow(0, 'trade_data', 0, 0, '已有缓存，跳过', 'calendar');
-manager.updateRow(0, 'simulate', 1, 1, '完成');
+const row = manager.getRow();
+assert(row.root.classList.contains('is-running'));
+assert(!row.root.classList.contains('is-event-replaying'));
+assert(row.diagram.innerHTML.includes('gt-flow-event-root'));
+assert(row.diagram.innerHTML.includes('gt-flow-merge-junction'));
 
-row = manager.getRow(0);
-tradeData = row.phaseHistory.trade_data;
-assert.equal(tradeData.done, true);
-assert.equal(tradeData.completed, 3);
-assert.equal(tradeData.total, 3);
-assert.equal(tradeData.subSteps.calendar.done, true);
-assert.equal(tradeData.subSteps.calendar.completed, 1);
-assert.equal(tradeData.subSteps.calendar.total, 1);
-assert.equal(row.phaseHistory.simulate.completed, 1);
-assert.equal(row.phaseHistory.simulate.total, 1);
+manager.updateSignalProgress({ phase: 'event_replay', completed: 1, total: 4 });
+assert.equal(row.fill.style.width, '25.00%');
+assert(row.root.classList.contains('is-event-replaying'));
+assert(row.diagram.innerHTML.includes('gt-flow-line-phase is-active is-event-phase'));
+
+manager.recordActivity({
+  phase: 'event_replay',
+  flow_key: 'signal.flow',
+  flow_label: '读取信号',
+  timestamp: '2026-01-01 09:01:00',
+});
+assert(row.message.title.includes('读取信号') || row.message.title.includes('09:01:00'));
 
 manager.markAllDone(true, '完成');
-assert.equal(row.pct, 100);
-assert.equal(row.textEl.textContent, '100%');
+assert.equal(row.fill.style.width, '100%');
+assert(!row.root.classList.contains('is-running'));
+assert(!row.root.classList.contains('is-event-replaying'));
 
-console.log('PASS: group progress manager completes count-less sub-steps');
+console.log('PASS: group progress manager renders converged flow line and running event animation');

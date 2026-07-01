@@ -35,13 +35,15 @@
         var rotatePosition = {};
         var lastMessageText = '';
         var done = false;
+        var eventReplayActive = false;
         var row = buildShell(progressContainer);
 
         ensureFlowLineStyle();
 
         function buildShell(parent) {
             var root = document.createElement('div');
-            root.className = 'gt-progress-track gt-activity-progress';
+            root.className = 'gt-progress-track gt-activity-progress is-running';
+            root.classList.add('is-running');
             root.style.cssText = 'margin-bottom:10px;';
 
             var title = document.createElement('div');
@@ -125,6 +127,10 @@
             if (!phase) return;
             currentPhase = phase;
             activeFlowKey = payload.flow_key || '';
+            if (phase === EVENT_PHASE) {
+                eventReplayActive = true;
+                row.root.classList.add('is-event-replaying');
+            }
             if (!phaseByKey[phase]) {
                 registerActivityManifest([{ key: phase, label: payload.phase_label || phase, flows: [] }]);
             }
@@ -217,6 +223,11 @@
 
         function updateSignalProgress(payload) {
             if (done) return;
+            if (payload && normalizePhaseKey(payload.phase) === EVENT_PHASE) {
+                eventReplayActive = true;
+                row.root.classList.add('is-event-replaying');
+                renderDiagram();
+            }
             var percent = Number(payload && payload.percent);
             if (!isFinite(percent)) {
                 var completed = Number(payload && payload.completed || 0);
@@ -236,14 +247,14 @@
             var html = ['<div class="gt-flow-line-root">'];
             for (var i = 0; i < phases.length; i++) {
                 var phase = phases[i];
-                var active = phase.key === currentPhase;
+                var active = phase.key === currentPhase || (phase.key === EVENT_PHASE && eventReplayActive);
                 html.push(
                     '<div class="gt-flow-line-phase' + (active ? ' is-active' : '') + (phase.key === EVENT_PHASE ? ' is-event-phase' : '') + '" data-phase="' + escapeHtml(phase.key) + '">'
                     + '<div class="gt-flow-phase-title">' + escapeHtml(phase.label || phase.key) + '</div>'
                 );
                 var flows = phase.flows || [];
                 if (phase.key === EVENT_PHASE) {
-                    html.push(renderEventPhase(flows, active));
+                    html.push(renderEventPhase(flows, active || eventReplayActive));
                 } else {
                     html.push('<div class="gt-flow-line-track">');
                     html.push(renderFlowNodes(phase, flows, active));
@@ -294,7 +305,10 @@
                             '<div class="gt-flow-line-track">', renderFlowNodes(phase, noticeFlows, active), '</div>',
                         '</div>',
                     '</div>',
-                    '<div class="gt-flow-merge-stem" aria-hidden="true"></div>',
+                    '<div class="gt-flow-merge-junction" aria-hidden="true">'
+                        + '<span class="gt-flow-merge-vertical"></span>'
+                        + '<span class="gt-flow-merge-horizontal"></span>'
+                    + '</div>',
                     '<div class="gt-flow-order-branch">',
                         '<div class="gt-flow-branch-title">订单处理</div>',
                         '<div class="gt-flow-line-track">', renderFlowNodes(phase, orderFlows, active), '</div>',
@@ -312,25 +326,30 @@
                 '.gt-flow-line-root{display:flex;flex-direction:column;gap:8px;min-width:0;padding:0 2px 2px;}',
                 '.gt-flow-line-phase{position:relative;display:grid;grid-template-columns:72px minmax(0,1fr);align-items:start;gap:10px;min-width:0;padding:4px 0;}',
                 '.gt-flow-phase-title{text-align:right;font-size:11px;font-weight:600;color:#64748b;line-height:1.2;padding-top:8px;white-space:nowrap;}',
-                '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:16px;min-width:max-content;padding:8px 2px 0;}',
+                '.gt-flow-line-track{position:relative;display:flex;align-items:flex-start;gap:clamp(5px,1.15vw,14px);min-width:0;width:100%;padding:8px 2px 0;}',
                 '.gt-flow-line-track:before{content:"";position:absolute;left:0;right:0;top:14px;height:2px;background:#d0d5dd;}',
                 '.gt-flow-line-track:after{content:"";position:absolute;left:0;right:0;top:13px;height:4px;border-radius:999px;opacity:0;pointer-events:none;}',
                 '.gt-flow-line-phase.is-active .gt-flow-phase-title{color:#0f766e;}',
                 '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:#99f6e4;}',
-                '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:after{opacity:1;background:linear-gradient(90deg,transparent 0,rgba(20,184,166,.12) 18%,#14b8a6 48%,rgba(20,184,166,.12) 78%,transparent 100%);background-size:56px 4px;animation:gtFlowLineMove .75s linear infinite;}',
-                '.gt-flow-event-root{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:center;gap:8px;min-width:max-content;}',
-                '.gt-flow-producer-branches{display:flex;flex-direction:column;gap:8px;min-width:max-content;}',
-                '.gt-flow-event-branch,.gt-flow-order-branch{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:8px;}',
+                '.gt-activity-progress.is-event-replaying .gt-flow-line-phase.is-event-phase .gt-flow-line-track:before{background:#99f6e4;}',
+                '.gt-activity-progress.is-event-replaying .gt-flow-line-phase.is-event-phase .gt-flow-line-track:after{opacity:1;background:linear-gradient(90deg,transparent 0,rgba(20,184,166,.12) 18%,#14b8a6 48%,rgba(20,184,166,.12) 78%,transparent 100%);background-size:56px 4px;animation:gtFlowLineMove .75s linear infinite;}',
+                '.gt-flow-event-root{display:grid;grid-template-columns:minmax(0,1fr) clamp(18px,3vw,30px) minmax(0,1fr);align-items:center;gap:clamp(4px,1vw,8px);min-width:0;width:100%;}',
+                '.gt-flow-producer-branches{display:flex;flex-direction:column;gap:8px;min-width:0;}',
+                '.gt-flow-event-branch,.gt-flow-order-branch{position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);align-items:start;gap:clamp(4px,1vw,8px);min-width:0;}',
+                '.gt-flow-event-branch:after{content:"";position:absolute;left:calc(40px + clamp(4px,1vw,8px));right:-9px;top:14px;height:2px;background:#99f6e4;}',
                 '.gt-flow-branch-title{font-size:10px;line-height:1.12;color:#667085;text-align:right;padding-top:8px;white-space:nowrap;}',
-                '.gt-flow-merge-stem{height:2px;background:linear-gradient(90deg,#99f6e4,#14b8a6);border-radius:999px;}',
-                '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-width:20px;}',
+                '.gt-flow-merge-junction{position:relative;align-self:stretch;min-height:60px;}',
+                '.gt-flow-merge-vertical{position:absolute;left:50%;top:14px;bottom:14px;width:2px;transform:translateX(-50%);background:#99f6e4;border-radius:999px;}',
+                '.gt-flow-merge-horizontal{position:absolute;left:50%;right:-50%;top:50%;height:2px;transform:translateY(-50%);background:linear-gradient(90deg,#99f6e4,#14b8a6);border-radius:999px;}',
+                '.gt-flow-order-branch:before{content:"";position:absolute;left:-18px;top:14px;width:18px;height:2px;background:#14b8a6;}',
+                '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex:1 1 18px;flex-direction:column;align-items:center;min-width:14px;max-width:34px;}',
                 '.gt-flow-dot{width:12px;height:12px;border-radius:999px;background:#fff;border:2px solid #cbd5e1;box-sizing:border-box;}',
                 '.gt-flow-line-node.is-current .gt-flow-dot{border-color:#0f766e;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16);}',
                 '.gt-flow-node-label{margin-top:5px;font-size:10px;line-height:1.08;color:#475467;writing-mode:vertical-rl;text-orientation:mixed;white-space:nowrap;}',
                 '.gt-flow-line-node.is-current .gt-flow-node-label{color:#0f766e;font-weight:600;}',
                 '.gt-flow-empty{font-size:11px;color:#98a2b3;padding:4px 0 0;}'
             ].join('');
-            document.head.appendChild(style);
+            (document.head || document.body || document.documentElement).appendChild(style);
         }
 
         function stopTimers() {
@@ -343,6 +362,9 @@
 
         function markAllDone(success, message) {
             done = true;
+            eventReplayActive = false;
+            row.root.classList.remove('is-running');
+            row.root.classList.remove('is-event-replaying');
             stopTimers();
             if (success) {
                 row.fill.style.width = '100%';
