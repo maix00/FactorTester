@@ -51,47 +51,6 @@ _PHASE_LABELS: dict[str, str] = {
 }
 
 
-_FLOW_LABELS: dict[str, str] = {
-    "check_market_data_coverage": "检查产品覆盖期",
-    "resolve_market_data_request": "解析行情数据源与频率",
-    "resolve_product_selection": "解析产品路径",
-    "expand_term_structure": "展开期限结构",
-    "resolve_tradable_target_weights": "解析可交易合约目标",
-    "register_force_close_notices": "登记交割强平通知",
-    "register_rollover_notices": "登记换月通知",
-    "load_raw_market_data": "装载行情数据",
-    "build_trading_day_resolver": "建立交易日映射",
-    "load_historical_fields": "加载历史交易规则字段",
-    "causal_valuation": "生成因果估值序列",
-    "initialize_ledgers": "初始化交易账本",
-    "schedule_bar_events": "登记行情事件",
-    "signal_live": "处理实时因子信号",
-    "signal_precomputed": "登记预计算信号",
-    "lookup_current_prices_on_signal": "读取信号时点价格",
-    "lookup_current_prices_on_bar": "读取行情时点价格",
-    "lookup_current_prices_on_order": "读取订单时点价格",
-    "resolve_execution_price": "解析订单成交价",
-    "handle_rollover_notice": "处理换月通知",
-    "handle_delivery_force_close_notice": "处理交割强平通知",
-    "lookup_volume_on_signal": "读取成交量",
-    "lookup_historical_fields_on_signal": "读取交易规则字段",
-    "lookup_historical_fields_on_order": "读取订单交易规则字段",
-    "group_quantile_membership": "计算分组隶属",
-    "equity_on_signal": "计算信号时点权益",
-    "size_order": "计算目标下单量",
-    "construct_orders": "构造订单",
-    "constrain_to_ledger_cash": "按现金约束调整订单",
-    "schedule_order_execution": "登记订单执行事件",
-    "cash_update": "更新现金与持仓",
-    "equity_on_order": "计算订单后权益",
-    "record_equity_on_signal": "记录信号时点净值",
-    "record_equity_on_order": "记录订单后净值",
-    "finalize_order": "确认订单终态",
-    "flush_equity_post_replay": "整理净值曲线",
-    "compute_risk_metrics": "计算风险指标",
-}
-
-
 # ── FlowRegistry ──────────────────────────────────────────────────
 
 
@@ -112,7 +71,7 @@ class ResolvedFlow:
 
     @property
     def effective_description(self) -> str:
-        return self.description or _FLOW_LABELS.get(self.name, self.name)
+        return self.description or self.name
 
     @property
     def activity_key(self) -> str:
