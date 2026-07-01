@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Phase
@@ -115,7 +116,8 @@ def test_flow_context_tracks_declared_field_contract():
 def test_flow_context_records_undeclared_field_access():
     ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), audit_contract=True)
     ctx.enter_flow(_resolved_flow(outputs=()))
-    ctx.set(REF, 1)
+    with pytest.warns(RuntimeWarning, match="undeclared write"):
+        ctx.set(REF, 1)
     ctx.exit_flow()
 
     assert ctx.contract_violations() == ({
@@ -131,8 +133,6 @@ def test_flow_context_strict_contract_raises():
     ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), enforce_contract=True)
     ctx.enter_flow(_resolved_flow(outputs=()))
     try:
-        import pytest
-
         with pytest.raises(SchedulerError, match="undeclared write"):
             ctx.set(REF, 1)
     finally:
@@ -145,3 +145,14 @@ def test_flow_context_contract_audit_is_off_by_default():
     ctx.set(REF, 1)
     ctx.exit_flow()
     assert ctx.contract_violations() == ()
+
+
+def test_flow_context_contract_warning_is_deduped():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), audit_contract=True)
+    ctx.enter_flow(_resolved_flow(outputs=()))
+    with pytest.warns(RuntimeWarning, match="undeclared write") as records:
+        ctx.set(REF, 1)
+        ctx.set(REF, 2)
+    ctx.exit_flow()
+    assert len(records) == 1
+    assert len(ctx.contract_violations()) == 2

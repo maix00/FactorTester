@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
@@ -254,6 +255,7 @@ class FlowContext:
         self._enforce_contract = enforce_contract
         self._active_flow: ResolvedFlow | None = None
         self._contract_violations: list[dict[str, Any]] = []
+        self._warned_contract_violations: set[tuple[str, str, str]] = set()
 
     def get(self, ref: "FieldRef", default: Any = None) -> Any:
         self._record_contract_access("read", ref)
@@ -303,6 +305,15 @@ class FlowContext:
             raise SchedulerError(
                 f"flow {_flow_qualified_name(flow)!r} performed undeclared {access} "
                 f"of field {ref.qualified_name!r}"
+            )
+        warn_key = (_flow_qualified_name(flow), access, ref.qualified_name)
+        if warn_key not in self._warned_contract_violations:
+            self._warned_contract_violations.add(warn_key)
+            warnings.warn(
+                f"flow {_flow_qualified_name(flow)!r} performed undeclared {access} "
+                f"of field {ref.qualified_name!r}",
+                RuntimeWarning,
+                stacklevel=3,
             )
 
     def _push_if_event(self, value: Any) -> None:
