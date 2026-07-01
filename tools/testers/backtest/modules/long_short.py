@@ -158,21 +158,13 @@ def _normalize_abs(weights: dict[Any, float], *, gross: float) -> dict[Any, floa
 def _record_target_trace(account, strategy, timestamp, weights: dict[Any, float]) -> None:
     if timestamp is None:
         return
-    trace = getattr(account, "target_trace", None)
-    if trace is None:
-        trace = {}
-        account.target_trace = trace
-    trace.setdefault(strategy, {})[timestamp.isoformat()] = {str(p): w for p, w in weights.items()}
+    account.target_store.record_target_trace(strategy, timestamp, weights)
 
 
 def _record_long_short_diagnostics(account, strategy, timestamp, diagnostics: dict[str, Any]) -> None:
     if timestamp is None:
         return
-    all_diags = getattr(account, "long_short_diagnostics", None)
-    if all_diags is None:
-        all_diags = {}
-        account.long_short_diagnostics = all_diags
-    all_diags.setdefault(strategy, {})[timestamp.isoformat()] = dict(diagnostics)
+    account.target_store.record_long_short_diagnostics(strategy, timestamp, diagnostics)
 
 
 def _safe_float(raw: Any, default: float) -> float:

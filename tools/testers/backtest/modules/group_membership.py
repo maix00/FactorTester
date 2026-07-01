@@ -128,7 +128,7 @@ class GroupMembershipModule(ExecutableModule):
 def _group_quantile_membership(account, ctx) -> None:
     """`position_policy="buy_and_hold"`: once a strategy has computed its
     first non-empty target_weights, every later SIGNAL event reuses that
-    exact same allocation (cached on `account.established_target_weights`)
+    exact same allocation (cached on TargetStore)
     instead of recomputing from the current signal_value -- real holding
     behavior, not "rebalance every period but happen to get the same
     answer." `OrderBookModule.size_order` naturally produces zero deltas
@@ -143,14 +143,9 @@ def _group_quantile_membership(account, ctx) -> None:
     needless turnover/fees on a signal that didn't actually change who's
     in or out of the group. "scheduled" is not implemented (see field
     docstring)."""
-    established = getattr(account, "established_target_weights", None)
-    if established is None:
-        established = {}
-        account.established_target_weights = established
-    last_membership = getattr(account, "last_group_membership", None)
-    if last_membership is None:
-        last_membership = {}
-        account.last_group_membership = last_membership
+    store = account.target_store
+    established = store.established_target_weights
+    last_membership = store.last_group_membership
 
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
@@ -208,16 +203,11 @@ def _record_target_trace(account, strategy, timestamp, weights: dict) -> None:
     presence at a timestamp means "the target actually changed here"."""
     if timestamp is None:
         return
-    trace = getattr(account, "target_trace", None)
-    if trace is None:
-        trace = {}
-        account.target_trace = trace
-    trace.setdefault(strategy, {})[timestamp.isoformat()] = {str(p): w for p, w in weights.items()}
+    account.target_store.record_target_trace(strategy, timestamp, weights)
 
 
 def target_trace_for(account, strategy) -> dict:
-    trace = getattr(account, "target_trace", {})
-    return dict(trace.get(strategy, {}))
+    return account.target_store.target_trace_for(strategy)
 
 
 def _allocate_weights(account, ctx, strategy, members: frozenset) -> dict:
