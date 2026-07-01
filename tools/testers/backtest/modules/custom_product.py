@@ -147,7 +147,7 @@ def custom_product_overrides_for(config) -> list[dict[str, Any]]:
     return raw if isinstance(raw, list) else []
 
 
-def apply_custom_product_fields(fields: dict[str, dict[str, object]], config, timestamp=None) -> dict[str, dict[str, object]]:
+def apply_custom_product_fields(fields: dict[Any, dict[str, object]], config, timestamp=None) -> dict[Any, dict[str, object]]:
     overrides = custom_product_overrides_for(config)
     if not overrides:
         return fields
@@ -160,8 +160,21 @@ def apply_custom_product_fields(fields: dict[str, dict[str, object]], config, ti
         if timestamp is not None and not _override_active(item, timestamp):
             continue
         value = item.get("value")
-        out.setdefault(product, {})[field] = value
+        key = _resolve_product_key(out, product)
+        out.setdefault(key, {})[field] = value
     return out
+
+
+def _resolve_product_key(fields: dict[Any, dict[str, object]], product: str) -> Any:
+    for key in fields.keys():
+        candidates = {str(key)}
+        for attr_name in ("name", "symbol", "code"):
+            attr = getattr(key, attr_name, None)
+            if attr is not None:
+                candidates.add(str(attr))
+        if product in candidates:
+            return key
+    return product
 
 
 def _override_active(item: dict[str, Any], timestamp) -> bool:

@@ -332,7 +332,13 @@ class DataIndex:
         sig = self.signal_index
         if aligned in sig:
             return aligned
-        pos = sig.searchsorted(aligned.to_datetime64(), side="right") - 1
+        # Pandas may keep DatetimeIndex values in microsecond resolution on
+        # newer runtimes; strategy scheduling can deliberately add 1ns to
+        # distinguish bar-close signal time from order action time.  Compare
+        # in nanosecond integers so as-of lookup does not ask pandas to cast a
+        # nanosecond Timestamp losslessly into a microsecond index.
+        sig_ns = sig.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)
+        pos = int(np.searchsorted(sig_ns, aligned.value, side="right") - 1)
         if pos < 0:
             raise KeyError(f"no signal_index value at or before {aligned!r}")
         return cast(pd.Timestamp, sig[pos])

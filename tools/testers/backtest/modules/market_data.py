@@ -57,7 +57,7 @@ class MarketDataModule(ExecutableModule):
     historical_field_provider: ClassVar[FieldRef[Any]] = FieldRef("historical_field_provider")
     trading_day_resolver: ClassVar[FieldRef[Any]] = FieldRef("trading_day_resolver")
     historical_field_policy: ClassVar[FieldRef[str]] = FieldRef("historical_field_policy")
-    current_historical_fields: ClassVar[FieldRef[dict[str, dict[str, object]]]] = FieldRef("current_historical_fields")
+    current_historical_fields: ClassVar[FieldRef[dict[Any, dict[str, object]]]] = FieldRef("current_historical_fields")
     current_prices: ClassVar[FieldRef[Any]] = FieldRef("current_prices")  # dict[Product, float], looked up per-timestamp
     data_source: ClassVar[FieldRef[str]] = FieldRef("data_source")
         # which raw data source the data-prep stage should load raw_prices/
@@ -220,6 +220,7 @@ def _check_market_data_coverage(account, ctx) -> None:
             product: raw.get("raw_prices")[product]
             for product in getattr(raw.get("raw_prices"), "columns", [])
         }
+        account._market_data_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
         account._market_data_excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         return
     products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
@@ -268,12 +269,13 @@ def _load_raw_market_data(account, ctx) -> None:
     end_dt = request.get("end_dt")
     warmup_window = request.get("warmup_window")
     series_by_product: dict[Any, pd.Series] = {}
+    price_series_by_basis: dict[str, dict[Any, pd.Series]] = {"open": {}, "close": {}, "vwap": {}}
     missing_products: list[str] = []
     for product, freq in getattr(account, "_market_data_load_plan", ()):
         try:
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
-                [DataColumn.CLOSE.name],
+                [DataColumn.OPEN.name, DataColumn.CLOSE.name, DataColumn.VWAP.name],
                 copy=False,
                 start_dt=start_dt,
                 end_dt=end_dt,
@@ -296,11 +298,24 @@ def _load_raw_market_data(account, ctx) -> None:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
         series_by_product[product] = df[DataColumn.CLOSE.name]
+        if DataColumn.OPEN.name in df.columns:
+            price_series_by_basis["open"][product] = df[DataColumn.OPEN.name]
+        price_series_by_basis["close"][product] = df[DataColumn.CLOSE.name]
+        if DataColumn.VWAP.name in df.columns:
+            price_series_by_basis["vwap"][product] = df[DataColumn.VWAP.name]
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
+    price_tables = {
+        basis: pd.DataFrame(values)
+        for basis, values in price_series_by_basis.items()
+        if values
+    }
+    if "close" not in price_tables:
+        price_tables["close"] = raw_prices
     raw = {
         "raw_prices": raw_prices,
+        "price_tables": price_tables,
         "historical_field_provider": load_market_rule_field_provider(),
         "historical_field_policy": request.get("policy", "latest_available"),
         "historical_field_names": _required_market_rule_field_names(account),
@@ -357,6 +372,7 @@ def _publish_raw_market_data(account, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.historical_field_provider, raw.get("historical_field_provider"))
     raw_policy = raw.get("historical_field_policy")
     account.raw_prices_table = raw.get("raw_prices")
+    account.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
     account.historical_field_provider = raw.get("historical_field_provider")
     included_products = raw.get("included_products")
     account.backtest_included_products = (
@@ -566,10 +582,10 @@ def _set_current_historical_fields(account, ctx) -> None:
 
 
 def _historical_fields_for_strategy(
-    base_fields: dict[str, dict[str, object]],
+    base_fields: dict[Any, dict[str, object]],
     strategy_config,
     timestamp: pd.Timestamp,
-) -> dict[str, dict[str, object]]:
+) -> dict[Any, dict[str, object]]:
     if engine_mode_for(strategy_config) != "custom":
         return base_fields
     if not _custom_historical_fields_enabled(strategy_config):
@@ -619,7 +635,7 @@ def current_volume_at(account, timestamp: pd.Timestamp) -> dict:
     return {product: float(cast(Any, row[product])) for product in table.columns}
 
 
-def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, dict[str, object]]:
+def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[Any, dict[str, object]]:
     """按事件时间查当前历史字段。
 
     MarketDataModule 只消费公共 FieldHistoryProvider，不关心字段来自 Guosen、
@@ -648,7 +664,7 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, 
     frames = getattr(account, "historical_field_frames", None)
     if isinstance(frames, dict):
         return _historical_fields_at_from_frames(frames, instruments, timestamp)
-    result: dict[str, dict[str, object]] = {}
+    result: dict[Any, dict[str, object]] = {}
     for instrument in instruments:
         try:
             values = resolve_historical_fields_for_product(
@@ -661,7 +677,7 @@ def current_historical_fields_at(account, timestamp: pd.Timestamp) -> dict[str, 
             )
         except HistoricalFieldLookupError:
             raise
-        result[str(instrument)] = values
+        result[instrument] = values
     return result
 
 
@@ -696,8 +712,8 @@ def _historical_fields_at_from_frames(
     frames: dict[str, pd.DataFrame],
     instruments: list[Any],
     timestamp: pd.Timestamp,
-) -> dict[str, dict[str, object]]:
-    result: dict[str, dict[str, object]] = {str(instrument): {} for instrument in instruments}
+) -> dict[Any, dict[str, object]]:
+    result: dict[Any, dict[str, object]] = {instrument: {} for instrument in instruments}
     for field_name, frame in frames.items():
         # FieldHistoryProvider stores its frames tz-naive (it normalises
         # every lookup key via _normalise_timestamp_key); event timestamps
@@ -709,7 +725,7 @@ def _historical_fields_at_from_frames(
         for instrument in instruments:
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:
-                result[str(instrument)][str(field_name)] = row[str(column)]
+                result[instrument][str(field_name)] = row[str(column)]
     return result
 
 
@@ -726,31 +742,25 @@ def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> 
 
 
 def historical_fields_for_product(
-    historical_fields: dict[str, dict[str, object]] | None,
+    historical_fields: dict[Any, dict[str, object]] | None,
     product: Any,
 ) -> dict[str, object]:
-    """Return current historical fields for a product using the same aliases
-    as FieldHistory frame lookup.
+    """Return current historical fields for a runtime Product object.
 
-    Consumers should not hand-roll product/name/symbol/code matching; futures
-    rules are often product-level even when a runtime object is contract-like.
+    FieldHistory/database identifiers are normalised back to Product keys at
+    the MarketDataModule boundary. Downstream modules should not guess string
+    aliases such as name/symbol/code.
     """
     if not historical_fields:
         return {}
-    candidates: list[str] = [str(product)]
-    for attr_name in ("name", "symbol", "code"):
-        attr = getattr(product, attr_name, None)
-        if attr is not None:
-            candidates.append(str(attr))
-    for candidate in dict.fromkeys(candidates):
-        values = historical_fields.get(candidate)
-        if isinstance(values, dict):
-            return values
+    values = historical_fields.get(product)
+    if isinstance(values, dict):
+        return values
     return {}
 
 
 def contract_multiplier_from_fields(
-    historical_fields: dict[str, dict[str, object]] | None,
+    historical_fields: dict[Any, dict[str, object]] | None,
     product: Any,
     *,
     default: float = 1.0,
@@ -769,7 +779,7 @@ def contract_multiplier_from_fields(
 def contract_notional(
     price: float,
     quantity: float,
-    historical_fields: dict[str, dict[str, object]] | None,
+    historical_fields: dict[Any, dict[str, object]] | None,
     product: Any,
 ) -> float:
     return float(quantity) * float(price) * contract_multiplier_from_fields(historical_fields, product)

@@ -16,7 +16,7 @@ ThresholdSignalModule.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pandas as pd
 
@@ -26,7 +26,8 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, historical_fields_for_product
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 
 
@@ -275,11 +276,13 @@ def _allocate_equal_margin(account, ctx, members: frozenset) -> dict:
 
 
 def _margin_ratio_for_product(fields: dict, product) -> float | None:
-    values = fields.get(str(product)) or fields.get(str(getattr(product, "name", product))) or {}
+    values = historical_fields_for_product(fields, product)
     for key in ("LongMarginRatioByMoney", "ShortMarginRatioByMoney", "MarginRatio"):
         raw = values.get(key)
+        if raw is None:
+            continue
         try:
-            value = float(raw)
+            value = float(cast(Any, raw))
         except (TypeError, ValueError):
             continue
         if value > 0:
@@ -302,19 +305,42 @@ def _trailing_volatility(table, product, timestamp, lookback: int) -> float | No
     return float(std) if pd.notna(std) else None
 
 
-def _resolve_execution_timestamp(account, ctx, strategy) -> pd.Timestamp:
+def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp]:
+    if ctx.timestamp is None:
+        raise ValueError("execution scheduling requires an event timestamp")
+    current_ts = cast(pd.Timestamp, ctx.timestamp)
     config = account.config_for(strategy)
     timing = config.get(GroupMembershipModule.execution_timing, "next_bar")
+    basis = str(config.get(OrderExecutionModule.execution_price_basis, "open") or "open").lower()
     if timing == "same_bar":
-        return ctx.timestamp
+        if basis == "open":
+            raise ValueError("same_bar execution cannot use open price because the bar has already opened")
+        return current_ts, current_ts
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
     table = getattr(account, "current_prices_table", None)
     if table is None:
-        return ctx.timestamp
+        return current_ts, current_ts
     index = signal_timestamps(table)
-    pos = index.get_indexer([ctx.timestamp], method="bfill")[0]
-    target_pos = min(pos + delay, len(index) - 1)
-    return index[target_pos]
+    pos = index.get_indexer([current_ts], method="bfill")[0]
+    delay = max(int(delay or 1), 1)
+    price_pos = min(pos + delay, len(index) - 1)
+    price_ts = cast(pd.Timestamp, index[price_pos])
+    if basis == "open":
+        open_boundary_pos = max(0, min(price_pos - 1, len(index) - 1))
+        event_ts = cast(
+            pd.Timestamp,
+            cast(pd.Timestamp, index[open_boundary_pos]) + pd.Timedelta(nanoseconds=1),
+        )
+    elif basis in {"close", "vwap"}:
+        event_ts = cast(pd.Timestamp, price_ts + pd.Timedelta(nanoseconds=1))
+    else:
+        raise ValueError(f"unsupported execution_price_basis: {basis}")
+    return event_ts, price_ts
+
+
+def _resolve_execution_timestamp(account, ctx, strategy) -> pd.Timestamp:
+    event_ts, _price_ts = _resolve_execution_schedule(account, ctx, strategy)
+    return event_ts
 
 
 def _schedule_order_execution(account, ctx) -> None:
@@ -325,9 +351,8 @@ def _schedule_order_execution(account, ctx) -> None:
 
     Only cancels a stale order whose own scheduled timestamp is STRICTLY
     AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
-    should already have been processed because ORDER has higher same-timestamp
-    priority than SIGNAL; if a test calls this helper directly, keep that
-    order intact rather than treating it as still-cancellable future work."""
+    is already due at this signal boundary; keep it intact rather than treating
+    it as still-cancellable future work."""
     pending = getattr(account, "pending_orders", None)
     if pending is None:
         pending = {}
@@ -336,17 +361,18 @@ def _schedule_order_execution(account, ctx) -> None:
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
-        execution_ts = _resolve_execution_timestamp(account, ctx, strategy)
+        execution_ts, price_ts = _resolve_execution_schedule(account, ctx, strategy)
         for order in orders:
             key = (strategy, order.instrument)
             stale = pending.get(key)
             if (
                 stale is not None and stale.status == OrderStatus.SCHEDULED
-                and stale.timestamp > ctx.timestamp
+                and stale.get("price_timestamp", stale.timestamp) > ctx.timestamp
             ):
                 stale.status = OrderStatus.CANCELLED
             order.status = OrderStatus.SCHEDULED
             order.timestamp = execution_ts
+            order.set("price_timestamp", price_ts)
             pending[key] = order
             drafts.append(EventDraft(EventKind.ORDER, execution_ts, strategy, order))
     if drafts:

@@ -177,7 +177,7 @@ def test_cash_update_and_equity_use_contract_multiplier():
 
     t = pd.Timestamp("2024-01-01")
     prices = {p: 10.0}
-    historical_fields = {str(p): {"VolumeMultiple": 10.0}}
+    historical_fields = {p: {"VolumeMultiple": 10.0}}
     order = Order(instrument=p, timestamp=t, quantity=1000.0, intent_quantity=1000.0, strategy=s)
     draft = EventDraft(EventKind.ORDER, t, s, order)
     order_ctx = FlowContext(

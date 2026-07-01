@@ -47,7 +47,7 @@ def test_basic_size_order_uses_contract_multiplier_for_futures_notional():
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
-    ctx.set(MarketDataModule.current_historical_fields, {str(p): {"VolumeMultiple": 10.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 10.0}})
     ctx.set_for(LedgerModule.equity, s, 1000.0)
     ctx.set_for(GroupMembershipModule.target_weights, s, {p: 0.5})
 

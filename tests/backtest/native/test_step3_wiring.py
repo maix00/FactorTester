@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.scheduler import FlowRegistry, sort_a
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_lifecycle import OrderLifecycleModule
 from tools.testers.backtest.modules.product_selection import (
     DeliveryForceCloseModule,
@@ -23,7 +24,7 @@ from tools.testers.backtest.modules.product_selection import (
 def _register_all():
     registry = FlowRegistry()
     for module in (ProductSelectionModule, TermStructureExpandModule, DeliveryForceCloseModule, RolloverModule, LedgerModule,
-                    MarketDataModule, OrderBookModule, OrderLifecycleModule):
+                    MarketDataModule, OrderBookModule, OrderExecutionModule, OrderLifecycleModule):
         for flow in module.flows:
             registry.register_flow(flow)
     return registry
@@ -34,6 +35,8 @@ def test_order_group_orders_cash_update_before_equity_before_finalize():
     groups = sort_and_validate(registry.resolve())
     ordered_names = [f.name for f in groups[(Phase.PER_EVENT, EventKind.ORDER)]]
     assert ordered_names.index("lookup_current_prices_on_order") < ordered_names.index("cash_update")
+    assert ordered_names.index("lookup_current_prices_on_order") < ordered_names.index("resolve_execution_price")
+    assert ordered_names.index("resolve_execution_price") < ordered_names.index("cash_update")
     assert ordered_names.index("cash_update") < ordered_names.index("equity_on_order")
     assert ordered_names.index("equity_on_order") < ordered_names.index("finalize_order")
 

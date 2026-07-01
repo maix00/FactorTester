@@ -76,10 +76,8 @@ def row_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool = False) 
             return table.loc[ts]
         if not asof:
             raise KeyError(timestamp)
-        row = cast(pd.Series, table.asof(ts))
-        if row.isna().all():
-            raise KeyError(f"no row at or before {ts!r}")
-        return row
+        value = data_index.asof_value(ts)
+        return table.loc[value]
 
     if not asof and not data_index.contains(timestamp):
         raise KeyError(timestamp)

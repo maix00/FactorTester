@@ -53,7 +53,7 @@ def _apply_slippage(account, ctx, base_compute) -> None:
         mode = config.get(SlippageModule.slippage_mode, "none")
         slippage_bps = config.get(SlippageModule.slippage_bps, 0.0) if mode == "fixed_bps" else 0.0
         for order in ctx.payloads_for(strategy):
-            price = prices[order.instrument]
+            price = order.get("effective_price", prices[order.instrument])
             # buys execute at a worse (higher) price, sells at a worse
             # (lower) price -- sign of the adjustment follows the trade
             # direction, not the position direction

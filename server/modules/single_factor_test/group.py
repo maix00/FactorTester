@@ -1915,8 +1915,9 @@ def _resolve_long_short_strategy_settings(
     settings.update(first_source)
     settings.update({
         key: value
-        for key, value in (resolved_backtest_settings.get(strategy_id) or {}).items()
+        for key, value in config.items()
         if value not in (None, "")
+        and key not in {"id", "strategy_id", "name", "long", "short", "longGroupId", "shortGroupId"}
     })
     settings["strategy_kind"] = "long_short"
     settings["long_leg_strategy_ids"] = long_legs

@@ -16,6 +16,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, ProgressSink, run
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.group_membership import target_trace_for
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
@@ -47,6 +48,13 @@ def run_backtest_task(
     """Fixed task: runs the engine against an already-built AccountState,
     stores it on `state.account` for later snapshot/detail requests, and
     returns the `execution` dict shape group.py already consumes."""
+    requested_engine = _requested_engine(account)
+    if requested_engine != "native":
+        raise NotImplementedError(
+            f"FactorTester.dispatch('backtest') currently owns only the native "
+            f"event queue; {requested_engine!r} must run through its own "
+            "ExecutableModule/worker bridge instead of falling back to native."
+        )
     registry = _build_registry()
     queue = EventQueue()
     run(account, queue, registry.resolve(), progress=progress, activity_sink=activity_sink)
@@ -80,3 +88,14 @@ def run_backtest_task(
         "payload": {"run_id": run_id, "instruments": [], "market_rules": {}},
         "signal_kind": "native",
     }
+
+
+def _requested_engine(account: "AccountState") -> str:
+    configs = getattr(account, "strategy_configs", {}) or {}
+    values = {
+        str(config.get(EngineModule.engine, "native") or "native").lower()
+        for config in configs.values()
+    }
+    if len(values) > 1:
+        raise ValueError(f"backtest strategies disagree on execution engine: {sorted(values)}")
+    return next(iter(values), "native")

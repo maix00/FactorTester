@@ -17,7 +17,7 @@ def test_pop_order_by_timestamp_then_kind():
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER)))
 
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
-    queue.push_event(EventDraft(EventKind.ORDER, t1, s))
+    queue.push_event(EventDraft(EventKind.ORDER, t1, s))  # pushed first but ORDER value > SIGNAL
     queue.push_event(EventDraft(EventKind.SIGNAL, t1, s))
     queue.push_event(EventDraft(EventKind.BAR, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t2, s))
@@ -25,23 +25,24 @@ def test_pop_order_by_timestamp_then_kind():
 
     assert seen == [
         (t1, EventKind.BAR),
-        (t1, EventKind.ORDER),
         (t1, EventKind.SIGNAL),
+        (t1, EventKind.ORDER),
         (t2, EventKind.SIGNAL),
     ]
 
 
-def test_order_due_at_same_timestamp_fills_before_new_signal_decision():
+def test_order_due_at_earlier_timestamp_fills_before_next_signal_decision():
     queue = EventQueue()
     s = Strategy(alias="S")
-    t = pd.Timestamp("2024-01-02 09:01")
+    order_ts = pd.Timestamp("2024-01-02 09:00:00")
+    signal_ts = pd.Timestamp("2024-01-02 09:00:00.000000001")
     seen: list[EventKind] = []
 
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.append(batch[0].kind))
     queue.set_dispatcher(EventKind.SIGNAL, lambda batch: seen.append(batch[0].kind))
     queue.push_events([
-        EventDraft(EventKind.SIGNAL, t, s),
-        EventDraft(EventKind.ORDER, t, s),
+        EventDraft(EventKind.SIGNAL, signal_ts, s),
+        EventDraft(EventKind.ORDER, order_ts, s),
     ])
 
     queue.run_until_drained()
@@ -112,8 +113,8 @@ def test_push_events_bulk_preserves_timestamp_kind_ordering():
     queue.run_until_drained()
 
     assert seen == [
-        (t1, EventKind.ORDER, {s1}),
         (t1, EventKind.SIGNAL, {s1, s2}),
+        (t1, EventKind.ORDER, {s1}),
         (t2, EventKind.SIGNAL, {s1}),
     ]
 

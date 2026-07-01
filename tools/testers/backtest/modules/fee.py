@@ -15,7 +15,11 @@ from tools.testers.backtest.engines.native.flow import FlowOverride
 from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields
+from tools.testers.backtest.modules.market_data import (
+    MarketDataModule,
+    contract_multiplier_from_fields,
+    historical_fields_for_product,
+)
 
 
 _FEE_FIELDS = (
@@ -128,7 +132,7 @@ def _apply_fee(account, ctx, base_compute) -> None:
             if fixed_fee is not None:
                 order.set("fee_cost", fixed_fee)
                 continue
-            fields = historical_fields.get(str(order.instrument), {})
+            fields = historical_fields_for_product(historical_fields, order.instrument)
             order.set(
                 "fee_cost",
                 _market_fee_cost(

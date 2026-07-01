@@ -79,7 +79,7 @@ def test_fee_mode_custom_uses_unified_product_field_overrides():
     ctx.set_for(
         MarketDataModule.current_historical_fields,
         s,
-        _historical_fields_for_strategy({str(p): {}}, config, pd.Timestamp("2024-01-01")),
+            _historical_fields_for_strategy({p: {}}, config, pd.Timestamp("2024-01-01")),
     )
 
     _apply_fee(account, ctx, lambda a, c: None)
@@ -112,7 +112,7 @@ def test_fee_mode_auto_uses_historical_fields():
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
     ctx.set(MarketDataModule.current_historical_fields, {
-        str(p): {
+        p: {
             "OpenRatioByMoney": 0.002,
             "OpenRatioByVolume": 0.0,
             "CloseRatioByMoney": 0.0,

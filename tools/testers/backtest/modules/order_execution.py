@@ -1,14 +1,21 @@
-"""OrderExecutionModule — declares order execution controls.
+"""OrderExecutionModule — order timing/price-basis controls.
 
-The fields are registered here so the frontend schema is module-owned. Wiring
-these options into order construction and matching remains a later execution
-layer change.
+`GroupMembershipModule` decides which bar an order targets and stores the
+target price row on the order. This module turns that target row plus
+`execution_price_basis` into the order's effective base fill price. Slippage,
+fees and ledger updates then consume `order.effective_price`.
 """
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
+import pandas as pd
+
+from tools.testers.backtest.engines.native.events import EventKind
+from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.time_index_lookup import row_at
 from .base import ExecutableModule, FieldDefinition, FieldRef
 
 
@@ -19,6 +26,7 @@ class OrderExecutionModule(ExecutableModule):
     execution_price_basis: ClassVar[FieldRef[str]] = FieldRef("execution_price_basis")
     order_type: ClassVar[FieldRef[str]] = FieldRef("order_type")
     matching_model: ClassVar[FieldRef[str]] = FieldRef("matching_model")
+    execution_prices: ClassVar[FieldRef[Any]] = FieldRef("execution_prices")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "execution_price_basis": FieldDefinition(
@@ -39,4 +47,67 @@ class OrderExecutionModule(ExecutableModule):
             ),
             chip_template="撮合: {value}", tab_label="订单执行", tab_order=120,
         ),
+        "execution_prices": FieldDefinition(public=False),
     }
+
+    resolve_execution_price: ClassVar[Flow] = Flow(
+        "resolve_execution_price",
+        inputs=(execution_price_basis, MarketDataModule.current_prices),
+        outputs=(execution_prices,),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=5,
+        compute=lambda account, ctx: _resolve_execution_price(account, ctx),
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (resolve_execution_price,)
+
+
+def _normalise_price_basis(value: object) -> str:
+    basis = str(value or "open").lower()
+    if basis not in {"open", "close", "vwap"}:
+        raise ValueError(f"unsupported execution_price_basis: {basis}")
+    return basis
+
+
+def _price_table(account: Any, basis: str) -> pd.DataFrame:
+    tables = getattr(account, "market_price_tables", None)
+    if isinstance(tables, dict):
+        table = tables.get(basis)
+        if isinstance(table, pd.DataFrame) and not table.empty:
+            return table
+    if basis == "close":
+        table = getattr(account, "current_prices_table", None)
+        if isinstance(table, pd.DataFrame) and not table.empty:
+            return table
+    raise KeyError(f"market data does not provide execution price basis {basis!r}")
+
+
+def _execution_price_at(account: Any, order: Any, basis: str) -> float:
+    timestamp = cast(pd.Timestamp, order.get("price_timestamp", order.timestamp))
+    table = _price_table(account, basis)
+    row = row_at(table, timestamp, asof=False)
+    return float(cast(Any, row[order.instrument]))
+
+
+def _resolve_execution_price(account: Any, ctx: Any) -> None:
+    resolved: dict[Any, dict[Any, float]] = {}
+    current_prices = ctx.get(MarketDataModule.current_prices, {})
+    for strategy in ctx.active_strategies:
+        config = account.config_for(strategy)
+        basis = _normalise_price_basis(config.get(OrderExecutionModule.execution_price_basis, "open"))
+        prices: dict[Any, float] = {}
+        for order in ctx.payloads_for(strategy):
+            try:
+                price = _execution_price_at(account, order, basis)
+            except KeyError:
+                if basis == "close" and order.instrument in current_prices:
+                    price = float(current_prices[order.instrument])
+                else:
+                    raise
+            order.set("execution_price_basis", basis)
+            order.set("effective_price", price)
+            prices[order.instrument] = price
+        ctx.set_for(OrderExecutionModule.execution_prices, strategy, prices)
+        resolved[strategy] = prices
+    ctx.set(OrderExecutionModule.execution_prices, resolved)

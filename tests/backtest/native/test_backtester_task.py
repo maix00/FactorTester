@@ -53,7 +53,7 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
         "A1": {
             "product_path_selection": selection, "factor": factor, "factor_mode": "precomputed",
             "split_count": 2, "group_index": 1, "initial_capital_major": 1_000_000.0,
-            "base_currency": "CNY", "engine_mode": "basic",
+            "base_currency": "CNY", "engine_mode": "basic", "execution_price_basis": "close",
         },
     }
     account = AccountState()
@@ -92,3 +92,43 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
     # state.account must be set so a later snapshot/detail request can
     # read the same run without re-executing anything.
     assert state.account is account
+
+
+def test_run_backtest_task_rejects_non_native_engine_without_fallback():
+    p1 = _product()
+    idx = pd.date_range("2024-01-01", periods=2, freq="D")
+    selection = _FakeProductPathSelection("sel-1", [p1])
+    factor = _FakeFactor(pd.DataFrame({p1: [1.0, 2.0]}, index=idx))
+    resolved_settings = {
+        "A1": {
+            "engine": "backtrader",
+            "product_path_selection": selection,
+            "factor": factor,
+            "factor_mode": "precomputed",
+            "split_count": 1,
+            "group_index": 0,
+            "initial_capital_major": 1_000_000.0,
+            "base_currency": "CNY",
+            "engine_mode": "basic",
+            "execution_price_basis": "close",
+        },
+    }
+    account = AccountState()
+    apply_strategy_configs(account, resolved_settings)
+    account.raw_market_data = {"raw_prices": pd.DataFrame({p1: [10.0, 11.0]}, index=idx)}
+
+    with pytest.raises(NotImplementedError, match="falling back to native"):
+        run_backtest_task(
+            FactorTesterState(products=[]),
+            account=account,
+            group_owner=[{
+                "group_id": "A1",
+                "group_name": "A1",
+                "group_index": 0,
+                "product_path_selection_id": "sel-1",
+                "factor_alias": "f1",
+                "is_ls": False,
+            }],
+            settings_by_strategy=resolved_settings,
+            run_id="run-1",
+        )
