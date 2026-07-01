@@ -10,7 +10,8 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule, TermStructureExpandModule
-from tools.testers.backtest.modules.run_window import RunWindowModule, _resolve_run_window
+from tools.testers.backtest.modules.run_window import RunWindowModule, _resolve_run_window, auto_warmup_window
+from tools.factors.FactorExpr import ColumnRef, DataColumn
 
 
 def test_resolve_run_window_sets_account_and_market_data_defaults():
@@ -48,6 +49,17 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
     assert account.market_data_request["start_dt"] == window.start_dt
     assert account.market_data_request["end_dt"] == window.end_dt
     assert "warmup_window" not in account.market_data_request
+
+
+def test_auto_warmup_unwraps_factor_evaluate_adapter_shape():
+    class _Factor:
+        _expr = ColumnRef(DataColumn.CLOSE).rolling_mean("2D").shift("1D")
+
+    class _Adapter:
+        def __init__(self, factor):
+            self._factor = factor
+
+    assert auto_warmup_window(_Adapter(_Factor())) == pd.Timedelta("3D")
 
 
 def test_run_window_flow_orders_before_product_and_market_data_flows():

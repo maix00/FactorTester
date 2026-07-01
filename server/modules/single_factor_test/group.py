@@ -1800,6 +1800,46 @@ class _FactorEvaluateAdapter:
         self._factor = factor
         self._products = products
 
+    @property
+    def underlying_factor(self) -> Any:
+        return self._factor
+
+    @property
+    def expression(self) -> Any:
+        return (
+            getattr(self._factor, "expression", None)
+            or getattr(self._factor, "_expr", None)
+            or getattr(self._factor, "_source_expr", None)
+        )
+
+    def supports_vectorized(self) -> bool:
+        flag = getattr(self._factor, "supports_vectorized", None)
+        if callable(flag):
+            return bool(flag())
+        if flag is not None:
+            return bool(flag)
+        expr = self.expression
+        expr_flag = getattr(expr, "supports_vectorized", None)
+        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
+
+    def supports_incremental(self) -> bool:
+        flag = getattr(self._factor, "supports_incremental", None)
+        if callable(flag):
+            return bool(flag())
+        if flag is not None:
+            return bool(flag)
+        expr = self.expression
+        expr_flag = getattr(expr, "supports_incremental", None)
+        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
+
+    def required_warmup_window(self) -> Any:
+        required = getattr(self._factor, "required_warmup_window", None) or getattr(self._factor, "required_lookback", None)
+        if callable(required):
+            return required()
+        if required is not None:
+            return required
+        return None
+
     def backtest_factor_cache_key(self) -> tuple:
         factor_key = (
             getattr(self._factor, "alias", None)

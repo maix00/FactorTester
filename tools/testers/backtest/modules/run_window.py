@@ -249,7 +249,7 @@ def parse_warmup_window(value: Any) -> pd.Timedelta:
 
 def auto_warmup_window(factor: Any) -> pd.Timedelta | None:
     """Infer expression warm-up for constant time-valued rolling/shift windows."""
-    for obj in (factor, getattr(factor, "_expr", None), getattr(factor, "expression", None)):
+    for obj in _factor_warmup_candidates(factor):
         if obj is None:
             continue
         required = getattr(obj, "required_warmup_window", None) or getattr(obj, "required_lookback", None)
@@ -262,6 +262,41 @@ def auto_warmup_window(factor: Any) -> pd.Timedelta | None:
         if inferred is not None:
             return inferred
     return None
+
+
+def _factor_warmup_candidates(factor: Any) -> tuple[Any, ...]:
+    """Return factor/expression candidates, unwrapping backtest adapters first."""
+    out: list[Any] = []
+    seen: set[int] = set()
+
+    def add(obj: Any) -> None:
+        if obj is None:
+            return
+        obj_id = id(obj)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+        out.append(obj)
+
+    def visit(obj: Any) -> None:
+        if obj is None or id(obj) in seen:
+            return
+        add(obj)
+        for attr in ("underlying_factor", "_factor", "factor"):
+            try:
+                child = getattr(obj, attr, None)
+            except Exception:
+                child = None
+            if child is not None and child is not obj:
+                visit(child)
+        for attr in ("expression", "_expr", "_source_expr", "_func_expr"):
+            try:
+                add(getattr(obj, attr, None))
+            except Exception:
+                continue
+
+    visit(factor)
+    return tuple(out)
 
 
 def _infer_expr_warmup_window(expr: Any, seen: set[int] | None = None) -> pd.Timedelta | None:
