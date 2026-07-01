@@ -21,7 +21,19 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
-from tools.testers.backtest.modules.run_window import RunWindowModule
+from tools.testers.backtest.modules.run_window import (
+    RunWindowModule,
+    _expr_operands as _run_window_expr_operands,
+    _expr_window_to_timedelta as _run_window_expr_window_to_timedelta,
+    _infer_expr_warmup_window as _run_window_infer_expr_warmup_window,
+    _max_timedelta as _run_window_max_timedelta,
+    auto_warmup_window,
+    parse_warmup_window,
+    run_window_envelope_for_strategies,
+    run_window_key_for_config,
+    strategy_run_window_datetimes,
+    warmup_window_for_strategies,
+)
 from tools.testers.backtest.modules.time_index_lookup import (
     IndexEventTime,
     row_at,
@@ -319,19 +331,7 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, account) -> p
 
 
 def _warmup_window_for_strategies(factor: Any, strategies: list, account) -> pd.Timedelta | None:
-    windows: list[pd.Timedelta] = []
-    for strategy in strategies:
-        config = account.config_for(strategy)
-        mode = str(config.get(FactorSignalModule.warmup_mode, "auto") or "auto").lower()
-        if mode == "none":
-            windows.append(_zero_warmup())
-        elif mode == "fixed":
-            windows.append(_parse_warmup_window(config.get(FactorSignalModule.warmup_window)))
-        elif mode == "auto":
-            windows.append(_auto_warmup_window(factor) or _zero_warmup())
-        else:
-            windows.append(_zero_warmup())
-    return max(windows) if windows else None
+    return warmup_window_for_strategies(strategies, account)
 
 
 def _zero_warmup() -> pd.Timedelta:
@@ -339,116 +339,31 @@ def _zero_warmup() -> pd.Timedelta:
 
 
 def _parse_warmup_window(value: Any) -> pd.Timedelta:
-    if value is None or str(value).strip() == "":
-        return _zero_warmup()
-    value_text = str(value).strip()
-    if value_text.endswith("d"):
-        value_text = f"{value_text[:-1]}D"
-    try:
-        delta = pd.Timedelta(value_text)
-    except Exception as exc:
-        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a time value such as '30min' or '5d'") from exc
-    if pd.isna(delta):
-        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a concrete time value")
-    if delta < pd.Timedelta(0):
-        raise ValueError(f"warmup_window must be non-negative, got {value!r}")
-    return cast(pd.Timedelta, delta)
+    return parse_warmup_window(value)
 
 
 def _auto_warmup_window(factor: Any) -> pd.Timedelta | None:
-    """Infer expression warm-up for constant time-valued rolling/shift windows.
-
-    Dynamic parameters and integer bar windows are intentionally not guessed:
-    fixed bar counts require a product calendar/frequency context, while this
-    setting is registered as a time-valued field.
-    """
-    for obj in (factor, getattr(factor, "_expr", None), getattr(factor, "expression", None)):
-        if obj is None:
-            continue
-        required = getattr(obj, "required_warmup_window", None) or getattr(obj, "required_lookback", None)
-        if callable(required):
-            value = required()
-            return _parse_warmup_window(value)
-        if required is not None:
-            return _parse_warmup_window(required)
-        inferred = _infer_expr_warmup_window(obj)
-        if inferred is not None:
-            return inferred
-    return None
+    return auto_warmup_window(factor)
 
 
 def _infer_expr_warmup_window(expr: Any, seen: set[int] | None = None) -> pd.Timedelta | None:
-    if expr is None:
-        return None
-    seen = seen or set()
-    expr_id = id(expr)
-    if expr_id in seen:
-        return None
-    seen.add(expr_id)
-
-    cls_name = type(expr).__name__
-    if cls_name == "RollingOp":
-        window = _expr_window_to_timedelta(getattr(expr, "window", None))
-        if window is None:
-            return None
-        child_window = _max_timedelta(
-            _infer_expr_warmup_window(child, seen)
-            for child in _expr_operands(expr)
-            if child is not getattr(expr, "window", None)
-        )
-        return window + (child_window or _zero_warmup())
-    if cls_name == "ShiftOp":
-        shift = _expr_window_to_timedelta(getattr(expr, "periods", None))
-        if shift is None:
-            return None
-        child_window = _infer_expr_warmup_window(getattr(expr, "operand", None), seen)
-        return shift + (child_window or _zero_warmup())
-    return _max_timedelta(_infer_expr_warmup_window(child, seen) for child in _expr_operands(expr))
+    return _run_window_infer_expr_warmup_window(expr, seen)
 
 
 def _expr_operands(expr: Any) -> tuple[Any, ...]:
-    operands = getattr(expr, "_operands", None)
-    if operands is None:
-        operands = getattr(expr, "operands", ())
-    try:
-        return tuple(operands)
-    except TypeError:
-        return ()
+    return _run_window_expr_operands(expr)
 
 
 def _expr_window_to_timedelta(expr: Any) -> pd.Timedelta | None:
-    value = getattr(expr, "value", expr)
-    if isinstance(value, (int, float)):
-        return None
-    freq_value = getattr(value, "value", None)
-    if isinstance(freq_value, pd.Timedelta):
-        return cast(pd.Timedelta, freq_value)
-    try:
-        return _parse_warmup_window(value)
-    except ValueError:
-        return None
+    return _run_window_expr_window_to_timedelta(expr)
 
 
 def _max_timedelta(values: Any) -> pd.Timedelta | None:
-    concrete = [value for value in values if value is not None]
-    return max(concrete) if concrete else None
+    return _run_window_max_timedelta(values)
 
 
 def _run_window_envelope_for_strategies(strategies: list, account) -> tuple[DataTime | None, DataTime | None]:
-    starts: list[DataTime] = []
-    ends: list[DataTime] = []
-    for strategy in strategies:
-        start_dt, end_dt = _strategy_run_window_datetimes(account.config_for(strategy))
-        if start_dt is None or end_dt is None:
-            return None, None
-        starts.append(start_dt)
-        ends.append(end_dt)
-    if not starts or not ends:
-        return None, None
-    return (
-        min(starts, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
-        max(ends, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
-    )
+    return run_window_envelope_for_strategies(strategies, account)
 
 
 def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
@@ -477,30 +392,11 @@ def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.Dat
 
 
 def _strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
-    start_date = str(config.get(RunWindowModule.start_date, "") or "").strip()
-    end_date = str(config.get(RunWindowModule.end_date, "") or "").strip()
-    if not start_date or not end_date:
-        return None, None
-    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
-    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
-    if precision == "trading_day":
-        return (
-            DataTime.from_dict({"date": start_date}, precision="trading_day"),
-            DataTime.from_dict({"date": end_date}, precision="trading_day"),
-        )
-    start_time = str(config.get(RunWindowModule.start_time, "00:00") or "00:00")
-    end_time = str(config.get(RunWindowModule.end_time, "23:59") or "23:59")
-    return (
-        DataTime.from_dict({"date": start_date, "time": start_time, "tz": timezone}, precision="exact"),
-        DataTime.from_dict({"date": end_date, "time": end_time, "tz": timezone}, precision="exact"),
-    )
+    return strategy_run_window_datetimes(config)
 
 
 def _strategy_run_window_key(config) -> tuple:
-    start_dt, end_dt = _strategy_run_window_datetimes(config)
-    if start_dt is None or end_dt is None:
-        return ("unbounded",)
-    return (str(start_dt.precision), start_dt.ts, end_dt.ts)
+    return run_window_key_for_config(config)
 
 
 def _evaluate_signal_live(account, ctx) -> None:

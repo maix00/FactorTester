@@ -29,6 +29,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
@@ -216,7 +217,7 @@ def _check_market_data_coverage(account, ctx) -> None:
         }
         account._market_data_excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         return
-    products = list(request.get("products") or ())
+    products = _products_from_selection_context(account, ctx) or list(request.get("products") or ())
     start_dt = request.get("start_dt")
     end_dt = request.get("end_dt")
     missing_products: list[str] = []
@@ -241,6 +242,15 @@ def _check_market_data_coverage(account, ctx) -> None:
     account._market_data_load_plan = load_plan
     account._market_data_excluded_out_of_range = tuple(_dedupe_products(excluded_out_of_range))
     _record_excluded_out_of_range_products(account, account._market_data_excluded_out_of_range)
+
+
+def _products_from_selection_context(account, ctx) -> list[Any]:
+    products: list[Any] = []
+    for strategy in account.strategy_configs:
+        for product in ctx.get_for(ProductSelectionModule.products, strategy, frozenset()):
+            if product not in products:
+                products.append(product)
+    return products
 
 
 def _load_raw_market_data(account, ctx) -> None:

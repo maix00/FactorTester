@@ -47,11 +47,13 @@ def test_pre_replay_group_orders_without_error():
     groups = sort_and_validate(registry.resolve())
     ordered_names = [f.name for f in groups[(Phase.PRE_REPLAY, None)]]
 
-    # resolve_product_selection (15) -> expand_term_structure (30) ->
-    # load_raw_market_data (40) -> initialize_ledgers (41) -> causal_valuation (45).
+    # resolve_product_selection (15) -> check abstract/continuous coverage (38)
+    # -> expand term-structure lifecycle/contracts (39) -> load_raw_market_data
+    # (40) -> initialize_ledgers (41) -> causal_valuation (45).
     # Ledger initialization consumes the data-prep effective product universe,
     # so it must run after raw market data has been loaded.
-    assert ordered_names.index("resolve_product_selection") < ordered_names.index("expand_term_structure")
+    assert ordered_names.index("resolve_product_selection") < ordered_names.index("check_market_data_coverage")
+    assert ordered_names.index("check_market_data_coverage") < ordered_names.index("expand_term_structure")
     assert ordered_names.index("expand_term_structure") < ordered_names.index("initialize_ledgers")
     assert ordered_names.index("load_raw_market_data") < ordered_names.index("initialize_ledgers")
     assert ordered_names.index("load_raw_market_data") < ordered_names.index("causal_valuation")

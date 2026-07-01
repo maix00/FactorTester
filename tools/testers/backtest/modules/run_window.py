@@ -1,10 +1,46 @@
-"""RunWindowModule — owns the backtest time range and evaluation split."""
+"""RunWindowModule — owns the backtest time range and calculation window.
+
+This module deliberately resolves the run window before product expansion,
+market data loading, factor evaluation, and event scheduling.  Downstream
+modules consume the resolved DataTime objects instead of re-parsing date fields
+or inventing their own warm-up semantics.
+"""
 
 from __future__ import annotations
 
-from typing import ClassVar
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any, ClassVar, cast
+
+import pandas as pd
+
+from tools.data.types import DataTime
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+
+
+_FACTOR_REF = FieldRef("factor", owner="FactorModule")
+_WARMUP_MODE_REF = FieldRef("warmup_mode", owner="FactorSignalModule")
+_WARMUP_WINDOW_REF = FieldRef("warmup_window", owner="FactorSignalModule")
+
+
+@dataclass(frozen=True)
+class StrategyRunWindow:
+    """Resolved strategy time window.
+
+    `start_dt`/`end_dt` define the formal run and signal window.
+    `warmup_window` only expands upstream data/evaluate lookback; it must not
+    change formal signal clipping, performance windows, or result timestamps.
+    """
+
+    start_dt: DataTime | None
+    end_dt: DataTime | None
+    warmup_window: pd.Timedelta
+
+    @property
+    def is_bounded(self) -> bool:
+        return self.start_dt is not None and self.end_dt is not None
 
 
 class RunWindowModule(ExecutableModule):
@@ -18,6 +54,9 @@ class RunWindowModule(ExecutableModule):
     timezone: ClassVar[FieldRef[str]] = FieldRef("timezone")
     time_precision: ClassVar[FieldRef[str]] = FieldRef("time_precision")
     evaluation_split: ClassVar[FieldRef[str]] = FieldRef("evaluation_split")
+    strategy_windows: ClassVar[FieldRef[dict[Any, StrategyRunWindow]]] = FieldRef("strategy_windows")
+    run_window_envelope: ClassVar[FieldRef[tuple[DataTime | None, DataTime | None]]] = FieldRef("run_window_envelope")
+    warmup_window_envelope: ClassVar[FieldRef[pd.Timedelta]] = FieldRef("warmup_window_envelope")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "start_date": FieldDefinition(
@@ -64,4 +103,230 @@ class RunWindowModule(ExecutableModule):
             public=True, label="样本切分", default=None, control_template="date", tab="evaluation",
             chip_template="样本切分: {value}", tab_label="样本划分", tab_order=200,
         ),
+        "strategy_windows": FieldDefinition(public=False),
+        "run_window_envelope": FieldDefinition(public=False),
+        "warmup_window_envelope": FieldDefinition(public=False),
     }
+
+    resolve_run_window: ClassVar[Flow] = Flow(
+        "resolve_run_window",
+        inputs=(
+            start_date, end_date, start_time, end_time, timezone, time_precision,
+            _FACTOR_REF, _WARMUP_MODE_REF, _WARMUP_WINDOW_REF,
+        ),
+        outputs=(strategy_windows, run_window_envelope, warmup_window_envelope),
+        phase=Phase.PRE_REPLAY,
+        order=10,
+        compute=lambda account, ctx: _resolve_run_window(account, ctx),
+        description="解析运行时间窗口",
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (resolve_run_window,)
+
+
+def _resolve_run_window(account, ctx) -> None:
+    strategy_windows: dict[Any, StrategyRunWindow] = {}
+    for strategy in account.strategy_configs:
+        strategy_windows[strategy] = resolve_strategy_run_window(account.config_for(strategy))
+
+    start_dt, end_dt = run_window_envelope(strategy_windows.values())
+    warmup_window = warmup_window_envelope(strategy_windows.values())
+
+    account.strategy_run_windows = strategy_windows
+    account.run_window_envelope = (start_dt, end_dt)
+    account.market_data_warmup_window = warmup_window
+    ctx.set(RunWindowModule.strategy_windows, strategy_windows)
+    ctx.set(RunWindowModule.run_window_envelope, (start_dt, end_dt))
+    ctx.set(RunWindowModule.warmup_window_envelope, warmup_window)
+
+    request = getattr(account, "market_data_request", None)
+    if isinstance(request, dict):
+        request.setdefault("start_dt", start_dt)
+        request.setdefault("end_dt", end_dt)
+        request.setdefault("warmup_window", warmup_window)
+
+
+def resolve_strategy_run_window(config) -> StrategyRunWindow:
+    start_dt, end_dt = strategy_run_window_datetimes(config)
+    factor = config.get(_FACTOR_REF)
+    return StrategyRunWindow(
+        start_dt=start_dt,
+        end_dt=end_dt,
+        warmup_window=warmup_window_for_strategy(config, factor),
+    )
+
+
+def strategy_run_window_datetimes(config) -> tuple[DataTime | None, DataTime | None]:
+    start_date = str(config.get(RunWindowModule.start_date, "") or "").strip()
+    end_date = str(config.get(RunWindowModule.end_date, "") or "").strip()
+    if not start_date or not end_date:
+        return None, None
+    precision = str(config.get(RunWindowModule.time_precision, "exact") or "exact")
+    timezone = str(config.get(RunWindowModule.timezone, "Asia/Shanghai") or "Asia/Shanghai")
+    if precision == "trading_day":
+        return (
+            DataTime.from_dict({"date": start_date}, precision="trading_day"),
+            DataTime.from_dict({"date": end_date}, precision="trading_day"),
+        )
+    start_time = str(config.get(RunWindowModule.start_time, "00:00") or "00:00")
+    end_time = str(config.get(RunWindowModule.end_time, "23:59") or "23:59")
+    return (
+        DataTime.from_dict({"date": start_date, "time": start_time, "tz": timezone}, precision="exact"),
+        DataTime.from_dict({"date": end_date, "time": end_time, "tz": timezone}, precision="exact"),
+    )
+
+
+def run_window_key_for_config(config) -> tuple:
+    start_dt, end_dt = strategy_run_window_datetimes(config)
+    if start_dt is None or end_dt is None:
+        return ("unbounded",)
+    return (str(start_dt.precision), start_dt.ts, end_dt.ts)
+
+
+def run_window_envelope(windows: Iterable[StrategyRunWindow]) -> tuple[DataTime | None, DataTime | None]:
+    starts: list[DataTime] = []
+    ends: list[DataTime] = []
+    for window in windows:
+        if window.start_dt is None or window.end_dt is None:
+            return None, None
+        starts.append(window.start_dt)
+        ends.append(window.end_dt)
+    if not starts or not ends:
+        return None, None
+    return (
+        min(starts, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
+        max(ends, key=lambda dt: cast(pd.Timestamp, dt.sort_key())),
+    )
+
+
+def run_window_envelope_for_strategies(strategies: Iterable[Any], account) -> tuple[DataTime | None, DataTime | None]:
+    resolved = getattr(account, "strategy_run_windows", None)
+    windows: list[StrategyRunWindow] = []
+    for strategy in strategies:
+        if isinstance(resolved, dict) and strategy in resolved:
+            windows.append(resolved[strategy])
+        else:
+            windows.append(resolve_strategy_run_window(account.config_for(strategy)))
+    return run_window_envelope(windows)
+
+
+def warmup_window_envelope(windows: Iterable[StrategyRunWindow]) -> pd.Timedelta:
+    values = [window.warmup_window for window in windows]
+    return max(values) if values else _zero_warmup()
+
+
+def warmup_window_for_strategies(strategies: Iterable[Any], account) -> pd.Timedelta:
+    resolved = getattr(account, "strategy_run_windows", None)
+    values: list[pd.Timedelta] = []
+    for strategy in strategies:
+        if isinstance(resolved, dict) and strategy in resolved:
+            values.append(resolved[strategy].warmup_window)
+        else:
+            values.append(resolve_strategy_run_window(account.config_for(strategy)).warmup_window)
+    return max(values) if values else _zero_warmup()
+
+
+def warmup_window_for_strategy(config, factor: Any | None = None) -> pd.Timedelta:
+    mode = str(config.get(_WARMUP_MODE_REF, "auto") or "auto").lower()
+    if mode == "none":
+        return _zero_warmup()
+    if mode == "fixed":
+        return parse_warmup_window(config.get(_WARMUP_WINDOW_REF))
+    if mode == "auto":
+        return auto_warmup_window(factor) or _zero_warmup()
+    return _zero_warmup()
+
+
+def _zero_warmup() -> pd.Timedelta:
+    return cast(pd.Timedelta, pd.Timedelta(0))
+
+
+def parse_warmup_window(value: Any) -> pd.Timedelta:
+    if value is None or str(value).strip() == "":
+        return _zero_warmup()
+    value_text = str(value).strip()
+    if value_text.endswith("d"):
+        value_text = f"{value_text[:-1]}D"
+    try:
+        delta = pd.Timedelta(value_text)
+    except Exception as exc:
+        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a time value such as '30min' or '5d'") from exc
+    if pd.isna(delta):
+        raise ValueError(f"invalid fixed warmup_window={value!r}; expected a concrete time value")
+    if delta < pd.Timedelta(0):
+        raise ValueError(f"warmup_window must be non-negative, got {value!r}")
+    return cast(pd.Timedelta, delta)
+
+
+def auto_warmup_window(factor: Any) -> pd.Timedelta | None:
+    """Infer expression warm-up for constant time-valued rolling/shift windows."""
+    for obj in (factor, getattr(factor, "_expr", None), getattr(factor, "expression", None)):
+        if obj is None:
+            continue
+        required = getattr(obj, "required_warmup_window", None) or getattr(obj, "required_lookback", None)
+        if callable(required):
+            value = required()
+            return parse_warmup_window(value)
+        if required is not None:
+            return parse_warmup_window(required)
+        inferred = _infer_expr_warmup_window(obj)
+        if inferred is not None:
+            return inferred
+    return None
+
+
+def _infer_expr_warmup_window(expr: Any, seen: set[int] | None = None) -> pd.Timedelta | None:
+    if expr is None:
+        return None
+    seen = seen or set()
+    expr_id = id(expr)
+    if expr_id in seen:
+        return None
+    seen.add(expr_id)
+
+    cls_name = type(expr).__name__
+    if cls_name == "RollingOp":
+        window = _expr_window_to_timedelta(getattr(expr, "window", None))
+        if window is None:
+            return None
+        child_window = _max_timedelta(
+            _infer_expr_warmup_window(child, seen)
+            for child in _expr_operands(expr)
+            if child is not getattr(expr, "window", None)
+        )
+        return window + (child_window or _zero_warmup())
+    if cls_name == "ShiftOp":
+        shift = _expr_window_to_timedelta(getattr(expr, "periods", None))
+        if shift is None:
+            return None
+        child_window = _infer_expr_warmup_window(getattr(expr, "operand", None), seen)
+        return shift + (child_window or _zero_warmup())
+    return _max_timedelta(_infer_expr_warmup_window(child, seen) for child in _expr_operands(expr))
+
+
+def _expr_operands(expr: Any) -> tuple[Any, ...]:
+    operands = getattr(expr, "_operands", None)
+    if operands is None:
+        operands = getattr(expr, "operands", ())
+    try:
+        return tuple(operands)
+    except TypeError:
+        return ()
+
+
+def _expr_window_to_timedelta(expr: Any) -> pd.Timedelta | None:
+    value = getattr(expr, "value", expr)
+    if isinstance(value, (int, float)):
+        return None
+    freq_value = getattr(value, "value", None)
+    if isinstance(freq_value, pd.Timedelta):
+        return cast(pd.Timedelta, freq_value)
+    try:
+        return parse_warmup_window(value)
+    except ValueError:
+        return None
+
+
+def _max_timedelta(values: Any) -> pd.Timedelta | None:
+    concrete = [value for value in values if value is not None]
+    return max(concrete) if concrete else None
