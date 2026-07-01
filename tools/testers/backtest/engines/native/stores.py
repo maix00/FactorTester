@@ -67,3 +67,8 @@ class TargetStore:
 @dataclass
 class OrderStore:
     pending_orders: dict[Any, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EquityCurveStore:
+    buffer: dict[Any, list[tuple[Any, dict[str, Any]]]] = field(default_factory=dict)

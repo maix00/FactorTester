@@ -75,11 +75,7 @@ class EquityCurveModule(ExecutableModule):
 
 
 def _ensure_buffer(account) -> dict:
-    buffer = getattr(account, "equity_buffer", None)
-    if buffer is None:
-        buffer = {}
-        account.equity_buffer = buffer
-    return buffer
+    return account.equity_curve_store.buffer
 
 
 def _snapshot_strategy_state(account, strategy, prices: dict, historical_fields: dict) -> dict | None:
