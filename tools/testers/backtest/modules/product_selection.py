@@ -309,8 +309,7 @@ def _expand_term_structure(account, ctx) -> None:
         all_metadata[strategy] = tuple(metadata)
         ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, all_contracts[strategy])
         ctx.set_for(TermStructureExpandModule.contract_metadata, strategy, all_metadata[strategy])
-    account.term_structure_expanded_contracts = all_contracts
-    account.term_structure_contract_metadata = all_metadata
+    account.term_structure_store.set_expansion(all_contracts, all_metadata)
 
 
 def _register_force_close_notices(account, ctx) -> None:
@@ -400,11 +399,7 @@ def _resolve_tradable_target_weights(account, ctx) -> None:
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
         if mapping_trace:
-            trace = getattr(account, "term_structure_target_mapping", None)
-            if trace is None:
-                trace = {}
-                account.term_structure_target_mapping = trace
-            trace.setdefault(strategy, {})[str(ctx.timestamp)] = mapping_trace
+            account.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 
 
 def _handle_rollover_notice(account, ctx) -> None:
@@ -458,11 +453,7 @@ def _handle_delivery_force_close_notice(account, ctx) -> None:
 
 
 def _record_term_structure_notice(account, payload: dict[str, Any]) -> None:
-    notices = getattr(account, "term_structure_notices", None)
-    if notices is None:
-        notices = []
-        account.term_structure_notices = notices
-    notices.append(payload)
+    account.term_structure_store.record_notice(payload)
 
 
 def _reference_timezone(account, strategy: Any) -> str | None:

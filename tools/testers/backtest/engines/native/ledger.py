@@ -108,6 +108,7 @@ class RunState:
         "target_store",
         "order_store",
         "equity_curve_store",
+        "term_structure_store",
     })
 
     def __init__(
@@ -148,6 +149,7 @@ class RunState:
             FactorSignalStore,
             OrderStore,
             RunWindowStore,
+            TermStructureStore,
             TargetStore,
         )
         self.run_window_store = RunWindowStore()
@@ -155,6 +157,7 @@ class RunState:
         self.target_store = TargetStore()
         self.order_store = OrderStore()
         self.equity_curve_store = EquityCurveStore()
+        self.term_structure_store = TermStructureStore()
         self._initializing = False
 
     def ledger_for(self, order: "Order") -> Ledger:
