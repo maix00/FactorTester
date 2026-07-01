@@ -3,7 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.scheduler import FlowContext
+from tools.testers.backtest.engines.native.flow import Phase
+from tools.testers.backtest.engines.native.scheduler import FlowContext, ResolvedFlow, SchedulerError
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.base import FieldRef
 
@@ -83,3 +84,64 @@ def test_set_for_keyed_by_field_and_strategy():
     ctx.set_for(REF, s2, 2.0)
     assert ctx.get_for(REF, s1) == 1.0
     assert ctx.get_for(REF, s2) == 2.0
+
+
+def _resolved_flow(*, inputs=(), outputs=()) -> ResolvedFlow:
+    return ResolvedFlow(
+        name="flow",
+        owner="TestModule",
+        inputs=inputs,
+        outputs=outputs,
+        phase=Phase.PRE_REPLAY,
+        event_kind=None,
+        order=1,
+        after=(),
+        before=(),
+        compute=lambda _account, _ctx: None,
+        description="",
+        strategy_scoped=False,
+    )
+
+
+def test_flow_context_tracks_declared_field_contract():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue())
+    ctx.enter_flow(_resolved_flow(inputs=(REF,), outputs=(REF,)))
+    ctx.get(REF)
+    ctx.set(REF, 1)
+    ctx.exit_flow()
+    assert ctx.contract_violations() == ()
+
+
+def test_flow_context_records_undeclared_field_access():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), audit_contract=True)
+    ctx.enter_flow(_resolved_flow(outputs=()))
+    ctx.set(REF, 1)
+    ctx.exit_flow()
+
+    assert ctx.contract_violations() == ({
+        "flow": "TestModule.flow",
+        "phase": "pre_replay",
+        "event_kind": "",
+        "access": "write",
+        "field": "X.x",
+    },)
+
+
+def test_flow_context_strict_contract_raises():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue(), enforce_contract=True)
+    ctx.enter_flow(_resolved_flow(outputs=()))
+    try:
+        import pytest
+
+        with pytest.raises(SchedulerError, match="undeclared write"):
+            ctx.set(REF, 1)
+    finally:
+        ctx.exit_flow()
+
+
+def test_flow_context_contract_audit_is_off_by_default():
+    ctx = FlowContext(timestamp=None, event_queue=_FakeQueue())
+    ctx.enter_flow(_resolved_flow(outputs=()))
+    ctx.set(REF, 1)
+    ctx.exit_flow()
+    assert ctx.contract_violations() == ()

@@ -97,6 +97,7 @@ _FLOW_LABELS: dict[str, str] = {
 @dataclass(frozen=True)
 class ResolvedFlow:
     name: str
+    owner: str
     inputs: tuple["FieldRef", ...]
     outputs: tuple["FieldRef", ...]
     phase: Phase
@@ -116,6 +117,10 @@ class ResolvedFlow:
     def activity_key(self) -> str:
         event = self.event_kind.name.lower() if self.event_kind is not None else "once"
         return f"{self.phase.value}.{event}.{self.name}"
+
+
+def _flow_qualified_name(flow: ResolvedFlow) -> str:
+    return f"{flow.owner}.{flow.name}" if getattr(flow, "owner", "") else f".{flow.name}"
 
 
 def _wrap(override_compute: Callable, base_compute: Callable) -> Callable:
@@ -161,7 +166,7 @@ class FlowRegistry:
                 if ov.compute is not None:
                     compute = _wrap(ov.compute, compute)
             resolved.append(ResolvedFlow(
-                name=name, inputs=tuple(inputs), outputs=base.outputs,
+                name=name, owner=base.owner, inputs=tuple(inputs), outputs=base.outputs,
                 phase=base.phase, event_kind=base.event_kind, order=base.order,
                 after=base.after, before=base.before, compute=compute,
                 description=base.description, strategy_scoped=base.strategy_scoped,
@@ -233,6 +238,8 @@ class FlowContext:
         event_queue: "EventQueue",
         active_strategies: frozenset["Strategy"] = frozenset(),
         drafts_by_strategy: dict["Strategy", list[EventDraft]] | None = None,
+        audit_contract: bool = False,
+        enforce_contract: bool = False,
     ) -> None:
         self.timestamp = timestamp
         self.active_strategies = active_strategies
@@ -243,20 +250,60 @@ class FlowContext:
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
         self._values_by_strategy: dict["FieldRef", dict["Strategy", Any]] = {}
+        self._audit_contract = audit_contract
+        self._enforce_contract = enforce_contract
+        self._active_flow: ResolvedFlow | None = None
+        self._contract_violations: list[dict[str, Any]] = []
 
     def get(self, ref: "FieldRef", default: Any = None) -> Any:
+        self._record_contract_access("read", ref)
         return self._values.get(ref, default)
 
     def set(self, ref: "FieldRef", value: Any) -> None:
+        self._record_contract_access("write", ref)
         self._values[ref] = value
         self._push_if_event(value)
 
     def get_for(self, ref: "FieldRef", strategy: "Strategy", default: Any = None) -> Any:
+        self._record_contract_access("read", ref)
         return self._values_by_strategy.get(ref, {}).get(strategy, default)
 
     def set_for(self, ref: "FieldRef", strategy: "Strategy", value: Any) -> None:
+        self._record_contract_access("write", ref)
         self._values_by_strategy.setdefault(ref, {})[strategy] = value
         self._push_if_event(value)
+
+    def enter_flow(self, flow: ResolvedFlow) -> None:
+        self._active_flow = flow
+
+    def exit_flow(self) -> None:
+        self._active_flow = None
+
+    def contract_violations(self) -> tuple[dict[str, Any], ...]:
+        return tuple(self._contract_violations)
+
+    def _record_contract_access(self, access: str, ref: "FieldRef") -> None:
+        if not self._audit_contract and not self._enforce_contract:
+            return
+        flow = self._active_flow
+        if flow is None:
+            return
+        declared = flow.inputs if access == "read" else flow.outputs
+        if ref in declared:
+            return
+        violation = {
+            "flow": _flow_qualified_name(flow),
+            "phase": flow.phase.value,
+            "event_kind": flow.event_kind.name if flow.event_kind is not None else "",
+            "access": access,
+            "field": ref.qualified_name,
+        }
+        self._contract_violations.append(violation)
+        if self._enforce_contract:
+            raise SchedulerError(
+                f"flow {_flow_qualified_name(flow)!r} performed undeclared {access} "
+                f"of field {ref.qualified_name!r}"
+            )
 
     def _push_if_event(self, value: Any) -> None:
         if isinstance(value, EventDraft):
@@ -478,6 +525,8 @@ def make_dispatcher(
     account: "AccountState",
     event_queue: EventQueue,
     tracker: "_ProgressTracker | None" = None,
+    audit_contract: bool = False,
+    enforce_contract: bool = False,
 ) -> Callable[[list[EventDraft]], None]:
     def handler(batch: list[EventDraft]) -> None:
         timestamp = batch[0].timestamp
@@ -497,6 +546,8 @@ def make_dispatcher(
         ctx = FlowContext(
             timestamp=timestamp, event_queue=event_queue,
             active_strategies=all_active, drafts_by_strategy=drafts_by_strategy,
+            audit_contract=audit_contract,
+            enforce_contract=enforce_contract,
         )
         for f in ordered_flows:
             applicable = frozenset(
@@ -508,7 +559,7 @@ def make_dispatcher(
             ctx.active_strategies = applicable
             if tracker is not None:
                 tracker.activity(f, timestamp=timestamp, phase="event_replay")
-            f.compute(account, ctx)
+            _compute_flow(f, account, ctx)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
@@ -535,6 +586,8 @@ def run(
     resolved_flows: list[ResolvedFlow],
     progress: Callable[[int, int, str], None] | None = None,
     activity_sink: ProgressSink | None = None,
+    audit_flow_contract: bool = False,
+    enforce_flow_contract: bool = False,
 ) -> None:
     """Invariant: run() itself never calls event_queue.push_event directly
     — events are only ever registered by some Flow's compute via
@@ -563,16 +616,30 @@ def run(
     for (phase, event_kind), ordered_flows in groups.items():
         if phase is Phase.PER_EVENT:
             event_queue.set_dispatcher(
-                cast(EventKind, event_kind), make_dispatcher(ordered_flows, account, event_queue, tracker))
+                cast(EventKind, event_kind),
+                make_dispatcher(
+                    ordered_flows,
+                    account,
+                    event_queue,
+                    tracker,
+                    audit_flow_contract,
+                    enforce_flow_contract,
+                ),
+            )
 
-    ctx = FlowContext(timestamp=None, event_queue=event_queue)
+    ctx = FlowContext(
+        timestamp=None,
+        event_queue=event_queue,
+        audit_contract=audit_flow_contract,
+        enforce_contract=enforce_flow_contract,
+    )
     for f in pre_replay_flows:
         applicable = _pre_post_applicable_strategies(account, f)
         if not applicable:
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay")
-        f.compute(account, ctx)
+        _compute_flow(f, account, ctx)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -580,17 +647,30 @@ def run(
     event_queue.run_until_drained()
     tracker.event_replay_done()
 
-    ctx = FlowContext(timestamp=None, event_queue=event_queue)
+    ctx = FlowContext(
+        timestamp=None,
+        event_queue=event_queue,
+        audit_contract=audit_flow_contract,
+        enforce_contract=enforce_flow_contract,
+    )
     for f in post_replay_flows:
         applicable = _pre_post_applicable_strategies(account, f)
         if not applicable:
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay")
-        f.compute(account, ctx)
+        _compute_flow(f, account, ctx)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     tracker.complete()
+
+
+def _compute_flow(flow: ResolvedFlow, account: "AccountState", ctx: FlowContext) -> None:
+    ctx.enter_flow(flow)
+    try:
+        flow.compute(account, ctx)
+    finally:
+        ctx.exit_flow()
 
 
 def _activity_phase(phase: Phase) -> str:
