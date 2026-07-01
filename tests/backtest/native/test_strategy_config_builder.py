@@ -79,6 +79,26 @@ def test_factor_mode_auto_defaults_to_signal_precomputed():
     assert not config.uses_flow("schedule_bar_events")
 
 
+def test_engine_mode_basic_disables_term_structure_lifecycle_flows():
+    configs = build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert not config.uses_flow("expand_term_structure")
+    assert not config.uses_flow("resolve_tradable_target_weights")
+    assert not config.uses_flow("register_force_close_notices")
+    assert not config.uses_flow("register_rollover_notices")
+    assert not config.uses_flow("handle_delivery_force_close_notice")
+    assert not config.uses_flow("handle_rollover_notice")
+
+
+def test_engine_mode_auto_keeps_term_structure_lifecycle_flows_available():
+    configs = build_strategy_configs({"A1": {"engine_mode": "auto", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert config.uses_flow("expand_term_structure")
+    assert config.uses_flow("resolve_tradable_target_weights")
+    assert config.uses_flow("register_force_close_notices")
+    assert config.uses_flow("register_rollover_notices")
+
+
 def test_factor_mode_auto_uses_live_for_non_vectorizable_factor():
     class LiveOnlyFactor:
         supports_vectorized = False

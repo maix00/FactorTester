@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
+_TARGET_WEIGHTS_REF = FieldRef("target_weights", owner="GroupMembershipModule")
 
 
 class ProductSelectionModule(ExecutableModule):
@@ -143,9 +144,19 @@ class TermStructureExpandModule(ExecutableModule):
         phase=Phase.PRE_REPLAY, order=39,
         after=(ProductSelectionModule.resolve_product_selection,),
         compute=lambda account, ctx: _expand_term_structure(account, ctx),
+        strategy_scoped=True,
+    )
+    resolve_tradable_target_weights: ClassVar[Flow] = Flow(
+        "resolve_tradable_target_weights",
+        inputs=(contract_metadata, _TARGET_WEIGHTS_REF),
+        outputs=(_TARGET_WEIGHTS_REF,),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL,
+        order=15,
+        compute=lambda account, ctx: _resolve_tradable_target_weights(account, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure,)
+    flows: ClassVar[tuple[Flow, ...]] = (expand_term_structure, resolve_tradable_target_weights)
 
 
 class DeliveryForceCloseModule(ExecutableModule):
@@ -160,13 +171,13 @@ class DeliveryForceCloseModule(ExecutableModule):
         "force_close_before_expiry": FieldDefinition(
             public=True,
             label="到期强平提前量",
-            default="0d",
+            default="2d",
             control_template="text",
             tab="delivery_force_close",
             chip_template="到期强平提前量: {value}",
             tab_label="交割强平",
             tab_order=39,
-            help_text="按合约生命周期基准日向前偏移登记强平通知；若有 First Notice/交割风险日期则优先使用，否则使用合约窗口结束日。",
+            help_text="按合约生命周期基准时点向前偏移登记强平通知；可填 5min、1h、2d 等任意非负时间间隔。",
         ),
         "force_close_notices": FieldDefinition(public=False),
         "forced_close_orders": FieldDefinition(public=False),
@@ -180,6 +191,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         order=39,
         after=(TermStructureExpandModule.expand_term_structure,),
         compute=lambda account, ctx: _register_force_close_notices(account, ctx),
+        strategy_scoped=True,
     )
     handle_delivery_force_close_notice: ClassVar[Flow] = Flow(
         "handle_delivery_force_close_notice",
@@ -206,7 +218,7 @@ class RolloverModule(ExecutableModule):
         "rollover_policy": FieldDefinition(
             public=True,
             label="换月规则",
-            default="none",
+            default="date_before_expiry",
             control_template="select",
             tab="rollover",
             chip_template="换月规则: {value}",
@@ -228,6 +240,7 @@ class RolloverModule(ExecutableModule):
             tab_label="换月",
             tab_order=40,
             visible_when={"rollover_policy": ("date_before_expiry",)},
+            help_text="按合约生命周期基准时点向前偏移登记换月通知；可填 5min、1h、5d 等任意非负时间间隔。",
         ),
         "rollover_notices": FieldDefinition(public=False),
     }
@@ -240,6 +253,7 @@ class RolloverModule(ExecutableModule):
         order=39,
         after=(TermStructureExpandModule.expand_term_structure,),
         compute=lambda account, ctx: _register_rollover_notices(account, ctx),
+        strategy_scoped=True,
     )
     handle_rollover_notice: ClassVar[Flow] = Flow(
         "handle_rollover_notice",
@@ -261,7 +275,8 @@ def _expand_term_structure(account, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
-    for strategy in account.strategy_configs:
+    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    for strategy in strategies:
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
         metadata: list[dict[str, Any]] = []
@@ -280,7 +295,8 @@ def _expand_term_structure(account, ctx) -> None:
 def _register_force_close_notices(account, ctx) -> None:
     start_dt, end_dt = getattr(account, "run_window_envelope", (None, None))
     drafts: list[EventDraft] = []
-    for strategy in account.strategy_configs:
+    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    for strategy in strategies:
         metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
         offset = _parse_time_offset(
             account.config_for(strategy).get(DeliveryForceCloseModule.force_close_before_expiry, "0d"),
@@ -299,7 +315,8 @@ def _register_force_close_notices(account, ctx) -> None:
 def _register_rollover_notices(account, ctx) -> None:
     start_dt, end_dt = getattr(account, "run_window_envelope", (None, None))
     drafts: list[EventDraft] = []
-    for strategy in account.strategy_configs:
+    strategies = ctx.active_strategies or frozenset(account.strategy_configs)
+    for strategy in strategies:
         config = account.config_for(strategy)
         policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
         if policy == "none":
@@ -320,6 +337,47 @@ def _register_rollover_notices(account, ctx) -> None:
         ctx.set_for(RolloverModule.rollover_notices, strategy, strategy_drafts)
     if drafts:
         ctx.set(RolloverModule.rollover_notices, drafts)
+
+
+def _resolve_tradable_target_weights(account, ctx) -> None:
+    for strategy in ctx.active_strategies:
+        weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
+        metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
+        if not weights or not metadata:
+            continue
+        config = account.config_for(strategy)
+        rollover_policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
+        rollover_offset = _parse_time_offset(
+            config.get(RolloverModule.rollover_before_expiry, "5d"),
+            field_name="rollover_before_expiry",
+        ) if rollover_policy == "date_before_expiry" else None
+        force_close_offset = _parse_time_offset(
+            config.get(DeliveryForceCloseModule.force_close_before_expiry, "2d"),
+            field_name="force_close_before_expiry",
+        )
+        mapped: dict[Any, float] = {}
+        mapping_trace: dict[str, str | None] = {}
+        for product, weight in weights.items():
+            row = _tradable_contract_row(
+                product,
+                metadata,
+                timestamp=ctx.timestamp,
+                rollover_offset=rollover_offset,
+                force_close_offset=force_close_offset,
+            )
+            target = row.get("contract_object", product) if row is not None else product
+            if target is None:
+                mapping_trace[str(product)] = None
+                continue
+            mapped[target] = mapped.get(target, 0.0) + weight
+            mapping_trace[str(product)] = str(getattr(target, "name", target))
+        ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
+        if mapping_trace:
+            trace = getattr(account, "term_structure_target_mapping", None)
+            if trace is None:
+                trace = {}
+                account.term_structure_target_mapping = trace
+            trace.setdefault(strategy, {})[str(ctx.timestamp)] = mapping_trace
 
 
 def _handle_rollover_notice(account, ctx) -> None:
@@ -426,6 +484,78 @@ def _expand_product_contracts(product: Any, *, start_date: str | None, end_date:
     return contracts, metadata
 
 
+def _tradable_contract_row(
+    product: Any,
+    metadata: list[dict[str, Any]],
+    *,
+    timestamp: Any,
+    rollover_offset: pd.Timedelta | None,
+    force_close_offset: pd.Timedelta,
+) -> dict[str, Any] | None:
+    product_name = getattr(product, "name", str(product))
+    rows = [row for row in metadata if row.get("product") == product_name]
+    if not rows:
+        return None
+    if len(rows) == 1 and rows[0].get("is_identity"):
+        return rows[0]
+    ts = _timestamp_sort_key(timestamp)
+    rows = sorted(rows, key=lambda row: _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min))
+    selected_idx: int | None = None
+    for idx, row in enumerate(rows):
+        start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
+        end = _timestamp_sort_key(_row_end_value(row) or pd.Timestamp.max)
+        if start <= ts <= end:
+            selected_idx = idx
+            break
+    if selected_idx is None:
+        for idx, row in enumerate(rows):
+            start = _timestamp_sort_key(_row_start_value(row) or pd.Timestamp.min)
+            if ts < start:
+                return row
+        return None
+
+    row = rows[selected_idx]
+    next_row = rows[selected_idx + 1] if selected_idx + 1 < len(rows) else None
+    force_close_ts = _event_timestamp_from_row(row, offset=force_close_offset)
+    if force_close_ts is not None and ts >= _timestamp_sort_key(force_close_ts):
+        return next_row
+    if rollover_offset is not None:
+        rollover_ts = _event_timestamp_from_row(row, offset=rollover_offset)
+        if rollover_ts is not None and ts >= _timestamp_sort_key(rollover_ts):
+            return next_row or row
+    return row
+
+
+def _row_start_value(row: dict[str, Any]) -> Any:
+    for key in ("start_ts", "listed_ts"):
+        value = row.get(key)
+        if value not in (None, ""):
+            try:
+                return pd.Timestamp(int(value), unit="ms")
+            except Exception:
+                pass
+    for key in ("start", "listed_date"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _row_end_value(row: dict[str, Any]) -> Any:
+    for key in ("end_ts", "auto_close_ts", "last_trade_ts", "maturity_ts"):
+        value = row.get(key)
+        if value not in (None, ""):
+            try:
+                return pd.Timestamp(int(value), unit="ms")
+            except Exception:
+                pass
+    for key in ("end", "auto_close_date", "last_trade_date", "maturity_date"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _lifecycle_event_drafts(
     strategy: Any,
     metadata: list[dict[str, Any]],
@@ -486,7 +616,10 @@ def _parse_time_offset(value: Any, *, field_name: str) -> pd.Timedelta:
                 raise ValueError
             return delta
         except Exception:
-            raise ValueError(f"invalid {field_name}={value!r}; expected non-negative time such as '0d' or '2d'")
+            raise ValueError(
+                f"invalid {field_name}={value!r}; expected non-negative time such as "
+                "'5min', '1h', or '2d'"
+            )
     return cast(pd.Timedelta, pd.Timedelta(0))
 
 

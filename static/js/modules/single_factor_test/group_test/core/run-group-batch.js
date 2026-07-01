@@ -240,26 +240,67 @@
                 html.push(
                     '<div class="gt-flow-line-phase' + (active ? ' is-active' : '') + (phase.key === EVENT_PHASE ? ' is-event-phase' : '') + '" data-phase="' + escapeHtml(phase.key) + '">'
                     + '<div class="gt-flow-phase-title">' + escapeHtml(phase.label || phase.key) + '</div>'
-                    + '<div class="gt-flow-line-track">'
                 );
                 var flows = phase.flows || [];
-                for (var j = 0; j < flows.length; j++) {
-                    var flow = flows[j];
-                    var nodeActive = active && phase.key !== EVENT_PHASE && flow.flow_key === activeFlowKey;
-                    html.push(
-                        '<div class="gt-flow-line-node' + (nodeActive ? ' is-current' : '') + '">'
-                        + '<span class="gt-flow-dot"></span>'
-                        + '<div class="gt-flow-node-label">' + escapeHtml(flow.flow_label || flow.flow_name || flow.flow_key) + '</div>'
-                        + '</div>'
-                    );
+                if (phase.key === EVENT_PHASE) {
+                    html.push(renderEventPhase(flows, active));
+                } else {
+                    html.push('<div class="gt-flow-line-track">');
+                    html.push(renderFlowNodes(phase, flows, active));
+                    html.push('</div>');
                 }
-                if (!flows.length) {
-                    html.push('<div class="gt-flow-empty">暂无节点</div>');
-                }
-                html.push('</div></div>');
+                html.push('</div>');
             }
             html.push('</div>');
             row.diagram.innerHTML = html.join('');
+        }
+
+        function renderFlowNodes(phase, flows, active) {
+            if (!flows.length) return '<div class="gt-flow-empty">暂无节点</div>';
+            var html = [];
+            for (var j = 0; j < flows.length; j++) {
+                var flow = flows[j];
+                var nodeActive = active && phase.key !== EVENT_PHASE && flow.flow_key === activeFlowKey;
+                html.push(
+                    '<div class="gt-flow-line-node' + (nodeActive ? ' is-current' : '') + '">'
+                    + '<span class="gt-flow-dot"></span>'
+                    + '<div class="gt-flow-node-label">' + escapeHtml(flow.flow_label || flow.flow_name || flow.flow_key) + '</div>'
+                    + '</div>'
+                );
+            }
+            return html.join('');
+        }
+
+        function renderEventPhase(flows, active) {
+            var signalFlows = [];
+            var noticeFlows = [];
+            var orderFlows = [];
+            for (var i = 0; i < flows.length; i++) {
+                var kind = String(flows[i].event_kind || '').toUpperCase();
+                if (kind === 'ORDER') orderFlows.push(flows[i]);
+                else if (kind === 'ORDER_NOTICE') noticeFlows.push(flows[i]);
+                else signalFlows.push(flows[i]);
+            }
+            var phase = { key: EVENT_PHASE };
+            return [
+                '<div class="gt-flow-event-root">',
+                    '<div class="gt-flow-producer-branches">',
+                        '<div class="gt-flow-event-branch">',
+                            '<div class="gt-flow-branch-title">信号产单</div>',
+                            '<div class="gt-flow-line-track">', renderFlowNodes(phase, signalFlows, active), '</div>',
+                        '</div>',
+                        '<div class="gt-flow-event-branch">',
+                            '<div class="gt-flow-branch-title">通知产单</div>',
+                            '<div class="gt-flow-line-track">', renderFlowNodes(phase, noticeFlows, active), '</div>',
+                        '</div>',
+                    '</div>',
+                    '<div class="gt-flow-merge-stem" aria-hidden="true"></div>',
+                    '<div class="gt-flow-order-branch">',
+                        '<div class="gt-flow-branch-title">订单处理</div>',
+                        '<div class="gt-flow-line-track">', renderFlowNodes(phase, orderFlows, active), '</div>',
+                    '</div>',
+                '</div>'
+            ].join('');
         }
 
         function ensureFlowLineStyle() {
@@ -277,6 +318,11 @@
                 '.gt-flow-line-phase.is-active .gt-flow-phase-title{color:#0f766e;}',
                 '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:before{background:#99f6e4;}',
                 '.gt-flow-line-phase.is-event-phase.is-active .gt-flow-line-track:after{opacity:1;background:linear-gradient(90deg,transparent 0,rgba(20,184,166,.12) 18%,#14b8a6 48%,rgba(20,184,166,.12) 78%,transparent 100%);background-size:56px 4px;animation:gtFlowLineMove .75s linear infinite;}',
+                '.gt-flow-event-root{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:center;gap:8px;min-width:max-content;}',
+                '.gt-flow-producer-branches{display:flex;flex-direction:column;gap:8px;min-width:max-content;}',
+                '.gt-flow-event-branch,.gt-flow-order-branch{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:8px;}',
+                '.gt-flow-branch-title{font-size:10px;line-height:1.12;color:#667085;text-align:right;padding-top:8px;white-space:nowrap;}',
+                '.gt-flow-merge-stem{height:2px;background:linear-gradient(90deg,#99f6e4,#14b8a6);border-radius:999px;}',
                 '.gt-flow-line-node{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-width:20px;}',
                 '.gt-flow-dot{width:12px;height:12px;border-radius:999px;background:#fff;border:2px solid #cbd5e1;box-sizing:border-box;}',
                 '.gt-flow-line-node.is-current .gt-flow-dot{border-color:#0f766e;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16);}',

@@ -18,7 +18,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert "settings" not in index
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
-        "time", "capital", "target_allocation", "rebalance_trigger",
+        "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
         "position_policy", "group_strategy", "cost", "order", "liquidity", "margin",
         "accounting", "calendar", "evaluation",
     ]
@@ -27,8 +27,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "group-settings": [],
     }
     assert [tab["key"] for tab in index["tab_lists"]["group-settings"]] == [
-        "engine", "factor", "product_path_selection", "data_source", "frequency", "time",
-        "capital", "target_allocation", "rebalance_trigger", "position_policy",
+        "engine", "factor", "product_path_selection", "data_source", "frequency",
+        "delivery_force_close", "time", "rollover", "capital", "target_allocation",
+        "rebalance_trigger", "position_policy",
         "group_strategy", "cost", "order", "liquidity", "margin",
         "accounting", "calendar", "evaluation",
     ]
@@ -59,6 +60,12 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["engine_mode"]["value"] == "auto"
     assert index["defaults"]["engine_mode"]["scope_policy"] == "overridable"
+    assert index["defaults"]["force_close_before_expiry"]["value"] == "2d"
+    assert index["defaults"]["rollover_policy"]["value"] == "date_before_expiry"
+    assert index["defaults"]["rollover_before_expiry"]["value"] == "5d"
+    assert index["defaults"]["rollover_before_expiry"]["visible_when"] == {
+        "rollover_policy": ["date_before_expiry"],
+    }
     assert index["defaults"]["fee_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
     }

@@ -26,6 +26,14 @@ if TYPE_CHECKING:
 
 _FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
 _LIVE_FACTOR_SUPPORT_FLOWS = {"schedule_bar_events"}
+_TERM_STRUCTURE_FLOWS = {
+    "expand_term_structure",
+    "resolve_tradable_target_weights",
+    "register_force_close_notices",
+    "register_rollover_notices",
+    "handle_delivery_force_close_notice",
+    "handle_rollover_notice",
+}
 
 
 def _all_flow_names() -> set[str]:
@@ -42,6 +50,8 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
     excluded = _FACTOR_MODE_FLOWS - {chosen}
     if chosen != "signal_live":
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
+    if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
+        excluded |= _TERM_STRUCTURE_FLOWS
     return frozenset(names - excluded)
 
 

@@ -12,12 +12,17 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_lifecycle import OrderLifecycleModule
-from tools.testers.backtest.modules.product_selection import ProductSelectionModule, TermStructureExpandModule
+from tools.testers.backtest.modules.product_selection import (
+    DeliveryForceCloseModule,
+    ProductSelectionModule,
+    RolloverModule,
+    TermStructureExpandModule,
+)
 
 
 def _register_all():
     registry = FlowRegistry()
-    for module in (ProductSelectionModule, TermStructureExpandModule, LedgerModule,
+    for module in (ProductSelectionModule, TermStructureExpandModule, DeliveryForceCloseModule, RolloverModule, LedgerModule,
                     MarketDataModule, OrderBookModule, OrderLifecycleModule):
         for flow in module.flows:
             registry.register_flow(flow)
@@ -39,6 +44,7 @@ def test_signal_group_orders_equity_before_size_order_before_construct_orders():
     ordered_names = [f.name for f in groups[(Phase.PER_EVENT, EventKind.SIGNAL)]]
     assert ordered_names.index("lookup_current_prices_on_signal") < ordered_names.index("equity_on_signal")
     assert ordered_names.index("equity_on_signal") < ordered_names.index("size_order")
+    assert ordered_names.index("resolve_tradable_target_weights") < ordered_names.index("size_order")
     assert ordered_names.index("size_order") < ordered_names.index("construct_orders")
 
 
@@ -54,6 +60,8 @@ def test_pre_replay_group_orders_without_error():
     # so it must run after raw market data has been loaded.
     assert ordered_names.index("resolve_product_selection") < ordered_names.index("check_market_data_coverage")
     assert ordered_names.index("check_market_data_coverage") < ordered_names.index("expand_term_structure")
+    assert ordered_names.index("expand_term_structure") < ordered_names.index("register_force_close_notices")
+    assert ordered_names.index("expand_term_structure") < ordered_names.index("register_rollover_notices")
     assert ordered_names.index("expand_term_structure") < ordered_names.index("initialize_ledgers")
     assert ordered_names.index("load_raw_market_data") < ordered_names.index("initialize_ledgers")
     assert ordered_names.index("load_raw_market_data") < ordered_names.index("causal_valuation")

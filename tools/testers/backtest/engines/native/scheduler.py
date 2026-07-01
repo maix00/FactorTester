@@ -54,6 +54,7 @@ _FLOW_LABELS: dict[str, str] = {
     "check_market_data_coverage": "检查产品覆盖期",
     "resolve_product_selection": "解析产品路径",
     "expand_term_structure": "展开期限结构",
+    "resolve_tradable_target_weights": "解析可交易合约目标",
     "register_force_close_notices": "登记交割强平通知",
     "register_rollover_notices": "登记换月通知",
     "load_raw_market_data": "装载行情数据",

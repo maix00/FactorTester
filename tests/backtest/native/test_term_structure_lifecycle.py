@@ -16,7 +16,9 @@ from tools.testers.backtest.modules.product_selection import (
     _handle_delivery_force_close_notice,
     _register_force_close_notices,
     _register_rollover_notices,
+    _resolve_tradable_target_weights,
 )
+from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, strategy_run_window_datetimes
 
 
@@ -51,6 +53,26 @@ class _TermProduct:
         }]
 
 
+class _TwoContractTermProduct(_TermProduct):
+    def get_contract_list(self, start_date=None, end_date=None):
+        return [
+            {
+                "uid": "P2601.DCE",
+                "contract": "P2601",
+                "start": "2026-01-01",
+                "end": "2026-01-31",
+                "end_ts": int(pd.Timestamp("2026-01-31 15:00").timestamp() * 1000),
+            },
+            {
+                "uid": "P2602.DCE",
+                "contract": "P2602",
+                "start": "2026-01-20",
+                "end": "2026-02-28",
+                "end_ts": int(pd.Timestamp("2026-02-28 15:00").timestamp() * 1000),
+            },
+        ]
+
+
 def test_term_structure_registers_force_close_event_before_expiry():
     strategy = Strategy(alias="A")
     product = _TermProduct()
@@ -71,7 +93,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
-    ctx = FlowContext(timestamp=None, event_queue=queue)
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
     _expand_term_structure(account, ctx)
@@ -82,6 +104,37 @@ def test_term_structure_registers_force_close_event_before_expiry():
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00")
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
+
+
+def test_term_structure_force_close_offset_accepts_intraday_window():
+    strategy = Strategy(alias="A")
+    product = _TermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "5min",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_force_close_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured
+    assert captured[0].timestamp == pd.Timestamp("2026-01-31 14:55")
 
 
 def test_force_close_event_emits_reverse_order_for_existing_position():
@@ -120,6 +173,74 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     assert order.get("reason") == "term_structure_force_close"
 
 
+def test_signal_target_weights_map_abstract_product_to_current_contract():
+    strategy = Strategy(alias="A")
+    product = _TwoContractTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-10 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    ctx.set_for(GroupMembershipModule.target_weights, strategy, {product: 1.0})
+    _resolve_tradable_target_weights(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
+    assert weights == {_Contract("P2601.DCE"): 1.0}
+
+
+def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time():
+    strategy = Strategy(alias="A")
+    product = _TwoContractTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-26 15:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    ctx.set_for(GroupMembershipModule.target_weights, strategy, {product: 1.0})
+    _resolve_tradable_target_weights(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, strategy)
+    assert weights == {_Contract("P2602.DCE"): 1.0}
+
+
 def test_rollover_module_registers_rollover_notice_independently():
     strategy = Strategy(alias="A")
     product = _TermProduct()
@@ -141,7 +262,7 @@ def test_rollover_module_registers_rollover_notice_independently():
     queue = EventQueue()
     captured: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
-    ctx = FlowContext(timestamp=None, event_queue=queue)
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
     _expand_term_structure(account, ctx)
