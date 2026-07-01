@@ -103,6 +103,7 @@ class RunState:
         "current_prices_table",
         "market_price_tables",
         "results",
+        "factor_signal_store",
     })
 
     def __init__(
@@ -138,6 +139,8 @@ class RunState:
         self.current_prices_table: Any = None
         self.market_price_tables: dict[str, Any] = {}
         self.results = ResultStore()
+        from tools.testers.backtest.engines.native.stores import FactorSignalStore
+        self.factor_signal_store = FactorSignalStore()
         self._initializing = False
 
     def ledger_for(self, order: "Order") -> Ledger:

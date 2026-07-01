@@ -248,14 +248,8 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
         by_calculation[calculation_key].append(strategy)
         factor_by_calculation[calculation_key] = factor
 
-    tables = getattr(account, "precomputed_factor_tables", None)
-    if tables is None:
-        tables = {}
-        account.precomputed_factor_tables = tables
-    table_keys = getattr(account, "precomputed_factor_table_keys", None)
-    if table_keys is None:
-        table_keys = {}
-        account.precomputed_factor_table_keys = table_keys
+    store = account.factor_signal_store
+    tables = store.precomputed_tables
 
     drafts: list[EventDraft] = []
     for calculation_key, strategies in by_calculation.items():
@@ -266,9 +260,9 @@ def _schedule_signal_precomputed_timestamps(account, ctx) -> None:
         ).items():
             first_config = account.config_for(scheduled_strategies[0])
             if schedule_key not in tables:
-                tables[schedule_key] = _schedule_table_for_strategy(table, first_config)
+                store.put_precomputed_table(schedule_key, _schedule_table_for_strategy(table, first_config))
             for strategy in scheduled_strategies:
-                table_keys[strategy] = schedule_key
+                store.bind_precomputed_table(strategy, schedule_key)
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
 
@@ -533,8 +527,9 @@ def _evaluate_signal_live(account, ctx) -> None:
         by_factor[state_key].append(strategy)
         factor_by_key[state_key] = factor
 
-    price_tables = getattr(account, "live_factor_price_tables", {})
-    executors = getattr(account, "live_factor_executors", {})
+    store = account.factor_signal_store
+    price_tables = store.live_price_tables
+    executors = store.live_executors
     for factor_key, strategies in by_factor.items():
         factor = factor_by_key[factor_key]
         executor = executors.get(factor_key)
@@ -548,16 +543,15 @@ def _evaluate_signal_live(account, ctx) -> None:
 
 def _evaluate_signal_precomputed(account, ctx) -> None:
     """Looks up a value from the table cached once in PRE_REPLAY
-    (`account.precomputed_factor_tables`, keyed by id(factor)) -- no
+    (`RunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
     re-evaluation here."""
-    tables = getattr(account, "precomputed_factor_tables", {})
-    table_keys = getattr(account, "precomputed_factor_table_keys", {})
+    store = account.factor_signal_store
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
         factor = config.get(FactorModule.factor)
         calculation_key = _factor_calculation_key(factor_runtime_key(factor), config)
         fallback_key = _precomputed_schedule_key(calculation_key, config)
-        table = tables.get(table_keys.get(strategy, fallback_key))
+        table = store.precomputed_table_for(strategy, fallback_key)
         if table is None:
             ctx.set_for(FactorSignalModule.signal_value, strategy, {})
             continue
@@ -576,14 +570,9 @@ def _observe_signal_live_bar(account, ctx) -> None:
     prices = ctx.get(FieldRef("current_prices", owner="MarketDataModule"), {})
     if not prices:
         return
-    tables = getattr(account, "live_factor_price_tables", None)
-    if tables is None:
-        tables = {}
-        account.live_factor_price_tables = tables
-    executors = getattr(account, "live_factor_executors", None)
-    if executors is None:
-        executors = {}
-        account.live_factor_executors = executors
+    store = account.factor_signal_store
+    tables = store.live_price_tables
+    executors = store.live_executors
 
     by_factor: dict[Any, list] = defaultdict(list)
     factor_by_key: dict[Any, Any] = {}

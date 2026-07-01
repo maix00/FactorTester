@@ -145,9 +145,9 @@ def test_signal_precomputed_groups_by_factor_identity():
     _schedule_signal_precomputed_timestamps(account, ctx)
 
     assert shared_factor.calls == 1
-    assert len(account.precomputed_factor_tables) == 1
+    assert len(account.factor_signal_store.precomputed_tables) == 1
     expected_key = _factor_calculation_key(("object", id(shared_factor)), configs[s1])
-    assert (expected_key, "factor") in account.precomputed_factor_tables
+    assert (expected_key, "factor") in account.factor_signal_store.precomputed_tables
 
 
 def test_signal_precomputed_splits_shared_factor_by_warmup_window():
@@ -188,7 +188,7 @@ def test_signal_precomputed_splits_shared_factor_by_warmup_window():
     _schedule_signal_precomputed_timestamps(account, FlowContext(timestamp=None, event_queue=EventQueue()))
 
     assert shared_factor.calls == [pd.Timedelta("1D"), pd.Timedelta("2D")]
-    assert len(account.precomputed_factor_tables) == 2
+    assert len(account.factor_signal_store.precomputed_tables) == 2
 
 
 def test_signal_precomputed_clips_events_to_strategy_run_window():
@@ -251,7 +251,7 @@ def test_signal_precomputed_clips_events_to_strategy_run_window():
     queue.run_until_drained()
 
     assert factor.calls == 2
-    assert len(account.precomputed_factor_tables) == 2
+    assert len(account.factor_signal_store.precomputed_tables) == 2
     assert seen == [
         (pd.Timestamp("2024-01-01 09:00"), s1),
         (pd.Timestamp("2024-01-02 09:00"), s1),
@@ -311,7 +311,7 @@ def test_signal_precomputed_merges_equivalent_exact_windows_across_timezones():
     _schedule_signal_precomputed_timestamps(account, ctx)
 
     assert factor.calls == 1
-    assert len(account.precomputed_factor_tables) == 1
+    assert len(account.factor_signal_store.precomputed_tables) == 1
 
 
 def test_signal_precomputed_splits_factor_evaluate_by_run_window():
@@ -499,7 +499,7 @@ def test_signal_precomputed_same_window_batches_strategies_by_timestamp():
     )
     queue.run_until_drained()
 
-    assert len(account.precomputed_factor_tables) == 1
+    assert len(account.factor_signal_store.precomputed_tables) == 1
     assert batches == [
         (pd.Timestamp("2024-01-01 09:00"), {s1, s2}),
         (pd.Timestamp("2024-01-02 09:00"), {s1, s2}),
@@ -530,8 +530,8 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
     )
     table = pd.DataFrame({"P1": [10.0, 20.0]}, index=index)
     key = (("object", id(factor)), "factor", ("unbounded",))
-    account.precomputed_factor_tables = {key: table}
-    account.precomputed_factor_table_keys = {s1: key, s2: key}
+    account.factor_signal_store.precomputed_tables = {key: table}
+    account.factor_signal_store.precomputed_table_keys = {s1: key, s2: key}
     ctx = FlowContext(
         timestamp=timestamp,
         event_queue=EventQueue(),
@@ -648,9 +648,9 @@ def test_signal_precomputed_calendar_frequency_aligns_schedule():
 
     align.assert_called_once()
     assert align.call_args.args[1] == "5min"
-    key = account.precomputed_factor_table_keys[strategy]
-    assert key in account.precomputed_factor_tables
-    assert list(account.precomputed_factor_tables[key].index) == [pd.Timestamp("2024-01-01 09:01")]
+    key = account.factor_signal_store.precomputed_table_keys[strategy]
+    assert key in account.factor_signal_store.precomputed_tables
+    assert list(account.factor_signal_store.precomputed_tables[key].index) == [pd.Timestamp("2024-01-01 09:01")]
 
 
 def test_signal_live_observes_bars_then_signals_from_causal_price_table():
