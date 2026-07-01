@@ -9,7 +9,7 @@ or inventing their own warm-up semantics.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
 import pandas as pd
@@ -41,6 +41,19 @@ class StrategyRunWindow:
     @property
     def is_bounded(self) -> bool:
         return self.start_dt is not None and self.end_dt is not None
+
+
+@dataclass
+class RunWindowStore:
+    strategy_windows: dict[Any, Any] = field(default_factory=dict)
+    envelope: tuple[Any, Any] | None = None
+
+    def set_windows(self, windows: dict[Any, Any], envelope: tuple[Any, Any]) -> None:
+        self.strategy_windows = windows
+        self.envelope = envelope
+
+    def window_for(self, strategy: Any) -> Any | None:
+        return self.strategy_windows.get(strategy)
 
 
 class RunWindowModule(ExecutableModule):

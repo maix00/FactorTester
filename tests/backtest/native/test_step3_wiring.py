@@ -13,9 +13,9 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_lifecycle import OrderLifecycleModule
-from tools.testers.backtest.modules.product_selection import (
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.term_structure import (
     DeliveryForceCloseModule,
-    ProductSelectionModule,
     RolloverModule,
     TermStructureExpandModule,
 )

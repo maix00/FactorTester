@@ -21,7 +21,7 @@ from typing import Any, ClassVar, cast
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.fields import FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
@@ -33,9 +33,10 @@ from tools.testers.backtest.modules.market_data import (
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.target import TargetStrategyModule
 
 
-class GroupMembershipModule(ExecutableModule):
+class GroupMembershipModule(TargetStrategyModule):
     key: ClassVar[str] = "group_strategy"  # matches the existing frontend
         # SettingModule("group_strategy", ...) / chip module references --
         # this is the same concept the old framework called "分组策略",
@@ -44,7 +45,7 @@ class GroupMembershipModule(ExecutableModule):
 
     split_count: ClassVar[FieldRef[int]] = FieldRef("split_count")
     group_index: ClassVar[FieldRef[int]] = FieldRef("group_index")
-    target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")  # dict[Product, float], Σ == 1
+    target_weights: ClassVar[FieldRef[Any]] = TargetStrategyModule.target_weights  # dict[Product, float], Σ == 1
     execution_timing: ClassVar[FieldRef[str]] = FieldRef("execution_timing")  # fixed "next_bar"
     execution_delay_bars: ClassVar[FieldRef[int]] = FieldRef("execution_delay_bars")
     dispatched_order_events: ClassVar[FieldRef[Any]] = FieldRef("dispatched_order_events")  # push-only, never read
@@ -132,7 +133,7 @@ class GroupMembershipModule(ExecutableModule):
 def _group_quantile_membership(account, ctx) -> None:
     """`position_policy="buy_and_hold"`: once a strategy has computed its
     first non-empty target_weights, every later SIGNAL event reuses that
-    exact same allocation (cached on TargetStore)
+    exact same allocation (cached on the shared target strategy store)
     instead of recomputing from the current signal_value -- real holding
     behavior, not "rebalance every period but happen to get the same
     answer." `OrderBookModule.size_order` naturally produces zero deltas
@@ -148,8 +149,8 @@ def _group_quantile_membership(account, ctx) -> None:
     in or out of the group. "scheduled" is not implemented (see field
     docstring)."""
     store = account.target_store
-    established = store.established_target_weights
-    last_membership = store.last_group_membership
+    established = store.strategy_target_cache
+    last_membership = store.strategy_membership_cache
 
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)

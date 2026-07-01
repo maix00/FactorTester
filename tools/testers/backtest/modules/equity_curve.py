@@ -19,7 +19,8 @@ margin is tracked" contract).
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 import pandas as pd
 
@@ -28,6 +29,11 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
+
+
+@dataclass
+class EquityCurveStore:
+    buffer: dict[Any, list[tuple[Any, dict[str, Any]]]] = field(default_factory=dict)
 
 
 class EquityCurveModule(ExecutableModule):

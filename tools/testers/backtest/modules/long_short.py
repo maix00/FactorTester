@@ -11,15 +11,16 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.fields import FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+from tools.testers.backtest.modules.target import TargetStrategyModule
 
 
-_TARGET_WEIGHTS_REF: FieldRef[Any] = FieldRef("target_weights", owner="GroupMembershipModule")
+_TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
 
-class LongShortCompositionModule(ExecutableModule):
+class LongShortCompositionModule(TargetStrategyModule):
     key: ClassVar[str] = "long_short_strategy"
     label: ClassVar[str] = "Long-Short"
     order: ClassVar[int] = 85
@@ -74,7 +75,6 @@ def _compose_long_short_target(account, ctx) -> None:
         if not long_weights or not short_weights:
             ctx.set_for(_TARGET_WEIGHTS_REF, strategy, {})
             ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
-            _record_long_short_diagnostics(account, strategy, ctx.timestamp, diagnostics)
             continue
 
         overlap = set(long_weights) & set(short_weights)
@@ -87,7 +87,6 @@ def _compose_long_short_target(account, ctx) -> None:
         if not long_weights or not short_weights:
             ctx.set_for(_TARGET_WEIGHTS_REF, strategy, {})
             ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
-            _record_long_short_diagnostics(account, strategy, ctx.timestamp, diagnostics)
             continue
 
         target: dict[Any, float] = {}
@@ -99,7 +98,6 @@ def _compose_long_short_target(account, ctx) -> None:
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, target)
         ctx.set_for(LongShortCompositionModule.long_short_diagnostics, strategy, diagnostics)
         _record_target_trace(account, strategy, ctx.timestamp, target)
-        _record_long_short_diagnostics(account, strategy, ctx.timestamp, diagnostics)
 
 
 def _strategy_by_alias(account) -> dict[str, Any]:
@@ -159,12 +157,6 @@ def _record_target_trace(account, strategy, timestamp, weights: dict[Any, float]
     if timestamp is None:
         return
     account.target_store.record_target_trace(strategy, timestamp, weights)
-
-
-def _record_long_short_diagnostics(account, strategy, timestamp, diagnostics: dict[str, Any]) -> None:
-    if timestamp is None:
-        return
-    account.target_store.record_long_short_diagnostics(strategy, timestamp, diagnostics)
 
 
 def _safe_float(raw: Any, default: float) -> float:

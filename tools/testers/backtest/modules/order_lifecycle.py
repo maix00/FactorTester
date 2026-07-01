@@ -11,13 +11,19 @@ LedgerModule.cash_update already skips them so they have no ledger effect.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+
+@dataclass
+class OrderStore:
+    pending_orders: dict[Any, Any] = field(default_factory=dict)
 
 
 class OrderLifecycleModule(ExecutableModule):

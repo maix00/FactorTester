@@ -63,9 +63,10 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 
 - `BacktestRunState` 名称更准确，避免把行情、因子、期限结构等 run 级缓存误称为账户状态。
 - `FlowContext` 成为 flow 字段依赖的唯一短期通道，便于定位未声明读写。
-- 后续可以逐步迁移到 `MarketDataStore`、`FactorSignalStore`、
-  `TermStructureStore`、`RuntimeInfoStore` 等模块 store，而不是继续膨胀
+- 后续可以逐步迁移到少数有明确业务语义的 store / service，而不是继续膨胀
   `BacktestRunState`。
+- Store 是语义边界，不是“每个模块一个文件”的机械拆分目标。轻量 store 可以和
+  拥有它的模块同文件；只有共享抽象层或文件过大/循环依赖明显时，才独立成文件。
 
 ### 负面 / 权衡
 
@@ -84,8 +85,8 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 3. audit 模式 warning：flow 从 `FlowContext` 读取未声明 input 或写入未声明
    output 时提示。
 4. 增加 `BacktestRunState` 动态写入 audit，先 warning，后续按模块迁移。
-5. 每迁移一个模块后，把对应裸写从 `BacktestRunState` 挪到专门 store 或 `FlowContext`
-   output。
+5. 每迁移一个模块后，把对应裸写从 `BacktestRunState` 挪到拥有语义的 store/service
+   或 `FlowContext` output；避免为每个细小缓存新增一个顶层 store。
 6. 当主要模块迁移完成后，在 exact/debug 流程中启用 strict contract。
 
 ## 参考

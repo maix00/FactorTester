@@ -9,6 +9,7 @@ values up at SIGNAL events.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 import inspect
 from typing import Any, ClassVar, cast
 
@@ -42,6 +43,24 @@ from tools.testers.backtest.modules.time_index_lookup import (
     row_at_index_key,
     signal_event_times,
 )
+
+
+@dataclass
+class FactorSignalStore:
+    precomputed_tables: dict[Any, Any] = field(default_factory=dict)
+    precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
+    live_price_tables: dict[Any, Any] = field(default_factory=dict)
+    live_executors: dict[Any, Any] = field(default_factory=dict)
+
+    def put_precomputed_table(self, key: Any, table: Any) -> None:
+        self.precomputed_tables[key] = table
+
+    def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
+        self.precomputed_table_keys[strategy] = key
+
+    def precomputed_table_for(self, strategy: Any, fallback_key: Any = None) -> Any:
+        key = self.precomputed_table_keys.get(strategy, fallback_key)
+        return self.precomputed_tables.get(key)
 
 
 class FactorSignalModule(ExecutableModule):

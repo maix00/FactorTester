@@ -32,9 +32,9 @@ from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
 from .order_book import OrderBookModule
 from .trading_rule import TradingRuleModule
-from .product_selection import (
+from .product_selection import ProductSelectionModule
+from .term_structure import (
     DeliveryForceCloseModule,
-    ProductSelectionModule,
     RolloverModule,
     TermStructureExpandModule,
 )

@@ -145,13 +145,13 @@ class BacktestRunState:
         self.current_prices_table: Any = None
         self.market_price_tables: dict[str, Any] = {}
         self.results = ResultStore()
-        from tools.testers.backtest.modules.equity_curve_store import EquityCurveStore
-        from tools.testers.backtest.modules.factor_signal_store import FactorSignalStore
-        from tools.testers.backtest.modules.market_data_store import MarketDataStore
-        from tools.testers.backtest.modules.order_store import OrderStore
-        from tools.testers.backtest.modules.run_window_store import RunWindowStore
-        from tools.testers.backtest.modules.target_store import TargetStore
-        from tools.testers.backtest.modules.term_structure_store import TermStructureStore
+        from tools.testers.backtest.modules.equity_curve import EquityCurveStore
+        from tools.testers.backtest.modules.factor_signal import FactorSignalStore
+        from tools.testers.backtest.modules.market_data import MarketDataStore
+        from tools.testers.backtest.modules.order_lifecycle import OrderStore
+        from tools.testers.backtest.modules.run_window import RunWindowStore
+        from tools.testers.backtest.modules.target import TargetStore
+        from tools.testers.backtest.modules.term_structure import TermStructureStore
         self.run_window_store = RunWindowStore()
         self.factor_signal_store = FactorSignalStore()
         self.target_store = TargetStore()

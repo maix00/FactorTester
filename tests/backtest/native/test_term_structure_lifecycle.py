@@ -11,8 +11,8 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules import product_selection
-from tools.testers.backtest.modules.product_selection import (
+from tools.testers.backtest.modules import term_structure
+from tools.testers.backtest.modules.term_structure import (
     DeliveryForceCloseModule,
     ProductSelectionModule,
     RolloverModule,
@@ -150,9 +150,9 @@ def test_term_structure_registers_force_close_event_before_expiry():
 
 
 def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTermProduct()
     account = BacktestRunState(strategy_configs={
@@ -186,9 +186,9 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatc
 
 
 def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTwoContractTermProduct()
     account = BacktestRunState(strategy_configs={
@@ -243,9 +243,9 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
     # still-active peer (P2602), which coverage inference cannot resolve
     # either way and which exact mode must legitimately raise on — that's
     # covered separately by test_exact_mode_raises_when_coverage_inference_is_inconclusive.
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
 
     idx = pd.DatetimeIndex([
         pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
@@ -260,7 +260,7 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
     ended_row = {"product": "P.DCE", "contract": "P2601", "uid": "P2601.DCE"}
     peer_row = {"product": "P.DCE", "contract": "P2602", "uid": "P2602.DCE"}
 
-    ts = product_selection._event_timestamp_from_row(
+    ts = term_structure._event_timestamp_from_row(
         ended_row, offset=pd.Timedelta(0), account=account,
         peer_rows=[ended_row, peer_row], engine_mode="exact",
     )
@@ -270,8 +270,8 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
 
 
 def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {
         "P2601": {
             "open_date": "2025-01-15",
             "last_trade_date": "2026-01-14",
@@ -314,7 +314,7 @@ def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypa
 
 
 def test_akshare_lifecycle_overrides_openctp_on_conflicting_fields(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {
         "P2601": {
             "open_date": "2025-01-10",
             "last_trade_date": "2026-01-20",
@@ -323,7 +323,7 @@ def test_akshare_lifecycle_overrides_openctp_on_conflicting_fields(monkeypatch):
             "lifecycle_source": "OpenCTP latest contract snapshot",
         },
     })
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {
         "P2601": {
             "open_date": "2025-01-15",
             "last_trade_date": "2026-01-14",
@@ -332,7 +332,7 @@ def test_akshare_lifecycle_overrides_openctp_on_conflicting_fields(monkeypatch):
             "lifecycle_source": "AKShare DCE contract lifecycle",
         },
     })
-    row = product_selection._with_authoritative_lifecycle_fields({
+    row = term_structure._with_authoritative_lifecycle_fields({
         "product": "P.DCE",
         "contract": "P2601",
         "uid": "P2601.DCE",
@@ -344,15 +344,15 @@ def test_akshare_lifecycle_overrides_openctp_on_conflicting_fields(monkeypatch):
 
 
 def test_row_exchange_maps_local_suffix_to_akshare_code():
-    assert product_selection._row_exchange({"contract": "P2601.DCE"}) == "DCE"
-    assert product_selection._row_exchange({"contract": "SR409.CZC"}) == "CZCE"
-    assert product_selection._row_exchange({"uid": "si2411.GFE"}) == "GFEX"
-    assert product_selection._row_exchange({"contract": "P2601"}) is None
+    assert term_structure._row_exchange({"contract": "P2601.DCE"}) == "DCE"
+    assert term_structure._row_exchange({"contract": "SR409.CZC"}) == "CZCE"
+    assert term_structure._row_exchange({"uid": "si2411.GFE"}) == "GFEX"
+    assert term_structure._row_exchange({"contract": "P2601"}) is None
 
 
 def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeypatch):
-    monkeypatch.setattr(product_selection, "_akshare_live_cache", {})
-    monkeypatch.setattr(product_selection, "_akshare_live_attempted", set())
+    monkeypatch.setattr(term_structure, "_akshare_live_cache", {})
+    monkeypatch.setattr(term_structure, "_akshare_live_attempted", set())
     calls: list[str] = []
 
     def fake_fetch_and_store_live(exchange, **kwargs):
@@ -367,9 +367,9 @@ def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeyp
 
     monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
 
-    first = product_selection._akshare_live_lookup("GFEX", "SI2411")
-    second = product_selection._akshare_live_lookup("GFEX", "SI2411")
-    missing = product_selection._akshare_live_lookup("GFEX", "SI2412")
+    first = term_structure._akshare_live_lookup("GFEX", "SI2411")
+    second = term_structure._akshare_live_lookup("GFEX", "SI2411")
+    missing = term_structure._akshare_live_lookup("GFEX", "SI2412")
 
     assert first == {
         "open_date": "2022-12-22",
@@ -384,11 +384,11 @@ def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeyp
 
 
 def test_with_authoritative_lifecycle_fields_falls_back_to_akshare_live_lookup(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_live_cache", {})
-    monkeypatch.setattr(product_selection, "_akshare_live_attempted", set())
-    monkeypatch.setattr(product_selection, "_akshare_live_lookup_enabled", lambda: True)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_cache", {})
+    monkeypatch.setattr(term_structure, "_akshare_live_attempted", set())
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup_enabled", lambda: True)
 
     def fake_fetch_and_store_live(exchange, **kwargs):
         return [{
@@ -401,7 +401,7 @@ def test_with_authoritative_lifecycle_fields_falls_back_to_akshare_live_lookup(m
 
     monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
 
-    row = product_selection._with_authoritative_lifecycle_fields({
+    row = term_structure._with_authoritative_lifecycle_fields({
         "product": "SI.GFE",
         "contract": "SI2411",
         "uid": "SI2411.GFE",
@@ -411,16 +411,16 @@ def test_with_authoritative_lifecycle_fields_falls_back_to_akshare_live_lookup(m
 
 
 def test_akshare_live_lookup_is_enabled_by_default(monkeypatch):
-    monkeypatch.delenv(product_selection._AKSHARE_LIVE_LOOKUP_ENV, raising=False)
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.delenv(term_structure._AKSHARE_LIVE_LOOKUP_ENV, raising=False)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        product_selection, "_akshare_live_lookup",
+        term_structure, "_akshare_live_lookup",
         lambda exchange, key: calls.append((exchange, key)) or None,
     )
 
-    product_selection._with_authoritative_lifecycle_fields({
+    term_structure._with_authoritative_lifecycle_fields({
         "product": "SI.GFE",
         "contract": "SI2411",
         "uid": "SI2411.GFE",
@@ -430,16 +430,16 @@ def test_akshare_live_lookup_is_enabled_by_default(monkeypatch):
 
 
 def test_akshare_live_lookup_can_be_disabled_via_env(monkeypatch):
-    monkeypatch.setenv(product_selection._AKSHARE_LIVE_LOOKUP_ENV, "0")
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setenv(term_structure._AKSHARE_LIVE_LOOKUP_ENV, "0")
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        product_selection, "_akshare_live_lookup",
+        term_structure, "_akshare_live_lookup",
         lambda exchange, key: calls.append((exchange, key)) or None,
     )
 
-    row = product_selection._with_authoritative_lifecycle_fields({
+    row = term_structure._with_authoritative_lifecycle_fields({
         "product": "SI.GFE",
         "contract": "SI2411",
         "uid": "SI2411.GFE",
@@ -450,9 +450,9 @@ def test_akshare_live_lookup_can_be_disabled_via_env(monkeypatch):
 
 
 def test_exact_mode_raises_when_coverage_inference_is_inconclusive(monkeypatch):
-    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
-    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     # No raw_prices_table at all: coverage inference has nothing to check
     # against, so it cannot conclude the contract has stopped trading either.

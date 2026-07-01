@@ -9,7 +9,8 @@ from tools.testers.backtest.engines.native.flow import Phase
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
-from tools.testers.backtest.modules.product_selection import ProductSelectionModule, TermStructureExpandModule
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
+from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, _resolve_run_window, auto_warmup_window
 from tools.factors.FactorExpr import ColumnRef, DataColumn
 

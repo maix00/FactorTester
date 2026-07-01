@@ -14,14 +14,9 @@ from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_multiplier_from_fields
+from tools.testers.backtest.modules.target import TargetStrategyModule
 
-# Constructed by hand (not imported from group_membership.py) to avoid a
-# module-level circular import: group_membership.py needs OrderBookModule
-# (it schedules order execution after construct_orders), so OrderBookModule
-# can't import group_membership.py back. FieldRef equality/hash is by
-# (name, owner) tuple, so this is the exact same FieldRef as
-# GroupMembershipModule.target_weights without needing the class itself.
-_TARGET_WEIGHTS_REF: FieldRef[Any] = FieldRef("target_weights", owner="GroupMembershipModule")
+_TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
 
 class OrderBookModule(ExecutableModule):
