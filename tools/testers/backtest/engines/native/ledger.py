@@ -89,19 +89,8 @@ class BacktestRunState:
         "strategy_configs",
         "raw_market_data",
         "market_data_request",
-        "backtest_included_products",
-        "backtest_excluded_out_of_range_products",
         "runtime_info_rows",
         "runtime_info_sink",
-        "_runtime_info_excluded_product_sets",
-        "historical_field_provider",
-        "trading_day_resolver",
-        "historical_field_policy",
-        "historical_field_names",
-        "historical_field_frames",
-        "volume_table",
-        "current_prices_table",
-        "market_price_tables",
         "results",
         "run_window_store",
         "factor_signal_store",
@@ -129,21 +118,6 @@ class BacktestRunState:
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
         )
-        self.raw_market_data: dict[str, Any] = {}
-        self.market_data_request: dict[str, Any] = {}
-        self.backtest_included_products: frozenset[Any] | None = None
-        self.backtest_excluded_out_of_range_products: tuple[Any, ...] = ()
-        self.runtime_info_rows: list[dict[str, Any]] = []
-        self.runtime_info_sink: Any = None
-        self._runtime_info_excluded_product_sets: list[tuple[Any, ...]] = []
-        self.historical_field_provider: Any = None
-        self.trading_day_resolver: Any = None
-        self.historical_field_policy: str | None = None
-        self.historical_field_names: tuple[str, ...] = ()
-        self.historical_field_frames: Any = None
-        self.volume_table: Any = None
-        self.current_prices_table: Any = None
-        self.market_price_tables: dict[str, Any] = {}
         self.results = ResultStore()
         from tools.testers.backtest.modules.equity_curve import EquityCurveStore
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
@@ -160,6 +134,38 @@ class BacktestRunState:
         self.term_structure_store = TermStructureStore()
         self.market_data_store = MarketDataStore()
         self._initializing = False
+
+    @property
+    def raw_market_data(self) -> dict[str, Any]:
+        return self.market_data_store.raw_input
+
+    @raw_market_data.setter
+    def raw_market_data(self, value: dict[str, Any]) -> None:
+        self.market_data_store.raw_input = value
+
+    @property
+    def market_data_request(self) -> dict[str, Any]:
+        return self.market_data_store.request
+
+    @market_data_request.setter
+    def market_data_request(self, value: dict[str, Any]) -> None:
+        self.market_data_store.request = value
+
+    @property
+    def runtime_info_rows(self) -> list[dict[str, Any]]:
+        return self.market_data_store.runtime_info_rows
+
+    @runtime_info_rows.setter
+    def runtime_info_rows(self, value: list[dict[str, Any]]) -> None:
+        self.market_data_store.runtime_info_rows = value
+
+    @property
+    def runtime_info_sink(self) -> Any:
+        return self.market_data_store.runtime_info_sink
+
+    @runtime_info_sink.setter
+    def runtime_info_sink(self, value: Any) -> None:
+        self.market_data_store.runtime_info_sink = value
 
     def ledger_for(self, order: "Order") -> Ledger:
         return self.ledgers[order.strategy]

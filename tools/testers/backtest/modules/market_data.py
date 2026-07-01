@@ -52,6 +52,8 @@ from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 
 @dataclass
 class MarketDataStore:
+    raw_input: dict[str, Any] = field(default_factory=dict)
+    request: dict[str, Any] = field(default_factory=dict)
     load_plan: list[Any] = field(default_factory=list)
     excluded_out_of_range: tuple[Any, ...] = ()
     series_by_product: dict[Any, Any] = field(default_factory=dict)
@@ -66,6 +68,8 @@ class MarketDataStore:
     historical_field_names: tuple[Any, ...] = ()
     historical_field_frames: Any = None
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
+    runtime_info_rows: list[dict[str, Any]] = field(default_factory=list)
+    runtime_info_sink: Any = None
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
         self.raw_prices_table = raw.get("raw_prices")
