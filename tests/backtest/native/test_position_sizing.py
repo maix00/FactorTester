@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.market_data import MarketDataModule
@@ -21,7 +21,7 @@ def _account(strategy, policy="floor_to_lot"):
     config = StrategyConfig(strategy=strategy, field_values={
         PositionSizingModule.quantity_rounding_policy: policy,
     })
-    return RunState(strategy_configs={strategy: config})
+    return BacktestRunState(strategy_configs={strategy: config})
 
 
 def test_floor_to_lot_rounds_magnitude_down():

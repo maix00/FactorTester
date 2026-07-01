@@ -13,7 +13,7 @@ logic, not someone else's I/O.
 The ffill'd table itself is stored in `account.market_data_store` (not `ctx`)
 because it's computed once in PRE_REPLAY but needs to survive into every later
 PER_EVENT dispatch — `ctx` is scoped to a single dispatch batch and is
-discarded right after, while RunState-owned stores live for the whole run.
+discarded right after, while BacktestRunState-owned stores live for the whole run.
 """
 
 from __future__ import annotations

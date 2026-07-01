@@ -4,7 +4,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -15,7 +15,7 @@ def _account(strategies, active_flow_names=frozenset()):
         s: StrategyConfig(strategy=s, active_flow_names=active_flow_names)
         for s in strategies
     }
-    return RunState(strategy_configs=configs)
+    return BacktestRunState(strategy_configs=configs)
 
 
 def test_empty_flows_runs_without_error():
@@ -121,7 +121,7 @@ def test_dispatch_grouped_by_active_flow_names():
         s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"f1"})),
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"f2"})),
     }
-    account = RunState(strategy_configs=configs)
+    account = BacktestRunState(strategy_configs=configs)
     queue = EventQueue()
 
     t = pd.Timestamp("2024-01-01")
@@ -146,7 +146,7 @@ def test_flow_not_applicable_to_any_strategy_is_skipped():
     registry = FlowRegistry()
     registry.register_flow(f1)
     configs = {s1: StrategyConfig(strategy=s1, active_flow_names=frozenset())}
-    account = RunState(strategy_configs=configs)
+    account = BacktestRunState(strategy_configs=configs)
     queue = EventQueue()
 
     from tools.testers.backtest.engines.native.scheduler import sort_and_validate, make_dispatcher
@@ -193,7 +193,7 @@ def test_strategy_scoped_pre_replay_flow_runs_for_applicable_strategies():
 
     registry = FlowRegistry()
     registry.register_flow(scoped)
-    account = RunState(strategy_configs={
+    account = BacktestRunState(strategy_configs={
         s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"scoped_pre"})),
         s2: StrategyConfig(strategy=s2, active_flow_names=frozenset()),
     })

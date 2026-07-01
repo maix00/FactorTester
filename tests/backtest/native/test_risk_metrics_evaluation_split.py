@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.risk_metrics import RiskMetricsModule, _compute_risk_metrics
@@ -18,7 +18,7 @@ def _seed_equity(account, strategy, points):
 def test_no_split_reports_only_in_sample_metrics():
     s = Strategy(alias="S")
     config = StrategyConfig(strategy=s)
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     idx = pd.date_range("2024-01-01", periods=5)
     _seed_equity(account, s, [(t, 100.0 + i) for i, t in enumerate(idx)])
 
@@ -34,7 +34,7 @@ def test_split_separates_in_and_out_of_sample_metrics():
     config = StrategyConfig(strategy=s, field_values={
         RunWindowModule.evaluation_split: idx[4],  # first 5 points in-sample
     })
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     # in-sample: flat (no volatility); out-of-sample: trending up
     equity_values = [100.0] * 5 + [100.0 + i * 5 for i in range(1, 6)]
     _seed_equity(account, s, list(zip(idx, equity_values)))

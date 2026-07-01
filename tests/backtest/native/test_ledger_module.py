@@ -7,7 +7,7 @@ import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -42,7 +42,7 @@ def test_initialize_ledgers_builds_correct_shape_per_method():
         s1: _strategy_config(s1, engine_mode="basic"),
         s2: _strategy_config(s2, engine_mode="custom", accounting_mode="Custom", cost_basis_method="FIFO"),
     }
-    account = RunState(strategy_configs=configs)
+    account = BacktestRunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s1, frozenset({p1}))
     ctx.set_for(ProductSelectionModule.products, s2, frozenset({p2}))
@@ -65,7 +65,7 @@ def test_initialize_ledgers_use_int_position_keeps_quantity_as_int():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="custom", accounting_mode="Custom", use_int_position=True)
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
     _initialize_ledgers(account, ctx)
@@ -78,7 +78,7 @@ def test_initialize_ledgers_uses_effective_backtest_product_universe():
     s = Strategy(alias="S")
     in_range, out_of_range = _product(), _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     account.market_data_store.included_products = frozenset({in_range})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({in_range, out_of_range}))
@@ -95,7 +95,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p1, p2}))
@@ -136,7 +136,7 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
     _initialize_ledgers(account, ctx)
@@ -170,7 +170,7 @@ def test_cash_update_and_equity_use_contract_multiplier():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
     _initialize_ledgers(account, ctx)
@@ -201,7 +201,7 @@ def test_two_strategies_independent_ledgers_do_not_cross_contaminate():
         s1: _strategy_config(s1, engine_mode="basic"),
         s2: _strategy_config(s2, engine_mode="basic"),
     }
-    account = RunState(strategy_configs=configs)
+    account = BacktestRunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s1, frozenset({p}))
     ctx.set_for(ProductSelectionModule.products, s2, frozenset({p}))
@@ -226,7 +226,7 @@ def test_cancelled_order_has_no_ledger_effect():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
     _initialize_ledgers(account, ctx)
@@ -253,7 +253,7 @@ def test_multiple_simultaneous_orders_for_one_strategy_are_all_applied():
     s = Strategy(alias="S")
     p1, p2, p3 = _product(), _product(), _product()
     config = _strategy_config(s, engine_mode="basic")
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p1, p2, p3}))
     _initialize_ledgers(account, ctx)

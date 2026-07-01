@@ -6,7 +6,7 @@ import warnings
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import RunState, Ledger
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.base import FieldRef
@@ -31,7 +31,7 @@ def test_run_state_ledger_for_isolates_strategies():
     s2 = Strategy(alias="S2")
     l1 = Ledger(strategy=s1, base_currency="CNY")
     l2 = Ledger(strategy=s2, base_currency="CNY")
-    account = RunState(ledgers={s1: l1, s2: l2})
+    account = BacktestRunState(ledgers={s1: l1, s2: l2})
 
     o1 = Order(instrument="P1", timestamp=pd.Timestamp("2024-01-01"),
                quantity=1.0, intent_quantity=1.0, strategy=s1)
@@ -47,13 +47,13 @@ def test_run_state_ledger_for_isolates_strategies():
 
 
 def test_run_state_dynamic_write_audit_is_off_by_default():
-    state = RunState()
+    state = BacktestRunState()
     state.some_module_cache = {"ok": True}
     assert state.some_module_cache == {"ok": True}
 
 
 def test_run_state_dynamic_write_audit_warns_for_unknown_attrs():
-    state = RunState()
+    state = BacktestRunState()
     state.enable_dynamic_write_audit()
     with pytest.warns(RuntimeWarning, match="some_module_cache"):
         state.some_module_cache = {"ok": True}
@@ -63,7 +63,7 @@ def test_run_state_dynamic_write_audit_warns_for_unknown_attrs():
 
 
 def test_run_state_dynamic_write_audit_allows_declared_attrs():
-    state = RunState()
+    state = BacktestRunState()
     state.enable_dynamic_write_audit()
     with warnings.catch_warnings(record=True) as records:
         state.market_data_request = {"start_dt": "2026-01-01"}

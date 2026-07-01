@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tools.testers.backtest.engines.native.ledger import RunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext, FlowRegistry, sort_and_validate
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.flow import Phase
@@ -21,7 +21,7 @@ def test_resolve_run_window_sets_account_and_market_data_defaults():
         def required_warmup_window(self):
             return "2d"
 
-    account = RunState(strategy_configs={
+    account = BacktestRunState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
             field_values={

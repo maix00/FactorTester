@@ -22,7 +22,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import RunState
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
 
 _FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
 _LIVE_FACTOR_SUPPORT_FLOWS = {"schedule_bar_events"}
@@ -194,5 +194,5 @@ def build_strategy_configs(
     return configs
 
 
-def apply_strategy_configs(account: "RunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
+def apply_strategy_configs(account: "BacktestRunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
     account.strategy_configs = build_strategy_configs(resolved_settings_by_alias)

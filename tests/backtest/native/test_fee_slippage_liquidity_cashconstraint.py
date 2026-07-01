@@ -7,7 +7,7 @@ import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import RunState, Ledger, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -27,8 +27,8 @@ def _product() -> Product:
     return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
 
 
-def _account_with_ledger(strategy: Strategy, config: StrategyConfig) -> RunState:
-    account = RunState(strategy_configs={strategy: config})
+def _account_with_ledger(strategy: Strategy, config: StrategyConfig) -> BacktestRunState:
+    account = BacktestRunState(strategy_configs={strategy: config})
     account.ledgers[strategy] = Ledger(strategy=strategy, base_currency="CNY")
     account.ledgers[strategy].set(LedgerModule.positions, {})
     return account
@@ -132,7 +132,7 @@ def test_slippage_zero_means_unadjusted_price():
     p = _product()
     order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     config = StrategyConfig(strategy=s, field_values={SlippageModule.slippage_mode: "none"})
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
@@ -150,7 +150,7 @@ def test_slippage_worsens_buy_and_sell_price_in_opposite_directions():
     config = StrategyConfig(strategy=s, field_values={
         SlippageModule.slippage_mode: "fixed_bps", SlippageModule.slippage_bps: 100.0,  # 1%
     })
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
 
     for order in (buy, sell):
         draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
@@ -167,7 +167,7 @@ def test_liquidity_uncapped_when_mode_infinite():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={LiquidityModule.liquidity_mode: "infinite"})
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
@@ -184,7 +184,7 @@ def test_liquidity_caps_to_participation_rate_times_volume():
     config = StrategyConfig(strategy=s, field_values={
         LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
     })
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
@@ -201,7 +201,7 @@ def test_liquidity_does_not_defer_excess_to_next_bar():
     config = StrategyConfig(strategy=s, field_values={
         LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
     })
-    account = RunState(strategy_configs={s: config})
+    account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
@@ -217,7 +217,7 @@ def test_cash_constraint_haircuts_buy_orders_proportionally():
     p1, p2 = _product(), _product()
     ledger = Ledger(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.cash, DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
-    account = RunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
 
     buy1 = Order(instrument=p1, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     buy2 = Order(instrument=p2, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -235,7 +235,7 @@ def test_cash_constraint_does_not_touch_sell_orders():
     p = _product()
     ledger = Ledger(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.cash, DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
-    account = RunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
 
     sell = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -253,7 +253,7 @@ def test_cash_constraint_isolates_strategies():
     l1.set(LedgerModule.cash, DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
     l2 = Ledger(strategy=s2, base_currency="CNY")
     l2.set(LedgerModule.cash, DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
-    account = RunState(
+    account = BacktestRunState(
         ledgers={s1: l1, s2: l2},
         strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
     )

@@ -1,6 +1,6 @@
 """ResultStore — the front-end-facing results container.
 
-RunState owns one ResultStore for the run, but result rows stay isolated here
+BacktestRunState owns one ResultStore for the run, but result rows stay isolated here
 by Strategy so multi-strategy/multi-group results do not leak into each other.
 """
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import RunState
+from tools.testers.backtest.engines.native.ledger import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import (
     apply_strategy_configs, build_strategy_configs,
 )
@@ -140,7 +140,7 @@ def test_non_variant_flows_are_always_active():
 
 
 def test_apply_strategy_configs_sets_account_attribute():
-    account = RunState()
+    account = BacktestRunState()
     apply_strategy_configs(account, {"A1": {"fixed_fee_rate": 0.001, **_GROUP_FIELDS}})
     assert len(account.strategy_configs) == 1
     strategy = next(iter(account.strategy_configs))

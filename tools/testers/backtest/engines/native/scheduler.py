@@ -22,7 +22,7 @@ from .events import EventDraft, EventKind
 from .flow import Flow, FlowOverride, Phase
 
 if TYPE_CHECKING:
-    from .ledger import RunState
+    from .ledger import BacktestRunState
     from .strategy import Strategy
     from tools.testers.backtest.modules.base import FieldRef
 
@@ -439,7 +439,7 @@ class _ProgressTracker:
     def emit_manifest(
         self,
         groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
-        account: "RunState",
+        account: "BacktestRunState",
     ) -> None:
         if self._activity_sink is not None:
             self._activity_sink.emit_activity_manifest(activity_manifest_from_groups(groups, account))
@@ -533,7 +533,7 @@ class _ProgressTracker:
 
 def make_dispatcher(
     ordered_flows: list[ResolvedFlow],
-    account: "RunState",
+    account: "BacktestRunState",
     event_queue: EventQueue,
     tracker: "_ProgressTracker | None" = None,
     audit_contract: bool = False,
@@ -578,21 +578,21 @@ def make_dispatcher(
     return handler
 
 
-def _strategies_using_flow(account: "RunState", flow_name: str) -> frozenset["Strategy"]:
+def _strategies_using_flow(account: "BacktestRunState", flow_name: str) -> frozenset["Strategy"]:
     return frozenset(
         strategy for strategy in account.strategy_configs
         if flow_name in account.config_for(strategy).active_flow_names
     )
 
 
-def _pre_post_applicable_strategies(account: "RunState", flow: ResolvedFlow) -> frozenset["Strategy"]:
+def _pre_post_applicable_strategies(account: "BacktestRunState", flow: ResolvedFlow) -> frozenset["Strategy"]:
     if not flow.strategy_scoped:
         return frozenset(account.strategy_configs)
     return _strategies_using_flow(account, flow.name)
 
 
 def run(
-    account: "RunState",
+    account: "BacktestRunState",
     event_queue: EventQueue,
     resolved_flows: list[ResolvedFlow],
     progress: Callable[[int, int, str], None] | None = None,
@@ -676,7 +676,7 @@ def run(
     tracker.complete()
 
 
-def _compute_flow(flow: ResolvedFlow, account: "RunState", ctx: FlowContext) -> None:
+def _compute_flow(flow: ResolvedFlow, account: "BacktestRunState", ctx: FlowContext) -> None:
     ctx.enter_flow(flow)
     try:
         flow.compute(account, ctx)
@@ -702,7 +702,7 @@ def _activity_message(timestamp: str, label: str) -> str:
 
 def activity_manifest_from_groups(
     groups: dict[tuple[Phase, EventKind | None], list[ResolvedFlow]],
-    account: "RunState",
+    account: "BacktestRunState",
 ) -> list[dict[str, Any]]:
     phase_specs: list[dict[str, Any]] = []
     pre_all = [
@@ -730,7 +730,7 @@ def activity_manifest_from_groups(
     return phase_specs
 
 
-def _flow_applicable_to_any_strategy(account: "RunState", flow: ResolvedFlow) -> bool:
+def _flow_applicable_to_any_strategy(account: "BacktestRunState", flow: ResolvedFlow) -> bool:
     return any(
         flow.name in account.config_for(strategy).active_flow_names
         for strategy in account.strategy_configs

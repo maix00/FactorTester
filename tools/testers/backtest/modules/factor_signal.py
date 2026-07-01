@@ -543,7 +543,7 @@ def _evaluate_signal_live(account, ctx) -> None:
 
 def _evaluate_signal_precomputed(account, ctx) -> None:
     """Looks up a value from the table cached once in PRE_REPLAY
-    (`RunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
+    (`BacktestRunState.factor_signal_store.precomputed_tables`, keyed by calculation/schedule key) -- no
     re-evaluation here."""
     store = account.factor_signal_store
     for strategy in ctx.active_strategies:

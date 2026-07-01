@@ -1,6 +1,6 @@
-"""Ledger and RunState primitives for the native backtest engine.
+"""Ledger and BacktestRunState primitives for the native backtest engine.
 
-`Ledger` is per-strategy account state. `RunState` is the whole native run's
+`Ledger` is per-strategy account state. `BacktestRunState` is the whole native run's
 long-lived container: strategy registry, ledgers, result store, and module
 caches that must survive across FlowContext batches.
 """
@@ -83,7 +83,7 @@ class StrategyConfig:
         return flow_name in self.active_flow_names
 
 
-class RunState:
+class BacktestRunState:
     _declared_runtime_attrs = frozenset({
         "ledgers",
         "strategy_configs",
@@ -186,7 +186,7 @@ class RunState:
         warned.add(name)
         object.__setattr__(self, "_warned_dynamic_writes", warned)
         warnings.warn(
-            f"RunState dynamic attribute write is not declared: {name!r}. "
+            f"BacktestRunState dynamic attribute write is not declared: {name!r}. "
             "Move this state into FlowContext output or a domain store.",
             RuntimeWarning,
             stacklevel=2,

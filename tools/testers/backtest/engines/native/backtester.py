@@ -1,5 +1,5 @@
 """run_backtest_task -- the "backtester" FactorTester.dispatch("backtest",
-...) calls. Given a RunState already built by
+...) calls. Given a BacktestRunState already built by
 strategy_config_builder.apply_strategy_configs, runs the whole engine and
 shapes the result into the `execution` dict that
 server/modules/single_factor_test/group.py's `_serialize_event_execution`/
@@ -22,7 +22,7 @@ from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 if TYPE_CHECKING:
     from tools.factors.factor_tester_state import FactorTesterState
-    from tools.testers.backtest.engines.native.ledger import RunState
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState
 
 
 def _build_registry() -> FlowRegistry:
@@ -38,14 +38,14 @@ def _build_registry() -> FlowRegistry:
 def run_backtest_task(
     state: "FactorTesterState",
     *,
-    account: "RunState",
+    account: "BacktestRunState",
     group_owner: list[dict[str, Any]],
     settings_by_strategy: dict[str, dict[str, Any]],
     run_id: str,
     progress: Callable[[int, int, str], None] | None = None,
     activity_sink: ProgressSink | None = None,
 ) -> dict[str, Any]:
-    """Fixed task: runs the engine against an already-built RunState,
+    """Fixed task: runs the engine against an already-built BacktestRunState,
     stores it on `state.account` for later snapshot/detail requests, and
     returns the `execution` dict shape group.py already consumes."""
     requested_engine = _requested_engine(account)
@@ -90,7 +90,7 @@ def run_backtest_task(
     }
 
 
-def _requested_engine(account: "RunState") -> str:
+def _requested_engine(account: "BacktestRunState") -> str:
     configs = getattr(account, "strategy_configs", {}) or {}
     values = {
         str(config.get(EngineModule.engine, "native") or "native").lower()
