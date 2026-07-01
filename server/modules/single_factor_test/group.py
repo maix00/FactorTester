@@ -8,11 +8,14 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
+from tools.data.field_history import load_market_rule_field_provider
+from tools.data.types import DataColumn
 from tools.data.types.currency import normalize_currency, require_product_currency_vector
 from tools.data.types.currency_units import minor_units_to_major
 from tools.data.types.time_index import DataIndex
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.testers.backtest.modules.market_data import historical_field_frames_for_market_data
 
 
 def infer_periods_per_year(index_like) -> float:
@@ -69,6 +72,126 @@ _log = logging.getLogger(__name__)
 
 _GROUP_INHERIT_UNIQUE_KEYS = {"id", "name", "parentId", "shortAlias", "_expanded"}
 # Silent default keys now come from the registry — no hardcoded constant list
+
+
+def _load_raw_market_data_for(products: list[Any], start_dt: Any, end_dt: Any) -> dict[str, Any]:
+    """Compatibility facade for old group endpoint tests.
+
+    Production backtest loading is owned by MarketDataModule.  A few server
+    tests and old diagnostic scripts still call this group-level helper to
+    assert coverage behavior, so keep a narrow facade with the same observable
+    contract instead of reintroducing the old execution path.
+    """
+    series_by_product: dict[Any, pd.Series] = {}
+    missing_products: list[str] = []
+    excluded_out_of_range: list[Any] = []
+    for product in products:
+        try:
+            available_freqs = list(product.list_available_freqs())
+            if not available_freqs:
+                if _product_outside_run_window(product, start_dt, end_dt):
+                    excluded_out_of_range.append(product)
+                else:
+                    missing_products.append(str(getattr(product, "name", product)))
+                continue
+            current_freq = getattr(product, "current_freq", None)
+            freq = cast(Any, current_freq if current_freq in available_freqs else available_freqs[0])
+            data_view = getattr(product, freq.name)
+            df = data_view.get_and_adjust_cols([DataColumn.CLOSE.name], copy=False, start_dt=start_dt, end_dt=end_dt)
+        except (ValueError, KeyError, AttributeError):
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(product)
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        if df.empty or DataColumn.CLOSE.name not in df.columns:
+            if _product_outside_run_window(product, start_dt, end_dt):
+                excluded_out_of_range.append(product)
+            else:
+                missing_products.append(str(getattr(product, "name", product)))
+            continue
+        series_by_product[product] = df[DataColumn.CLOSE.name]
+    if missing_products:
+        sample = ", ".join(sorted(set(missing_products))[:20])
+        raise ValueError(
+            "回测产品池存在本地行情缺口，不能静默跳过或按 0 估值："
+            f"{sample}；窗口={getattr(start_dt, 'ts', start_dt)} 到 {getattr(end_dt, 'ts', end_dt)}。"
+            "请检查产品路径是否包含已退市/无分钟数据品种，或先补齐对应行情数据。"
+        )
+    raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()
+    provider = load_market_rule_field_provider()
+    historical_frames = historical_field_frames_for_market_data(
+        list(raw_prices.columns),
+        raw_prices.index,
+        provider=provider,
+        trading_day_resolver=None,
+        field_names=(),
+        policy="latest_available",
+    )
+    return {
+        "raw_prices": raw_prices,
+        "historical_field_provider": provider,
+        "historical_field_frames": historical_frames,
+        "included_products": tuple(series_by_product.keys()),
+        "excluded_out_of_range_products": tuple(str(getattr(product, "name", product)) for product in _dedupe_products(excluded_out_of_range)),
+    }
+
+
+def _dedupe_products(products: list[Any]) -> list[Any]:
+    result: list[Any] = []
+    for product in products:
+        if product not in result:
+            result.append(product)
+    return result
+
+
+def _supports_local_cnfutures_coverage(_product: Any) -> bool:
+    return False
+
+
+def _product_outside_run_window(product: Any, start_dt: Any, end_dt: Any) -> bool:
+    if not _supports_local_cnfutures_coverage(product):
+        return False
+    coverage = _product_data_coverage(product)
+    if coverage is None:
+        return False
+    data_start, data_end = coverage
+    start_key = _datetime_sort_key(getattr(start_dt, "sort_key", lambda: None)())
+    end_key = _datetime_sort_key(getattr(end_dt, "sort_key", lambda: None)())
+    if start_key is not None and data_end is not None and data_end < start_key:
+        return True
+    if end_key is not None and data_start is not None and data_start > end_key:
+        return True
+    return False
+
+
+def _product_data_coverage(product: Any) -> tuple[pd.Timestamp | None, pd.Timestamp | None] | None:
+    try:
+        available_freqs = list(product.list_available_freqs())
+    except Exception:
+        available_freqs = []
+    for freq in available_freqs:
+        try:
+            view = getattr(product, freq.name)
+            data = view.get_data(copy=False)
+        except Exception:
+            continue
+        if data is None or data.empty:
+            continue
+        index = DataIndex(data.index).signal_index
+        if len(index) == 0:
+            continue
+        return _datetime_sort_key(index.min()), _datetime_sort_key(index.max())
+    return None
+
+
+def _datetime_sort_key(value: Any) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+    return timestamp
 
 
 def _group_product_path_selection_id(group: dict[str, Any]) -> str:
