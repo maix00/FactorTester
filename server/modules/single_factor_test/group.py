@@ -2638,6 +2638,13 @@ def _event_group_snapshot(
             "BAR_CLOSE": "时间片收盘",
         }[selected_event["event_type"]],
         "event_cursors": [event["cursor"] for event in events],
+        "order_flow_groups": [
+            {
+                "group_id": str(owner.get("group_id") or ""),
+                "group_name": str(owner.get("group_name") or owner.get("group_id") or ""),
+            }
+            for owner in owners
+        ],
         "all_timestamps_ms": all_ms,
         "has_prev": event_index > 0,
         "has_next": event_index + 1 < len(events),

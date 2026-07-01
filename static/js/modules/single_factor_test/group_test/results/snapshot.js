@@ -28,6 +28,9 @@
     var _snapshotCurrentEventCursor = null;
     var _snapshotPrevChangeEventCursor = null;
     var _snapshotNextChangeEventCursor = null;
+    var _snapshotActiveTab = 'snapshot';
+    var _snapshotOrderFlowGroupId = null;
+    var _orderFlowCache = {};
 
     function _selection() {
         return GT.panels && GT.panels.list && GT.panels.list.selection;
@@ -44,6 +47,10 @@
         }
         var sel = _selection();
         return sel && typeof sel.getFirstProductPathSelectionId === 'function' ? sel.getFirstProductPathSelectionId() : null;
+    }
+
+    function _orderFlowCacheKey(groupId, timestampMs) {
+        return String(groupId || '') + '@' + String(timestampMs || '');
     }
 
     function _escape(value) {
@@ -133,6 +140,15 @@
             _snapshotCurrentEventCursor = data.event_cursor || null;
             _snapshotPrevChangeEventCursor = data.prev_change_event_cursor || null;
             _snapshotNextChangeEventCursor = data.next_change_event_cursor || null;
+            var orderFlowGroups = Array.isArray(data.order_flow_groups) ? data.order_flow_groups : [];
+            if (!_snapshotOrderFlowGroupId && orderFlowGroups.length) {
+                _snapshotOrderFlowGroupId = orderFlowGroups[0].group_id || null;
+            } else if (_snapshotOrderFlowGroupId && orderFlowGroups.length) {
+                var stillExists = orderFlowGroups.some(function(group) {
+                    return group && group.group_id === _snapshotOrderFlowGroupId;
+                });
+                if (!stillExists) _snapshotOrderFlowGroupId = orderFlowGroups[0].group_id || null;
+            }
 
             try {
                 renderGroupSnapshot(data, data.timestamp_ms);
@@ -354,6 +370,37 @@
         return (num > 0 ? '+' : '') + _formatAmount(num, currency);
     }
 
+    function _formatRecordValue(value) {
+        if (value === null || value === undefined || value === '') return '—';
+        if (typeof value === 'number') {
+            if (!isFinite(value)) return '—';
+            return Math.abs(value) >= 1000 ? value.toFixed(2) : value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+        }
+        if (typeof value === 'object') return JSON.stringify(value);
+        return String(value);
+    }
+
+    function _firstDefined(values) {
+        for (var i = 0; i < values.length; i++) {
+            if (values[i] !== null && values[i] !== undefined && values[i] !== '') return values[i];
+        }
+        return null;
+    }
+
+    function _orderFlowStepLabel(step) {
+        var labels = {
+            construct_order: '构造订单',
+            quantity_rounding: '手数取整',
+            liquidity_cap: '流动性约束',
+            cash_rescale: '现金约束',
+            slippage: '滑点定价',
+            fee: '手续费',
+            ledger_update: '账本更新',
+            finalize_order: '订单定稿',
+        };
+        return labels[step] || step || '未知步骤';
+    }
+
     function _renderProduct(p) {
         if (!p) return '—';
         if (typeof p === 'string') return '<span class="snapshot-product-name">' + _escape(p) + '</span>';
@@ -467,6 +514,10 @@
     function _renderMatrixToggle() {
         var toggleEl = document.getElementById('snapshot_matrix_toggle');
         if (!toggleEl) return;
+        if (_snapshotActiveTab !== 'snapshot') {
+            toggleEl.innerHTML = '';
+            return;
+        }
         var matrices = _snapshotPayload && Array.isArray(_snapshotPayload.matrices) ? _snapshotPayload.matrices : [];
         if (matrices.length <= 1) {
             toggleEl.innerHTML = '';
@@ -569,6 +620,126 @@
         return html;
     }
 
+    function _renderSnapshotTabs() {
+        var tabs = [
+            { key: 'snapshot', label: '事件快照' },
+            { key: 'order_flow', label: '订单流水' },
+        ];
+        var html = '<div class="snapshot-main-tabs" role="tablist">';
+        tabs.forEach(function(tab) {
+            html += '<button type="button" class="snapshot-main-tab'
+                + (_snapshotActiveTab === tab.key ? ' active' : '')
+                + '" data-snapshot-tab="' + _escape(tab.key) + '">' + _escape(tab.label) + '</button>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function _bindSnapshotTabs() {
+        var bodyEl = document.getElementById('snapshot_body');
+        if (!bodyEl || !bodyEl.querySelectorAll) return;
+        var tabs = bodyEl.querySelectorAll('[data-snapshot-tab]');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].onclick = function(evt) {
+                var tab = evt.currentTarget.getAttribute('data-snapshot-tab') || 'snapshot';
+                if (_snapshotActiveTab === tab) return;
+                _snapshotActiveTab = tab;
+                renderGroupSnapshot(_snapshotPayload, _snapshotCurrentMs);
+            };
+        }
+        var groupButtons = bodyEl.querySelectorAll('[data-order-flow-group-id]');
+        for (var j = 0; j < groupButtons.length; j++) {
+            groupButtons[j].onclick = function(evt) {
+                var groupId = evt.currentTarget.getAttribute('data-order-flow-group-id') || null;
+                if (!groupId || groupId === _snapshotOrderFlowGroupId) return;
+                _snapshotOrderFlowGroupId = groupId;
+                renderGroupSnapshot(_snapshotPayload, _snapshotCurrentMs);
+            };
+        }
+    }
+
+    function _renderOrderFlowShell(data) {
+        var groups = Array.isArray(data.order_flow_groups) ? data.order_flow_groups : [];
+        if (!groups.length) return '<div class="snapshot-empty-tab">当前回测结果没有可追溯的订单流水</div>';
+        if (!_snapshotOrderFlowGroupId) _snapshotOrderFlowGroupId = groups[0].group_id || null;
+        var html = '<div class="snapshot-order-flow">';
+        html += '<div class="snapshot-order-flow-toolbar">';
+        groups.forEach(function(group) {
+            var groupId = group.group_id || '';
+            html += '<button type="button" class="snapshot-matrix-switch-btn'
+                + (groupId === _snapshotOrderFlowGroupId ? ' active' : '')
+                + '" data-order-flow-group-id="' + _escape(groupId) + '">'
+                + _escape(group.group_name || groupId)
+                + '</button>';
+        });
+        html += '</div>';
+        html += '<div id="snapshot_order_flow_body" class="snapshot-order-flow-body">正在加载订单流水...</div>';
+        html += '</div>';
+        return html;
+    }
+
+    function _renderOrderFlowRecords(payload) {
+        var body = document.getElementById('snapshot_order_flow_body');
+        if (!body) return;
+        var groups = payload && Array.isArray(payload.groups) ? payload.groups : [];
+        var records = groups.length ? (groups[0].records || []) : [];
+        if (!records.length) {
+            body.innerHTML = '<div class="snapshot-empty-tab">该时间切片没有订单流水记录</div>';
+            return;
+        }
+        var html = '<div class="snapshot-matrix-scroll"><table class="snapshot-order-flow-table">';
+        html += '<thead><tr><th>时间</th><th>订单</th><th>步骤</th><th>产品</th><th>数量</th><th>价格</th><th>金额/费用</th><th>说明</th></tr></thead><tbody>';
+        records.forEach(function(record) {
+            var details = record.details && typeof record.details === 'object' ? record.details : {};
+            var amount = _firstDefined([record.amount, record.fee_cost, record.fee, record.cash_delta, details.amount, details.cash_delta]);
+            var quantity = _firstDefined([record.quantity, record.final_quantity, record.target_quantity, details.quantity, record.intent_quantity]);
+            var price = _firstDefined([record.price, record.execution_price, record.fill_price, record.effective_price, details.price, details.effective_price]);
+            var reason = record.reject_reason || record.reason || record.label || record.status || record.note || '';
+            html += '<tr>'
+                + '<td>' + _escape(record.timestamp || '—') + '</td>'
+                + '<td>' + _escape(record.order_id || '—') + '</td>'
+                + '<td><span class="snapshot-order-step">' + _escape(_orderFlowStepLabel(record.step)) + '</span></td>'
+                + '<td>' + _escape(record.product || record.instrument || '—') + '</td>'
+                + '<td>' + _escape(_formatRecordValue(quantity)) + '</td>'
+                + '<td>' + _escape(_formatRecordValue(price)) + '</td>'
+                + '<td>' + _escape(_formatRecordValue(amount)) + '</td>'
+                + '<td>' + _escape(reason || '—') + '</td>'
+                + '</tr>';
+        });
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    }
+
+    function _loadOrderFlowForActiveGroup() {
+        if (!_snapshotPayload || !_snapshotOrderFlowGroupId || !_snapshotCurrentMs) return;
+        var key = _orderFlowCacheKey(_snapshotOrderFlowGroupId, _snapshotCurrentMs);
+        if (_orderFlowCache[key]) {
+            _renderOrderFlowRecords(_orderFlowCache[key]);
+            return;
+        }
+        var body = document.getElementById('snapshot_order_flow_body');
+        if (body) body.innerHTML = '<div class="snapshot-empty-tab">正在加载订单流水...</div>';
+        fetch('/get_group_order_flow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                page_uuid: window._pageUuid || '',
+                group_id: _snapshotOrderFlowGroupId,
+                timestamp_ms: _snapshotCurrentMs,
+            })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.error || '订单流水加载失败');
+            _orderFlowCache[key] = data;
+            _renderOrderFlowRecords(data);
+        })
+        .catch(function(err) {
+            var target = document.getElementById('snapshot_order_flow_body');
+            if (target) target.innerHTML = '<div style="padding:20px;color:#d40000;">' + _escape(err.message || err) + '</div>';
+        });
+    }
+
     function renderGroupSnapshot(data, timestampMs) {
         if (!data || !Array.isArray(data.matrices)) return;
 
@@ -592,14 +763,16 @@
         if (!bodyEl) return;
 
         var matrix = _matrixByKey(_snapshotMatrixKey);
-        if (!matrix) {
-            bodyEl.innerHTML = '<div class="snapshot-empty-tab">暂无分组数据</div>';
-            if (statsEl) statsEl.innerHTML = '';
-            _renderMatrixToggle();
-            return;
+        var contentHtml = '';
+        if (_snapshotActiveTab === 'order_flow') {
+            contentHtml = _renderOrderFlowShell(data);
+        } else if (!matrix) {
+            contentHtml = '<div class="snapshot-empty-tab">暂无分组数据</div>';
+        } else {
+            contentHtml = _renderSnapshotMatrix(matrix);
         }
-
-        bodyEl.innerHTML = _renderSnapshotMatrix(matrix);
+        bodyEl.innerHTML = _renderSnapshotTabs() + '<div class="snapshot-tab-content">' + contentHtml + '</div>';
+        _bindSnapshotTabs();
 
         if (statsEl) {
             var summary = data.summary || {};
@@ -626,6 +799,7 @@
             statsEl.innerHTML = statsHtml;
         }
         _renderMatrixToggle();
+        if (_snapshotActiveTab === 'order_flow') _loadOrderFlowForActiveGroup();
     }
 
     // ---------- 导出 ----------

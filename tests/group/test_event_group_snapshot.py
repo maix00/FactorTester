@@ -105,6 +105,10 @@ def test_event_snapshot_exposes_position_and_target_tabs() -> None:
     assert result["matrices"][0]["cells"][2][0]["delta_margin_amount"] == 20.0
     assert result["matrices"][2]["cells"][0][0]["selected"] is True
     assert result["default_matrix_key"] == "positions_contracts"
+    assert result["order_flow_groups"] == [
+        {"group_id": "group-1", "group_name": "第一组"},
+        {"group_id": "group-2", "group_name": "第二组"},
+    ]
 
     fill = _event_group_snapshot(
         execution,
