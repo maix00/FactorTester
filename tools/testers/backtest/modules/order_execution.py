@@ -1,9 +1,9 @@
-"""OrderExecutionModule — order timing/price-basis controls.
+"""OrderExecutionModule — fixed next-bar-open order execution.
 
 `GroupMembershipModule` decides which bar an order targets and stores the
-target price row on the order. This module turns that target row plus
-`execution_price_basis` into the order's effective base fill price. Slippage,
-fees and ledger updates then consume `order.effective_price`.
+target price row on the order. This module turns that target row's open price
+into the order's effective base fill price. Slippage, fees and ledger updates
+then consume `order.effective_price`.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ class OrderExecutionModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "execution_price_basis": FieldDefinition(
-            public=True, label="价格", default="open", control_template="select", tab="order",
-            options=(("close", "收盘/切片价格"), ("open", "开盘价"), ("vwap", "VWAP")),
+            public=False, label="价格", default="open", control_template="select", tab="order",
+            options=(("open", "下一 bar 开盘价"),),
             chip_template="价格: {value}", tab_label="订单执行", tab_order=120,
         ),
         "order_type": FieldDefinition(
@@ -65,8 +65,8 @@ class OrderExecutionModule(ExecutableModule):
 
 def _normalise_price_basis(value: object) -> str:
     basis = str(value or "open").lower()
-    if basis not in {"open", "close", "vwap"}:
-        raise ValueError(f"unsupported execution_price_basis: {basis}")
+    if basis != "open":
+        raise ValueError("order execution is fixed to next-bar open price")
     return basis
 
 
@@ -74,10 +74,6 @@ def _price_table(account: Any, basis: str) -> pd.DataFrame:
     tables = getattr(account, "market_price_tables", None)
     if isinstance(tables, dict):
         table = tables.get(basis)
-        if isinstance(table, pd.DataFrame) and not table.empty:
-            return table
-    if basis == "close":
-        table = getattr(account, "current_prices_table", None)
         if isinstance(table, pd.DataFrame) and not table.empty:
             return table
     raise KeyError(f"market data does not provide execution price basis {basis!r}")
@@ -92,19 +88,12 @@ def _execution_price_at(account: Any, order: Any, basis: str) -> float:
 
 def _resolve_execution_price(account: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
-    current_prices = ctx.get(MarketDataModule.current_prices, {})
     for strategy in ctx.active_strategies:
         config = account.config_for(strategy)
         basis = _normalise_price_basis(config.get(OrderExecutionModule.execution_price_basis, "open"))
         prices: dict[Any, float] = {}
         for order in ctx.payloads_for(strategy):
-            try:
-                price = _execution_price_at(account, order, basis)
-            except KeyError:
-                if basis == "close" and order.instrument in current_prices:
-                    price = float(current_prices[order.instrument])
-                else:
-                    raise
+            price = _execution_price_at(account, order, basis)
             order.set("execution_price_basis", basis)
             order.set("effective_price", price)
             prices[order.instrument] = price

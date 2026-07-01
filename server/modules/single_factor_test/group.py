@@ -289,9 +289,6 @@ def _silent_default_settings_for_run(
         "allocation_policy",
         "rebalance_trigger",
         "position_policy",
-        "execution_timing",
-        "execution_price_basis",
-        "execution_delay_bars",
     )
     local_settings = _payload_local_settings(payload)
     explicit_local = set(local_settings) if local_settings else set(payload)

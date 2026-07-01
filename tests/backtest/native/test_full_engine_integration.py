@@ -76,13 +76,12 @@ def test_full_engine_runs_two_product_two_day_backtest():
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
             "engine_mode": "basic",
-            "execution_price_basis": "close",
         },
     }
 
     account = AccountState()
     apply_strategy_configs(account, resolved_settings)
-    account.raw_market_data = {"raw_prices": raw_prices}
+    account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
     registry = _build_registry()
     queue = EventQueue()
@@ -113,7 +112,7 @@ def test_full_engine_two_strategies_independent_results():
     base_settings = {
         "product_path_selection": selection, "factor": factor, "factor_mode": "precomputed",
         "split_count": 2, "initial_capital_major": 1_000_000.0, "base_currency": "CNY",
-        "engine_mode": "basic", "execution_price_basis": "close",
+        "engine_mode": "basic",
     }
     resolved_settings = {
         "A1": {**base_settings, "group_index": 0},
@@ -122,7 +121,7 @@ def test_full_engine_two_strategies_independent_results():
 
     account = AccountState()
     apply_strategy_configs(account, resolved_settings)
-    account.raw_market_data = {"raw_prices": raw_prices}
+    account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
     registry = _build_registry()
     queue = EventQueue()
@@ -204,7 +203,6 @@ def test_full_engine_with_real_moving_average_factor_expression():
                 "initial_capital_major": 1_000_000.0,
                 "base_currency": "CNY",
                 "engine_mode": "basic",
-                "execution_price_basis": "close",
         },
     }))
     selection = _FakeProductPathSelection("sel-ma", [p1, p2])
@@ -213,7 +211,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
 
     account = AccountState()
     apply_strategy_configs(account, frontend_payload)
-    account.raw_market_data = {"raw_prices": raw_prices}
+    account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
     registry = _build_registry()
     queue = EventQueue()

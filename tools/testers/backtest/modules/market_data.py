@@ -269,13 +269,22 @@ def _load_raw_market_data(account, ctx) -> None:
     end_dt = request.get("end_dt")
     warmup_window = request.get("warmup_window")
     series_by_product: dict[Any, pd.Series] = {}
-    price_series_by_basis: dict[str, dict[Any, pd.Series]] = {"open": {}, "close": {}, "vwap": {}}
+    price_columns = (
+        ("open", DataColumn.OPEN.name),
+        ("high", DataColumn.HIGH.name),
+        ("low", DataColumn.LOW.name),
+        ("close", DataColumn.CLOSE.name),
+        ("vwap", DataColumn.VWAP.name),
+    )
+    price_series_by_basis: dict[str, dict[Any, pd.Series]] = {
+        basis: {} for basis, _column in price_columns
+    }
     missing_products: list[str] = []
     for product, freq in getattr(account, "_market_data_load_plan", ()):
         try:
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
-                [DataColumn.OPEN.name, DataColumn.CLOSE.name, DataColumn.VWAP.name],
+                [column for _basis, column in price_columns],
                 copy=False,
                 start_dt=start_dt,
                 end_dt=end_dt,
@@ -298,11 +307,9 @@ def _load_raw_market_data(account, ctx) -> None:
                 missing_products.append(str(getattr(product, "name", product)))
             continue
         series_by_product[product] = df[DataColumn.CLOSE.name]
-        if DataColumn.OPEN.name in df.columns:
-            price_series_by_basis["open"][product] = df[DataColumn.OPEN.name]
-        price_series_by_basis["close"][product] = df[DataColumn.CLOSE.name]
-        if DataColumn.VWAP.name in df.columns:
-            price_series_by_basis["vwap"][product] = df[DataColumn.VWAP.name]
+        for basis, column in price_columns:
+            if column in df.columns:
+                price_series_by_basis[basis][product] = df[column]
     if missing_products:
         _raise_missing_market_data(missing_products, start_dt, end_dt)
     raw_prices = pd.DataFrame(series_by_product) if series_by_product else pd.DataFrame()

@@ -112,33 +112,10 @@ def _resolve_setting_dependencies(
     overrides: Mapping[str, Any],
     setting_fallbacks: list[dict[str, Any]],
 ) -> None:
-    timing = str(values.get("execution_timing") or "next_bar")
-    basis = str(values.get("execution_price_basis") or "close")
-    if timing == "same_bar" and basis == "open":
-        _replace_setting_value(
-            application,
-            values,
-            "execution_price_basis",
-            "close",
-            engine,
-            local_values,
-            overrides,
-            setting_fallbacks,
-            reason="incompatible_setting_value",
-        )
-        basis = "close"
-    if basis == "vwap":
-        _replace_setting_value(
-            application,
-            values,
-            "execution_price_basis",
-            "close",
-            engine,
-            local_values,
-            overrides,
-            setting_fallbacks,
-            reason="unavailable_market_price_basis",
-        )
+    # Order timing/price-basis are no longer public settings.  The executable
+    # modules own their fixed next-bar-open defaults internally; settings
+    # resolution only manages backend-registered user-visible fields.
+    _ = (application, values, engine, local_values, overrides, setting_fallbacks)
 
 
 def _replace_setting_value(

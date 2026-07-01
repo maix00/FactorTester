@@ -58,16 +58,16 @@ def test_group_quantile_membership_selects_highest_bucket():
     assert set(weights) == {products[2], products[3]}
 
 
-def test_resolve_execution_timestamp_same_bar_is_unchanged():
+def test_resolve_execution_timestamp_rejects_same_bar_execution():
     s = Strategy(alias="S")
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.execution_timing: "same_bar",
-        OrderExecutionModule.execution_price_basis: "close",
     })
     account = AccountState(strategy_configs={s: config})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue())
-    assert _resolve_execution_timestamp(account, ctx, s) == t
+    with pytest.raises(ValueError, match="next-bar open"):
+        _resolve_execution_timestamp(account, ctx, s)
 
 
 def test_resolve_execution_timestamp_next_bar_advances_by_delay():
@@ -85,9 +85,8 @@ def test_resolve_execution_timestamp_next_bar_advances_by_delay():
     assert result == pd.Timestamp("2024-01-02") + pd.Timedelta(nanoseconds=1)
 
 
-def test_resolve_execution_schedule_next_bar_open_and_close_have_distinct_event_times():
+def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_boundary_event():
     s_open = Strategy(alias="open")
-    s_close = Strategy(alias="close")
     idx = pd.date_range("2024-01-01 09:01", periods=3, freq="1min")
     account = AccountState(strategy_configs={
         s_open: StrategyConfig(strategy=s_open, field_values={
@@ -95,22 +94,30 @@ def test_resolve_execution_schedule_next_bar_open_and_close_have_distinct_event_
             GroupMembershipModule.execution_delay_bars: 1,
             OrderExecutionModule.execution_price_basis: "open",
         }),
-        s_close: StrategyConfig(strategy=s_close, field_values={
-            GroupMembershipModule.execution_timing: "next_bar",
-            GroupMembershipModule.execution_delay_bars: 1,
-            OrderExecutionModule.execution_price_basis: "close",
-        }),
     })
     account.current_prices_table = pd.DataFrame({"P1": [1, 2, 3]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
 
     open_event_ts, open_price_ts = _resolve_execution_schedule(account, ctx, s_open)
-    close_event_ts, close_price_ts = _resolve_execution_schedule(account, ctx, s_close)
 
     assert open_event_ts == idx[0] + pd.Timedelta(nanoseconds=1)
     assert open_price_ts == idx[1]
-    assert close_event_ts == idx[1] + pd.Timedelta(nanoseconds=1)
-    assert close_price_ts == idx[1]
+
+
+def test_resolve_execution_schedule_rejects_non_open_price_basis():
+    s = Strategy(alias="S")
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    account = AccountState(strategy_configs={
+        s: StrategyConfig(strategy=s, field_values={
+            GroupMembershipModule.execution_timing: "next_bar",
+            OrderExecutionModule.execution_price_basis: "close",
+        }),
+    })
+    account.current_prices_table = pd.DataFrame({"P1": [1, 2]}, index=idx)
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
+
+    with pytest.raises(ValueError, match="next-bar open"):
+        _resolve_execution_schedule(account, ctx, s)
 
 
 def test_resolve_execution_timestamp_clips_to_last_available_bar():
@@ -133,10 +140,12 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
-        GroupMembershipModule.execution_timing: "same_bar",
-        OrderExecutionModule.execution_price_basis: "close",
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
     })
     account = AccountState(strategy_configs={s: config})
+    account.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
     order = Order(instrument=p, timestamp=t, quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -187,18 +196,20 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
     assert new_order.status == OrderStatus.SCHEDULED
 
 
-def test_schedule_order_execution_does_not_cancel_an_order_due_at_this_exact_timestamp():
-    """A stale order scheduled to fire AT this exact timestamp is already
-    due and should have been processed before SIGNAL in the real event queue.
-    Direct helper calls still leave it untouched rather than cancelling it as
-    future work."""
+def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_signal_time():
+    """With fixed next-bar-open execution, a pending order created at this
+    signal timestamp still targets a future price row, so a recomputed order
+    for the same strategy/product supersedes it."""
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
-        GroupMembershipModule.execution_timing: "same_bar",
-        OrderExecutionModule.execution_price_basis: "close",
+        GroupMembershipModule.execution_timing: "next_bar",
+        GroupMembershipModule.execution_delay_bars: 1,
+        OrderExecutionModule.execution_price_basis: "open",
     })
     account = AccountState(strategy_configs={s: config})
+    account.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
 
@@ -213,7 +224,7 @@ def test_schedule_order_execution_does_not_cancel_an_order_due_at_this_exact_tim
     ctx2.set_for(OrderBookModule.orders, s, [new_order])
     _schedule_order_execution(account, ctx2)
 
-    assert old_order.status == OrderStatus.SCHEDULED  # NOT cancelled -- due now, not in the future
+    assert old_order.status == OrderStatus.CANCELLED
     assert new_order.status == OrderStatus.SCHEDULED
 
 
@@ -221,10 +232,12 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
     config = StrategyConfig(strategy=s, field_values={
-        GroupMembershipModule.execution_timing: "same_bar",
-        OrderExecutionModule.execution_price_basis: "close",
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
     })
     account = AccountState(strategy_configs={s: config})
+    account.current_prices_table = pd.DataFrame(
+        {p1: [1, 2], p2: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     queue = EventQueue()
     t = pd.Timestamp("2024-01-01")
 

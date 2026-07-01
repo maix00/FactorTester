@@ -176,11 +176,11 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["warmup_mode"]["default_when"]["engine_mode"]["basic"] == "none"
     assert index["defaults"]["warmup_window"]["visible_when"] == {"warmup_mode": ["fixed"]}
     assert index["defaults"]["evaluation_split"]["module"] == "run_window"
+    assert "execution_price_basis" not in index["defaults"]
     assert {
         key: index["defaults"][key]["module"]
-        for key in ("execution_price_basis", "order_type", "matching_model")
+        for key in ("order_type", "matching_model")
     } == {
-        "execution_price_basis": "order_execution",
         "order_type": "order_execution",
         "matching_model": "order_execution",
     }
@@ -437,7 +437,8 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
     by_key = {item["setting_key"]: item for item in defaults}
     assert by_key["allocation_policy"]["value"] == "inverse_volatility"
     assert by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
-    assert by_key["execution_timing"]["value"] == "next_bar"
+    assert "execution_timing" not in by_key
+    assert "execution_price_basis" not in by_key
 
 
 def test_explicit_group_allocation_is_not_reported_as_silent_default() -> None:
@@ -785,26 +786,17 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
 # isn't modeled here, so there's no equivalent cross-engine fallback to test.
 
 
-def test_execution_price_basis_dependencies_fall_back_with_diagnostics() -> None:
+def test_order_execution_price_basis_is_not_a_public_setting() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    resolved = resolve_group_settings(
-        application,
-        local_values={
-            "engine": "native",
-            "execution_timing": "same_bar",
-            "execution_price_basis": "open",
-        },
-        group_values={"group-1": {}},
-        group_ids=("group-1",),
-    )
-
-    assert resolved["group-1"]["execution_price_basis"] == "close"
-    assert resolved["group-1"]["_setting_fallbacks"] == [{
-        "setting_key": "execution_price_basis",
-        "module": "order_execution",
-        "engine": "native",
-        "requested_value": "open",
-        "applied_value": "close",
-        "reason": "incompatible_setting_value",
-    }]
+    with pytest.raises(ValueError, match="unknown backtest settings"):
+        resolve_group_settings(
+            application,
+            local_values={
+                "engine": "native",
+                "execution_timing": "same_bar",
+                "execution_price_basis": "close",
+            },
+            group_values={"group-1": {}},
+            group_ids=("group-1",),
+        )

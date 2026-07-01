@@ -41,7 +41,7 @@ class GroupMembershipModule(ExecutableModule):
     split_count: ClassVar[FieldRef[int]] = FieldRef("split_count")
     group_index: ClassVar[FieldRef[int]] = FieldRef("group_index")
     target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")  # dict[Product, float], Σ == 1
-    execution_timing: ClassVar[FieldRef[str]] = FieldRef("execution_timing")  # "same_bar"|"next_bar"
+    execution_timing: ClassVar[FieldRef[str]] = FieldRef("execution_timing")  # fixed "next_bar"
     execution_delay_bars: ClassVar[FieldRef[int]] = FieldRef("execution_delay_bars")
     dispatched_order_events: ClassVar[FieldRef[Any]] = FieldRef("dispatched_order_events")  # push-only, never read
     position_policy: ClassVar[FieldRef[str]] = FieldRef("position_policy")  # "rebalance_to_target"|"buy_and_hold"
@@ -72,12 +72,12 @@ class GroupMembershipModule(ExecutableModule):
             scope_policy="group_only",
         ),
         "execution_timing": FieldDefinition(
-            public=True, label="成交时机", default="next_bar", control_template="select", tab="order",
-            options=(("same_bar", "本期成交"), ("next_bar", "下一期成交")),
+            public=False, label="成交时机", default="next_bar", control_template="select", tab="order",
+            options=(("next_bar", "下一 bar 开盘成交"),),
             chip_template="成交时机: {value}", tab_label="订单执行", tab_order=120,
         ),
         "execution_delay_bars": FieldDefinition(
-            public=True, label="延迟", default=1, control_template="number", tab="order",
+            public=False, label="延迟", default=1, control_template="number", tab="order",
             visible_when={"execution_timing": ("next_bar",)},
             chip_template="延迟: {value}bar", tab_label="订单执行", tab_order=120,
         ),
@@ -312,10 +312,10 @@ def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, p
     config = account.config_for(strategy)
     timing = config.get(GroupMembershipModule.execution_timing, "next_bar")
     basis = str(config.get(OrderExecutionModule.execution_price_basis, "open") or "open").lower()
-    if timing == "same_bar":
-        if basis == "open":
-            raise ValueError("same_bar execution cannot use open price because the bar has already opened")
-        return current_ts, current_ts
+    if timing != "next_bar":
+        raise ValueError("order execution is fixed to next-bar open")
+    if basis != "open":
+        raise ValueError("order execution is fixed to next-bar open")
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
     table = getattr(account, "current_prices_table", None)
     if table is None:
@@ -325,16 +325,11 @@ def _resolve_execution_schedule(account, ctx, strategy) -> tuple[pd.Timestamp, p
     delay = max(int(delay or 1), 1)
     price_pos = min(pos + delay, len(index) - 1)
     price_ts = cast(pd.Timestamp, index[price_pos])
-    if basis == "open":
-        open_boundary_pos = max(0, min(price_pos - 1, len(index) - 1))
-        event_ts = cast(
-            pd.Timestamp,
-            cast(pd.Timestamp, index[open_boundary_pos]) + pd.Timedelta(nanoseconds=1),
-        )
-    elif basis in {"close", "vwap"}:
-        event_ts = cast(pd.Timestamp, price_ts + pd.Timedelta(nanoseconds=1))
-    else:
-        raise ValueError(f"unsupported execution_price_basis: {basis}")
+    open_boundary_pos = max(0, min(price_pos - 1, len(index) - 1))
+    event_ts = cast(
+        pd.Timestamp,
+        cast(pd.Timestamp, index[open_boundary_pos]) + pd.Timedelta(nanoseconds=1),
+    )
     return event_ts, price_ts
 
 

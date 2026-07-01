@@ -59,6 +59,45 @@ def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
     assert "ER.CZC" in row["detail"] and "ME.CZC" in row["detail"]
 
 
+def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
+    class _Freq:
+        name = "min1"
+
+    class _Product:
+        name = "P1"
+        desc = "P1"
+
+        def __init__(self) -> None:
+            self.min1 = self
+
+        def get_and_adjust_cols(self, columns, **kwargs):
+            idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+            frame = pd.DataFrame({
+                "OPEN": [10.0, 20.0],
+                "HIGH": [11.0, 21.0],
+                "LOW": [9.0, 19.0],
+                "CLOSE": [10.5, 20.5],
+                "VWAP": [10.25, 20.25],
+            }, index=idx)
+            return frame[list(columns)]
+
+    product = _Product()
+    account = AccountState()
+    account.market_data_request = {"products": [product]}
+    setattr(account, "_market_data_load_plan", [(product, _Freq())])
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _load_raw_market_data(account, ctx)
+
+    assert set(account.market_price_tables) >= {"open", "high", "low", "close", "vwap"}
+    assert account.market_price_tables["open"][product].tolist() == [10.0, 20.0]
+    assert account.market_price_tables["high"][product].tolist() == [11.0, 21.0]
+    assert account.market_price_tables["low"][product].tolist() == [9.0, 19.0]
+    assert account.market_price_tables["close"][product].tolist() == [10.5, 20.5]
+    assert account.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
+    assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
+
+
 def test_causal_valuation_ffills_gaps_and_never_looks_ahead():
     account = AccountState()
     idx = pd.date_range("2024-01-01", periods=4)

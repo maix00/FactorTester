@@ -53,12 +53,12 @@ def test_run_backtest_task_produces_the_execution_dict_contract():
         "A1": {
             "product_path_selection": selection, "factor": factor, "factor_mode": "precomputed",
             "split_count": 2, "group_index": 1, "initial_capital_major": 1_000_000.0,
-            "base_currency": "CNY", "engine_mode": "basic", "execution_price_basis": "close",
+            "base_currency": "CNY", "engine_mode": "basic",
         },
     }
     account = AccountState()
     apply_strategy_configs(account, resolved_settings)
-    account.raw_market_data = {"raw_prices": raw_prices}
+    account.raw_market_data = {"raw_prices": raw_prices, "price_tables": {"open": raw_prices, "close": raw_prices}}
 
     state = FactorTesterState(products=[])
     execution = run_backtest_task(
@@ -110,7 +110,6 @@ def test_run_backtest_task_rejects_non_native_engine_without_fallback():
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
             "engine_mode": "basic",
-            "execution_price_basis": "close",
         },
     }
     account = AccountState()

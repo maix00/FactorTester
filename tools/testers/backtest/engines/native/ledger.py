@@ -109,6 +109,7 @@ class AccountState:
         self.historical_field_frames: Any = None
         self.volume_table: Any = None
         self.current_prices_table: Any = None
+        self.market_price_tables: dict[str, Any] = {}
         self.results = ResultStore()
 
     def ledger_for(self, order: "Order") -> Ledger:
