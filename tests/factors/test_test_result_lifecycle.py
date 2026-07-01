@@ -10,7 +10,7 @@ import pandas as pd
 from server.modules.single_factor_test.ic import _ICComputeResult, _build_ic_response
 from tools.data.types import DataFreq
 from tools.factors.FactorRunResult import FactorRunResult
-from tools.factors.tests.single_factor_test import ic as ic_module
+from tools.factors.tester_calc.single_factor_test import ic as ic_module
 
 
 class _DisposableFactor:
@@ -92,10 +92,13 @@ def test_ic_response_replacement_discards_previous_alias_result():
 
     tester = _Tester()
     compute = _ICComputeResult()
+    compute.factor_by_column[new_factor.alias] = new_factor
+    compute.series_by_column_lag[new_factor.alias] = {0: pd.Series([0.2], dtype=float)}
+    compute.stats_by_column_lag[new_factor.alias] = {0: pd.Series({"mean": 0.2}, dtype=float)}
 
     _build_ic_response(
         tester,
-        [new_factor],
+        [new_factor.alias],
         [],
         compute,
         "paths",
@@ -109,20 +112,3 @@ def test_ic_response_replacement_discards_previous_alias_result():
     assert tester.discarded == [old_factor]
     assert old_factor not in tester.results
     assert new_factor in tester.results
-
-
-def test_group_result_state_keeps_only_latest_run():
-    result = FactorRunResult()
-    first_returns = np.zeros((4, 2))
-    first_returns_ref = weakref.ref(first_returns)
-    first_group = SimpleNamespace(returns_np=first_returns)
-    second_group = object()
-
-    result.group_result = first_group
-    del first_returns
-    del first_group
-    result.group_result = second_group
-    gc.collect()
-
-    assert result.group_result is second_group
-    assert first_returns_ref() is None

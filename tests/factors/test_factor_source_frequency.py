@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
+from tools.data.types import DataTime
 from tools.factors import FactorFamily
 from tools.factors.FactorExpr import ColumnRef
 from tools.parameters import WindowParam
@@ -15,7 +16,7 @@ class _Meta:
         self.data = data
         self.day_periods = day_periods
 
-    def get_and_adjust_cols(self, columns, copy=False, start_calc_point=None):
+    def get_and_adjust_cols(self, columns, copy=False, start_dt=None, end_dt=None, warmup_window=None):
         return self.data[columns]
 
 
@@ -78,13 +79,21 @@ class _PreviousReloadProduct(_Product):
         ]
 
 
+def _window():
+    return (
+        DataTime.from_dict({"date": "2026-01-02", "time": "09:00", "tz": "Asia/Shanghai"}, precision="exact"),
+        DataTime.from_dict({"date": "2026-01-05", "time": "15:00", "tz": "Asia/Shanghai"}, precision="exact"),
+    )
+
+
 def test_source_frequency_is_fine_enough_for_signal_alignment():
     factor = _DailyWindowMinuteSignal().get_factor(
         SourceFrequencyWindow="1D",
         **{"$F": "1m", "$Rev": "0"},
     )
 
-    result = factor.evaluate([_Product()])
+    start_dt, end_dt = _window()
+    result = factor.evaluate([_Product()], start_dt=start_dt, end_dt=end_dt)
 
     assert factor._source_freq == DataFreq.MIN1
     assert not result.empty
@@ -96,7 +105,8 @@ def test_declared_source_frequency_overrides_daily_window_and_signal():
         **{"$F": "1D", "$Rev": "0"},
     )
 
-    factor.evaluate([_Product()])
+    start_dt, end_dt = _window()
+    factor.evaluate([_Product()], start_dt=start_dt, end_dt=end_dt)
 
     assert factor._source_freq == DataFreq.MIN1
 
@@ -107,7 +117,8 @@ def test_explicit_source_frequency_normalizes_string_input():
         **{"$F": "1D", "$Rev": "0"},
     )
 
-    result = factor.evaluate([_Product()], freq="MIN1")
+    start_dt, end_dt = _window()
+    result = factor.evaluate([_Product()], freq="MIN1", start_dt=start_dt, end_dt=end_dt)
 
     assert factor._source_freq is DataFreq.MIN1
     assert not result.empty
@@ -119,7 +130,8 @@ def test_explicit_source_frequency_accepts_product_frequency_from_previous_reloa
         **{"$F": "1D", "$Rev": "0"},
     )
 
-    result = factor.evaluate([_PreviousReloadProduct()], freq="MIN1")
+    start_dt, end_dt = _window()
+    result = factor.evaluate([_PreviousReloadProduct()], freq="MIN1", start_dt=start_dt, end_dt=end_dt)
 
     assert not result.empty
 
@@ -132,7 +144,8 @@ def test_declared_source_frequency_skips_products_without_that_source():
     minute_product = _Product()
     factor.clear()
 
-    result = factor.evaluate([minute_product, _DailyOnlyProduct()])
+    start_dt, end_dt = _window()
+    result = factor.evaluate([minute_product, _DailyOnlyProduct()], start_dt=start_dt, end_dt=end_dt)
 
     assert list(result.columns) == [minute_product]
 
@@ -141,7 +154,8 @@ def test_constant_factor_values_are_retained_for_visualization_and_ic():
     product = _Product()
     factor = _ConstantMinuteSignal().get_factor(**{"$F": "1m", "$Rev": "0"})
 
-    result = factor.evaluate([product])
+    start_dt, end_dt = _window()
+    result = factor.evaluate([product], start_dt=start_dt, end_dt=end_dt)
 
     assert list(result.columns) == [product]
     assert (result[product] == 0.0).all()

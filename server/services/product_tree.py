@@ -184,8 +184,7 @@ def build_submission_tree():
     try:
         from sources.LocalCNFutures.CNFutures import (
             CNFuturesContract,
-            CNFuturesDayNightTimeCategory,
-            CNFuturesSectorCategory,
+            CNFuturesSectorNightTimeCategory,
             exchange_map,
             get_all_futures_contract,
         )
@@ -208,19 +207,13 @@ def build_submission_tree():
         )
 
         contracts_fc = cast(List[FuturesContract], contracts)
-        sector_category = make_contract_category_from_futures_category(
-            CNFuturesSectorCategory,
+        category = make_contract_category_from_futures_category(
+            CNFuturesSectorNightTimeCategory,
             CNFuturesContract,
             contracts_fc,
             contract_to_future,
         )
-        daynight_category = make_contract_category_from_futures_category(
-            CNFuturesDayNightTimeCategory,
-            CNFuturesContract,
-            contracts_fc,
-            contract_to_future,
-        )
-        contract_tree = (sector_category * daynight_category).get_tree_with_parents(
+        contract_tree = category.get_tree_with_parents(
             all_objects=cast(List[Any], contracts),
             ancester=Product,
         )

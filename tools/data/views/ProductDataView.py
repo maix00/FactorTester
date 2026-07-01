@@ -44,7 +44,7 @@ class ProductDataView(UniqueNameObject):
       - 懒加载 + IdleResourceManager 缓存（自动回收闲置数据）
       - 列名映射（原始文件列名 → DataColumn 标准名称）
       - 时间索引构建（将日期/时间列设为 MultiIndex）
-      - StartCalcPoint 过滤（只返回计算起始点之后的数据）
+  - 按 DataTime 运行窗口过滤
       - 复权价格计算
 
     一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
@@ -210,7 +210,7 @@ class ProductDataView(UniqueNameObject):
             # 直接使用传入数据，不走缓存
             df = loaded_data
             if not df.empty:
-                ds = self.get_current_source()
+                ds = self.set_current_source(source) if source is not None else self.get_current_source()
                 if time_cols_mapping is not None:
                     ds.set_time_cols_mapping(time_cols_mapping)
                 if data_cols_mapping is not None:
@@ -227,7 +227,7 @@ class ProductDataView(UniqueNameObject):
 
         # 通过 DataHub 缓存（传自定义 reader 保留实例上下文）
         hub = DataHub.get_instance()
-        resource_key = self._resource_id()
+        resource_key = self._resource_id_for_source(source)
 
         return hub.load(
             namespace=_DATAMETA_NAMESPACE,
@@ -243,22 +243,38 @@ class ProductDataView(UniqueNameObject):
                 filter_object_attr=filter_object_attr,
             ),
         )
+
+    def _resource_id_for_source(self, source: Optional[Any]) -> str:
+        if source is None:
+            return self._resource_id()
+        return f"{source.key}:{self.object.name}:{self.freq.name}"
     
-    def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
+    def get_data(
+        self,
+        copy: bool = False,
+        start_dt: Optional[Any] = None,
+        end_dt: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
         """
         获取 DataFrame（通过 DataHub 缓存 + 自动回收）。
-        start_calc_point: DataTime | None，为 None 时不截断。
+        start_dt/end_dt: DataTime | None，为 None 时对应边界不截断。
+        warmup_window: 时间窗口，仅在 start_dt 已设置时用于按真实 bar 向左扩展计算窗口。
         copy=True 时返回副本，避免外部修改影响缓存。
-
-        Issue #3: start_calc_point 必须显式传入，不再隐式从 _active_tester 读取。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
         else:
             data = self.load_data(**kwargs)
 
-        if start_calc_point is not None:
-            data = self._filter_data_by_start_calc_point(data, time=start_calc_point)
+        if start_dt is not None or end_dt is not None:
+            data = self._filter_data_by_calc_window(
+                data,
+                start=start_dt,
+                end=end_dt,
+                warmup_window=warmup_window,
+            )
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -275,32 +291,84 @@ class ProductDataView(UniqueNameObject):
             level = next((lvl for lvl in index.names if str(lvl).split('@')[-1] == DataFreq(level).name), None)
             return index.get_level_values(level)
 
-    def _filter_data_by_start_calc_point(self, data: pd.DataFrame, time_col: Optional[str] = None,
-                                        time: Optional[Any] = None, time_is_date: Optional[bool] = None,
-                                        copy: bool = False) -> pd.DataFrame:
-        """
-        按起始时间截断数据。time 必须是 DataTime（或 None）。
-        通过 DataIndex.slice_by_datatime() 统一处理时区对齐和截断。
-
-        Issue #3: time 参数必须显式传入，不再通过 _active_tester 隐式获取。
-        """
+    def _filter_data_by_calc_window(
+        self,
+        data: pd.DataFrame,
+        *,
+        start: Optional[Any] = None,
+        end: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
+        copy: bool = False,
+    ) -> pd.DataFrame:
+        """按 DataTime 起止边界截断数据，并可按真实 bar 向左扩展 warm-up。"""
         if data.empty:
             return data
-        if time is None:
+        if start is None and end is None:
             return data.copy() if copy else data
 
         from ..types import DataTime
 
-        if not isinstance(time, DataTime):
-            raise TypeError(f"_filter_data_by_start_calc_point: time must be DataTime, got {type(time)}")
-        if not time.is_set:
+        if start is not None and not isinstance(start, DataTime):
+            raise TypeError(f"_filter_data_by_calc_window: start must be DataTime, got {type(start)}")
+        if end is not None and not isinstance(end, DataTime):
+            raise TypeError(f"_filter_data_by_calc_window: end must be DataTime, got {type(end)}")
+
+        start_set = start is not None and start.is_set
+        end_set = end is not None and end.is_set
+        if not start_set and not end_set:
             return data.copy() if copy else data
 
         di = DataIndex(data.index)
-        # 只有起始点无结束点：用 slice_by(start_ts, None)
-        mask = di.slice_by(time.ts, None)
+        if start_set and end_set:
+            mask = di.slice_by_datatime(start, end)
+        else:
+            start_ts = start.ts if start is not None and start_set else None
+            end_ts = end.ts if end is not None and end_set else None
+            mask = di.slice_by(start_ts, end_ts)
+        if start_set and warmup_window is not None:
+            mask = self._expand_window_mask_for_warmup(data, mask, warmup_window)
         data = cast(pd.DataFrame, data[mask])
         return cast(pd.DataFrame, data.copy()) if copy else data
+
+    def _expand_window_mask_for_warmup(
+        self,
+        data: pd.DataFrame,
+        mask: Any,
+        warmup_window: Any,
+    ) -> np.ndarray:
+        mask_array = np.asarray(mask, dtype=bool)
+        if mask_array.size == 0 or not mask_array.any():
+            return mask_array
+        warmup_bars = self._warmup_window_to_bars(warmup_window, data)
+        if warmup_bars <= 0:
+            return mask_array
+        positions = np.flatnonzero(mask_array)
+        left = max(0, int(positions[0]) - warmup_bars)
+        expanded = mask_array.copy()
+        expanded[left:int(positions[0])] = True
+        return expanded
+
+    def _warmup_window_to_bars(self, warmup_window: Any, data: pd.DataFrame) -> int:
+        from tools.factors.expr.rolling import _resolve_windows
+
+        if self._day_periods is None:
+            self._day_periods = self._infer_day_periods_from_index(data.index)
+        common, periods, product_periods = _resolve_windows(warmup_window, self.freq, [self.object])
+        if common:
+            return max(0, int(periods))
+        return max(0, int(product_periods.get(self.object, 0)))
+
+    @staticmethod
+    def _infer_day_periods_from_index(index: pd.Index) -> int:
+        finest = finest_index(index)
+        dt_index = pd.DatetimeIndex(finest)
+        if len(dt_index) == 0:
+            return 0
+        dates = pd.Series([ts.date() for ts in dt_index])
+        counts = dates.value_counts(sort=False)
+        if counts.empty:
+            return int(len(dt_index))
+        return int(counts.mode().iloc[0])
     
     @staticmethod
     def _get_adjusted_col_name(col: str) -> str:
@@ -314,14 +382,28 @@ class ProductDataView(UniqueNameObject):
     def _check_is_adjusted(col: str) -> bool:
         return col.endswith("_ADJUSTED")
 
-    def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True, start_calc_point: Optional[Any] = None) -> pd.DataFrame:
+    def get_and_adjust_cols(
+        self,
+        cols: List[str] | str,
+        copy: bool = True,
+        start_dt: Optional[Any] = None,
+        end_dt: Optional[Any] = None,
+        warmup_window: Optional[Any] = None,
+        source: Optional[Any] = None,
+    ) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
         cols = list(set(cols))
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy, start_calc_point=start_calc_point)
+        df = self.get_data(
+            copy=copy,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            warmup_window=warmup_window,
+            source=source,
+        )
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

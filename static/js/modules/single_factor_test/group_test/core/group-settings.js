@@ -117,12 +117,13 @@
     }
 
     // =========================================================================
-    // FIELD SCHEMA — base + dynamic (panel-registered) fields
+    // FIELD SCHEMA — structural fields + backend-registered runtime fields
     // =========================================================================
     //
-    // Core defines only structural fields. Config panel fields (fee, rebalance,
-    // liquidity, productMask, etc.) are injected at load time via registerField()
-    // from each panel's registry registration.
+    // Core defines only structural fields. Backtest settings, identity chips,
+    // and derived chip source fields are injected at load time via
+    // backendSettings after reading the backend manifest. UI panels do not own
+    // setting field definitions.
     //
     // registerField spec:
     //   { key, type: 'string'|'number'|'boolean'|'object'|'any', default, validate?, patchable? }
@@ -138,8 +139,8 @@
         // ── Tree / lineage ──
         { key: 'parentId',     type: 'string',  default: null },
 
-        // ── Tester / factor scoping (root only; child inherit from parent chain) ──
-        { key: 'testerId',    type: 'string',  default: '' },
+        // ── Product path / factor scoping (root only; child inherit from parent chain) ──
+        { key: 'product_path_selection', type: 'object', default: null },
         { key: 'factorAlias', type: 'string',  default: '' },
         { key: 'splitCount',  type: 'number',  default: 5,
           validate: function(v) {
@@ -199,10 +200,10 @@
     _rebuildSchema();
 
     // ═══════════════════════════════════════════════════════════════
-    // Dynamic field registration — panels call this to inject fields
+    // Dynamic field registration — backend manifest injects fields
     // ═══════════════════════════════════════════════════════════════
 
-    /** Register a field spec from a config panel. Must be called before any groups are created. */
+    /** Register a field spec from the backend settings manifest before groups are created. */
     api.registerField = function(spec) {
         if (!spec || !spec.key) return;
         // dedup: remove existing entry with same key
@@ -254,9 +255,9 @@
         }
 
         if (!hasParent) {
-            // Root nodes require testerId + factorAlias
-            if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
-                errors.push('testerId is required (non-empty string)');
+            // Root nodes require product_path_selection + factorAlias
+            if (!config.product_path_selection || typeof config.product_path_selection !== 'object') {
+                errors.push('product_path_selection is required');
             }
             if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
                 errors.push('factorAlias is required (non-empty string)');
@@ -346,7 +347,7 @@
     function _fillGroupFromConfig(item, config, hasParent) {
         var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
         var inheritedKeys = hasParent ? {
-            testerId: true,
+            product_path_selection: true,
             factorAlias: true,
             splitCount: true,
             groupIndex: true,
@@ -434,7 +435,7 @@
 
     function _groupsList() {
         return _groupItems.map(function(item) {
-            return { id: item.id, name: item.name, testerId: item.testerId, factorAlias: item.factorAlias };
+            return { id: item.id, name: item.name, product_path_selection: item.product_path_selection, factorAlias: item.factorAlias };
         });
     }
 
@@ -559,10 +560,18 @@
         if (node.parentId) {
             return _groupsEffectiveProductNames(_groupsGet(node.parentId), options, seen);
         }
-        // 根节点：用自身 products 或 testerId 解析
+        // 根节点：用自身 products 或 product_path_selection 解析
         if (Array.isArray(node.products) && node.products.length) return node.products.slice();
-        if (node.testerId && typeof options.getProductsForTester === 'function') {
-            return options.getProductsForTester(node.testerId) || [];
+        var selection = node.product_path_selection;
+        if (selection && Array.isArray(selection.products) && selection.products.length) {
+            return selection.products.map(function(item) {
+                return typeof item === 'string' ? item : (item && item.name);
+            }).filter(Boolean);
+        }
+        if (selection && Array.isArray(selection.product_groups) && selection.product_groups.length) {
+            return selection.product_groups.map(function(item) {
+                return typeof item === 'string' ? item : (item && item.name);
+            }).filter(Boolean);
         }
         return [];
     }
@@ -609,7 +618,6 @@
     var _lsIdCounter = 0;
 
     var VALID_LS_FEE_MODES = ['inherit', 'override'];
-    var VALID_LS_REBALANCE_MODES = ['each_period', 'buy_and_hold', 'recycle'];
 
     function _lsUuid() {
         _lsIdCounter += 1;
@@ -663,9 +671,6 @@
         if (config.feeRate !== undefined && config.feeRate !== null && (typeof config.feeRate !== 'number' || config.feeRate < 0)) {
             errors.push('feeRate must be a non-negative number or null');
         }
-        if (config.rebalanceMode !== undefined && config.rebalanceMode !== null && VALID_LS_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
-            errors.push('rebalanceMode must be one of: ' + VALID_LS_REBALANCE_MODES.join(', '));
-        }
         if (config.metadata !== undefined && (typeof config.metadata !== 'object' || config.metadata === null || Array.isArray(config.metadata))) {
             errors.push('metadata must be a plain object');
         }
@@ -684,7 +689,6 @@
             feeMode: config.feeMode || 'inherit',
             feeRate: config.feeRate !== undefined ? config.feeRate : null,
             useCloseToday: config.useCloseToday !== undefined ? config.useCloseToday : null,
-            rebalanceMode: config.rebalanceMode !== undefined ? config.rebalanceMode : null,
             needsRegenerate: true,
             metadata: config.metadata !== undefined ? _deepCopy(config.metadata) : {},
         };
@@ -828,9 +832,44 @@
      */
     function _settingsSnapshot() {
         return {
-            groups: _groupsGetAll(),
-            lsConfigs: _lsConfigsGetAll(),
+            groups: _groupsGetAll().map(_settingsGroupSnapshot),
+            lsConfigs: _lsConfigsGetAll().map(_settingsLongShortSnapshot),
         };
+    }
+
+    function _copyKeys(source, keys) {
+        var out = {};
+        keys.forEach(function(key) {
+            if (source[key] !== undefined) out[key] = _deepCopy(source[key]);
+        });
+        return out;
+    }
+
+    function _settingsGroupSnapshot(group) {
+        var out = _copyKeys(group || {}, [
+            'id', 'name', 'parentId', 'product_path_selection', 'factorAlias', 'splitCount',
+            'groupIndex', 'isAllGroups', 'shortAlias', 'productMask',
+        ]);
+        if (out.product_path_selection && GT.backendSettings && typeof GT.backendSettings.compactProductPathSelection === 'function') {
+            out.product_path_selection = GT.backendSettings.compactProductPathSelection(out.product_path_selection);
+        }
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(group || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
+    }
+
+    function _settingsLongShortSnapshot(config) {
+        var out = _copyKeys(config || {}, [
+            'id', 'name', 'shortAlias', 'longGroupId', 'shortGroupId',
+            'needsRegenerate', 'metadata',
+        ]);
+        if (GT.backendSettings && typeof GT.backendSettings.flattenGroupForSnapshot === 'function') {
+            var backendFields = GT.backendSettings.flattenGroupForSnapshot(config || {});
+            Object.keys(backendFields).forEach(function(key) { out[key] = backendFields[key]; });
+        }
+        return out;
     }
 
     /**
@@ -893,10 +932,10 @@
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
             var countText = group.splitCount != null ? group.splitCount : '未设置';
-            var feeText = group.feeMode || api.getFieldDefault('feeMode');
-            var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
-                + ' · 费率 ' + feeText + ' · 再平衡 ' + rebalanceText);
+                + ' · 设置 ' + Object.keys(group).filter(function(key) {
+                    return ['fee_mode', 'rebalance_trigger', 'position_policy', 'liquidity_mode', 'participation_rate'].indexOf(key) >= 0;
+                }).join(', '));
         });
         if (baseGroups.length > 8) {
             lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');

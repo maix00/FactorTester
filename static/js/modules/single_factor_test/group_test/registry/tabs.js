@@ -32,6 +32,7 @@
         LIST: 1,
         ADD: 2,
         CONFIG: 3,
+        EDIT: 4,
     };
 
     var GT_PANEL_REGISTRY = [];
@@ -80,11 +81,9 @@
         var el = document.getElementById('gt-section-status');
         if (!el) return;
         if (M.isMode('edit')) {
-            var REG = window.GT_CONFIG_REGISTRY;
-            var hasDirty = REG ? REG.hasDirty() : false;
             el.style.display = '';
-            el.style.color = hasDirty ? '#e65100' : '#888';
-            el.textContent = hasDirty ? '编辑中 - 未保存' : '编辑中';
+            el.style.color = '#888';
+            el.textContent = '编辑中';
         } else if (M.isMode('add')) {
             el.style.display = '';
             el.style.color = '#1565c0';
@@ -118,6 +117,8 @@
         // 取消按钮 — mousedown 后直接退出，无需等 blur 刷新
         var cancelBtn = document.getElementById('gt-action-cancel');
         if (cancelBtn) cancelBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitAddMode(); });
+        var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
+        if (cancelEditBtn) cancelEditBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitEditMode(); });
 
         // 提交/保存 — mousedown 先 blur 聚焦输入框，等 blur 回调执行后再提交
         var submitBtn = document.getElementById('gt-action-submit');
@@ -160,8 +161,19 @@
         if (!bar) return;
         var html = '';
         var d = M.getAddDraft();
+        function visibleIcon(innerHtml, title) {
+            var raw = String(innerHtml || '');
+            if (raw.indexOf('<i') < 0) return raw;
+            if (raw.indexOf('fa-plus') >= 0) return '+';
+            if (raw.indexOf('fa-times') >= 0) return '&times;';
+            if (raw.indexOf('fa-save') >= 0) return '&#10003;';
+            if (raw.indexOf('fa-copy') >= 0) return '&#10697;';
+            if (raw.indexOf('fa-trash') >= 0) return '&#128465;';
+            if (raw.indexOf('fa-edit') >= 0 || raw.indexOf('fa-pencil') >= 0) return '&#9998;';
+            return String(title || '') || raw;
+        }
         function iconButton(id, title, innerHtml, cls, extraStyle) {
-            return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + innerHtml + '</button>';
+            return '<button id="' + id + '" class="btn btn-sm ' + (cls || 'btn-primary') + '" title="' + title + '" aria-label="' + title + '" style="padding:4px 10px;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:30px;' + (extraStyle || '') + '">' + visibleIcon(innerHtml, title) + '</button>';
         }
 
         if (M.isMode('add')) {
@@ -183,6 +195,7 @@
                 html += iconButton('gt-action-edit-' + act.name, act.title || act.label || act.name, act.label, cls, act.style || '');
             }
             html += ' ' + iconButton('gt-action-save', '保存修改', '<i class="fas fa-save"></i>', 'btn-primary', '');
+            html += ' ' + iconButton('gt-action-cancel-edit', '取消编辑', '<i class="fas fa-times"></i>', 'btn-outline-secondary', '');
 
         } else {
             // list 模式 — 固定显示「新增分组」
@@ -230,11 +243,6 @@
         var d = M.getAddDraft();
         if (!d) { alert('草稿丢失'); return; }
 
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.commitDirty === 'function') {
-            try { REG.commitDirty(); } catch(e) {}
-        }
-
         var onSubmit = M.getOnSubmit();
         if (typeof onSubmit === 'function') {
             onSubmit(d, { exitAdd: _exitAddMode });
@@ -245,13 +253,11 @@
     }
 
     function _enterEditMode(selection) {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.rollbackDirty();
         M.enterEdit(selection);
         _currentTab = 'list';
         _renderTabActions();
         _renderTabBar();
-        mountTab('list');
+        mountTab(_currentTab);
     }
 
     function _exitEditMode() {
@@ -262,8 +268,6 @@
     }
 
     function _saveEditChanges() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG) REG.commitDirty();
         M.exitEdit();
         _renderTabActions();
         _renderTabBar();
@@ -274,7 +278,7 @@
 
     function _visibleCategories() {
         if (M.isMode('list')) return [TAB_CATEGORY.LIST];
-        if (M.isMode('edit')) return [TAB_CATEGORY.LIST, TAB_CATEGORY.CONFIG];
+        if (M.isMode('edit')) return [TAB_CATEGORY.LIST, TAB_CATEGORY.EDIT, TAB_CATEGORY.CONFIG];
         if (M.isMode('add')) return [TAB_CATEGORY.ADD, TAB_CATEGORY.CONFIG];
         return [TAB_CATEGORY.LIST];
     }
@@ -354,31 +358,26 @@
                 visible: function() { return M.isAddFlow('group'); }
             });
         }
+        if (P.add && P.add.derived) {
+            registerPanel({
+                name: 'add-derived', label: '创建派生组', containerId: 'add-derived',
+                category: TAB_CATEGORY.ADD, panel: P.add.derived,
+                visible: function() { return M.isAddFlow('derived'); }
+            });
+        }
+        if (P.edit && P.edit.group) {
+            registerPanel({
+                name: 'edit-group', label: '修改分组', containerId: 'edit-group',
+                category: TAB_CATEGORY.EDIT, panel: P.edit.group,
+                visible: function() {
+                    var ctx = M.getEditContext ? M.getEditContext() : { groups: [] };
+                    return ctx.groups && ctx.groups.some(function(group) {
+                        return group && !group.parentId;
+                    });
+                }
+            });
+        }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
-        if (P.config && P.config.fee) {
-            registerPanel({
-                name: 'fee', label: '手续费', containerId: 'config-fee',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.fee
-            });
-        }
-        if (P.config && P.config.rebalance) {
-            registerPanel({
-                name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.rebalance
-            });
-        }
-        if (P.config && P.config.liquidity) {
-            registerPanel({
-                name: 'liquidity', label: '💧 流动性', containerId: 'config-liquidity',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.liquidity
-            });
-        }
-        if (P.config && P.config.productSift) {
-            registerPanel({
-                name: 'config-product-sift', label: '🌾 品种筛选', containerId: 'config-product-sift',
-                category: TAB_CATEGORY.CONFIG, panel: P.config.productSift
-            });
-        }
     }
 
     function init() {
@@ -401,6 +400,7 @@
         enterAddMode: _enterAddMode,
         exitAddMode: _exitAddMode,
         renderTabActions: _renderTabActions,
+        refreshTabBar: _renderTabBar,
         _selectedEditIds: function() { return M.getEditIds(); },
     };
 
@@ -411,7 +411,7 @@
     // ── 批量删除 ──
     M.registerEditAction({
         name: 'delete',
-        label: '<span style="color:#d40000;font-weight:700;font-size:16px;line-height:1;">&times;</span>',
+        label: '<i class="fas fa-trash"></i>',
         title: '删除',
         priority: 50,
         condition: function(ctx) { return ctx.count > 0; },
@@ -429,55 +429,7 @@
         }
     });
 
-    // ── 复制（派生组） ──
-    M.registerEditAction({
-        name: 'clone',
-        label: '<i class="fas fa-copy"></i>',
-        title: '复制为派生组',
-        priority: 40,
-        condition: function(ctx) { return ctx.count > 0; },
-        action: function(ctx, helpers) {
-            var groups = GT.groupSettings.groups;
-            var ids = ctx.ids;
-            var created = [];
-            for (var i = 0; i < ids.length; i++) {
-                var src = groups.get(ids[i]);
-                if (!src) continue;
-                var parent = src.parentId ? groups.get(src.parentId) : src;
-                if (!parent) continue;
-                var clone = {
-                    name: '',
-                    parentId: src.id,
-                    splitCount: src.splitCount || (parent && parent.splitCount) || 1,
-                    groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
-                    productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
-                };
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
-                 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
-                    if (src[key] !== undefined && src[key] !== null) {
-                        clone[key] = (typeof src[key] === 'object') ? JSON.parse(JSON.stringify(src[key])) : src[key];
-                    }
-                });
-                try {
-                    var newId = groups.add(clone);
-                    created.push(newId);
-                } catch (err) {
-                    alert('复制失败: ' + (err && err.message || err));
-                    break;
-                }
-            }
-            if (created.length > 0) {
-                // 选中新创建的派生组
-                var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
-                if (sel) {
-                    sel.clear();
-                    for (var j = 0; j < created.length; j++) { sel.add(created[j]); }
-                }
-                if (GT.events && GT.events.emit) GT.events.emit('derivedGraphChanged');
-            }
-            helpers.exitEdit();
-        }
-    });
+    // 复制(clone) 现已改为可编辑 flow，注册在 panels/add/derived.js（复用派生表单）。
 
     GT.log('registry/tabs loaded');
 })();

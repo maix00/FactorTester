@@ -8,7 +8,7 @@ from sources.LocalCNFutures import SOURCE_DATA_DIR
 from sources.LocalCNFutures.product_catalog import load_product_catalog
 from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
 
-_data = load_product_catalog()
+_data = load_product_catalog(sync=False)
 data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
 data_path_day = os.path.join(SOURCE_DATA_DIR, 'main_series_adjusted.parquet')
 data_dir_day = os.path.join(SOURCE_DATA_DIR, 'main_dayk')
@@ -219,7 +219,7 @@ class CNFutures(Futures):
 
         数据源：SQLite 规范品种视图中的「合约标的」→「品种代码」。
         首次调用会构建缓存映射。
-        可传入 extra_map 补充 sectors.csv 覆盖不到的别名（如国信页面用名）。
+        可传入 extra_map 补充 SQLite catalog 覆盖不到的别名（如国信页面用名）。
         未找到时返回原字符串。
         """
         if cls._DESC_TO_CODE is None:
@@ -230,7 +230,7 @@ class CNFutures(Futures):
                 if variety and code:
                     cls._DESC_TO_CODE[variety] = code
         desc_str = str(desc)
-        # priority: extra_map > sectors.csv
+        # priority: extra_map > SQLite catalog
         if extra_map and desc_str in extra_map:
             return extra_map[desc_str]
         return cls._DESC_TO_CODE.get(desc_str, desc)
@@ -454,10 +454,16 @@ for product in CNFUTURES:
 
 from tools.products.categories.Category import Category
 
+_MEANINGFUL_SECTOR_VALUES = sorted({
+    value
+    for value in CNFUTURES_CATEGORY_SECTOR.values()
+    if str(value).strip() and str(value).strip() not in {"未分类", "Others"}
+})
+
 CNFuturesSectorCategory = Category(
     alias = '行业',
     type = CNFutures,
-    categories = list(set(CNFUTURES_CATEGORY_SECTOR.values())),
+    categories = _MEANINGFUL_SECTOR_VALUES,
 )
 CNFuturesSectorCategory._whether_is_in_category = lambda catname, obj: catname == CNFUTURES_CATEGORY_SECTOR.get(obj)
 CNFuturesSectorCategory.objs = CNFUTURES
@@ -487,4 +493,8 @@ def get_value_alias_for_day_night_time_category(x: str) -> str:
     return '日盘'
 CNFuturesDayNightTimeCategory.get_value_alias = get_value_alias_for_day_night_time_category
 
-CNFuturesSectorNightTimeCategory = CNFuturesSectorCategory * CNFuturesDayNightTimeCategory
+CNFuturesSectorNightTimeCategory = (
+    CNFuturesSectorCategory * CNFuturesDayNightTimeCategory
+    if _MEANINGFUL_SECTOR_VALUES
+    else CNFuturesDayNightTimeCategory
+)

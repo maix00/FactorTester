@@ -1,139 +1,34 @@
 <div class="module" id="group_test_module" style="margin-top:24px;">
+    <style>
+    </style>
     <div class="section-title">分组测试</div>
 
-    <!-- ═══════════════════════════════════════════════════════════════════════
-         第1层：时间范围（独立设置，不依赖时间模块）
-         ═══════════════════════════════════════════════════════════════════════ -->
-    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;flex-direction:column;gap:10px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
-        <div id="gt-local-settings-tab-bar" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-        <div data-local-settings-tab-panel="dates" style="display:flex;flex-direction:column;gap:8px;">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
-                <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
-            </div>
-            <div class="group-setting-row" style="margin-bottom:0;">
-                <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
-                <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="margin-left:4px;"></span>
-                <input type="number" id="group_start_hour" placeholder="时" min="0" max="23" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-                <span style="color:#999;">:</span>
-                <input type="number" id="group_start_minute" placeholder="分" min="0" max="59" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-            </div>
-            <div class="group-setting-row" style="margin-bottom:0;">
-                <label style="margin-bottom:0;white-space:nowrap;">终止：</label>
-                <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="color:#999;">-</span>
-                <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="margin-left:4px;"></span>
-                <input type="number" id="group_end_hour" placeholder="时" min="0" max="23" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-                <span style="color:#999;">:</span>
-                <input type="number" id="group_end_minute" placeholder="分" min="0" max="59" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;background:#eee;">
-            </div>
-            <!-- 时间精度 + 时区（时区仅 exact 时显示） -->
-            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:4px;">
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-                    <input type="radio" name="group_time_precision" value="day" id="group_precision_day" style="width:auto;margin:0;"> 📅 天级
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-                    <input type="radio" name="group_time_precision" value="exact" id="group_precision_exact" checked style="width:auto;margin:0;"> ⏰ 精确时间
-                </label>
-                <span id="group_tz_wrap" style="display:flex;align-items:center;gap:4px;font-size:12px;">
-                    <span style="color:#888;">🌐 时区</span>
-                    <select id="group_tz" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;background:#fff;">
-                        <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
-                        <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
-                        <option value="Asia/Hong_Kong">Asia/Hong_Kong (UTC+8)</option>
-                        <option value="Asia/Singapore">Asia/Singapore (UTC+8)</option>
-                        <option value="Asia/Kolkata">Asia/Kolkata (UTC+5:30)</option>
-                        <option value="Europe/London">Europe/London (UTC+0/+1)</option>
-                        <option value="Europe/Paris">Europe/Paris (UTC+1/+2)</option>
-                        <option value="America/New_York">America/New_York (UTC-5/-4)</option>
-                        <option value="America/Chicago">America/Chicago (UTC-6/-5)</option>
-                        <option value="UTC">UTC</option>
-                    </select>
-                </span>
-            </div>
-        </div>
-        <div data-local-settings-tab-panel="initialCapital" style="display:none;flex-direction:column;gap:10px;">
-            <span style="font-weight:600;font-size:13px;color:#1f2937;">💵 初始金额</span>
-            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
-                    <input
-                        type="number"
-                        id="group_initial_capital"
-                        placeholder="100000000"
-                        min="0"
-                        step="1000"
-                        value="100000000"
-                        style="width:140px;text-align:right;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_base_currency" style="margin-bottom:0;white-space:nowrap;">基础货币：</label>
-                    <input
-                        type="text"
-                        id="group_base_currency"
-                        placeholder="CNY"
-                        value="CNY"
-                        style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-                <div class="group-setting-row" style="margin-bottom:0;">
-                    <label for="group_currency_conversion_fee_rate" style="margin-bottom:0;white-space:nowrap;">换汇佣金率：</label>
-                    <input
-                        type="number"
-                        id="group_currency_conversion_fee_rate"
-                        placeholder="0"
-                        min="0"
-                        step="0.000001"
-                        value="0"
-                        style="width:120px;padding:6px;border:1px solid #ddd;border-radius:4px;"
-                    >
-                </div>
-            </div>
-            <span style="font-size:11px;color:#888;">用于交易簿回测的开仓资金；图表仍显示归一化净值</span>
-        </div>
-        <div data-local-settings-tab-panel="calendarFreq" style="display:flex;flex-direction:column;gap:10px;">
-            <label style="display:flex;align-items:center;gap:8px;margin:0;font-weight:600;font-size:13px;color:#1f2937;">
-                <input type="checkbox" id="group_calendar_freq_auto" checked>
-                自动判断公共时间轴频率
-            </label>
-            <div id="group_calendar_freq_manual_wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span style="font-size:12px;color:#4b5563;">手动选择：</span>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="1min" checked>
-                    <span>1分钟</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="5min">
-                    <span>5分钟</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;margin:0;">
-                    <input type="radio" name="group_calendar_freq" value="1day">
-                    <span>1天</span>
-                </label>
-            </div>
-            <span style="font-size:11px;color:#888;">仅允许 1min、5min、1day；手动选择若不能整除参与测试因子频率，后端会直接报错</span>
-        </div>
+    <div class="group-test-layer gt-backtest-settings-shell backend-settings-shell" id="gt-layer-backtest-settings">
+        <div id="gt-local-settings-tab-bar" class="gt-backtest-settings-tab-bar backend-settings-tab-bar"></div>
+        <div
+            id="gt-local-settings-chip-row"
+            class="gt-backtest-settings-chip-row backend-settings-chip-row"
+            style="display:none;"
+        ></div>
+        <div
+            id="gt-backtest-local-host"
+            data-application="group_test"
+            class="gt-backtest-settings-host backend-settings-host"
+            style="display:none;"
+        ></div>
     </div>
     <!-- ═══════════════════════════════════════════════════════════════════════
          第2层：可折叠标题行 + 主 Tab + 子面板区
          ═══════════════════════════════════════════════════════════════════════ -->
     
     <!-- 2a. 可折叠标题行 -->
-    <div id="gt-section-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0f4f8;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-top:12px;user-select:none;">
-        <span id="gt-section-toggle" style="font-size:14px;transition:transform 0.2s;display:inline-block;">▼</span>
-        <span style="font-weight:600;font-size:14px;color:#1f2937;">📦 分组组合设置</span>
-        <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
-        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
-            <span id="group_test_status" style="font-size:12px;color:#888;"></span>
+    <div id="gt-section-header" class="gt-section-title-strip gt-section-title-strip-spaced">
+        <span id="gt-section-toggle" class="gt-section-toggle">▼</span>
+        <span class="gt-section-title-text">📦 分组组合设置</span>
+        <span id="gt-section-status" class="gt-section-title-meta" style="display:none;"></span>
+        <div class="gt-section-title-actions" onclick="event.stopPropagation()">
+            <span id="group_test_status" class="gt-section-title-meta"></span>
+            <button id="cancel_group_test_btn" class="btn btn-outline-danger btn-sm" style="display:none;">取消测试</button>
             <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
         </div>
     </div>
@@ -224,6 +119,10 @@
 
     <!-- 统一分组设置面板挂载点 -->
     <div id="group-tab-container" class="group-test-nav-shell" style="display:none;"></div>
+
+    <div id="group-evaluation-toolbar" style="display:none;justify-content:flex-end;margin-top:14px;">
+        <button id="group-oos-toggle" type="button" class="btn btn-sm btn-outline-secondary">显示样本外</button>
+    </div>
 
     <!-- 图表容器 -->
     <div id="group_chart_container" style="margin-top:16px;width:100%;height:600px;display:none;"></div>
@@ -511,10 +410,16 @@
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
             <div style="display:flex;align-items:center;gap:8px;">
-                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一时刻">◀ 前一时刻</button>
-                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一时刻">后一时刻 ▶</button>
-                <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一个持仓发生变化的时刻">◀ 前一变化</button>
-                <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一个持仓发生变化的时刻">后一变化 ▶</button>
+                <div class="snapshot-nav-group" title="事件组：TARGET / FILL / BAR_CLOSE 的相邻事件">
+                    <span class="snapshot-nav-label">事件组</span>
+                    <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一事件组" aria-label="前一事件组">◀</button>
+                    <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一事件组" aria-label="后一事件组">▶</button>
+                </div>
+                <div class="snapshot-nav-group" title="持仓变化：跳转到至少一个组合持仓发生变化的成交事件">
+                    <span class="snapshot-nav-label">持仓变化</span>
+                    <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一持仓变化" aria-label="前一持仓变化">◁</button>
+                    <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一持仓变化" aria-label="后一持仓变化">▷</button>
+                </div>
                 <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -876,7 +781,52 @@
         color: #0f4c81;
         font-weight: 600;
     }
-
+    #group_test_module #gt-tab-actions .btn {
+        min-height: 28px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    #group_test_module #gt-tab-actions .btn {
+        min-width: 30px;
+        font-weight: 600;
+    }
+    #group_test_module .gt-backtest-setting-row {
+        display: grid;
+        grid-template-columns: minmax(90px, 0.35fr) minmax(160px, 0.65fr);
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 11px;
+        color: #334155;
+    }
+    #group_test_module .gt-backtest-setting-row:last-child {
+        border-bottom: 0;
+    }
+    #group_test_module .gt-backtest-setting-label {
+        color: #64748b;
+        white-space: nowrap;
+    }
+    #group_test_module .gt-backtest-setting-control {
+        min-width: 0;
+    }
+    #group_test_module .gt-backtest-setting-control select,
+    #group_test_module .gt-backtest-setting-control input {
+        width: 100%;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #1f2937;
+        font-size: 11px;
+    }
     /* Submission tabs in selector bar */
     #group_test_module .gt-submission-tab {
         padding: 4px 12px;
@@ -911,17 +861,59 @@
     #group_test_module .gt-strategy-row:hover {
         background: #f6f8fb;
     }
+    #group_test_module #gt-strategy-table {
+        table-layout: auto;
+        min-width: 760px;
+    }
+    #group_test_module #gt-strategy-table th,
+    #group_test_module #gt-strategy-table td {
+        padding: 7px 10px;
+        border-bottom: 1px solid #eef2f7;
+        vertical-align: top;
+        line-height: 1.45;
+    }
+    #group_test_module #gt-strategy-table th {
+        background: #f8fafc;
+        color: #475467;
+        font-weight: 600;
+        text-align: left;
+        white-space: nowrap;
+    }
+    #group_test_module .gt-strategy-type-cell {
+        width: 1%;
+        color: #1f2937;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    #group_test_module .gt-strategy-status-cell {
+        width: 1%;
+        color: #475467;
+        white-space: nowrap;
+    }
+    #group_test_module .gt-strategy-detail-cell {
+        color: #344054;
+    }
+    #group_test_module .gt-strategy-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px 6px;
+        align-items: center;
+    }
 
     /* ── Snapshot 矩阵表格 ── */
     #group_test_module .snapshot-matrix-table {
-        width: 100%;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: 12px;
-        table-layout: fixed;
+        table-layout: auto;
     }
     #group_test_module .snapshot-matrix-scroll {
         width: 100%;
-        overflow: auto;
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: auto;
+        overscroll-behavior-x: contain;
     }
     #group_test_module .snapshot-matrix-table th {
         position: sticky;
@@ -939,10 +931,11 @@
         padding: 4px 8px;
         border-bottom: 1px solid #edf0f4;
         white-space: normal;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow: visible;
+        text-overflow: clip;
         vertical-align: middle;
         word-break: break-word;
+        min-width: 150px;
     }
     #group_test_module .snapshot-prod-name-cell {
         font-weight: 500;
@@ -951,7 +944,8 @@
         position: sticky;
         left: 0;
         z-index: 1;
-        min-width: 90px;
+        min-width: 132px;
+        max-width: 190px;
     }
     /* 状态颜色 */
     #group_test_module .snapshot-cell-holding {
@@ -1055,6 +1049,9 @@
         font-size: 11px;
         line-height: 1.35;
         font-weight: 600;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
     }
     #group_test_module .snapshot-status-label {
         display: inline-block;
@@ -1103,6 +1100,21 @@
         color: #0f4c81;
         font-weight: 600;
     }
+    #group_test_module .snapshot-matrix-switch-paired {
+        gap: 12px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+    #group_test_module .snapshot-toggle-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        background: #fff;
+    }
     #group_test_module .snapshot-batch-section {
         margin-bottom: 20px;
         border: 1px solid #e5e7eb;
@@ -1131,12 +1143,106 @@
         line-height: 1.2;
         color: #98a2b3;
     }
+    #group_test_module .snapshot-col-events {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 3px;
+        margin-top: 3px;
+    }
+    #group_test_module .snapshot-col-event {
+        display: inline-flex;
+        align-items: center;
+        min-height: 16px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #eef2f7;
+        color: #334155;
+        font-size: 10px;
+        line-height: 1.2;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-event-fill {
+        background: #e8f5ee;
+        color: #166534;
+    }
+    #group_test_module .snapshot-event-target {
+        background: #eff6ff;
+        color: #1d4ed8;
+    }
     #group_test_module .snapshot-ls-section {
         border-color: #c7d2e0;
     }
     #group_test_module .snapshot-ls-header {
         background: #eef2f8;
         color: #3a5a8c;
+    }
+    #group_test_module .snapshot-main-tabs {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 8px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #fff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+    #group_test_module .snapshot-main-tab {
+        border: 1px solid #d0d5dd;
+        background: #fff;
+        color: #344054;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-main-tab.active {
+        background: #2563eb;
+        border-color: #2563eb;
+        color: #fff;
+    }
+    #group_test_module .snapshot-tab-content {
+        min-height: 120px;
+    }
+    #group_test_module .snapshot-order-flow-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 10px;
+        border-bottom: 1px solid #eef2f7;
+        background: #f9fafb;
+    }
+    #group_test_module .snapshot-order-flow-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    #group_test_module .snapshot-order-flow-table th,
+    #group_test_module .snapshot-order-flow-table td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 8px;
+        vertical-align: top;
+        white-space: nowrap;
+        color: #344054;
+    }
+    #group_test_module .snapshot-order-flow-table th {
+        background: #f8fafc;
+        color: #475467;
+        font-weight: 700;
+    }
+    #group_test_module .snapshot-order-step {
+        display: inline-block;
+        border: 1px solid #c7d2fe;
+        background: #eef2ff;
+        color: #3730a3;
+        border-radius: 4px;
+        padding: 2px 5px;
+        font-size: 11px;
+        font-weight: 700;
     }
     #group_test_module .snapshot-empty-tab {
         padding: 24px;
@@ -1173,6 +1279,29 @@
         line-height: 1;
         white-space: nowrap;
     }
+    #group_test_module .snapshot-nav-btn {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        text-align: center;
+        font-size: 13px;
+    }
+    #group_test_module .snapshot-nav-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 3px 2px 7px;
+        border: 1px solid #e4e7ec;
+        border-radius: 6px;
+        background: #f8fafc;
+    }
+    #group_test_module .snapshot-nav-label {
+        color: #475467;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+    }
     #group_test_module .snapshot-close-btn {
         background: #fff5f5;
         border-color: #fecaca;
@@ -1184,15 +1313,14 @@
         white-space: nowrap;
     }
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/fancytree/ui.fancytree.min.css') }}">
 
 <!-- GroupTest essential scripts: loaded inline for tabs & section toggle to work immediately -->
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/backend-settings.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/date-inputs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
 
 <!-- GroupTest deferred scripts: lazy-loaded when user expands "分组组合设置" section (clicks ▼) -->
@@ -1204,18 +1332,18 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/add-group-batch.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-group-batch.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}",
+    "https://code.jquery.com/jquery-3.6.0.min.js",
+    "{{ url_for('static', filename='vendor/fancytree/jquery.fancytree-all-deps.min.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}",
+    "{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}",
+    "{{ url_for('static', filename='js/modules/products/product_selector.js') }}",
+    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/group_chip_list.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/group.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/product-sift.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/derived.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}",
@@ -1230,8 +1358,7 @@
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}",
-    "{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}",
-    "{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}",
+    "{{ url_for('static', filename='js/modules/shared/overlays/product_path_selection_products.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}",
     "{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}",
@@ -1253,19 +1380,64 @@
     var _loaded = false;
 
     function _loadAllScripts() {
-        // 并行 fetch 所有脚本内容，然后按顺序拼成一个 inline script 执行
-        // 既保证并行下载速度，又保证 DOM 顺序执行
-        return Promise.all(urls.map(function(src) {
-            return fetch(src).then(function(r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
-                return r.text();
+        var fetchFn = (typeof window.fetch === 'function') ? window.fetch.bind(window) : null;
+        function loadViaXHR(src) {
+            return new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', src, true);
+                xhr.onload = function() {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText || '');
+                    else reject(new Error('HTTP ' + xhr.status + ' for ' + src));
+                };
+                xhr.onerror = function() { reject(new Error('Network error for ' + src)); };
+                xhr.send();
             });
-        })).then(function(contents) {
-            var combined = contents.join('\n');
+        }
+        function loadText(src) {
+            if (fetchFn) {
+                return fetchFn(src).then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
+                    return r.text();
+                }).catch(function() {
+                    return loadViaXHR(src);
+                });
+            }
+            return loadViaXHR(src);
+        }
+        function runInline(src, text) {
             var s = document.createElement('script');
-            s.textContent = combined;
+            s.textContent = text + '\n//# sourceURL=' + src;
             document.body.appendChild(s);
+        }
+        function runExternal(src) {
+            return new Promise(function(resolve, reject) {
+                var s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = function() { reject(new Error('script load failed for ' + src)); };
+                document.body.appendChild(s);
+            });
+        }
+        var chain = Promise.resolve();
+        urls.forEach(function(src) {
+            chain = chain.then(function() {
+                return loadText(src).then(function(text) {
+                    runInline(src, text);
+                }).catch(function() {
+                    return runExternal(src);
+                });
+            });
+        });
+        return chain.then(function() {
             console.log('[GT lazy] all ' + urls.length + ' scripts loaded and executed');
+        }).catch(function(err) {
+            console.error('[GT lazy] failed to load deferred scripts', err);
+            var status = document.getElementById('group_test_status');
+            if (status) {
+                status.textContent = '分组设置脚本加载失败: ' + (err && err.message ? err.message : err);
+                status.style.color = '#d40000';
+            }
+            throw err;
         });
     }
 

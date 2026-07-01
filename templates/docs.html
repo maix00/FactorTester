@@ -165,7 +165,7 @@
             <tr><th>函数/变量</th><th>说明</th></tr>
             <tr><td><code>_tester_cache</code></td><td>FactorTester 单例缓存，按因子名 key</td></tr>
             <tr><td><code>_active_tester</code></td><td><code>ContextVar</code>，当前请求的活跃 tester，保证线程安全</td></tr>
-            <tr><td><code>params_store</code></td><td>dict，按 session 与因子名存储当前参数组列表</td></tr>
+            <tr><td><code>page_factors</code></td><td>dict，按 page_uuid 与 alias 存储 Factor 实例（单一真相源）</td></tr>
             <tr><td><code>current_user()</code></td><td>从 Flask session 获取当前登录用户名</td></tr>
             <tr><td><code>get_factor_family_instance()</code></td><td>位于 <code>server/services/factor_registry.py</code>，负责实例化因子族类</td></tr>
             <tr><td><code>get_factor_main_section_html()</code></td><td>位于 <code>server/modules/single_factor_test/view_helpers.py</code>，渲染单因子测试主页 HTML 片段</td></tr>
@@ -182,17 +182,14 @@
             <tr><td><code>templates/base.html</code></td><td>基础布局，包含侧边栏因子列表、搜索框、用户状态。所有功能页继承此模板</td></tr>
             <tr><td><code>templates/home.html</code></td><td>首页，模块导航卡片 + 登录/注册弹窗</td></tr>
             <tr><td><code>templates/login.html</code></td><td>独立登录页面</td></tr>
-            <tr><td><code>templates/factor_main.html</code></td><td>因子测试主框架，集成参数、时间、品种、IC、分组等子模块</td></tr>
+            <tr><td><code>templates/single_factor_test_main.html</code></td><td>因子测试主框架，集成参数、时间、品种、IC、分组等子模块</td></tr>
         </table>
 
         <h3>3.2 子模块 (templates/modules/)</h3>
         <table>
             <tr><th>模块</th><th>说明</th></tr>
-            <tr><td><code>shared/parameter_module.html</code></td><td>参数配置表格，支持新增/删除/拖拽排序/模板管理</td></tr>
-            <tr><td><code>shared/time_range_module.html</code></td><td>时间范围选择，支持交易日模式、期货日夜盘、时区</td></tr>
             <tr><td><code>shared/latex_module.html</code></td><td>MathJax 渲染因子公式和文字说明</td></tr>
-            <tr><td><code>single_factor_test/category_filter_module.html</code></td><td>树状产品选择器 (Fancytree)，产品路径提交</td></tr>
-            <tr><td><code>single_factor_test/global_template_module.html</code></td><td>单因子设置快照：一键保存/加载当前因子家族的设置组合</td></tr>
+            <tr><td><code>shared/product_path_settings.js</code></td><td>产品路径设置状态、候选列表和现场路径组构建器；具体入口由后端注册的设置模块按需打开</td></tr>
             <tr><td><code>single_factor_test/ic_test_module.html</code></td><td>IC 测试配置，自定义收益率频率</td></tr>
             <tr><td><code>single_factor_test/group_test_module.html</code></td><td>分组回测设置：分组数、手续费模式、多周期对比</td></tr>
         </table>
@@ -201,9 +198,7 @@
         <table>
             <tr><th>JS 文件</th><th>核心功能</th></tr>
             <tr><td><code>static/js/base.js</code></td><td>全局工具：<code>searchFactors()</code> 搜索、<code>shutdownServer()</code> 关机、数字格式化</td></tr>
-            <tr><td><code>static/js/factor_main.js</code></td><td>因子主页初始化，加载子模块</td></tr>
-            <tr><td><code>shared/parameter_module.js</code></td><td>参数 CRUD：<code>reloadParamModule()</code>、模板保存/加载、<code>/replace_params</code> API</td></tr>
-            <tr><td><code>shared/time_range_module.js</code></td><td>时间抽屉控制，交易日/期货盘面联动，同步到分组模块</td></tr>
+
             <tr><td><code>shared/date_utils.js</code></td><td>日期处理：<code>carryOver()</code> 进位、<code>adjustTime()</code> 修正</td></tr>
             <tr><td><code>single_factor_test/ic_test_module.js</code></td><td>运行 IC 测试，渲染 IC 序列/衰减/ACF/滚动 IC 图表 (Highcharts)</td></tr>
             <tr><td><code>single_factor_test/group_test_module.js</code></td><td>分组回测，渲染累积净值曲线，支持前端实时费率敏感性分析</td></tr>
@@ -232,11 +227,7 @@
         <h3>4.2 参数管理</h3>
         <table>
             <tr><th>路由</th><th>方法</th><th>说明</th></tr>
-            <tr><td><code>/add_params</code></td><td>POST</td><td>新增一组因子参数</td></tr>
-            <tr><td><code>/delete_params</code></td><td>POST</td><td>删除指定索引的参数组</td></tr>
-            <tr><td><code>/reorder_params</code></td><td>POST</td><td>拖拽排序后的参数组顺序</td></tr>
-            <tr><td><code>/replace_params</code></td><td>POST</td><td>批量替换所有参数组（含去重）</td></tr>
-            <tr><td><code>/api/current_params/&lt;alias&gt;</code></td><td>GET</td><td>获取当前 session 中的参数列表</td></tr>
+            <tr><td><code>/add_factor_by_params</code></td><td>POST</td><td>新增一组因子参数（写入 page_factors）</td></tr>
         </table>
 
         <h3>4.3 模板系统 (CRUD 统一模式)</h3>
@@ -403,7 +394,7 @@
             <tr>
                 <td><a href="/docs/tool/factors/Parameters.py"><code>Parameters.py</code></a></td>
                 <td><code>Parameters</code></td>
-                <td>因子参数组。管理 StartCalcPointParam、FactorNextPeriodReturns 等因子系统级参数。</td>
+                <td>因子参数组。管理 FactorNextPeriodReturns 等因子系统级参数；因子计算窗口由调用方显式传入。</td>
             </tr>
         </table>
 
@@ -444,12 +435,12 @@
         </table>
 
         <h3>7.2 CNFutures 数据文件</h3>
-        <p><code>CNFutures</code> 通过 <code>../data/</code> 目录下的文件读取行情与元数据，数据管线如下：</p>
+        <p><code>CNFutures</code> 通过行情文件与 SQLite 元数据表读取数据，数据管线如下：</p>
 
         <h4>元数据 &amp; 映射</h4>
         <table>
             <tr><th>文件</th><th>格式</th><th>说明</th></tr>
-            <tr><td><code>../data/sectors.csv</code></td><td>CSV</td><td>品种分类元数据。含品种代码、合约标的、类别、交易所、版本、日夜盘时间、标准合约终止日等字段</td></tr>
+            <tr><td><code>src_local_cnfutures_sectors</code></td><td>SQLite 表</td><td>品种分类元数据。含品种代码、合约标的、类别、交易所、版本、日夜盘时间、标准合约终止日等字段</td></tr>
             <tr><td><code>../data/wind_mapping.parquet</code></td><td>Parquet</td><td>Wind 主力合约映射表。记录每个交易日各品种对应的主力合约代码（S_INFO_WINDCODE → FS_MAPPING_WINDCODE），含起止日期</td></tr>
             <tr><td><code>../data/wind_mapping.csv</code></td><td>CSV</td><td>同上，CSV 格式备份</td></tr>
         </table>

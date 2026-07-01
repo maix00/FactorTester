@@ -10,11 +10,10 @@
     GT.panels = GT.panels || {};
     GT.panels.list = GT.panels.list || {};
 
-    var H, REG, R, SEL;
+    var H, R, SEL;
 
     function _ensureDeps() {
         if (!H) H = GT.panels.list._helpers;
-        if (!REG) REG = window.GT_CONFIG_REGISTRY;
         if (!R) R = GT.panels.list.render;
     }
 
@@ -58,6 +57,16 @@
         // state = { fullRender, expandedBatches, lsSectionExpanded, getAddGroupBatchMap }
         var fullRender = state.fullRender;
         var batchMapRef = state.getAddGroupBatchMap || function() { return H.getAddGroupBatchMap(); };
+
+        container.querySelectorAll('.unified-chip-toggle-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (state.showFullChips) {
+                    state.showFullChips.val = !state.showFullChips.val;
+                }
+                if (typeof fullRender === 'function') fullRender();
+            });
+        });
 
         // ── LS section ──
 
@@ -129,7 +138,7 @@
         // ── Base group rows ──
         container.querySelectorAll('.unified-bg-row').forEach(function(row) {
             row.addEventListener('click', function(e) {
-                if (e.target.closest('button') || e.target.closest('.unified-config-chip') || e.target.closest('.unified-tester-chip')) return;
+                if (e.target.closest('button') || e.target.closest('.unified-backend-chip')) return;
                 var id = this.getAttribute('data-bg-id');
                 if (!SEL) return;
                 SEL.toggle(id);
@@ -137,44 +146,27 @@
             });
         });
 
-        // ── Config chips (base + derived) ──
-        container.querySelectorAll('.unified-config-chip').forEach(function(chip) {
+        // ── Backend-registered clickable chips; overlays/data resolve lazily on click. ──
+        // Non-actionable chips (factor / splitCount / letter summaries) must bubble so a
+        // click anywhere on a batch header still selects the batch's base groups.
+        container.querySelectorAll('.unified-backend-chip').forEach(function(chip) {
             chip.addEventListener('click', function(e) {
+                var action = this.getAttribute('data-chip-action') || '';
+                if (!action) return;
                 e.stopPropagation();
-                var chipLabel = this.getAttribute('data-chip-label');
-                var gid = this.getAttribute('data-gid');
-                var dgid = this.getAttribute('data-dgid');
-                var group = null;
-                var synthGroup = null;
-                if (gid) {
-                    group = GT.groupSettings.groups && GT.groupSettings.groups.get(gid);
-                    synthGroup = group;
-                } else if (dgid) {
-                    group = GT.groupSettings.groups && GT.groupSettings.groups.get(dgid);
-                    synthGroup = H.synthGroupForDerivedNode(group);
-                }
-                if (!group || !synthGroup) return;
-                if (REG && typeof REG.getChips === 'function') {
-                    var chips = REG.getChips(synthGroup);
-                    for (var ci = 0; ci < chips.length; ci++) {
-                        if (chips[ci].label === chipLabel && typeof chips[ci].onClick === 'function') {
-                            chips[ci].onClick(this, synthGroup);
-                            break;
-                        }
+                var groupId = this.getAttribute('data-gid') || '';
+                var group = GT.groupSettings.groups && GT.groupSettings.groups.get(groupId);
+                if (!group) return;
+                if (action === 'product-path-selection-products' && GT.overlays && GT.overlays.productPathSelectionProducts) {
+                    var selection = H.nodeProductPathSelection(group);
+                    var products = H.productPathSelectionProducts(selection);
+                    var label = H.productPathSelectionLabel(selection);
+                    GT.overlays.productPathSelectionProducts.open(label, products, selection);
+                } else if (action === 'toggle-product-mask') {
+                    if (GT.backendSettings && typeof GT.backendSettings.toggleProductMask === 'function') {
+                        GT.backendSettings.toggleProductMask(groupId);
                     }
-                }
-            });
-        });
-
-        // ── Tester chips ──
-        container.querySelectorAll('.unified-tester-chip').forEach(function(chip) {
-            chip.addEventListener('click', function(e) {
-                e.stopPropagation();
-                var testerId = this.getAttribute('data-tester-id');
-                if (GT.overlays && GT.overlays.testerProducts) {
-                    var products = H.testerProducts(testerId);
-                    var label = H.testerLabel(testerId);
-                    GT.overlays.testerProducts.open(label, products);
+                    if (typeof fullRender === 'function') fullRender();
                 }
             });
         });
@@ -182,7 +174,7 @@
         // ── Tree nodes ──
         container.querySelectorAll('.unified-node-header').forEach(function(header) {
             header.addEventListener('click', function(e) {
-                if (e.target.closest('button') || e.target.closest('.unified-config-chip') || e.target.closest('.unified-dg-product-chip') || e.target.closest('.unified-tree-expand')) return;
+                if (e.target.closest('button') || e.target.closest('.unified-backend-chip') || e.target.closest('.unified-tree-expand')) return;
                 var nodeId = this.parentElement.getAttribute('data-node-id');
                 if (!SEL) return;
                 SEL.toggle(nodeId);
@@ -229,18 +221,6 @@
                 return;
             }
 
-            // Derived product chip → toggle product list
-            var prodChip = e.target.closest('.unified-dg-product-chip');
-            if (prodChip) {
-                e.stopPropagation();
-                var dgId = prodChip.getAttribute('data-dg-id');
-                if (REG && REG._expandedProducts) {
-                    REG._expandedProducts[dgId] = !REG._expandedProducts[dgId];
-                }
-                fullRenderFn();
-                return;
-            }
-
             // Tree node expand triangle → toggle children
             var treeExpand = e.target.closest('.unified-tree-expand');
             if (treeExpand) {
@@ -254,9 +234,12 @@
                 return;
             }
 
-            // Batch header row → toggle selection
+            // Batch header row → toggle selection (= multi-select the batch's first-level base
+            // groups and enter edit mode). Only actionable chips (e.g. the product-path chip that
+            // opens an overlay) block selection; summary chips fall through.
             var batchHeader = e.target.closest('.unified-batch-header');
-            if (batchHeader && !e.target.closest('button')) {
+            var actionableChip = e.target.closest('.unified-backend-chip[data-chip-action]:not([data-chip-action=""])');
+            if (batchHeader && !e.target.closest('button') && !actionableChip) {
                 var addGroupBatchKey = batchHeader.getAttribute('data-batch-key');
                 var batchMap = H.getAddGroupBatchMap();
                 toggleBatchSelection(batchMap[addGroupBatchKey]);

@@ -55,12 +55,20 @@ def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:
     if len(values) == 1:
         mask[0] = True
         return mask
-    normalized = values.normalize()
+    normalized = DataIndex.normalized_days(values)
     day_change = np.flatnonzero(normalized[1:].to_numpy() != normalized[:-1].to_numpy()) + 1
     boundaries = np.concatenate([day_change, np.array([len(values)], dtype=int)])
     for end in boundaries:
         mask[end - 1] = True
     return mask
+
+
+def _has_subday_component(values: pd.DatetimeIndex) -> bool:
+    values = pd.DatetimeIndex(values)
+    if len(values) == 0:
+        return False
+    naive = values.tz_localize(None) if values.tz is not None else values
+    return bool((naive != DataIndex.normalized_days(naive)).any())
 
 
 class DataIndex:
@@ -232,6 +240,38 @@ class DataIndex:
             return result
         return pd.DatetimeIndex(idx)
 
+    def event_timestamps(self) -> pd.DatetimeIndex:
+        """返回用于逐 bar / 事件驱动查询的实际事件时间层。
+
+        这是 ``signal_index`` 的语义化别名。调用方不应再自行猜测
+        ``MIN1``/``trade_time``/最后一层；统一交给 DataIndex 解析。
+        """
+        return self.signal_index
+
+    def trading_day_index(self) -> pd.DatetimeIndex:
+        """返回交易日层。
+
+        MultiIndex 中优先使用 DAY1 / trading_day / trade_day 等日级层；
+        普通 DatetimeIndex 或没有显式交易日层时，退化为事件时间的自然日。
+        """
+        idx = self.raw
+        if isinstance(idx, pd.MultiIndex):
+            day_level = next(
+                (i for i, name in enumerate(idx.names) if name and _is_day_level_name(str(name))),
+                None,
+            )
+            if day_level is not None:
+                return DataIndex.normalized_days(idx.get_level_values(day_level))
+        return DataIndex.normalized_days(self.event_timestamps())
+
+    @staticmethod
+    def event_timestamps_from_index(index: pd.Index | DataIndex) -> pd.DatetimeIndex:
+        return index.event_timestamps() if isinstance(index, DataIndex) else DataIndex(index).event_timestamps()
+
+    @staticmethod
+    def trading_day_index_from_index(index: pd.Index | DataIndex) -> pd.DatetimeIndex:
+        return index.trading_day_index() if isinstance(index, DataIndex) else DataIndex(index).trading_day_index()
+
     @staticmethod
     def normalized_days(values: Any) -> pd.DatetimeIndex:
         """从原始列值构造标准化的日级别 DatetimeIndex（去tz + normalize）。
@@ -241,8 +281,8 @@ class DataIndex:
         """
         result = pd.DatetimeIndex(pd.to_datetime(values))
         if result.tz is not None:
-            result = result.tz_localize(None)  # type: ignore[assignment]
-        return cast(pd.DatetimeIndex, result.normalize())
+            result = pd.DatetimeIndex(result.tz_localize(None))
+        return pd.DatetimeIndex(result.to_numpy(dtype="datetime64[D]"))
 
     # ── 时区 ──────────────────────────────────────────────────────────────
 
@@ -260,6 +300,48 @@ class DataIndex:
         if ts.tzinfo is None:
             return ts.tz_localize(idx_tz)
         return ts.tz_convert(idx_tz)
+
+    # ── 按信号时间层定位行 ──────────────────────────────────────────────────
+
+    @property
+    def level_for_xs(self) -> Any:
+        """用于 ``DataFrame.xs(..., level=...)`` 的层级标识。
+
+        MultiIndex 时返回 signal_index 对应的层级名（解析失败则回退到位置
+        -1，与 signal_index 自身的回退一致）；非 MultiIndex 时无意义，
+        返回 None（调用方应直接用 .loc，不走 xs）。
+        """
+        if not self.is_multi:
+            return None
+        idx = cast(pd.MultiIndex, self.raw)
+        name = self.signal_name
+        return name if name in idx.names else -1
+
+    def contains(self, ts: Any) -> bool:
+        """`ts`（自动 tz 对齐）是否命中 signal_index 中的某个时间点。"""
+        return self.tz_align(ts) in self.signal_index
+
+    def asof_value(self, ts: Any) -> pd.Timestamp:
+        """signal_index 中 <= `ts`（自动 tz 对齐）的最近一个时间点。
+
+        用于先定位、再用 `.xs(value, level=level_for_xs)` 取行 —— 同时支持
+        精确命中和 as-of 回退（结算时段缺口、调度时间没有精确落在某根 bar
+        上等场景）。命中或之前都没有数据时抛 KeyError。
+        """
+        aligned = self.tz_align(ts)
+        sig = self.signal_index
+        if aligned in sig:
+            return aligned
+        # Pandas may keep DatetimeIndex values in microsecond resolution on
+        # newer runtimes; strategy scheduling can deliberately add 1ns to
+        # distinguish bar-close signal time from order action time.  Compare
+        # in nanosecond integers so as-of lookup does not ask pandas to cast a
+        # nanosecond Timestamp losslessly into a microsecond index.
+        sig_ns = sig.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)
+        pos = int(np.searchsorted(sig_ns, aligned.value, side="right") - 1)
+        if pos < 0:
+            raise KeyError(f"no signal_index value at or before {aligned!r}")
+        return cast(pd.Timestamp, sig[pos])
 
     # ── 频率 ──────────────────────────────────────────────────────────────
 
@@ -301,8 +383,8 @@ class DataIndex:
         """
         result = self.signal_index
         if result.tz is not None:
-            result = result.tz_localize(None)
-        return cast(pd.DatetimeIndex, result.normalize())
+            result = pd.DatetimeIndex(result.tz_localize(None))
+        return DataIndex.normalized_days(result)
 
     def end_of_trading_day(self) -> np.ndarray:
         """标记每个交易日最后一个 bar。
@@ -322,7 +404,7 @@ class DataIndex:
         ts = self.finest_index
         if len(ts) == 0:
             return np.zeros(0, dtype=bool)
-        return _last_in_groups(pd.DatetimeIndex(ts).normalize())
+        return _last_in_groups(DataIndex.normalized_days(ts))
 
     # ── 时间切片 ──────────────────────────────────────────────────────────
 
@@ -349,9 +431,9 @@ class DataIndex:
         """根据两个 DataTime 对象截取 boolean mask。
 
         start_dt, end_dt : DataTime（单时间点 + 精度 + 可选时区）
-        - 若任一 precision == "day"，用天级层截断（end 自动推至当天结束）
+        - 若任一 precision == "trading_day"，用交易日层截断（end 自动推至当天结束）
         - 否则用当前 signal_index 精确截断
-        - DataTime.ts 的时区由 DataTime 保证（exact + tz → tz-aware；day → tz-naive）
+        - DataTime.ts 的时区由 DataTime 保证（exact + tz → tz-aware；trading_day → tz-naive）
           此处通过 slice_by() → tz_align() 自动对齐
 
         守卫：
@@ -364,10 +446,12 @@ class DataIndex:
         if not start_dt.is_set or not end_dt.is_set:
             raise ValueError("Both DataTime must have ts set")
 
-        # 精度：任一是 day 就用天级层
-        precision = "day" if start_dt.precision == "day" or end_dt.precision == "day" else "exact"
+        # 精度：任一是 trading_day 就用交易日层
+        precision = "trading_day" if (
+            start_dt.precision == "trading_day" or end_dt.precision == "trading_day"
+        ) else "exact"
 
-        if precision == "day":
+        if precision == "trading_day":
             di_for_slice = self
             if self.is_multi:
                 from .time_freq import DataFreq
@@ -378,18 +462,31 @@ class DataIndex:
                 )
                 if day_name is not None:
                     di_for_slice = DataIndex(self.raw, time_name=str(day_name))
-            # day 精度：end 代表当天结束，推后一天使 <= 变为包含整天
+            # trading_day 精度：end 代表当天结束，推后一天使 <= 变为包含整天
             end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
-            # 守卫：exact 精度要求日内索引（通过信号名推断频率，检查是否日倍数）
+            # 守卫：exact 精度要求信号索引有日内分量。显式日级信号层拒绝；
+            # 对普通 DatetimeIndex，不能只按相邻间隔判断，因为每天 09:00
+            # 一根的序列间隔也是 DAY1，但语义仍是 exact 时间点。
             sig_freq = self.freq
-            if sig_freq is not None and sig_freq.is_day_multiple():
+            explicit_day_level = bool(
+                self.signal_name
+                and _SIGNAL_PREFIX in str(self.signal_name)
+                and _is_day_level_name(str(self.signal_name))
+            )
+            inferred_day_without_subday = (
+                not self.signal_name
+                and sig_freq is not None
+                and sig_freq.is_day_multiple()
+                and not _has_subday_component(self.signal_index)
+            )
+            if explicit_day_level or inferred_day_without_subday:
                 raise ValueError(
                     f"slice_by_datatime: exact precision requires intraday signal_index, "
                     f"but signal_name='{self.signal_name}' has freq={sig_freq} "
                     f"which is a day-multiple (>= 1day, no sub-day component). "
-                    f"Use precision='day' or provide an intraday DataIndex."
+                    f"Use precision='trading_day' or provide an intraday DataIndex."
                 )
             return self.slice_by(start_dt.ts, end_dt.ts)
 

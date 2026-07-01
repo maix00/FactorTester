@@ -1,0 +1,65 @@
+name: GTHTClient
+options:
+  bundleIdPrefix: com.gtht
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""              # 填入你的 Apple Developer Team ID（自签名调试可留空）
+    CODE_SIGN_STYLE: Automatic
+
+# 自签名服务器支持：放行任意加载，让 WKWebView 与 URLSession 都能连上
+# 自签名 https / 局域网 IP / http。两端共用同一段 ATS。
+.ats: &ats
+  NSAppTransportSecurity:
+    NSAllowsArbitraryLoads: true
+
+targets:
+  # ── iOS / iPadOS ──────────────────────────────────────────────
+  GTHTClient-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"     # iPhone + iPad
+    info:
+      path: Resources/iOS/Info.plist
+      properties:
+        CFBundleDisplayName: GTHT
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        <<: *ats
+
+  # ── macOS ─────────────────────────────────────────────────────
+  GTHTClient-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtht.client
+        CODE_SIGN_ENTITLEMENTS: Resources/macOS/GTHTClient.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Resources/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: GTHT
+        LSMinimumSystemVersion: "13.0"
+        <<: *ats

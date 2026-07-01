@@ -1,6 +1,8 @@
 from flask import Flask
 
+from server.modules.products import product_group_routes
 from server.modules.templates import setting_snapshot_routes as routes
+from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
 
 
 def test_template_list_returns_metadata_without_snapshot(monkeypatch):
@@ -50,6 +52,202 @@ def test_template_detail_loads_only_requested_template(monkeypatch):
     with app.test_request_context("/api/single_factor_setting_templates/MmRet/tpl-2"):
         response = routes.get_single_factor_setting_template.__wrapped__("MmRet", "tpl-2")
 
-    assert response.get_json() == {"success": True, "template": template}
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["template"]["id"] == "tpl-2"
+    assert payload["template"]["snapshot"]["params_list"] == [{"N": 2}]
     assert len(calls) == 1
     assert calls[0][0][2] == "tpl-2"
+
+
+def test_product_group_resolve_returns_only_requested_ids(monkeypatch):
+    monkeypatch.setattr(product_group_routes, "require_user", lambda: "alice")
+    monkeypatch.setattr(
+        product_group_routes,
+        "load_product_groups",
+        lambda username: [
+            {"id": "pg-day", "name": "中国期货日盘", "paths": ["Day"]},
+            {"id": "pg-night", "name": "中国期货夜盘", "paths": ["Night"]},
+        ],
+    )
+    app = Flask(__name__)
+
+    with app.test_request_context("/api/product-groups/resolve", method="POST", json={"ids": ["pg-day"]}):
+        response = product_group_routes.resolve_product_groups.__wrapped__()
+
+    payload = response.get_json()
+    assert payload == {
+        "success": True,
+        "groups": [{"id": "pg-day", "name": "中国期货日盘", "paths": ["Day"]}],
+    }
+
+
+def test_snapshot_migration_moves_legacy_time_to_flat_local_settings():
+    snapshot, changed = migrate_snapshot_backend_settings({
+        "time_data": {
+            "start_date": "2024-01-02",
+            "start_time": "09:00",
+            "end_date": "2026-05-31",
+            "end_time": "15:00",
+            "timezone": "Asia/Shanghai",
+            "time_precision": "exact",
+        },
+        "local_settings": {
+            "initialCapital": {"initialCapital": 100000000},
+            "calendarFreq": {"autoGroupCalendarFreq": True, "groupCalendarFreq": "1min"},
+        },
+    })
+
+    assert changed is True
+    assert "time_data" not in snapshot
+    assert "initialCapital" not in snapshot["local_settings"]
+    assert "calendarFreq" not in snapshot["local_settings"]
+    assert "backendBacktestSettings" not in snapshot["local_settings"]
+    assert snapshot["local_settings"] == {
+        "start_date": "2024-01-02",
+        "start_time": "09:00",
+        "end_date": "2026-05-31",
+        "end_time": "15:00",
+    }
+
+
+def test_snapshot_migration_moves_submissions_to_product_path_selections_with_group_id_by_paths():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "submissions": [{
+                "id": "old-sub",
+                "label": "Metals",
+                "product_group": "Old Name",
+                "selected_paths": ["B/Path", "A/Path"],
+            }],
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "testerId": "old-sub",
+                    "factorAlias": "F",
+                    "splitCount": 5,
+                    "groupIndex": 1,
+                }]
+            },
+        },
+        product_groups=[{
+            "id": "pg-metals",
+            "name": "Metals Template",
+            "paths": ["A/Path", "B/Path"],
+        }],
+    )
+
+    assert changed is True
+    assert "submissions" not in snapshot
+    assert "product_path_selections" not in snapshot
+    assert snapshot["group_settings"]["groups"][0]["product_path_selection"] == {
+        "product_path_selection_id": "pg-metals",
+    }
+    assert "testerId" not in snapshot["group_settings"]["groups"][0]
+
+
+def test_snapshot_migration_does_not_fallback_unscoped_paths_to_local_settings():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "submissions": [{
+                "id": "plain-paths",
+                "selected_paths": ["Only/Paths"],
+            }],
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    assert "product_path_selections" not in snapshot
+    assert "submissions" not in snapshot
+    assert "local_settings" not in snapshot
+
+
+def test_snapshot_migration_normalizes_existing_product_path_selection_fields():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "local_settings": {
+                "product_path_selection": {
+                    "product_group_template_id": "pg-local",
+                    "paths": ["B/Path", "A/Path"],
+                }
+            },
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "testerId": "sel-1",
+                    "product_path_selection": {
+                        "path_id": "pg-group",
+                        "selected_paths": ["D/Path", "C/Path"],
+                    },
+                }]
+            },
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    assert snapshot["local_settings"]["product_path_selection"] == {
+        "product_path_selection_id": "pg-local",
+    }
+    selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
+    assert selection == {"product_path_selection_id": "pg-group"}
+
+
+def test_snapshot_migration_relinks_existing_selection_to_matching_product_group():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "group_settings": {
+                "groups": [{
+                    "id": "g1",
+                    "product_path_selection": {
+                        "id": "old-selection",
+                        "product_path_selection_id": "old-selection",
+                        "label": "中国期货日盘",
+                        "paths": ["Futures/Day", "Futures/More"],
+                    },
+                }]
+            },
+        },
+        product_groups=[{
+            "id": "pg-day",
+            "name": "中国期货日盘",
+            "paths": ["Futures/More", "Futures/Day"],
+        }],
+    )
+
+    assert changed is True
+    selection = snapshot["group_settings"]["groups"][0]["product_path_selection"]
+    assert selection == {"product_path_selection_id": "pg-day"}
+
+
+def test_snapshot_migration_materializes_parent_product_path_selection_on_derived_groups():
+    snapshot, changed = migrate_snapshot_backend_settings(
+        {
+            "group_settings": {
+                "groups": [
+                    {
+                        "id": "parent",
+                        "testerId": "sel-parent",
+                        "product_path_selection": {
+                            "product_path_selection_id": "sel-parent",
+                            "product_group_template_id": "pg-parent",
+                            "paths": ["Parent/Path"],
+                        },
+                    },
+                    {
+                        "id": "child",
+                        "parentId": "parent",
+                    },
+                ]
+            },
+        },
+        product_groups=[],
+    )
+
+    assert changed is True
+    child = snapshot["group_settings"]["groups"][1]
+    assert "testerId" not in child
+    assert child["product_path_selection"] == {
+        "product_path_selection_id": "pg-parent",
+    }

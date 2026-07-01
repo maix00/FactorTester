@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import time
+import uuid
+from hashlib import sha1
 
 from server.modules.products.product_path_selection import resolve_selection_products
+from tools.products.product_path_selection import ProductPathSelection
 from tools.data.account_manage import load_product_groups as _load_product_groups
 from tools.data.account_manage import save_product_groups as _save_product_groups
 
@@ -21,6 +24,9 @@ def load_product_groups(username: str) -> list:
     groups = _load_product_groups(username)
     dirty = False
     for group in groups:
+        if "id" not in group:
+            group["id"] = _legacy_group_id(group.get("name"))
+            dirty = True
         if "product_names" not in group:
             _enrich_group(group)
             dirty = True
@@ -38,6 +44,32 @@ def find_group_by_name(groups: list, name: str) -> int:
         if group.get("name") == name:
             return i
     return -1
+
+
+def find_group_by_paths(groups: list, paths: list) -> dict | None:
+    wanted = {str(path) for path in paths if str(path).strip()}
+    for group in groups:
+        current = {str(path) for path in group.get("paths", []) if str(path).strip()}
+        if current == wanted:
+            return group
+    return None
+
+
+def product_group_to_path_selection(
+    group: dict,
+    *,
+    selection_id: str | None = None,
+    page_uuid: str = "",
+) -> ProductPathSelection:
+    """Build the backend product-path selection that corresponds to one template row."""
+    name = str(group.get("name") or group.get("product_group") or "").strip()
+    if not name:
+        raise AssertionError("产品组模板缺少名称")
+    return ProductPathSelection.from_product_group_template(
+        selection_id or str(group.get("id") or name),
+        group,
+        page_uuid=page_uuid,
+    )
 
 
 def _enrich_group(group: dict) -> dict:
@@ -60,6 +92,7 @@ def create_product_group(username: str, name: str, paths: list) -> dict | None:
     if find_group_by_name(groups, name) >= 0:
         return None
     group = {
+        "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
         "paths": [path for path in paths if isinstance(path, str) and path.strip()],
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
@@ -91,6 +124,11 @@ def delete_product_group(username: str, name: str) -> bool:
     groups.pop(idx)
     save_product_groups(username, groups)
     return True
+
+
+def _legacy_group_id(name: object) -> str:
+    raw = str(name or "").strip() or "unnamed"
+    return f"pg_{sha1(raw.encode('utf-8')).hexdigest()[:12]}"
 
 
 def rename_product_group(username: str, old_name: str, new_name: str) -> dict | None:

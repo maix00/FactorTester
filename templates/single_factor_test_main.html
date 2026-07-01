@@ -1,0 +1,61 @@
+<div class="section" 
+     data-factor-alias="{{ factor_family_alias }}" 
+     data-factor-type="{{ factor_type | default('public') }}"
+     data-param-aliases='{{ param_aliases|tojson }}'
+     data-param-metas='{{ (param_metas | default([])) | tojson }}'>
+    <div class="section-title">当前因子: <b style="color:#0078d4;">{{ factor_family_alias }}</b>{% if chinese_name %} <span style="color:#555;font-weight:normal;font-size:0.85em;">{{ chinese_name }}</span>{% endif %}</div>
+    <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
+    
+    {% include 'modules/shared/latex_module.html' %}
+    {% include 'modules/shared/param_info_table.html' %}
+    <div class="module" id="single-factor-page-settings-module" style="margin-top:24px;">
+        <div class="section-title">因子家族测试设置</div>
+        <div id="single-factor-page-settings"></div>
+    </div>
+    <script>window.factorFamilyAlias = '{{ factor_family_alias }}';</script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/backend_settings_panel.css') }}">
+    <script src="{{ url_for('static', filename='js/modules/shared/dom_utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/field_store.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/chip_renderer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/settings_row_list.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/settings_edit_modal.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/settings_flows.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/backend_settings_panel.js') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/fancytree/jquery.fancytree-all-deps.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/time_window_settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/product_path_settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/factor_param_settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/panel_registry.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/main_page_settings_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/overlays/fields_table.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/overlays/factor_info.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/global_template_module.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/submission_bus.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/submission_context.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/factor_library_helper.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/single_factor_test/single_factor_progress.js') }}"></script>
+    {% include 'modules/single_factor_test/factor_series_viewer_module.html' %}
+    {% include 'modules/single_factor_test/ic_test_module.html' %}
+    {% include 'modules/single_factor_test/group_test_module.html' %}
+</div>
+
+<script>
+// Expose initial session params from backend render so new settings panel can read them
+(function() {
+    var aliases = {{ param_aliases|tojson }};
+    var factors = {{ factors|tojson }};
+    var ffAlias = '{{ factor_family_alias }}';
+    window._initialSessionParams = factors.map(function(f) {
+        var row = { factor_alias: f.alias, factor_family_alias: ffAlias, scope_key: '现场', source_type: 'session', params: {} };
+        aliases.forEach(function(alias) {
+            row.params[alias] = (f.family && f.family.params_dict && f.family.params_dict[alias])
+                ? f.family.params_dict[alias].get_value(f)
+                : '';
+        });
+        return row;
+    });
+})();
+</script>

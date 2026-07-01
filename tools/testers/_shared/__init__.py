@@ -1,0 +1,37 @@
+"""Shared setting registration helpers used across multiple applications.
+
+These base registration functions are NOT application-specific — they are
+imported by application registrations (group_test, ic_test, etc.).
+"""
+
+from .factor import (
+    FACTOR_CANDIDATE_KEYS,
+    FACTOR_SELECTION_KEYS,
+    FACTOR_SELECTIONS_KEYS,
+    register_factor_candidate_list_base,
+    register_factor_execution_base,
+    register_factor_selection_base,
+    register_factor_selections_base,
+)
+from .product_path import (
+    PRODUCT_PATH_CANDIDATE_KEYS,
+    PRODUCT_PATH_SELECTION_KEYS,
+    PRODUCT_PATH_SELECTIONS_KEYS,
+    register_product_path_candidate_list_base,
+    register_product_path_selection_base,
+    register_product_path_selections_base,
+)
+from .market_data import (
+    MARKET_DATA_SELECTION_KEYS,
+    register_market_data_base,
+)
+from .run_window import (
+    RUN_WINDOW_KEYS,
+    register_run_window_base,
+)
+from .category import (
+    CATEGORY_CANDIDATE_KEYS,
+    CATEGORY_SELECTION_KEYS,
+    register_category_candidate_list_base,
+    register_category_selection_base,
+)

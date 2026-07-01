@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+from dataclasses import dataclass
 import threading
 import uuid
 from types import SimpleNamespace
@@ -15,11 +16,15 @@ if TYPE_CHECKING:
     from tools.factors import FactorTester
 
 
-factor_testers: list = []
-page_factor_testers: dict[str, list] = {}
+# 统一的页级对象注册表：page_objects[page_uuid][kind.name] -> list[obj]（保序）。
+# 取代原先各类型各自维护的 page_factor_testers / page_product_selections 字典——
+# 所有"页内活对象"（FactorTester / 产品路径选择 / 分类 …）走同一套生命周期管理。
+page_objects: dict[str, dict[str, list]] = {}
 page_owners: dict[str, str | None] = {}
 page_states: dict[str, dict[str, Any]] = {}
-factor_testers_lock = threading.Lock()
+# Submission mutations may call scoped lookup helpers while holding the state
+# lock. An RLock preserves the atomic mutation without deadlocking that lookup.
+factor_testers_lock = threading.RLock()
 
 MAX_PAGE_UUIDS = 500
 page_time_store: dict = {}
@@ -49,120 +54,184 @@ def alias_matches_submission_id(alias: str, submission_id: str | int | None, all
     return False
 
 
-def find_factor_tester(submission_id: str | int | None, allow_suffix: bool = True):
-    with factor_testers_lock:
-        return next(
-            (
-                t for t in factor_testers
-                if alias_matches_submission_id(getattr(t, 'alias', ''), submission_id, allow_suffix=allow_suffix)
-            ),
-            None,
+def _selection_id(selection: Any) -> str:
+    return str(
+        getattr(
+            selection,
+            "selection_id",
+            getattr(selection, "product_path_selection_id", getattr(selection, "id", "")),
         )
+        or ""
+    )
 
 
-def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
-    tester = find_factor_tester(alias, allow_suffix=True)
-    if tester is None:
-        aliases = [getattr(t, 'alias', '?') for t in factor_testers]
-        raise AssertionError(
-            f"{str(caller) + ': ' if caller is not None else ''}"
-            f"未找到对应的测试器实例 alias={alias!r}, "
-            f"available={aliases}"
-        )
-    return tester
+def _factor_tester_id(tester: Any) -> str:
+    return str(getattr(tester, "alias", "") or "")
 
 
-def iter_factor_testers(page_uuid: Optional[str] = None) -> list:
-    with factor_testers_lock:
-        if page_uuid:
-            return list(page_factor_testers.get(page_uuid, []))
-        return list(factor_testers)
+def _category_id(category: Any) -> str:
+    return str(getattr(category, "alias", None) or getattr(category, "id", "") or "")
 
 
-def register_factor_tester(tester: Any, page_uuid: Optional[str] = None) -> None:
-    if page_uuid is None:
-        page_uuid = _tester_page_uuid(tester)
-    if page_uuid:
-        try:
-            setattr(tester, '_page_uuid', page_uuid)
-        except Exception:
-            pass
-    with factor_testers_lock:
-        factor_testers.append(tester)
-        if page_uuid:
-            page_factor_testers.setdefault(page_uuid, []).append(tester)
+@dataclass(frozen=True)
+class PageObjectKind:
+    """描述一类"页内活对象"的身份与生命周期，供通用注册表统一处理。"""
+    name: str
+    id_of: Callable[[Any], str]
+    page_uuid_attr: str = "page_uuid"      # 对象上记录所属页的属性名
+    allow_suffix: bool = False             # 默认查找是否允许 ":id" 后缀匹配
+    deletes_on_remove: bool = False        # remove/clear 时是否调用 obj.delete()
+
+    def matches(self, obj: Any, query_id: str, allow_suffix: Optional[bool] = None) -> bool:
+        suffix = self.allow_suffix if allow_suffix is None else allow_suffix
+        oid = self.id_of(obj)
+        if oid == query_id:
+            return True
+        return bool(suffix and query_id and oid.endswith(f":{query_id}"))
 
 
-def _remove_from_flat_store_locked(tester: Any) -> None:
-    try:
-        factor_testers.remove(tester)
-    except ValueError:
-        pass
-    page_uuid = _tester_page_uuid(tester)
+# 已注册的 kind。新增一类页内活对象 = 在此加一个 PageObjectKind，无需另写一套增删查改。
+FACTOR_TESTER = PageObjectKind(
+    "factor_tester", _factor_tester_id,
+    page_uuid_attr="_page_uuid", allow_suffix=True, deletes_on_remove=True,
+)
+PRODUCT_SELECTION = PageObjectKind(
+    "product_selection", _selection_id,
+    page_uuid_attr="page_uuid", allow_suffix=False, deletes_on_remove=False,
+)
+CATEGORY = PageObjectKind(
+    "category", _category_id,
+    page_uuid_attr="page_uuid", allow_suffix=False, deletes_on_remove=False,
+)
+_ALL_KINDS: tuple[PageObjectKind, ...] = (FACTOR_TESTER, PRODUCT_SELECTION, CATEGORY)
+
+
+def _require_page_uuid(page_uuid: Any, action: str) -> str:
+    page_uuid = str(page_uuid or "").strip()
     if not page_uuid:
-        return
-    page_list = page_factor_testers.get(page_uuid)
-    if not page_list:
-        return
+        raise ValueError(f"{action}必须提供 page_uuid")
+    return page_uuid
+
+
+def register_page_object(kind: PageObjectKind, obj: Any, *, page_uuid: Optional[str] = None) -> None:
+    if page_uuid is None:
+        page_uuid = getattr(obj, kind.page_uuid_attr, None)
+    page_uuid = _require_page_uuid(page_uuid, f"注册 {kind.name}")
     try:
-        page_list.remove(tester)
-    except ValueError:
+        setattr(obj, kind.page_uuid_attr, page_uuid)
+    except Exception:
         pass
-    if not page_list:
-        page_factor_testers.pop(page_uuid, None)
-
-
-def remove_factor_tester(tester: Any, *, delete: bool = True) -> None:
+    oid = kind.id_of(obj)
     with factor_testers_lock:
-        _remove_from_flat_store_locked(tester)
+        items = page_objects.setdefault(page_uuid, {}).setdefault(kind.name, [])
+        items[:] = [it for it in items if kind.id_of(it) != oid]
+        items.append(obj)
+
+
+def iter_page_objects(kind: PageObjectKind, *, page_uuid: str) -> list:
+    page_uuid = _require_page_uuid(page_uuid, f"遍历 {kind.name}")
+    with factor_testers_lock:
+        return list(page_objects.get(page_uuid, {}).get(kind.name, []))
+
+
+def find_page_object(
+    kind: PageObjectKind,
+    query_id: str | int | None,
+    *,
+    page_uuid: str,
+    allow_suffix: Optional[bool] = None,
+) -> Any:
+    page_uuid = _require_page_uuid(page_uuid, f"查找 {kind.name}")
+    qid = str(query_id or "")
+    with factor_testers_lock:
+        for obj in page_objects.get(page_uuid, {}).get(kind.name, []):
+            if kind.matches(obj, qid, allow_suffix):
+                return obj
+    return None
+
+
+def get_page_object(
+    kind: PageObjectKind,
+    query_id: str | int | None,
+    *,
+    page_uuid: str,
+    caller: Optional[Any] = None,
+    allow_suffix: Optional[bool] = None,
+) -> Any:
+    obj = find_page_object(kind, query_id, page_uuid=page_uuid, allow_suffix=allow_suffix)
+    if obj is None:
+        with factor_testers_lock:
+            available = [kind.id_of(o) for o in page_objects.get(str(page_uuid), {}).get(kind.name, [])]
+        prefix = f"{caller}: " if caller is not None else ""
+        raise AssertionError(
+            f"{prefix}未找到 {kind.name} id={query_id!r}, page_uuid={page_uuid!r}, available={available}"
+        )
+    return obj
+
+
+def replace_page_objects(kind: PageObjectKind, *, page_uuid: str, ordered: list) -> None:
+    page_uuid = _require_page_uuid(page_uuid, f"重排 {kind.name}")
+    with factor_testers_lock:
+        page_objects.setdefault(page_uuid, {})[kind.name] = list(ordered)
+
+
+def remove_page_object(kind: PageObjectKind, obj: Any, *, delete: Optional[bool] = None) -> None:
+    if delete is None:
+        delete = kind.deletes_on_remove
+    page_uuid = str(getattr(obj, kind.page_uuid_attr, "") or "").strip()
+    if page_uuid:
+        oid = kind.id_of(obj)
+        with factor_testers_lock:
+            store = page_objects.get(page_uuid)
+            items = store.get(kind.name) if store else None
+            if items:
+                items[:] = [it for it in items if kind.id_of(it) != oid]
+                if not items:
+                    store.pop(kind.name, None)
+                if not store:
+                    page_objects.pop(page_uuid, None)
     if delete:
         try:
-            tester.delete()
+            obj.delete()
         except Exception:
             pass
 
 
-def replace_page_factor_testers(page_uuid: str, ordered_testers: list) -> None:
-    page_uuid = str(page_uuid).strip()
+def clear_page_objects(kind: PageObjectKind, *, page_uuid: str, delete: Optional[bool] = None) -> None:
+    page_uuid = _require_page_uuid(page_uuid, f"清理 {kind.name}")
+    if delete is None:
+        delete = kind.deletes_on_remove
     with factor_testers_lock:
-        page_factor_testers[page_uuid] = list(ordered_testers)
-        new_flat: list = []
-        inserted = False
-        for tester in factor_testers:
-            if _tester_page_uuid(tester) == page_uuid:
-                if not inserted:
-                    new_flat.extend(ordered_testers)
-                    inserted = True
-                continue
-            new_flat.append(tester)
-        if not inserted:
-            new_flat.extend(ordered_testers)
-        factor_testers[:] = new_flat
-
-
-def clear_page_factor_testers(page_uuid: str | None, *, delete: bool = True) -> None:
-    if page_uuid is None:
-        with factor_testers_lock:
-            testers = list(factor_testers)
-            factor_testers.clear()
-            page_factor_testers.clear()
-        if delete:
-            for tester in testers:
-                try:
-                    tester.delete()
-                except Exception:
-                    pass
-        return
-    page_uuid = str(page_uuid).strip()
-    with factor_testers_lock:
-        testers = list(page_factor_testers.pop(page_uuid, []))
-        factor_testers[:] = [tester for tester in factor_testers if _tester_page_uuid(tester) != page_uuid]
+        store = page_objects.get(page_uuid, {})
+        removed = list(store.pop(kind.name, []))
+        if not store:
+            page_objects.pop(page_uuid, None)
     if delete:
-        for tester in testers:
+        for obj in removed:
             try:
-                tester.delete()
+                obj.delete()
             except Exception:
                 pass
+
+
+def clear_page(page_uuid: str, *, delete: bool = True) -> None:
+    """清空某页的所有页内活对象（取代旧的 clear_page_submissions）。
+
+    delete 控制是否对"有删除语义"的 kind（如 FactorTester）调用 obj.delete()。
+    """
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        return
+    with factor_testers_lock:
+        store = page_objects.pop(page_uuid, {})
+    if delete:
+        for kind in _ALL_KINDS:
+            if kind.deletes_on_remove:
+                for obj in store.get(kind.name, []):
+                    try:
+                        obj.delete()
+                    except Exception:
+                        pass
 
 
 def get_default_time():
@@ -213,7 +282,9 @@ def unregister_page(page_uuid: str) -> None:
     page_uuid = str(page_uuid).strip()
     if not page_uuid:
         return
-    clear_page_factor_testers(page_uuid, delete=True)
+    from server.services.backtest_runs import cancel_page
+    cancel_page(page_uuid)
+    clear_page(page_uuid, delete=True)
     from server.services.factor_registry import unregister_page as _unreg_page
     _unreg_page(page_uuid)
     with page_time_store_lock:
@@ -243,6 +314,14 @@ def get_page_state(page_uuid: str) -> Any:
     return SimpleNamespace(**state)
 
 
+def get_page_owner(page_uuid: str) -> str | None:
+    page_uuid = str(page_uuid).strip()
+    if not page_uuid:
+        return None
+    with factor_testers_lock:
+        return page_owners.get(page_uuid)
+
+
 def cleanup_user_pages(user: Any) -> None:
     if user is None:
         return
@@ -255,15 +334,6 @@ def cleanup_user_pages(user: Any) -> None:
         }
     for page_uuid in page_uuids:
         unregister_page(page_uuid)
-
-
-def cleanup_user_testers(user: Any) -> None:
-    if user is None:
-        return
-    with factor_testers_lock:
-        testers = [tester for tester in factor_testers if getattr(tester, 'user', None) is user]
-    for tester in testers:
-        remove_factor_tester(tester, delete=True)
 
 
 def _evict_page(page_uuid: str) -> None:

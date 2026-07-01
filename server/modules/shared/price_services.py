@@ -13,8 +13,7 @@ from settings import get_all_products, get_cat_tree
 from sources.LocalCNFutures import MINK_PRODUCT_DIR
 from sources.LocalCNFutures.CNFutures import (
     CNFuturesContract,
-    CNFuturesDayNightTimeCategory,
-    CNFuturesSectorCategory,
+    CNFuturesSectorNightTimeCategory,
     exchange_map,
     get_all_futures_contract,
 )
@@ -75,20 +74,13 @@ def get_contract_category_tree(contracts) -> CategoryTree:
     """Build a CNFuturesContract tree that mirrors CNFutures category labels."""
     contract_to_future = map_contracts_to_futures_for_categories(contracts)
 
-    sector_category = make_contract_category_from_futures_category(
-        CNFuturesSectorCategory,
+    category = make_contract_category_from_futures_category(
+        CNFuturesSectorNightTimeCategory,
         CNFuturesContract,
         contracts,
         contract_to_future,
     )
-    daynight_category = make_contract_category_from_futures_category(
-        CNFuturesDayNightTimeCategory,
-        CNFuturesContract,
-        contracts,
-        contract_to_future,
-    )
-
-    return (sector_category * daynight_category).get_tree_with_parents(
+    return category.get_tree_with_parents(
         all_objects=contracts,
         ancester=Product,
     )
@@ -318,26 +310,30 @@ def _serialize_field_value(value: Any) -> Any:
     return repr(value)
 
 
-def product_public_fields(product: Any) -> dict[str, Any]:
-    """Reflect current backend product fields without a frontend field registry.
+def reflect_public_fields(obj: Any, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Reflect an arbitrary backend object's public fields without a frontend field registry.
 
     Returns {key: {'value': ..., 'type': 'str'|'int'|'float'|'bool'|'list'|'dict'|...}}
-    so the frontend can display both value and type.
+    so the frontend can display both value and type. Any backend object with a
+    `__dict__` (products, factor expressions, ...) can be reflected this way.
     """
     def field_entry(raw_value: Any) -> dict[str, Any]:
         py_type = type(raw_value).__name__
         return {'value': _serialize_field_value(raw_value), 'type': py_type}
 
-    fields: dict[str, Any] = {'class': field_entry(type(product).__name__)}
-    for key, value in vars(product).items():
+    fields: dict[str, Any] = {'class': field_entry(type(obj).__name__)}
+    for key, value in vars(obj).items():
         if key.startswith('_'):
             continue
         fields[key] = field_entry(value)
-    # Merge fee/trading-spec fields (already serialized plain values, wrap them)
-    fee_fields = cn_futures_trading_spec_fields(product)
-    for k, v in fee_fields.items():
+    for k, v in (extra or {}).items():
         fields[k] = field_entry(v)
     return fields
+
+
+def product_public_fields(product: Any) -> dict[str, Any]:
+    """Reflect current backend product fields (class, public attrs, fee/trading-spec fields)."""
+    return reflect_public_fields(product, extra=cn_futures_trading_spec_fields(product))
 
 
 def supports_adjusted_price(product) -> bool:

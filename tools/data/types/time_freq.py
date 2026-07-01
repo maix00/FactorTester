@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # =============================================================================
 # tools/data/time_freq.py
 # 数据频率类模块
@@ -136,6 +138,18 @@ class DataFreq(UniqueNameObject, metaclass=DataFreqMeta):
     def is_multiples_of_day(self) -> bool:
         """判断该频率是否为 整日数倍数（即是 1天的整数倍）。"""
         return self.is_day_multiple()
+
+    def __add__(self, other: Any) -> DataFreq:
+        """Add two frequency-like values and return a normalized DataFreq."""
+        if other == 0:
+            return self
+        return DataFreq(self.value + DataFreq(other).value)
+
+    def __radd__(self, other: Any) -> DataFreq:
+        """Support sum([...], DataFreq('0min')) and sum([...])."""
+        if other == 0:
+            return self
+        return DataFreq(DataFreq(other).value + self.value)
     
     def is_day_multiple(self) -> bool:
         """

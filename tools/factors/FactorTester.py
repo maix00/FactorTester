@@ -1,48 +1,44 @@
 # =============================================================================
 # tools/factors/FactorTester.py
-# 因子测试器模块
+# 因子测试器 -- 纯粹的任务调度薄封装。
 #
-# FactorTester 负责驱动因子的量化分析流程，包括：
-#   - 品种管理（全量 / 按成交量筛选 / 按空数据过滤）
-#   - calc_factor  : 批量计算各 Factor 的信号表
-#   - ic_stats / calc_factor : 因子计算与 IC 分析
-#
-# 辅助函数：
-#   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
+# 实际状态（products/factors/results 缓存等）在 FactorTesterState
+# （factor_tester_state.py），实际任务逻辑在 factor_tester_tasks.py（IC/
+# 因子评估等）和 backtester.py（分组回测）。FactorTester 自己只剩三件事：
+#   - __new__/身份（UniqueNameObject，供 runtime_state.register_page_object/
+#     get_page_object 做跨请求复用，不能动）
+#   - __init__ 建 self.state
+#   - dispatch(task_name, **kwargs) 按任务名转发给对应处理函数
+# 加一层显式属性转发（products/results/...），因为 tools/factors/Factors.py、
+# tools/factors/FactorFamily.py 等核心因子求值代码会直接读
+# `_active_tester.get()` 拿到的 tester 实例的这些属性（duck typing），这些
+# 调用点跟 issue-114 无关，不在这次改造范围内，转发层保证它们不用改。
+# 用显式 @property 而不是 __getattr__/__setattr__ 魔法：UniqueNameObject.
+# __new__/__init__ 会在 self.state 存在之前就对 self 做普通属性赋值
+# （name/alias），__setattr__ 拦截会在那个时间点访问还不存在的 self.state，
+# 显式属性没有这个时序问题。
 # =============================================================================
-import os
-import re
 import uuid
-import logging
-import threading
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-from datetime import datetime
-from weakref import WeakValueDictionary
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Sequence
+from weakref import WeakValueDictionary
 
-from tools.decorators import tech_docs
-from tools.factors import Factor, FactorFamily
-from tools.factors.FactorRunResult import FactorRunResult
-from tools.products.Product import Product
 from tools.data.types import UniqueNameObject
-from tools.data.types import DataColumn, DataFreq
-from tools.data.account_manage import User
-from tools.data.types import DataTime
-from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
-from settings import get_all_products, logger_dir_path_default
+from tools.factors import factor_tester_tasks as _tasks
+from tools.factors.factor_tester_state import FactorTesterState
 
 if TYPE_CHECKING:
+    from tools.data.account_manage import User
+    from tools.data.types import DataTime
     from tools.factors.FactorTester import FactorTester
+    from tools.products.Product import Product
 
 # ── 运行时上下文：活跃 FactorTester 与用户前缀 ──
 # 由 FactorTester / FactorFamily.test() 设置，Factor / ProductDataView 读取
 _active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
 _active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
+
 
 def _signal_time(obj: Any) -> Any:
     """从索引项中提取最末一级时间戳（兼容 tuple 多级索引和单值索引）。"""
@@ -51,6 +47,7 @@ def _signal_time(obj: Any) -> Any:
 
 def _align_ts(lhs: Any, rhs: Any) -> Any:
     """将 lhs 时区对齐到 rhs；若任一非 Timestamp 则原样返回 lhs。"""
+    import pandas as pd
     rhs = _signal_time(rhs)
     if not isinstance(rhs, pd.Timestamp):
         try:
@@ -67,32 +64,67 @@ def _align_ts(lhs: Any, rhs: Any) -> Any:
     return lhs
 
 
-def _align_ts_to_index(ts: Any, idx: pd.Index) -> pd.Timestamp:
+def _align_ts_to_index(ts: Any, idx: Any) -> Any:
     """将时间戳的时区规整到 DatetimeIndex，避免 tz-aware/naive 比较错误。"""
     from tools.data.types import DataIndex
     return DataIndex(idx).tz_align(ts)
 
 
-def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
-    """从信号索引中提取时间戳层，返回 DatetimeIndex。"""
-    from tools.data.types import DataIndex
-    return DataIndex(idx).signal_index
+def _forward(attr_name: str) -> property:
+    """生成一个转发到 self.state.{attr_name} 的可读可写 property。"""
+    def getter(self):
+        return getattr(self.state, attr_name)
 
-@tech_docs
+    def setter(self, value):
+        setattr(self.state, attr_name, value)
+
+    return property(getter, setter)
+
+
 class FactorTester(UniqueNameObject):
-    """
-    因子测试器。
-
-    属性：
-        products  (set)         : 当前参与测试的品种集合（可经筛选后缩小）
-        all_products (set)      : 初始全量品种集合
-        factors   (list)        : 已计算的 Factor 列表
-        start_date (Timestamp)  : 测试起始日期
-        end_date   (Timestamp)  : 测试截止日期
-        logger    (Logger)      : 日志记录器（文件 + 可选控制台）
-    """
     _instances = WeakValueDictionary()
-    _allowed_group_calendar_freqs = (DataFreq.MIN1, DataFreq.MIN5, DataFreq.DAY1)
+
+    # task_name -> handler(state, **kwargs)。新增任务只在这里加一行，
+    # FactorTester 类本身不为任何任务写专门方法。
+    _TASK_HANDLERS: ClassVar[dict[str, Callable]] = {
+        "calc_factor": _tasks.calc_factor,
+        "resolve_factor": _tasks.resolve_factor,
+        "get_result": _tasks.get_result,
+        "discard_result": _tasks.discard_result,
+        "update_time_range": _tasks.update_time_range,
+        "sift_product": _tasks.sift_product,
+        "sift_product_by_empty_data": _tasks.sift_product_by_empty_data,
+        "sift_product_by_volumes": _tasks.sift_product_by_volumes,
+        "ic_stats": _tasks.ic_stats,
+        "delete": _tasks.delete,
+    }
+
+    # 属性转发表 -- 外部代码（Factors.py/FactorFamily.py/server 路由）直接
+    # 读写的全部 FactorTesterState 字段，逐一显式声明，不用 __getattr__ 魔法。
+    products = _forward("products")
+    all_products = _forward("all_products")
+    factors = _forward("factors")
+    results = _forward("results")
+    start_dt = _forward("start_dt")
+    end_dt = _forward("end_dt")
+    start_date = _forward("start_date")
+    end_date = _forward("end_date")
+    group_calendar_freq = _forward("group_calendar_freq")
+    selected_paths = _forward("selected_paths")
+    sift_product_by_empty_data_bool = _forward("sift_product_by_empty_data_bool")
+    sync_signal_index = _forward("sync_signal_index")
+    sync_signal_index_replaced = _forward("sync_signal_index_replaced")
+    last_group_factor = _forward("last_group_factor")
+    logger = _forward("logger")
+    user = _forward("user")
+    label = _forward("label")
+    product_group = _forward("product_group")
+    product_group_template_id = _forward("product_group_template_id")
+    selection_source_type = _forward("selection_source_type")
+    selection_source_key = _forward("selection_source_key")
+    product_selection = _forward("product_selection")
+    account = _forward("account")
+    _page_uuid = _forward("_page_uuid")
 
     def __new__(cls, alias: Optional[str] = None, *args, user=None, **kwargs):
         core_alias = alias if alias else cls.__name__
@@ -107,393 +139,46 @@ class FactorTester(UniqueNameObject):
         instance.name = name
         return instance
 
-    def __init__(self, products: Sequence[Product],
-                 alias: Optional[str] = None,
-                 start_dt: Optional[DataTime] = None,
-                 end_dt: Optional[DataTime] = None,
-                 group_calendar_freq: Optional[Any] = None,
-                 user: Optional['User'] = None,
-                 logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
-                 logger_console: bool = False):
-        """
-        初始化 FactorTester。
-
-        参数：
-            products       : 参与测试的品种列表
-            alias          : 实例别名，默认类名
-            start_dt       : 测试起始 DataTime
-            end_dt         : 测试截止 DataTime
-            user           : 创建此 tester 的 User 实例
-            logger_file    : 是否写日志到文件
-            logger_dir_path: 日志目录
-            logger_console : 是否同时输出到控制台
-        """
+    def __init__(
+        self, products: Sequence["Product"], alias: Optional[str] = None,
+        start_dt: Optional["DataTime"] = None, end_dt: Optional["DataTime"] = None,
+        group_calendar_freq: Optional[Any] = None, user: Optional["User"] = None,
+    ):
         if not hasattr(self, '_initialized'):
-            # 传入 name=self.name 防止 UniqueObject.__init__ 重新生成 name
-            # （name 已在 __new__ 中格式化为 FactorTester:{user_prefix}:{core_alias}:{uuid}）
             super().__init__(name=self.name, alias=alias)
-            self.user = user  # 创建者 User 实例（None 表示无归属）
-
-            # 初始化日志记录器
-            self.logger = logging.getLogger(self.__class__.__name__)
-            if not self.logger.handlers:
-                self.logger.setLevel(logging.INFO)
-                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-                if logger_console:
-                    console_handler = logging.StreamHandler()
-                    console_handler.setFormatter(formatter)
-                    self.logger.addHandler(console_handler)
-
-                if logger_file:
-                    if not os.path.exists(logger_dir_path):
-                        os.makedirs(logger_dir_path)
-                    # Windows 文件名不允许 <>:"/\|?*，替换为下划线
-                    _safe_log_name = re.sub(r'[<>:"/\\|?*]', '_', self.name)
-                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{_safe_log_name}_{datetime.now().strftime('%Y%m%d')}.log")
-                    file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
-                    file_handler.setFormatter(formatter)
-                    self.logger.addHandler(file_handler)
-
-            self.products = set(products)       # 当前测试品种集（可经筛选减少）
-            self.all_products = set(products)   # 原始全量品种集
-            self.group_calendar_freq = DataFreq(group_calendar_freq or DataFreq.MIN1)
-            self.selected_paths: list = []     # 提交时选取的路径列表（前端显示用）
-            self.sift_product_by_empty_data_bool = False  # 记录是否已执行空数据过滤
-            self.factors = []
-            # 信号同步索引缓存（per-run，避免跨并发请求共享）
-            self.sync_signal_index: Optional[pd.Index] = None
-            self.sync_signal_index_replaced: Optional[pd.Index] = None
-            self._sync_lock = threading.Lock()
-            # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
-            self.results: Dict['Factor', FactorRunResult] = {}
-            self._results_lock = threading.RLock()
-            self.last_group_factor: Optional['Factor'] = None
-            if start_dt is not None and end_dt is not None:
-                self.update_time_range(start_dt, end_dt)
-            else:
-                self.start_dt = None
-                self.end_dt = None
-                self.start_date = None
-                self.end_date = None
-                self.start_calc_point = None  # DataTime | None，计算起始点
-            self.logger.info(f"FactorTester initialized with {len(self.products)} products")
-
-    def delete(self):
-        """
-        清理 FactorTester 及其持有的所有 per-factor 数据。
-
-        调用后：
-          - 所有关联 Factor 的计算缓存被清空
-          - Factor 和其非$开头 Parameter 副本被从全局缓存中移除（delete）
-          - self.products / self.all_products 被置空
-          - 将 self 从所属 User 的 tester 列表中移除（如有）
-          - 关闭 logger handler 释放文件句柄
-        """
-        from tools.parameters.Parameter import Parameter
-        # 清理所有关联 Factor 及其非$开头参数
-        for f in list(self.factors):
-            try:
-                # 清理非$开头的 Parameter 副本（name = {alias}:{factor.name}）
-                if f.family is not None:
-                    for param in list(f.family.params):
-                        if not param.alias.startswith('$'):
-                            try:
-                                param.delete()
-                            except Exception:
-                                pass
-                f.clear()
-                f.delete()
-            except Exception:
-                pass
-        # 清空 per-factor 缓存
-        with self._results_lock:
-            for result in self.results.values():
-                result.clear_caches()
-            self.results.clear()
-        self.factors.clear()
-        self.products = set()
-        self.all_products = set()
-        # 关闭 logger handler
-        for handler in list(self.logger.handlers):
-            handler.close()
-            self.logger.removeHandler(handler)
-        try:
-            self.logger.info(f"FactorTester {self.alias} deleted")
-        except Exception:
-            pass
-
-    def _get_result(self, factor: 'Factor') -> FactorRunResult:
-        """获取或创建 factor 对应的 FactorRunResult（公用的访问入口）。"""
-        with self._results_lock:
-            if factor not in self.results:
-                self.results[factor] = FactorRunResult(factor=factor)
-            return self.results[factor]
-
-    def discard_result(self, factor: 'Factor', *, clear_factor: bool = True) -> None:
-        """释放不再可达的 factor 运行结果及其中间表。"""
-        with self._results_lock:
-            result = self.results.pop(factor, None)
-        if result is not None:
-            result.clear_caches()
-        if self.last_group_factor is factor:
-            self.last_group_factor = None
-        if clear_factor:
-            factor.clear()
-
-    def update_time_range(self, start_dt: DataTime, end_dt: DataTime):
-        """更新测试时间区间。start_dt/end_dt 均为 DataTime。"""
-        self.start_dt = start_dt
-        self.end_dt = end_dt
-        self.start_date = start_dt.ts
-        self.end_date = end_dt.ts
-        self.start_calc_point = start_dt
-        self.logger.info(f"Time range updated to {start_dt} - {end_dt}")
-
-    def sift_product(self, sift_func: Callable[[Product], bool]):
-        """按自定义函数筛选品种，不满足条件的品种从 self.products 中移除。"""
-        new_products = set()
-        for product in self.products:
-            if sift_func(product):
-                new_products.add(product)
-        self.products = new_products
-
-    def sift_product_by_empty_data(self):
-        """移除所有无有效成交量数据的品种（使用全量数据判断，不依赖 start_calc_point）。"""
-        new_products = set()
-        for product in self.products:
-            df = product.get_some_data(copy=False)
-            if not df.empty and max(df[DataColumn.VOLUME.name]) > 0:
-                new_products.add(product)
-        self.products = new_products
-        self.sift_product_by_empty_data_bool = True
-
-    def sift_product_by_volumes(self, ratio: Optional[float] = None, time_col: Optional[Any] = None,
-                                time_range: Optional[Any] = None) -> Set[Product]:
-        """
-        按成交量排名保留头部品种。
-
-        参数：
-            ratio      : 保留比例（0~1），None 则返回全量
-            time_col   : 成交量统计的时间列（传给 get_slices）
-            time_range : 成交量统计的时间范围
-
-        返回：
-            按成交量从高到低排序后取前 ratio 比例的品种集合
-        """
-        if ratio is None:
-            return self.products
-        if not self.sift_product_by_empty_data_bool:
-            self.sift_product_by_empty_data()
-        results = {}
-        for product in self.products:
-            sum_volume = product.get_slices(target_cols=DataColumn.VOLUME,
-                                                  time_col=time_col, time_range=time_range,
-                                                  copy=False).sum().values
-            if sum_volume == 0:
-                continue
-            results[product] = sum_volume
-        sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
-        return set(sorted_products[:int(len(sorted_products) * ratio)])
-
-    def calc_factor(self, factors: 'Factor|List[Factor]', parallel: bool = True, max_workers: int = 4):
-        """
-        批量计算因子值。品种筛选由 func 内部处理。
-
-        参数：
-            factors    : 单个 Factor 或 Factor 列表
-            parallel   : 是否并行计算（默认 True，单因子时自动退化为串行）
-            max_workers: 并行线程数（默认 4）
-        """
-        if isinstance(factors, Factor):
-            factors = [factors]
-        self.factors = factors
-
-        if parallel and len(factors) > 1:
-            desc = f'Calculate {len(factors)} factors for {len(self.products)} products'
-            # 捕获当前 context 中 _active_tester 的值，在每个 worker 线程里手动设置
-            token = _active_tester.get()
-            def _calc_one(factor: Factor) -> None:
-                _active_tester.set(token)
-                factor.evaluate(self.products)
-            with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
-                futures = {pool.submit(_calc_one, f): f for f in factors}
-                for future in tqdm(as_completed(futures), total=len(futures), desc=desc):
-                    exc = future.exception()
-                    if exc is not None:
-                        for fut in futures:
-                            fut.cancel()
-                        raise RuntimeError(
-                            f"calc_factor: {futures[future].alias} 计算失败") from exc
-        else:
-            for factor in tqdm(factors, desc=f'Calculate factors for {len(self.products)} products'):
-                factor.evaluate(self.products)
-
-    def ic_stats(self, ic_series: pd.Series) -> pd.Series:
-        """计算 IC 序列的汇总统计量。"""
-        from tools.factors.tests.single_factor_test.ic import ic_stats
-        return ic_stats(ic_series)
-
-    def resolve_factor(self, factor_alias: str) -> Optional['Factor']:
-        """Resolve factor by alias or name within this tester."""
-        return next(
-            (f for f in self.factors if f.alias == factor_alias or f.name == factor_alias),
-            None,
-        )
-
-    @classmethod
-    def allowed_group_calendar_freqs(cls) -> tuple[DataFreq, ...]:
-        return tuple(DataFreq(freq) for freq in cls._allowed_group_calendar_freqs)
-
-    def collect_group_factor_freqs(self, factor_aliases: List[str]) -> List[DataFreq]:
-        freqs: list[DataFreq] = []
-        for factor_alias in factor_aliases:
-            factor = self.resolve_factor(str(factor_alias))
-            if factor is None:
-                continue
-            try:
-                factor_freq = factor.freq
-            except Exception:
-                factor_freq = None
-            if factor_freq is None:
-                continue
-            freqs.append(DataFreq(factor_freq))
-        return freqs
-
-    @classmethod
-    def resolve_group_calendar_freq_from_factor_freqs(
-        cls,
-        factor_freqs: Sequence[DataFreq],
-        requested: Optional[Any] = None,
-    ) -> DataFreq:
-        allowed = cls.allowed_group_calendar_freqs()
-        if not factor_freqs:
-            if requested in (None, '', 'auto', 'AUTO'):
-                return DataFreq.MIN1
-            calendar_freq = DataFreq(requested)
-            if str(calendar_freq) not in {str(freq) for freq in allowed}:
-                raise ValueError(
-                    "group_calendar_freq 只允许 "
-                    f"{[str(freq) for freq in allowed]}，收到 {calendar_freq}"
-                )
-            return calendar_freq
-
-        def _is_compatible(candidate: DataFreq) -> bool:
-            base_ns = candidate.value.value
-            return base_ns > 0 and all(freq.value.value > 0 and freq.value.value % base_ns == 0 for freq in factor_freqs)
-
-        if requested in (None, '', 'auto', 'AUTO'):
-            for candidate in reversed(allowed):
-                if _is_compatible(candidate):
-                    return candidate
-            raise ValueError(
-                "参与测试的因子频率无法映射到允许的 group_calendar_freq "
-                f"{[str(freq) for freq in allowed]}"
+            self.state = FactorTesterState(
+                products, alias=alias, start_dt=start_dt, end_dt=end_dt,
+                group_calendar_freq=group_calendar_freq, user=user,
             )
 
-        calendar_freq = DataFreq(requested)
-        if str(calendar_freq) not in {str(freq) for freq in allowed}:
-            raise ValueError(
-                "group_calendar_freq 只允许 "
-                f"{[str(freq) for freq in allowed]}，收到 {calendar_freq}"
-            )
-        if not _is_compatible(calendar_freq):
-            raise ValueError(
-                f"group_calendar_freq={calendar_freq} 不能整除参与测试的全部因子频率 "
-                f"{[str(freq) for freq in factor_freqs]}"
-            )
-        return calendar_freq
+    def dispatch(self, task_name: str, **kwargs: Any) -> Any:
+        if task_name == "backtest" and "backtest" not in self._TASK_HANDLERS:
+            from tools.testers.backtest.engines.native.backtester import run_backtest_task
+            FactorTester._TASK_HANDLERS["backtest"] = run_backtest_task
+        handler = self._TASK_HANDLERS[task_name]
+        return handler(self.state, **kwargs)
 
-    def resolve_group_calendar_freq(self, factor_aliases: List[str], requested: Optional[Any] = None) -> DataFreq:
-        """Resolve effective group calendar frequency for these factors."""
-        setting = self.group_calendar_freq if requested is None else requested
-        factor_freqs = self.collect_group_factor_freqs(factor_aliases)
-        return self.resolve_group_calendar_freq_from_factor_freqs(factor_freqs, setting)
+    # ── Thin one-line delegators, kept as real methods (not dispatch-only) ──
+    # tools/factors/Factors.py and tools/factors/FactorFamily.py -- the core
+    # factor-evaluation machinery used everywhere, not just single_factor_test
+    # routes -- call these directly on whatever `_active_tester.get()`
+    # returns via duck typing. Rewriting that (unrelated to issue-114, used
+    # repo-wide) is out of scope here, so these four stay real methods;
+    # everything else routes through dispatch().
+    def _get_result(self, factor: Any) -> Any:
+        return _tasks.get_result(self.state, factor)
 
-    def build_group_calendar_index(self, factor_aliases: List[str], requested_calendar_freq: Optional[Any] = None) -> pd.Index:
-        """Build a dense shared signal calendar for group testing within this tester."""
-        from typing import cast
-        from tools.factors.tests.single_factor_test.group.core import (
-            align_table_for_group,
-            get_factor_table_for_group,
-        )
+    def discard_result(self, factor: Any, *, clear_factor: bool = True) -> None:
+        _tasks.discard_result(self.state, factor, clear_factor=clear_factor)
 
-        calendar_freq = self.resolve_group_calendar_freq(factor_aliases, requested_calendar_freq)
-        indices: list[pd.DatetimeIndex] = []
+    def calc_factor(self, factors: Any, parallel: bool = True, max_workers: int = 4) -> None:
+        _tasks.calc_factor(self.state, factors, parallel=parallel, max_workers=max_workers)
 
-        for factor_alias in factor_aliases:
-            factor = self.resolve_factor(str(factor_alias))
-            if factor is None:
-                continue
-            result = self._get_result(factor)
-            raw_returns = getattr(result, 'returns', None)
-            if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
-                continue
-            try:
-                table_src = get_factor_table_for_group(self, factor)
-                returns_src = align_table_for_group(factor, raw_returns)
-            except Exception:
-                continue
-            table_idx = _extract_signal_index(cast(pd.DataFrame, table_src).index)
-            returns_idx = _extract_signal_index(cast(pd.DataFrame, returns_src).index)
-            idx = pd.DatetimeIndex(table_idx.intersection(returns_idx)).dropna()
-            if len(idx) == 0:
-                continue
-            indices.append(idx)
-        merged = self.merge_group_calendar_indices(indices)
-        if len(merged) == 0:
-            return merged
-        merged_idx = pd.DatetimeIndex(merged).sort_values()
-        start = merged_idx[0]
-        end = merged_idx[-1]
-        return pd.date_range(start=start, end=end, freq=calendar_freq.value)
+    def resolve_factor(self, factor_alias: str) -> Any:
+        return _tasks.resolve_factor(self.state, factor_alias)
 
-    @staticmethod
-    def merge_group_calendar_indices(indices: Sequence[pd.Index]) -> pd.Index:
-        """Merge signal calendars across factors or testers into one dense shared index."""
-        cleaned: list[pd.DatetimeIndex] = []
-        tz_kinds: set[str] = set()
-        tz_values: set[str] = set()
 
-        for idx in indices:
-            if len(idx) == 0:
-                continue
-            dt_idx = pd.DatetimeIndex(idx).dropna()
-            if len(dt_idx) == 0:
-                continue
-            cleaned.append(dt_idx)
-            if dt_idx.tz is None:
-                tz_kinds.add('naive')
-            else:
-                tz_kinds.add('aware')
-                tz_values.add(str(dt_idx.tz))
-
-        if not cleaned:
-            return pd.Index([])
-
-        same_tz = len(tz_kinds) == 1 and (('naive' in tz_kinds) or len(tz_values) == 1)
-        if same_tz:
-            merged = cleaned[0]
-            for dt_idx in cleaned[1:]:
-                merged = merged.union(dt_idx)
-            return pd.DatetimeIndex(merged).sort_values().unique()
-
-        utc_values: list[pd.Timestamp] = []
-        for dt_idx in cleaned:
-            for value in dt_idx:
-                ts = pd.Timestamp(value)
-                utc_values.append(ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC'))
-        return pd.DatetimeIndex(utc_values).sort_values().unique()
-
-def get_factor_tester(start_dt: Optional[DataTime] = None, end_dt: Optional[DataTime] = None) -> FactorTester:
-    """
-    创建包含全部品种的 FactorTester 实例（便捷工厂函数）。
-
-    参数：
-        start_dt : 测试起始 DataTime
-        end_dt   : 测试截止 DataTime
-
-    返回：
-        FactorTester 实例
-    """
+def get_factor_tester(start_dt: Optional["DataTime"] = None, end_dt: Optional["DataTime"] = None) -> FactorTester:
+    """创建包含全部品种的 FactorTester 实例（便捷工厂函数）。"""
+    from settings import get_all_products
     return FactorTester(products=get_all_products(), start_dt=start_dt, end_dt=end_dt)

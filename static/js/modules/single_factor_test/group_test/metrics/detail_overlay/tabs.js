@@ -15,6 +15,7 @@
     var C = GT.metrics.detailOverlay.charts;
     var IW = GT.metrics.detailOverlay.intraday;
     if (!F || !T || !C || !IW) throw new Error('detailOverlay sub-modules not fully loaded');
+    var _productAnalysisLevel = 'products';
 
     /* ───── renderGroupSummaryCards ───── */
 
@@ -100,18 +101,36 @@
     }
 
     function renderProductAnalysis(analysis) {
-        var top = analysis.top_products || [];
-        var bottom = analysis.bottom_products || [];
+        var byLevel = analysis.by_level || {};
+        var level = byLevel[_productAnalysisLevel] ? _productAnalysisLevel : (analysis.default_level || 'products');
+        if (!byLevel[level]) level = byLevel.products ? 'products' : byLevel.contracts ? 'contracts' : '';
+        var active = level ? byLevel[level] : analysis;
+        var top = active.top_products || [];
+        var bottom = active.bottom_products || [];
         var best = top[0];
         document.getElementById('group-detail-product-summary').textContent =
-            best ? '哪些产品真正贡献了毛收益 · 最高 ' + F.formatGroupProduct(best.product) : '哪些产品真正贡献了毛收益';
+            best ? '哪些' + (level === 'contracts' ? '合约' : '品种') + '真正贡献了毛收益 · 最高 ' + F.formatGroupProduct(best.product) : '哪些产品真正贡献了毛收益';
+        var switchHtml = '';
+        if (byLevel.products && byLevel.contracts) {
+            switchHtml = '<div class="snapshot-matrix-switch snapshot-matrix-switch-paired" role="group" style="margin-bottom:8px;">'
+                + '<button type="button" class="snapshot-matrix-switch-btn' + (level === 'products' ? ' active' : '') + '" data-product-analysis-level="products">品种</button>'
+                + '<button type="button" class="snapshot-matrix-switch-btn' + (level === 'contracts' ? ' active' : '') + '" data-product-analysis-level="contracts">合约</button>'
+                + '</div>';
+        }
         document.getElementById('group-detail-product-overview').textContent =
             '以下为已实现持仓下的毛收益贡献，不含手续费分摊。'
-            + '最强 1 个产品贡献正毛收益的 ' + F.fmtPct(analysis.top1_positive_contribution_ratio)
-            + '，最强 3 个产品贡献 ' + F.fmtPct(analysis.top3_positive_contribution_ratio)
-            + (analysis.is_concentrated ? '。当前毛收益对少数产品较集中。' : '。');
-        document.getElementById('group-detail-product-top').innerHTML = T.renderProductContributionRows(top);
-        document.getElementById('group-detail-product-bottom').innerHTML = T.renderProductContributionRows(bottom);
+            + '最强 1 个' + (level === 'contracts' ? '合约' : '品种') + '贡献正毛收益的 ' + F.fmtPct(active.top1_positive_contribution_ratio)
+            + '，最强 3 个' + (level === 'contracts' ? '合约' : '品种') + '贡献 ' + F.fmtPct(active.top3_positive_contribution_ratio)
+            + (active.is_concentrated ? '。当前毛收益对少数' + (level === 'contracts' ? '合约' : '品种') + '较集中。' : '。');
+        document.getElementById('group-detail-product-top').innerHTML = switchHtml + T.renderProductContributionRows(top, { level: level, weighted: level === 'products' });
+        document.getElementById('group-detail-product-bottom').innerHTML = T.renderProductContributionRows(bottom, { level: level, weighted: level === 'products' });
+        var switchButtons = document.querySelectorAll('#group-detail-product-top [data-product-analysis-level]');
+        for (var i = 0; i < switchButtons.length; i++) {
+            switchButtons[i].addEventListener('click', function() {
+                _productAnalysisLevel = this.getAttribute('data-product-analysis-level') || 'products';
+                renderProductAnalysis(analysis);
+            });
+        }
     }
 
     function renderRobustnessSummary(summary, periodRobustness) {

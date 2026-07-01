@@ -70,7 +70,7 @@ AUTHOR_SDK_MODULES = (
         + ")\n"
         + "from tools.factors.Parameters import (\n"
         + "    FactorNextPeriodReturns as FactorNextPeriodReturns, ReturnFreqParam as ReturnFreqParam,\n"
-        + "    FactorFreqParam as FactorFreqParam, StartCalcPointParam as StartCalcPointParam,\n"
+        + "    FactorFreqParam as FactorFreqParam,\n"
         + "    ReverseParam as ReverseParam,\n"
         + ")\n",
     ),

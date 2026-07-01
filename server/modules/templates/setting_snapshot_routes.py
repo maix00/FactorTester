@@ -9,6 +9,7 @@ from server.modules.products.product_group_store import load_product_groups
 from server.services.http_auth import login_required
 from server.services.session_runtime import get_user_file_lock, require_user
 from tools.data.account_manage import list_user_template_metadata, load_user_template
+from server.modules.templates.backend_settings_migration import migrate_snapshot_backend_settings
 
 
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['GET'])
@@ -48,6 +49,8 @@ def save_single_factor_setting_template(factor_family_alias):
         return jsonify({'success': False, 'error': '因子家族不能为空'})
     username = require_user()
     with get_user_file_lock(username):
+        if isinstance(snapshot, dict):
+            snapshot = _migrate_snapshot_with_product_groups(username, snapshot)
         templates = load_template_list(username, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         template_id = new_template_id()
         templates.append({
@@ -93,9 +96,18 @@ def update_single_factor_setting_template(factor_family_alias, tpl_id):
                 return jsonify({'success': False, 'error': '模板名称不能为空'})
             template['name'] = name
         if 'snapshot' in data:
-            template['snapshot'] = data['snapshot']
+            snapshot = data['snapshot']
+            if isinstance(snapshot, dict):
+                snapshot = _migrate_snapshot_with_product_groups(username, snapshot)
+            template['snapshot'] = snapshot
         save_template_list(username, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, templates, scope_key=factor_family_alias)
     return jsonify({'success': True})
+
+
+def _migrate_snapshot_with_product_groups(username: str, snapshot: dict) -> dict:
+    groups = load_product_groups(username)
+    snapshot, _ = migrate_snapshot_backend_settings(snapshot, groups)
+    return snapshot
 
 
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['DELETE'])

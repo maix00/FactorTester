@@ -54,14 +54,14 @@ class CrossSectionalOp(OperandExpr):
             opnd = self.operands[i]
             vals.append(opnd.value if isinstance(opnd, ConstExpr) else val)
 
-        if self.op == 'cs_spearman':
+        if self.op in ('cs_spearman', 'cs_corr'):
             left_df, right_df = vals[0], vals[1]
             if not isinstance(left_df, pd.DataFrame) or not isinstance(right_df, pd.DataFrame):
                 raise TypeError(
-                    f"cs_spearman 需要两个 DataFrame 输入，收到 "
+                    f"{self.op} 需要两个 DataFrame 输入，收到 "
                     f"{type(left_df).__name__} 与 {type(right_df).__name__}"
                 )
-            return self._apply_spearman(left_df, right_df)
+            return self._apply_spearman(left_df, right_df) if self.op == 'cs_spearman' else self._apply_corr(left_df, right_df)
 
         x = vals[0]
         if self.op == 'cs_zscore':
@@ -130,6 +130,48 @@ class CrossSectionalOp(OperandExpr):
         result.index.names = left_df.index.names
         return result
 
+    @staticmethod
+    def _apply_corr(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
+        if left_df.index.equals(right_df.index) and left_df.columns.equals(right_df.columns):
+            idx = left_df.index
+            l_df = left_df
+            r_df = right_df
+        else:
+            common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
+            common_cols = left_df.columns.intersection(right_df.columns)
+            if len(common_idx) == 0 or len(common_cols) == 0:
+                empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
+                result = pd.DataFrame({'IC': []}, index=empty_idx)
+                result.index.names = left_df.index.names
+                return result
+            idx = common_idx
+            l_df = left_df.loc[idx, common_cols]
+            r_df = right_df.loc[idx, common_cols]
+
+        x = l_df.to_numpy(dtype=float)
+        y = r_df.to_numpy(dtype=float)
+        mask = ~np.isnan(x) & ~np.isnan(y)
+        x_masked = np.where(mask, x, 0.0)
+        y_masked = np.where(mask, y, 0.0)
+
+        n = mask.sum(axis=1).astype(float)
+        sum_x = x_masked.sum(axis=1)
+        sum_y = y_masked.sum(axis=1)
+        sum_x2 = (x_masked * x_masked).sum(axis=1)
+        sum_y2 = (y_masked * y_masked).sum(axis=1)
+        sum_xy = (x_masked * y_masked).sum(axis=1)
+
+        num = n * sum_xy - sum_x * sum_y
+        den = np.sqrt((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y))
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ic = num / den
+        ic[(n <= 1) | (den <= 0)] = np.nan
+
+        result = pd.DataFrame({'IC': ic}, index=idx)
+        result.index.names = left_df.index.names
+        return result
+
     def _to_latex(self, subst: dict | None = None) -> str:
         sk = self._structural_key()
         if subst is not None and sk in subst:
@@ -138,6 +180,10 @@ class CrossSectionalOp(OperandExpr):
             left_latex = self.left._to_latex(subst)
             right_latex = self.right._to_latex(subst)
             return f'\\rho_s({left_latex}, {right_latex})'
+        if self.op == 'cs_corr':
+            left_latex = self.left._to_latex(subst)
+            right_latex = self.right._to_latex(subst)
+            return f'\\rho({left_latex}, {right_latex})'
 
         operand_latex = self.operand._to_latex(subst)
         _LATEX_MAP = {
@@ -147,7 +193,7 @@ class CrossSectionalOp(OperandExpr):
         return _LATEX_MAP.get(self.op, f'\\text{{{self.op}}}({operand_latex})')
 
     def _get_alias(self) -> str:
-        if self.op == 'cs_spearman':
+        if self.op in ('cs_spearman', 'cs_corr'):
             return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
         return f"{self.op}_{self.operand._get_alias()}"
 

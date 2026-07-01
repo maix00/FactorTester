@@ -11,11 +11,10 @@
     GT.panels = GT.panels || {};
     GT.panels.list = GT.panels.list || {};
 
-    var H, REG, SEL;
+    var H, SEL;
 
     function _ensureDeps() {
         if (!H) H = GT.panels.list._helpers;
-        if (!REG) REG = window.GT_CONFIG_REGISTRY;
     }
 
     function _setSEL(s) { SEL = s; }
@@ -150,20 +149,20 @@
         html += '<label style="display:block;margin-bottom:12px;">';
         html += '<span style="display:block;font-size:13px;margin-bottom:4px;">品种筛选（留空=全选）</span>';
         html += '<div id="dg-f-product-mask" style="max-height:120px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;">';
-        var testerProds = [];
-        if (isEdit) { testerProds = H.nodeProducts(editData); }
-        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); testerProds = pn ? H.nodeProducts(pn) : []; }
+        var selectionProducts = [];
+        if (isEdit) { selectionProducts = H.nodeProducts(editData); }
+        else if (parentNodeId) { var pn = GT.groupSettings.groups && GT.groupSettings.groups.get(parentNodeId); selectionProducts = pn ? H.nodeProducts(pn) : []; }
         else {
             var allPs = {};
             for (var bi = 0; bi < bgs.length; bi++) {
-                var pp = H.testerProducts(bgs[bi].testerId);
+                var pp = H.productPathSelectionProducts(bgs[bi].product_path_selection);
                 for (var pi = 0; pi < pp.length; pi++) { allPs[pp[pi].name] = pp[pi]; }
             }
-            testerProds = Object.keys(allPs).map(function(k) { return allPs[k]; });
+            selectionProducts = Object.keys(allPs).map(function(k) { return allPs[k]; });
         }
         var existingMask = (editData && editData.productMask) ? editData.productMask : {};
-        for (var ti = 0; ti < testerProds.length; ti++) {
-            var pName = testerProds[ti].name;
+        for (var ti = 0; ti < selectionProducts.length; ti++) {
+            var pName = selectionProducts[ti].name;
             var checked = Object.keys(existingMask).length === 0 ? ' checked' : (existingMask[pName] ? ' checked' : '');
             html += '<label style="display:inline-block;margin-right:12px;font-size:12px;"><input type="checkbox" class="dg-f-prod" value="' + H.escapeHTML(pName) + '"' + checked + '> ' + H.escapeHTML(pName) + '</label>';
         }
@@ -238,29 +237,27 @@
 
             for (var i = 0; i < items.length; i++) {
                 var item = items[i];
+                var longDg = H.getGroup(item.longGroupId);
+                var shortDg = H.getGroup(item.shortGroupId);
+                var longLabel = longDg
+                    ? (H.deriveShortAlias(longDg) || longDg.shortAlias || longDg.name || item.longGroupId)
+                    : (item.longGroupId || '—');
+                var shortLabel = shortDg
+                    ? (H.deriveShortAlias(shortDg) || shortDg.shortAlias || shortDg.name || item.shortGroupId)
+                    : (item.shortGroupId || '—');
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + H.escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;">';
 
-                h += '<td style="padding:6px 8px;white-space:nowrap;">';
-                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + H.escapeHTML(item.shortAlias || item.name) + '</span>';
-                h += '</td>';
-
-                h += '<td style="padding:2px 4px;width:100%;">';
-                var longDg = H.getGroup(item.longGroupId);
-                var shortDg = H.getGroup(item.shortGroupId);
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#3b82f6;font-weight:600;margin-right:4px;">📈</span>';
-                if (longDg) h += H.renderAllChipsForGroup(longDg);
-                h += '</div>';
-                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
-                h += '<span style="font-size:10px;color:#8b5cf6;font-weight:600;margin-right:4px;">📉</span>';
-                if (shortDg) h += H.renderAllChipsForGroup(shortDg);
-                h += '</div>';
+                h += '<td style="padding:6px 8px;width:100%;white-space:nowrap;">';
+                h += '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#4338ca;font-size:13px;">';
+                h += '<span style="font-size:11px;font-weight:700;color:#6366f1;">LS</span>';
+                h += '<span>' + H.escapeHTML(longLabel) + '/' + H.escapeHTML(shortLabel) + '</span>';
+                h += '</span>';
                 h += '</td>';
 
                 h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
-                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:1px 5px;font-size:13px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">🔄</button>';
-                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:2px 7px;font-size:12px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">交换</button>';
+                h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:2px 7px;font-size:12px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">删除</button>';
                 h += '</td></tr>';
             }
             h += '</tbody></table>';
@@ -269,7 +266,55 @@
         return h;
     }
 
-    function _renderBaseSection(expandedBatches, collapsedIds) {
+    function _chipsForGroup(group) {
+        return (GT.backendSettings && typeof GT.backendSettings.getAllChips === 'function')
+            ? GT.backendSettings.getAllChips(group)
+            : [];
+    }
+
+    function _chipOwnedByBatch(chip, group, batch) {
+        if (!chip) return false;
+        // 哪些 chip 属于批次键由后端 ChipDefinition.batch_owned 声明（不再前端硬编码标签）。
+        var isProductPath = chip.label === 'product_path_selection' || chip.label === 'backtest-product_path_selection';
+        if (!chip.batch_owned && !isProductPath) return false;
+        if (!isProductPath) return true;
+        // 产品路径：仅当本组选择与批次选择一致时才归批次（组内可覆盖为不同产品路径）。
+        var groupSelection = group && group.product_path_selection;
+        if (!groupSelection) return true;
+        var groupId = H.selectionId ? H.selectionId(groupSelection) : '';
+        var batchId = batch && batch.product_path_selection_id || '';
+        return String(groupId || '') === String(batchId || '');
+    }
+
+    function _batchDiffConfigKeys(batch) {
+        if (!GT.backendSettings || typeof GT.backendSettings.configSettingKeys !== 'function') return {};
+        if (!batch || !Array.isArray(batch.items) || batch.items.length < 2) return {};
+        var keys = GT.backendSettings.configSettingKeys();
+        var diff = {};
+        for (var ki = 0; ki < keys.length; ki++) {
+            var key = keys[ki];
+            var seen = {};
+            var count = 0;
+            for (var ii = 0; ii < batch.items.length; ii++) {
+                var value = GT.backendSettings.effectiveSettingValueForGroup
+                    ? GT.backendSettings.effectiveSettingValueForGroup(batch.items[ii], key)
+                    : undefined;
+                if (value === undefined || value === null || value === '') continue;
+                var marker = String(value);
+                if (!seen[marker]) {
+                    seen[marker] = true;
+                    count += 1;
+                }
+                if (count > 1) {
+                    diff[key] = true;
+                    break;
+                }
+            }
+        }
+        return diff;
+    }
+
+    function _renderBaseSection(expandedBatches, collapsedIds, showFullChips) {
         _ensureDeps();
         var items = GT.groupSettings.groups.getAll();
         if (items.length === 0) {
@@ -281,11 +326,15 @@
         var h = '';
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">';
         h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span>';
+        h += '<span style="display:inline-flex;align-items:center;gap:8px;">';
         h += '<span style="font-size:11px;color:#666;">' + items.length + ' 个组 / ' + batches.length + ' 批</span>';
+        h += '<button type="button" class="unified-chip-toggle-btn' + (showFullChips ? ' active' : '') + '" title="' + (showFullChips ? '隐藏完整设置' : '显示完整设置') + '" style="height:22px;padding:0 8px;border:1px solid ' + (showFullChips ? '#6366f1' : '#cbd5e1') + ';border-radius:4px;background:' + (showFullChips ? '#eef2ff' : '#fff') + ';color:' + (showFullChips ? '#3730a3' : '#475569') + ';font-size:11px;line-height:20px;cursor:pointer;">' + (showFullChips ? '收起设置' : '显示设置') + '</button>';
+        h += '</span>';
         h += '</div>';
 
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
+            var batchDiffKeys = _batchDiffConfigKeys(batch);
             var batchId = batch.key;
             var isExpanded = batches.length === 1 ? true : (expandedBatches[batchId] === true);
             var isCollapsed = collapsedIds && collapsedIds[batchId];
@@ -298,7 +347,6 @@
                 }
             }
 
-            var testerLabel = H.testerLabel(batch.testerId);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
             var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
@@ -308,15 +356,28 @@
             }
             h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + H.escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="' + batchHeaderStyle + '">';
             h += '<span class="unified-batch-expand" style="margin-right:6px;width:20px;text-align:center;cursor:pointer;font-size:18px;line-height:1;">' + (isExpanded ? '▾' : '▸') + '</span>';
-            h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;">';
+            h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:wrap;">';
             if (batchLetter) {
-                h += '<span style="font-weight:700;color:#4338ca;min-width:24px;">' + H.escapeHTML(batchLetter) + '</span>';
+                h += '<span class="unified-batch-letter" style="font-size:12px;font-weight:700;color:#4338ca;line-height:20px;padding:0 2px;">' + H.escapeHTML(batchLetter) + '</span>';
             }
-            h += '<span style="font-weight:600;">' + H.escapeHTML(batch.factorAlias) + '</span>';
-            h += '<span style="color:#555;">' + H.escapeHTML(testerLabel) + '</span>';
-            h += '<span style="color:#888;font-size:11px;">' + batch.splitCount + '组</span>';
+            // 批次头的 因子/产品路径/分组数 走后端 ChipDefinition（manifest 驱动），
+            // 与每组行同源：per-group 行用 _chipOwnedByBatch 把这些"批次自有"的 identity
+            // chip 排除，正由批次头在此渲染。产品路径保留点击打开产品 overlay 的动作。
+            var batchGroup = batch.items[0];
+            var batchHeaderChips = batchGroup ? _chipsForGroup(batchGroup).filter(function(c) {
+                return c.batch_owned;   // 批次键 chip 由后端 ChipDefinition.batch_owned 声明
+            }) : [];
+            for (var hci = 0; hci < batchHeaderChips.length; hci++) {
+                var hchip = batchHeaderChips[hci];
+                if (hchip.label === 'product_path_selection') {
+                    h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="product-path-selection-products" data-gid="'
+                        + H.escapeHTML(batchGroup && batchGroup.id || '') + '" data-chip-label="product-path-selection">' + hchip.html + '</span>';
+                } else {
+                    h += '<span class="gt-backend-chip unified-backend-chip">' + hchip.html + '</span>';
+                }
+            }
             h += '</span>';
-            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
+            h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" title="删除批次" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">🗑</button>';
             h += '</div>';
 
             if (isExpanded && !isCollapsed) {
@@ -334,35 +395,54 @@
                     if (bg.shortAlias) {
                         h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + H.escapeHTML(bg.shortAlias) + '</span>';
                     }
-                    var allChips = (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(bg) : [];
+                    var allChips = _chipsForGroup(bg);
                     h += '<span style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;flex:1;min-width:0;">';
                     for (var ci = 0; ci < allChips.length; ci++) {
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
-                        if (chip.label === 'tester') {
-                            h += '<span class="unified-tester-chip" data-tester-id="' + H.escapeHTML(bg.testerId) + '" style="' + s + ';">' + chip.html + '</span>';
+                        if (_chipOwnedByBatch(chip, bg, batch)) continue;
+                        if (chip.clickable) {
+                            h += '<span class="gt-backend-chip unified-backend-chip" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {
-                            h += '<span style="' + s + ';">' + chip.html + '</span>';
+                            h += '<span class="gt-backend-chip" style="' + s + ';">' + chip.html + '</span>';
                         }
                     }
                     h += '</span>';
-                    h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
-                    for (ci = 0; ci < allChips.length; ci++) {
-                        chip = allChips[ci];
-                        if (chip.category !== 'config') continue;
-                        s = chip.style || H.CHIP_STYLE_PLAIN;
-                        if (chip.onClick) {
-                            var cls2 = ' class="unified-config-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
-                            h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
-                        } else {
-                            h += '<span style="' + s + ';">' + chip.html + '</span>';
+                    if (showFullChips) {
+                        var renderedConfigLabels = {};
+                        var configChips = [];
+                        h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
+                        for (ci = 0; ci < allChips.length; ci++) {
+                            chip = allChips[ci];
+                            if (chip.category !== 'config') continue;
+                            if (_chipOwnedByBatch(chip, bg, batch)) continue;
+                            renderedConfigLabels[chip.label] = true;
+                            configChips.push(chip);
                         }
+                        if (GT.backendSettings && typeof GT.backendSettings.configChipForGroupKey === 'function') {
+                            Object.keys(batchDiffKeys).forEach(function(key) {
+                                var diffChip = GT.backendSettings.configChipForGroupKey(bg, key);
+                                if (!diffChip || renderedConfigLabels[diffChip.label]) return;
+                                renderedConfigLabels[diffChip.label] = true;
+                                configChips.push(diffChip);
+                            });
+                        }
+                        for (var cfgi = 0; cfgi < configChips.length; cfgi++) {
+                            chip = configChips[cfgi];
+                            s = chip.style || H.CHIP_STYLE_PLAIN;
+                            if (chip.clickable) {
+                                var cls2 = ' class="gt-backend-chip unified-backend-chip" data-gid="' + H.escapeHTML(bg.id) + '" data-chip-action="' + H.escapeHTML(chip.action || '') + '" data-chip-label="' + H.escapeHTML(chip.label) + '"';
+                                h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
+                            } else {
+                                h += '<span class="gt-backend-chip" style="' + s + ';">' + chip.html + '</span>';
+                            }
+                        }
+                        h += '</span>';
                     }
-                    h += '</span>';
-                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+                    h += '<button class="unified-bg-del-btn" data-bg-id="' + H.escapeHTML(bg.id) + '" title="删除基础组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
                     h += '</div>';
-                    h += _renderDerivedTreeForBase(bg.id, expandedBatches);
+                    h += _renderDerivedTreeForBase(bg.id, expandedBatches, showFullChips);
                 }
                 h += '</div>';
             }
@@ -370,7 +450,7 @@
         return h;
     }
 
-    function _renderDerivedTreeForBase(rootGroupId, expandedBatches) {
+    function _renderDerivedTreeForBase(rootGroupId, expandedBatches, showFullChips) {
         _ensureDeps();
         if (!GT.groupSettings.groups) return '';
         var allNodes = GT.groupSettings.groups.getAll();
@@ -416,7 +496,7 @@
 
         var h = '<div class="unified-derived-subtree" style="margin-left:16px;border-left:2px solid #c7d2fe;padding-left:8px;">';
         for (var r = 0; r < roots.length; r++) {
-            h += _renderNode(roots[r], 0, expandedBatches);
+            h += _renderNode(roots[r], 0, expandedBatches, showFullChips);
         }
         h += '</div>';
         return h;
@@ -426,7 +506,7 @@
         return '';
     }
 
-    function _renderNode(node, depth, expandedBatches) {
+    function _renderNode(node, depth, expandedBatches, showFullChips) {
         _ensureDeps();
         if (!node) return '';
         var indent = depth * 18;
@@ -434,14 +514,10 @@
         var shortAlias = H.deriveShortAlias(node);
         var products = H.nodeProducts(node);
         var chips = H.deriveOverrideChips(node);
-        var prodExpanded = REG && REG._expandedProducts && REG._expandedProducts[node.id] === true;
+        var prodExpanded = GT.backendSettings && GT.backendSettings.isProductMaskExpanded
+            ? GT.backendSettings.isProductMaskExpanded(node.id)
+            : false;
         var hasKids = node.children && node.children.length > 0;
-        var ownMask = node.productMask || {};
-        var ownMaskKeys = Object.keys(ownMask).filter(function(k) { return ownMask[k]; });
-        var parentProducts = node.parentId && GT.groupSettings.groups
-            ? H.nodeProducts(GT.groupSettings.groups.get(node.parentId))
-            : [];
-        var showProductChip = ownMaskKeys.length > 0 && (!parentProducts.length || products.length !== parentProducts.length);
 
         var nodeSelected = SEL && SEL.isSelected(node.id);
         var rowStyle = 'display:flex;align-items:center;flex-wrap:wrap;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;gap:2px 6px;';
@@ -461,24 +537,20 @@
             h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + H.escapeHTML(shortAlias) + '</span>';
         }
         h += '<span style="flex:1;"></span>';
-        if (chips.length > 0) {
-            h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
+        if (showFullChips && chips.length > 0) {
+            h += '<span class="unified-config-chip-group" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
             for (var dci = 0; dci < chips.length; dci++) {
                 var dchip = chips[dci];
                 var ds = dchip.style || H.CHIP_STYLE_PLAIN;
-                var dcls = dchip.onClick ? ' class="unified-config-chip" data-dgid="' + H.escapeHTML(node.id) + '" data-chip-label="' + H.escapeHTML(dchip.label) + '"' : '';
+                var dcls = dchip.clickable ? ' class="gt-backend-chip unified-backend-chip" data-gid="' + H.escapeHTML(node.id) + '" data-chip-action="' + H.escapeHTML(dchip.action || '') + '" data-chip-label="' + H.escapeHTML(dchip.label) + '"' : ' class="gt-backend-chip"';
                 h += '<span' + dcls + ' style="' + ds + ';">' + dchip.html + '</span>';
             }
             h += '</span>';
         }
-        if (showProductChip) {
-            var tri = prodExpanded ? '▾' : '▸';
-            h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
-        }
-        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
+        h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" title="删除派生组" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">🗑</button>';
         h += '</div>';
 
-        if (showProductChip && prodExpanded && products.length > 0) {
+        if (prodExpanded && products.length > 0) {
             h += '<div class="unified-dg-product-list" style="margin-left:' + (indent + 34) + 'px;padding:4px 8px;border-left:2px solid #c7d2fe;font-size:11px;">';
             for (var pi = 0; pi < products.length; pi++) {
                 var pn = products[pi].name;
@@ -495,7 +567,7 @@
 
         if (isExp && hasKids) {
             for (var ci = 0; ci < node.children.length; ci++) {
-                h += _renderNode(node.children[ci], depth + 1, expandedBatches);
+                h += _renderNode(node.children[ci], depth + 1, expandedBatches, showFullChips);
             }
         }
         h += '</div>';

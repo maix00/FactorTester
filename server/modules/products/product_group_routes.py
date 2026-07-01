@@ -14,7 +14,7 @@ from server.modules.products.product_group_store import (
     reorder_product_groups,
     update_product_group,
 )
-from server.modules.custom_factors.param_config_store import rename_scope
+from server.modules.custom_factors.factor_library_store import rename_scope
 from server.services.http_auth import login_required
 from server.services.session_runtime import require_user
 
@@ -27,6 +27,22 @@ def list_product_groups():
     username = require_user()
     groups = load_product_groups(username)
     return jsonify({'success': True, 'groups': groups})
+
+
+@templates_bp.route('/api/product-groups/resolve', methods=['POST'])
+@login_required
+def resolve_product_groups():
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids') or []
+    if not isinstance(ids, list):
+        return jsonify({'success': False, 'error': 'ids 必须是数组'}), 400
+    wanted = {str(item).strip() for item in ids if str(item).strip()}
+    username = require_user()
+    matches = [
+        group for group in load_product_groups(username)
+        if str(group.get('id') or '').strip() in wanted
+    ]
+    return jsonify({'success': True, 'groups': matches})
 
 
 @templates_bp.route('/api/product-groups', methods=['POST'])

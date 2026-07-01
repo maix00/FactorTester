@@ -79,7 +79,7 @@
         var factorFamilyAlias = window.factorFamilyAlias || '';
 
         try {
-            var resp = await fetch('/custom-factors/api/param-config-scopes');
+            var resp = await fetch('/custom-factors/api/factor-library-scopes');
             var data = await resp.json();
             var scopes = data.success ? (data.product_groups || data.scopes || []) : [];
             scopes = scopes.map(normalizeScope);
@@ -118,7 +118,7 @@
             var scopeKey = scopeSelect ? scopeSelect.value : 'default';
             var msgEl = popover.querySelector('.factor-add-to-lib-msg');
             try {
-                var addResp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
+                var addResp = await fetch('/custom-factors/api/factor-library-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ factor_alias: factorAlias, product_group: scopeKey })

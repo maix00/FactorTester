@@ -34,14 +34,16 @@ class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
     Issue #2: 将 5 种 _evaluate() 签名变体统一为 ctx: EvaluateContext。
-    Issue #3: 新增 start_calc_point，替代 ProductDataView 对 _active_tester 的隐式依赖。
+    Run window is explicit: factor evaluation callers must pass start_dt/end_dt.
     """
     products: Sequence['Product']
     freq: DataFreq
     source: Optional['DataSource'] = None
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
-    start_calc_point: Optional[Any] = None  # DataTime | None
+    start_dt: Optional[Any] = None  # DataTime | None
+    end_dt: Optional[Any] = None  # DataTime | None
+    warmup_window: Optional[Any] = None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
 
@@ -155,6 +157,60 @@ class FactorExpr:
         """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
         return self
 
+    def supports_vectorized(self) -> bool:
+        """Whether this expression can be evaluated as a whole historical table.
+
+        Ordinary OHLCV-style FactorExpr graphs are vectorizable by default.
+        Path-dependent or live-only nodes, such as future order-book/event
+        fields, should override this to return False so backtest factor-mode
+        selection can reject forced precomputation or choose live replay in
+        auto mode.
+        """
+        return all(
+            child.supports_vectorized()
+            for child in getattr(self, "_operands", ())
+            if isinstance(child, FactorExpr)
+        )
+
+    def supports_incremental(self) -> bool:
+        """Whether this expression is intended to be incrementally compilable.
+
+        Expressions default to being eligible for incremental compilation when
+        their children are. This is intentionally independent from
+        supports_vectorized(): live-only leaves can be non-vectorizable while
+        still compiling into an incremental executor. The compiler remains the
+        source of truth for detailed unsupported operators.
+        """
+        return all(
+            child.supports_incremental()
+            for child in getattr(self, "_operands", ())
+            if isinstance(child, FactorExpr)
+        )
+
+    def compile_incremental(
+        self,
+        *,
+        factor_alias: str = "factor",
+        products: Sequence['Product'],
+        source_freq: DataFreq | str | None = None,
+    ) -> Any:
+        """Compile this FactorExpr into a run-scoped incremental executor."""
+        from tools.testers.backtest.engines.factors.incremental import (
+            UnsupportedStreamingFactor,
+            compile_incremental_factor,
+        )
+
+        if not self.supports_incremental():
+            raise UnsupportedStreamingFactor(
+                f"{type(self).__name__} does not support incremental execution"
+            )
+        return compile_incremental_factor(
+            factor_alias,
+            self,
+            tuple(products),
+            source_freq=source_freq,
+        )
+
     def evaluate(self, *args, ctx: Optional['EvaluateContext'] = None, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。
 
@@ -169,7 +225,9 @@ class FactorExpr:
                 source=kwargs.get('source', None),
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
-                start_calc_point=kwargs.get('start_calc_point', None),
+                start_dt=kwargs.get('start_dt', None),
+                end_dt=kwargs.get('end_dt', None),
+                warmup_window=kwargs.get('warmup_window', None),
                 run_result=kwargs.get('run_result', None),
                 panel_timeline=kwargs.get('panel_timeline', None),
             )
@@ -608,6 +666,11 @@ class FactorExpr:
     def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
         return _lazy()['CrossSectionalOp']('cs_spearman', self, other)
+
+    @factor_workspace
+    def cs_corr(self, other: 'FactorExpr') -> 'CrossSectionalOp':
+        """截面 Pearson 相关系数：self 与 other 逐时间点计算。"""
+        return _lazy()['CrossSectionalOp']('cs_corr', self, other)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

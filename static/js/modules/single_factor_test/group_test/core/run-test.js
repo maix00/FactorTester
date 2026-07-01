@@ -22,64 +22,12 @@
         return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
     }
 
-    function prepareLocalRun() {
-        return GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
-            ? GT.localSettings.prepareRun()
-            : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
-    }
-
-    async function resolveSubmissionIdForGroup(submissionId) {
-        var targetId = String(submissionId || '');
-        if (!targetId) return targetId;
-        try {
-            var subs = Array.isArray(window.submissions) ? window.submissions : [];
-            var pageUuid = encodeURIComponent(window._pageUuid || '');
-            var resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
-            var data = await resp.json();
-            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
-                return targetId;
-            }
-
-            for (var j = 0; j < data.submissions.length; j++) {
-                if (String(data.submissions[j].id) === targetId) return String(data.submissions[j].id);
-            }
-
-            var localSub = null;
-            for (var k = 0; k < subs.length; k++) {
-                if (String(subs[k].id) === targetId) {
-                    localSub = subs[k];
-                    break;
-                }
-            }
-            var rawLocalPaths = localSub && (localSub.paths || localSub.selected_paths);
-            var localPaths = Array.isArray(rawLocalPaths) ? rawLocalPaths.map(String) : [];
-            if (localPaths.length > 0) {
-                var pathSet = {};
-                localPaths.forEach(function(p) { pathSet[p] = true; });
-                for (var m = 0; m < data.submissions.length; m++) {
-                    var remotePaths = (data.submissions[m].selected_paths || []).map(String);
-                    if (remotePaths.length !== localPaths.length) continue;
-                    var same = true;
-                    for (var rp = 0; rp < remotePaths.length; rp++) {
-                        if (!pathSet[remotePaths[rp]]) {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (same) {
-                        console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[m].id));
-                        return String(data.submissions[m].id);
-                    }
-                }
-            }
-            if (targetId.indexOf('tpl-') === 0 && data.submissions.length === 1) {
-                console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[0].id));
-                return String(data.submissions[0].id);
-            }
-        } catch (e) {
-            console.warn('resolveSubmissionIdForGroup failed:', e);
+    function productPathSelectionIdFromGroup(group) {
+        var selection = group && group.product_path_selection;
+        if (selection && typeof selection === 'object') {
+            return String(selection.product_path_selection_id || selection.selection_id || selection.id || '');
         }
-        return targetId;
+        return String(group && group.product_path_selection_id || '');
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -113,11 +61,12 @@
     /**
      * 批量分组测试 POST（SSE 流式）
      */
-    runTest.postBatchGroupTest = function(payload, onEvent) {
+    runTest.postBatchGroupTest = function(payload, onEvent, signal) {
         return fetch('/run_group_test_stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: signal
         }).then(async function(res) {
             if (!res.ok) {
                 throw new Error('HTTP ' + res.status);
@@ -167,11 +116,7 @@
     runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
-
-        var REG = window.GT_CONFIG_REGISTRY;
-        if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
-            REG.commitDirty();
-        }
+        var cancelBtn = document.getElementById('cancel_group_test_btn');
 
         // ── 0. 检查是否有分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
@@ -189,14 +134,19 @@
         function _resolvedGroupForRun(group) {
             var out = Object.assign({}, group || {});
             if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
-                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
+                ['factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'product_path_selection'].forEach(function(key) {
                     var resolved = GT.groupSettings.groups.resolveRootField(out, key);
                     if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
                 });
             }
             return out;
         }
-        var runGroups = allStoredGroups.map(_resolvedGroupForRun);
+        var runGroups = allStoredGroups.map(_resolvedGroupForRun).map(function(group) {
+            if (GT.backendSettings && typeof GT.backendSettings.groupPayloadForRun === 'function') {
+                return GT.backendSettings.groupPayloadForRun(group);
+            }
+            return group;
+        });
         // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
         var groupIdToIndex = {};
         for (var ai = 0; ai < runGroups.length; ai++) {
@@ -221,34 +171,70 @@
             flatLSConfigs.push({
                 name: lsName,
                 key: lsName,
-                long: [{ group: longIdx - 1, weight: 1.0 }],
-                short: [{ group: shortIdx - 1, weight: 1.0 }]
+                long: [{ group_id: String(ls.longGroupId), group: longIdx - 1, weight: 1.0 }],
+                short: [{ group_id: String(ls.shortGroupId), group: shortIdx - 1, weight: 1.0 }]
             });
         }
 
         // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
-        var localRun = prepareLocalRun();
-        if (localRun.errors && localRun.errors.length) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
+        if (!GT.backendSettings || typeof GT.backendSettings.runPayload !== 'function') {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 后端注册的回测设置尚未加载'; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;
         }
+        var backendRunPayload = GT.backendSettings.runPayload();
+        if (!GT.backendSettings || typeof GT.backendSettings.runPayload !== 'function') {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 后端注册的回测设置尚未加载'; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+        var backendRunPayload = GT.backendSettings.runPayload();
 
         if (statusSpan) {
             statusSpan.innerHTML = '分组测试运行中...';
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
-        var bulkPayload = Object.assign({}, localRun.payload, {
+        // ── 合并 local_settings ──
+        var bulkPayload = {
+            local_settings: backendRunPayload.local_settings || {},
             groups: runGroups,
-            flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''
-        });
+        };
+        var runToken = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        var abortController = new AbortController();
+        bulkPayload.run_token = runToken;
+        runTest._activeRun = { token: runToken, controller: abortController };
+        if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.onclick = async function() {
+                if (!runTest._activeRun || runTest._activeRun.token !== runToken) return;
+                cancelBtn.disabled = true;
+                if (statusSpan) {
+                    statusSpan.textContent = '正在取消测试...';
+                    statusSpan.style.color = '#b45309';
+                }
+                try {
+                    await fetch('/cancel_group_test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            run_token: runToken,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    });
+                } finally {
+                    abortController.abort();
+                }
+            };
+        }
 
         try {
             // ── 多行并行进度条 ──
@@ -266,18 +252,54 @@
             }
             progressContainer.innerHTML = '';
 
+            var batchProgressHost = document.createElement('div');
+            progressContainer.appendChild(batchProgressHost);
+
+            var progressNotice = document.createElement('div');
+            progressNotice.className = 'gt-progress-notice';
+            progressNotice.style.cssText = 'display:none;margin-top:10px;padding:8px 10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;line-height:1.5;';
+            var seenProgressNotices = {};
+            function pushProgressNotice(kind, text) {
+                if (!text || seenProgressNotices[kind + ':' + text]) return;
+                seenProgressNotices[kind + ':' + text] = true;
+                progressNotice.style.display = 'block';
+                var row = document.createElement('div');
+                row.textContent = text;
+                progressNotice.appendChild(row);
+            }
+            function updateProgressNotice(payload) {
+                var fallbacks = Array.isArray(payload.setting_fallbacks) ? payload.setting_fallbacks : [];
+                if (fallbacks.length) {
+                    pushProgressNotice('setting-fallbacks', '已按当前执行引擎替换 ' + fallbacks.length + ' 个不适用设置，结果摘要中会保留明细。');
+                }
+                var multiSession = Array.isArray(payload.multi_session_entries) ? payload.multi_session_entries : [];
+                if (multiSession.length) {
+                    var totalMissing = 0;
+                    for (var mi = 0; mi < multiSession.length; mi++) {
+                        totalMissing += Number(multiSession[mi].missing_product_count || 0);
+                    }
+                    pushProgressNotice('multi-session', '检测到持仓池内存在多时段/缺 bar/异步交易品种，已启用按可交易切片处理（涉及 ' + totalMissing + ' 个品种）。');
+                }
+            }
             var pendingGlobalProgress = [];
 
             var batchMgr = GT.groupSettings.runGroupBatch.createManager({
-                progressContainer: progressContainer,
+                progressContainer: batchProgressHost,
             });
+            progressContainer.appendChild(progressNotice);
 
             markProgressRowsDone = function(done, message) {
                 batchMgr.markAllDone(done, message);
             };
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                if (event === 'start') {
+                if (event === 'activity_manifest') {
+                    batchMgr.registerActivityManifest(payload.phases || []);
+                } else if (event === 'activity') {
+                    batchMgr.recordActivity(payload);
+                } else if (event === 'signal_progress') {
+                    batchMgr.updateSignalProgress(payload);
+                } else if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
                     batchMgr.syncRows(newTotal);
                     // 后端告知的 phases：[{key, label, sub_steps?}, ...]
@@ -306,6 +328,7 @@
                         }
                     }
                 } else if (event === 'progress') {
+                    updateProgressNotice(payload);
                     var bi = payload.product_coverage_batch_index;
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));
@@ -322,12 +345,16 @@
                     } else {
                         batchMgr.updateAllRows(payload.phase, payload.completed || 0, payload.total || 0, payload.message, payload.sub_step);
                     }
+                } else if (event === 'runtime_info') {
+                    if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.pushRuntimeInfo === 'function') {
+                        GT.results.strategyPanel.pushRuntimeInfo(payload.row || payload);
+                    }
                 }
-            });
+            }, abortController.signal);
 
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
-                    ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
+                    ? '当前产品路径选择还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
                     : data.error;
                 markProgressRowsDone(false, errorText || '分组测试失败');
                 if (statusSpan) {
@@ -344,7 +371,7 @@
             var doneGroups = allStoredGroups || [];
             for (var bi = 0; bi < doneGroups.length; bi++) {
                 var btch = doneGroups[bi];
-                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
+                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(productPathSelectionIdFromGroup(btch), btch.factorAlias, 'done');
             }
             markProgressRowsDone(true, '分组测试完成');
 
@@ -360,12 +387,21 @@
             }
         } catch (e) {
             console.error('[runGroupTest] error:', e);
-            markProgressRowsDone(false, e.message || '未知错误');
+            var wasCancelled = e && e.name === 'AbortError';
+            markProgressRowsDone(false, wasCancelled ? '测试已取消' : (e.message || '未知错误'));
             if (statusSpan) {
-                statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
-                statusSpan.style.color = '#d40000';
+                statusSpan.innerHTML = wasCancelled ? '已取消测试' : ('✗ ' + (e.message || '未知错误'));
+                statusSpan.style.color = wasCancelled ? '#b45309' : '#d40000';
             }
         } finally {
+            if (runTest._activeRun && runTest._activeRun.token === runToken) {
+                runTest._activeRun = null;
+            }
+            if (cancelBtn) {
+                cancelBtn.style.display = 'none';
+                cancelBtn.disabled = false;
+                cancelBtn.onclick = null;
+            }
             if (runBtn) {
                 runBtn.disabled = false;
                 runBtn.style.display = '';
@@ -379,12 +415,12 @@
     // ════════════════════════════════════════════════════════════════
 
     /** 为单个派生组发请求，不画图 */
-    runTest._generateDerivedGroupOnce = async function(def, fee, fee_mods, submissionId) {
-        if (!def || !submissionId) return null;
+    runTest._generateDerivedGroupOnce = async function(def, fee, fee_mods, productPathSelectionId) {
+        if (!def || !productPathSelectionId) return null;
         if (def.baseGroup == null) return null;
         try {
             var resp = await GT.api.createDerivedGroup({
-                submission_id: submissionId,
+                product_path_selection_id: productPathSelectionId,
                 group_index: def.baseGroup,
                 product_names: def.productNames,
                 name: def.name,
@@ -488,7 +524,7 @@
             productMask: node.productMask || {}
         };
 
-        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_mods, baseNode ? baseNode.testerId : null);
+        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_mods, baseNode ? productPathSelectionIdFromGroup(baseNode) : null);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;
