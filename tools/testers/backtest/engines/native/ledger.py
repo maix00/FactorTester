@@ -119,6 +119,8 @@ class BacktestRunState:
             strategy_configs if strategy_configs is not None else {}
         )
         self.results = ResultStore()
+        self.runtime_info_rows: list[dict[str, Any]] = []
+        self.runtime_info_sink: Any = None
         from tools.testers.backtest.modules.equity_curve import EquityCurveStore
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
         from tools.testers.backtest.modules.market_data import MarketDataStore
@@ -150,22 +152,6 @@ class BacktestRunState:
     @market_data_request.setter
     def market_data_request(self, value: dict[str, Any]) -> None:
         self.market_data_store.request = value
-
-    @property
-    def runtime_info_rows(self) -> list[dict[str, Any]]:
-        return self.market_data_store.runtime_info_rows
-
-    @runtime_info_rows.setter
-    def runtime_info_rows(self, value: list[dict[str, Any]]) -> None:
-        self.market_data_store.runtime_info_rows = value
-
-    @property
-    def runtime_info_sink(self) -> Any:
-        return self.market_data_store.runtime_info_sink
-
-    @runtime_info_sink.setter
-    def runtime_info_sink(self, value: Any) -> None:
-        self.market_data_store.runtime_info_sink = value
 
     def ledger_for(self, order: "Order") -> Ledger:
         return self.ledgers[order.strategy]

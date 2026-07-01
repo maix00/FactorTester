@@ -39,7 +39,7 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 当前允许的 run-level store 清单保持收敛：
 
 - `RunWindowStore`：各策略正式运行窗口与全局 envelope。
-- `MarketDataStore`：行情请求、装载计划、原始/因果行情表、历史字段、运行提示。
+- `MarketDataStore`：行情请求、装载计划、原始/因果行情表、历史字段，以及行情覆盖期提示去重状态。
 - `FactorSignalStore`：预计算信号表、预计算表绑定、实时因子状态。
 - `TargetStore`：各类 target-producing strategy 的已建立目标、选择签名和 target trace。
 - `OrderStore`：尚未执行或待取消的订单引用。
