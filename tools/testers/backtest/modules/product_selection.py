@@ -552,13 +552,126 @@ def _openctp_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _akshare_lifecycle_specs_by_instrument() -> dict[str, dict[str, Any]]:
+    try:
+        from sources.AKShare.lifecycle import read_contract_lifecycle
+        from sources.OpenCTP.client import normalise_instrument_code
+    except Exception:
+        return {}
+    try:
+        specs = read_contract_lifecycle()
+    except Exception:
+        return {}
+    if not isinstance(specs, pd.DataFrame) or specs.empty:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for _, spec in specs.iterrows():
+        key = normalise_instrument_code(spec.get("contract_code"))
+        if not key:
+            continue
+        out[key] = {
+            "open_date": spec.get("list_date"),
+            "last_trade_date": spec.get("last_trading_date"),
+            "notice_date": spec.get("delivery_notice_date"),
+            "delivery_date": spec.get("last_delivery_date"),
+            "lifecycle_source": f"AKShare {spec.get('exchange')} contract lifecycle",
+        }
+    return out
+
+
+# Local product/contract names are suffixed with these short exchange codes
+# (see sources.LocalCNFutures.product_catalog._EXCHANGE_TO_SECTOR_CODE), not
+# the AKShare exchange codes used by src_akshare_contract_lifecycle.
+_LOCAL_EXCHANGE_SUFFIX_TO_AKSHARE = {
+    "DCE": "DCE",
+    "CZC": "CZCE",
+    "INE": "INE",
+    "SHF": "SHFE",
+    "CFE": "CFFEX",
+    "GFE": "GFEX",
+}
+_akshare_live_cache: dict[str, dict[str, Any]] = {}
+_akshare_live_attempted: set[str] = set()
+_AKSHARE_LIVE_LOOKUP_ENV = "GTHT_AKSHARE_LIVE_LOOKUP"
+
+
+def _akshare_live_lookup_enabled() -> bool:
+    """Live AKShare lookups make a real network call and write to the shared
+    cache DB. Enabled by default; set GTHT_AKSHARE_LIVE_LOOKUP=0 to opt out
+    (e.g. for hermetic/offline test runs)."""
+    import os
+
+    return str(os.environ.get(_AKSHARE_LIVE_LOOKUP_ENV, "1")).strip().lower() not in {"0", "false", "no"}
+
+
+def _row_exchange(row: dict[str, Any]) -> str | None:
+    for key in ("contract_product", "contract", "uid"):
+        text = str(row.get(key) or "").strip()
+        if "." not in text:
+            continue
+        suffix = text.rsplit(".", 1)[-1].upper()
+        mapped = _LOCAL_EXCHANGE_SUFFIX_TO_AKSHARE.get(suffix)
+        if mapped:
+            return mapped
+    return None
+
+
+def _akshare_live_lookup(exchange: str, key: str) -> dict[str, Any] | None:
+    """On-demand top-up for a contract missing from the backfilled table.
+
+    Tried at most once per exchange per process: DCE/GFEX only ever expose a
+    recent rolling window through AKShare, so a live query now is exactly as
+    good as it gets for a *current* contract, and repeating it per-contract
+    within one run would be wasted network calls for the same answer.
+    """
+    if exchange in _akshare_live_attempted:
+        return _akshare_live_cache.get(key)
+    _akshare_live_attempted.add(exchange)
+    try:
+        from sources.AKShare.lifecycle import fetch_and_store_live
+        from sources.OpenCTP.client import normalise_instrument_code
+    except Exception:
+        return None
+    try:
+        live_rows = fetch_and_store_live(exchange)
+    except Exception:
+        return None
+    for live_row in live_rows:
+        code = normalise_instrument_code(live_row.get("contract_code"))
+        if not code:
+            continue
+        _akshare_live_cache[code] = {
+            "open_date": live_row.get("list_date"),
+            "last_trade_date": live_row.get("last_trading_date"),
+            "notice_date": live_row.get("delivery_notice_date"),
+            "delivery_date": live_row.get("last_delivery_date"),
+            "lifecycle_source": f"AKShare {exchange} live lookup",
+        }
+    return _akshare_live_cache.get(key)
+
+
 def _with_authoritative_lifecycle_fields(row: dict[str, Any]) -> dict[str, Any]:
     if any(row.get(key) not in (None, "") for key in _LIFECYCLE_TS_KEYS + _LIFECYCLE_DATE_KEYS):
         return row
     key = _normalised_contract_id(row)
     if not key:
         return row
-    spec = _openctp_lifecycle_specs_by_instrument().get(key)
+    # AKShare is published directly by the exchanges; prefer it over OpenCTP's
+    # snapshot and let it override any overlapping field.
+    spec: dict[str, Any] = {}
+    openctp_spec = _openctp_lifecycle_specs_by_instrument().get(key)
+    if openctp_spec:
+        spec.update(openctp_spec)
+    akshare_spec = _akshare_lifecycle_specs_by_instrument().get(key)
+    if akshare_spec:
+        spec.update(akshare_spec)
+    if not spec and _akshare_live_lookup_enabled():
+        exchange = _row_exchange(row)
+        if exchange:
+            live_spec = _akshare_live_lookup(exchange, key)
+            if live_spec:
+                spec.update(live_spec)
     if not spec:
         return row
     enriched = dict(row)
@@ -750,14 +863,23 @@ def _lifecycle_base_timestamp(
         if pd.isna(ts):
             continue
         return _with_reference_timezone(cast(pd.Timestamp, ts), reference_tz)
-    if str(engine_mode).lower() == "exact":
-        raise ValueError(
-            "exact engine_mode requires authoritative contract lifecycle dates "
-            f"for {row.get('contract_product') or row.get('contract') or row.get('uid')}"
-        )
+    # Row fields → AKShare cache → OpenCTP → live AKShare lookup all ran already
+    # in _with_authoritative_lifecycle_fields; reaching here means none of them
+    # had this contract. LocalCNFutures coverage inference is the last resort —
+    # it only returns non-None when it can conclusively tell the contract has
+    # stopped trading (a peer contract kept printing bars after this one went
+    # quiet); "still might be alive" or "no data to check" both come back None.
     inferred = _local_cnfutures_inferred_lifecycle(row, peer_rows=peer_rows, account=account)
     if inferred is not None:
         return _with_reference_timezone(inferred, reference_tz)
+    if str(engine_mode).lower() == "exact":
+        raise ValueError(
+            "exact engine_mode could not determine whether "
+            f"{row.get('contract_product') or row.get('contract') or row.get('uid')} "
+            "has stopped trading: no authoritative lifecycle date, and local "
+            "coverage inference is inconclusive (either no market data to check, "
+            "or the contract may still be trading)"
+        )
     return None
 
 

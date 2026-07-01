@@ -11,6 +11,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules import product_selection
 from tools.testers.backtest.modules.product_selection import (
     DeliveryForceCloseModule,
     ProductSelectionModule,
@@ -148,7 +149,10 @@ def test_term_structure_registers_force_close_event_before_expiry():
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
 
 
-def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date():
+def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTermProduct()
     account = AccountState(strategy_configs={
@@ -181,7 +185,10 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date():
     assert captured == []
 
 
-def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts():
+def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
     strategy = Strategy(alias="A")
     product = _CoverageOnlyTwoContractTermProduct()
     account = AccountState(strategy_configs={
@@ -226,9 +233,55 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts()
     assert captured[0].payload["lifecycle_source"] == "LocalCNFutures coverage inference"
 
 
-def test_exact_mode_rejects_coverage_inferred_lifecycle_dates():
+def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(monkeypatch):
+    # exact mode has no authoritative source anywhere for this contract, so it
+    # falls through to the same LocalCNFutures coverage inference as auto/custom
+    # instead of raising — coverage inference is a universal last resort now,
+    # but ONLY when it can conclusively resolve "ended" (a later peer contract
+    # still has data after this one goes quiet). Tested at the row level
+    # directly: a full _register_rollover_notices sweep would also process the
+    # still-active peer (P2602), which coverage inference cannot resolve
+    # either way and which exact mode must legitimately raise on — that's
+    # covered separately by test_exact_mode_raises_when_coverage_inference_is_inconclusive.
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
+    ])
+    account = AccountState(strategy_configs={})
+    account.raw_prices_table = pd.DataFrame({
+        _Contract("P2601.DCE"): [1.0, 1.0, None],
+        _Contract("P2602.DCE"): [None, 2.0, 2.0],
+    }, index=idx)
+    ended_row = {"product": "P.DCE", "contract": "P2601", "uid": "P2601.DCE"}
+    peer_row = {"product": "P.DCE", "contract": "P2602", "uid": "P2602.DCE"}
+
+    ts = product_selection._event_timestamp_from_row(
+        ended_row, offset=pd.Timedelta(0), account=account,
+        peer_rows=[ended_row, peer_row], engine_mode="exact",
+    )
+
+    assert ts == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
+    assert ended_row["lifecycle_source"] == "LocalCNFutures coverage inference"
+
+
+def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {
+        "P2601": {
+            "open_date": "2025-01-15",
+            "last_trade_date": "2026-01-14",
+            "notice_date": None,
+            "delivery_date": "2026-01-19",
+            "lifecycle_source": "AKShare DCE contract lifecycle",
+        },
+    })
     strategy = Strategy(alias="A")
-    product = _CoverageOnlyTwoContractTermProduct()
+    product = _CoverageOnlyTermProduct()
     account = AccountState(strategy_configs={
         strategy: StrategyConfig(
             strategy=strategy,
@@ -245,20 +298,186 @@ def test_exact_mode_rejects_coverage_inferred_lifecycle_dates():
         ),
     })
     account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
-    idx = pd.DatetimeIndex([
-        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
-        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
-    ])
-    account.raw_prices_table = pd.DataFrame({
-        _Contract("P2601.DCE"): [1.0, None],
-        _Contract("P2602.DCE"): [2.0, 2.0],
-    }, index=idx)
+    queue = EventQueue()
+    captured: list[EventDraft] = []
+    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+    _register_rollover_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert captured
+    assert captured[0].payload["lifecycle_source"] == "AKShare DCE contract lifecycle"
+    assert captured[0].timestamp == pd.Timestamp("2026-01-14 00:00", tz="Asia/Shanghai")
+
+
+def test_akshare_lifecycle_overrides_openctp_on_conflicting_fields(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {
+        "P2601": {
+            "open_date": "2025-01-10",
+            "last_trade_date": "2026-01-20",
+            "delivery_date": "2026-01-25",
+            "inst_life_phase": "0",
+            "lifecycle_source": "OpenCTP latest contract snapshot",
+        },
+    })
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {
+        "P2601": {
+            "open_date": "2025-01-15",
+            "last_trade_date": "2026-01-14",
+            "notice_date": None,
+            "delivery_date": "2026-01-19",
+            "lifecycle_source": "AKShare DCE contract lifecycle",
+        },
+    })
+    row = product_selection._with_authoritative_lifecycle_fields({
+        "product": "P.DCE",
+        "contract": "P2601",
+        "uid": "P2601.DCE",
+    })
+    assert row["last_trade_date"] == "2026-01-14"
+    assert row["delivery_date"] == "2026-01-19"
+    assert row["lifecycle_source"] == "AKShare DCE contract lifecycle"
+    assert row["inst_life_phase"] == "0"
+
+
+def test_row_exchange_maps_local_suffix_to_akshare_code():
+    assert product_selection._row_exchange({"contract": "P2601.DCE"}) == "DCE"
+    assert product_selection._row_exchange({"contract": "SR409.CZC"}) == "CZCE"
+    assert product_selection._row_exchange({"uid": "si2411.GFE"}) == "GFEX"
+    assert product_selection._row_exchange({"contract": "P2601"}) is None
+
+
+def test_akshare_live_lookup_is_attempted_once_per_exchange_and_persists(monkeypatch):
+    monkeypatch.setattr(product_selection, "_akshare_live_cache", {})
+    monkeypatch.setattr(product_selection, "_akshare_live_attempted", set())
+    calls: list[str] = []
+
+    def fake_fetch_and_store_live(exchange, **kwargs):
+        calls.append(exchange)
+        return [{
+            "contract_code": "SI2411",
+            "list_date": "2022-12-22",
+            "last_trading_date": "2024-11-15",
+            "delivery_notice_date": None,
+            "last_delivery_date": "2024-11-19",
+        }]
+
+    monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
+
+    first = product_selection._akshare_live_lookup("GFEX", "SI2411")
+    second = product_selection._akshare_live_lookup("GFEX", "SI2411")
+    missing = product_selection._akshare_live_lookup("GFEX", "SI2412")
+
+    assert first == {
+        "open_date": "2022-12-22",
+        "last_trade_date": "2024-11-15",
+        "notice_date": None,
+        "delivery_date": "2024-11-19",
+        "lifecycle_source": "AKShare GFEX live lookup",
+    }
+    assert second == first
+    assert missing is None
+    assert calls == ["GFEX"]
+
+
+def test_with_authoritative_lifecycle_fields_falls_back_to_akshare_live_lookup(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_live_cache", {})
+    monkeypatch.setattr(product_selection, "_akshare_live_attempted", set())
+    monkeypatch.setattr(product_selection, "_akshare_live_lookup_enabled", lambda: True)
+
+    def fake_fetch_and_store_live(exchange, **kwargs):
+        return [{
+            "contract_code": "SI2411",
+            "list_date": "2022-12-22",
+            "last_trading_date": "2024-11-15",
+            "delivery_notice_date": None,
+            "last_delivery_date": "2024-11-19",
+        }]
+
+    monkeypatch.setattr("sources.AKShare.lifecycle.fetch_and_store_live", fake_fetch_and_store_live)
+
+    row = product_selection._with_authoritative_lifecycle_fields({
+        "product": "SI.GFE",
+        "contract": "SI2411",
+        "uid": "SI2411.GFE",
+    })
+    assert row["last_trade_date"] == "2024-11-15"
+    assert row["lifecycle_source"] == "AKShare GFEX live lookup"
+
+
+def test_akshare_live_lookup_is_enabled_by_default(monkeypatch):
+    monkeypatch.delenv(product_selection._AKSHARE_LIVE_LOOKUP_ENV, raising=False)
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        product_selection, "_akshare_live_lookup",
+        lambda exchange, key: calls.append((exchange, key)) or None,
+    )
+
+    product_selection._with_authoritative_lifecycle_fields({
+        "product": "SI.GFE",
+        "contract": "SI2411",
+        "uid": "SI2411.GFE",
+    })
+
+    assert calls == [("GFEX", "SI2411")]
+
+
+def test_akshare_live_lookup_can_be_disabled_via_env(monkeypatch):
+    monkeypatch.setenv(product_selection._AKSHARE_LIVE_LOOKUP_ENV, "0")
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        product_selection, "_akshare_live_lookup",
+        lambda exchange, key: calls.append((exchange, key)) or None,
+    )
+
+    row = product_selection._with_authoritative_lifecycle_fields({
+        "product": "SI.GFE",
+        "contract": "SI2411",
+        "uid": "SI2411.GFE",
+    })
+
+    assert calls == []
+    assert "last_trade_date" not in row or row.get("last_trade_date") in (None, "")
+
+
+def test_exact_mode_raises_when_coverage_inference_is_inconclusive(monkeypatch):
+    monkeypatch.setattr(product_selection, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(product_selection, "_akshare_live_lookup", lambda exchange, key: None)
+    strategy = Strategy(alias="A")
+    # No raw_prices_table at all: coverage inference has nothing to check
+    # against, so it cannot conclude the contract has stopped trading either.
+    product = _CoverageOnlyTermProduct()
+    account = AccountState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                EngineModule.engine_mode: "exact",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+            },
+        ),
+    })
+    account.run_window_envelope = strategy_run_window_datetimes(account.config_for(strategy))
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
     _expand_term_structure(account, ctx)
-    with pytest.raises(ValueError, match="authoritative contract lifecycle"):
-        _register_rollover_notices(account, ctx)
+    with pytest.raises(ValueError, match="could not determine whether"):
+        _register_force_close_notices(account, ctx)
 
 
 def test_term_structure_force_close_offset_accepts_intraday_window():
