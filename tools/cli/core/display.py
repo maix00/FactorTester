@@ -39,8 +39,6 @@ def print_single_factor_family_welcome(state: CliState) -> None:
 
 def print_backtest_welcome(state: CliState) -> None:
     click.echo("回测")
-    if state.factor_family:
-        click.echo(f"因子家族: {state.factor_family}")
     click.echo("设置草稿:")
     if state.backtest_local_settings:
         click.echo("  local-settings:")
@@ -78,10 +76,9 @@ def print_backtest_welcome(state: CliState) -> None:
     else:
         click.echo("  long-short: （空）")
     click.echo("参数示例:")
-    click.echo("  factortester backtest --factor-family SgCCS")
-    click.echo("  factortester backtest --config-local-settings allocation_mode=equal_notional")
-    click.echo("  factortester backtest --time-range 2026-01-01 2026-01-31")
-    click.echo("  factortester backtest --add-group --name A1 --split-count 5 --group-index 1")
+    click.echo("  factortester backtest local-settings allocation_mode=equal_notional")
+    click.echo("  factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS")
+    click.echo("  factortester backtest --run")
     click.echo("下一步: factortester list 查看回测设置 tabs；factortester back 返回。")
 
 

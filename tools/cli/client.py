@@ -124,6 +124,9 @@ class FactorTesterClient:
             )
         )
 
+    def run_group_test_stream(self, payload: dict[str, Any]):
+        yield from self.session.stream_post("/run_group_test_stream", payload)
+
     def _expect_success(self, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("success") is False:
             raise RuntimeError(str(data.get("error") or data))

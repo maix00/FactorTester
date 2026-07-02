@@ -21,14 +21,14 @@ def cli() -> None:
       factortester login --username 18717974771
       factortester list
       factortester single_factor_test --factor-family SgCCS
-      factortester backtest --factor-family SgCCS
-      factortester backtest add-group --group-name A1 --split-count 5 --group-index 1
+      factortester backtest
+      factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
 
     进入某个模块后再次运行 factortester list，只展示当前层级的下一层。
     字段级帮助示例:
 
-      factortester add-group --group-name --help
-      factortester add-group --group-name A1 --help
+      factortester group --add --group-name --help
+      factortester group --add --group-name A1 --help
     """
 
 

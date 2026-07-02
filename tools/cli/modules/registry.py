@@ -12,7 +12,7 @@ from typing import Iterable
 
 import click
 
-from tools.cli.modules.backtest import add_group, backtest
+from tools.cli.modules.backtest import backtest, group, local_settings, long_short
 from tools.cli.modules.custom_factors import custom_factors
 from tools.cli.modules.products import products
 from tools.cli.modules.single_factor_family_test import enter_single_factor_family_test, enter_single_factor_test
@@ -36,7 +36,7 @@ class ControllerRegistry:
             ControllerAdapter(
                 public_key="backtest",
                 backend_key="group_test",
-                commands=(backtest, add_group),
+                commands=(backtest, group, local_settings, long_short),
             ),
             ControllerAdapter(
                 public_key="products",

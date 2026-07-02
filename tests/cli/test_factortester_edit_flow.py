@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 import click
 from click.testing import CliRunner
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
 
 from tools.cli.app import _backtest_errors, cli
@@ -179,6 +179,10 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
     def login():
         return jsonify(success=True, username="alice")
 
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-1")
+
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     with running_server(app) as url:
@@ -188,6 +192,7 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
         result = runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"])
         assert result.exit_code == 0
         assert "已登录: alice" in result.output
+        assert "页面上下文: page-1" in result.output
         assert "欢迎使用 FactorTester CLI" in result.output
         assert "factortester list" in result.output
 
@@ -219,7 +224,7 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
         result = runner.invoke(cli, ["single_factor_family_test", "--factor-family", "SgCCS", "backtest"])
         assert result.exit_code == 0
         assert "回测" in result.output
-        assert "因子家族: SgCCS" in result.output
+        assert "--factor-family SgCCS" in result.output
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
@@ -295,21 +300,34 @@ def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_p
         result = runner.invoke(cli, ["configure", "--base-url", url])
         assert result.exit_code == 0
 
+        result = runner.invoke(cli, ["backtest"])
+        assert result.exit_code == 0
+
         result = runner.invoke(cli, [
             "backtest",
+            "local-settings",
+            "allocation_mode=equal_notional",
+            "--start-date", "2026-01-01",
+            "--end-date", "2026-01-31",
+        ])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "group",
+            "--add",
             "--factor-family", "SgCCS",
-            "--config-local-settings", "allocation_mode=equal_notional",
-            "--time-range", "2026-01-01", "2026-01-31",
-            "--add-group",
-            "--name", "A1",
+            "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
         ])
         assert result.exit_code == 0
-        assert "因子家族: SgCCS" in result.output
-        assert "allocation_mode: equal_notional" in result.output
-        assert "start_date: 2026-01-01" in result.output
-        assert "end_date: 2026-01-31" in result.output
+        assert "名称: A1" in result.output
+        assert "分组数: 5" in result.output
+        assert "分组序号: 1" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "list"])
+        assert result.exit_code == 0
         assert "A1 · 分组数=5 · 分组序号=1" in result.output
         assert "产品路径=中国期货日盘" in result.output
         assert "因子=SgCCS|N:2m|$F:1m|$Rev" in result.output
@@ -377,8 +395,10 @@ def test_single_factor_test_backtest_add_group_reuses_factor_family_context(tmp_
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
-            "--name", "A1",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
+            "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
         ])
@@ -447,11 +467,13 @@ def test_backtest_add_group_supports_inline_factor_and_product_paths(tmp_path, m
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
@@ -527,11 +549,13 @@ def test_backtest_add_group_uses_backend_registered_candidate_field_commands(tmp
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A1",
             "--product-path-candidates", "add",
             "--name", "现场路径",
@@ -601,11 +625,13 @@ def test_backtest_add_group_selects_factor_and_product_group_from_candidates(tmp
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A5",
             "--split-count", "5",
             "--group-index", "5",
@@ -655,18 +681,19 @@ def test_backtest_add_group_accepts_multiple_group_sections(tmp_path, monkeypatc
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
-            "--add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
             "--factor", "--alias", "SgCCS|N:1m",
             "--product-group", "--from-candidates", "--name", "中国期货日盘",
-            "--add-group",
+            "--add",
             "--group-name", "A5",
             "--split-count", "5",
             "--group-index", "5",
@@ -712,9 +739,9 @@ def test_backtest_config_local_settings_is_sibling_action(tmp_path, monkeypatch)
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
-        result = runner.invoke(cli, ["backtest", "config-local-settings", "--allocation-mode", "equal_notional"])
+        result = runner.invoke(cli, ["backtest", "local-settings", "--allocation-mode", "equal_notional"])
 
         assert result.exit_code == 0
         assert "已更新 local-settings" in result.output
@@ -786,12 +813,13 @@ def test_backtest_add_group_context_help_prints_registered_visible_and_editable_
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
-            "--add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
@@ -850,16 +878,16 @@ def test_backtest_add_group_field_help_distinguishes_missing_value_from_context(
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
-        result = runner.invoke(cli, ["add-group", "--split-count", "--help"])
+        result = runner.invoke(cli, ["group", "--add", "--split-count", "--help"])
         assert result.exit_code == 0
         assert "--split-count 字段说明" in result.output
         assert "后端字段: split_count" in result.output
         assert "类型: number" in result.output
         assert "回测设置上下文" not in result.output
 
-        result = runner.invoke(cli, ["add-group", "--split-count", "5", "--help"])
+        result = runner.invoke(cli, ["group", "--add", "--split-count", "5", "--help"])
         assert result.exit_code == 0
         assert "回测设置上下文" in result.output
         assert "--split-count  分组数" in result.output
@@ -885,7 +913,7 @@ def test_cli_help_pages_explain_navigation_and_backtest_construction() -> None:
     result = runner.invoke(cli, ["backtest", "--help"])
     assert result.exit_code == 0
     assert "进入通用回测控制界面" in result.output
-    assert "factortester backtest add-group" in result.output
+    assert "factortester backtest group" in result.output
 
 
 def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path, monkeypatch) -> None:
@@ -919,10 +947,12 @@ def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
         assert runner.invoke(cli, [
             "backtest",
-            "add-group",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
             "--group-name", "A1",
             "--split-count", "5",
             "--group-index", "1",
@@ -930,11 +960,12 @@ def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path
 
         result = runner.invoke(cli, [
             "backtest",
-            "add-ls",
+            "long-short",
+            "--add",
             "--name", "LS A1/A5",
             "--long-group", "A1",
             "--short-group",
-            "--add-group",
+            "--add",
             "--group-name", "A5",
             "--split-count", "5",
             "--group-index", "5",
@@ -948,6 +979,163 @@ def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path
         assert "名称: LS A1/A5" in result.output
         assert "多头: A1" in result.output
         assert "空头: A5" in result.output
+
+
+def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_uuid(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    app.secret_key = "test-secret"
+    register_home_modules(app)
+    received_payloads: list[dict] = []
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-login-1")
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "allocation_mode": {
+                "value": "equal_risk",
+                "label": "分配方式",
+                "tab_key": "allocation",
+                "control_template": "select",
+                "options": [{"value": "equal_risk"}, {"value": "equal_notional"}],
+            },
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    @app.post("/run_group_test_stream")
+    def run_group_test_stream():
+        received_payloads.append(request.get_json())
+        body = "\n".join([
+            "event: activity",
+            'data: {"label": "准备运行"}',
+            "",
+            "event: complete",
+            "data: {}",
+            "",
+        ])
+        return Response(body, mimetype="text/event-stream")
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        result = runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"])
+        assert result.exit_code == 0
+        assert "页面上下文: page-login-1" in result.output
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "group",
+            "--add",
+            "--factor-family", "SgCCS",
+            "--batch",
+            "--group-names", "A1", "A2",
+            "--split-count", "2",
+            "--product-group", "from-candidates",
+            "--name", "中国期货日盘",
+            "--factor", "--alias", "SgCCS|N:1m",
+        ])
+        assert result.exit_code == 0
+        assert "新增分组: 2" in result.output
+        assert "分组序号: 1" in result.output
+        assert "分组序号: 2" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "list"])
+        assert result.exit_code == 0
+        assert "1. A1 · 分组数=2 · 分组序号=1" in result.output
+        assert "2. A2 · 分组数=2 · 分组序号=2" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "--group-name", "A1", "--describe"])
+        assert result.exit_code == 0
+        assert "名称: A1" in result.output
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "group",
+            "--group-names", "A1", "A2",
+            "--edit",
+            "--allocation-mode", "equal_notional",
+        ])
+        assert result.exit_code == 0
+        assert "已修改分组: 2" in result.output
+
+        result = runner.invoke(cli, ["backtest", "long-short", "--add", "--ls-name", "LS A1/A2", "--long-group", "A1", "--short-group", "A2"])
+        assert result.exit_code == 0
+        result = runner.invoke(cli, ["backtest", "long-short", "list"])
+        assert result.exit_code == 0
+        assert "LS A1/A2" in result.output
+
+        result = runner.invoke(cli, ["backtest", "--run"])
+        assert result.exit_code == 0
+        assert "开始运行回测: groups=2, long-short=1" in result.output
+        assert "[activity] 准备运行" in result.output
+        assert "回测完成" in result.output
+
+    assert len(received_payloads) == 1
+    payload = received_payloads[0]
+    assert payload["page_uuid"] == "page-login-1"
+    assert [group["name"] for group in payload["groups"]] == ["A1", "A2"]
+    assert {group["factor_family_alias"] for group in payload["groups"]} == {"SgCCS"}
+    assert all(group["allocation_mode"] == "equal_notional" for group in payload["groups"])
+    assert payload["ls_configs"][0]["name"] == "LS A1/A2"
+
+
+def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "group", "--add", "--help"])
+        assert result.exit_code == 0
+        assert "group --add 动作说明" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "--add", "--batch", "--help"])
+        assert result.exit_code == 0
+        assert "group --add --batch 字段说明" in result.output
 
 
 def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:
@@ -982,9 +1170,9 @@ def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatc
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
-        result = runner.invoke(cli, ["backtest", "config-local-settings", "--not-registered", "x", "--help"])
+        result = runner.invoke(cli, ["backtest", "local-settings", "--not-registered", "x", "--help"])
 
         assert result.exit_code != 0
         assert "local-settings 包含未注册字段: not_registered" in result.output
@@ -1028,9 +1216,9 @@ def test_backtest_context_help_errors_on_invalid_registered_value(tmp_path, monk
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
 
-        result = runner.invoke(cli, ["backtest", "config-local-settings", "--engine", "Bad", "--help"])
+        result = runner.invoke(cli, ["backtest", "local-settings", "--engine", "Bad", "--help"])
 
         assert result.exit_code != 0
         assert "字段 engine 的值不合法" in result.output
@@ -1067,10 +1255,12 @@ def test_backtest_inline_product_path_rejects_duplicate_candidate_name(tmp_path,
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
-        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
         result = runner.invoke(cli, [
             "backtest",
-            "add-group",
+            "group",
+            "--add",
+            "--group-name", "A1",
             "--product-group", "add",
             "--name", "中国期货日盘",
             "--path", "Product/Futures/CNFutures/日盘",

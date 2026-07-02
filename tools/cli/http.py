@@ -109,6 +109,44 @@ class HttpSession:
     def put(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.request("PUT", path, payload=payload or {})
 
+    def stream_post(self, path: str, payload: dict[str, Any] | None = None):
+        url = self._url(path)
+        body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            url,
+            data=body,
+            headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with self._opener.open(request, timeout=self.timeout) as response:
+                event_name = "message"
+                data_lines: list[str] = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+                    if not line:
+                        if data_lines:
+                            yield _parse_sse_event(event_name, data_lines)
+                            event_name = "message"
+                            data_lines = []
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line.split(":", 1)[1].strip() or "message"
+                    elif line.startswith("data:"):
+                        data_lines.append(line.split(":", 1)[1].lstrip())
+                if data_lines:
+                    yield _parse_sse_event(event_name, data_lines)
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            if _looks_like_html(raw):
+                raise ValueError(
+                    "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
+                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                ) from exc
+            raise HttpClientError(exc.code, url, raw) from exc
+        finally:
+            self._save_cookies()
+
     def request(
         self,
         method: str,
@@ -170,3 +208,12 @@ class HttpSession:
 def _looks_like_html(raw: str) -> bool:
     text = raw.lstrip().lower()
     return text.startswith("<!doctype html") or text.startswith("<html")
+
+
+def _parse_sse_event(event_name: str, data_lines: list[str]) -> dict[str, Any]:
+    raw_data = "\n".join(data_lines)
+    try:
+        data: Any = json.loads(raw_data)
+    except json.JSONDecodeError:
+        data = raw_data
+    return {"event": event_name, "data": data}

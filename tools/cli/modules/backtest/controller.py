@@ -34,8 +34,10 @@ from tools.cli.state import load_state, save_state
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
 SELECTOR_HELP_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []}
 _ADD_GROUP_SELECTOR_ROOTS = {
-    "--add-group", "--add_group",
+    "--add", "--batch",
     "--group-name", "--group_name",
+    "--group-names", "--group_names",
+    "--factor-family", "--factor_family",
     "--split-count", "--split_count",
     "--group-index", "--group_index",
     "--name",
@@ -50,91 +52,49 @@ _ADD_GROUP_SELECTOR_ROOTS = {
 
 
 @click.group("backtest", invoke_without_command=True, context_settings=SELECTOR_CONTEXT)
-@click.option("--factor-family", "--factor_family", default="", help="从顶层进入回测时使用的因子家族。")
-@click.option(
-    "--config-local-settings",
-    "--config_local_settings",
-    "local_settings",
-    multiple=True,
-    metavar="KEY=VALUE",
-    help="写入回测 local-settings 草稿，可重复传入。",
-)
-@click.option("--time-range", "--time_range", nargs=2, metavar="START END", help="写入 local-settings 的起止时间。")
-@click.option("--add-group", "--add_group", is_flag=True, help="在当前回测草稿中新增一个分组。")
-@click.option("--name", default="", help="新增分组名称。")
-@click.option("--split-count", "--split_count", type=int, default=None, help="新增分组的分组数。")
-@click.option("--group-index", "--group_index", type=int, default=None, help="新增分组的分组序号。")
-@click.option("--factor", default="", help="新增分组使用的因子 alias；为空时走 FieldStore fallback。")
-@click.option("--factor-param", "factor_params", multiple=True, metavar="KEY=VALUE", help="现场新增因子参数并选中，可重复传入。")
-@click.option("--product-path", "--product_path", default="", help="新增分组使用的产品组 id/名称；为空时走 FieldStore fallback。")
-@click.option("--product-path-name", "--product_path_name", default="", help="现场新增产品路径候选名称。")
-@click.option("--product-path-path", "--product_path_path", "product_path_paths", multiple=True, help="现场新增产品路径，可重复传入。")
+@click.option("--run", is_flag=True, help="运行当前 backtest 草稿中的全部策略。")
 @click.pass_context
 @friendly_errors
 def backtest(
     ctx: click.Context,
-    factor_family: str,
-    local_settings: tuple[str, ...],
-    time_range: tuple[str, str] | None,
-    add_group: bool,
-    name: str,
-    split_count: int | None,
-    group_index: int | None,
-    factor: str,
-    factor_params: tuple[str, ...],
-    product_path: str,
-    product_path_name: str,
-    product_path_paths: tuple[str, ...],
+    run: bool,
 ) -> None:
     """进入通用回测控制界面。
 
-    回测与 single_factor_test 平行注册；从顶层进入时必须指定因子家族:
+    回测与 single_factor_test 平行注册；因子家族在具体需要因子的动作中指定:
 
-      factortester backtest --factor-family SgCCS
+      factortester backtest group --add --factor-family SgCCS --factor 'SgCCS|N:2m|$F:1m|$Rev'
 
     常用草稿命令:
 
-      factortester backtest config-local-settings --allocation-mode equal_notional
-      factortester backtest add-group --group-name A1 --split-count 5 --group-index 1
-      factortester backtest add-group --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
-      factortester backtest add-group --factor add --param N=2m --param '$Rev=1'
-      factortester backtest add-group --product-group from-candidates --name 中国期货日盘
-      factortester backtest add-ls --ls-name LS-A1-A5 --long-group A1 --short-group A5
+      factortester backtest local-settings --allocation-mode equal_notional
+      factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
+      factortester backtest group --add --factor-family SgCCS --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
+      factortester backtest group --add --factor-family SgCCS --factor add --param N=2m --param '$Rev=1'
+      factortester backtest group --add --product-group from-candidates --name 中国期货日盘
+      factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
 
     字段级帮助:
 
-      factortester add-group --group-name --help
-      factortester add-group --group-name A1 --help
+      factortester group --add --group-name --help
+      factortester group --add --group-name A1 --help
     """
     if ctx.invoked_subcommand is not None:
         return
     state = load_state()
-    enter_backtest_state(state, factor_family=factor_family)
-    _apply_local_settings(state, local_settings, time_range)
-    if add_group:
-        selectors = _legacy_selectors(
-            name=name,
-            split_count=split_count,
-            group_index=group_index,
-            factor=factor,
-            factor_params=factor_params,
-            product_path=product_path,
-            product_path_name=product_path_name,
-            product_path_paths=product_path_paths,
-        )
-        _append_group(
-            state,
-            selectors=selectors,
-        )
+    enter_backtest_state(state)
     save_state(state)
+    if run:
+        _run_backtest(state, groups=state.backtest_groups)
+        return
     print_backtest_welcome(state)
 
 
-@backtest.command("config-local-settings", context_settings=SELECTOR_HELP_CONTEXT)
+@backtest.command("local-settings", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
-def config_local_settings(ctx: click.Context) -> None:
-    """Edit local-settings as a sibling action to add-group/add-ls."""
+def local_settings(ctx: click.Context) -> None:
+    """配置回测 local-settings。"""
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state)
@@ -152,30 +112,32 @@ def config_local_settings(ctx: click.Context) -> None:
     print_backtest_welcome(state)
 
 
-@backtest.command("add-group", context_settings=SELECTOR_HELP_CONTEXT)
+@backtest.command("group", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
-def add_group(
+def group(
     ctx: click.Context,
 ) -> None:
-    """新增一个或多个回测分组草稿。
+    """管理回测分组草稿。
 
-    单个分组可以省略段落标记:
+    常用动作:
 
-      factortester add-group --group-name A1 --split-count 5 --group-index 1
-
-    多个分组用重复 --add-group 分段:
-
-      factortester add-group --add-group --group-name A1 --split-count 5 --group-index 1 \
-        --add-group --group-name A5 --split-count 5 --group-index 5
+      factortester group list
+      factortester group --add --group-name A1 --split-count 5 --group-index 1
+      factortester group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5
+      factortester group --group-name A1 --edit --factor --alias SgCCS|N:2m
+      factortester group --group-names A1 A5 --edit --allocation-policy equal_notional
+      factortester group --group-name A1 --describe
+      factortester group --group-name A1 --run
 
     字段说明模式:
 
-      factortester add-group --group-name --help
+      factortester group --add --group-name --help
+      factortester group --add --batch --help
 
     上下文校验模式:
 
-      factortester add-group --group-name A1 --help
+      factortester group --add --group-name A1 --help
     """
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
@@ -184,45 +146,70 @@ def add_group(
     show_help = _has_context_help(args)
     help_target = _context_help_target(args)
     clean_args = _strip_context_help(args)
-    selector_args, setting_args = _split_selector_and_local_setting_args(clean_args, selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
-    if setting_args:
-        _apply_raw_local_settings(state, tuple(setting_args))
+    if _is_list_action(clean_args):
+        _print_group_list(state)
+        return
+    action = _group_action(clean_args)
+    selector_args, setting_args = _split_selector_and_local_setting_args(_strip_group_action_args(clean_args), selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
+    group_settings = _parse_raw_settings(tuple(setting_args)) if setting_args else {}
     if show_help and help_target and not help_target.has_value:
-        _print_add_group_field_help(state, help_target.option)
+        _print_group_field_help(state, help_target.option, batch="--batch" in clean_args)
         return
-    selectors_list = parse_add_group_selector_groups(tuple(selector_args))
     if show_help:
-        _validate_registered_local_settings(state)
-        _print_backtest_settings_help(state)
+        _validate_settings_dict(state, group_settings)
+        if action == "add" and "--batch" in clean_args:
+            _print_group_batch_help()
+        else:
+            _print_backtest_settings_help(state, values=group_settings)
         return
-    for selectors in selectors_list:
-        _append_group(
-            state,
-            selectors=selectors,
-        )
+    if action == "add":
+        selectors_list = _parse_group_add_selectors(tuple(selector_args), batch="--batch" in clean_args)
+        for selectors in selectors_list:
+            _append_group(state, selectors=selectors, extra_values=group_settings)
+        click.echo(f"新增分组: {len(selectors_list)}")
+        for group_item in state.backtest_groups[-len(selectors_list):]:
+            _print_group(group_item)
+    elif action == "edit":
+        groups = _selected_groups(state, clean_args)
+        selectors = parse_add_group_selectors(_remove_group_name_args(tuple(selector_args)))
+        for group_item in groups:
+            _edit_group(state, group_item, selectors=selectors, extra_values=group_settings)
+        click.echo(f"已修改分组: {len(groups)}")
+        for group_item in groups:
+            _print_group(group_item)
+    elif action == "describe":
+        for group_item in _selected_groups(state, clean_args):
+            _print_group(group_item)
+    elif action == "run":
+        _run_backtest(state, groups=_selected_groups(state, clean_args, default_all=True))
+    else:
+        raise click.ClickException("group 需要明确动作：list、--add、--edit、--describe 或 --run")
     save_state(state)
-    click.echo(f"新增分组: {len(selectors_list)}")
-    for group in state.backtest_groups[-len(selectors_list):]:
-        _print_group(group)
-    click.echo("下一步: 这些参数会进入 backtest/group-test 的配置草稿；运行接口接好后可直接提交。")
+    if action == "add":
+        click.echo("下一步: 这些参数会进入 backtest/group-test 的配置草稿；运行接口接好后可直接提交。")
 
 
-@backtest.command("add-ls", context_settings=SELECTOR_HELP_CONTEXT)
+@backtest.command("long-short", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
-def add_ls(ctx: click.Context) -> None:
-    """Add a long-short strategy draft from existing or inline group legs."""
+def long_short(ctx: click.Context) -> None:
+    """管理 Long-Short 策略草稿。"""
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
     clean_args = _strip_context_help(args)
+    if _is_list_action(clean_args):
+        _print_long_short_list(state)
+        return
     if show_help:
         _validate_registered_local_settings(state)
         _print_backtest_settings_help(state)
         return
-    selector = parse_long_short_selector(clean_args)
+    if "--add" not in clean_args:
+        raise click.ClickException("long-short 需要明确动作：list 或 --add")
+    selector = parse_long_short_selector(tuple(arg for arg in clean_args if arg != "--add"))
     long_group = _resolve_ls_leg(state, selector.long_leg, side="long")
     short_group = _resolve_ls_leg(state, selector.short_leg, side="short")
     config = {
@@ -238,69 +225,51 @@ def add_ls(ctx: click.Context) -> None:
     click.echo(f"空头: {config['short_group'].get('name') or config['short_group'].get('id')}")
 
 
-def enter_backtest_state(state, *, factor_family: str = "") -> None:
+def enter_backtest_state(state) -> None:
     if state.current_parent == "single_factor_family_test":
-        if factor_family:
-            state.factor_family = factor_family
         ensure_child_available(state.current_parent, BACKTEST_BACKEND_KEY)
         state.enter(BACKTEST_BACKEND_KEY)
         return
-    if factor_family:
-        state.factor_family = factor_family
-    if not state.factor_family:
-        state.factor_family = click.prompt("因子家族", default="", show_default=False)
-    if not state.factor_family:
-        raise click.ClickException("从顶层进入 backtest 时必须选择 factor-family")
     ensure_child_available(None, BACKTEST_PUBLIC_KEY)
     state.enter(BACKTEST_PUBLIC_KEY)
 
 
-def _apply_local_settings(
-    state,
-    local_settings: tuple[str, ...],
-    time_range: tuple[str, str] | None,
-) -> None:
-    if not local_settings and time_range is None:
-        return
-    for item in local_settings:
-        key, value = _parse_key_value(item)
-        state.backtest_local_settings[key] = value
-    if time_range is not None:
-        start, end = time_range
-        state.backtest_local_settings["start_date"] = start
-        state.backtest_local_settings["end_date"] = end
-
-
 def _apply_raw_local_settings(state, args: tuple[str, ...]) -> None:
+    state.backtest_local_settings.update(_parse_raw_settings(args))
+
+
+def _parse_raw_settings(args: tuple[str, ...]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     i = 0
     while i < len(args):
         token = args[i]
         if "=" in token and not token.startswith("--"):
             key, value = _parse_key_value(token)
-            state.backtest_local_settings[key] = value
+            values[key] = value
             i += 1
             continue
         if not token.startswith("--"):
-            raise click.ClickException(f"无法识别 local-settings 参数: {token}")
+            raise click.ClickException(f"无法识别设置参数: {token}")
         key = token[2:].replace("-", "_")
         if not key:
-            raise click.ClickException("local-settings 字段名不能为空")
+            raise click.ClickException("设置字段名不能为空")
         if i + 1 >= len(args) or args[i + 1].startswith("--"):
             value: Any = True
             i += 1
         else:
             value = args[i + 1]
             i += 2
-        state.backtest_local_settings[key] = value
+        values[key] = value
+    return values
 
 
 def _parse_key_value(item: str) -> tuple[str, str]:
     if "=" not in item:
-        raise click.ClickException("--config-local-settings 必须使用 KEY=VALUE 格式")
+        raise click.ClickException("local-settings 必须使用 KEY=VALUE 格式")
     key, value = item.split("=", 1)
     key = key.strip()
     if not key:
-        raise click.ClickException("--config-local-settings 的 KEY 不能为空")
+        raise click.ClickException("local-settings 的 KEY 不能为空")
     return key, value.strip()
 
 
@@ -335,6 +304,60 @@ def _strip_context_help(args: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(arg for arg in args if arg not in {"--help", "-h"})
 
 
+def _is_list_action(args: tuple[str, ...]) -> bool:
+    return bool(args) and args[0] == "list"
+
+
+def _group_action(args: tuple[str, ...]) -> str:
+    if "--add" in args:
+        return "add"
+    if "--edit" in args:
+        return "edit"
+    if "--describe" in args:
+        return "describe"
+    if "--run" in args:
+        return "run"
+    return ""
+
+
+def _strip_group_action_args(args: tuple[str, ...]) -> tuple[str, ...]:
+    result: list[str] = []
+    removed_action_add = False
+    for arg in args:
+        if arg == "--add" and not removed_action_add:
+            removed_action_add = True
+            continue
+        if arg in {"--edit", "--describe", "--run", "--batch"}:
+            continue
+        result.append(arg)
+    return tuple(result)
+
+
+def _group_names_from_args(args: tuple[str, ...]) -> list[str]:
+    names: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in {"--group-name", "--group_name"}:
+            names.append(_require_arg_value(args, i, token))
+            i += 2
+            continue
+        if token in {"--group-names", "--group_names"}:
+            i += 1
+            while i < len(args) and not args[i].startswith("--"):
+                names.append(args[i])
+                i += 1
+            continue
+        i += 1
+    return names
+
+
+def _require_arg_value(args: tuple[str, ...], index: int, option: str) -> str:
+    if index + 1 >= len(args) or args[index + 1].startswith("--"):
+        raise click.ClickException(f"{option} 缺少参数")
+    return args[index + 1]
+
+
 def _split_selector_and_local_setting_args(args: tuple[str, ...], *, selector_roots: set[str]) -> tuple[list[str], list[str]]:
     selector_args: list[str] = []
     setting_args: list[str] = []
@@ -342,7 +365,7 @@ def _split_selector_and_local_setting_args(args: tuple[str, ...], *, selector_ro
     i = 0
     while i < len(args):
         token = args[i]
-        if token in {"--add-group", "--add_group"}:
+        if token == "--add":
             selector_mode = True
             selector_args.append(token)
             i += 1
@@ -378,27 +401,63 @@ def _split_selector_and_local_setting_args(args: tuple[str, ...], *, selector_ro
 
 
 def _validate_registered_local_settings(state) -> None:
+    _validate_settings_dict(state, state.backtest_local_settings, prefix="local-settings")
+
+
+def _validate_settings_dict(state, values: dict[str, Any], *, prefix: str = "设置") -> None:
     _, store = _stores_for_backtest(state)
-    unknown = [key for key in state.backtest_local_settings if key not in store.defaults]
+    unknown = [key for key in values if key not in store.defaults]
     if unknown:
-        raise click.ClickException("local-settings 包含未注册字段: " + ", ".join(sorted(unknown)))
-    for key, value in state.backtest_local_settings.items():
+        raise click.ClickException(f"{prefix} 包含未注册字段: " + ", ".join(sorted(unknown)))
+    for key, value in values.items():
         try:
             store.validate_value(key, value)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from None
 
 
-def _print_backtest_settings_help(state) -> None:
+def _print_backtest_settings_help(state, *, values: dict[str, Any] | None = None) -> None:
     _, store = _stores_for_backtest(state)
+    for key, value in (values or {}).items():
+        store.set(key, value)
     for line in render_settings_help(store, title="回测设置上下文"):
         click.echo(line)
+
+
+def _print_group_field_help(state, option: str, *, batch: bool = False) -> None:
+    if option == "--add":
+        _print_group_add_help()
+        return
+    if option == "--batch":
+        _print_group_batch_help()
+        return
+    _print_add_group_field_help(state, option)
+    if batch:
+        click.echo("  批量新增中 --group-index 由 --group-names 的顺序自动生成。")
+
+
+def _print_group_add_help() -> None:
+    click.echo("group --add 动作说明")
+    click.echo("  用途: 新增一个或多个分组策略草稿。")
+    click.echo("  单个新增: group --add --group-name A1 --split-count 5 --group-index 1")
+    click.echo("  批量新增: group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5")
+    click.echo("  产品路径: --product-group from-candidates --name 中国期货日盘")
+    click.echo("  因子: --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'")
+
+
+def _print_group_batch_help() -> None:
+    click.echo("group --add --batch 字段说明")
+    click.echo("  用途: 一次新增一个分组集合中的所有组。")
+    click.echo("  必填: --group-names NAME...，例如 A1 A2 A3 A4 A5")
+    click.echo("  分组数: 省略 --split-count 时默认等于 group-names 个数。")
+    click.echo("  分组序号: 不允许填写 --group-index；按 group-names 顺序自动生成 1..N。")
+    click.echo("  写法: factortester group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5")
 
 
 def _print_add_group_field_help(state, option: str) -> None:
     field_key = _field_key_for_option(option)
     if field_key is None:
-        raise click.ClickException(f"无法识别 add-group 字段: {option}")
+        raise click.ClickException(f"无法识别 group 字段: {option}")
     _, store = _stores_for_backtest(state)
     meta = store.field(field_key)
     if meta:
@@ -436,6 +495,7 @@ def _field_key_for_option(option: str) -> str | None:
     aliases = {
         "name": "group_name",
         "group_name": "group_name",
+        "factor_family": "factor_family",
         "split_count": "split_count",
         "group_index": "group_index",
         "product_group": "product_path_selection",
@@ -454,48 +514,62 @@ _ADD_GROUP_LOCAL_FIELD_HELP = {
         "metavar": "NAME",
         "help": "当前新增分组在回测草稿中的显示名称；不参与后端因子或交易语义。",
     },
+    "factor_family": {
+        "label": "因子家族",
+        "type": "str",
+        "metavar": "ALIAS",
+        "help": "仅用于本次分组中解析或现场创建因子；backtest 模块本身不绑定因子家族。",
+    },
 }
 
 
-def _legacy_selectors(
-    *,
-    name: str,
-    split_count: int | None,
-    group_index: int | None,
-    factor: str,
-    factor_params: tuple[str, ...],
-    product_path: str,
-    product_path_name: str,
-    product_path_paths: tuple[str, ...],
-) -> AddGroupSelectors:
-    args: list[str] = []
-    if name:
-        args.extend(["--group-name", name])
-    if split_count is not None:
-        args.extend(["--split-count", str(split_count)])
-    if group_index is not None:
-        args.extend(["--group-index", str(group_index)])
-    if product_path_name or product_path_paths:
-        args.extend(["--product-group", "add"])
-        if product_path_name:
-            args.extend(["--name", product_path_name])
-        for path in product_path_paths:
-            args.extend(["--path", path])
-    elif product_path:
-        args.extend(["--product-group", "from-candidates", "--name", product_path])
-    if factor_params:
-        args.extend(["--factor", "add"])
-        for item in factor_params:
-            args.extend(["--param", item])
-    elif factor:
-        args.extend(["--factor", factor])
-    return parse_add_group_selectors(tuple(args))
+def _parse_group_add_selectors(args: tuple[str, ...], *, batch: bool) -> list[AddGroupSelectors]:
+    if not batch:
+        names = _group_names_from_args(args)
+        if not names:
+            raise click.ClickException("group --add 必须传 --group-name；不再支持 group --group-name 直接新增")
+        return parse_add_group_selector_groups(args)
+    if "--group-index" in args or "--group_index" in args:
+        raise click.ClickException("group --add --batch 不允许传 --group-index；序号由 --group-names 顺序自动生成")
+    names = _group_names_from_args(args)
+    if not names:
+        raise click.ClickException("group --add --batch 必须传 --group-names NAME...")
+    base_args = _remove_group_name_args(args)
+    base = parse_add_group_selectors(base_args)
+    split_count = base.split_count or len(names)
+    selectors: list[AddGroupSelectors] = []
+    for index, name in enumerate(names, start=1):
+        item = parse_add_group_selectors(base_args)
+        item.group_name = name
+        item.split_count = split_count
+        item.group_index = index
+        selectors.append(item)
+    return selectors
+
+
+def _remove_group_name_args(args: tuple[str, ...]) -> tuple[str, ...]:
+    result: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in {"--group-name", "--group_name"}:
+            i += 2
+            continue
+        if token in {"--group-names", "--group_names"}:
+            i += 1
+            while i < len(args) and not args[i].startswith("--"):
+                i += 1
+            continue
+        result.append(token)
+        i += 1
+    return tuple(result)
 
 
 def _append_group(
     state,
     *,
     selectors: AddGroupSelectors,
+    extra_values: dict[str, Any] | None = None,
 ) -> None:
     client = client_from_config()
     _ensure_page_candidates(state, client)
@@ -505,11 +579,19 @@ def _append_group(
     if product_selection:
         backtest_store.set(fields.product_path_selection, product_selection)
     product_group_label = selection_label(backtest_store.effective(fields.product_path_selection))
-    factor = resolve_factor_selector(state, client, selectors.factor, product_group_label=product_group_label, fields=fields)
+    factor_family = selectors.factor_family or state.factor_family
+    factor = resolve_factor_selector(
+        state,
+        client,
+        selectors.factor,
+        factor_family=factor_family,
+        product_group_label=product_group_label,
+        fields=fields,
+    )
     if factor:
         backtest_store.set(fields.factor, factor)
     elif not backtest_store.effective(fields.factor):
-        _load_default_factor_for_product_group(state, client, page_store, product_group_label=product_group_label)
+        _load_default_factor_for_product_group(state, client, page_store, factor_family=factor_family, product_group_label=product_group_label)
     resolved_product_path = backtest_store.effective(fields.product_path_selection)
     resolved_factor = backtest_store.effective(fields.factor)
     if not resolved_product_path:
@@ -525,10 +607,52 @@ def _append_group(
         payload["group_index"] = selectors.group_index
     payload["product_path_selection"] = resolved_product_path
     payload["factor"] = resolved_factor
+    if factor_family:
+        payload["factor_family_alias"] = factor_family
     if selectors.group_name:
         payload["name"] = selectors.group_name
+    if extra_values:
+        payload.update(extra_values)
     payload.setdefault("id", f"group-{len(state.backtest_groups) + 1}")
     state.backtest_groups.append(payload)
+
+
+def _edit_group(
+    state,
+    group: dict[str, Any],
+    *,
+    selectors: AddGroupSelectors,
+    extra_values: dict[str, Any] | None = None,
+) -> None:
+    if selectors.group_name:
+        group["name"] = selectors.group_name
+    if selectors.split_count is not None:
+        group["split_count"] = selectors.split_count
+    if selectors.group_index is not None:
+        group["group_index"] = selectors.group_index
+    client = client_from_config()
+    _ensure_page_candidates(state, client)
+    page_store, backtest_store = _stores_for_backtest(state, client)
+    fields = resolve_backtest_public_fields(backtest_store)
+    product_selection = resolve_product_group_selector(state, selectors.product_group, fields=fields)
+    if product_selection:
+        group["product_path_selection"] = product_selection
+    factor = resolve_factor_selector(
+        state,
+        client,
+        selectors.factor,
+        factor_family=selectors.factor_family or str(group.get("factor_family_alias") or state.factor_family or ""),
+        product_group_label=selection_label(group.get("product_path_selection")),
+        fields=fields,
+    )
+    if factor:
+        group["factor"] = factor
+    if selectors.factor_family:
+        group["factor_family_alias"] = selectors.factor_family
+    if extra_values:
+        group.update(extra_values)
+    state.page_settings = page_store.to_payload()
+    state.backtest_local_settings = backtest_store.to_payload()
 
 
 def _resolve_ls_leg(state, leg, *, side: str) -> dict[str, Any]:
@@ -541,7 +665,7 @@ def _resolve_ls_leg(state, leg, *, side: str) -> dict[str, Any]:
         return group
     if leg.group_name:
         return _find_group_by_name(state, leg.group_name)
-    raise click.ClickException(f"add-ls 缺少 {side} leg；请传 --{side}-group GROUP 或 --{side}-group --add-group ...")
+    raise click.ClickException(f"long-short 缺少 {side} leg；请传 --{side}-group GROUP 或 --{side}-group --add ...")
 
 
 def _find_group_by_name(state, name: str) -> dict[str, Any]:
@@ -549,6 +673,50 @@ def _find_group_by_name(state, name: str) -> dict[str, Any]:
         if name in {str(group.get("name") or ""), str(group.get("id") or "")}:
             return group
     raise click.ClickException(f"找不到分组: {name}")
+
+
+def _selected_groups(state, args: tuple[str, ...], *, default_all: bool = False) -> list[dict[str, Any]]:
+    names = _group_names_from_args(args)
+    if not names:
+        if default_all:
+            return list(state.backtest_groups)
+        raise click.ClickException("请用 --group-name 或 --group-names 选择分组")
+    return [_find_group_by_name(state, name) for name in names]
+
+
+def _print_group_list(state) -> None:
+    click.echo("分组列表")
+    if not state.backtest_groups:
+        click.echo("  （空）")
+        return
+    for index, group_item in enumerate(state.backtest_groups, start=1):
+        name = group_item.get("name") or group_item.get("id") or f"group-{index}"
+        parts = [str(name)]
+        if group_item.get("split_count") is not None:
+            parts.append(f"分组数={group_item['split_count']}")
+        if group_item.get("group_index") is not None:
+            parts.append(f"分组序号={group_item['group_index']}")
+        product_path = selection_label(group_item.get("product_path_selection"))
+        if product_path:
+            parts.append(f"产品路径={product_path}")
+        if group_item.get("factor"):
+            parts.append(f"因子={group_item['factor']}")
+        click.echo(f"  {index}. " + " · ".join(parts))
+
+
+def _print_long_short_list(state) -> None:
+    click.echo("Long-Short 列表")
+    if not state.backtest_ls_configs:
+        click.echo("  （空）")
+        return
+    for index, config in enumerate(state.backtest_ls_configs, start=1):
+        long_group = config.get("long_group") or {}
+        short_group = config.get("short_group") or {}
+        click.echo(
+            f"  {index}. {config.get('name') or f'ls-{index}'} · "
+            f"多头={long_group.get('name') or long_group.get('id')} · "
+            f"空头={short_group.get('name') or short_group.get('id')}"
+        )
 
 
 def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
@@ -571,6 +739,51 @@ def _print_group(group: dict[str, Any]) -> None:
     click.echo(f"因子: {group.get('factor')}")
 
 
+def _run_backtest(state, *, groups: list[dict[str, Any]]) -> None:
+    if not state.page_uuid:
+        raise click.ClickException("缺少 page_uuid；请先运行 factortester login 以创建页面上下文")
+    if not groups:
+        raise click.ClickException("没有可运行的分组；请先用 factortester group --add 新增分组")
+    payload = _run_payload(state, groups=groups)
+    click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
+    client = client_from_config()
+    for event in client.run_group_test_stream(payload):
+        event_name = str(event.get("event") or "message")
+        data = event.get("data")
+        if event_name == "error":
+            message = data.get("error") if isinstance(data, dict) else data
+            raise click.ClickException(f"分组测试失败: {message}")
+        if event_name in {"runtime_info", "progress", "activity", "signal_progress", "complete", "done"}:
+            _print_run_event(event_name, data)
+
+
+def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "page_uuid": state.page_uuid,
+        "local_settings": dict(state.backtest_local_settings),
+        "groups": [dict(group) for group in groups],
+        "ls_configs": list(state.backtest_ls_configs),
+    }
+
+
+def _print_run_event(event_name: str, data: Any) -> None:
+    if isinstance(data, dict):
+        if event_name == "runtime_info":
+            row_type = data.get("type") or data.get("status") or "运行信息"
+            detail = data.get("detail") or data.get("message") or data
+            click.echo(f"[运行信息] {row_type}: {detail}")
+            return
+        if event_name in {"complete", "done"}:
+            click.echo("回测完成")
+            return
+        label = data.get("label") or data.get("message") or data.get("phase") or data.get("status")
+        if label:
+            click.echo(f"[{event_name}] {label}")
+            return
+    elif data:
+        click.echo(f"[{event_name}] {data}")
+
+
 def _stores_for_backtest(state, client=None) -> tuple[FieldStore, FieldStore]:
     client = client or client_from_config()
     page_store = FieldStore.from_manifest(client.manifest("single_factor_page"), values=state.page_settings)
@@ -589,10 +802,10 @@ def _ensure_page_candidates(state, client) -> None:
     state.page_settings = page_store.to_payload()
 
 
-def _load_default_factor_for_product_group(state, client, page_store: FieldStore, *, product_group_label: str) -> None:
-    if not state.factor_family:
+def _load_default_factor_for_product_group(state, client, page_store: FieldStore, *, factor_family: str, product_group_label: str) -> None:
+    if not factor_family:
         return
-    overview = client.factor_library_overview(factor_family=state.factor_family, product_group=product_group_label)
+    overview = client.factor_library_overview(factor_family=factor_family, product_group=product_group_label)
     factors = list(overview.get("factors") or [])
     fields = resolve_backtest_public_fields(page_store)
     page_store.set(fields.factor_candidates, factors)

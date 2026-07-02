@@ -31,6 +31,7 @@ class ProductGroupSelector:
 @dataclass(slots=True)
 class AddGroupSelectors:
     group_name: str = ""
+    factor_family: str = ""
     split_count: int | None = None
     group_index: int | None = None
     factor: FactorSelector = field(default_factory=FactorSelector)
@@ -87,9 +88,9 @@ def parse_long_short_selector(args: tuple[str, ...]) -> LongShortSelector:
             else:
                 i += 1
             continue
-        if token in {"--add-group", "--add_group"}:
+        if token == "--add":
             if section not in {"long", "short"}:
-                raise click.ClickException("--add-group 必须跟在 --long-group 或 --short-group 后面")
+                raise click.ClickException("--add 必须跟在 --long-group 或 --short-group 后面")
             current_group_args = []
             i += 1
             continue
@@ -97,13 +98,13 @@ def parse_long_short_selector(args: tuple[str, ...]) -> LongShortSelector:
             current_group_args.append(token)
             i += 1
             continue
-        raise click.ClickException(f"无法识别 add-ls 参数: {token}")
+        raise click.ClickException(f"无法识别 long-short 参数: {token}")
     _flush_ls_group(selector, section, current_group_args)
     return selector
 
 
 def parse_add_group_selectors(args: tuple[str, ...]) -> AddGroupSelectors:
-    """Parse selector mini-grammar used by backtest add-group.
+    """Parse selector mini-grammar used by backtest group --add.
 
     Supported examples:
     - --factor add --param N=2m --param '$Rev=1'
@@ -115,7 +116,7 @@ def parse_add_group_selectors(args: tuple[str, ...]) -> AddGroupSelectors:
     """
     groups = parse_add_group_selector_groups(args)
     if len(groups) > 1:
-        raise click.ClickException("当前入口只接受一个分组；一次新增多个分组请使用重复的 --add-group 段落")
+        raise click.ClickException("当前入口只接受一个分组；一次新增多个分组请使用重复的 --add 段落")
     return groups[0] if groups else AddGroupSelectors()
 
 
@@ -123,7 +124,7 @@ def parse_add_group_selector_groups(args: tuple[str, ...]) -> list[AddGroupSelec
     groups: list[AddGroupSelectors] = []
     current: list[str] = []
     for token in args:
-        if token in {"--add-group", "--add_group"}:
+        if token == "--add":
             if current:
                 groups.append(_parse_one_add_group(tuple(current)))
                 current = []
@@ -152,6 +153,11 @@ def _parse_one_add_group(args: tuple[str, ...]) -> AddGroupSelectors:
         token = args[i]
         if token in {"--group-name", "--group_name"}:
             parsed.group_name = _require_value(args, i, token)
+            section = None
+            i += 2
+            continue
+        if token in {"--factor-family", "--factor_family"}:
+            parsed.factor_family = _require_value(args, i, token)
             section = None
             i += 2
             continue
@@ -282,7 +288,7 @@ def _parse_one_add_group(args: tuple[str, ...]) -> AddGroupSelectors:
             section = "factor"
             i += 2
             continue
-        raise click.ClickException(f"无法识别 add-group 参数: {token}")
+        raise click.ClickException(f"无法识别 group 参数: {token}")
     return parsed
 
 
@@ -318,17 +324,19 @@ def resolve_factor_selector(
     client: Any,
     selector: FactorSelector,
     *,
+    factor_family: str,
     product_group_label: str,
     fields: BacktestPublicFields,
 ) -> str:
     if selector.mode == "add" or selector.params:
-        return create_factor_candidate(state, client, params=selector.params, product_group=product_group_label, fields=fields)
+        return create_factor_candidate(state, client, factor_family=factor_family, params=selector.params, product_group=product_group_label, fields=fields)
     if selector.mode == "alias" or selector.alias:
         return selector.alias
     if selector.mode == "from_candidates":
         return resolve_factor_from_candidates(
             state,
             client,
+            factor_family=factor_family,
             product_group=selector.product_group or product_group_label,
             alias=selector.alias,
             index=selector.index,
@@ -341,22 +349,23 @@ def create_factor_candidate(
     state: Any,
     client: Any,
     *,
+    factor_family: str,
     params: list[str],
     product_group: str,
     fields: BacktestPublicFields,
 ) -> str:
     if not params:
         raise click.ClickException("现场新增因子时必须传 --param KEY=VALUE")
-    if not state.factor_family:
-        raise click.ClickException("现场新增因子参数时必须先指定 factor-family")
-    current = client.factor_library_configs(state.factor_family, product_group=product_group)
+    if not factor_family:
+        raise click.ClickException("现场新增因子参数时必须传 --factor-family")
+    current = client.factor_library_configs(factor_family, product_group=product_group)
     rows = []
     for user in current.get("users") or []:
         if user.get("editable"):
             rows = list((user.get("config") or {}).get("params_list") or [])
             break
     rows.append(dict(parse_factor_param(item) for item in params))
-    data = client.save_factor_library_config(state.factor_family, product_group=product_group, params_list=rows)
+    data = client.save_factor_library_config(factor_family, product_group=product_group, params_list=rows)
     factors = list(data.get("factors") or [])
     factor = str((factors[-1] if factors else {}).get("factor_alias") or "")
     if not factor:
@@ -372,14 +381,15 @@ def resolve_factor_from_candidates(
     state: Any,
     client: Any,
     *,
+    factor_family: str,
     product_group: str,
     alias: str = "",
     index: int | None = None,
     fields: BacktestPublicFields,
 ) -> str:
-    if not state.factor_family:
-        raise click.ClickException("从因子候选选择时必须先指定 factor-family")
-    overview = client.factor_library_overview(factor_family=state.factor_family, product_group=product_group)
+    if not factor_family:
+        raise click.ClickException("从因子候选选择时必须传 --factor-family")
+    overview = client.factor_library_overview(factor_family=factor_family, product_group=product_group)
     factors = list(overview.get("factors") or [])
     state.page_settings[fields.factor_candidates] = factors
     if alias:
