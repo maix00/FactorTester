@@ -137,11 +137,13 @@ class BacktestRunRenderer:
         label = str(data.get("message") or data.get("flow_label") or data.get("flow_name") or data.get("label") or "").strip()
         if timestamp or label:
             prefix = f"{timestamp} " if timestamp else ""
+            phase_label = str(data.get("phase_label") or self._phase_labels.get(phase, phase) or "").strip()
+            phase_prefix = f"{phase_label} · " if phase_label else ""
             activity_text = ""
             if flow_position and phase != EVENT_PHASE:
-                activity_text = f"当前: {prefix}{flow_position} {label}".rstrip()
+                activity_text = f"当前: {phase_prefix}{prefix}{flow_position} {label}".rstrip()
             else:
-                activity_text = f"当前: {prefix}{label}".rstrip()
+                activity_text = f"当前: {phase_prefix}{prefix}{label}".rstrip()
             if self.verbose and data.get("flow_key"):
                 activity_text = f"{activity_text} · {data.get('flow_key')}"
             self._update_activity_line(activity_text)

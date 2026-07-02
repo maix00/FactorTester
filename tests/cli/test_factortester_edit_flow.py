@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+import contextlib
+import io
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -12,6 +14,7 @@ from werkzeug.serving import make_server
 from tools.cli.app import _backtest_errors, cli
 from tools.cli.http import HttpClientError
 from tools.cli.modules.keys import public_module_key
+from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.registry import ControllerRegistry
 
 
@@ -1298,9 +1301,9 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "事件回放: [####------------]  25.0%" in result.output
     assert "整理: [################] 100.0%" in result.output
     assert "1/4" not in result.output
-    assert "当前: 2026-01-02 09:00:00 1/1 加载行情" in result.output
-    assert "当前: 2026-01-02 09:01:00 合成目标" in result.output
-    assert "当前: 2026-01-31 15:00:00 1/1 计算风险指标" in result.output
+    assert "当前: 准备 · 2026-01-02 09:00:00 1/1 加载行情" in result.output
+    assert "当前: 事件回放 · 2026-01-02 09:01:00 合成目标" in result.output
+    assert "当前: 整理 · 2026-01-31 15:00:00 1/1 计算风险指标" in result.output
     assert "[activity] phase=event_replay flow=signal.target" in result.output
     assert "[progress] phase=event_replay percent=25.00" in result.output
     assert "[运行信息] 产品路径: ER.CZC(早籼稻)" in result.output
@@ -1314,6 +1317,49 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "A1: final=100500000.00 points=4" in result.output
     assert "LS A1/A5 · LS: final=100300000.00 points=3" in result.output
     assert "回测完成" in result.output
+
+
+def test_backtest_tty_status_keeps_pre_and_post_current_flow() -> None:
+    class TtyBuffer(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    renderer = BacktestRunRenderer(verbose=False)
+    manifest = {
+        "phases": [
+            {"key": "pre_replay", "label": "回放准备", "flows": [
+                {"flow_key": "pre.window", "flow_label": "解析运行时间窗口", "display_order": 1},
+            ]},
+            {"key": "event_replay", "label": "事件回放", "flows": [
+                {"flow_key": "signal.target", "flow_label": "合成目标", "display_order": 1, "event_kind": "SIGNAL"},
+            ]},
+            {"key": "post_replay", "label": "结果整理", "flows": [
+                {"flow_key": "post.risk", "flow_label": "计算风险指标", "display_order": 1},
+            ]},
+        ],
+    }
+    stream = TtyBuffer()
+    with contextlib.redirect_stdout(stream):
+        renderer.handle("activity_manifest", manifest)
+        renderer.handle("activity", {
+            "phase": "pre_replay",
+            "phase_label": "回放准备",
+            "flow_key": "pre.window",
+            "flow_label": "解析运行时间窗口",
+        })
+        renderer.handle("progress", {"phase": "pre_replay", "percent": 5})
+        renderer.handle("activity", {
+            "phase": "post_replay",
+            "phase_label": "结果整理",
+            "flow_key": "post.risk",
+            "flow_label": "计算风险指标",
+        })
+        renderer.handle("progress", {"phase": "post_replay", "percent": 95})
+
+    raw = stream.getvalue()
+    assert "当前: 回放准备 · 1/1 解析运行时间窗口" in raw
+    assert "当前: 结果整理 · 1/1 计算风险指标" in raw
+    assert "\n\n\n" not in raw
 
 
 def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_path, monkeypatch) -> None:
