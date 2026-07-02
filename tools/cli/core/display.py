@@ -65,6 +65,18 @@ def print_backtest_welcome(state: CliState) -> None:
             click.echo(f"    {index}. " + " · ".join(parts))
     else:
         click.echo("  groups: （空）")
+    if state.backtest_ls_configs:
+        click.echo("  long-short:")
+        for index, config in enumerate(state.backtest_ls_configs, start=1):
+            long_group = config.get("long_group") or {}
+            short_group = config.get("short_group") or {}
+            click.echo(
+                f"    {index}. {config.get('name') or f'ls-{index}'} · "
+                f"多头={long_group.get('name') or long_group.get('id')} · "
+                f"空头={short_group.get('name') or short_group.get('id')}"
+            )
+    else:
+        click.echo("  long-short: （空）")
     click.echo("参数示例:")
     click.echo("  factortester backtest --factor-family SgCCS")
     click.echo("  factortester backtest --config-local-settings allocation_mode=equal_notional")

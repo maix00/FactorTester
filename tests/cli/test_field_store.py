@@ -71,10 +71,56 @@ def test_visible_fields_honor_visible_when() -> None:
     assert [key for key, _ in visible_fields(store, tab_key="allocation")] == ["allocation_mode", "vol_window"]
 
 
+def test_field_store_reports_editable_when_without_blocking_set() -> None:
+    store = FieldStore(
+        defaults={
+            "engine_mode": {"value": "basic"},
+            "warmup": {
+                "value": "auto",
+                "visible_when": {"engine_mode": ["auto"]},
+                "editable_when": {"engine_mode": ["auto"]},
+            },
+            "engine": {"value": "Native", "editible_when": {"engine_mode": ["advanced"]}},
+        }
+    )
+
+    assert not store.is_visible("warmup")
+    assert not store.is_editable("warmup")
+    assert not store.is_editable("engine")
+    store.set("warmup", "fixed")
+    assert store.effective("warmup") == "fixed"
+    store.set("engine_mode", "auto")
+    assert store.is_visible("warmup")
+    assert store.is_editable("warmup")
+
+
+def test_field_store_validates_registered_values() -> None:
+    store = FieldStore(
+        defaults={
+            "engine": {
+                "value": "Native",
+                "control_template": "select",
+                "options": [{"value": "Native", "label": "Native"}, {"value": "Backtrader", "label": "Backtrader"}],
+            },
+            "window": {"value": 20, "control_template": "number"},
+            "enabled": {"value": False, "control_template": "boolean"},
+        }
+    )
+
+    store.validate_value("engine", "Native")
+    store.validate_value("window", "20")
+    store.validate_value("enabled", "true")
+    try:
+        store.validate_value("engine", "Bad")
+    except ValueError as exc:
+        assert "字段 engine 的值不合法" in str(exc)
+    else:
+        raise AssertionError("expected invalid option to fail")
+
+
 def test_empty_matches_frontend_core_values() -> None:
     assert is_empty(None)
     assert is_empty("")
     assert is_empty([])
     assert not is_empty(0)
     assert not is_empty(False)
-

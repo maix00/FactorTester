@@ -19,6 +19,7 @@ class CliState:
     page_settings: dict[str, Any] = field(default_factory=dict)
     backtest_local_settings: dict[str, Any] = field(default_factory=dict)
     backtest_groups: list[dict[str, Any]] = field(default_factory=list)
+    backtest_ls_configs: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def location_label(self) -> str:
@@ -59,6 +60,7 @@ def load_state(path: Path | None = None) -> CliState:
         page_settings=dict(raw.get("page_settings") or {}),
         backtest_local_settings=dict(raw.get("backtest_local_settings") or {}),
         backtest_groups=list(raw.get("backtest_groups") or []),
+        backtest_ls_configs=list(raw.get("backtest_ls_configs") or []),
     )
 
 

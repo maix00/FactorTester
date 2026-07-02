@@ -71,6 +71,32 @@ class FieldStore:
     def field(self, key: str) -> dict[str, Any]:
         return self.defaults.get(key, {})
 
+    def is_visible(self, key: str) -> bool:
+        return _condition_matches(self, self.defaults.get(key, {}).get("visible_when"))
+
+    def is_editable(self, key: str) -> bool:
+        meta = self.defaults.get(key, {})
+        return self.is_visible(key) and _condition_matches(self, meta.get("editable_when", meta.get("editible_when")))
+
+    def validate_value(self, key: str, value: Any) -> None:
+        if key not in self.defaults:
+            raise ValueError(f"未注册字段: {key}")
+        meta = self.defaults[key]
+        options = meta.get("options") or []
+        if options:
+            allowed = {option.get("value") for option in options if isinstance(option, Mapping)}
+            if value not in allowed:
+                raise ValueError(f"字段 {key} 的值不合法: {value!r}，允许值: {', '.join(str(item) for item in allowed)}")
+        control = meta.get("control_template")
+        if control == "number":
+            try:
+                float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"字段 {key} 需要数字值: {value!r}") from exc
+        if control == "boolean" and not isinstance(value, bool):
+            if str(value).lower() not in {"true", "false", "1", "0", "yes", "no"}:
+                raise ValueError(f"字段 {key} 需要布尔值: {value!r}")
+
     def _effective(self, key: str, *, seen: set[str]) -> Any:
         if key in seen:
             return self.get(key)
@@ -101,18 +127,20 @@ def visible_fields(store: FieldStore, *, tab_key: str | None = None) -> list[tup
     for key, meta in store.defaults.items():
         if tab_key is not None and meta.get("tab_key", meta.get("tab")) != tab_key:
             continue
-        if _visible(store, meta):
+        if store.is_visible(key):
             fields.append((key, meta))
     return sorted(fields, key=lambda item: (item[1].get("order", 1000), item[1].get("label", item[0])))
 
 
-def _visible(store: FieldStore, meta: Mapping[str, Any]) -> bool:
-    visible_when = meta.get("visible_when")
-    if not isinstance(visible_when, Mapping):
+def _condition_matches(store: FieldStore, condition: Any) -> bool:
+    if not isinstance(condition, Mapping):
         return True
-    for dep_key, allowed_values in visible_when.items():
+    for dep_key, allowed_values in condition.items():
         current = store.effective(str(dep_key))
-        if current not in set(allowed_values or []):
+        if isinstance(allowed_values, (list, tuple, set)):
+            allowed = set(allowed_values)
+        else:
+            allowed = {allowed_values}
+        if current not in allowed:
             return False
     return True
-

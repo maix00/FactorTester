@@ -472,6 +472,79 @@ def test_backtest_add_group_supports_inline_factor_and_product_paths(tmp_path, m
         assert "因子: SgCCS|N:2m|$Rev:1" in result.output
 
 
+def test_backtest_add_group_uses_backend_registered_candidate_field_commands(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        defaults = {
+            "product_path_candidates": {
+                "value": [],
+                "label": "产品路径候选",
+                "serialization": {"shared_page_field": "product_path_candidates"},
+            },
+            "product_path_selection": {
+                "value": None,
+                "label": "产品路径",
+                "serialization": {"shared_page_field": "product_path_selection"},
+            },
+            "factor_candidates": {
+                "value": [],
+                "label": "因子候选",
+                "serialization": {"shared_page_field": "factor_candidates"},
+            },
+            "factor": {
+                "value": "",
+                "label": "因子",
+                "serialization": {"shared_page_field": "factor"},
+            },
+        }
+        return jsonify(success=True, application=application, defaults=defaults)
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[])
+
+    @app.get("/api/factor-library-configs/<factor_family>")
+    def factor_library_configs(factor_family: str):
+        return jsonify(success=True, users=[{"editable": True, "config": {"params_list": []}}])
+
+    @app.put("/api/factor-library-configs/<factor_family>")
+    def save_factor_library_configs(factor_family: str):
+        payload = request.get_json()
+        assert payload["product_group"] == "现场路径"
+        assert payload["params_list"] == [{"N": "2m"}]
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:2m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "add-group",
+            "--group-name", "A1",
+            "--product-path-candidates", "add",
+            "--name", "现场路径",
+            "--path", "Product/Futures/CNFutures/日盘",
+            "--factor-candidates", "add",
+            "--param", "N=2m",
+        ])
+
+        assert result.exit_code == 0
+        assert "产品路径: 现场路径" in result.output
+        assert "因子: SgCCS|N:2m" in result.output
+
+
 def test_backtest_add_group_selects_factor_and_product_group_from_candidates(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)
@@ -607,6 +680,283 @@ def test_backtest_add_group_accepts_multiple_group_sections(tmp_path, monkeypatc
         assert "因子: SgCCS|N:1m" in result.output
         assert "名称: A5" in result.output
         assert "因子: SgCCS|N:2m" in result.output
+
+
+def test_backtest_config_local_settings_is_sibling_action(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "allocation_mode": {
+                "value": "equal_risk",
+                "label": "分配方式",
+                "tab_key": "allocation",
+                "control_template": "select",
+                "options": [{"value": "equal_risk"}, {"value": "equal_notional"}],
+            },
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "config-local-settings", "--allocation-mode", "equal_notional"])
+
+        assert result.exit_code == 0
+        assert "已更新 local-settings" in result.output
+        assert "allocation_mode: equal_notional" in result.output
+
+
+def test_backtest_add_group_context_help_prints_registered_visible_and_editable_fields(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        defaults = {
+            "engine": {
+                "value": "Native",
+                "label": "执行引擎",
+                "tab_key": "engine",
+                "tab_label": "执行引擎",
+                "order": 1,
+            },
+            "engine_mode": {
+                "value": "basic",
+                "label": "引擎模式",
+                "tab_key": "engine",
+                "tab_label": "执行引擎",
+                "order": 2,
+            },
+            "warmup_mode": {
+                "value": "auto",
+                "label": "前摇模式",
+                "tab_key": "factor_execution",
+                "tab_label": "因子执行",
+                "visible_when": {"engine_mode": ["auto"]},
+                "editable_when": {"engine_mode": ["auto"]},
+                "order": 1,
+            },
+            "readonly_probe": {
+                "value": "locked",
+                "label": "只读字段",
+                "tab_key": "engine",
+                "tab_label": "执行引擎",
+                "editible_when": {"engine_mode": ["never"]},
+                "order": 3,
+            },
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        }
+        return jsonify(success=True, application=application, defaults=defaults)
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "add-group",
+            "--add-group",
+            "--group-name", "A1",
+            "--split-count", "5",
+            "--group-index", "1",
+            "--product-group", "from-candidates",
+            "--name", "中国期货日盘",
+            "--factor", "--alias", "SgCCS|N:1m",
+            "--engine", "Native",
+            "--engine-mode", "auto",
+            "--help",
+        ])
+
+        assert result.exit_code == 0
+        assert "回测设置上下文" in result.output
+        assert "执行引擎" in result.output
+        assert "--engine  执行引擎  [可编辑]" in result.output
+        assert "--engine-mode  引擎模式  [可编辑]" in result.output
+        assert "因子执行" in result.output
+        assert "--warmup-mode  前摇模式  [可编辑]" in result.output
+        assert "--readonly-probe  只读字段  [不可编辑]" in result.output
+
+
+def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+        assert runner.invoke(cli, [
+            "backtest",
+            "add-group",
+            "--group-name", "A1",
+            "--split-count", "5",
+            "--group-index", "1",
+        ]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "add-ls",
+            "--name", "LS A1/A5",
+            "--long-group", "A1",
+            "--short-group",
+            "--add-group",
+            "--group-name", "A5",
+            "--split-count", "5",
+            "--group-index", "5",
+            "--factor", "--alias", "SgCCS|N:2m",
+            "--product-group", "from-candidates",
+            "--name", "中国期货日盘",
+        ])
+
+        assert result.exit_code == 0
+        assert "新增 Long-Short" in result.output
+        assert "名称: LS A1/A5" in result.output
+        assert "多头: A1" in result.output
+        assert "空头: A5" in result.output
+
+
+def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "engine": {"value": "Native", "label": "执行引擎", "tab_key": "engine"},
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "config-local-settings", "--not-registered", "x", "--help"])
+
+        assert result.exit_code != 0
+        assert "local-settings 包含未注册字段: not_registered" in result.output
+
+
+def test_backtest_context_help_errors_on_invalid_registered_value(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "engine": {
+                "value": "Native",
+                "label": "执行引擎",
+                "tab_key": "engine",
+                "control_template": "select",
+                "options": [{"value": "Native", "label": "Native"}],
+            },
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "config-local-settings", "--engine", "Bad", "--help"])
+
+        assert result.exit_code != 0
+        assert "字段 engine 的值不合法" in result.output
 
 
 def test_backtest_inline_product_path_rejects_duplicate_candidate_name(tmp_path, monkeypatch) -> None:
