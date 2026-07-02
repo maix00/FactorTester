@@ -161,3 +161,34 @@ def test_ordinary_field_missing_value_materializes_real_default():
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
     assert config.get(FeeModule.fixed_fee_rate) == 0.0
+
+
+def test_use_minor_units_defaults_to_true_outside_basic_engine_mode():
+    from tools.testers.backtest.modules.minor_unit import MinorUnitModule
+
+    for engine_mode in ("auto", "custom", "exact"):
+        configs = build_strategy_configs({"A1": {"engine_mode": engine_mode, **_GROUP_FIELDS}})
+        config = next(iter(configs.values()))
+        assert config.get(MinorUnitModule.use_minor_units) is True, engine_mode
+    # unset engine_mode resolves to "auto" (EngineModule.engine_mode's own default)
+    configs = build_strategy_configs({"A1": _GROUP_FIELDS})
+    config = next(iter(configs.values()))
+    assert config.get(MinorUnitModule.use_minor_units) is True
+
+
+def test_use_minor_units_defaults_to_false_only_for_basic_engine_mode():
+    from tools.testers.backtest.modules.minor_unit import MinorUnitModule
+
+    configs = build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}})
+    config = next(iter(configs.values()))
+    assert config.get(MinorUnitModule.use_minor_units) is False
+
+
+def test_use_minor_units_explicit_value_overrides_the_engine_mode_default():
+    from tools.testers.backtest.modules.minor_unit import MinorUnitModule
+
+    configs = build_strategy_configs({
+        "A1": {"engine_mode": "basic", "use_minor_units": True, **_GROUP_FIELDS},
+    })
+    config = next(iter(configs.values()))
+    assert config.get(MinorUnitModule.use_minor_units) is True

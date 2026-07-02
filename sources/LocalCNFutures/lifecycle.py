@@ -14,6 +14,8 @@ from typing import Any, Iterable, cast
 
 import pandas as pd
 
+from tools.data.types.time_index import DataIndex
+
 
 def infer_contract_end_from_coverage(
     row: dict[str, Any],
@@ -97,7 +99,15 @@ def _last_valid_timestamp(series: pd.Series) -> pd.Timestamp | None:
     valid = series.dropna()
     if valid.empty:
         return None
-    return cast(pd.Timestamp, pd.Timestamp(cast(Any, valid.index[-1])))
+    # valid.index can be a MultiIndex (e.g. a _SIGNAL@-prefixed time level
+    # alongside a trading-day level) -- indexing a MultiIndex with [-1]
+    # returns a tuple of level values, not a scalar, which pd.Timestamp(...)
+    # cannot parse. DataIndex.event_timestamps() extracts just the signal
+    # time level for both plain DatetimeIndex and MultiIndex inputs.
+    events = DataIndex(valid.index).event_timestamps()
+    if len(events) == 0:
+        return None
+    return cast(pd.Timestamp, events[-1])
 
 
 def _trading_day(ts: pd.Timestamp) -> pd.Timestamp:

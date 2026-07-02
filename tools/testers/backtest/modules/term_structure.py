@@ -47,6 +47,14 @@ class TermStructureStore:
     contract_metadata: dict[Any, Any] = field(default_factory=dict)
     target_mapping: dict[Any, dict[str, Any]] = field(default_factory=dict)
     notices: list[dict[str, Any]] = field(default_factory=list)
+    # _event_timestamp_from_row(row, offset=...) is deterministic given a
+    # metadata row identity and an offset -- it never depends on the current
+    # event timestamp -- but resolve_tradable_target_weights calls it on
+    # every SIGNAL event for every product with a target weight, and its
+    # fallback (_local_cnfutures_inferred_lifecycle) scans the whole raw
+    # price table. Cache by (id(row), offset) so that scan happens once per
+    # run, not once per event.
+    event_timestamp_cache: dict[tuple[int, Any], Any] = field(default_factory=dict)
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -82,7 +90,16 @@ class TermStructureExpandModule(ExecutableModule):
         "expand_term_structure",
         inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope),
         outputs=(expanded_contracts, contract_metadata),
-        phase=Phase.PRE_REPLAY, order=39,
+        # order=20, not grouped with the other market_data.py PRE_REPLAY flows
+        # (37-45): MarketDataModule.check_market_data_coverage/load_raw_market_data
+        # need expanded_contracts to plan/load each concrete contract's own
+        # price series (not just the abstract product's continuous series --
+        # that's what a resolved target actually trades once rollover/force-
+        # close switches TermStructureExpandModule.resolve_tradable_target_weights'
+        # output to a concrete contract object), so this must run BEFORE them,
+        # not after (order=39 previously sat between check_market_data_coverage
+        # at 38 and load_raw_market_data at 40 -- too late for either to see it).
+        phase=Phase.PRE_REPLAY, order=20,
         after=(ProductSelectionModule.resolve_product_selection,),
         description="展开期限结构",
         compute=lambda state, ctx: _expand_term_structure(state, ctx),
@@ -298,9 +315,14 @@ def _register_rollover_notices(state, ctx) -> None:
 
 
 def _resolve_tradable_target_weights(state, ctx) -> None:
+    # contract_metadata is set via ctx.set_for during PRE_REPLAY, but PER_EVENT
+    # dispatch gets a brand-new FlowContext per batch (see scheduler.py's
+    # make_dispatcher) -- ctx.get_for here would always see the empty default,
+    # never PRE_REPLAY's output. Read from state.term_structure_store instead,
+    # like _next_contract_object_for_notice below already does.
     for strategy in ctx.active_strategies:
         weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
-        metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
+        metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
         if not weights or not metadata:
             continue
         config = state.config_for(strategy)
@@ -814,12 +836,22 @@ def _event_timestamp_from_row(
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
 ) -> pd.Timestamp | None:
+    # Deterministic given (row identity, offset) -- never depends on the
+    # current event timestamp -- but resolve_tradable_target_weights calls
+    # this on every SIGNAL event per product. See TermStructureStore.
+    # event_timestamp_cache for why this must be memoized, not recomputed.
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.event_timestamp_cache if store is not None else None
+    cache_key = (id(row), offset)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     base = _lifecycle_base_timestamp(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
     )
-    if base is None:
-        return None
-    return _apply_lifecycle_offset(base, offset, state=state)
+    result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def _lifecycle_base_timestamp(
