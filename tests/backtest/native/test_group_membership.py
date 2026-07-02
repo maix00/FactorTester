@@ -139,6 +139,43 @@ def test_group_quantile_membership_applies_product_mask_after_full_bucket_select
     assert weights == {products[2]: pytest.approx(1.0)}
 
 
+def test_equal_margin_allocation_reads_the_per_strategy_historical_field_override():
+    """_set_current_historical_fields (market_data.py) computes a per-strategy
+    override via ctx.set_for(..., strategy, ...) for engine_mode="custom"
+    strategies with custom margin fields -- _allocate_equal_margin must
+    actually read that per-strategy value (ctx.get_for), not just the
+    global one (ctx.get), or a strategy's custom margin ratios silently
+    never take effect."""
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(2)]
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.allocation_policy: "equal_margin",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(FactorSignalModule.signal_value, s, {p: 1.0 for p in products})
+    # global fields say both products have equal margin ratio (would give
+    # equal weight); the per-strategy override says product[0] has a much
+    # higher ratio (lower weight) -- only the per-strategy read should win.
+    ctx.set(MarketDataModule.current_historical_fields, {
+        products[0]: {"LongMarginRatioByMoney": 0.1},
+        products[1]: {"LongMarginRatioByMoney": 0.1},
+    })
+    ctx.set_for(MarketDataModule.current_historical_fields, s, {
+        products[0]: {"LongMarginRatioByMoney": 0.4},
+        products[1]: {"LongMarginRatioByMoney": 0.1},
+    })
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, s)
+    # equal_margin weights ∝ 1/ratio: product[0] gets 1/0.4=2.5, product[1] gets 1/0.1=10
+    total = 2.5 + 10.0
+    assert weights[products[0]] == pytest.approx(2.5 / total)
+    assert weights[products[1]] == pytest.approx(10.0 / total)
+
+
 def test_group_quantile_membership_selects_lowest_bucket_last():
     s = Strategy(alias="S")
     products = [_product() for _ in range(4)]

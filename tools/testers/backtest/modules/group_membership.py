@@ -121,7 +121,10 @@ class GroupMembershipModule(TargetStrategyModule):
 
     group_quantile_membership: ClassVar[Flow] = Flow(
         "group_quantile_membership",
-        inputs=(FactorSignalModule.signal_value, split_count, group_index),
+        inputs=(
+            FactorSignalModule.signal_value, split_count, group_index,
+            MarketDataModule.current_historical_fields,
+        ),
         outputs=(target_weights,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算分组隶属",
         order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
@@ -271,7 +274,7 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
     config = state.config_for(strategy)
     policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
     if policy == "equal_margin":
-        return _allocate_equal_margin(state, ctx, members)
+        return _allocate_equal_margin(state, ctx, strategy, members)
     if policy != "inverse_volatility":
         weight = 1.0 / len(members)
         return {product: weight for product in members}
@@ -308,8 +311,12 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
     return weights
 
 
-def _allocate_equal_margin(state, ctx, members: frozenset) -> dict:
-    ratios = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+def _allocate_equal_margin(state, ctx, strategy, members: frozenset) -> dict:
+    ratios = ctx.get_for(
+        MarketDataModule.current_historical_fields,
+        strategy,
+        ctx.get(MarketDataModule.current_historical_fields, {}),
+    ) or {}
     raw: dict = {}
     for product in members:
         ratio = _margin_ratio_for_product(ratios, product)
