@@ -24,8 +24,8 @@ SETTINGS_COMMAND_ALIASES = {SINGLE_FACTOR_PAGE_SETTINGS_KEY, "settings", "templa
 def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -> None:
     """进入单因子测试控制界面。
 
+    \b
     示例:
-
       factortester single_factor_test --factor-family SgCCS
       factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS backtest
@@ -45,8 +45,8 @@ def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -
 def enter_single_factor_test(factor_family: str, path: tuple[str, ...]) -> None:
     """进入单因子测试控制界面。
 
+    \b
     示例:
-
       factortester single_factor_test --factor-family SgCCS
       factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS backtest

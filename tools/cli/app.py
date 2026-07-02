@@ -15,8 +15,8 @@ from tools.cli.modules.registry import register_cli_modules
 def cli() -> None:
     """FactorTester CLI.
 
+    \b
     常用路径:
-
       factortester configure --host 127.0.0.1 --port 8114
       factortester login --username 18717974771
       factortester list
@@ -26,8 +26,9 @@ def cli() -> None:
       factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
 
     factortester list 固定展示首页模块；查看下一层请使用 factortester <module> list 或 --help。
-    字段级帮助示例:
 
+    \b
+    字段级帮助示例:
       factortester group --add --group-name --help
       factortester group --add --group-name A1 --help
     """

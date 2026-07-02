@@ -67,12 +67,12 @@ def backtest(
 ) -> None:
     """进入通用回测控制界面。
 
+    \b
     回测与 single_factor_test 平行注册；因子家族在具体需要因子的动作中指定:
-
       factortester backtest group --add --factor-family SgCCS --factor 'SgCCS|N:2m|$F:1m|$Rev'
 
+    \b
     常用草稿命令:
-
       factortester backtest local-settings --allocation-mode equal_notional
       factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
       factortester backtest group --add --factor-family SgCCS --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
@@ -81,12 +81,12 @@ def backtest(
       factortester backtest group --group-name A1 --derive --group-name A1a --product-path ...
       factortester backtest group --group-name A1 --copy --group-name A1-copy
       factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
-      factortester backtest template load "2026-06-02 07:20:47"
+      factortester backtest template --from-module-template single_factor_test load "2026-06-02 07:20:47"
       factortester backtest template save "CLI 草稿"
       factortester backtest clear
 
+    \b
     字段级帮助:
-
       factortester group --add --group-name --help
       factortester group --add --group-name A1 --help
     """
