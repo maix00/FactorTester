@@ -175,6 +175,14 @@ def _group_quantile_membership(state, ctx) -> None:
     # strategies sharing signal_value can share a ranking even with
     # different split_count.
     ranked_cache: dict[frozenset, list[tuple[Any, float]]] = {}
+    # A derived group shares its parent's split_count/group_index exactly
+    # (only product_mask_names differs -- "parent bucket intersected with
+    # mask", per product_mask_names' own field docstring), so once a
+    # (signal content, n_groups, group_index) triple has been sliced into a
+    # raw bucket, a strategy with the identical triple can reuse that raw
+    # membership directly and just re-apply its own mask, instead of
+    # re-slicing ranked from scratch.
+    bucket_cache: dict[tuple[frozenset, int, int], frozenset] = {}
 
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
@@ -210,11 +218,14 @@ def _group_quantile_membership(state, ctx) -> None:
             # PYTHONHASHSEED randomization).
             ranked = sorted(signal_value.items(), key=lambda kv: (-kv[1], _product_name(kv[0])))
             ranked_cache[cache_key] = ranked
-        bucket_size = len(ranked) / n_groups
-        start = round(group_index * bucket_size)
-        end = round((group_index + 1) * bucket_size)
-        bucket = ranked[start:end]
-        members = frozenset(product for product, _ in bucket)
+        bucket_key = (cache_key, n_groups, group_index)
+        members = bucket_cache.get(bucket_key)
+        if members is None:
+            bucket_size = len(ranked) / n_groups
+            start = round(group_index * bucket_size)
+            end = round((group_index + 1) * bucket_size)
+            members = frozenset(product for product, _ in ranked[start:end])
+            bucket_cache[bucket_key] = members
         product_mask_names = config.get(GroupMembershipModule.product_mask_names)
         if product_mask_names:
             allowed = {str(name) for name in product_mask_names}

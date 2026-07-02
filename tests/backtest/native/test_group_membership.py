@@ -101,6 +101,55 @@ def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_sign
     assert set(weights4) == {products[2], products[3]}  # split_count=2, group_index=0 -> top half
 
 
+def test_group_quantile_membership_reuses_raw_bucket_for_derived_group_sharing_split_and_index(monkeypatch):
+    """A derived group shares its parent's split_count/group_index exactly
+    (product_mask_names' own field docstring: "parent bucket intersected
+    with mask") -- the raw bucket slice (before masking) should be computed
+    once per (signal content, split_count, group_index), not once per
+    strategy, even though the two strategies differ in product_mask_names."""
+    import tools.testers.backtest.modules.group_membership as group_membership_module
+
+    round_calls = 0
+    real_round = round
+
+    def _counting_round(*args, **kwargs):
+        nonlocal round_calls
+        round_calls += 1
+        return real_round(*args, **kwargs)
+
+    monkeypatch.setattr(group_membership_module, "round", _counting_round, raising=False)
+
+    products = [_product() for _ in range(4)]
+    signal_value = {p: float(i) for i, p in enumerate(products)}
+    parent = Strategy(alias="parent")
+    derived = Strategy(alias="derived")
+    configs = {
+        parent: StrategyConfig(strategy=parent, field_values={
+            GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
+        }),
+        derived: StrategyConfig(strategy=derived, field_values={
+            GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
+            # same bucket as parent (top half = {products[2], products[3]}),
+            # masked down to just products[2]
+            GroupMembershipModule.product_mask_names: (products[2].name,),
+        }),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({parent, derived}))
+    ctx.set_for(FactorSignalModule.signal_value, parent, dict(signal_value))
+    ctx.set_for(FactorSignalModule.signal_value, derived, dict(signal_value))
+
+    _group_quantile_membership(account, ctx)
+
+    # 2 round() calls (start, end) for one bucket computation; a second
+    # strategy sharing (signal, split_count, group_index) must not add more.
+    assert round_calls == 2
+    parent_weights = ctx.get_for(GroupMembershipModule.target_weights, parent)
+    derived_weights = ctx.get_for(GroupMembershipModule.target_weights, derived)
+    assert set(parent_weights) == {products[2], products[3]}
+    assert set(derived_weights) == {products[2]}
+
+
 def test_group_quantile_membership_ignores_products_without_current_price():
     s = Strategy(alias="S")
     tradable, removed = _product(), _product()
