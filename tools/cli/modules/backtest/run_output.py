@@ -29,6 +29,7 @@ class BacktestRunRenderer:
         self._last_phase_percent: dict[str, float] = {}
         self._progress_lines: dict[str, str] = {}
         self._last_log_progress_bucket: dict[str, int] = {}
+        self._activity_line = ""
         self._latest_chart_lines: list[str] = []
         self._status_height = 0
         self._done = False
@@ -136,13 +137,18 @@ class BacktestRunRenderer:
         label = str(data.get("message") or data.get("flow_label") or data.get("flow_name") or data.get("label") or "").strip()
         if timestamp or label:
             prefix = f"{timestamp} " if timestamp else ""
+            activity_text = ""
             if flow_position and phase != EVENT_PHASE:
-                self._echo(f"当前: {prefix}{flow_position} {label}".rstrip())
+                activity_text = f"当前: {prefix}{flow_position} {label}".rstrip()
             else:
-                self._echo(f"当前: {prefix}{label}".rstrip())
+                activity_text = f"当前: {prefix}{label}".rstrip()
+            if self.verbose and data.get("flow_key"):
+                activity_text = f"{activity_text} · {data.get('flow_key')}"
+            self._update_activity_line(activity_text)
         if self.verbose:
             flow_key = data.get("flow_key") or ""
-            self._echo(f"[activity] phase={phase} flow={flow_key}")
+            if not _is_tty():
+                self._echo(f"[activity] phase={phase} flow={flow_key}")
 
     def _print_progress(self, data: Any) -> None:
         if not isinstance(data, dict):
@@ -234,6 +240,13 @@ class BacktestRunRenderer:
         self._progress_lines[key] = line
         self._render_status_region()
 
+    def _update_activity_line(self, line: str) -> None:
+        if not _is_tty():
+            self._echo(line)
+            return
+        self._activity_line = line
+        self._render_status_region()
+
     def _should_log_progress(self, key: str) -> bool:
         percent = self._phase_progress.get(key, self._overall_percent() if key == "total" else 0.0)
         if key != "total" and key != EVENT_PHASE:
@@ -257,6 +270,8 @@ class BacktestRunRenderer:
         lines: list[str] = []
         if "total" in self._progress_lines:
             lines.append(self._progress_lines["total"])
+        if self._activity_line:
+            lines.append(self._activity_line)
         for key in self._phase_order:
             if key in self._progress_lines:
                 lines.append(self._progress_lines[key])
@@ -276,18 +291,24 @@ class BacktestRunRenderer:
         lines = self._status_lines()
         width = _terminal_width()
         for line in lines:
-            click.echo("\x1b[2K" + line[:width])
+            _write_tty_line("\x1b[2K" + line[:width])
+            sys.stdout.write("\n")
+        sys.stdout.flush()
         self._status_height = len(lines)
 
     def _clear_status_region(self, *, for_redraw: bool) -> None:
         if not self._status_height:
             return
         height = self._status_height
-        click.echo(f"\x1b[{self._status_height}F", nl=False)
-        for _ in range(height):
-            click.echo("\x1b[2K")
-        if for_redraw:
-            click.echo(f"\x1b[{height}F", nl=False)
+        sys.stdout.write(f"\x1b[{height}F")
+        for index in range(height):
+            sys.stdout.write("\r\x1b[2K")
+            if index < height - 1:
+                sys.stdout.write("\x1b[1B")
+        if height > 1:
+            sys.stdout.write(f"\x1b[{height - 1}F")
+        sys.stdout.write("\r")
+        sys.stdout.flush()
         self._status_height = 0
 
 
@@ -427,6 +448,10 @@ def _is_tty() -> bool:
 
 def _terminal_width() -> int:
     return max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
+
+
+def _write_tty_line(text: str) -> None:
+    sys.stdout.write(text)
 
 
 def _sparkline(values: list[float], *, width: int = 32) -> str:
