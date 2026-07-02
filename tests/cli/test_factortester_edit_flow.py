@@ -1233,6 +1233,99 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert "（空）" in result.output
 
 
+def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+    calls: list[tuple[str, dict]] = []
+
+    @app.get("/custom-factors/api/source-root")
+    def source_root():
+        return jsonify(success=True, source_root="", resolved_root="/tmp/factor-workspace")
+
+    @app.post("/custom-factors/api/source-root")
+    def save_source_root():
+        payload = request.get_json() or {}
+        calls.append(("save-root", payload))
+        return jsonify(success=True, source_root=payload.get("source_root"), resolved_root=payload.get("source_root"))
+
+    @app.post("/custom-factors/api/workspace/build")
+    def build_workspace():
+        calls.append(("build", request.get_json() or {}))
+        return jsonify(success=True, workspace_root="/tmp/factor-workspace", custom_factor_count=2, public_factor_count=1)
+
+    @app.post("/custom-factors/api/workspace/sync")
+    def sync_workspace():
+        payload = request.get_json() or {}
+        calls.append(("sync", payload))
+        return jsonify(success=True, workspace_root="/tmp/factor-workspace", git_selected_branch=payload.get("branch_mode"), touched_files=["custom_factors/A.py"])
+
+    @app.post("/custom-factors/api/workspace/push")
+    def push_workspace():
+        payload = request.get_json() or {}
+        calls.append(("push", payload))
+        return jsonify(success=True, workspace_root="/tmp/factor-workspace", git_selected_branch=payload.get("branch_mode"), updated_custom_count=1)
+
+    @app.get("/custom-factors/api/workspace/git-settings")
+    def git_settings():
+        return jsonify(success=True, git_enabled=True, git_repo_root="/tmp/factor-workspace", git_current_branch="factor-upload", git_branches=["factor-upload"])
+
+    @app.post("/custom-factors/api/workspace/git-settings")
+    def save_git_settings():
+        payload = request.get_json() or {}
+        calls.append(("git-settings", payload))
+        return jsonify(success=True, git_enabled=payload.get("git_enabled"), git_repo_root=payload.get("git_repo_root"), git_current_branch="factor-upload")
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+
+        result = runner.invoke(cli, ["custom_factors"])
+        assert result.exit_code == 0
+        assert "workspace show|root|build|sync|push" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "custom_factors/factor-library" in result.output
+        assert "custom_factors/workspace" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "show"])
+        assert result.exit_code == 0
+        assert "实际目录: /tmp/factor-workspace" in result.output
+        assert "当前分支: factor-upload" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "root", "/tmp/custom-root"])
+        assert result.exit_code == 0
+        assert "实际目录: /tmp/custom-root" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "build"])
+        assert result.exit_code == 0
+        assert "建立完成" in result.output
+        assert "自定义因子: 2" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "sync", "--branch-mode", "force"])
+        assert result.exit_code == 0
+        assert "下载同步完成" in result.output
+        assert "写入文件" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "push", "--branch-mode", "auto"])
+        assert result.exit_code == 0
+        assert "上传入库完成" in result.output
+        assert "更新自定义因子: 1" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "git-settings", "--disable", "--repo-root", "/tmp/no-git"])
+        assert result.exit_code == 0
+        assert "启用: 否" in result.output
+
+    assert calls == [
+        ("save-root", {"source_root": "/tmp/custom-root"}),
+        ("build", {}),
+        ("sync", {"branch_mode": "force"}),
+        ("push", {"branch_mode": "auto"}),
+        ("git-settings", {"git_enabled": False, "git_repo_root": "/tmp/no-git"}),
+    ]
+
+
 def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)

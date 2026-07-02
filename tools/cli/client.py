@@ -28,7 +28,10 @@ class FactorTesterClient:
         if parent == "products":
             return [{"key": "products/product-groups", "label": "产品组库", "kind": "module", "has_children": False}]
         if parent == "custom_factors":
-            return [{"key": "custom_factors/factor-library", "label": "因子库", "kind": "module", "has_children": False}]
+            return [
+                {"key": "custom_factors/factor-library", "label": "因子库", "kind": "module", "has_children": False},
+                {"key": "custom_factors/workspace", "label": "本地 factor workspace", "kind": "module", "has_children": False},
+            ]
         query = {"parent": parent} if parent else None
         data = self._expect_success(self.session.get("/api/testers/modules", query=query))
         if parent and data.get("parent") != parent:
@@ -140,6 +143,43 @@ class FactorTesterClient:
         if not isinstance(template, dict):
             raise ValueError("服务器模板详情响应格式错误")
         return template
+
+    def factor_workspace_source_root(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/custom-factors/api/source-root"))
+
+    def save_factor_workspace_source_root(self, source_root: str) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post("/custom-factors/api/source-root", {"source_root": source_root})
+        )
+
+    def build_factor_workspace(self) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/custom-factors/api/workspace/build", {}))
+
+    def sync_factor_workspace(self, *, branch_mode: str = "force") -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post("/custom-factors/api/workspace/sync", {"branch_mode": branch_mode})
+        )
+
+    def push_factor_workspace(self, *, branch_mode: str = "auto") -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post("/custom-factors/api/workspace/push", {"branch_mode": branch_mode})
+        )
+
+    def factor_workspace_git_settings(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/custom-factors/api/workspace/git-settings"))
+
+    def save_factor_workspace_git_settings(
+        self,
+        *,
+        git_enabled: bool,
+        git_repo_root: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post(
+                "/custom-factors/api/workspace/git-settings",
+                {"git_enabled": git_enabled, "git_repo_root": git_repo_root},
+            )
+        )
 
     def _expect_success(self, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("success") is False:
