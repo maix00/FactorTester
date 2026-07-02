@@ -68,6 +68,13 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
             ],
         )
 
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "group_test":
+            return jsonify(success=True, parent=parent, modules=[{"key": "group_test/risk", "label": "风险", "kind": "tab", "has_children": True}])
+        return jsonify(success=True, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     with running_server(app) as url:
@@ -77,6 +84,15 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         result = runner.invoke(cli, ["describe", "group_test"])
         assert result.exit_code == 0
         assert "分配方式" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "[module] group_test" in result.output
+        assert "group_test/risk" not in result.output
+
+        result = runner.invoke(cli, ["list", "group_test"])
+        assert result.exit_code == 0
+        assert "[tab] group_test/risk" in result.output
 
         result = runner.invoke(cli, ["edit", "group_test"], input="1\n1\n2\nq\n")
         assert result.exit_code == 0

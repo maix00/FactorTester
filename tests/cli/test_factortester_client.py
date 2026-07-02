@@ -44,7 +44,10 @@ def fake_server() -> Iterator[str]:
 
     @app.get("/api/testers/modules")
     def modules():
-        return jsonify(success=True, modules=[{"key": "single_factor_page", "label": "因子家族测试设置", "modules": []}])
+        parent = request.args.get("parent")
+        if parent == "single_factor_page":
+            return jsonify(success=True, parent=parent, modules=[{"key": "single_factor_page/setting_template", "label": "模板", "kind": "tab"}])
+        return jsonify(success=True, modules=[{"key": "single_factor_page", "label": "因子家族测试设置", "kind": "module", "has_children": True}])
 
     @app.get("/api/backtest/settings/<application>")
     def settings(application: str):
@@ -82,6 +85,7 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.login("alice", "pw")["username"] == "alice"
     assert client.bootstrap_page()["page_uuid"] == "page-1"
     assert client.list_modules()[0]["key"] == "single_factor_page"
+    assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
 
 
 def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> None:
@@ -92,4 +96,3 @@ def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> N
     assert client.tab_manifest("group_test", "engine")["tab"]["key"] == "engine"
     assert client.list_candidates("product_path_selection")[0]["id"] == "pg-1"
     assert client.list_candidates("factor_candidates")[0]["alias"] == "SgCCS|N:2m"
-

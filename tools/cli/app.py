@@ -40,9 +40,10 @@ def login(username: str, password: str) -> None:
 
 
 @cli.command("list")
-def list_modules() -> None:
-    """List tester modules registered by the server."""
-    modules = _client_from_config().list_modules()
+@click.argument("parent", required=False)
+def list_modules(parent: str | None) -> None:
+    """List one navigation layer registered by the server."""
+    modules = _client_from_config().list_modules(parent=parent)
     for line in _module_lines(modules):
         click.echo(line)
 
@@ -113,16 +114,14 @@ def _client_from_config() -> FactorTesterClient:
     return FactorTesterClient(HttpSession(config.base_url))
 
 
-def _module_lines(modules: list[dict[str, Any]], *, indent: int = 0) -> list[str]:
+def _module_lines(modules: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
-    prefix = "  " * indent
     for module in modules:
         key = module.get("key", "")
         label = module.get("label", key)
-        lines.append(f"{prefix}- {key}: {label}")
-        children = module.get("modules")
-        if isinstance(children, list) and children:
-            lines.extend(_module_lines(children, indent=indent + 1))
+        kind = module.get("kind", "module")
+        marker = " +" if module.get("has_children") else ""
+        lines.append(f"- [{kind}] {key}: {label}{marker}")
     return lines
 
 
@@ -187,4 +186,3 @@ def _prompt_value(meta: dict[str, Any], current: Any) -> Any:
 
 if __name__ == "__main__":
     cli()
-

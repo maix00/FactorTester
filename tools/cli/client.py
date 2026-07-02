@@ -22,8 +22,9 @@ class FactorTesterClient:
             payload["type"] = factor_type
         return self._expect_success(self.session.post("/api/single_factor_test/page", payload))
 
-    def list_modules(self) -> list[dict[str, Any]]:
-        data = self._expect_success(self.session.get("/api/testers/modules"))
+    def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
+        query = {"parent": parent} if parent else None
+        data = self._expect_success(self.session.get("/api/testers/modules", query=query))
         modules = data.get("modules")
         if not isinstance(modules, list):
             raise ValueError("服务器 modules 响应格式错误")
@@ -61,4 +62,3 @@ class FactorTesterClient:
         if data.get("success") is False:
             raise RuntimeError(str(data.get("error") or data))
         return data
-
