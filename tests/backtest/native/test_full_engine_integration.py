@@ -72,7 +72,7 @@ def test_full_engine_runs_two_product_two_day_backtest():
             "factor": factor,
             "factor_mode": "precomputed",
             "split_count": 2,
-            "group_index": 1,  # highest-signal half
+            "group_index": 0,  # highest-signal half
             "initial_capital_major": 1_000_000.0,
             "base_currency": "CNY",
             "engine_mode": "basic",
@@ -199,7 +199,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
         "A1": {
             "factor_mode": "precomputed",
             "split_count": 2,
-            "group_index": 1,  # highest-MA half
+            "group_index": 0,  # highest-MA half
                 "initial_capital_major": 1_000_000.0,
                 "base_currency": "CNY",
                 "engine_mode": "basic",
@@ -221,7 +221,7 @@ def test_full_engine_with_real_moving_average_factor_expression():
     curve = equity_curve_for(account, strategy)
     assert not curve.empty
     # The real rolling-mean ranking must put p1 (consistently higher MA
-    # level) in the group_index=1 (top) bucket -- proof the engine's
+    # level) in the group_index=0 (top) bucket -- proof the engine's
     # allocation decision was actually driven by FactorExpr.evaluate()'s
     # real output, not a hand-built signal table.
     positions_by_ts = position_curve_for(account, strategy)

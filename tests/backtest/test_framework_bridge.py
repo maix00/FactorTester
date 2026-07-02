@@ -187,11 +187,11 @@ def test_membership_matches_native_quantile_bucketing():
     membership = np.asarray(out["membership"], dtype=bool)
     updates = np.asarray(out["signal_updates"], dtype=bool)
     assert membership.shape == (3, 1, 2)
-    # group_index=1 of split_count=2 == the higher-signal half:
-    # rows 0-1: B(2.0) > A(1.0) → B; row 2: A(3.0) > B(1.0) → A
-    assert membership[0, 0].tolist() == [False, True]
-    assert membership[1, 0].tolist() == [False, True]
-    assert membership[2, 0].tolist() == [True, False]
+    # group_index=0 is the highest-signal half, group_index=1 the lower half:
+    # rows 0-1: A(1.0) < B(2.0) → lower half is A; row 2: B(1.0) < A(3.0) → lower half is B
+    assert membership[0, 0].tolist() == [True, False]
+    assert membership[1, 0].tolist() == [True, False]
+    assert membership[2, 0].tolist() == [False, True]
     assert updates.all()  # on_factor_signal updates every signal row
 
 
