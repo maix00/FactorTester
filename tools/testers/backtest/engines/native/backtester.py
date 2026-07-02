@@ -55,10 +55,20 @@ def run_backtest_task(
     returns the `execution` dict shape group.py already consumes."""
     requested_engine = _requested_engine(run_state)
     if requested_engine != "native":
-        raise NotImplementedError(
-            f"FactorTester.dispatch('backtest') currently owns only the native "
-            f"event queue; {requested_engine!r} must run through its own "
-            "ExecutableModule/worker bridge instead of falling back to native."
+        # ADR-030: external frameworks never enter the native event queue —
+        # the bridge runs shared PRE_REPLAY preparation, then the framework's
+        # own loop inside its isolated worker process.
+        from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
+
+        return run_framework_backtest_task(
+            state,
+            run_state=run_state,
+            engine=requested_engine,
+            group_owner=group_owner,
+            settings_by_strategy=settings_by_strategy,
+            run_id=run_id,
+            progress=progress,
+            activity_sink=activity_sink,
         )
     registry = _build_registry()
     queue = EventQueue()

@@ -20,7 +20,7 @@ from typing import ClassVar
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import FlowOverride
-from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.market_data import MarketDataModule, market_data_store_for
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
@@ -50,7 +50,16 @@ class PositionSizingModule(ExecutableModule):
 
 def _round_to_lot_sizes(state, ctx, base_compute) -> None:
     base_compute(state, ctx)  # compute the base deltas first
-    lot_sizes = ctx.get(MarketDataModule.lot_sizes, {})
+    # MarketDataModule.lot_sizes is only ever ctx.set() once, during
+    # PRE_REPLAY's _publish_raw_market_data -- PER_EVENT/SIGNAL dispatch runs
+    # on a fresh FlowContext (its own empty _values dict), so ctx.get here
+    # would always silently return the {} default and lot rounding would
+    # never actually apply. lot_sizes is time-invariant per run (unlike
+    # current_prices/volume which are legitimately re-published every SIGNAL
+    # event), so it belongs on the persistent MarketDataStore, not per-event ctx.
+    lot_sizes = ctx.get(MarketDataModule.lot_sizes, None)
+    if not lot_sizes:
+        lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         policy = state.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")

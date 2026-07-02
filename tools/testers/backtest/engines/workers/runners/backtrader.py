@@ -11,16 +11,13 @@ import pandas as pd
 
 from .common import (
     capacity_limited_deltas,
-    execute_target_weights,
-    execution_delay_bars,
     execution_trace_entry,
     execution_price,
-    execution_timing,
     market_rule_diagnostics,
     parse_group_strategy_input,
     parse_target_weight_input,
-    portfolio_value,
     position_value_snapshot,
+    require_broker_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -280,97 +277,114 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "backtrader", "portfolios": portfolios}
 
 
+def _configure_backtrader_broker(cerebro, strategy: Mapping[str, Any]) -> None:
+    """Map ADR-028 broker policy selectors onto Backtrader's broker.
+
+    - matching_policy=next_bar_open_full_fill: Backtrader market orders fill
+      at the NEXT bar's open by default — coc stays False.
+    - cancel_policy=replace_pending_same_product: implemented inside
+      _GroupMembershipStrategy.next() via self.cancel(previous).
+    - cash_policy=rescale_buy_orders + min_lot_policy=floor_to_lot:
+      implemented by _backtrader_executable_target_sizes before ordering.
+    - fill_cap_policy: no_cap → no filler; volume_participation →
+      bt.fillers.FixedBarPerc.
+    """
+    require_broker_policies(
+        strategy,
+        engine="backtrader",
+        supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},
+    )
+    cerebro.broker.set_coc(False)
+    liquidity_mode = str(strategy.get("liquidity_mode") or "infinite")
+    if liquidity_mode == "volume_participation":
+        cerebro.broker.set_filler(bt.fillers.FixedBarPerc(
+            perc=float(strategy.get("participation_rate") or 0.0) * 100.0
+        ))
+    elif liquidity_mode != "infinite":
+        raise ValueError(f"unsupported liquidity mode: {liquidity_mode}")
+    slippage_mode = str(strategy.get("slippage_mode") or "none")
+    if slippage_mode == "fixed_bps":
+        cerebro.broker.set_slippage_perc(
+            float(strategy.get("slippage_bps") or 0.0) / 10_000.0
+        )
+    elif slippage_mode != "none":
+        raise ValueError(f"unsupported slippage mode: {slippage_mode}")
+    cerebro.broker.setcommission(
+        commission=float(strategy.get("fee_rate") or 0.0), percabs=True
+    )
+
+
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Event-driven group replay through Backtrader's own Cerebro engine.
+
+    Each strategy runs a real bt.Strategy (_GroupMembershipStrategy): targets
+    are computed inside next() bar callbacks, stale open orders are cancelled
+    via the broker (replace_pending_same_product), and fills happen through
+    Backtrader's order/broker lifecycle at the next bar's open — the same
+    event semantics ADR-029 fixes for native (target on SIGNAL, fill on the
+    following ORDER)."""
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     portfolios = {}
     total_replay_steps = len(request.timestamps) * len(request.strategies)
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
+        cerebro = bt.Cerebro(stdstats=False)
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
-        cash = strategy_cash
-        positions = {instrument: 0.0 for instrument in request.instruments}
-        pending_targets = []
-        equity_curve = {}
-        position_curve = {}
-        notional_curve = {}
-        margin_curve = {}
-        execution_trace = {}
-        execution_trace_count = 0
-        collect_trace = bool(strategy.get("collect_execution_trace"))
-        timing = execution_timing(strategy)
-        delay_bars = execution_delay_bars(strategy)
-        for row, timestamp in enumerate(request.timestamps):
-            due_targets = [target for due_row, target in pending_targets if due_row <= row]
-            pending_targets = [
-                (due_row, target) for due_row, target in pending_targets if due_row > row
+        cerebro.broker.setcash(strategy_cash)
+        _configure_backtrader_broker(cerebro, strategy)
+        for instrument in request.instruments:
+            values = [
+                valuation_price(request, row, instrument)
+                for row in range(len(request.timestamps))
             ]
-            for pending in due_targets:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, pending, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            target = calculator.update(
-                timestamp,
-                np.asarray([request.prices[name][row] for name in request.instruments]),
-                memberships[row],
-                updates[row],
-                np.asarray(request.margin_ratios[row]),
+            frame = pd.DataFrame(
+                {
+                    "open": values,
+                    "high": [value * 2.0 for value in values],
+                    "low": [value * 0.5 for value in values],
+                    "close": values,
+                    "volume": (
+                        list(request.volumes[instrument])
+                        if request.volumes is not None else [1_000_000.0] * len(values)
+                    ),
+                    "openinterest": [0.0] * len(values),
+                },
+                index=pd.DatetimeIndex(request.timestamps),
             )
-            if timing == "same_bar" and target is not None:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions, deltas = execute_target_weights(
-                    request, row, strategy, target, positions, cash
-                )
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
-            elif timing == "next_bar":
-                if target is not None:
-                    pending_targets.append((row + delay_bars, target))
-            equity_curve[timestamp.isoformat()] = float(
-                portfolio_value(request, row, positions, cash)
-            )
-            position_curve[timestamp.isoformat()] = dict(positions)
-            notional_values, margin_values = position_value_snapshot(
-                request, row, strategy, positions
-            )
-            notional_curve[timestamp.isoformat()] = notional_values
-            if margin_values is not None:
-                margin_curve[timestamp.isoformat()] = margin_values
-            if (
-                progress is not None
-                and should_report_progress(
-                    strategy_position * len(request.timestamps) + row + 1,
-                    total_replay_steps,
-                )
-            ):
+            cerebro.adddata(bt.feeds.PandasData(dataname=frame), name=instrument)
+
+        def _progress_callback(completed, total, timestamp, _offset=strategy_position):
+            if progress is not None:
                 progress(
-                    strategy_position * len(request.timestamps) + row + 1,
+                    _offset * len(request.timestamps) + completed,
                     total_replay_steps,
                     timestamp,
                 )
+
+        cerebro.addstrategy(
+            _GroupMembershipStrategy,
+            request=request,
+            strategy_config=strategy,
+            calculator=calculator,
+            memberships=memberships,
+            signal_updates=updates,
+            progress_callback=_progress_callback if progress is not None else None,
+        )
+        instance = cerebro.run()[0]
         portfolios[calculator.strategy_id] = {
             "initial_value": strategy_cash,
-            "final_value": float(portfolio_value(request, len(request.timestamps) - 1, positions, cash)),
-            "positions": positions,
-            "equity_curve": equity_curve,
-            "position_curve": position_curve,
-            "notional_curve": notional_curve,
-            "margin_curve": margin_curve,
-            "execution_trace": execution_trace,
-            "execution_trace_count": execution_trace_count,
+            "final_value": float(cerebro.broker.getvalue()),
+            "positions": {
+                data._name: float(cerebro.broker.getposition(data).size)
+                for data in cerebro.datas
+            },
+            "equity_curve": dict(instance.equity_curve),
+            "position_curve": dict(instance.position_curve),
+            "notional_curve": dict(instance.notional_curve),
+            "margin_curve": dict(instance.margin_curve),
+            "execution_trace": dict(instance.execution_trace),
+            "execution_trace_count": len(instance.execution_trace),
         }
     return {
         "engine": "backtrader",

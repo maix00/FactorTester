@@ -21,6 +21,55 @@ def should_report_progress(completed: int, total: int, max_updates: int = 100) -
     return completed % stride == 0
 
 
+# ── ADR-028 broker policy selectors ────────────────────────────────
+# NativeBroker's default selector values. Framework runners implement these
+# defaults through their own machinery (backtrader: cancel(previous)/market
+# order next-bar-open fill/FixedBarPerc filler; common helpers: cash rescale
+# in executable_deltas, lot floor, volume-participation cap). A runner must
+# validate the requested selectors against what its framework can actually
+# express and reject the rest — never silently substitute (ADR-024/ADR-028).
+
+BROKER_POLICY_DEFAULTS: dict[str, str] = {
+    "broker_model": "native_default",
+    "cancel_policy": "replace_pending_same_product",
+    "order_validity": "next_signal",
+    "matching_policy": "next_bar_open_full_fill",
+    "accept_policy": "always_accept",
+    "cash_policy": "rescale_buy_orders",
+    "min_lot_policy": "floor_to_lot",
+    "fill_cap_policy": "no_cap",
+    "price_band_policy": "ignore",
+    "order_state_model": "simple_filled_rejected_cancelled",
+}
+
+
+def broker_policies(strategy: Mapping[str, Any]) -> dict[str, str]:
+    """Requested broker policy selectors, defaulted to NativeBroker values."""
+    return {
+        key: str(strategy.get(key) or default)
+        for key, default in BROKER_POLICY_DEFAULTS.items()
+    }
+
+
+def require_broker_policies(
+    strategy: Mapping[str, Any],
+    *,
+    engine: str,
+    supported: Mapping[str, frozenset[str]] | None = None,
+) -> dict[str, str]:
+    """Validate selectors; a value outside the engine's supported set raises."""
+    supported = supported or {}
+    policies = broker_policies(strategy)
+    for key, value in policies.items():
+        allowed = supported.get(key, frozenset({BROKER_POLICY_DEFAULTS[key]}))
+        if value not in allowed:
+            raise ValueError(
+                f"{engine} cannot express broker policy {key}={value!r}; "
+                f"supported: {sorted(allowed)}"
+            )
+    return policies
+
+
 @dataclass(frozen=True, slots=True)
 class TargetWeightInput:
     timestamps: tuple[pd.Timestamp, ...]
