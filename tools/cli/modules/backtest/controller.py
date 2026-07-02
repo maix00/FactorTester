@@ -31,7 +31,7 @@ from tools.cli.modules.backtest.shared.selectors import (
     selection_label,
 )
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
-from tools.cli.state import load_state, save_state
+from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -91,9 +91,12 @@ def backtest(
       factortester group --add --group-name A1 --help
     """
     if ctx.invoked_subcommand is not None:
+        state = load_state()
+        switch_backtest_space(state, BACKTEST_SPACE)
+        save_state(state)
         return
     state = load_state()
-    enter_backtest_state(state)
+    enter_backtest_state(state, scope=BACKTEST_SPACE)
     save_state(state)
     if run:
         _run_backtest(state, groups=state.backtest_groups, verbose=verbose)
@@ -105,9 +108,18 @@ def backtest(
 @click.pass_context
 @friendly_errors
 def template(ctx: click.Context) -> None:
-    """管理 single_factor_test 设置模板的便捷入口。"""
+    """管理 backtest 设置模板的便捷入口。"""
     state = load_state()
+    switch_backtest_space(state, BACKTEST_SPACE)
     args = tuple(ctx.args)
+    source_module = ""
+    if args[:1] == ("--from-module-template",):
+        if len(args) < 3:
+            raise click.ClickException("--from-module-template 需要模块名和动作，例如: --from-module-template single_factor_test load <模板>")
+        source_module = args[1]
+        if source_module not in {"single_factor_test", "single_factor_family_test"}:
+            raise click.ClickException(f"暂不支持从该模块模板导入: {source_module}")
+        args = args[2:]
     if not args or args[0] in {"help", "--help", "-h"}:
         _print_backtest_template_help(state)
         return
@@ -119,7 +131,7 @@ def template(ctx: click.Context) -> None:
     if args[0] == "load":
         if len(args) < 2:
             raise click.ClickException("template load 需要模板 ID 或名称")
-        _load_backtest_template_into_state(state, args[1])
+        _load_backtest_template_into_state(state, args[1], source_module=source_module)
         save_state(state)
         return
     if args[0] == "save":
@@ -137,7 +149,7 @@ def local_settings(ctx: click.Context) -> None:
     """配置回测 local-settings。"""
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state)
+        enter_backtest_state(state, scope=BACKTEST_SPACE)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
     setting_args = _strip_context_help(args)
@@ -158,6 +170,7 @@ def local_settings(ctx: click.Context) -> None:
 def clear(page_settings: bool) -> None:
     """清空当前 backtest 配置草稿。"""
     state = load_state()
+    switch_backtest_space(state, BACKTEST_SPACE)
     state.backtest_local_settings.clear()
     state.backtest_groups.clear()
     state.backtest_ls_configs.clear()
@@ -174,13 +187,14 @@ def _print_backtest_template_help(state) -> None:
     current = state.factor_family or "（未选择）"
     click.echo(f"当前因子家族: {current}")
     click.echo("  list / ls                 列出当前因子家族的设置模板")
-    click.echo("  load <模板ID或名称>        加载模板到当前 CLI 草稿")
+    click.echo("  load <模板ID或名称>        加载模板到顶层 backtest 草稿")
+    click.echo("  --from-module-template single_factor_test load <模板>  从 single_factor_test 模板显式导入")
     click.echo("  save [模板名]              保存当前 CLI 草稿为设置模板")
     click.echo("")
     click.echo("示例:")
     click.echo("  factortester single_factor_test --factor-family SgCCS")
     click.echo("  factortester backtest template list")
-    click.echo("  factortester backtest template load '2026-06-02 07:20:47'")
+    click.echo("  factortester backtest template --from-module-template single_factor_test load '2026-06-02 07:20:47'")
     click.echo("  factortester backtest template save 'CLI 草稿'")
 
 
@@ -194,7 +208,7 @@ def _list_backtest_templates(factor_family: str) -> None:
         click.echo(f"  {index}. {template.get('name') or template.get('id')} · id={template.get('id')}")
 
 
-def _load_backtest_template_into_state(state, selector: str) -> None:
+def _load_backtest_template_into_state(state, selector: str, *, source_module: str = "") -> None:
     client = client_from_config()
     templates = client.list_single_factor_setting_templates(state.factor_family)
     template_id = _resolve_template_id(selector, templates)
@@ -203,7 +217,8 @@ def _load_backtest_template_into_state(state, selector: str) -> None:
     if not isinstance(snapshot, dict):
         raise click.ClickException("模板缺少 snapshot")
     applied = _apply_snapshot_to_backtest_state(state, snapshot, template_name=str(template.get("name") or selector))
-    click.echo(f"已加载模板: {template.get('name') or selector}")
+    source = f"（来自 {source_module} 模板）" if source_module else ""
+    click.echo(f"已加载模板: {template.get('name') or selector}{source}")
     click.echo(
         f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
         f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}"
@@ -316,7 +331,7 @@ def group(
     """
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state)
+        enter_backtest_state(state, scope=BACKTEST_SPACE)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
     verbose = "--verbose" in args
@@ -378,7 +393,7 @@ def long_short(ctx: click.Context) -> None:
     """管理 Long-Short 策略草稿。"""
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state)
+        enter_backtest_state(state, scope=BACKTEST_SPACE)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
     clean_args = _strip_context_help(args)
@@ -407,7 +422,8 @@ def long_short(ctx: click.Context) -> None:
     click.echo(f"空头: {config['short_group'].get('name') or config['short_group'].get('id')}")
 
 
-def enter_backtest_state(state) -> None:
+def enter_backtest_state(state, *, scope: str = BACKTEST_SPACE) -> None:
+    switch_backtest_space(state, scope)
     if state.current_parent == "single_factor_family_test":
         ensure_child_available(state.current_parent, BACKTEST_BACKEND_KEY)
         state.enter(BACKTEST_BACKEND_KEY)

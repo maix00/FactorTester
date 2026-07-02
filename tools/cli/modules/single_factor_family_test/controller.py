@@ -11,7 +11,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines, print_location_welcome, print_single_factor_family_welcome
 from tools.cli.core.errors import friendly_errors
 from tools.cli.modules.backtest import BACKTEST_PUBLIC_KEY, enter_backtest_state
-from tools.cli.state import load_state, save_state
+from tools.cli.state import SINGLE_FACTOR_BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 
 SINGLE_FACTOR_PAGE_SETTINGS_KEY = "single_factor_page"
 SETTINGS_COMMAND_ALIASES = {SINGLE_FACTOR_PAGE_SETTINGS_KEY, "settings", "template"}
@@ -99,7 +99,7 @@ def _print_single_factor_children(factor_family: str) -> None:
 
 def enter_child(state, key: str) -> None:
     if key == BACKTEST_PUBLIC_KEY:
-        enter_backtest_state(state)
+        enter_backtest_state(state, scope=SINGLE_FACTOR_BACKTEST_SPACE)
         return
     ensure_child_available(state.current_parent, key)
     state.enter(key)
@@ -199,6 +199,7 @@ def _load_template_into_state(state, selector: str) -> None:
 def _save_template_from_state(state, name: str) -> None:
     if not state.factor_family:
         raise click.ClickException("保存模板前必须选择因子家族")
+    switch_backtest_space(state, SINGLE_FACTOR_BACKTEST_SPACE)
     snapshot = _snapshot_from_state(state)
     data = client_from_config().save_single_factor_setting_template(state.factor_family, name=name, snapshot=snapshot)
     template_id = data.get("id") or ""
@@ -232,6 +233,7 @@ def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:
 
 
 def _apply_snapshot_to_state(state, snapshot: dict[str, Any], *, template_name: str) -> dict[str, int]:
+    switch_backtest_space(state, SINGLE_FACTOR_BACKTEST_SPACE)
     factors = snapshot.get("factors") if isinstance(snapshot.get("factors"), dict) else {}
     if factors:
         for key in ("factor_candidates", "factor"):

@@ -1567,14 +1567,24 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
 
         result = runner.invoke(cli, ["backtest", "group", "list"])
         assert result.exit_code == 0
+        assert "（空）" in result.output
+
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "backtest"])
+        assert result.exit_code == 0
+        result = runner.invoke(cli, ["group", "list"])
+        assert result.exit_code == 0
         assert "A1 · 分组数=5 · 分组序号=1" in result.output
         assert "产品路径=中国期货日盘" in result.output
         assert "因子=SgCCS|N:2m" in result.output
 
-        result = runner.invoke(cli, ["backtest", "long-short", "list"])
+        result = runner.invoke(cli, ["long-short", "list"])
         assert result.exit_code == 0
         assert "LS A1/A5" in result.output
         assert "多头=g1" in result.output
+
+        result = runner.invoke(cli, ["backtest", "template", "--from-module-template", "single_factor_test", "load", "2026-06-02 07:20:47"])
+        assert result.exit_code == 0
+        assert "来自 single_factor_test 模板" in result.output
 
         result = runner.invoke(cli, ["backtest", "template", "save", "CLI 草稿"])
         assert result.exit_code == 0
