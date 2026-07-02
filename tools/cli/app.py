@@ -11,6 +11,7 @@ import click
 from .client import FactorTesterClient
 from .field_store import FieldStore, visible_fields
 from .http import ClientConfig, HttpClientError, HttpSession, load_config, save_config
+from .state import CliState, load_state, save_state
 
 
 @click.group()
@@ -90,16 +91,85 @@ def login(username: str, password: str) -> None:
         password = getpass.getpass("Password: ")
     data = _client_from_config().login(username, password)
     click.echo(f"已登录: {data.get('username') or username}")
+    state = load_state()
+    state.reset()
+    save_state(state)
+    _print_home_welcome()
 
 
 @cli.command("list")
-@click.argument("parent", required=False)
 @_friendly_errors
-def list_modules(parent: str | None) -> None:
-    """List one navigation layer registered by the server."""
-    modules = _client_from_config().list_modules(parent=parent)
+def list_modules() -> None:
+    """List the next navigation layer from the current CLI location."""
+    state = load_state()
+    modules = _client_from_config().list_modules(parent=state.current_parent)
+    click.echo(f"当前位置: {state.location_label}")
     for line in _module_lines(modules):
         click.echo(line)
+    if state.current_parent is not None:
+        click.echo("返回上一层: factortester back")
+
+
+@cli.command()
+@_friendly_errors
+def home() -> None:
+    """Return to the CLI home location."""
+    state = load_state()
+    state.reset()
+    save_state(state)
+    _print_home_welcome()
+
+
+@cli.command()
+@_friendly_errors
+def back() -> None:
+    """Return to the previous navigation layer."""
+    state = load_state()
+    state.back()
+    save_state(state)
+    click.echo(f"已返回: {state.location_label}")
+
+
+@cli.command("single_factor_family_test")
+@click.option("--factor-family", "--factor_family", default="", help="要测试的因子家族。")
+@click.argument("path", nargs=-1)
+@_friendly_errors
+def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -> None:
+    """Enter the single-factor-family test page controller."""
+    if not factor_family:
+        factor_family = click.prompt("因子家族", default="", show_default=False)
+    if not factor_family:
+        raise click.ClickException("必须选择 factor_family")
+    state = load_state()
+    _ensure_child_available(state.current_parent, "single_factor_family_test")
+    state.enter("single_factor_family_test")
+    state.factor_family = factor_family
+    for child in path:
+        _ensure_child_available(state.current_parent, child)
+        state.enter(child)
+    save_state(state)
+    if path:
+        _print_location_welcome(state)
+    else:
+        _print_single_factor_family_welcome(state)
+
+
+@cli.command("group_test")
+@_friendly_errors
+def enter_group_test() -> None:
+    """Enter the group backtest controller from the current page."""
+    state = load_state()
+    _ensure_child_available(state.current_parent, "group_test")
+    state.enter("group_test")
+    save_state(state)
+    _print_group_test_welcome(state)
+
+
+def _print_group_test_welcome(state: CliState) -> None:
+    click.echo("分组回测")
+    if state.factor_family:
+        click.echo(f"因子家族: {state.factor_family}")
+    click.echo("下一步: factortester list 查看分组回测设置 tabs；factortester back 返回。")
 
 
 @cli.command()
@@ -168,6 +238,39 @@ def edit(key: str) -> None:
 def _client_from_config() -> FactorTesterClient:
     config = load_config()
     return FactorTesterClient(HttpSession(config.base_url))
+
+
+def _ensure_child_available(parent: str | None, key: str) -> None:
+    modules = _client_from_config().list_modules(parent=parent)
+    if any(module.get("key") == key for module in modules):
+        return
+    location = CliState(current_parent=parent).location_label
+    raise RuntimeError(f"当前位置 {location} 下没有 {key}；请先 factortester list 查看可进入项。")
+
+
+def _print_home_welcome() -> None:
+    click.echo("欢迎使用 FactorTester CLI")
+    click.echo("常用操作:")
+    click.echo("  factortester list                         查看当前层级可进入模块")
+    click.echo("  factortester single_factor_family_test    进入单因子家族测试")
+    click.echo("  factortester back                         返回上一层")
+
+
+def _print_single_factor_family_welcome(state: CliState) -> None:
+    click.echo("单因子家族测试")
+    click.echo(f"已选择 factor_family: {state.factor_family}")
+    click.echo("下一步: factortester list 查看测试模块；例如 factortester group_test 进入分组回测。")
+
+
+def _print_location_welcome(state: CliState) -> None:
+    if state.current_parent == "single_factor_family_test":
+        _print_single_factor_family_welcome(state)
+        return
+    if state.current_parent == "group_test":
+        _print_group_test_welcome(state)
+        return
+    click.echo(f"已进入: {state.location_label}")
+    click.echo("下一步: factortester list 查看下一层；factortester back 返回。")
 
 
 def _module_lines(modules: list[dict[str, Any]]) -> list[str]:

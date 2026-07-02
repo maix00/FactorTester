@@ -51,6 +51,10 @@ def cookie_path() -> Path:
     return _home_dir() / "cookies.lwp"
 
 
+def state_path() -> Path:
+    return _home_dir() / "state.json"
+
+
 def _home_dir() -> Path:
     configured = os.environ.get(HOME_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_HOME

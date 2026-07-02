@@ -73,9 +73,11 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
     @app.get("/api/testers/modules")
     def modules():
         parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
         if parent == "group_test":
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test/risk", "label": "风险", "kind": "tab", "has_children": True}])
-        return jsonify(success=True, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+        return jsonify(success=True, modules=[{"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True}])
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -89,12 +91,36 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        assert "[module] group_test" in result.output
+        assert "当前位置: 首页" in result.output
+        assert "[module] single_factor_family_test" in result.output
         assert "group_test/risk" not in result.output
 
-        result = runner.invoke(cli, ["list", "group_test"])
+        result = runner.invoke(cli, ["list", "single_factor_family_test"])
+        assert result.exit_code != 0
+        assert "unexpected extra argument" in result.output.lower()
+
+        result = runner.invoke(cli, ["single_factor_family_test", "--factor-family", "SgCCS"])
         assert result.exit_code == 0
+        assert "单因子家族测试" in result.output
+        assert "已选择 factor_family: SgCCS" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: 单因子家族测试 · SgCCS" in result.output
+        assert "[module] group_test" in result.output
+
+        result = runner.invoke(cli, ["group_test"])
+        assert result.exit_code == 0
+        assert "分组回测" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: group_test" in result.output
         assert "[tab] group_test/risk" in result.output
+
+        result = runner.invoke(cli, ["back"])
+        assert result.exit_code == 0
+        assert "单因子家族测试" in result.output
 
         result = runner.invoke(cli, ["edit", "group_test"], input="1\n1\n2\nq\n")
         assert result.exit_code == 0
@@ -120,6 +146,56 @@ def test_click_login_failure_is_user_friendly(tmp_path, monkeypatch) -> None:
         assert "Error: 请求失败 (401): 用户名或密码错误" in result.output
         assert "Traceback" not in result.output
         assert "tools/cli" not in result.output
+
+
+def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    app.secret_key = "test-secret"
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        result = runner.invoke(cli, ["configure", "--base-url", url])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"])
+        assert result.exit_code == 0
+        assert "已登录: alice" in result.output
+        assert "欢迎使用 FactorTester CLI" in result.output
+        assert "factortester list" in result.output
+
+
+def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+        if parent == "group_test":
+            return jsonify(success=True, parent=parent, modules=[{"key": "group_test/time", "label": "时间范围", "kind": "tab", "has_children": True}])
+        return jsonify(success=True, modules=[{"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True}])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        result = runner.invoke(cli, ["configure", "--base-url", url])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["single_factor_family_test", "--factor-family", "SgCCS", "group_test"])
+        assert result.exit_code == 0
+        assert "分组回测" in result.output
+        assert "因子家族: SgCCS" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: group_test" in result.output
+        assert "[tab] group_test/time" in result.output
 
 
 def test_click_non_json_html_response_is_user_friendly(tmp_path, monkeypatch) -> None:
