@@ -31,7 +31,9 @@ from tools.cli.modules.backtest.shared.selectors import (
     selection_label,
 )
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
+from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
+from tools.cli.table import render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -174,12 +176,47 @@ def clear(page_settings: bool) -> None:
     state.backtest_local_settings.clear()
     state.backtest_groups.clear()
     state.backtest_ls_configs.clear()
+    state.backtest_last_result.clear()
     if page_settings:
         state.page_settings.clear()
     save_state(state)
     click.echo("已清空 backtest 配置")
     if page_settings:
         click.echo("已同时清空页面级设置")
+
+
+@backtest.command("results", context_settings=SELECTOR_HELP_CONTEXT)
+@click.pass_context
+@friendly_errors
+def results(ctx: click.Context) -> None:
+    """查看最近一次 backtest 运行结果。
+
+    \b
+    常用命令:
+      factortester backtest results summary
+      factortester backtest results equity
+      factortester backtest results snapshot --index 1
+      factortester backtest results order-flow --group-name A1
+    """
+    state = load_state()
+    args = tuple(ctx.args)
+    if not args or args[0] in {"help", "--help", "-h"}:
+        _print_results_help()
+        return
+    action = args[0]
+    if action == "summary":
+        _print_stored_result_summary(state)
+        return
+    if action == "equity":
+        _print_stored_equity_chart(state)
+        return
+    if action == "snapshot":
+        _print_snapshot_result(state, args[1:])
+        return
+    if action in {"order-flow", "orders"}:
+        _print_order_flow_result(state, args[1:])
+        return
+    raise click.ClickException("results 支持: summary, equity, snapshot, order-flow")
 
 
 def _print_backtest_template_help(state) -> None:
@@ -999,6 +1036,10 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
         if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
     renderer.handle("complete", {})
+    if renderer.last_result:
+        state.backtest_last_result = renderer.last_result
+        save_state(state)
+    _print_backtest_result_hints()
 
 
 def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1008,6 +1049,148 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
         "groups": [dict(group) for group in groups],
         "ls_configs": list(state.backtest_ls_configs),
     }
+
+
+def _print_results_help() -> None:
+    click.echo("backtest results 命令")
+    click.echo("  summary                         最近一次运行的统计表格")
+    click.echo("  equity                          最近一次运行的多策略净值图")
+    click.echo("  snapshot --index N              查看第 N 个时间点的持仓/资金快照")
+    click.echo("  snapshot --timestamp-ms MS      查看指定 epoch 毫秒附近的快照")
+    click.echo("  order-flow [--group-name NAME]  查看订单流/下单过程记录")
+
+
+def _require_last_result(state) -> dict[str, Any]:
+    if not state.backtest_last_result:
+        raise click.ClickException("没有最近一次 backtest 结果；请先运行 factortester backtest --run")
+    return state.backtest_last_result
+
+
+def _print_stored_result_summary(state) -> None:
+    data = _require_last_result(state)
+    series = _result_series(data.get("groups") or [])
+    rows = [
+        (f"{name} · LS" if is_ls else name, f"{curve[-1]:.2f}", len(curve))
+        for name, curve, is_ls in series
+        if curve
+    ]
+    click.echo("最近一次回测摘要")
+    for line in render_table(("策略", "最终权益", "点数"), rows, indent="  ", aligns=("left", "right", "right"), max_widths=(28, 16, 8)):
+        click.echo(line)
+
+
+def _print_stored_equity_chart(state) -> None:
+    data = _require_last_result(state)
+    series = _result_series(data.get("groups") or [])
+    if not series:
+        raise click.ClickException("最近一次结果没有可画的净值曲线")
+    for line in ["净值曲线:", *_multi_series_chart(series, width=_chart_body_width())]:
+        click.echo(line)
+
+
+def _print_snapshot_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    product_path_selection_id = str(data.get("product_path_selection_id") or "")
+    if not product_path_selection_id:
+        raise click.ClickException("最近一次结果没有 product_path_selection_id，无法请求快照")
+    timestamp_ms = _result_timestamp_ms(data, args)
+    result = client_from_config().group_snapshot({
+        "page_uuid": state.page_uuid,
+        "product_path_selection_id": product_path_selection_id,
+        "timestamp_ms": timestamp_ms,
+    })
+    summary = result.get("summary") or {}
+    click.echo(f"快照: timestamp_ms={result.get('timestamp_ms')}")
+    click.echo(f"事件: {result.get('event_label') or result.get('event_type') or '（未知）'}")
+    click.echo(f"摘要: changed={summary.get('total_changed')} products={summary.get('total_prod_count')} turnover={summary.get('avg_turnover')}")
+    matrices = result.get("matrices") if isinstance(result.get("matrices"), list) else []
+    for matrix in matrices[:1]:
+        columns = matrix.get("columns") if isinstance(matrix, dict) else []
+        rows = matrix.get("rows") if isinstance(matrix, dict) else []
+        click.echo(f"矩阵: {matrix.get('label') if isinstance(matrix, dict) else ''} · 列={len(columns)} · 行={len(rows)}")
+
+
+def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    payload: dict[str, Any] = {"page_uuid": state.page_uuid}
+    group_name = _arg_value(args, "--group-name")
+    if group_name:
+        group_id = _group_id_for_name(data, group_name)
+        if group_id:
+            payload["group_id"] = group_id
+        else:
+            raise click.ClickException(f"最近一次结果中找不到策略: {group_name}")
+    timestamp_ms = _arg_value(args, "--timestamp-ms")
+    if timestamp_ms:
+        payload["timestamp_ms"] = int(timestamp_ms)
+    result = client_from_config().group_order_flow(payload)
+    groups = result.get("groups") if isinstance(result.get("groups"), list) else []
+    click.echo(f"订单流: records={result.get('record_count', 0)}")
+    rows = []
+    for group in groups:
+        records = group.get("records") if isinstance(group, dict) else []
+        rows.append((group.get("group_name") or group.get("group_id") or "", len(records or [])))
+    for line in render_table(("策略", "记录数"), rows, indent="  ", aligns=("left", "right"), max_widths=(28, 8)):
+        click.echo(line)
+
+
+def _result_timestamp_ms(data: dict[str, Any], args: tuple[str, ...]) -> int:
+    explicit = _arg_value(args, "--timestamp-ms")
+    if explicit:
+        return int(explicit)
+    index_raw = _arg_value(args, "--index")
+    index = int(index_raw or "1") - 1
+    groups = data.get("groups") if isinstance(data.get("groups"), list) else []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        timestamps = group.get("timestamps")
+        if isinstance(timestamps, list) and timestamps:
+            index = max(0, min(index, len(timestamps) - 1))
+            return _timestamp_value_to_ms(timestamps[index])
+    raise click.ClickException("最近一次结果没有时间索引，无法请求快照")
+
+
+def _timestamp_value_to_ms(value: Any) -> int:
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        raise click.ClickException("时间索引为空，无法请求快照")
+    try:
+        return int(float(text))
+    except ValueError:
+        pass
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise click.ClickException(f"无法解析时间索引: {text}") from exc
+    return int(parsed.timestamp() * 1000)
+
+
+def _group_id_for_name(data: dict[str, Any], name: str) -> str:
+    for group in data.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        keys = {str(group.get("name") or ""), str(group.get("id") or ""), str(group.get("group_id") or "")}
+        if name in keys:
+            return str(group.get("id") or group.get("group_id") or "")
+    return ""
+
+
+def _arg_value(args: tuple[str, ...], flag: str) -> str:
+    for index, token in enumerate(args):
+        if token == flag and index + 1 < len(args):
+            return str(args[index + 1])
+    return ""
+
+
+def _print_backtest_result_hints() -> None:
+    click.echo("结果查看:")
+    click.echo("  factortester backtest results summary")
+    click.echo("  factortester backtest results equity")
+    click.echo("  factortester backtest results snapshot --index 1")
+    click.echo("  factortester backtest results order-flow --group-name <策略名>")
 
 
 def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:

@@ -41,6 +41,7 @@ class BacktestRunRenderer:
         self._last_event_activity_log_at: float | None = None
         self._event_activity_log_interval = 2.0
         self._activity_typewriter_delay = 0.006
+        self.last_result: dict[str, Any] = {}
 
     def handle(self, event_name: str, data: Any) -> None:
         if self._done and event_name not in {"complete", "done"}:
@@ -74,6 +75,7 @@ class BacktestRunRenderer:
             if data:
                 self._echo(f"[result] {data}")
             return
+        self.last_result = dict(data)
         groups = data.get("groups")
         if not isinstance(groups, list) or not groups:
             return
@@ -181,7 +183,7 @@ class BacktestRunRenderer:
             if self.verbose:
                 self._echo(f"[progress] {data}")
             return
-        if self._last_percent is not None and abs(percent - self._last_percent) < 0.01 and not self.verbose:
+        if self._last_percent is not None and abs(percent - self._last_percent) < 0.01:
             return
         self._last_percent = percent
         phase = str(data.get("phase") or self._current_phase or EVENT_PHASE)
@@ -191,8 +193,6 @@ class BacktestRunRenderer:
                 self._phase_progress[key] = 100.0
             self._print_total_progress()
             self._print_phase_bars()
-            if self.verbose:
-                self._echo(f"[progress] phase={phase} percent={percent:.2f}")
             return
         has_completed_total = "completed" in data and "total" in data
         if has_completed_total and phase == EVENT_PHASE:
@@ -205,8 +205,6 @@ class BacktestRunRenderer:
                 self._phase_progress[phase] = max(self._phase_progress.get(phase, 0.0), max(0.0, min(100.0, event_percent)))
         self._print_total_progress()
         self._print_phase_bars()
-        if self.verbose:
-            self._echo(f"[progress] phase={phase} percent={percent:.2f}")
 
     def _advance_activity_phase(self, data: dict[str, Any]) -> str:
         phase = str(data.get("phase") or "")
@@ -233,7 +231,7 @@ class BacktestRunRenderer:
         for key in self._phase_order or sorted(self._phase_progress):
             percent = self._phase_progress.get(key, 0.0)
             last = self._last_phase_percent.get(key)
-            if not force and last is not None and abs(percent - last) < 0.01 and not self.verbose:
+            if not force and last is not None and abs(percent - last) < 0.01:
                 continue
             self._last_phase_percent[key] = percent
             label = self._phase_labels.get(key, key)
@@ -254,7 +252,7 @@ class BacktestRunRenderer:
 
     def _update_progress_line(self, key: str, line: str) -> None:
         if not _is_tty():
-            if not self.verbose and not self._should_log_progress(key):
+            if not self._should_log_progress(key):
                 return
             click.echo(line)
             return
@@ -430,10 +428,17 @@ def _result_series(groups: list[Any]) -> list[tuple[str, list[float], bool]]:
     return series
 
 
-def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: int = 48, height: int = 10) -> list[str]:
+def _multi_series_chart(
+    series: list[tuple[str, list[float], bool]],
+    *,
+    width: int = 48,
+    height: int = 18,
+    title: str = "净值曲线",
+    ylabel: str = "权益",
+) -> list[str]:
     if not series:
         return []
-    plotext_lines = _plotext_chart(series, width=width, height=height)
+    plotext_lines = _plotext_chart(series, width=width, height=height, title=title, ylabel=ylabel)
     if plotext_lines:
         return plotext_lines
     symbols = list("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -453,7 +458,7 @@ def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: i
     return lines
 
 
-def _plotext_chart(series: list[tuple[str, list[float], bool]], *, width: int, height: int) -> list[str]:
+def _plotext_chart(series: list[tuple[str, list[float], bool]], *, width: int, height: int, title: str, ylabel: str) -> list[str]:
     try:
         import plotext as plt  # type: ignore[import-not-found]
     except Exception:
@@ -462,15 +467,15 @@ def _plotext_chart(series: list[tuple[str, list[float], bool]], *, width: int, h
     try:
         plt.clear_figure()
         plt.plotsize(width, height)
-        plt.title("净值曲线")
+        plt.title(title)
         plt.xlabel("样本点")
-        plt.ylabel("权益")
+        plt.ylabel(ylabel)
         for name, curve, is_ls in series:
             label = f"{name} LS" if is_ls else name
             plt.plot(list(range(len(curve))), curve, label=label)
         with contextlib.redirect_stdout(buffer):
             plt.show()
-        lines = [str(plt.uncolorize(line)).rstrip() for line in buffer.getvalue().splitlines() if line.strip()]
+        lines = [line.rstrip() for line in buffer.getvalue().splitlines() if line.strip()]
         return lines
     except Exception:
         return []

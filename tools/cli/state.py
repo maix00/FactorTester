@@ -26,6 +26,7 @@ class CliState:
     backtest_local_settings: dict[str, Any] = field(default_factory=dict)
     backtest_groups: list[dict[str, Any]] = field(default_factory=list)
     backtest_ls_configs: list[dict[str, Any]] = field(default_factory=list)
+    backtest_last_result: dict[str, Any] = field(default_factory=dict)
     ic_test_local_settings: dict[str, Any] = field(default_factory=dict)
     ic_test_configs: list[dict[str, Any]] = field(default_factory=list)
     factor_evaluation_local_settings: dict[str, Any] = field(default_factory=dict)
@@ -82,6 +83,7 @@ def load_state(path: Path | None = None) -> CliState:
         backtest_local_settings=dict(raw.get("backtest_local_settings") or {}),
         backtest_groups=list(raw.get("backtest_groups") or []),
         backtest_ls_configs=list(raw.get("backtest_ls_configs") or []),
+        backtest_last_result=dict(raw.get("backtest_last_result") or {}),
         ic_test_local_settings=dict(raw.get("ic_test_local_settings") or {}),
         ic_test_configs=list(raw.get("ic_test_configs") or []),
         factor_evaluation_local_settings=dict(raw.get("factor_evaluation_local_settings") or {}),

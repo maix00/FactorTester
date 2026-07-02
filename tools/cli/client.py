@@ -150,6 +150,18 @@ class FactorTesterClient:
     def run_group_test_stream(self, payload: dict[str, Any]):
         yield from self.session.stream_post("/run_group_test_stream", payload)
 
+    def group_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/get_group_snapshot", payload))
+
+    def group_order_flow(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/get_group_order_flow", payload))
+
+    def group_detail(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/get_group_detail", payload))
+
+    def group_ranking_detail(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/get_group_ranking_detail", payload))
+
     def run_ic_test_stream(self, payload: dict[str, Any]):
         yield from self.session.stream_post("/run_ic_test_stream", payload)
 

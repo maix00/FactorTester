@@ -19,6 +19,7 @@ from tools.cli.modules.backtest.shared.selectors import (
     selection_label,
 )
 from tools.cli.modules.products.controller import product_group_selection
+from tools.cli.modules.backtest.run_output import _multi_series_chart
 from tools.cli.state import load_state, save_state
 from tools.cli.table import render_table
 
@@ -395,10 +396,11 @@ def _run_ic_configs(state, *, configs: list[dict[str, Any]] | None = None, verbo
                     click.echo(f"  进度: {data.get('phase')} {data.get('completed')}/{data.get('total')}")
             if event_name == "result":
                 result = data
-        if isinstance(result, dict):
-            _print_ic_result(result)
-        else:
-            click.echo("  未收到 IC 结果")
+    if isinstance(result, dict):
+        _print_ic_result(result)
+        _print_ic_factor_outputs(result)
+    else:
+        click.echo("  未收到 IC 结果")
 
 
 def _run_payload(state, item: dict[str, Any]) -> dict[str, Any]:
@@ -446,3 +448,73 @@ def _print_ic_result(result: dict[str, Any]) -> None:
             table_rows.append((index, col, display))
     for line in render_table(("指标", "因子", "值"), table_rows, indent="    ", aligns=("left", "left", "right"), max_widths=(12, 42, 14)):
         click.echo(line)
+
+
+def _print_ic_factor_outputs(result: dict[str, Any]) -> None:
+    factors = result.get("factors") if isinstance(result.get("factors"), list) else []
+    for factor in factors[:3]:
+        if not isinstance(factor, dict):
+            continue
+        label = str(factor.get("alias") or factor.get("factor_alias") or factor.get("name") or "IC")
+        series = factor.get("ic_series") if isinstance(factor.get("ic_series"), dict) else {}
+        values = _numeric_values(series.get("values") if isinstance(series, dict) else [])
+        if values:
+            click.echo(f"  IC 序列图: {label}")
+            for line in _multi_series_chart([(label, values, False)], width=72, height=14, title="IC 序列", ylabel="IC"):
+                click.echo("    " + line)
+        rolling = factor.get("rolling_ic") if isinstance(factor.get("rolling_ic"), dict) else {}
+        if rolling:
+            _print_rolling_ic(rolling)
+        decay = factor.get("ic_decay") if isinstance(factor.get("ic_decay"), list) else []
+        if decay:
+            _print_ic_decay(decay)
+
+
+def _print_rolling_ic(rolling: dict[str, Any]) -> None:
+    mean = _numeric_values(rolling.get("mean"))
+    ir = _numeric_values(rolling.get("ir"))
+    click.echo(f"  Rolling IC: window={rolling.get('window')}")
+    rows = []
+    if mean:
+        rows.append(("mean", f"{mean[-1]:.6g}", len(mean)))
+    if ir:
+        rows.append(("ir", f"{ir[-1]:.6g}", len(ir)))
+    for line in render_table(("序列", "末值", "点数"), rows, indent="    ", aligns=("left", "right", "right"), max_widths=(12, 14, 8)):
+        click.echo(line)
+
+
+def _print_ic_decay(decay: list[Any]) -> None:
+    rows = []
+    for item in decay[:8]:
+        if not isinstance(item, dict):
+            continue
+        rows.append((
+            item.get("lag"),
+            _format_number(item.get("mean")),
+            _format_number(item.get("ir")),
+            item.get("n"),
+        ))
+    if rows:
+        click.echo("  IC 衰减:")
+        for line in render_table(("lag", "mean", "ir", "n"), rows, indent="    ", aligns=("right", "right", "right", "right"), max_widths=(6, 14, 14, 8)):
+            click.echo(line)
+
+
+def _numeric_values(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    out: list[float] = []
+    for item in value:
+        try:
+            if item is None:
+                continue
+            out.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _format_number(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{float(value):.6g}"
+    return str(value)

@@ -1289,13 +1289,33 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
             'data: {"phase":"post_replay","phase_label":"整理","flow_key":"risk","flow_label":"计算风险指标","timestamp":"2026-01-31 15:00:00"}',
             "",
             "event: result",
-            'data: {"success":true,"groups":[{"name":"A1","total_equity":[100000000,100200000,100100000,100500000],"timestamps":[1,2,3,4]},{"name":"LS A1/A5","is_ls":true,"total_equity":[100000000,99900000,100300000],"timestamps":[1,2,3]}]}',
+            'data: {"success":true,"product_path_selection_id":"pg-day","groups":[{"id":"g-a1","name":"A1","total_equity":[100000000,100200000,100100000,100500000],"timestamps":[1000,2000,3000,4000]},{"id":"ls-a1-a5","name":"LS A1/A5","is_ls":true,"total_equity":[100000000,99900000,100300000],"timestamps":[1000,2000,3000]}]}',
             "",
             "event: complete",
             "data: {}",
             "",
         ])
         return Response(body, mimetype="text/event-stream")
+
+    @app.post("/get_group_snapshot")
+    def group_snapshot():
+        payload = request.get_json() or {}
+        return jsonify(
+            success=True,
+            timestamp_ms=payload.get("timestamp_ms"),
+            event_label="成交后账本",
+            summary={"total_changed": 2, "total_prod_count": 5, "avg_turnover": 40.0},
+            matrices=[{"label": "实际持仓 · 合约", "columns": [{"label": "A1"}], "rows": [{"name": "现金"}]}],
+        )
+
+    @app.post("/get_group_order_flow")
+    def group_order_flow():
+        payload = request.get_json() or {}
+        return jsonify(
+            success=True,
+            record_count=2,
+            groups=[{"group_id": payload.get("group_id") or "g-a1", "group_name": "A1", "records": [{"order_id": "o1"}, {"order_id": "o2"}]}],
+        )
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -1324,7 +1344,7 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "当前: 事件回放 · 2026-01-02 09:01:00 合成目标" in result.output
     assert "当前: 整理 · 2026-01-31 15:00:00 1/1 计算风险指标" in result.output
     assert "[activity] phase=event_replay flow=signal.target" in result.output
-    assert "[progress] phase=event_replay percent=25.00" in result.output
+    assert "[progress] phase=event_replay" not in result.output
     assert "[运行信息] 产品路径: ER.CZC(早籼稻)" in result.output
     assert "[live] 刷新净值曲线" in result.output
     assert "净值曲线:" in result.output
@@ -1343,6 +1363,31 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "100300000.00" in summary_lines[1]
     assert "0.30%" in summary_lines[1]
     assert "回测完成" in result.output
+    assert "结果查看:" in result.output
+    assert "factortester backtest results summary" in result.output
+
+    result = runner.invoke(cli, ["backtest", "results", "summary"])
+    assert result.exit_code == 0
+    assert "最近一次回测摘要" in result.output
+    assert "最终权益" in result.output
+    assert "A1" in result.output
+
+    result = runner.invoke(cli, ["backtest", "results", "equity"])
+    assert result.exit_code == 0
+    assert "净值曲线:" in result.output
+
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"]).exit_code == 0
+        result = runner.invoke(cli, ["backtest", "results", "snapshot", "--index", "2"])
+        assert result.exit_code == 0
+        assert "快照: timestamp_ms=2000" in result.output
+        assert "成交后账本" in result.output
+
+        result = runner.invoke(cli, ["backtest", "results", "order-flow", "--group-name", "A1"])
+        assert result.exit_code == 0
+        assert "订单流: records=2" in result.output
+        assert "A1" in result.output
 
 
 def test_backtest_tty_status_keeps_pre_and_post_current_flow() -> None:
@@ -1701,6 +1746,26 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
                     "control_template": "number",
                     "tab_key": "delay",
                 },
+                "ic_decay_lags": {
+                    "value": 5,
+                    "label": "IC 衰减阶数",
+                    "control_template": "number",
+                    "tab_key": "delay",
+                },
+                "group_adjust": {
+                    "value": "off",
+                    "label": "组内去均值",
+                    "control_template": "select",
+                    "tab_key": "cross_section",
+                    "options": [{"value": "off"}, {"value": "on"}],
+                },
+                "by_group": {
+                    "value": "off",
+                    "label": "分组 IC",
+                    "control_template": "select",
+                    "tab_key": "cross_section",
+                    "options": [{"value": "off"}, {"value": "on"}],
+                },
                 "rolling_window": {
                     "value": 20,
                     "label": "滚动窗口",
@@ -1727,7 +1792,10 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
                 'event: result\ndata: '
                 '{"success": true, "ic_stats": {"columns": ["index", "SgCCS|N:2m"], '
                 '"rows": [{"index": "mean", "SgCCS|N:2m": 0.123456}, '
-                '{"index": "ir", "SgCCS|N:2m": 1.5}]}, "factors": []}\n\n'
+                '{"index": "ir", "SgCCS|N:2m": 1.5}]}, '
+                '"factors": [{"alias": "SgCCS|N:2m", "ic_series": {"dates": [1,2,3], "values": [0.1, 0.2, -0.1]}, '
+                '"rolling_ic": {"window": 3, "mean": [0.066], "ir": [0.4]}, '
+                '"ic_decay": [{"lag": 1, "mean": 0.1, "ir": 0.5, "n": 3}, {"lag": 2, "mean": 0.2, "ir": 0.6, "n": 3}]}]}\n\n'
             )
 
         return Response(stream(), mimetype="text/event-stream")
@@ -1747,7 +1815,16 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert "IC 设置上下文" in result.output
         assert "--ic-correlation" in result.output
 
-        result = runner.invoke(cli, ["ic_test", "local-settings", "--ic-correlation", "both", "--ic-lag", "1"])
+        result = runner.invoke(cli, [
+            "ic_test",
+            "local-settings",
+            "--ic-correlation", "both",
+            "--ic-lag", "1",
+            "--ic-decay-lags", "3",
+            "--rolling-window", "3",
+            "--group-adjust", "on",
+            "--by-group", "on",
+        ])
         assert result.exit_code == 0
         assert "已更新 IC local-settings" in result.output
 
@@ -1779,12 +1856,42 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert "mean" in result.output
         assert "SgCCS|N:2m" in result.output
         assert "0.123456" in result.output
+        assert "IC 序列图" in result.output
+        assert "Rolling IC" in result.output
+        assert "IC 衰减" in result.output
         assert received_payloads
         assert received_payloads[-1]["page_uuid"] == "page-ic-1"
         assert received_payloads[-1]["factor_family_alias"] == "SgCCS"
         assert received_payloads[-1]["product_path_selection_id"] == "pg-day"
         assert received_payloads[-1]["factors"] == [{"alias": "SgCCS|N:2m"}]
         assert (received_payloads[-1]["settings"])["ic_correlation"] == "both"
+        assert (received_payloads[-1]["settings"])["group_adjust"] == "on"
+        assert (received_payloads[-1]["settings"])["by_group"] == "on"
+        assert received_payloads[-1]["ic_correlation"] == "both"
+        assert received_payloads[-1]["ic_lag"] == "1"
+        assert received_payloads[-1]["ic_decay_lags"] == [1, 2, 3]
+        assert received_payloads[-1]["rolling_window"] == "3"
+
+        result = runner.invoke(cli, [
+            "ic_test",
+            "local-settings",
+            "--ic-correlation", "pearson",
+            "--ic-lag", "0",
+            "--ic-decay-lags", "1",
+            "--rolling-window", "2",
+            "--group-adjust", "off",
+            "--by-group", "off",
+        ])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["ic_test", "--run"])
+        assert result.exit_code == 0
+        assert received_payloads[-1]["ic_correlation"] == "pearson"
+        assert received_payloads[-1]["ic_lag"] == "0"
+        assert received_payloads[-1]["ic_decay_lags"] == [1]
+        assert received_payloads[-1]["rolling_window"] == "2"
+        assert (received_payloads[-1]["settings"])["group_adjust"] == "off"
+        assert (received_payloads[-1]["settings"])["by_group"] == "off"
 
 
 def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> None:
