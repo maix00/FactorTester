@@ -14,4 +14,11 @@ factortester = "tools.cli.app:cli"
 
 [tool.setuptools]
 package-dir = {"" = "../.."}
-packages = ["tools.cli", "tools.cli.commands", "tools.cli.core", "tools.cli.modules"]
+packages = [
+  "tools.cli",
+  "tools.cli.commands",
+  "tools.cli.core",
+  "tools.cli.modules",
+  "tools.cli.modules.backtest",
+  "tools.cli.modules.single_factor_family_test",
+]

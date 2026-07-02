@@ -8,11 +8,15 @@ import click
 
 from tools.cli.state import CliState
 
+BACKEND_TO_PUBLIC_KEYS = {
+    "group_test": "backtest",
+}
+
 
 def module_lines(modules: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for module in modules:
-        key = module.get("key", "")
+        key = _public_key(str(module.get("key", "")))
         label = module.get("label", key)
         kind = module.get("kind", "module")
         marker = " +" if module.get("has_children") else ""
@@ -31,14 +35,16 @@ def print_home_welcome() -> None:
 def print_single_factor_family_welcome(state: CliState) -> None:
     click.echo("单因子家族测试")
     click.echo(f"已选择 factor_family: {state.factor_family}")
-    click.echo("下一步: factortester list 查看测试模块；例如 factortester group_test 进入分组回测。")
+    click.echo("下一步: factortester list 查看测试模块；例如 factortester backtest 进入回测。")
 
 
-def print_group_test_welcome(state: CliState) -> None:
-    click.echo("分组回测")
+def print_backtest_welcome(state: CliState) -> None:
+    click.echo("回测")
     if state.factor_family:
         click.echo(f"因子家族: {state.factor_family}")
-    click.echo("下一步: factortester list 查看分组回测设置 tabs；factortester back 返回。")
+    click.echo("当前接口: group_test")
+    click.echo("可用动作: factortester backtest add-group")
+    click.echo("下一步: factortester list 查看回测设置 tabs；factortester back 返回。")
 
 
 def print_location_welcome(state: CliState) -> None:
@@ -46,8 +52,14 @@ def print_location_welcome(state: CliState) -> None:
         print_single_factor_family_welcome(state)
         return
     if state.current_parent == "group_test":
-        print_group_test_welcome(state)
+        print_backtest_welcome(state)
         return
     click.echo(f"已进入: {state.location_label}")
     click.echo("下一步: factortester list 查看下一层；factortester back 返回。")
 
+
+def _public_key(key: str) -> str:
+    if "/" not in key:
+        return BACKEND_TO_PUBLIC_KEYS.get(key, key)
+    head, tail = key.split("/", 1)
+    return f"{BACKEND_TO_PUBLIC_KEYS.get(head, head)}/{tail}"

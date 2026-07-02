@@ -107,16 +107,16 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
         assert "当前位置: 单因子家族测试 · SgCCS" in result.output
-        assert "[module] group_test" in result.output
+        assert "[module] backtest" in result.output
 
-        result = runner.invoke(cli, ["group_test"])
+        result = runner.invoke(cli, ["backtest"])
         assert result.exit_code == 0
-        assert "分组回测" in result.output
+        assert "回测" in result.output
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        assert "当前位置: group_test" in result.output
-        assert "[tab] group_test/risk" in result.output
+        assert "当前位置: backtest" in result.output
+        assert "[tab] backtest/risk" in result.output
 
         result = runner.invoke(cli, ["back"])
         assert result.exit_code == 0
@@ -187,15 +187,15 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
         result = runner.invoke(cli, ["configure", "--base-url", url])
         assert result.exit_code == 0
 
-        result = runner.invoke(cli, ["single_factor_family_test", "--factor-family", "SgCCS", "group_test"])
+        result = runner.invoke(cli, ["single_factor_family_test", "--factor-family", "SgCCS", "backtest"])
         assert result.exit_code == 0
-        assert "分组回测" in result.output
+        assert "回测" in result.output
         assert "因子家族: SgCCS" in result.output
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        assert "当前位置: group_test" in result.output
-        assert "[tab] group_test/time" in result.output
+        assert "当前位置: backtest" in result.output
+        assert "[tab] backtest/time" in result.output
 
 
 def test_click_non_json_html_response_is_user_friendly(tmp_path, monkeypatch) -> None:

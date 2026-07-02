@@ -23,6 +23,8 @@ class CliState:
         if self.current_parent == "single_factor_family_test":
             suffix = f" · {self.factor_family}" if self.factor_family else ""
             return f"单因子家族测试{suffix}"
+        if self.current_parent == "group_test":
+            return "backtest"
         return self.current_parent
 
     def enter(self, parent: str) -> None:
@@ -65,4 +67,3 @@ def _state_payload(state: CliState) -> dict[str, Any]:
     payload = asdict(state)
     payload["stack"] = list(state.stack)
     return payload
-
