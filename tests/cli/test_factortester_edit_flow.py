@@ -88,7 +88,10 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
     def modules():
         parent = request.args.get("parent")
         if parent == "single_factor_family_test":
-            return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+            return jsonify(success=True, parent=parent, modules=[
+                {"key": "single_factor_page", "label": "因子家族测试设置", "kind": "module", "has_children": True},
+                {"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True},
+            ])
         if parent == "group_test":
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test/risk", "label": "风险", "kind": "tab", "has_children": True}])
         if parent == "backtest":
@@ -205,7 +208,10 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
     def modules():
         parent = request.args.get("parent")
         if parent == "single_factor_family_test":
-            return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+            return jsonify(success=True, parent=parent, modules=[
+                {"key": "single_factor_page", "label": "因子家族测试设置", "kind": "module", "has_children": True},
+                {"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True},
+            ])
         if parent == "group_test":
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test/time", "label": "时间范围", "kind": "tab", "has_children": True}])
         if parent == "backtest":
@@ -1136,6 +1142,95 @@ def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_pat
         result = runner.invoke(cli, ["backtest", "group", "--add", "--batch", "--help"])
         assert result.exit_code == 0
         assert "group --add --batch 字段说明" in result.output
+
+
+def test_single_factor_template_load_restores_backtest_state_and_clear_resets_draft(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    snapshot = {
+        "factors": {
+            "factor_candidates": [{"alias": "SgCCS|N:2m", "params": {"N": "2m"}}],
+            "factor": "SgCCS|N:2m",
+        },
+        "local_settings": {"allocation_mode": "equal_notional"},
+        "group_settings": {
+            "groups": [{
+                "id": "g1",
+                "name": "A1",
+                "splitCount": 5,
+                "groupIndex": 1,
+                "factorAlias": "SgCCS|N:2m",
+                "product_path_selection": {"product_path_selection_id": "pg-day", "product_group": "中国期货日盘"},
+            }],
+            "lsConfigs": [{
+                "id": "ls1",
+                "name": "LS A1/A5",
+                "longGroupId": "g1",
+                "shortGroupId": "g5",
+            }],
+        },
+    }
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[
+                {"key": "single_factor_page", "label": "因子家族测试设置", "kind": "module", "has_children": True},
+                {"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True},
+            ])
+        if parent == "group_test":
+            return jsonify(success=True, parent=parent, modules=[])
+        return jsonify(success=True, modules=[{"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True}])
+
+    @app.get("/api/single_factor_setting_templates/<factor_family>")
+    def templates(factor_family: str):
+        assert factor_family == "SgCCS"
+        return jsonify(success=True, templates=[{"id": "tpl-20260602", "name": "2026-06-02 07:20:47"}])
+
+    @app.get("/api/single_factor_setting_templates/<factor_family>/<template_id>")
+    def template_detail(factor_family: str, template_id: str):
+        assert factor_family == "SgCCS"
+        assert template_id == "tpl-20260602"
+        return jsonify(success=True, template={"id": template_id, "name": "2026-06-02 07:20:47", "snapshot": snapshot})
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "template", "list"])
+        assert result.exit_code == 0
+        assert "2026-06-02 07:20:47 · id=tpl-20260602" in result.output
+
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "template", "load", "2026-06-02 07:20:47"])
+        assert result.exit_code == 0
+        assert "已加载模板: 2026-06-02 07:20:47" in result.output
+        assert "groups: 1" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "list"])
+        assert result.exit_code == 0
+        assert "A1 · 分组数=5 · 分组序号=1" in result.output
+        assert "产品路径=中国期货日盘" in result.output
+        assert "因子=SgCCS|N:2m" in result.output
+
+        result = runner.invoke(cli, ["backtest", "long-short", "list"])
+        assert result.exit_code == 0
+        assert "LS A1/A5" in result.output
+        assert "多头=g1" in result.output
+
+        result = runner.invoke(cli, ["backtest"])
+        assert result.exit_code == 0
+        assert "allocation_mode: equal_notional" in result.output
+
+        result = runner.invoke(cli, ["backtest", "clear"])
+        assert result.exit_code == 0
+        assert "已清空 backtest 配置" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "list"])
+        assert result.exit_code == 0
+        assert "（空）" in result.output
 
 
 def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:

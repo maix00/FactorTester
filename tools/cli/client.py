@@ -127,6 +127,20 @@ class FactorTesterClient:
     def run_group_test_stream(self, payload: dict[str, Any]):
         yield from self.session.stream_post("/run_group_test_stream", payload)
 
+    def list_single_factor_setting_templates(self, factor_family: str) -> list[dict[str, Any]]:
+        data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}"))
+        templates = data.get("templates")
+        if not isinstance(templates, list):
+            raise ValueError("服务器模板列表响应格式错误")
+        return templates
+
+    def get_single_factor_setting_template(self, factor_family: str, template_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}/{template_id}"))
+        template = data.get("template")
+        if not isinstance(template, dict):
+            raise ValueError("服务器模板详情响应格式错误")
+        return template
+
     def _expect_success(self, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("success") is False:
             raise RuntimeError(str(data.get("error") or data))

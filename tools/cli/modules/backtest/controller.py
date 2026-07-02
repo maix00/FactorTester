@@ -73,6 +73,7 @@ def backtest(
       factortester backtest group --add --factor-family SgCCS --factor add --param N=2m --param '$Rev=1'
       factortester backtest group --add --product-group from-candidates --name 中国期货日盘
       factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
+      factortester backtest clear
 
     字段级帮助:
 
@@ -110,6 +111,23 @@ def local_settings(ctx: click.Context) -> None:
     save_state(state)
     click.echo("已更新 local-settings")
     print_backtest_welcome(state)
+
+
+@backtest.command("clear")
+@click.option("--page-settings", is_flag=True, help="同时清空 single_factor_test 页面级设置。")
+@friendly_errors
+def clear(page_settings: bool) -> None:
+    """清空当前 backtest 配置草稿。"""
+    state = load_state()
+    state.backtest_local_settings.clear()
+    state.backtest_groups.clear()
+    state.backtest_ls_configs.clear()
+    if page_settings:
+        state.page_settings.clear()
+    save_state(state)
+    click.echo("已清空 backtest 配置")
+    if page_settings:
+        click.echo("已同时清空页面级设置")
 
 
 @backtest.command("group", context_settings=SELECTOR_HELP_CONTEXT)
@@ -692,15 +710,18 @@ def _print_group_list(state) -> None:
     for index, group_item in enumerate(state.backtest_groups, start=1):
         name = group_item.get("name") or group_item.get("id") or f"group-{index}"
         parts = [str(name)]
-        if group_item.get("split_count") is not None:
-            parts.append(f"分组数={group_item['split_count']}")
-        if group_item.get("group_index") is not None:
-            parts.append(f"分组序号={group_item['group_index']}")
+        split_count = group_item.get("split_count", group_item.get("splitCount"))
+        group_index = group_item.get("group_index", group_item.get("groupIndex"))
+        factor = group_item.get("factor", group_item.get("factorAlias"))
+        if split_count is not None:
+            parts.append(f"分组数={split_count}")
+        if group_index is not None:
+            parts.append(f"分组序号={group_index}")
         product_path = selection_label(group_item.get("product_path_selection"))
         if product_path:
             parts.append(f"产品路径={product_path}")
-        if group_item.get("factor"):
-            parts.append(f"因子={group_item['factor']}")
+        if factor:
+            parts.append(f"因子={factor}")
         click.echo(f"  {index}. " + " · ".join(parts))
 
 
@@ -712,10 +733,12 @@ def _print_long_short_list(state) -> None:
     for index, config in enumerate(state.backtest_ls_configs, start=1):
         long_group = config.get("long_group") or {}
         short_group = config.get("short_group") or {}
+        long_label = long_group.get("name") or long_group.get("id") or config.get("long_group_id") or config.get("longGroupId")
+        short_label = short_group.get("name") or short_group.get("id") or config.get("short_group_id") or config.get("shortGroupId")
         click.echo(
             f"  {index}. {config.get('name') or f'ls-{index}'} · "
-            f"多头={long_group.get('name') or long_group.get('id')} · "
-            f"空头={short_group.get('name') or short_group.get('id')}"
+            f"多头={long_label} · "
+            f"空头={short_label}"
         )
 
 
@@ -731,12 +754,15 @@ def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
 def _print_group(group: dict[str, Any]) -> None:
     if group.get("name"):
         click.echo(f"名称: {group['name']}")
-    if group.get("split_count") is not None:
-        click.echo(f"分组数: {group['split_count']}")
-    if group.get("group_index") is not None:
-        click.echo(f"分组序号: {group['group_index']}")
+    split_count = group.get("split_count", group.get("splitCount"))
+    group_index = group.get("group_index", group.get("groupIndex"))
+    factor = group.get("factor", group.get("factorAlias"))
+    if split_count is not None:
+        click.echo(f"分组数: {split_count}")
+    if group_index is not None:
+        click.echo(f"分组序号: {group_index}")
     click.echo(f"产品路径: {selection_label(group.get('product_path_selection'))}")
-    click.echo(f"因子: {group.get('factor')}")
+    click.echo(f"因子: {factor}")
 
 
 def _run_backtest(state, *, groups: list[dict[str, Any]]) -> None:
