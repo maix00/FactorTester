@@ -90,6 +90,26 @@ class FactorTesterClient:
             return self._expect_success(self.session.post("/add_factor_by_params", payload))
         raise ValueError(f"CLI 暂不支持新增候选类型: {kind}")
 
+    def create_custom_factor(
+        self,
+        *,
+        source_code: str,
+        chinese_name: str = "",
+        description: str = "",
+        category: str = "自编",
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post(
+                "/custom-factors/api/create",
+                {
+                    "source_code": source_code,
+                    "chinese_name": chinese_name,
+                    "description": description,
+                    "category": category,
+                },
+            )
+        )
+
     def create_product_group(self, *, name: str, paths: list[str]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/product-groups", {"name": name, "paths": paths}))
 

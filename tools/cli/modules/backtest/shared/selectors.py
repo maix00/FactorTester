@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import click
@@ -32,6 +33,7 @@ class ProductGroupSelector:
 class AddGroupSelectors:
     group_name: str = ""
     factor_family: str = ""
+    factor_family_path: str = ""
     split_count: int | None = None
     group_index: int | None = None
     factor: FactorSelector = field(default_factory=FactorSelector)
@@ -157,9 +159,14 @@ def _parse_one_add_group(args: tuple[str, ...]) -> AddGroupSelectors:
             i += 2
             continue
         if token in {"--factor-family", "--factor_family"}:
-            parsed.factor_family = _require_value(args, i, token)
+            nxt = _peek(args, i)
+            if nxt == "--path":
+                parsed.factor_family_path = _require_value(args, i + 1, "--path")
+                i += 3
+            else:
+                parsed.factor_family = _require_value(args, i, token)
+                i += 2
             section = None
-            i += 2
             continue
         if token in {"--split-count", "--split_count"}:
             parsed.split_count = _parse_int(_require_value(args, i, token), token)
@@ -343,6 +350,35 @@ def resolve_factor_selector(
             fields=fields,
         )
     return ""
+
+
+def resolve_factor_family_selector(state: Any, client: Any, selector: AddGroupSelectors) -> str:
+    if selector.factor_family_path:
+        return import_factor_family_from_path(state, client, selector.factor_family_path)
+    return selector.factor_family or str(getattr(state, "factor_family", "") or "")
+
+
+def import_factor_family_from_path(state: Any, client: Any, source_path: str) -> str:
+    path = Path(source_path).expanduser()
+    if not path.is_file():
+        raise click.ClickException(f"本地因子家族源码不存在: {source_path}")
+    source_code = path.read_text(encoding="utf-8")
+    data = client.create_custom_factor(source_code=source_code)
+    factor = data.get("factor") or {}
+    alias = str(factor.get("name") or factor.get("id") or "").strip()
+    if not alias:
+        raise click.ClickException("导入本地因子家族后，服务器没有返回因子名称")
+    if hasattr(state, "page_settings"):
+        candidates = list(state.page_settings.get("factor_candidates") or [])
+        candidates.append({
+            "factor_alias": alias,
+            "factor_family_alias": alias,
+            "source_type": "local_path",
+            "source_path": str(path),
+        })
+        state.page_settings["factor_candidates"] = candidates
+        state.page_settings["factor"] = alias
+    return alias
 
 
 def create_factor_candidate(

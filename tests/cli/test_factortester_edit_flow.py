@@ -500,6 +500,99 @@ def test_backtest_add_group_supports_inline_factor_and_product_paths(tmp_path, m
         assert "因子: SgCCS|N:2m|$Rev:1" in result.output
 
 
+def test_backtest_add_group_can_import_local_factor_family_path(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+    source_path = tmp_path / "LocalAlpha.py"
+    source_path.write_text(
+        "from tools.factors import FactorFamily\n\nclass LocalAlpha(FactorFamily):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.post("/custom-factors/api/create")
+    def create_custom_factor():
+        payload = request.get_json() or {}
+        assert "class LocalAlpha" in payload["source_code"]
+        return jsonify(success=True, factor={"id": "LocalAlpha", "name": "LocalAlpha"})
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "group",
+            "--add",
+            "--factor-family",
+            "--path",
+            str(source_path),
+            "--group-name",
+            "LocalA1",
+            "--split-count",
+            "5",
+            "--group-index",
+            "1",
+            "--product-group",
+            "from-candidates",
+            "--name",
+            "中国期货日盘",
+        ])
+
+        assert result.exit_code != 0
+        assert "新增分组缺少 factor" in result.output
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "group",
+            "--add",
+            "--factor-family",
+            "--path",
+            str(source_path),
+            "--factor",
+            "--alias",
+            "LocalAlpha|N:2m",
+            "--group-name",
+            "LocalA1",
+            "--split-count",
+            "5",
+            "--group-index",
+            "1",
+            "--product-group",
+            "from-candidates",
+            "--name",
+            "中国期货日盘",
+        ])
+
+        assert result.exit_code == 0
+        assert "名称: LocalA1" in result.output
+        assert "因子: LocalAlpha|N:2m" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "list"])
+        assert result.exit_code == 0
+        assert "因子=LocalAlpha|N:2m" in result.output
+
+
 def test_backtest_add_group_uses_backend_registered_candidate_field_commands(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)

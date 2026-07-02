@@ -24,6 +24,7 @@ from tools.cli.modules.backtest.shared.selectors import (
     parse_add_group_selectors,
     parse_add_group_selector_groups,
     parse_long_short_selector,
+    resolve_factor_family_selector,
     resolve_factor_selector,
     resolve_product_group_selector,
     selection_label,
@@ -597,7 +598,7 @@ def _append_group(
     if product_selection:
         backtest_store.set(fields.product_path_selection, product_selection)
     product_group_label = selection_label(backtest_store.effective(fields.product_path_selection))
-    factor_family = selectors.factor_family or state.factor_family
+    factor_family = resolve_factor_family_selector(state, client, selectors)
     factor = resolve_factor_selector(
         state,
         client,
@@ -608,7 +609,7 @@ def _append_group(
     )
     if factor:
         backtest_store.set(fields.factor, factor)
-    elif not backtest_store.effective(fields.factor):
+    elif not selectors.factor_family_path and not backtest_store.effective(fields.factor):
         _load_default_factor_for_product_group(state, client, page_store, factor_family=factor_family, product_group_label=product_group_label)
     resolved_product_path = backtest_store.effective(fields.product_path_selection)
     resolved_factor = backtest_store.effective(fields.factor)
@@ -655,18 +656,19 @@ def _edit_group(
     product_selection = resolve_product_group_selector(state, selectors.product_group, fields=fields)
     if product_selection:
         group["product_path_selection"] = product_selection
+    factor_family = resolve_factor_family_selector(state, client, selectors)
     factor = resolve_factor_selector(
         state,
         client,
         selectors.factor,
-        factor_family=selectors.factor_family or str(group.get("factor_family_alias") or state.factor_family or ""),
+        factor_family=factor_family or str(group.get("factor_family_alias") or state.factor_family or ""),
         product_group_label=selection_label(group.get("product_path_selection")),
         fields=fields,
     )
     if factor:
         group["factor"] = factor
-    if selectors.factor_family:
-        group["factor_family_alias"] = selectors.factor_family
+    if factor_family:
+        group["factor_family_alias"] = factor_family
     if extra_values:
         group.update(extra_values)
     state.page_settings = page_store.to_payload()
