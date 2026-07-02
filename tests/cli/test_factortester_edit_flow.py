@@ -1930,6 +1930,13 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
                 "tab_key": "product",
                 "serialization": {"shared_page_field": "product_path_candidates"},
             },
+            "product_path_selection": {
+                "value": None,
+                "label": "产品路径",
+                "control_template": "custom",
+                "tab_key": "product",
+                "serialization": {"shared_page_field": "product_path_selection"},
+            },
             "factor_candidates": {
                 "value": [],
                 "label": "因子候选",
@@ -2003,6 +2010,7 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
         assert "点数" in result.output
         assert "AP.CZC" in result.output
         assert "苹果" in result.output
+        assert "因子序列图" in result.output
         assert received["factor_evaluation"]["page_uuid"] == "page-analysis-1"
         assert received["factor_evaluation"]["paths"] == ["Product/Futures/CNFutures/日盘/_products/AP.CZC"]
 

@@ -7,6 +7,7 @@ import click
 from tools.cli.core.context import ensure_child_available
 from tools.cli.core.errors import friendly_errors
 from tools.cli.core.context import client_from_config
+from tools.cli.modules.backtest.run_output import _multi_series_chart
 from tools.cli.modules.single_factor_analysis_shared import (
     apply_local_settings,
     base_payload,
@@ -105,3 +106,36 @@ def _print_result(result: dict) -> None:
         rows.append((product or "", desc or "", len(values)))
     for line in render_table(("产品", "描述", "点数"), rows, indent="  ", aligns=("left", "left", "right"), max_widths=(18, 32, 10)):
         click.echo(line)
+    series_rows = _result_series(result.get("series") or [])
+    if series_rows:
+        click.echo("因子序列图:")
+        for line in _multi_series_chart(series_rows, width=72, height=14, title="因子序列", ylabel="因子"):
+            click.echo("  " + line)
+
+
+def _result_series(items) -> list[tuple[str, list[float], bool]]:
+    out: list[tuple[str, list[float], bool]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        values = _numeric_values(item.get("values"))
+        if not values:
+            continue
+        product = str(item.get("product") or item.get("name") or "因子")
+        desc = str(item.get("desc") or "").strip()
+        label = f"{product}({desc})" if desc else product
+        out.append((label, values, False))
+    return out
+
+
+def _numeric_values(value) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    out: list[float] = []
+    for item in value:
+        try:
+            if item is not None:
+                out.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return out

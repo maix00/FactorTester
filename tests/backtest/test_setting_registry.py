@@ -326,6 +326,26 @@ def test_factor_type_analysis_reuses_product_path_selection_setting() -> None:
     ]
 
 
+def test_factor_evaluation_reuses_product_path_selection_setting() -> None:
+    application = backtest_setting_registry.get("factor_evaluation")
+
+    index = application.manifest()
+    product_tab = application.tab_manifest("product_path_selection")
+
+    assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
+        "product_path_selection", "time", "data_source", "frequency", "price_type", "factor",
+    ]
+    assert [setting["key"] for setting in product_tab["settings"]] == [
+        "product_path_candidates", "product_path_selection",
+    ]
+    assert index["defaults"]["product_path_selection"]["serialization"]["kind"] == "product_path_selection"
+    assert list(index["defaults"]["product_path_selection"]["serialization"]["manual_fields"]) == [
+        "product_path_selection_id",
+        "paths",
+    ]
+    assert "product" not in index["defaults"]
+
+
 def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules() -> None:
     application = backtest_setting_registry.get("single_factor_page")
     index = application.manifest()
