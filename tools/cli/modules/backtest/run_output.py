@@ -36,6 +36,7 @@ class BacktestRunRenderer:
         self._done = False
         self._last_event_activity_log_at: float | None = None
         self._event_activity_log_interval = 2.0
+        self._activity_typewriter_delay = 0.006
 
     def handle(self, event_name: str, data: Any) -> None:
         if self._done and event_name not in {"complete", "done"}:
@@ -253,6 +254,25 @@ class BacktestRunRenderer:
         if not _is_tty():
             self._echo(line)
             return
+        previous = self._activity_line
+        if previous and line.startswith(previous):
+            self._type_activity_line(line, start=len(previous))
+            return
+        if len(line) <= 24:
+            self._activity_line = line
+            self._render_status_region()
+            return
+        self._activity_line = ""
+        for index in range(1, len(line) + 1):
+            self._activity_line = line[:index]
+            self._render_status_region()
+            time.sleep(self._activity_typewriter_delay)
+
+    def _type_activity_line(self, line: str, *, start: int) -> None:
+        for index in range(start + 1, len(line) + 1):
+            self._activity_line = line[:index]
+            self._render_status_region()
+            time.sleep(self._activity_typewriter_delay)
         self._activity_line = line
         self._render_status_region()
 
