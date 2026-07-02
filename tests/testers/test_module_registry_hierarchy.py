@@ -1,7 +1,8 @@
 """Locks in the config-driven Module/ModuleRegistry hierarchy:
 
 HomeModuleRegistry -> single_factor_family_test (page Module)
-  -> sub_registry: SingleFactorFamilyTestModuleRegistry
+                   -> backtest (generic Backtest Module)
+  single_factor_family_test -> sub_registry: SingleFactorFamilyTestModuleRegistry
        -> 5 leaf Modules (single_factor_page, factor_evaluation,
           factor_type_analysis, ic_test, group_test)
        -> group_test.sub_registry: BacktestModuleRegistry
@@ -18,7 +19,7 @@ def test_home_registers_single_factor_family_test_page():
     from tools.testers.home import HomeModuleRegistry
 
     home = HomeModuleRegistry()
-    assert home.module_keys == ("single_factor_family_test",)
+    assert home.module_keys == ("single_factor_family_test", "backtest")
 
     page = home.get("single_factor_family_test")
     assert page.label == "单因子家族测试"
@@ -26,6 +27,9 @@ def test_home_registers_single_factor_family_test_page():
     # build_app override resolves to single_factor_page_settings, not a
     # (nonexistent) single_factor_family_test_settings.
     assert type(page.app).__name__ == "ApplicationSettings"
+    backtest = home.get("backtest")
+    assert backtest.label == "回测"
+    assert backtest.app.application == "group_test"
 
 
 def test_single_factor_family_test_registers_five_modules_in_order():
@@ -78,6 +82,7 @@ def test_find_recurses_into_sub_registries():
     home = HomeModuleRegistry()
     # top-level
     assert home.find("single_factor_family_test") is home.get("single_factor_family_test")
+    assert home.find("backtest") is home.get("backtest")
     # one level down, inside single_factor_family_test's sub_registry
     ic_module = home.find("ic_test")
     assert ic_module is not None

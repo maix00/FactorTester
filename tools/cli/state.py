@@ -16,6 +16,8 @@ class CliState:
     current_parent: str | None = None
     stack: list[str | None] = field(default_factory=list)
     factor_family: str = ""
+    backtest_local_settings: dict[str, Any] = field(default_factory=dict)
+    backtest_groups: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def location_label(self) -> str:
@@ -53,6 +55,8 @@ def load_state(path: Path | None = None) -> CliState:
         current_parent=raw.get("current_parent"),
         stack=list(raw.get("stack") or []),
         factor_family=str(raw.get("factor_family") or ""),
+        backtest_local_settings=dict(raw.get("backtest_local_settings") or {}),
+        backtest_groups=list(raw.get("backtest_groups") or []),
     )
 
 

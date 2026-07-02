@@ -47,6 +47,7 @@ def _serialize_module(module: Module) -> dict[str, Any]:
         "order": module.order,
         "layout": module.layout,
         "kind": "module",
+        "application": _module_application(module),
         "has_children": has_children,
     }
 
@@ -97,6 +98,7 @@ def _navigation_children(home: HomeModuleRegistry, parent: str) -> list[dict[str
 
 def _tab_nodes(module: Module) -> list[dict[str, Any]]:
     app = module.app
+    application = _module_application(module)
     tabs = sorted(app.tabs.values(), key=lambda tab: tab.order)
     return [
         {
@@ -104,7 +106,7 @@ def _tab_nodes(module: Module) -> list[dict[str, Any]]:
             "label": tab.label,
             "order": tab.order,
             "kind": "tab",
-            "application": module.key,
+            "application": application,
             "tab_key": tab.key,
             "layout": tab.layout_template,
             "has_children": any(setting.tab == tab.key for setting in app.settings.values()),
@@ -115,6 +117,7 @@ def _tab_nodes(module: Module) -> list[dict[str, Any]]:
 
 def _field_nodes(module: Module, tab_key: str) -> list[dict[str, Any]]:
     app = module.app
+    application = _module_application(module)
     if tab_key not in app.tabs:
         raise KeyError(f"unknown tab: {module.key}/{tab_key}")
     fields = [
@@ -136,7 +139,7 @@ def _field_nodes(module: Module, tab_key: str) -> list[dict[str, Any]]:
             "label": setting.label,
             "order": setting.serialization.get("display_order", index),
             "kind": "field",
-            "application": module.key,
+            "application": application,
             "tab_key": tab_key,
             "field_key": setting.key,
             "control_template": setting.control_template,
@@ -144,6 +147,14 @@ def _field_nodes(module: Module, tab_key: str) -> list[dict[str, Any]]:
         }
         for index, setting in enumerate(fields, start=1)
     ]
+
+
+def _module_application(module: Module) -> str:
+    try:
+        application = str(module.app.application)
+    except Exception:
+        application = ""
+    return application or module.key
 
 
 @sft_bp.get("/api/backtest/settings/<application>")

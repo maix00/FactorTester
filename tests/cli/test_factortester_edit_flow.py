@@ -79,7 +79,12 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
         if parent == "group_test":
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test/risk", "label": "风险", "kind": "tab", "has_children": True}])
-        return jsonify(success=True, modules=[{"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True}])
+        if parent == "backtest":
+            return jsonify(success=True, parent=parent, modules=[{"key": "backtest/risk", "label": "风险", "kind": "tab", "application": "group_test", "has_children": True}])
+        return jsonify(success=True, modules=[
+            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -181,7 +186,12 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
         if parent == "group_test":
             return jsonify(success=True, parent=parent, modules=[{"key": "group_test/time", "label": "时间范围", "kind": "tab", "has_children": True}])
-        return jsonify(success=True, modules=[{"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True}])
+        if parent == "backtest":
+            return jsonify(success=True, parent=parent, modules=[{"key": "backtest/time", "label": "时间范围", "kind": "tab", "application": "group_test", "has_children": True}])
+        return jsonify(success=True, modules=[
+            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
 
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
@@ -193,6 +203,48 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
         assert result.exit_code == 0
         assert "回测" in result.output
         assert "因子家族: SgCCS" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: backtest" in result.output
+        assert "[tab] backtest/time" in result.output
+
+
+def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "backtest":
+            return jsonify(success=True, parent=parent, modules=[{"key": "backtest/time", "label": "时间范围", "kind": "tab", "application": "group_test", "has_children": True}])
+        return jsonify(success=True, modules=[
+            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        result = runner.invoke(cli, ["configure", "--base-url", url])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "--factor-family", "SgCCS",
+            "--config-local-settings", "allocation_mode=equal_notional",
+            "--time-range", "2026-01-01", "2026-01-31",
+            "--add-group",
+            "--name", "A1",
+            "--split-count", "5",
+            "--group-index", "1",
+        ])
+        assert result.exit_code == 0
+        assert "因子家族: SgCCS" in result.output
+        assert "allocation_mode: equal_notional" in result.output
+        assert "start_date: 2026-01-01" in result.output
+        assert "end_date: 2026-01-31" in result.output
+        assert "A1 · 分组数=5 · 分组序号=1" in result.output
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0

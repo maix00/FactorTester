@@ -39,8 +39,30 @@ def print_backtest_welcome(state: CliState) -> None:
     click.echo("回测")
     if state.factor_family:
         click.echo(f"因子家族: {state.factor_family}")
-    click.echo("当前接口: group_test")
-    click.echo("可用动作: factortester backtest add-group")
+    click.echo("设置草稿:")
+    if state.backtest_local_settings:
+        click.echo("  local-settings:")
+        for key, value in state.backtest_local_settings.items():
+            click.echo(f"    {key}: {value}")
+    else:
+        click.echo("  local-settings: （空）")
+    if state.backtest_groups:
+        click.echo("  groups:")
+        for index, group in enumerate(state.backtest_groups, start=1):
+            label = group.get("name") or f"group-{index}"
+            parts = [str(label)]
+            if group.get("split_count") is not None:
+                parts.append(f"分组数={group['split_count']}")
+            if group.get("group_index") is not None:
+                parts.append(f"分组序号={group['group_index']}")
+            click.echo(f"    {index}. " + " · ".join(parts))
+    else:
+        click.echo("  groups: （空）")
+    click.echo("参数示例:")
+    click.echo("  factortester backtest --factor-family SgCCS")
+    click.echo("  factortester backtest --config-local-settings allocation_mode=equal_notional")
+    click.echo("  factortester backtest --time-range 2026-01-01 2026-01-31")
+    click.echo("  factortester backtest --add-group --name A1 --split-count 5 --group-index 1")
     click.echo("下一步: factortester list 查看回测设置 tabs；factortester back 返回。")
 
 

@@ -9,6 +9,7 @@ import click
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
 from tools.cli.field_store import FieldStore, visible_fields
+from tools.cli.modules.keys import backend_module_key
 
 
 @click.command()
@@ -17,7 +18,7 @@ from tools.cli.field_store import FieldStore, visible_fields
 def describe(key: str) -> None:
     """Describe a tester/backtest setting application."""
     client = client_from_config()
-    manifest = client.manifest(key)
+    manifest = client.manifest(backend_module_key(key))
     print_manifest(manifest)
 
 
@@ -27,7 +28,8 @@ def describe(key: str) -> None:
 def edit(key: str) -> None:
     """Interactively edit server-registered setting fields."""
     client = client_from_config()
-    manifest = client.manifest(key)
+    application = backend_module_key(key)
+    manifest = client.manifest(application)
     store = FieldStore.from_manifest(manifest)
     tab_lists = manifest.get("tab_lists") or {}
     tabs = list(tab_lists.get("local-settings") or [])
@@ -48,7 +50,7 @@ def edit(key: str) -> None:
             click.echo("无效 tab")
             continue
         tab_key = str(tab.get("key") or "")
-        tab_manifest = client.tab_manifest(key, tab_key)
+        tab_manifest = client.tab_manifest(application, tab_key)
         tab_store = FieldStore.from_manifest(tab_manifest, values=store.explicit_values, parent=store.parent)
         fields = visible_fields(tab_store)
         if not fields:
@@ -131,4 +133,3 @@ def _prompt_value(meta: dict[str, Any], current: Any) -> Any:
     if control == "boolean":
         return click.confirm("是否启用", default=bool(current))
     return click.prompt("输入值", default=str(current if current is not None else ""), show_default=False)
-
