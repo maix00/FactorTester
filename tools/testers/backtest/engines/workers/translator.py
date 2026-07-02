@@ -19,6 +19,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.adapters.frameworks import UnsupportedFrameworkPlan
 from tools.testers.backtest.engines.workers.runners.common import BROKER_POLICY_DEFAULTS
+from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -28,6 +29,12 @@ from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.position_sizing import PositionSizingModule
 from tools.testers.backtest.modules.slippage import SlippageModule
+from tools.testers.backtest.modules.term_structure import (
+    DeliveryForceCloseModule,
+    RolloverModule,
+    _parse_time_offset,
+    _tradable_contract_row,
+)
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
@@ -289,16 +296,27 @@ def build_membership_payload(
     ascending, ``bucket_size = n/n_groups``, ``round`` boundaries) so the
     membership a framework consumes is generated from the same FactorExpr
     result as native — ADR-024's equivalence requirement.
+
+    Bucketing happens on the abstract product (signals are computed on the
+    continuous series), but the instrument actually written into ``membership``
+    is whatever ``TermStructureExpandModule._tradable_contract_row`` — the
+    same function native's ``resolve_tradable_target_weights`` calls per
+    SIGNAL event — resolves for that (strategy, timestamp): the concrete
+    rolled-to/force-closed contract, or the abstract product itself outside
+    a term structure. Without this remap, bridged frameworks would trade the
+    abstract continuous product forever and never roll, diverging from native.
     """
     from tools.testers.backtest.modules.market_data import current_prices_table_for
 
     prices_table = current_prices_table_for(run_state)
     instruments = [_instrument_name(col) for col in prices_table.columns]
+    instrument_index = {name: idx for idx, name in enumerate(instruments)}
     n_rows = len(event_timestamps)
     n_groups_axis = len(strategy_dialects)
     membership = np.zeros((n_rows, n_groups_axis, len(instruments)), dtype=bool)
     signal_updates = np.zeros((n_rows, n_groups_axis), dtype=bool)
 
+    strategies_by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     signal_tables = _signal_tables_by_strategy(run_state)
     for g_index, dialect in enumerate(strategy_dialects):
         if str(dialect.get("strategy_kind") or "group") == "long_short":
@@ -307,6 +325,8 @@ def build_membership_payload(
         table = signal_tables.get(alias)
         if table is None or table.empty:
             raise ValueError(f"strategy {alias!r} has no precomputed factor signal table")
+        strategy = strategies_by_alias.get(alias)
+        resolver = _term_structure_resolver_for(run_state, strategy) if strategy is not None else None
         split_count = int(dialect.get("split_count") or 1)
         group_index = int(dialect.get("group_index") or 0)
         signal_rows = table.reindex(index=event_timestamps).to_numpy(dtype=float)
@@ -328,20 +348,74 @@ def build_membership_payload(
             bucket_size = len(ranked) / split_count
             start = round(group_index * bucket_size)
             end = round((group_index + 1) * bucket_size)
-            members = frozenset(idx for idx, _ in ranked[start:end])
-            for idx in members:
+            selected = ranked[start:end]
+            members: set[int] = set()
+            for n_index, _value in selected:
+                target_idx = n_index
+                if resolver is not None:
+                    product = table.columns[col_positions[n_index]]
+                    target_idx = resolver(product, event_timestamps[row], instrument_index)
+                members.add(target_idx)
+            frozen_members = frozenset(members)
+            for idx in frozen_members:
                 membership[row, g_index, idx] = True
-            if members != last_members or last_members is None:
+            if frozen_members != last_members or last_members is None:
                 signal_updates[row, g_index] = True
             else:
                 trigger = str(dialect.get("rebalance_trigger") or "on_factor_signal")
                 signal_updates[row, g_index] = trigger == "on_factor_signal"
-            last_members = members
+            last_members = frozen_members
 
     return {
         "membership": membership.tolist(),
         "signal_updates": signal_updates.tolist(),
     }
+
+
+def _term_structure_resolver_for(run_state: "BacktestRunState", strategy: Any):
+    """Build a (product, timestamp, instrument_index) -> instrument-index
+    resolver reusing native's own ``_tradable_contract_row``, or ``None`` if
+    the strategy has no term-structure metadata to resolve against."""
+    metadata = list(run_state.term_structure_store.contract_metadata.get(strategy, ()))
+    if not metadata:
+        return None
+    config = run_state.config_for(strategy)
+    rollover_policy = str(config.get(RolloverModule.rollover_policy, "none") or "none")
+    rollover_offset = (
+        _parse_time_offset(
+            config.get(RolloverModule.rollover_before_expiry, "5d"),
+            field_name="rollover_before_expiry",
+        )
+        if rollover_policy == "date_before_expiry"
+        else None
+    )
+    force_close_offset = _parse_time_offset(
+        config.get(DeliveryForceCloseModule.force_close_before_expiry, "2d"),
+        field_name="force_close_before_expiry",
+    )
+    engine_mode = engine_mode_for(config)
+
+    def resolve(product: Any, timestamp: pd.Timestamp, instrument_index: dict[str, int]) -> int:
+        row = _tradable_contract_row(
+            product,
+            metadata,
+            timestamp=timestamp,
+            rollover_offset=rollover_offset,
+            force_close_offset=force_close_offset,
+            state=run_state,
+            engine_mode=engine_mode,
+        )
+        target = row.get("contract_object", product) if row is not None else product
+        name = _instrument_name(target)
+        idx = instrument_index.get(name)
+        if idx is None:
+            raise ValueError(
+                f"term structure resolved {product!r} to instrument {name!r} at {timestamp}, "
+                "but no price series was loaded for it"
+            )
+        return idx
+
+    return resolve
 
 
 def _signal_tables_by_strategy(run_state: "BacktestRunState") -> dict[str, pd.DataFrame]:

@@ -229,6 +229,47 @@ fallback 走同一套记录方式），不是静默忽略，也不是当成"框�
 东西）。`epsilon` 保护本身仍然保留，作为 lot 计算这一步单独的浮点边界防御，
 不因为账本本身更精确了就失去意义。
 
+### 修复：桥接框架从不换月，永远交易抽象连续合约
+
+native 侧修好 `expand_term_structure` 的排序 bug 后（见上面本 ADR 的
+`market_data.py`/`term_structure.py` 提交），追问桥接是否也有同样的问题——
+答案是有，而且更根本：`build_membership_payload` 里 membership 张量的列
+直接取自 `current_prices_table.columns`，signal 又是在抽象连续产品上算的，
+所以 `resolve_tradable_target_weights`（native 在 PER_EVENT/SIGNAL 阶段调用
+的换月/强平合约切换函数）在桥接路径上根本没被调用过——`_run_pre_replay_flows`
+只跑 PRE_REPLAY 阶段，`register_rollover_notices`/`register_force_close_notices`
+产生的 `ORDER_NOTICE` 事件从未被消费（bridge.py 的注释原本就写了"never
+drained"，但没意识到这连带丢了目标合约的切换逻辑）。结果是桥接框架永远在
+交易抽象连续产品本身，never rolls，跟 native 的"到期前换到下一张具体合约"
+行为在有期限结构的产品上完全不一致。
+
+修法是直接复用 `TermStructureExpandModule._tradable_contract_row`——不是
+重新实现一遍换月/强平判断逻辑，而是 import 那个函数本身，保证桥接和 native
+用的是同一段判断代码（ADR-024 的等价性要求）。`build_membership_payload`
+新增 `_term_structure_resolver_for(run_state, strategy)`：如果这个策略在
+`run_state.term_structure_store.contract_metadata` 里有内容（`_run_pre_replay_flows`
+执行 `expand_term_structure` 时已经填好了），就用该策略自己的
+`rollover_policy`/`rollover_before_expiry`/`force_close_before_expiry` 构造
+一个按 `(product, timestamp)` 解析出目标合约的 resolver；没有期限结构
+元数据的策略（绝大多数产品，没有 rollover）resolver 返回 `None`，membership
+写入位置和改动前完全一样，不影响现有行为。有 resolver 时，每一行/每一个
+被选中的抽象产品都先过一遍 `_tradable_contract_row`，再把 membership 写到
+它解析出的具体合约（或者仍然是抽象产品本身，取决于 native 会怎么解析）
+对应的列上——而不是抽象产品自己的列。
+
+`signal_updates`（触发 worker 侧下单的信号）现在基于"解析后的具体合约集合"
+是否变化来判断，不是抽象产品集合是否变化——这样换月导致的目标合约切换本身
+就会被记成一次信号更新，驱动 worker 平掉旧合约、开出新合约，跟 native
+`_handle_rollover_notice` 里手工构造的 close_order + open_order 是等价的
+经济结果（虽然桥接这边是通过"目标权重从旧合约的非零变成零、从新合约的零
+变成非零"这套已有的 target-weight executable-deltas 机制自然产生的，不是
+显式生成一对订单）。
+
+新增测试 `test_membership_resolves_rolled_to_contract_for_term_structure_products`
+（`tests/backtest/test_framework_bridge.py`）：一个抽象产品 + 两张具体合约，
+换月提前量设为 `0d`，断言不同 bar 上 membership 落在不同的具体合约列上，
+从不落在抽象产品自己的列上。
+
 ## 参考
 
 - ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与

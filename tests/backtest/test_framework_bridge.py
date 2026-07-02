@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -26,6 +27,7 @@ from tools.testers.backtest.modules.liquidity import LiquidityModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.slippage import SlippageModule
+from tools.testers.backtest.modules.term_structure import DeliveryForceCloseModule, RolloverModule
 
 
 def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
@@ -48,6 +50,9 @@ def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
         "slippage_bps": SlippageModule.slippage_bps,
         "initial_capital_major": LedgerModule.initial_capital_major,
         "use_minor_units": MinorUnitModule.use_minor_units,
+        "rollover_policy": RolloverModule.rollover_policy,
+        "rollover_before_expiry": RolloverModule.rollover_before_expiry,
+        "force_close_before_expiry": DeliveryForceCloseModule.force_close_before_expiry,
     }
     values = {refs[name]: value for name, value in field_values.items()}
     return strategy, StrategyConfig(strategy=strategy, field_values=values)
@@ -201,6 +206,79 @@ def test_membership_change_trigger_only_updates_when_members_change():
     out = build_membership_payload(run_state, dialects, idx)
     updates = np.asarray(out["signal_updates"], dtype=bool)
     assert updates[:, 0].tolist() == [True, False, True]
+
+
+@dataclass(frozen=True)
+class _Product:
+    name: str
+
+
+@dataclass(frozen=True)
+class _Contract:
+    name: str
+
+
+def test_membership_resolves_rolled_to_contract_for_term_structure_products():
+    """Signals are computed on the abstract continuous product, but the
+    instrument written into membership must be whatever
+    TermStructureExpandModule._tradable_contract_row (the same function
+    native's resolve_tradable_target_weights calls) resolves for that bar --
+    otherwise a bridged framework would trade the abstract product forever
+    and never roll, diverging from native's concrete-contract execution."""
+    run_state = BacktestRunState()
+    strategy, config = _config(
+        "g1", split_count=1, group_index=0,
+        position_policy="rebalance_to_target", rebalance_trigger="on_factor_signal",
+        allocation_policy="equal_notional",
+        fee_mode="zero", margin_mode="none",
+        initial_capital_major=100_000.0,
+        rollover_policy="date_before_expiry",
+        rollover_before_expiry="0d",
+    )
+    run_state.strategy_configs = {strategy: config}
+    product = _Product("P.DCE")
+    contract_1601 = _Contract("P2601.DCE")
+    contract_1602 = _Contract("P2602.DCE")
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-05 15:00"),
+        pd.Timestamp("2026-01-10 15:00"),
+    ])
+    run_state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [10.0, 10.5], contract_1601: [10.0, 10.2], contract_1602: [11.0, 11.3]},
+        index=idx,
+    )
+    signals = pd.DataFrame({product: [1.0, 1.0]}, index=idx)
+    run_state.factor_signal_store.put_precomputed_table("k", signals)
+    run_state.factor_signal_store.bind_precomputed_table(strategy, "k")
+    run_state.term_structure_store.contract_metadata[strategy] = (
+        {
+            "product": "P.DCE", "contract": "P2601", "uid": "P2601.DCE",
+            "contract_object": contract_1601, "is_identity": False,
+            "start": "2026-01-01", "auto_close_date": "2026-01-08",
+        },
+        {
+            "product": "P.DCE", "contract": "P2602", "uid": "P2602.DCE",
+            "contract_object": contract_1602, "is_identity": False,
+            "start": "2026-01-08", "auto_close_date": "2026-01-20",
+        },
+    )
+    dialects = [{
+        "strategy_id": "g1", "membership_index": 0,
+        "split_count": 1, "group_index": 0,
+        "rebalance_trigger": "on_factor_signal",
+    }]
+    out = build_membership_payload(run_state, dialects, idx)
+    membership = np.asarray(out["membership"], dtype=bool)
+    instruments = [inst for inst in ("P.DCE", "P2601.DCE", "P2602.DCE")]
+    assert membership.shape == (2, 1, 3)
+    # never trade the abstract product's own column once term structure metadata exists
+    assert membership[:, 0, instruments.index("P.DCE")].tolist() == [False, False]
+    # row 0 (still inside the P2601 window) resolves to the concrete P2601 contract
+    assert membership[0, 0, instruments.index("P2601.DCE")]
+    assert not membership[0, 0, instruments.index("P2602.DCE")]
+    # row 1 (past P2601's auto_close_date) resolves/rolls to the concrete P2602 contract
+    assert membership[1, 0, instruments.index("P2602.DCE")]
+    assert not membership[1, 0, instruments.index("P2601.DCE")]
 
 
 # ── bridge end-to-end with a fake dispatcher ───────────────────────
