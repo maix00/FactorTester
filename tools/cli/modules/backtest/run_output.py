@@ -20,12 +20,14 @@ class BacktestRunRenderer:
         self._manifest_printed = False
         self._current_phase = ""
         self._last_percent: float | None = None
+        self._overall_progress = 0.0
         self._phase_order: list[str] = []
         self._phase_labels: dict[str, str] = {}
         self._phase_flows: dict[str, list[dict[str, Any]]] = {}
         self._phase_progress: dict[str, float] = {}
         self._last_phase_percent: dict[str, float] = {}
         self._progress_lines: dict[str, str] = {}
+        self._last_log_progress_bucket: dict[str, int] = {}
         self._latest_chart_lines: list[str] = []
         self._status_height = 0
         self._done = False
@@ -49,6 +51,8 @@ class BacktestRunRenderer:
             self._print_progress(data)
             return
         if event_name in {"complete", "done"}:
+            if self._done:
+                return
             self._done = True
             self._echo("回测完成")
             return
@@ -120,6 +124,8 @@ class BacktestRunRenderer:
                 self._echo(f"[activity] {data}")
             return
         phase = str(data.get("phase") or "")
+        if phase == EVENT_PHASE and not self.verbose and not _is_tty():
+            return
         if phase and phase != self._current_phase:
             self._current_phase = phase
             phase_label = data.get("phase_label") or phase
@@ -151,8 +157,24 @@ class BacktestRunRenderer:
             return
         self._last_percent = percent
         phase = str(data.get("phase") or self._current_phase or EVENT_PHASE)
-        if phase:
+        if phase == "done" and percent >= 100:
+            self._overall_progress = 100.0
+            for key in self._phase_order:
+                self._phase_progress[key] = 100.0
+            self._print_total_progress()
+            self._print_phase_bars()
+            if self.verbose:
+                self._echo(f"[progress] phase={phase} percent={percent:.2f}")
+            return
+        has_completed_total = "completed" in data and "total" in data
+        if has_completed_total and phase == EVENT_PHASE:
             self._phase_progress[phase] = percent
+            self._overall_progress = max(self._overall_progress, min(90.0, 10.0 + percent * 0.8))
+        else:
+            self._overall_progress = max(self._overall_progress, percent)
+            if phase == EVENT_PHASE:
+                event_percent = (percent - 10.0) / 80.0 * 100.0
+                self._phase_progress[phase] = max(self._phase_progress.get(phase, 0.0), max(0.0, min(100.0, event_percent)))
         self._print_total_progress()
         self._print_phase_bars()
         if self.verbose:
@@ -190,10 +212,7 @@ class BacktestRunRenderer:
             self._update_progress_line(key, f"  {label}: {_bar(percent, width=16)} {percent:5.1f}%")
 
     def _overall_percent(self) -> float:
-        if not self._phase_order:
-            return self._last_percent or 0.0
-        total = sum(self._phase_progress.get(key, 0.0) for key in self._phase_order)
-        return max(0.0, min(100.0, total / len(self._phase_order)))
+        return max(0.0, min(100.0, self._overall_progress))
 
     def _print_live_chart(self, lines: list[str]) -> None:
         if _is_tty():
@@ -207,10 +226,23 @@ class BacktestRunRenderer:
 
     def _update_progress_line(self, key: str, line: str) -> None:
         if not _is_tty():
+            if not self.verbose and not self._should_log_progress(key):
+                return
             click.echo(line)
             return
         self._progress_lines[key] = line
         self._render_status_region()
+
+    def _should_log_progress(self, key: str) -> bool:
+        percent = self._phase_progress.get(key, self._overall_percent() if key == "total" else 0.0)
+        if key != "total" and key != EVENT_PHASE:
+            return True
+        bucket = int(percent // 5)
+        previous = self._last_log_progress_bucket.get(key)
+        if previous == bucket:
+            return False
+        self._last_log_progress_bucket[key] = bucket
+        return True
 
     def _echo(self, message: str) -> None:
         if _is_tty() and self._status_height:

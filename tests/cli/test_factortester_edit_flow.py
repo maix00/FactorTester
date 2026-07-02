@@ -1401,10 +1401,28 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert template_id == "tpl-20260602"
         return jsonify(success=True, template={"id": template_id, "name": "2026-06-02 07:20:47", "snapshot": snapshot})
 
+    registered_factors: list[dict[str, object]] = []
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-template-1")
+
+    @app.post("/add_factor_by_params")
+    def add_factor_by_params():
+        payload = request.get_json() or {}
+        registered_factors.append(payload)
+        params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+        return jsonify(success=True, factor_alias=f"SgCCS|N:{params.get('N')}")
+
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     with running_server(app) as url:
         assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"]).exit_code == 0
 
         result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "template", "list"])
         assert result.exit_code == 0
@@ -1414,6 +1432,12 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert result.exit_code == 0
         assert "已加载模板: 2026-06-02 07:20:47" in result.output
         assert "groups: 1" in result.output
+        assert "已注册因子: 1" in result.output
+        assert registered_factors == [{
+            "factor_family_alias": "SgCCS",
+            "params": {"N": "2m"},
+            "page_uuid": "page-template-1",
+        }]
 
         result = runner.invoke(cli, ["backtest", "group", "list"])
         assert result.exit_code == 0

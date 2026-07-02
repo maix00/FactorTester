@@ -147,8 +147,13 @@ def _load_template_into_state(state, selector: str) -> None:
     if not isinstance(snapshot, dict):
         raise click.ClickException("模板缺少 snapshot")
     applied = _apply_snapshot_to_state(state, snapshot, template_name=str(template.get("name") or selector))
+    registered = _register_template_factors(state, client)
     click.echo(f"已加载模板: {template.get('name') or selector}")
-    click.echo(f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} · groups: {applied['groups']} · long-short: {applied['ls_configs']}")
+    factor_text = f" · 已注册因子: {registered}" if registered else ""
+    click.echo(
+        f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
+        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}{factor_text}"
+    )
 
 
 def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:
@@ -202,3 +207,67 @@ def _normalize_ls_snapshot(config: dict[str, Any]) -> dict[str, Any]:
 def _rename_if_present(target: dict[str, Any], old: str, new: str) -> None:
     if old in target and new not in target:
         target[new] = target[old]
+
+
+def _register_template_factors(state, client) -> int:
+    aliases = _template_factor_aliases(state)
+    if not aliases or not state.page_uuid:
+        return 0
+    candidates = list(state.page_settings.get("factor_candidates") or [])
+    known = {
+        str(item.get("factor_alias") or item.get("alias") or "")
+        for item in candidates
+        if isinstance(item, dict)
+    }
+    registered = 0
+    for alias in aliases:
+        params = _params_from_factor_alias(alias, state.factor_family)
+        data = client.add_candidate("factor", {
+            "factor_family_alias": state.factor_family,
+            "params": params,
+            "page_uuid": state.page_uuid,
+        })
+        factor_alias = str(data.get("factor_alias") or alias)
+        if factor_alias not in known:
+            candidates.append({"factor_alias": factor_alias, "params": params})
+            known.add(factor_alias)
+        registered += 1
+    state.page_settings["factor_candidates"] = candidates
+    if aliases:
+        state.page_settings["factor"] = aliases[0]
+    return registered
+
+
+def _template_factor_aliases(state) -> list[str]:
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for group in state.backtest_groups:
+        if not isinstance(group, dict):
+            continue
+        alias = str(group.get("factor") or group.get("factorAlias") or "").strip()
+        if alias and alias not in seen:
+            seen.add(alias)
+            aliases.append(alias)
+    return aliases
+
+
+def _params_from_factor_alias(alias: str, factor_family: str) -> dict[str, Any]:
+    prefix = f"{factor_family}|"
+    if alias == factor_family:
+        return {}
+    if not alias.startswith(prefix):
+        raise click.ClickException(f"模板因子 {alias} 不属于当前因子家族 {factor_family}")
+    params: dict[str, Any] = {}
+    for part in alias[len(prefix):].split("|"):
+        if not part:
+            continue
+        if ":" in part:
+            key, value = part.split(":", 1)
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            params[key] = value
+        elif part == "$Rev":
+            params[part] = "1"
+        else:
+            params[part] = True
+    return params

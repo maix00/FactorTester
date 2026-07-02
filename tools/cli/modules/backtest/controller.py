@@ -789,6 +789,7 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
             raise click.ClickException(f"分组测试失败: {message}")
         if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
+    renderer.handle("complete", {})
 
 
 def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
