@@ -733,6 +733,8 @@ def test_backtest_add_group_context_help_prints_registered_visible_and_editable_
                 "label": "执行引擎",
                 "tab_key": "engine",
                 "tab_label": "执行引擎",
+                "control_template": "select",
+                "options": [{"value": "Native", "label": "Native"}, {"value": "Backtrader", "label": "Backtrader"}],
                 "order": 1,
             },
             "engine_mode": {
@@ -805,10 +807,85 @@ def test_backtest_add_group_context_help_prints_registered_visible_and_editable_
         assert "回测设置上下文" in result.output
         assert "执行引擎" in result.output
         assert "--engine  执行引擎  [可编辑]" in result.output
+        assert "类型=Literal[Native, Backtrader]" in result.output
         assert "--engine-mode  引擎模式  [可编辑]" in result.output
         assert "因子执行" in result.output
         assert "--warmup-mode  前摇模式  [可编辑]" in result.output
         assert "--readonly-probe  只读字段  [不可编辑]" in result.output
+
+
+def test_backtest_add_group_field_help_distinguishes_missing_value_from_context(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "split_count": {
+                "value": 5,
+                "label": "分组数",
+                "tab_key": "group_strategy",
+                "tab_label": "分组策略",
+                "control_template": "number",
+            },
+            "engine": {
+                "value": "Native",
+                "label": "执行引擎",
+                "tab_key": "engine",
+                "tab_label": "执行引擎",
+            },
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["backtest", "--factor-family", "SgCCS"]).exit_code == 0
+
+        result = runner.invoke(cli, ["add-group", "--split-count", "--help"])
+        assert result.exit_code == 0
+        assert "--split-count 字段说明" in result.output
+        assert "后端字段: split_count" in result.output
+        assert "类型: number" in result.output
+        assert "回测设置上下文" not in result.output
+
+        result = runner.invoke(cli, ["add-group", "--split-count", "5", "--help"])
+        assert result.exit_code == 0
+        assert "回测设置上下文" in result.output
+        assert "--split-count  分组数" in result.output
+        assert "执行引擎" in result.output
+
+
+def test_cli_help_pages_explain_navigation_and_backtest_construction() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "FactorTester CLI" in result.output
+    assert "factortester single_factor_test" in result.output
+    assert "--factor-family SgCCS" in result.output
+    assert "字段级帮助示例" in result.output
+
+    result = runner.invoke(cli, ["single_factor_test", "--help"])
+    assert result.exit_code == 0
+    assert "进入单因子测试控制界面" in result.output
+    assert "factortester single_factor_test" in result.output
+    assert "backtest" in result.output
+
+    result = runner.invoke(cli, ["backtest", "--help"])
+    assert result.exit_code == 0
+    assert "进入通用回测控制界面" in result.output
+    assert "factortester backtest add-group" in result.output
 
 
 def test_backtest_add_ls_can_reference_existing_groups_and_inline_group(tmp_path, monkeypatch) -> None:

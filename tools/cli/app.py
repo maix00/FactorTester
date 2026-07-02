@@ -13,7 +13,23 @@ from tools.cli.modules.registry import register_cli_modules
 
 @click.group()
 def cli() -> None:
-    """FactorTester remote HTTP client."""
+    """FactorTester CLI.
+
+    常用路径:
+
+      factortester configure --host 127.0.0.1 --port 8114
+      factortester login --username 18717974771
+      factortester list
+      factortester single_factor_test --factor-family SgCCS
+      factortester backtest --factor-family SgCCS
+      factortester backtest add-group --group-name A1 --split-count 5 --group-index 1
+
+    进入某个模块后再次运行 factortester list，只展示当前层级的下一层。
+    字段级帮助示例:
+
+      factortester add-group --group-name --help
+      factortester add-group --group-name A1 --help
+    """
 
 
 cli.add_command(configure)

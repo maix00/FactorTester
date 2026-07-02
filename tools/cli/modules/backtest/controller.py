@@ -14,7 +14,8 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import print_backtest_welcome
 from tools.cli.core.errors import friendly_errors
-from tools.cli.field_store import FieldStore, visible_fields
+from tools.cli.field_help import field_flag, field_type_label, render_settings_help
+from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
@@ -85,7 +86,26 @@ def backtest(
     product_path_name: str,
     product_path_paths: tuple[str, ...],
 ) -> None:
-    """Enter the generic backtest controller."""
+    """进入通用回测控制界面。
+
+    回测与 single_factor_test 平行注册；从顶层进入时必须指定因子家族:
+
+      factortester backtest --factor-family SgCCS
+
+    常用草稿命令:
+
+      factortester backtest config-local-settings --allocation-mode equal_notional
+      factortester backtest add-group --group-name A1 --split-count 5 --group-index 1
+      factortester backtest add-group --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
+      factortester backtest add-group --factor add --param N=2m --param '$Rev=1'
+      factortester backtest add-group --product-group from-candidates --name 中国期货日盘
+      factortester backtest add-ls --ls-name LS-A1-A5 --long-group A1 --short-group A5
+
+    字段级帮助:
+
+      factortester add-group --group-name --help
+      factortester add-group --group-name A1 --help
+    """
     if ctx.invoked_subcommand is not None:
         return
     state = load_state()
@@ -138,16 +158,38 @@ def config_local_settings(ctx: click.Context) -> None:
 def add_group(
     ctx: click.Context,
 ) -> None:
-    """Start a group-test add-group action in the backtest controller."""
+    """新增一个或多个回测分组草稿。
+
+    单个分组可以省略段落标记:
+
+      factortester add-group --group-name A1 --split-count 5 --group-index 1
+
+    多个分组用重复 --add-group 分段:
+
+      factortester add-group --add-group --group-name A1 --split-count 5 --group-index 1 \
+        --add-group --group-name A5 --split-count 5 --group-index 5
+
+    字段说明模式:
+
+      factortester add-group --group-name --help
+
+    上下文校验模式:
+
+      factortester add-group --group-name A1 --help
+    """
     state = load_state()
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
+    help_target = _context_help_target(args)
     clean_args = _strip_context_help(args)
     selector_args, setting_args = _split_selector_and_local_setting_args(clean_args, selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
     if setting_args:
         _apply_raw_local_settings(state, tuple(setting_args))
+    if show_help and help_target and not help_target.has_value:
+        _print_add_group_field_help(state, help_target.option)
+        return
     selectors_list = parse_add_group_selector_groups(tuple(selector_args))
     if show_help:
         _validate_registered_local_settings(state)
@@ -266,6 +308,29 @@ def _has_context_help(args: tuple[str, ...]) -> bool:
     return "--help" in args or "-h" in args
 
 
+class _HelpTarget:
+    def __init__(self, option: str, *, has_value: bool) -> None:
+        self.option = option
+        self.has_value = has_value
+
+
+def _context_help_target(args: tuple[str, ...]) -> _HelpTarget | None:
+    help_positions = [index for index, token in enumerate(args) if token in {"--help", "-h"}]
+    if not help_positions:
+        return None
+    help_index = help_positions[0]
+    if help_index == 0:
+        return None
+    previous = args[help_index - 1]
+    if previous.startswith("--"):
+        return _HelpTarget(previous, has_value=False)
+    for index in range(help_index - 2, -1, -1):
+        token = args[index]
+        if token.startswith("--"):
+            return _HelpTarget(token, has_value=True)
+    return None
+
+
 def _strip_context_help(args: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(arg for arg in args if arg not in {"--help", "-h"})
 
@@ -326,29 +391,70 @@ def _validate_registered_local_settings(state) -> None:
 
 def _print_backtest_settings_help(state) -> None:
     _, store = _stores_for_backtest(state)
-    click.echo("回测设置上下文")
-    tabs = _tabs_for_store(store)
-    for tab in tabs:
-        tab_key = str(tab.get("key") or "")
-        fields = visible_fields(store, tab_key=tab_key) if tab_key else visible_fields(store)
-        if not fields:
-            continue
-        click.echo(f"{tab.get('label') or tab_key}:")
-        for field_key, meta in fields:
-            label = meta.get("label") or field_key
-            editable = "可编辑" if store.is_editable(field_key) else "不可编辑"
-            default = meta.get("value")
-            current = store.effective(field_key)
-            click.echo(f"  --{field_key.replace('_', '-')}  {label}  [{editable}]  默认={default!r}  当前={current!r}")
+    for line in render_settings_help(store, title="回测设置上下文"):
+        click.echo(line)
 
 
-def _tabs_for_store(store: FieldStore) -> list[dict[str, Any]]:
-    by_key: dict[str, dict[str, Any]] = {}
-    for meta in store.defaults.values():
-        tab_key = str(meta.get("tab_key") or meta.get("tab") or "default")
-        if tab_key not in by_key:
-            by_key[tab_key] = {"key": tab_key, "label": meta.get("tab_label") or tab_key}
-    return sorted(by_key.values(), key=lambda tab: str(tab.get("label") or tab.get("key") or ""))
+def _print_add_group_field_help(state, option: str) -> None:
+    field_key = _field_key_for_option(option)
+    if field_key is None:
+        raise click.ClickException(f"无法识别 add-group 字段: {option}")
+    _, store = _stores_for_backtest(state)
+    meta = store.field(field_key)
+    if meta:
+        click.echo(f"{option} 字段说明")
+        click.echo(f"  后端字段: {field_key}")
+        click.echo(f"  中文名: {meta.get('label') or field_key}")
+        click.echo(f"  类型: {field_type_label(meta)}")
+        click.echo(f"  默认值: {meta.get('value')!r}")
+        click.echo(f"  可见: {'是' if store.is_visible(field_key) else '否'}")
+        click.echo(f"  可编辑: {'是' if store.is_editable(field_key) else '否'}")
+        if meta.get("options"):
+            options = ", ".join(
+                f"{item.get('value')}({item.get('label') or item.get('value')})"
+                for item in meta["options"]
+                if isinstance(item, dict)
+            )
+            click.echo(f"  允许值: {options}")
+        if meta.get("help_text"):
+            click.echo(f"  说明: {meta['help_text']}")
+        click.echo(f"  写法: {field_flag(field_key)} VALUE")
+        return
+    local = _ADD_GROUP_LOCAL_FIELD_HELP.get(field_key)
+    if local is None:
+        raise click.ClickException(f"字段尚未由后端注册: {field_key}")
+    click.echo(f"{option} 字段说明")
+    click.echo(f"  字段: {field_key}")
+    click.echo(f"  中文名: {local['label']}")
+    click.echo(f"  类型: {local['type']}")
+    click.echo(f"  说明: {local['help']}")
+    click.echo(f"  写法: {option} {local['metavar']}")
+
+
+def _field_key_for_option(option: str) -> str | None:
+    normalized = option.lstrip("-").replace("-", "_")
+    aliases = {
+        "name": "group_name",
+        "group_name": "group_name",
+        "split_count": "split_count",
+        "group_index": "group_index",
+        "product_group": "product_path_selection",
+        "product_path": "product_path_selection",
+        "product_path_candidates": "product_path_candidates",
+        "factor": "factor",
+        "factor_candidates": "factor_candidates",
+    }
+    return aliases.get(normalized, normalized or None)
+
+
+_ADD_GROUP_LOCAL_FIELD_HELP = {
+    "group_name": {
+        "label": "分组名称",
+        "type": "str",
+        "metavar": "NAME",
+        "help": "当前新增分组在回测草稿中的显示名称；不参与后端因子或交易语义。",
+    },
+}
 
 
 def _legacy_selectors(

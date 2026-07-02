@@ -16,7 +16,15 @@ from tools.cli.state import load_state, save_state
 @click.argument("path", nargs=-1)
 @friendly_errors
 def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -> None:
-    """Enter the single-factor-family test page controller."""
+    """进入单因子测试控制界面。
+
+    示例:
+
+      factortester single_factor_test --factor-family SgCCS
+      factortester single_factor_test --factor-family SgCCS backtest
+
+    进入后运行 factortester list 查看 IC 测试、回测等下一层模块。
+    """
     _enter_single_factor_page(factor_family, path)
 
 
@@ -25,7 +33,15 @@ def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -
 @click.argument("path", nargs=-1)
 @friendly_errors
 def enter_single_factor_test(factor_family: str, path: tuple[str, ...]) -> None:
-    """Enter the single-factor-test home module controller."""
+    """进入单因子测试控制界面。
+
+    示例:
+
+      factortester single_factor_test --factor-family SgCCS
+      factortester single_factor_test --factor-family SgCCS backtest
+
+    进入后运行 factortester list 查看 IC 测试、回测等下一层模块。
+    """
     _enter_single_factor_page(factor_family, path)
 
 
