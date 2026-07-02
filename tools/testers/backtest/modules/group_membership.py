@@ -159,6 +159,20 @@ def _group_quantile_membership(state, ctx) -> None:
     established = store.strategy_established_target_weights
     last_membership = store.strategy_selection_cache
 
+    # Every strategy sharing a factor's precomputed schedule is dispatched
+    # in this same SIGNAL batch (ctx.active_strategies), so their filtered
+    # signal_value is often byte-identical across group_index=0..n-1 -- only
+    # the bucket boundaries differ. Rank once per distinct signal_value
+    # content, not once per strategy: cache key is the actual (product,
+    # value) content (not a factor/schedule identity derived indirectly),
+    # so two strategies only ever share a cached ranking when their inputs
+    # are provably the same, never by coincidence of unrelated keys lining
+    # up. split_count is deliberately excluded from the key -- the ranked
+    # order doesn't depend on it, only the start/end slice does, so
+    # strategies sharing signal_value can share a ranking even with
+    # different split_count.
+    ranked_cache: dict[frozenset, list[tuple[Any, float]]] = {}
+
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
@@ -181,10 +195,18 @@ def _group_quantile_membership(state, ctx) -> None:
         if not signal_value or n_groups <= 0:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, {})
             continue
-        # Descending: group_index=0 ("第1组") is the highest-factor-value
-        # bucket, group_index=n_groups-1 is the lowest -- the highest factor
-        # value belongs in the first group.
-        ranked = sorted(signal_value.items(), key=lambda kv: kv[1], reverse=True)
+        cache_key = frozenset(signal_value.items())
+        ranked = ranked_cache.get(cache_key)
+        if ranked is None:
+            # Descending: group_index=0 ("第1组") is the highest-factor-value
+            # bucket, group_index=n_groups-1 is the lowest -- the highest
+            # factor value belongs in the first group. Secondary key on
+            # product name makes tie-breaking deterministic by construction
+            # (not an accident of dict/set iteration order, which for
+            # UniqueNameObject-hashed products can vary run to run under
+            # PYTHONHASHSEED randomization).
+            ranked = sorted(signal_value.items(), key=lambda kv: (-kv[1], _product_name(kv[0])))
+            ranked_cache[cache_key] = ranked
         bucket_size = len(ranked) / n_groups
         start = round(group_index * bucket_size)
         end = round((group_index + 1) * bucket_size)

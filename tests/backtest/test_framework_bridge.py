@@ -164,6 +164,63 @@ def _run_state_with_market_data() -> tuple[BacktestRunState, Strategy]:
     return run_state, strategy
 
 
+def test_membership_reuses_ranking_across_dialects_sharing_the_same_signal_table(monkeypatch):
+    """Dialects bound to the same precomputed table (same factor schedule)
+    get the exact same DataFrame object back from
+    _signal_tables_by_strategy -- only group_index/split_count differ. The
+    per-row descending rank should happen once per (table, row), not once
+    per dialect."""
+    import tools.testers.backtest.engines.workers.translator as translator_module
+
+    sort_calls = 0
+    real_sorted = sorted
+
+    def _counting_sorted(*args, **kwargs):
+        nonlocal sort_calls
+        sort_calls += 1
+        return real_sorted(*args, **kwargs)
+
+    monkeypatch.setattr(translator_module, "sorted", _counting_sorted, raising=False)
+
+    run_state = BacktestRunState()
+    strategies = []
+    configs = {}
+    for i in range(3):
+        strategy, config = _config(
+            f"g{i}", split_count=3, group_index=i,
+            position_policy="rebalance_to_target", rebalance_trigger="on_factor_signal",
+            allocation_policy="equal_notional",
+            fee_mode="zero", margin_mode="none",
+            initial_capital_major=100_000.0,
+        )
+        strategies.append(strategy)
+        configs[strategy] = config
+    run_state.strategy_configs = configs
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-05 15:00"),
+        pd.Timestamp("2026-01-06 15:00"),
+    ])
+    run_state.market_data_store.current_prices_table = pd.DataFrame(
+        {"A": [10.0, 11.0], "B": [20.0, 19.0], "C": [15.0, 16.0]}, index=idx,
+    )
+    signals = pd.DataFrame({"A": [1.0, 3.0], "B": [2.0, 1.0], "C": [3.0, 2.0]}, index=idx)
+    run_state.factor_signal_store.put_precomputed_table("k", signals)
+    for strategy in strategies:
+        run_state.factor_signal_store.bind_precomputed_table(strategy, "k")
+
+    dialects = [{
+        "strategy_id": strategy.alias, "membership_index": i,
+        "split_count": 3, "group_index": i,
+        "rebalance_trigger": "on_factor_signal",
+    } for i, strategy in enumerate(strategies)]
+    idx2 = run_state.market_data_store.current_prices_table.index
+    build_membership_payload(run_state, dialects, idx2)
+
+    # 3 dialects x 2 rows would be 6 sorts unshared; sharing the same table
+    # object across dialects should collapse this to 1 per (table, row) = 2.
+    assert sort_calls == 2
+
+
 def test_market_payload_serializes_prices_and_default_rules():
     run_state, _ = _run_state_with_market_data()
     payload = translate_market_payload(run_state)
