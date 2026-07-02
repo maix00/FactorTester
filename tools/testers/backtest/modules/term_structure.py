@@ -224,15 +224,21 @@ def _expand_term_structure(state, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
+    product_expansion_cache: dict[tuple[Any, str | None, str | None], tuple[list[Any], list[dict[str, Any]]]] = {}
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
         metadata: list[dict[str, Any]] = []
         for product in products:
-            contracts, rows = _expand_product_contracts(product, start_date=start_date, end_date=end_date)
+            cache_key = (product, start_date, end_date)
+            if cache_key not in product_expansion_cache:
+                product_expansion_cache[cache_key] = _expand_product_contracts(
+                    product, start_date=start_date, end_date=end_date,
+                )
+            contracts, rows = product_expansion_cache[cache_key]
             expanded.extend(contracts)
-            metadata.extend(rows)
+            metadata.extend(dict(row) for row in rows)
         all_contracts[strategy] = frozenset(expanded)
         all_metadata[strategy] = tuple(metadata)
         ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, all_contracts[strategy])
