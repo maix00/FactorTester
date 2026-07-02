@@ -47,6 +47,14 @@ class TermStructureStore:
     contract_metadata: dict[Any, Any] = field(default_factory=dict)
     target_mapping: dict[Any, dict[str, Any]] = field(default_factory=dict)
     notices: list[dict[str, Any]] = field(default_factory=list)
+    # _event_timestamp_from_row(row, offset=...) is deterministic given a
+    # metadata row identity and an offset -- it never depends on the current
+    # event timestamp -- but resolve_tradable_target_weights calls it on
+    # every SIGNAL event for every product with a target weight, and its
+    # fallback (_local_cnfutures_inferred_lifecycle) scans the whole raw
+    # price table. Cache by (id(row), offset) so that scan happens once per
+    # run, not once per event.
+    event_timestamp_cache: dict[tuple[int, Any], Any] = field(default_factory=dict)
 
     def set_expansion(self, contracts: dict[Any, Any], metadata: dict[Any, Any]) -> None:
         self.expanded_contracts = contracts
@@ -828,12 +836,22 @@ def _event_timestamp_from_row(
     peer_rows: list[dict[str, Any]] | None = None,
     engine_mode: str = "auto",
 ) -> pd.Timestamp | None:
+    # Deterministic given (row identity, offset) -- never depends on the
+    # current event timestamp -- but resolve_tradable_target_weights calls
+    # this on every SIGNAL event per product. See TermStructureStore.
+    # event_timestamp_cache for why this must be memoized, not recomputed.
+    store = getattr(state, "term_structure_store", None) if state is not None else None
+    cache = store.event_timestamp_cache if store is not None else None
+    cache_key = (id(row), offset)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     base = _lifecycle_base_timestamp(
         row, reference_tz=reference_tz, state=state, peer_rows=peer_rows, engine_mode=engine_mode,
     )
-    if base is None:
-        return None
-    return _apply_lifecycle_offset(base, offset, state=state)
+    result = None if base is None else _apply_lifecycle_offset(base, offset, state=state)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def _lifecycle_base_timestamp(

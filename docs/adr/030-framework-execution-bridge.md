@@ -372,6 +372,38 @@ MultiIndex 取 `[-1]` 返回的是这一行各层级值组成的元组，不是�
 两种索引验证；`infer_contract_end_from_coverage` 用 MultiIndex 行情表端到端
 验证。修复前，MultiIndex 用例复现了用户报的一模一样的 `TypeError`。
 
+### 修复：`resolve_tradable_target_weights` 真正跑起来之后，每个 SIGNAL 事件都重新扫一遍行情表
+
+上面 ctx 跨阶段失效的 bug 修好、`resolve_tradable_target_weights` 第一次
+真正在生产环境执行之后，用户反馈回测明显变慢。原因很直接：这个函数现在
+对每个 SIGNAL 事件、每个有目标权重的产品，都会调用一次
+`TermStructureExpandModule._tradable_contract_row`，而它内部
+`_event_timestamp_from_row`（解析换月/强平这两个时间点）在合约自身元数据
+和 OpenCTP/AKShare 目录都没有权威日期时，会兜底调用
+`_local_cnfutures_inferred_lifecycle` → `infer_contract_end_from_coverage`——
+这个函数会扫一遍整张行情表（每个候选合约的价格列都要 `dropna()`）。
+
+问题在于：`_event_timestamp_from_row` 的结果只取决于"这一行元数据 + 这个
+offset（换月提前量/强平提前量）"，跟当前是第几个 SIGNAL 事件、事件时间戳
+是多少完全无关——换月/强平的绝对时间点在回测开始时就已经确定了。之前这个
+函数从未真正跑过（ctx bug 导致 metadata 永远是空的，直接 `continue`），
+所以这个"每次都重新扫全表"的设计缺陷从未被现实数据触发过、代价从未被
+真正付过；bug 一修好，这笔账单也一起送到了。
+
+修法：`TermStructureStore` 新增 `event_timestamp_cache`，`_event_timestamp_from_row`
+按 `(id(row), offset)` 记忆化——同一份元数据行对象在整个回测过程中是
+`_expand_term_structure`（PRE_REPLAY，只跑一次）产出并持久化在
+`state.term_structure_store.contract_metadata` 上的稳定对象，不会跨事件
+重建，所以 `id(row)` 是安全的缓存键；`offset` 区分换月和强平这两个不同的
+提前量。
+
+新增测试 `test_resolve_tradable_target_weights_caches_lifecycle_inference_across_signal_events`
+（`tests/backtest/native/test_term_structure_lifecycle.py`）：monkeypatch
+`infer_contract_end_from_coverage` 计数，模拟 20 个各自独立 `FlowContext`
+的 SIGNAL 事件（贴近生产环境每批事件都是新 ctx 这一事实），断言昂贵的
+兜底推断调用次数有一个跟事件数无关的小常数上限。修复前，20 个事件触发了
+37 次全表扫描；修复后封顶在 4 次以内（2 张合约 × 最多 2 个 offset）。
+
 ## 参考
 
 - ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与

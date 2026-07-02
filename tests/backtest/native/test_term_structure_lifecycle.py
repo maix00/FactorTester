@@ -670,6 +670,90 @@ def test_signal_target_weights_resolve_across_separate_pre_replay_and_per_event_
     assert weights == {_Contract("P2602.DCE"): 1.0}
 
 
+def test_resolve_tradable_target_weights_caches_lifecycle_inference_across_signal_events(monkeypatch):
+    """Now that resolve_tradable_target_weights actually runs on every SIGNAL
+    event (the ctx-boundary bug fixed above), its fallback lifecycle
+    inference (LocalCNFutures coverage inference, which scans the whole raw
+    price table) must not be recomputed from scratch every single event --
+    that's the perf regression a real backtest hit. infer_contract_end_from_coverage
+    is deterministic given (row, offset), so TermStructureStore.event_timestamp_cache
+    should make it run at most once per row per offset, no matter how many
+    SIGNAL events fire."""
+    monkeypatch.setattr(term_structure, "_openctp_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_lifecycle_specs_by_instrument", lambda: {})
+    monkeypatch.setattr(term_structure, "_akshare_live_lookup", lambda exchange, key: None)
+
+    import sources.LocalCNFutures.lifecycle as lifecycle_module
+
+    call_count = 0
+    real_infer = lifecycle_module.infer_contract_end_from_coverage
+
+    def _counting_infer(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return real_infer(*args, **kwargs)
+
+    # _local_cnfutures_inferred_lifecycle does a local
+    # `from sources.LocalCNFutures.lifecycle import infer_contract_end_from_coverage`
+    # inside the function body, re-resolved on every call -- must patch the
+    # source module's attribute, not term_structure's (it never imports this
+    # name at module scope).
+    monkeypatch.setattr(lifecycle_module, "infer_contract_end_from_coverage", _counting_infer)
+
+    strategy = Strategy(alias="A")
+    product = _CoverageOnlyTwoContractTermProduct()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                EngineModule.engine_mode: "auto",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-02-02 15:00", tz="Asia/Shanghai"),
+    ])
+    account.market_data_store.raw_prices_table = pd.DataFrame({
+        _Contract("P2601.DCE"): [1.0, 1.0, None],
+        _Contract("P2602.DCE"): [None, 2.0, 2.0],
+    }, index=idx)
+
+    pre_replay_ctx = FlowContext(
+        timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}),
+    )
+    pre_replay_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    _expand_term_structure(account, pre_replay_ctx)
+
+    # Simulate 20 SIGNAL events at distinct timestamps, each independently
+    # resolving the same product's target weight -- exactly what a real
+    # backtest's PER_EVENT/SIGNAL dispatch does, one fresh FlowContext per
+    # event (see test above for why that matters).
+    for i in range(20):
+        per_event_ctx = FlowContext(
+            timestamp=pd.Timestamp("2026-01-20 09:01") + pd.Timedelta(days=i),
+            event_queue=EventQueue(),
+            active_strategies=frozenset({strategy}),
+        )
+        per_event_ctx.set_for(GroupMembershipModule.target_weights, strategy, {product: 1.0})
+        _resolve_tradable_target_weights(account, per_event_ctx)
+
+    # 2 contract rows x at most 2 offsets (force_close + rollover) each = a
+    # small constant ceiling, independent of how many SIGNAL events fire --
+    # without the cache this scales linearly with the 20 events below.
+    assert call_count <= 4
+
+
 def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time():
     strategy = Strategy(alias="A")
     product = _TwoContractTermProduct()
