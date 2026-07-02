@@ -132,7 +132,7 @@ class BacktestRunRenderer:
         if phase == EVENT_PHASE and not self.verbose and not _is_tty():
             return
         should_log_activity = True
-        if phase == EVENT_PHASE and not _is_tty():
+        if phase == EVENT_PHASE:
             should_log_activity = self._should_log_event_activity()
         if phase and phase != self._current_phase:
             self._current_phase = phase

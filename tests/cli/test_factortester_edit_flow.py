@@ -1388,6 +1388,32 @@ def test_backtest_verbose_event_activity_is_throttled(monkeypatch) -> None:
     assert "2026-01-02 09:03:00" in raw
 
 
+def test_backtest_tty_event_activity_is_throttled_by_wall_clock(monkeypatch) -> None:
+    class TtyBuffer(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    timestamps = iter([0.0, 0.5, 2.2])
+    monkeypatch.setattr(run_output.time, "monotonic", lambda: next(timestamps))
+    renderer = BacktestRunRenderer(verbose=False)
+    stream = TtyBuffer()
+
+    with contextlib.redirect_stdout(stream):
+        for minute in ("09:01:00", "09:02:00", "09:03:00"):
+            renderer.handle("activity", {
+                "phase": "event_replay",
+                "phase_label": "事件回放",
+                "flow_key": "signal.target",
+                "flow_label": "合成目标",
+                "timestamp": f"2026-01-02 {minute}",
+            })
+
+    raw = stream.getvalue()
+    assert "2026-01-02 09:01:00" in raw
+    assert "2026-01-02 09:02:00" not in raw
+    assert "2026-01-02 09:03:00" in raw
+
+
 def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)
