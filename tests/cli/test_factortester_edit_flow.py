@@ -1223,6 +1223,7 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
             "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
             "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
             "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+            "equity_compute_live": {"value": True},
         })
 
     @app.get("/api/product-groups")
@@ -1303,6 +1304,12 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "[activity] phase=event_replay flow=signal.target" in result.output
     assert "[progress] phase=event_replay percent=25.00" in result.output
     assert "[运行信息] 产品路径: ER.CZC(早籼稻)" in result.output
+    assert "[live] 刷新净值曲线" in result.output
+    assert "净值曲线:" in result.output
+    assert result.output.index("净值曲线:") < result.output.index("结果摘要:")
+    assert "图例:" in result.output
+    assert "A1" in result.output
+    assert "LS A1/A5 LS" in result.output
     assert "结果摘要:" in result.output
     assert "A1: final=100500000.00 points=4" in result.output
     assert "LS A1/A5 · LS: final=100300000.00 points=3" in result.output

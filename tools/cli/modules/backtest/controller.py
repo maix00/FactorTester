@@ -780,7 +780,7 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
     payload = _run_payload(state, groups=groups)
     click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
     client = client_from_config()
-    renderer = BacktestRunRenderer(verbose=verbose)
+    renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
     for event in client.run_group_test_stream(payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
@@ -798,6 +798,22 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
         "groups": [dict(group) for group in groups],
         "ls_configs": list(state.backtest_ls_configs),
     }
+
+
+def _equity_curve_live_enabled(state, *, client=None) -> bool:
+    _, store = _stores_for_backtest(state, client=client)
+    curve_mode = store.effective("equity_curve_mode")
+    if curve_mode is not None:
+        return str(curve_mode).strip().lower() == "live"
+    return _truthy(store.effective("equity_compute_live"))
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "y", "on", "live"}
 
 
 def _print_run_event(event_name: str, data: Any) -> None:
