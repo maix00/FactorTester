@@ -11,6 +11,8 @@ from werkzeug.serving import make_server
 
 from tools.cli.app import _backtest_errors, cli
 from tools.cli.http import HttpClientError
+from tools.cli.modules.keys import public_module_key
+from tools.cli.modules.registry import ControllerRegistry
 
 
 @contextmanager
@@ -230,3 +232,14 @@ def test_backtest_error_wrapper_preserves_server_body() -> None:
     assert result.exit_code != 0
     assert "Traceback (most recent call last)" in result.output
     assert "strategy.py" in result.output
+
+
+def test_cli_registry_only_adapts_controllers_not_module_metadata() -> None:
+    registry = ControllerRegistry()
+    backtest_adapter = registry.adapter_for_backend("group_test")
+
+    assert public_module_key("group_test/time") == "backtest/time"
+    assert backtest_adapter is not None
+    assert backtest_adapter.public_key == "backtest"
+    assert not hasattr(backtest_adapter, "label")
+    assert not hasattr(backtest_adapter, "order")

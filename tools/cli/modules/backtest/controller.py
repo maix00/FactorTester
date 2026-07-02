@@ -12,10 +12,8 @@ import click
 from tools.cli.core.context import ensure_child_available
 from tools.cli.core.display import print_backtest_welcome
 from tools.cli.core.errors import friendly_errors
+from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.state import load_state, save_state
-
-BACKTEST_BACKEND_KEY = "group_test"
-BACKTEST_PUBLIC_KEY = "backtest"
 
 
 @click.group("backtest", invoke_without_command=True)
@@ -55,4 +53,3 @@ def add_group(name: str, split_count: int | None, group_index: int | None) -> No
 def enter_backtest_state(state) -> None:
     ensure_child_available(state.current_parent, BACKTEST_BACKEND_KEY)
     state.enter(BACKTEST_BACKEND_KEY)
-

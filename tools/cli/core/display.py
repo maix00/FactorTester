@@ -6,17 +6,14 @@ from typing import Any
 
 import click
 
+from tools.cli.modules.keys import public_module_key
 from tools.cli.state import CliState
-
-BACKEND_TO_PUBLIC_KEYS = {
-    "group_test": "backtest",
-}
 
 
 def module_lines(modules: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for module in modules:
-        key = _public_key(str(module.get("key", "")))
+        key = public_module_key(str(module.get("key", "")))
         label = module.get("label", key)
         kind = module.get("kind", "module")
         marker = " +" if module.get("has_children") else ""
@@ -56,10 +53,3 @@ def print_location_welcome(state: CliState) -> None:
         return
     click.echo(f"已进入: {state.location_label}")
     click.echo("下一步: factortester list 查看下一层；factortester back 返回。")
-
-
-def _public_key(key: str) -> str:
-    if "/" not in key:
-        return BACKEND_TO_PUBLIC_KEYS.get(key, key)
-    head, tail = key.split("/", 1)
-    return f"{BACKEND_TO_PUBLIC_KEYS.get(head, head)}/{tail}"

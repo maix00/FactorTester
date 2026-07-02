@@ -1,11 +1,8 @@
-"""Client-side Module registry.
+"""Client-side controller adapters for server-registered modules.
 
-This registry manages CLI controller modules, using the same user-facing
-"Module" concept as the frontend navigation layer. It intentionally does not
-import the server-side ``tools.testers.registry.Module`` class: the installed
-``factortester`` client can run on machines that do not have the server source
-tree. The relation is by registered key/route contract, not Python class
-identity.
+The server registry is the only source of module metadata such as label, order,
+kind and nesting.  The installed CLI only keeps local command adapters so a
+server module key can open the matching client controller.
 """
 
 from __future__ import annotations
@@ -20,38 +17,38 @@ from tools.cli.modules.single_factor_family_test import enter_single_factor_fami
 
 
 @dataclass(frozen=True, slots=True)
-class Module:
-    key: str
-    label: str
-    order: int
+class ControllerAdapter:
+    public_key: str
+    backend_key: str
     commands: tuple[click.Command, ...]
 
 
-class ModuleRegistry:
+class ControllerRegistry:
     def __init__(self) -> None:
-        self._modules = (
-            Module(
-                key="single_factor_family_test",
-                label="单因子家族测试",
-                order=10,
+        self._adapters = (
+            ControllerAdapter(
+                public_key="single_factor_family_test",
+                backend_key="single_factor_family_test",
                 commands=(enter_single_factor_family_test,),
             ),
-            Module(
-                key="backtest",
-                label="回测",
-                order=20,
+            ControllerAdapter(
+                public_key="backtest",
+                backend_key="group_test",
                 commands=(backtest,),
             ),
         )
 
-    def sorted_modules(self) -> list[Module]:
-        return sorted(self._modules, key=lambda module: module.order)
-
     def commands(self) -> Iterable[click.Command]:
-        for module in self.sorted_modules():
-            yield from module.commands
+        for adapter in self._adapters:
+            yield from adapter.commands
+
+    def adapter_for_backend(self, key: str) -> ControllerAdapter | None:
+        return next((adapter for adapter in self._adapters if adapter.backend_key == key), None)
+
+    def adapter_for_public(self, key: str) -> ControllerAdapter | None:
+        return next((adapter for adapter in self._adapters if adapter.public_key == key), None)
 
 
 def register_cli_modules(cli: click.Group) -> None:
-    for command in ModuleRegistry().commands():
+    for command in ControllerRegistry().commands():
         cli.add_command(command)
