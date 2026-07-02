@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import getpass
+from functools import wraps
 from typing import Any
 
 import click
 
 from .client import FactorTesterClient
 from .field_store import FieldStore, visible_fields
-from .http import ClientConfig, HttpSession, load_config, save_config
+from .http import ClientConfig, HttpClientError, HttpSession, load_config, save_config
 
 
 @click.group()
@@ -17,10 +18,61 @@ def cli() -> None:
     """FactorTester remote HTTP client."""
 
 
+def _friendly_errors(func=None, *, expose_server_error_body: bool = False):
+    def decorator(command_func):
+        @wraps(command_func)
+        def wrapper(*args, **kwargs):
+            try:
+                return command_func(*args, **kwargs)
+            except HttpClientError as exc:
+                message = _http_error_message(exc, expose_body=expose_server_error_body)
+                raise click.ClickException(message) from None
+            except FileNotFoundError as exc:
+                raise click.ClickException(str(exc)) from None
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from None
+            except RuntimeError as exc:
+                raise click.ClickException(str(exc)) from None
+
+        return wrapper
+
+    if func is None:
+        return decorator
+    return decorator(func)
+
+
+def _http_error_message(exc: HttpClientError, *, expose_body: bool = False) -> str:
+    if expose_body or exc.status >= 500:
+        body = exc.body.strip()
+        return f"请求失败 ({exc.status}):\n{body}" if body else f"请求失败 ({exc.status}): {exc.url}"
+    try:
+        import json
+
+        payload = json.loads(exc.body)
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        detail = payload.get("error") or payload.get("message")
+        if detail:
+            return f"请求失败 ({exc.status}): {detail}"
+    return f"请求失败 ({exc.status}): {exc.url}"
+
+
+def _backtest_errors(func):
+    """Use for commands that execute user code/backtests.
+
+    Auth/navigation commands should hide local Python tracebacks. Backtest
+    commands need the server-returned traceback/source text because that is the
+    actionable strategy/runtime error, not a CLI implementation leak.
+    """
+    return _friendly_errors(func, expose_server_error_body=True)
+
+
 @cli.command()
 @click.option("--host", default="127.0.0.1", show_default=True)
 @click.option("--port", default=8114, show_default=True, type=int)
 @click.option("--base-url", default="", help="完整服务地址；提供时忽略 host/port。")
+@_friendly_errors
 def configure(host: str, port: int, base_url: str) -> None:
     """Save remote server address for later commands."""
     config = ClientConfig(base_url=base_url.rstrip("/")) if base_url else ClientConfig.from_host_port(host, port)
@@ -31,6 +83,7 @@ def configure(host: str, port: int, base_url: str) -> None:
 @cli.command()
 @click.option("--username", prompt=True)
 @click.option("--password", default="", help="不传则安全提示输入。")
+@_friendly_errors
 def login(username: str, password: str) -> None:
     """Login through the configured remote server."""
     if not password:
@@ -41,6 +94,7 @@ def login(username: str, password: str) -> None:
 
 @cli.command("list")
 @click.argument("parent", required=False)
+@_friendly_errors
 def list_modules(parent: str | None) -> None:
     """List one navigation layer registered by the server."""
     modules = _client_from_config().list_modules(parent=parent)
@@ -50,6 +104,7 @@ def list_modules(parent: str | None) -> None:
 
 @cli.command()
 @click.argument("key")
+@_friendly_errors
 def describe(key: str) -> None:
     """Describe a tester/backtest setting application."""
     client = _client_from_config()
@@ -59,6 +114,7 @@ def describe(key: str) -> None:
 
 @cli.command()
 @click.argument("key")
+@_friendly_errors
 def edit(key: str) -> None:
     """Interactively edit server-registered setting fields."""
     client = _client_from_config()

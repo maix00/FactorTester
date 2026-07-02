@@ -4,11 +4,13 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import click
 from click.testing import CliRunner
 from flask import Flask, jsonify, request
 from werkzeug.serving import make_server
 
-from tools.cli.app import cli
+from tools.cli.app import _backtest_errors, cli
+from tools.cli.http import HttpClientError
 
 
 @contextmanager
@@ -98,3 +100,36 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         assert result.exit_code == 0
         assert "已设置 分配方式: equal_notional" in result.output
         assert "当前显式设置" in result.output
+
+
+def test_click_login_failure_is_user_friendly(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=False, error="用户名或密码错误"), 401
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        result = runner.invoke(cli, ["configure", "--base-url", url])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["login", "--username", "alice", "--password", "bad"])
+        assert result.exit_code != 0
+        assert "Error: 请求失败 (401): 用户名或密码错误" in result.output
+        assert "Traceback" not in result.output
+        assert "tools/cli" not in result.output
+
+
+def test_backtest_error_wrapper_preserves_server_body() -> None:
+    @click.command()
+    @_backtest_errors
+    def failing_backtest():
+        raise HttpClientError(500, "http://server/run", "Traceback (most recent call last):\n  File \"strategy.py\", line 1")
+
+    result = CliRunner().invoke(failing_backtest)
+
+    assert result.exit_code != 0
+    assert "Traceback (most recent call last)" in result.output
+    assert "strategy.py" in result.output
