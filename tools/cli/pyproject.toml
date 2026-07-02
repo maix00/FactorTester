@@ -20,6 +20,7 @@ packages = [
   "tools.cli.core",
   "tools.cli.modules",
   "tools.cli.modules.backtest",
+  "tools.cli.modules.backtest.shared",
   "tools.cli.modules.custom_factors",
   "tools.cli.modules.products",
   "tools.cli.modules.single_factor_family_test",
