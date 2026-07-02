@@ -14,7 +14,7 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
-    _historical_fields_at_from_frames, _load_raw_market_data,
+    _desired_factor_frequencies, _historical_fields_at_from_frames, _load_raw_market_data,
     _resolve_market_data_request, current_prices_at, historical_fields_for_product,
 )
 from tools.data.types.time import DataTime
@@ -231,6 +231,71 @@ def test_resolve_market_data_request_records_strategy_frequency_and_source_maps(
         s1: ("A",),
         s2: ("B",),
     }
+
+
+def test_resolve_market_data_request_keeps_required_frequency_strategy_scoped_when_uniform():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+    product = _Product()
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, field_values={
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        }),
+        s2: StrategyConfig(strategy=s2, field_values={
+            MarketDataModule.freq_mode: "fixed",
+            MarketDataModule.freq_fixed: "MIN1",
+        }),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
+
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_frequency, s1) == DataFreq.MIN1
+    assert ctx.get_for(MarketDataModule.required_frequency, s2) == DataFreq.MIN1
+    assert ctx.get(MarketDataModule.required_frequency) is None
+    assert account.market_data_store.required_frequency_by_strategy == {
+        s1: DataFreq.MIN1,
+        s2: DataFreq.MIN1,
+    }
+
+
+def test_desired_factor_frequencies_does_not_default_to_min1_without_factor_requirements():
+    factor = object()
+
+    assert _desired_factor_frequencies(factor) == set()
+
+
+def test_infer_market_data_request_uses_available_common_frequency_without_min1_default():
+    class _Product:
+        name = "P1"
+
+        def list_available_freqs(self):
+            return [DataFreq.DAY1]
+
+    strategy = Strategy(alias="S1")
+    product = _Product()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            MarketDataModule.freq_mode: "auto",
+            FactorModule.factor: object(),
+        }),
+    })
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+
+    _resolve_market_data_request(account, ctx)
+
+    assert ctx.get_for(MarketDataModule.required_frequency, strategy) == DataFreq.DAY1
+    assert ctx.get(MarketDataModule.required_frequency) is None
 
 
 def test_check_market_data_coverage_rejects_same_product_with_conflicting_frequency(monkeypatch):

@@ -343,11 +343,8 @@ def _resolve_market_data_request(state, ctx) -> None:
     store.required_data_source_by_strategy = dict(sources_by_strategy)
     store.required_frequency_by_strategy = dict(frequencies_by_strategy)
     unique_sources = {source for source in sources_by_strategy.values()}
-    unique = {freq.name: freq for freq in frequencies_by_strategy.values()}
     if len(unique_sources) == 1:
         ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
-    if len(unique) == 1:
-        ctx.set(MarketDataModule.required_frequency, next(iter(unique.values()), None))
 
 
 def _required_data_source_for_strategy(config) -> tuple[str, ...]:
@@ -436,8 +433,6 @@ def _desired_factor_frequencies(factor: Any) -> set[DataFreq]:
             desired.add(DataFreq(getattr(const_ref, "value")))
         except Exception:
             continue
-    if not desired:
-        desired.add(DataFreq("MIN1"))
     return desired
 
 
