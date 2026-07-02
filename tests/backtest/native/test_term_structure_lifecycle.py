@@ -623,6 +623,53 @@ def test_signal_target_weights_map_abstract_product_to_current_contract():
     assert weights == {_Contract("P2601.DCE"): 1.0}
 
 
+def test_signal_target_weights_resolve_across_separate_pre_replay_and_per_event_contexts():
+    """Production never shares one FlowContext between expand_term_structure
+    (PRE_REPLAY) and resolve_tradable_target_weights (PER_EVENT/SIGNAL) --
+    scheduler.make_dispatcher constructs a brand-new FlowContext per event
+    batch, so PRE_REPLAY's ctx.set_for(contract_metadata, ...) is invisible
+    to any PER_EVENT flow's ctx.get_for. Only state.term_structure_store
+    (persisted on BacktestRunState, not ctx) survives that boundary. This
+    test uses two independent FlowContext instances -- not one shared ctx
+    like the tests above -- to prove resolve_tradable_target_weights reads
+    from the persisted store and would actually roll in a real replay run."""
+    strategy = Strategy(alias="A")
+    product = _TwoContractTermProduct()
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            field_values={
+                RunWindowModule.start_date: "2026-01-01",
+                RunWindowModule.start_time: "09:00",
+                RunWindowModule.end_date: "2026-02-05",
+                RunWindowModule.end_time: "15:00",
+                RunWindowModule.timezone: "Asia/Shanghai",
+                DeliveryForceCloseModule.force_close_before_expiry: "2d",
+                RolloverModule.rollover_policy: "date_before_expiry",
+                RolloverModule.rollover_before_expiry: "5d",
+            },
+        ),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+
+    pre_replay_ctx = FlowContext(
+        timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}),
+    )
+    pre_replay_ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
+    _expand_term_structure(account, pre_replay_ctx)
+
+    per_event_ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-26 15:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    per_event_ctx.set_for(GroupMembershipModule.target_weights, strategy, {product: 1.0})
+    _resolve_tradable_target_weights(account, per_event_ctx)
+
+    weights = per_event_ctx.get_for(GroupMembershipModule.target_weights, strategy)
+    assert weights == {_Contract("P2602.DCE"): 1.0}
+
+
 def test_signal_target_weights_roll_to_next_contract_after_rollover_notice_time():
     strategy = Strategy(alias="A")
     product = _TwoContractTermProduct()

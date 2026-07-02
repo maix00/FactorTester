@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import pytest
 
 from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
@@ -96,6 +97,100 @@ def test_market_data_coverage_plans_expanded_contracts_alongside_the_abstract_pr
     assert _Contract("P2601.DCE") in planned
     assert _Contract("P2602.DCE") in planned
     assert len(account.market_data_store.load_plan) == 3
+
+
+@dataclass(frozen=True)
+class _NoDataContract:
+    name: str
+
+    def list_available_freqs(self):
+        return []
+
+
+class _NoDataTermProduct(_Product):
+    contract_class = _NoDataContract
+
+    def supports_term_structure(self) -> bool:
+        return True
+
+    def get_contract_list(self, start_date=None, end_date=None):
+        return [{"uid": "P2601.DCE", "contract": "P2601", "start": "2026-01-01", "end": "2026-01-31"}]
+
+
+@dataclass(frozen=True)
+class _NoDataPlainProduct:
+    name: str
+
+    def list_available_freqs(self):
+        return []
+
+
+def test_missing_data_for_a_term_structure_contract_is_a_hard_error_not_a_silent_exclusion(monkeypatch):
+    """A concrete contract that expand_term_structure produced was already
+    filtered to intersect the run window by get_contract_list -- the term
+    structure table is the authoritative source that this contract SHOULD
+    have data here. _product_outside_run_window is a data-file-driven
+    heuristic built for continuous products (infers listing/delisting from
+    a *different* catalog than the term structure table) and must never be
+    allowed to silently exclude a term-structure contract just because that
+    heuristic (wrongly) thinks it's out of range -- that would hide a real
+    data gap. Force the heuristic to say "out of range" via monkeypatch and
+    confirm the term-structure contract still hard-errors, while a plain
+    non-term-structure product with the same monkeypatched heuristic still
+    gets the old silent-exclusion behavior."""
+    import tools.testers.backtest.modules.market_data as market_data_module
+
+    monkeypatch.setattr(market_data_module, "_product_outside_run_window", lambda *a, **k: True)
+
+    strategy = Strategy(alias="A")
+    term_product = _NoDataTermProduct("P.DCE")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            RunWindowModule.start_date: "2026-01-01",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2026-02-05",
+            RunWindowModule.end_time: "15:00",
+            RunWindowModule.timezone: "Asia/Shanghai",
+        }),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({term_product}))
+
+    _expand_term_structure(account, ctx)
+    _resolve_market_data_request(account, ctx)
+    with pytest.raises(ValueError, match="行情缺口"):
+        _check_market_data_coverage(account, ctx)
+
+    # same monkeypatched heuristic, but a non-term-structure product still
+    # takes the old silent-exclusion path (existing mid-list/delist tolerance
+    # must not regress).
+    plain_product = _NoDataPlainProduct("PLAIN")
+    account2 = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            RunWindowModule.start_date: "2026-01-01",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2026-02-05",
+            RunWindowModule.end_time: "15:00",
+            RunWindowModule.timezone: "Asia/Shanghai",
+        }),
+    })
+    account2.run_window_store.envelope = strategy_run_window_datetimes(account2.config_for(strategy))
+    ctx2 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({strategy}))
+    ctx2.set_for(ProductSelectionModule.products, strategy, frozenset({plain_product}))
+
+    _expand_term_structure(account2, ctx2)
+    # plain_product itself has no available freqs, so the auto-inferring
+    # _resolve_market_data_request would fail before reaching the coverage
+    # check at all -- set the request fields directly instead, to isolate
+    # exactly the "not available_freqs" branch plan_product hits either way.
+    from tools.testers.backtest.modules.market_data import MarketDataModule
+    from tools.data.types.time_freq import DataFreq as _DataFreq
+
+    ctx2.set(MarketDataModule.required_frequency, _DataFreq.MIN1)
+    ctx2.set(MarketDataModule.required_data_source, ())
+    _check_market_data_coverage(account2, ctx2)
+    assert plain_product in account2.market_data_store.excluded_out_of_range
 
 
 class _FakeDataView:

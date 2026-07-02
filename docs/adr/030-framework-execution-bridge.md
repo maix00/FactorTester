@@ -270,6 +270,70 @@ drained"，但没意识到这连带丢了目标合约的切换逻辑）。结果
 换月提前量设为 `0d`，断言不同 bar 上 membership 落在不同的具体合约列上，
 从不落在抽象产品自己的列上。
 
+### 修复：换月/强平从未真正解析过目标合约（ctx 跨阶段失效，比排序 bug 更根本）
+
+追问桥接一致性的过程中，用户指出把 `expand_term_structure` 挪到 PRE_REPLAY
+前面之后，还要确认后续（分组、目标解析）用的是"这个时刻对应的具体合约"，
+不能因为挪了顺序就引入新 bug。查证过程中发现一个比排序更根本、跟这次挪动
+无关的既有 bug：`resolve_tradable_target_weights`（PER_EVENT/SIGNAL，真正
+把抽象产品目标权重解析到当前可交易具体合约的函数）读 `contract_metadata`
+用的是 `ctx.get_for(...)`——但 `scheduler.py` 的 `make_dispatcher` 对每个
+事件批次都会新建一个 `FlowContext`（`handler()` 闭包里 `ctx = FlowContext(...)`
+是每次调用都重新构造，不是跨批次复用的），PRE_REPLAY 阶段 `expand_term_structure`
+写入的 `ctx.set_for(contract_metadata, ...)` 属于另一个、早已丢弃的 `FlowContext`
+实例，PER_EVENT 阶段的新 ctx 完全看不到它。也就是说：无论 `expand_term_structure`
+排在 PRE_REPLAY 的第几位，`resolve_tradable_target_weights` 读到的 `metadata`
+在真实回放中永远是空的（`ctx.get_for` 的默认值），换月/强平的目标合约重新
+映射在生产环境里从未真正执行过——现金/持仓/订单全程只认得抽象产品这一个
+对象。同文件里 `_handle_rollover_notice`/`_handle_delivery_force_close_notice`
+（同样是 PER_EVENT，但读的是 `state.term_structure_store.contract_metadata`，
+持久化在 `state` 上、不是 ctx-scoped）已经是正确写法，`resolve_tradable_target_weights`
+只是没跟上这个约定。测试之所以一直是绿的，是因为所有单测都用同一个手工构造的
+`ctx` 先调 `_expand_term_structure` 再调 `_resolve_tradable_target_weights`，
+掩盖了生产环境两次调用之间 ctx 会被整个替换掉这件事。
+
+修法是把 `metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata,
+strategy, ()))` 改成 `state.term_structure_store.contract_metadata.get(strategy, ())`，
+跟 `_next_contract_object_for_notice` 保持一致。新增回归测试
+`test_signal_target_weights_resolve_across_separate_pre_replay_and_per_event_contexts`
+（`tests/backtest/native/test_term_structure_lifecycle.py`）——特意用两个独立
+的 `FlowContext` 实例（不是像其它测试那样共用一个），修复前这个测试确认会
+失败（目标权重停留在抽象产品上，不会换月），修复后通过。
+
+### 修复：行情覆盖检查不能用"数据文件是否有交集"的启发式判断期限结构合约
+
+用户进一步指出：`expand_term_structure` 提前之后，`check_market_data_coverage`
+判断一个具体合约"是否被覆盖"的逻辑本身也不对。原来的 `_product_outside_run_window`
+是给连续产品设计的启发式——从产品自己的数据文件（或 `_local_cnfutures_lifecycle_coverage`
+目录快照）反推它的上市/退市区间，跟回测窗口比较，判断"没有交集就可以静默排除"
+（服务于半途上市/退市的连续产品场景，这部分行为不变）。但对
+`TermStructureExpandModule.expand_term_structure` 展开出来的具体合约而言，
+"这个时间区间是否应该有这张合约的数据"这件事期限结构表本身就是权威来源——
+`get_contract_list(start_date, end_date)` 已经把展开结果过滤成跟回测窗口
+有交集的合约了。如果这时候还是用连续产品那套（可能来自另一个、更粗糙的
+目录数据源的）启发式去判断"是否越界"，两个信息源可能互相矛盾：期限结构表
+明确说这张合约在这个窗口内应该有数据，但启发式因为查的是另一份目录快照，
+判断"越界"就把它静默排除——真实的数据缺口（合约存在、但本地行情库没有对应
+文件）被吞掉了，永远不会报错，用户不会知道自己其实是在缺数据的情况下跑的
+回测。
+
+修法：新增 `_term_structure_concrete_contracts(state, ctx)`，收集所有策略
+`contract_metadata` 里非 `is_identity` 行的 `contract_object` 集合。
+`_check_market_data_coverage`/`_load_raw_market_data` 里所有原本直接调
+`_product_outside_run_window(product, start_dt, end_dt)` 的地方，都换成一个
+本地 `outside_window(product)`：只要 `product` 属于这个集合，直接返回
+`False`（永远不允许静默排除，缺数据必须报错）；否则退回原来的启发式
+（非期限结构产品的行为完全不变）。`check_market_data_coverage`/
+`load_raw_market_data` 两个 Flow 的 `inputs` 都补上了
+`TermStructureExpandModule.contract_metadata` 的声明。
+
+新增测试 `test_missing_data_for_a_term_structure_contract_is_a_hard_error_not_a_silent_exclusion`
+（`tests/backtest/native/test_market_data_product_selection.py`）：把
+`_product_outside_run_window` monkeypatch 成永远返回 `True`（模拟启发式
+误判"越界"），断言期限结构展开出来的具体合约仍然报错，而普通非期限结构
+产品在同样的 monkeypatch 下还是走原来的静默排除路径——证明修复只收窄了
+期限结构合约这一类对象的行为，没有改变其它产品的既有语义。
+
 ## 参考
 
 - ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与

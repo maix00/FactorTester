@@ -307,9 +307,14 @@ def _register_rollover_notices(state, ctx) -> None:
 
 
 def _resolve_tradable_target_weights(state, ctx) -> None:
+    # contract_metadata is set via ctx.set_for during PRE_REPLAY, but PER_EVENT
+    # dispatch gets a brand-new FlowContext per batch (see scheduler.py's
+    # make_dispatcher) -- ctx.get_for here would always see the empty default,
+    # never PRE_REPLAY's output. Read from state.term_structure_store instead,
+    # like _next_contract_object_for_notice below already does.
     for strategy in ctx.active_strategies:
         weights = ctx.get_for(_TARGET_WEIGHTS_REF, strategy, {})
-        metadata = list(ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()))
+        metadata = list(state.term_structure_store.contract_metadata.get(strategy, ()))
         if not weights or not metadata:
             continue
         config = state.config_for(strategy)

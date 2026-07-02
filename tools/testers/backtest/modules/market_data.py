@@ -199,7 +199,7 @@ class MarketDataModule(ExecutableModule):
         "check_market_data_coverage",
         inputs=(
             required_data_source, required_frequency, ProductSelectionModule.products,
-            TermStructureExpandModule.expanded_contracts,
+            TermStructureExpandModule.expanded_contracts, TermStructureExpandModule.contract_metadata,
         ),
         outputs=(),
         phase=Phase.PRE_REPLAY, order=38,
@@ -208,7 +208,9 @@ class MarketDataModule(ExecutableModule):
         compute=lambda state, ctx: _check_market_data_coverage(state, ctx),
     )
     load_raw_market_data: ClassVar[Flow] = Flow(
-        "load_raw_market_data", inputs=(EngineModule.engine_mode,), outputs=(
+        "load_raw_market_data",
+        inputs=(EngineModule.engine_mode, TermStructureExpandModule.contract_metadata),
+        outputs=(
             raw_prices, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
         phase=Phase.PRE_REPLAY, order=40, after=(check_market_data_coverage,),
@@ -471,6 +473,7 @@ def _check_market_data_coverage(state, ctx) -> None:
     end_dt = request.get("end_dt")
     global_required_frequency = ctx.get(MarketDataModule.required_frequency)
     global_required_source = ctx.get(MarketDataModule.required_data_source, ())
+    term_structure_contracts = _term_structure_concrete_contracts(state, ctx)
     missing_products: list[str] = []
     missing_frequency_products: list[str] = []
     missing_source_products: list[str] = []
@@ -478,18 +481,32 @@ def _check_market_data_coverage(state, ctx) -> None:
     load_plan: list[tuple[Any, DataFreq, Any | None]] = []
     planned_by_product: dict[Any, tuple[DataFreq, Any | None]] = {}
 
+    def outside_window(product: Any) -> bool:
+        # A concrete contract that TermStructureExpandModule.expand_term_structure
+        # produced was already filtered to intersect the run window (that's what
+        # get_contract_list(start_date, end_date) does) -- the term structure
+        # table is the authoritative source for "should this contract have data
+        # here", not the data-file-driven heuristic _product_outside_run_window
+        # uses for continuous/non-term-structure products (which infers listing/
+        # delisting from a *different* catalog and can disagree). So a
+        # term-structure contract is never silently excluded here: if it has no
+        # data, that's a real gap and must surface as a hard error below.
+        if product in term_structure_contracts:
+            return False
+        return _product_outside_run_window(product, start_dt, end_dt)
+
     def plan_product(product: Any, required_frequency: DataFreq | None, required_source: tuple[str, ...] | None) -> None:
         try:
             available_freqs = _product_available_freqs(product)
             if not available_freqs:
-                if _product_outside_run_window(product, start_dt, end_dt):
+                if outside_window(product):
                     excluded_out_of_range.append(product)
                 else:
                     missing_products.append(str(getattr(product, "name", product)))
                 return
             freq = _select_required_product_frequency(product, available_freqs, required_frequency)
             if freq is None:
-                if _product_outside_run_window(product, start_dt, end_dt):
+                if outside_window(product):
                     excluded_out_of_range.append(product)
                 else:
                     missing_frequency_products.append(str(getattr(product, "name", product)))
@@ -506,7 +523,7 @@ def _check_market_data_coverage(state, ctx) -> None:
                 )
             source = _select_required_product_source(product, freq, required_source)
             if source is _MISSING_DATA_SOURCE:
-                if _product_outside_run_window(product, start_dt, end_dt):
+                if outside_window(product):
                     excluded_out_of_range.append(product)
                 else:
                     missing_source_products.append(str(getattr(product, "name", product)))
@@ -526,7 +543,7 @@ def _check_market_data_coverage(state, ctx) -> None:
         except _MarketDataPlanConflict:
             raise
         except (ValueError, KeyError):
-            if _product_outside_run_window(product, start_dt, end_dt):
+            if outside_window(product):
                 excluded_out_of_range.append(product)
             else:
                 missing_products.append(str(getattr(product, "name", product)))
@@ -665,6 +682,25 @@ def _tradable_universe_for_strategy(state, ctx, strategy) -> list[Any]:
     return universe
 
 
+def _term_structure_concrete_contracts(state, ctx) -> frozenset[Any]:
+    """Every concrete contract TermStructureExpandModule.expand_term_structure
+    produced for any strategy in this run -- i.e. every metadata row that
+    isn't the identity/no-term-structure passthrough. These are the objects
+    whose data coverage must be judged against the term structure table
+    (already listing-window-filtered), not against the data-file-driven
+    heuristic _product_outside_run_window uses for continuous products."""
+    contracts: set[Any] = set()
+    strategies = ctx.active_strategies or frozenset(state.strategy_configs)
+    for strategy in strategies:
+        for row in ctx.get_for(TermStructureExpandModule.contract_metadata, strategy, ()):
+            if row.get("is_identity"):
+                continue
+            contract = row.get("contract_object")
+            if contract is not None:
+                contracts.add(contract)
+    return frozenset(contracts)
+
+
 def _products_from_selection_context(state, ctx) -> list[Any]:
     products: list[Any] = []
     seen: set[Any] = set()
@@ -750,6 +786,18 @@ def _load_raw_market_data(state, ctx) -> None:
     volume_series_by_product: dict[Any, pd.Series] = {}
     missing_products: list[str] = []
     store = market_data_store_for(state)
+    term_structure_contracts = _term_structure_concrete_contracts(state, ctx)
+
+    def outside_window(product: Any) -> bool:
+        # Same reasoning as _check_market_data_coverage.outside_window: a
+        # term-structure concrete contract's presence in the load plan already
+        # means the term structure table says it should have data in this run
+        # window, so an empty query result here is a real data gap, not a
+        # legitimate "not listed yet / already delisted" exclusion.
+        if product in term_structure_contracts:
+            return False
+        return _product_outside_run_window(product, start_dt, end_dt)
+
     for plan_item in store.load_plan:
         product, freq, source = _unpack_market_data_load_plan_item(plan_item)
         try:
@@ -774,7 +822,7 @@ def _load_raw_market_data(state, ctx) -> None:
                     source=source,
                 )
             except (ValueError, KeyError):
-                if _product_outside_run_window(product, start_dt, end_dt):
+                if outside_window(product):
                     excluded: list[Any] = list(store.excluded_out_of_range)
                     excluded.append(product)
                     store.excluded_out_of_range = tuple(_dedupe_products(excluded))
@@ -782,7 +830,7 @@ def _load_raw_market_data(state, ctx) -> None:
                     missing_products.append(str(getattr(product, "name", product)))
                 continue
         if df.empty or DataColumn.CLOSE.name not in df.columns:
-            if _product_outside_run_window(product, start_dt, end_dt):
+            if outside_window(product):
                 excluded = list(store.excluded_out_of_range)
                 excluded.append(product)
                 store.excluded_out_of_range = tuple(_dedupe_products(excluded))
