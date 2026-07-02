@@ -23,6 +23,7 @@ from tools.cli.state import load_state, save_state
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
+SELECTOR_HELP_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []}
 IC_TEST_KEY = "ic_test"
 
 
@@ -53,7 +54,7 @@ def ic_test(ctx: click.Context, run: bool, verbose: bool) -> None:
     _print_ic_welcome(state)
 
 
-@ic_test.command("local-settings", context_settings=SELECTOR_CONTEXT)
+@ic_test.command("local-settings", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
 def local_settings(ctx: click.Context) -> None:
@@ -76,7 +77,7 @@ def local_settings(ctx: click.Context) -> None:
     _print_ic_welcome(state)
 
 
-@ic_test.command("config", context_settings=SELECTOR_CONTEXT)
+@ic_test.command("config", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
 def config(ctx: click.Context) -> None:

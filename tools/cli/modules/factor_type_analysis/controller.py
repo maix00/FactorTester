@@ -16,6 +16,7 @@ from tools.cli.state import load_state, save_state
 
 FACTOR_TYPE_ANALYSIS_KEY = "factor_type_analysis"
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
+SELECTOR_HELP_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []}
 
 
 @click.group("factor_type_analysis", invoke_without_command=True, context_settings=SELECTOR_CONTEXT)
@@ -37,7 +38,7 @@ def factor_type_analysis(ctx: click.Context) -> None:
         _print_welcome(state)
 
 
-@factor_type_analysis.command("local-settings", context_settings=SELECTOR_CONTEXT)
+@factor_type_analysis.command("local-settings", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
 def local_settings(ctx: click.Context) -> None:

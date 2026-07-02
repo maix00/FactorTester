@@ -1732,6 +1732,11 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert result.exit_code == 0
         assert "IC 测试" in result.output
 
+        result = runner.invoke(cli, ["ic_test", "local-settings", "--help"])
+        assert result.exit_code == 0
+        assert "IC 设置上下文" in result.output
+        assert "--ic-correlation" in result.output
+
         result = runner.invoke(cli, ["ic_test", "local-settings", "--ic-correlation", "both", "--ic-lag", "1"])
         assert result.exit_code == 0
         assert "已更新 IC local-settings" in result.output
