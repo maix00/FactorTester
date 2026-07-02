@@ -293,7 +293,8 @@ def build_membership_payload(
     """(T, G, N) membership + (T, G) signal_updates from precomputed signals.
 
     Replicates ``_group_quantile_membership``'s bucketing math exactly (rank
-    ascending, ``bucket_size = n/n_groups``, ``round`` boundaries) so the
+    descending -- group_index=0 is the highest-factor-value bucket,
+    ``bucket_size = n/n_groups``, ``round`` boundaries) so the
     membership a framework consumes is generated from the same FactorExpr
     result as native — ADR-024's equivalence requirement.
 
@@ -344,7 +345,9 @@ def build_membership_payload(
             }
             if not values:
                 continue
-            ranked = sorted(values.items(), key=lambda kv: kv[1])
+            # Descending, matching GroupMembershipModule._group_quantile_membership:
+            # group_index=0 ("第1组") is the highest-factor-value bucket.
+            ranked = sorted(values.items(), key=lambda kv: kv[1], reverse=True)
             bucket_size = len(ranked) / split_count
             start = round(group_index * bucket_size)
             end = round((group_index + 1) * bucket_size)

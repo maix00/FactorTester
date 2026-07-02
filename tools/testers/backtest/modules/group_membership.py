@@ -181,7 +181,10 @@ def _group_quantile_membership(state, ctx) -> None:
         if not signal_value or n_groups <= 0:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, {})
             continue
-        ranked = sorted(signal_value.items(), key=lambda kv: kv[1])
+        # Descending: group_index=0 ("第1组") is the highest-factor-value
+        # bucket, group_index=n_groups-1 is the lowest -- the highest factor
+        # value belongs in the first group.
+        ranked = sorted(signal_value.items(), key=lambda kv: kv[1], reverse=True)
         bucket_size = len(ranked) / n_groups
         start = round(group_index * bucket_size)
         end = round((group_index + 1) * bucket_size)

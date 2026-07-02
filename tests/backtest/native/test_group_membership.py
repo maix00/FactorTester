@@ -25,7 +25,9 @@ def _product() -> Product:
     return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
 
 
-def test_group_quantile_membership_selects_lowest_bucket():
+def test_group_quantile_membership_selects_highest_bucket_first():
+    """group_index=0 ("第1组") is the highest-factor-value bucket -- the
+    highest factor value belongs in the first group."""
     s = Strategy(alias="S")
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}  # ranked: p0 < p1 < p2 < p3
@@ -38,8 +40,8 @@ def test_group_quantile_membership_selects_lowest_bucket():
 
     _group_quantile_membership(account, ctx)
     weights = ctx.get_for(GroupMembershipModule.target_weights, s)
-    assert set(weights) == {products[0], products[1]}
-    assert weights[products[0]] == pytest.approx(0.5)
+    assert set(weights) == {products[2], products[3]}
+    assert weights[products[2]] == pytest.approx(0.5)
     assert sum(weights.values()) == pytest.approx(1.0)
 
 
@@ -67,7 +69,8 @@ def test_group_quantile_membership_applies_product_mask_after_full_bucket_select
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.split_count: 2,
         GroupMembershipModule.group_index: 0,
-        GroupMembershipModule.product_mask_names: tuple(p.name for p in products[1:]),
+        # highest bucket is {products[2], products[3]}; mask excludes products[3]
+        GroupMembershipModule.product_mask_names: tuple(p.name for p in products[:3]),
     })
     account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -77,10 +80,10 @@ def test_group_quantile_membership_applies_product_mask_after_full_bucket_select
     _group_quantile_membership(account, ctx)
 
     weights = ctx.get_for(GroupMembershipModule.target_weights, s)
-    assert weights == {products[1]: pytest.approx(1.0)}
+    assert weights == {products[2]: pytest.approx(1.0)}
 
 
-def test_group_quantile_membership_selects_highest_bucket():
+def test_group_quantile_membership_selects_lowest_bucket_last():
     s = Strategy(alias="S")
     products = [_product() for _ in range(4)]
     signal_value = {p: float(i) for i, p in enumerate(products)}
@@ -93,7 +96,7 @@ def test_group_quantile_membership_selects_highest_bucket():
 
     _group_quantile_membership(account, ctx)
     weights = ctx.get_for(GroupMembershipModule.target_weights, s)
-    assert set(weights) == {products[2], products[3]}
+    assert set(weights) == {products[0], products[1]}
 
 
 def test_resolve_execution_timestamp_rejects_same_bar_execution():
@@ -306,7 +309,7 @@ def test_buy_and_hold_freezes_target_weights_after_first_computation():
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
     _group_quantile_membership(account, ctx1)
     first_weights = ctx1.get_for(GroupMembershipModule.target_weights, s)
-    assert set(first_weights) == {products[0], products[1]}
+    assert set(first_weights) == {products[2], products[3]}
 
     # signal completely reverses ranking -- under rebalance_to_target this
     # would select the opposite bucket; buy_and_hold must ignore it
@@ -336,7 +339,7 @@ def test_rebalance_to_target_recomputes_every_time():
     _group_quantile_membership(account, ctx2)
     second_weights = ctx2.get_for(GroupMembershipModule.target_weights, s)
     assert second_weights != first_weights
-    assert set(second_weights) == {products[2], products[3]}
+    assert set(second_weights) == {products[0], products[1]}
 
 
 def test_membership_change_trigger_skips_recompute_when_bucket_unchanged():
@@ -374,13 +377,13 @@ def test_membership_change_trigger_recomputes_when_bucket_actually_changes():
     ctx1.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
     _group_quantile_membership(account, ctx1)
     first_weights = ctx1.get_for(GroupMembershipModule.target_weights, s)
-    assert set(first_weights) == {products[0], products[1]}
+    assert set(first_weights) == {products[2], products[3]}
 
     ctx2 = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx2.set_for(FactorSignalModule.signal_value, s, {p: float(len(products) - i) for i, p in enumerate(products)})
     _group_quantile_membership(account, ctx2)
     second_weights = ctx2.get_for(GroupMembershipModule.target_weights, s)
-    assert set(second_weights) == {products[2], products[3]}
+    assert set(second_weights) == {products[0], products[1]}
     assert second_weights != first_weights
 
 
@@ -481,7 +484,7 @@ def test_target_trace_records_fresh_computation():
 
     trace = target_trace_for(account, s)
     assert t.isoformat() in trace
-    assert trace[t.isoformat()] == {str(products[0]): 0.5, str(products[1]): 0.5}
+    assert trace[t.isoformat()] == {str(products[2]): 0.5, str(products[3]): 0.5}
 
 
 def test_target_trace_not_recorded_when_membership_change_skips_recompute():
