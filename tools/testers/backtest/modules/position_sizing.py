@@ -82,7 +82,14 @@ def _round_to_lot_sizes(state, ctx, base_compute) -> None:
 def _round_one(quantity: float, lot_size: float | None, policy: str) -> float:
     if not lot_size:
         return quantity
-    lots = abs(quantity) / lot_size
+    # +1e-12 guards against floating-point representation landing just under
+    # a whole lot (e.g. 239.99999999999997 should floor to 240, not 239) --
+    # the same epsilon convention runners/common.py's target_quantities and
+    # capacity_limited_deltas already use; without it, real price data can
+    # floor down one whole lot short at an exact-lot boundary (surfaced by
+    # test_framework_consistency_real_data.py diverging from the worker path
+    # by exactly one lot).
+    lots = abs(quantity) / lot_size + 1e-12
     rounded_lots = math.floor(lots) if policy == "floor_to_lot" else round(lots)
     sign = 1.0 if quantity > 0 else (-1.0 if quantity < 0 else 0.0)
     return sign * rounded_lots * lot_size
