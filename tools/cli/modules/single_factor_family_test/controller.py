@@ -11,6 +11,8 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines, print_location_welcome, print_single_factor_family_welcome
 from tools.cli.core.errors import friendly_errors
 from tools.cli.modules.backtest import BACKTEST_PUBLIC_KEY, enter_backtest_state
+from tools.cli.modules.factor_evaluation.controller import FACTOR_EVALUATION_KEY, enter_factor_evaluation_state
+from tools.cli.modules.factor_type_analysis.controller import FACTOR_TYPE_ANALYSIS_KEY, enter_factor_type_analysis_state
 from tools.cli.modules.ic_test.controller import IC_TEST_KEY, enter_ic_test_state
 from tools.cli.state import SINGLE_FACTOR_BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 
@@ -104,6 +106,12 @@ def enter_child(state, key: str) -> None:
         return
     if key == IC_TEST_KEY:
         enter_ic_test_state(state)
+        return
+    if key == FACTOR_EVALUATION_KEY:
+        enter_factor_evaluation_state(state)
+        return
+    if key == FACTOR_TYPE_ANALYSIS_KEY:
+        enter_factor_type_analysis_state(state)
         return
     ensure_child_available(state.current_parent, key)
     state.enter(key)

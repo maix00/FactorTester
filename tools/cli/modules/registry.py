@@ -14,6 +14,8 @@ import click
 
 from tools.cli.modules.backtest import backtest, group, local_settings, long_short
 from tools.cli.modules.custom_factors import custom_factors
+from tools.cli.modules.factor_evaluation import factor_evaluation
+from tools.cli.modules.factor_type_analysis import factor_type_analysis
 from tools.cli.modules.ic_test import ic_test
 from tools.cli.modules.products import products
 from tools.cli.modules.single_factor_family_test import enter_single_factor_family_test, enter_single_factor_test
@@ -43,6 +45,16 @@ class ControllerRegistry:
                 public_key="ic_test",
                 backend_key="ic_test",
                 commands=(ic_test,),
+            ),
+            ControllerAdapter(
+                public_key="factor_evaluation",
+                backend_key="factor_evaluation",
+                commands=(factor_evaluation,),
+            ),
+            ControllerAdapter(
+                public_key="factor_type_analysis",
+                backend_key="factor_type_analysis",
+                commands=(factor_type_analysis,),
             ),
             ControllerAdapter(
                 public_key="products",

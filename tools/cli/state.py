@@ -28,6 +28,8 @@ class CliState:
     backtest_ls_configs: list[dict[str, Any]] = field(default_factory=list)
     ic_test_local_settings: dict[str, Any] = field(default_factory=dict)
     ic_test_configs: list[dict[str, Any]] = field(default_factory=list)
+    factor_evaluation_local_settings: dict[str, Any] = field(default_factory=dict)
+    factor_type_analysis_local_settings: dict[str, Any] = field(default_factory=dict)
 
     @property
     def location_label(self) -> str:
@@ -82,6 +84,8 @@ def load_state(path: Path | None = None) -> CliState:
         backtest_ls_configs=list(raw.get("backtest_ls_configs") or []),
         ic_test_local_settings=dict(raw.get("ic_test_local_settings") or {}),
         ic_test_configs=list(raw.get("ic_test_configs") or []),
+        factor_evaluation_local_settings=dict(raw.get("factor_evaluation_local_settings") or {}),
+        factor_type_analysis_local_settings=dict(raw.get("factor_type_analysis_local_settings") or {}),
     )
     load_backtest_space_into_legacy_fields(state, state.active_backtest_space)
     return state

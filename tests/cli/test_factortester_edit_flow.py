@@ -1767,6 +1767,134 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert (received_payloads[-1]["settings"])["ic_correlation"] == "both"
 
 
+def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+    app.secret_key = "test-secret"
+    received: dict[str, dict[str, object]] = {}
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-analysis-1")
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[
+                {"key": "factor_evaluation", "label": "因子评估", "kind": "module", "has_children": True},
+                {"key": "factor_type_analysis", "label": "因子类型分析", "kind": "module", "has_children": True},
+            ])
+        return jsonify(success=True, modules=[
+            {"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True},
+        ])
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        defaults = {
+            "product_path_candidates": {
+                "value": [],
+                "label": "产品路径候选",
+                "control_template": "custom",
+                "tab_key": "product",
+                "serialization": {"shared_page_field": "product_path_candidates"},
+            },
+            "factor_candidates": {
+                "value": [],
+                "label": "因子候选",
+                "control_template": "custom",
+                "tab_key": "factor",
+                "serialization": {"shared_page_field": "factor_candidates"},
+            },
+            "start_date": {"value": "", "label": "开始日期", "control_template": "date", "tab_key": "time"},
+            "end_date": {"value": "", "label": "结束日期", "control_template": "date", "tab_key": "time"},
+        }
+        if application == "factor_type_analysis":
+            defaults["correlation_method"] = {
+                "value": "pearson",
+                "label": "相关性方法",
+                "control_template": "select",
+                "tab_key": "method",
+                "options": [
+                    {"value": "pearson", "label": "Pearson"},
+                    {"value": "spearman", "label": "Spearman"},
+                ],
+            }
+        if application in {"single_factor_page", "factor_evaluation", "factor_type_analysis"}:
+            return jsonify(success=True, application=application, defaults=defaults)
+        return jsonify(success=False, error="unknown application"), 404
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{
+            "id": "pg-day",
+            "name": "中国期货日盘",
+            "paths": ["Product/Futures/CNFutures/日盘/_products/AP.CZC"],
+        }])
+
+    @app.post("/api/factor_evaluation/evaluate")
+    def factor_evaluation_endpoint():
+        payload = request.get_json() or {}
+        received["factor_evaluation"] = payload
+        return jsonify(success=True, factor={"alias": payload.get("factor_alias")}, meta={"product_count": 1, "elapsed_ms": 12}, series=[
+            {"product": "AP.CZC", "desc": "苹果", "dates": [1, 2], "values": [0.1, 0.2]},
+        ])
+
+    @app.post("/api/factor_type_analysis/analyze")
+    def factor_type_endpoint():
+        payload = request.get_json() or {}
+        received["factor_type_analysis"] = payload
+        return jsonify(success=True, best_match={"category_label": "趋势", "correlation": 0.81}, reference_factors=[
+            {"key": "trend", "name": "趋势参照", "correlation": 0.81},
+        ])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"]).exit_code == 0
+
+        result = runner.invoke(cli, [
+            "factor_evaluation",
+            "run",
+            "--factor-family",
+            "SgCCS",
+            "--product-group",
+            "中国期货日盘",
+            "--factor",
+            "--alias",
+            "SgCCS|N:2m",
+        ])
+        assert result.exit_code == 0
+        assert "开始因子评估" in result.output
+        assert "AP.CZC(苹果) points=2" in result.output
+        assert received["factor_evaluation"]["page_uuid"] == "page-analysis-1"
+        assert received["factor_evaluation"]["paths"] == ["Product/Futures/CNFutures/日盘/_products/AP.CZC"]
+
+        result = runner.invoke(cli, ["factor_type_analysis", "local-settings", "--correlation-method", "spearman"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, [
+            "factor_type_analysis",
+            "run",
+            "--factor-family",
+            "SgCCS",
+            "--product-group",
+            "中国期货日盘",
+            "--factor",
+            "--alias",
+            "SgCCS|N:2m",
+        ])
+        assert result.exit_code == 0
+        assert "开始因子类型分析" in result.output
+        assert "最佳类型: 趋势" in result.output
+        assert received["factor_type_analysis"]["settings"]["correlation_method"] == "spearman"
+
+
 def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)

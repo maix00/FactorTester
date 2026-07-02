@@ -153,6 +153,12 @@ class FactorTesterClient:
     def run_ic_test_stream(self, payload: dict[str, Any]):
         yield from self.session.stream_post("/run_ic_test_stream", payload)
 
+    def run_factor_evaluation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/api/factor_evaluation/evaluate", payload))
+
+    def run_factor_type_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/api/factor_type_analysis/analyze", payload))
+
     def list_single_factor_setting_templates(self, factor_family: str) -> list[dict[str, Any]]:
         data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}"))
         templates = data.get("templates")

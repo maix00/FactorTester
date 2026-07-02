@@ -94,6 +94,16 @@ def print_location_welcome(state: CliState) -> None:
 
         print_ic_welcome(state)
         return
+    if state.current_parent == "factor_evaluation":
+        from tools.cli.modules.factor_evaluation.controller import print_factor_evaluation_welcome
+
+        print_factor_evaluation_welcome(state)
+        return
+    if state.current_parent == "factor_type_analysis":
+        from tools.cli.modules.factor_type_analysis.controller import print_factor_type_analysis_welcome
+
+        print_factor_type_analysis_welcome(state)
+        return
     click.echo(f"已进入: {state.location_label}")
     click.echo("下一步: factortester <module> list 或 factortester <module> --help 查看下一层。")
 

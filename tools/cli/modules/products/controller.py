@@ -81,7 +81,7 @@ def product_group_line(group: dict[str, Any]) -> str:
 
 def product_group_selection(group: dict[str, Any]) -> dict[str, Any]:
     group_id = str(group.get("id") or group.get("product_path_selection_id") or group.get("name") or "")
-    return {
+    selection = {
         "product_path_selection_id": group_id,
         "id": group_id,
         "label": group.get("name") or group.get("label") or group_id,
@@ -89,3 +89,8 @@ def product_group_selection(group: dict[str, Any]) -> dict[str, Any]:
         "product_group_template_id": group_id,
         "source_type": "user_product_group_template",
     }
+    paths = group.get("paths") or group.get("selected_paths")
+    if isinstance(paths, list):
+        selection["paths"] = list(paths)
+        selection["selected_paths"] = list(paths)
+    return selection
