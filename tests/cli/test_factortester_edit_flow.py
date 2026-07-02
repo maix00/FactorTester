@@ -13,6 +13,7 @@ from werkzeug.serving import make_server
 
 from tools.cli.app import _backtest_errors, cli
 from tools.cli.http import HttpClientError
+import tools.cli.modules.backtest.run_output as run_output
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.registry import ControllerRegistry
@@ -1290,12 +1291,7 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
         result = runner.invoke(cli, ["backtest", "--run", "--verbose"])
 
     assert result.exit_code == 0
-    assert "流程图:" in result.output
-    assert "准备: 加载行情" in result.output
-    assert "信号产单: 合成目标" in result.output
-    assert "通知产单: 换月通知" in result.output
-    assert "订单处理: 成交记账" in result.output
-    assert "整理: 计算风险指标" in result.output
+    assert "流程图:" not in result.output
     assert "总进度:" in result.output
     assert "准备: [################] 100.0%" in result.output
     assert "事件回放: [####------------]  25.0%" in result.output
@@ -1314,8 +1310,14 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "A1" in result.output
     assert "LS A1/A5 LS" in result.output
     assert "结果摘要:" in result.output
-    assert "A1: final=100500000.00 points=4" in result.output
-    assert "LS A1/A5 · LS: final=100300000.00 points=3" in result.output
+    summary_lines = [line for line in result.output.splitlines() if "final=" in line and "points=" in line]
+    assert len(summary_lines) == 2
+    assert len({line.index("final=") for line in summary_lines}) == 1
+    assert len({line.index("points=") for line in summary_lines}) == 1
+    assert "A1" in summary_lines[0]
+    assert "final=100500000.00  points=4" in summary_lines[0]
+    assert "LS A1/A5 · LS" in summary_lines[1]
+    assert "final=100300000.00  points=3" in summary_lines[1]
     assert "回测完成" in result.output
 
 
@@ -1360,6 +1362,30 @@ def test_backtest_tty_status_keeps_pre_and_post_current_flow() -> None:
     assert "当前: 回放准备 · 1/1 解析运行时间窗口" in raw
     assert "当前: 结果整理 · 1/1 计算风险指标" in raw
     assert "\n\n\n" not in raw
+
+
+def test_backtest_verbose_event_activity_is_throttled(monkeypatch) -> None:
+    timestamps = iter([0.0, 0.5, 2.2])
+    monkeypatch.setattr(run_output.time, "monotonic", lambda: next(timestamps))
+    renderer = BacktestRunRenderer(verbose=True)
+    stream = io.StringIO()
+
+    with contextlib.redirect_stdout(stream):
+        for minute in ("09:01:00", "09:02:00", "09:03:00"):
+            renderer.handle("activity", {
+                "phase": "event_replay",
+                "phase_label": "事件回放",
+                "flow_key": "signal.target",
+                "flow_label": "合成目标",
+                "timestamp": f"2026-01-02 {minute}",
+            })
+
+    raw = stream.getvalue()
+    assert raw.count("当前: 事件回放") == 2
+    assert raw.count("[activity] phase=event_replay") == 2
+    assert "2026-01-02 09:01:00" in raw
+    assert "2026-01-02 09:02:00" not in raw
+    assert "2026-01-02 09:03:00" in raw
 
 
 def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_path, monkeypatch) -> None:

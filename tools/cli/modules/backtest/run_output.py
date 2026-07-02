@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import time
 from typing import Any
 
 import click
@@ -33,6 +34,8 @@ class BacktestRunRenderer:
         self._latest_chart_lines: list[str] = []
         self._status_height = 0
         self._done = False
+        self._last_event_activity_log_at: float | None = None
+        self._event_activity_log_interval = 2.0
 
     def handle(self, event_name: str, data: Any) -> None:
         if self._done and event_name not in {"complete", "done"}:
@@ -71,7 +74,7 @@ class BacktestRunRenderer:
             return
         series = _result_series(groups)
         if series:
-            chart_lines = ["净值曲线:", *_multi_series_chart(series)]
+            chart_lines = ["净值曲线:", *_multi_series_chart(series, width=_chart_body_width())]
             self._latest_chart_lines = chart_lines
             if self.live:
                 self._print_live_chart(chart_lines)
@@ -79,11 +82,20 @@ class BacktestRunRenderer:
                 for line in chart_lines:
                     self._echo(line)
         self._echo("结果摘要:")
-        for name, curve, is_ls in series:
-            final_value = curve[-1]
-            spark = _sparkline(curve)
-            suffix = " · LS" if is_ls else ""
-            self._echo(f"  {name}{suffix}: final={final_value:.2f} points={len(curve)} {spark}")
+        summary_rows = [
+            (f"{name} · LS" if is_ls else name, curve[-1], len(curve), _sparkline(curve))
+            for name, curve, is_ls in series
+        ]
+        name_width = max((len(row[0]) for row in summary_rows), default=0)
+        final_width = max((len(f"{row[1]:.2f}") for row in summary_rows), default=0)
+        points_width = max((len(str(row[2])) for row in summary_rows), default=0)
+        for display_name, final_value, point_count, spark in summary_rows:
+            self._echo(
+                f"  {display_name:<{name_width}}  "
+                f"final={final_value:>{final_width}.2f}  "
+                f"points={point_count:>{points_width}}  "
+                f"{spark}"
+            )
 
     def _print_manifest(self, data: Any) -> None:
         if self._manifest_printed:
@@ -91,7 +103,6 @@ class BacktestRunRenderer:
         phases = _extract_phases(data)
         if not phases:
             return
-        self._echo("流程图:")
         for phase in phases:
             key = str(phase.get("key") or phase.get("phase") or "")
             label = str(phase.get("label") or key)
@@ -101,14 +112,6 @@ class BacktestRunRenderer:
                 self._phase_labels[key] = label
                 self._phase_flows[key] = flows
                 self._phase_progress.setdefault(key, 0.0)
-            if key == EVENT_PHASE:
-                self._echo(f"  {label}:")
-                for branch_label, branch_flows in _event_branches(flows):
-                    names = [_flow_label(flow) for flow in branch_flows]
-                    self._echo(f"    {branch_label}: " + (" -> ".join(names) if names else "（空）"))
-            else:
-                names = [_flow_label(flow) for flow in flows]
-                self._echo(f"  {label}: " + (" -> ".join(names) if names else "（空）"))
         self._print_phase_bars(force=True)
         self._manifest_printed = True
 
@@ -128,6 +131,9 @@ class BacktestRunRenderer:
         phase = str(data.get("phase") or "")
         if phase == EVENT_PHASE and not self.verbose and not _is_tty():
             return
+        should_log_activity = True
+        if phase == EVENT_PHASE and not _is_tty():
+            should_log_activity = self._should_log_event_activity()
         if phase and phase != self._current_phase:
             self._current_phase = phase
             phase_label = data.get("phase_label") or phase
@@ -146,10 +152,11 @@ class BacktestRunRenderer:
                 activity_text = f"当前: {phase_prefix}{prefix}{label}".rstrip()
             if self.verbose and data.get("flow_key"):
                 activity_text = f"{activity_text} · {data.get('flow_key')}"
-            self._update_activity_line(activity_text)
+            if should_log_activity:
+                self._update_activity_line(activity_text)
         if self.verbose:
             flow_key = data.get("flow_key") or ""
-            if not _is_tty():
+            if not _is_tty() and should_log_activity:
                 self._echo(f"[activity] phase={phase} flow={flow_key}")
 
     def _print_progress(self, data: Any) -> None:
@@ -260,6 +267,16 @@ class BacktestRunRenderer:
         self._last_log_progress_bucket[key] = bucket
         return True
 
+    def _should_log_event_activity(self) -> bool:
+        now = time.monotonic()
+        if self._last_event_activity_log_at is None:
+            self._last_event_activity_log_at = now
+            return True
+        if now - self._last_event_activity_log_at < self._event_activity_log_interval:
+            return False
+        self._last_event_activity_log_at = now
+        return True
+
     def _echo(self, message: str) -> None:
         if _is_tty() and self._status_height:
             self._clear_status_region(for_redraw=False)
@@ -335,21 +352,6 @@ def _flow_label(flow: dict[str, Any]) -> str:
     return str(flow.get("flow_label") or flow.get("flow_name") or flow.get("flow_key") or "")
 
 
-def _event_branches(flows: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
-    signal: list[dict[str, Any]] = []
-    notice: list[dict[str, Any]] = []
-    order: list[dict[str, Any]] = []
-    for flow in flows:
-        kind = str(flow.get("event_kind") or "").upper()
-        if kind == "ORDER":
-            order.append(flow)
-        elif kind == "ORDER_NOTICE":
-            notice.append(flow)
-        else:
-            signal.append(flow)
-    return [("信号产单", signal), ("通知产单", notice), ("订单处理", order)]
-
-
 def _progress_percent(data: dict[str, Any]) -> float | None:
     value = data.get("percent")
     if value is not None:
@@ -400,48 +402,21 @@ def _result_series(groups: list[Any]) -> list[tuple[str, list[float], bool]]:
 def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: int = 48, height: int = 10) -> list[str]:
     if not series:
         return []
-    symbols = ["●", "◆", "▲", "■", "◇", "○", "△", "□", "×", "+"]
-    colors = ["cyan", "magenta", "green", "yellow", "blue", "red", "bright_cyan", "bright_magenta", "bright_green", "bright_yellow"]
-    sampled = [(name, _downsample(curve, width), is_ls) for name, curve, is_ls in series if curve]
-    values = [value for _, curve, _ in sampled for value in curve]
-    if not values:
+    symbols = list("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    rows = [(f"{name} LS" if is_ls else name, curve[-1], curve) for name, curve, is_ls in series if curve]
+    if not rows:
         return []
-    lo = min(values)
-    hi = max(values)
-    if hi <= lo:
-        hi = lo + 1.0
-    grid: list[list[tuple[str, str] | None]] = [[None for _ in range(width)] for _ in range(height)]
-    for series_index, (_name, curve, _is_ls) in enumerate(sampled):
-        symbol = symbols[series_index % len(symbols)]
-        color = colors[series_index % len(colors)]
-        for col, value in enumerate(curve[:width]):
-            row = int(round((hi - value) / (hi - lo) * (height - 1)))
-            row = max(0, min(height - 1, row))
-            grid[row][col] = ("*", "white") if grid[row][col] is not None else (symbol, color)
-    lines: list[str] = []
-    for row_index, row in enumerate(grid):
-        if row_index == 0:
-            label = f"{hi:>12.2f} ┤"
-        elif row_index == height - 1:
-            label = f"{lo:>12.2f} ┤"
-        else:
-            label = " " * 12 + " │"
-        body = "".join(_colored(cell) if cell is not None else " " for cell in row)
-        lines.append(label + body)
-    lines.append(" " * 13 + "└" + "─" * width)
-    legend_parts = []
-    for index, (name, _curve, is_ls) in enumerate(sampled):
+    max_name_width = 24
+    name_width = min(max_name_width, max(len(row[0]) for row in rows))
+    final_width = max(len(f"{row[1]:.2f}") for row in rows)
+    spark_width = max(12, min(width, _terminal_width() - name_width - final_width - 16))
+    lines = ["图例: 每行一条策略曲线，避免终端字符重叠"]
+    for index, (name, final_value, curve) in enumerate(rows):
         symbol = symbols[index % len(symbols)]
-        color = colors[index % len(colors)]
-        suffix = " LS" if is_ls else ""
-        legend_parts.append(f"{_colored((symbol, color))} {name}{suffix}")
-    lines.append("图例: " + "  ".join(legend_parts))
+        display_name = _truncate(name, name_width)
+        spark = _sparkline(curve, width=spark_width)
+        lines.append(f"  {symbol} {display_name:<{name_width}}  {spark}  末值 {final_value:>{final_width}.2f}")
     return lines
-
-
-def _colored(cell: tuple[str, str]) -> str:
-    symbol, color = cell
-    return click.style(symbol, fg=color)
 
 
 def _is_tty() -> bool:
@@ -450,6 +425,18 @@ def _is_tty() -> bool:
 
 def _terminal_width() -> int:
     return max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
+
+
+def _chart_body_width() -> int:
+    return max(24, min(80, _terminal_width() - 16))
+
+
+def _truncate(value: str, width: int) -> str:
+    if len(value) <= width:
+        return value
+    if width <= 1:
+        return value[:width]
+    return value[: width - 1] + "…"
 
 
 def _write_tty_line(text: str) -> None:
