@@ -14,5 +14,4 @@ factortester = "tools.cli.app:cli"
 
 [tool.setuptools]
 package-dir = {"" = "../.."}
-packages = ["tools.cli"]
-
+packages = ["tools.cli", "tools.cli.commands", "tools.cli.core", "tools.cli.modules"]
