@@ -221,6 +221,61 @@ def test_membership_reuses_ranking_across_dialects_sharing_the_same_signal_table
     assert sort_calls == 2
 
 
+def test_membership_reuses_raw_bucket_for_dialects_sharing_split_and_index(monkeypatch):
+    """Two dialects sharing (table, split_count, group_index) get the exact
+    same raw pre-resolver bucket selection -- this must be computed once per
+    (table, row, split_count, group_index), not once per dialect, mirroring
+    GroupMembershipModule's parent/derived-group bucket reuse."""
+    import tools.testers.backtest.engines.workers.translator as translator_module
+
+    round_calls = 0
+    real_round = round
+
+    def _counting_round(*args, **kwargs):
+        nonlocal round_calls
+        round_calls += 1
+        return real_round(*args, **kwargs)
+
+    monkeypatch.setattr(translator_module, "round", _counting_round, raising=False)
+
+    run_state = BacktestRunState()
+    strategy_a, config_a = _config(
+        "gA", split_count=2, group_index=0,
+        position_policy="rebalance_to_target", rebalance_trigger="on_factor_signal",
+        allocation_policy="equal_notional",
+        fee_mode="zero", margin_mode="none",
+        initial_capital_major=100_000.0,
+    )
+    strategy_b, config_b = _config(
+        "gB", split_count=2, group_index=0,
+        position_policy="rebalance_to_target", rebalance_trigger="on_factor_signal",
+        allocation_policy="equal_notional",
+        fee_mode="zero", margin_mode="none",
+        initial_capital_major=100_000.0,
+    )
+    run_state.strategy_configs = {strategy_a: config_a, strategy_b: config_b}
+    idx = pd.DatetimeIndex([pd.Timestamp("2026-01-05 15:00")])
+    run_state.market_data_store.current_prices_table = pd.DataFrame(
+        {"A": [10.0], "B": [20.0], "C": [15.0]}, index=idx,
+    )
+    signals = pd.DataFrame({"A": [1.0], "B": [2.0], "C": [3.0]}, index=idx)
+    run_state.factor_signal_store.put_precomputed_table("k", signals)
+    run_state.factor_signal_store.bind_precomputed_table(strategy_a, "k")
+    run_state.factor_signal_store.bind_precomputed_table(strategy_b, "k")
+
+    dialects = [
+        {"strategy_id": "gA", "membership_index": 0, "split_count": 2, "group_index": 0,
+         "rebalance_trigger": "on_factor_signal"},
+        {"strategy_id": "gB", "membership_index": 1, "split_count": 2, "group_index": 0,
+         "rebalance_trigger": "on_factor_signal"},
+    ]
+    build_membership_payload(run_state, dialects, idx)
+
+    # 2 round() calls (start, end) for one bucket computation; a second
+    # dialect sharing (table, row, split_count, group_index) must not add more.
+    assert round_calls == 2
+
+
 def test_market_payload_serializes_prices_and_default_rules():
     run_state, _ = _run_state_with_market_data()
     payload = translate_market_payload(run_state)

@@ -338,6 +338,13 @@ def build_membership_payload(
     # GroupMembershipModule._group_quantile_membership.
     table_prep_cache: dict[int, tuple[Any, list[int | None]]] = {}
     rank_cache: dict[tuple[int, int], list[tuple[int, float]]] = {}
+    # A dialect sharing (table, row, split_count, group_index) with another
+    # gets the identical raw bucket slice before term-structure resolution
+    # (resolver differs per strategy -- each can have its own rollover
+    # policy -- so this only caches the pre-resolver selection, matching
+    # native's split between the shared raw bucket and per-strategy
+    # product_mask_names application).
+    bucket_cache: dict[tuple[int, int, int, int], list[tuple[int, float]]] = {}
     for g_index, dialect in enumerate(strategy_dialects):
         if str(dialect.get("strategy_kind") or "group") == "long_short":
             continue  # composes source-group memberships; no bucket of its own
@@ -380,10 +387,14 @@ def build_membership_payload(
                 rank_cache[rank_key] = ranked
             if not ranked:
                 continue
-            bucket_size = len(ranked) / split_count
-            start = round(group_index * bucket_size)
-            end = round((group_index + 1) * bucket_size)
-            selected = ranked[start:end]
+            bucket_key = (table_id, row, split_count, group_index)
+            selected = bucket_cache.get(bucket_key)
+            if selected is None:
+                bucket_size = len(ranked) / split_count
+                start = round(group_index * bucket_size)
+                end = round((group_index + 1) * bucket_size)
+                selected = ranked[start:end]
+                bucket_cache[bucket_key] = selected
             members: set[int] = set()
             for n_index, _value in selected:
                 target_idx = n_index
