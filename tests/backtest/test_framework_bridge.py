@@ -24,6 +24,7 @@ from tools.testers.backtest.modules.group_membership import GroupMembershipModul
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.liquidity import LiquidityModule
 from tools.testers.backtest.modules.margin import MarginModule
+from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.slippage import SlippageModule
 
 
@@ -46,6 +47,7 @@ def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
         "slippage_mode": SlippageModule.slippage_mode,
         "slippage_bps": SlippageModule.slippage_bps,
         "initial_capital_major": LedgerModule.initial_capital_major,
+        "use_minor_units": MinorUnitModule.use_minor_units,
     }
     values = {refs[name]: value for name, value in field_values.items()}
     return strategy, StrategyConfig(strategy=strategy, field_values=values)
@@ -105,6 +107,29 @@ def test_translate_copies_long_short_wiring_from_raw_settings():
     assert out["strategy_kind"] == "long_short"
     assert out["long_indices"] == [0]
     assert out["short_indices"] == [1]
+
+
+def test_translate_records_minor_unit_fallback_when_requested(monkeypatch):
+    # StrategyConfig here is built directly (bypassing strategy_config_builder's
+    # default_when resolution), so use_minor_units must be set explicitly --
+    # this asserts the translator's own fallback-recording, not the
+    # engine_mode="basic" default policy (covered by ledger_module tests).
+    _, config = _config("g1", fee_mode="zero", margin_mode="none", use_minor_units=True)
+    out = translate_strategy_config("g1", config, {}, framework="qlib", membership_index=0)
+    assert out["_setting_fallbacks"] == [{
+        "setting_key": "use_minor_units",
+        "module": "minor_unit",
+        "engine": "qlib",
+        "requested_value": True,
+        "applied_value": "engine_native",
+        "reason": "engine_disabled_value",
+    }]
+
+
+def test_translate_records_no_fallback_when_major_units_requested():
+    _, config = _config("g1", fee_mode="zero", margin_mode="none", use_minor_units=False)
+    out = translate_strategy_config("g1", config, {}, framework="qlib", membership_index=0)
+    assert "_setting_fallbacks" not in out
 
 
 # ── market payload + membership ─────────────────────────────────────

@@ -19,6 +19,7 @@ from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
     historical_fields_for_product,
 )
+from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule
@@ -58,7 +59,7 @@ class LedgerModule(ExecutableModule):
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
-                 TradingRuleModule.use_int_position, ProductSelectionModule.products),
+                 TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
@@ -94,13 +95,17 @@ def _initialize_ledgers(state, ctx) -> None:
     for strategy, strategy_config in state.strategy_configs.items():
         initial_capital = strategy_config.get(LedgerModule.initial_capital_major, 0.0)
         base_currency = strategy_config.get(LedgerModule.base_currency, "CNY")
+        # MinorUnitModule.use_minor_units default_when locks this to False
+        # for engine_mode="basic" and True otherwise (auto/custom/exact) --
+        # read the resolved field, don't re-decide the policy here.
+        use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
         ledger = Ledger(strategy=strategy, base_currency=base_currency)
         ledger.set(LedgerModule.cash, DataMoney.from_major(
-            initial_capital, currency=base_currency, use_minor_units=False))
+            initial_capital, currency=base_currency, use_minor_units=use_minor_units))
 
         use_int = _resolve_use_int_position(strategy_config)
         initial_quantity = 0 if use_int else 0.0
-        zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=False)
+        zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=use_minor_units)
 
         positions: dict = {}
         products = _products_for_backtest_window(state, ctx, strategy)

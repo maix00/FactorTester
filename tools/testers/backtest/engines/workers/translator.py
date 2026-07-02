@@ -24,6 +24,7 @@ from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.liquidity import LiquidityModule
 from tools.testers.backtest.modules.margin import MarginModule
+from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.position_sizing import PositionSizingModule
 from tools.testers.backtest.modules.slippage import SlippageModule
@@ -85,10 +86,34 @@ def translate_strategy_config(
     out["fee_rate"] = _translate_fee(alias, config, framework=framework, fallbacks=fallbacks)
     _translate_margin(alias, config, out, framework=framework, fallbacks=fallbacks)
     out.update(_broker_policy_selectors(alias, config, framework=framework))
+    _note_minor_unit_precision(alias, config, framework=framework, fallbacks=fallbacks)
 
     if fallbacks:
         out["_setting_fallbacks"] = fallbacks
     return out
+
+
+def _note_minor_unit_precision(
+    alias: str, config: "StrategyConfig", *, framework: str, fallbacks: list[dict[str, Any]]
+) -> None:
+    """MinorUnitModule.use_minor_units defaults to True for every engine_mode
+    except "basic" (see minor_unit.py's default_when). Worker runners always
+    compute in plain major-unit floats -- there is no integer-minor-unit
+    ledger to route into on the framework side -- so a True value can't be
+    silently honored (ADR-024). This isn't a different algorithm the way
+    fee_mode/margin_mode are, just coarser (cent-level, not float-epsilon)
+    precision, so it's recorded as a fallback rather than rejected outright.
+    """
+    if not bool(config.get(MinorUnitModule.use_minor_units, True)):
+        return
+    fallbacks.append({
+        "setting_key": "use_minor_units",
+        "module": "minor_unit",
+        "engine": framework,
+        "requested_value": True,
+        "applied_value": "engine_native",
+        "reason": "engine_disabled_value",
+    })
 
 
 def _broker_policy_selectors(

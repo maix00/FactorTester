@@ -204,6 +204,31 @@ native 已经修过的同一类顺序漂移，被一致性测试量出来后一�
 `market_data_store_for(state).raw_input`（持久化在 `state` 上，不是 ctx-scoped）
 读取，修好了这个此前一直存在、和本 ADR 无关但被一致性测试量出来的 bug。
 
+### 意外发现并修复：`MinorUnitModule.use_minor_units` 是个没接线的摆设字段
+
+对着真实行情数据（而不是凑巧是整数的合成价格）继续跑一致性测试时，手数计算
+在个别 bar 上出现"native 240 手、worker 239 手"这类整数手边界的分歧。一开始
+用 `+1e-12` epsilon 保护了 `_round_one` 的 floor（worker 侧 `runners/common.py`
+早就有这个保护），但 `_initialize_ledgers` 里 `DataMoney.from_major(...,
+use_minor_units=False)` 是硬编码的——`MinorUnitModule.use_minor_units` 字段
+在前端 manifest 上显示默认 `True`，实际代码从来没读过这个字段，现金/权益
+全程都是 major-unit 浮点数，`use_minor_units` 是个纯摆设。
+
+现在按你的纠正，`use_minor_units` 的 `default_when` 只在 `engine_mode="basic"`
+时锁定 `False`（对齐 `fee_mode`/`margin_mode`/`_resolve_use_int_position` 已有
+的"`basic` 用最简单模型，其余模式用完整语义"这条既有约定），其余
+（auto/custom/exact）默认 `True`，`_initialize_ledgers` 读取这个已解析好的
+字段值，不再硬编码。`initialize_ledgers` Flow 的 `inputs` 也补上了这个字段
+的声明。
+
+Worker 侧没有整数最小货币单位的账本可对接，`translator.py` 新增
+`_note_minor_unit_precision`：`use_minor_units=True` 时记一条
+`_setting_fallbacks`（`reason=engine_disabled_value`，与已有的 fee/margin
+fallback 走同一套记录方式），不是静默忽略，也不是当成"框架不支持就报错"
+（这不是算法差异，只是精度粗细的差异，跟已经容忍的整手边界噪声是同一类
+东西）。`epsilon` 保护本身仍然保留，作为 lot 计算这一步单独的浮点边界防御，
+不因为账本本身更精确了就失去意义。
+
 ## 参考
 
 - ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与
