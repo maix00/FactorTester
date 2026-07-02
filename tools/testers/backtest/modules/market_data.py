@@ -32,6 +32,7 @@ from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
+from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
 from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
@@ -196,9 +197,13 @@ class MarketDataModule(ExecutableModule):
 
     check_market_data_coverage: ClassVar[Flow] = Flow(
         "check_market_data_coverage",
-        inputs=(required_data_source, required_frequency, ProductSelectionModule.products),
+        inputs=(
+            required_data_source, required_frequency, ProductSelectionModule.products,
+            TermStructureExpandModule.expanded_contracts,
+        ),
         outputs=(),
-        phase=Phase.PRE_REPLAY, order=38, after=(resolve_market_data_request,),
+        phase=Phase.PRE_REPLAY, order=38,
+        after=(resolve_market_data_request, TermStructureExpandModule.expand_term_structure),
         description="检查产品覆盖期",
         compute=lambda state, ctx: _check_market_data_coverage(state, ctx),
     )
@@ -639,11 +644,34 @@ def _data_sources_for_bundle(key: str) -> tuple[Any, ...]:
     return data_sources_for_bundle(key)
 
 
+def _tradable_universe_for_strategy(state, ctx, strategy) -> list[Any]:
+    """Abstract products (needed for the pre-rollover tradability check in
+    _tradable_signal_values, which still keys signal_value by the abstract
+    product) UNION each of their expanded concrete contracts (needed once
+    TermStructureExpandModule.resolve_tradable_target_weights rekeys a
+    target to a concrete contract object -- that object needs its own loaded
+    price series, distinct from its parent's continuous one). A product that
+    doesn't support term structure expands to just itself (see
+    _expand_product_contracts' is_identity branch), so this union is a no-op
+    duplicate for the common non-futures case, not a special case to guard."""
+    abstract_products = list(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+    seen = set(abstract_products)
+    universe = list(abstract_products)
+    expanded_by_strategy = ctx.get_for(TermStructureExpandModule.expanded_contracts, strategy, frozenset())
+    for contract in expanded_by_strategy:
+        if contract not in seen:
+            seen.add(contract)
+            universe.append(contract)
+    return universe
+
+
 def _products_from_selection_context(state, ctx) -> list[Any]:
     products: list[Any] = []
+    seen: set[Any] = set()
     for strategy in state.strategy_configs:
-        for product in ctx.get_for(ProductSelectionModule.products, strategy, frozenset()):
-            if product not in products:
+        for product in _tradable_universe_for_strategy(state, ctx, strategy):
+            if product not in seen:
+                seen.add(product)
                 products.append(product)
     return products
 
@@ -651,7 +679,7 @@ def _products_from_selection_context(state, ctx) -> list[Any]:
 def _products_by_strategy_from_selection_context(state, ctx) -> dict[Any, tuple[Any, ...]]:
     result: dict[Any, tuple[Any, ...]] = {}
     for strategy in state.strategy_configs:
-        products = tuple(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+        products = tuple(_tradable_universe_for_strategy(state, ctx, strategy))
         if products:
             result[strategy] = products
     return result

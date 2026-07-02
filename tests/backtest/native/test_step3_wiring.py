@@ -56,13 +56,19 @@ def test_pre_replay_group_orders_without_error():
     groups = sort_and_validate(registry.resolve())
     ordered_names = [f.name for f in groups[(Phase.PRE_REPLAY, None)]]
 
-    # resolve_product_selection (15) -> check abstract/continuous coverage (38)
-    # -> expand term-structure lifecycle/contracts (39) -> load_raw_market_data
+    # resolve_product_selection (15) -> expand term-structure lifecycle/contracts
+    # (20) -> check abstract+concrete-contract coverage (38) -> load_raw_market_data
     # (40) -> initialize_ledgers (41) -> causal_valuation (45).
+    # expand_term_structure must run BEFORE check_market_data_coverage/
+    # load_raw_market_data, not after: those two need TermStructureExpandModule.
+    # expanded_contracts to plan/load each concrete contract's own price series
+    # (not just the abstract product's continuous one) -- a rolled-to order
+    # targets a concrete contract object and needs current_prices[that object]
+    # to resolve, which only works if its price series was actually loaded.
     # Ledger initialization consumes the data-prep effective product universe,
     # so it must run after raw market data has been loaded.
-    assert ordered_names.index("resolve_product_selection") < ordered_names.index("check_market_data_coverage")
-    assert ordered_names.index("check_market_data_coverage") < ordered_names.index("expand_term_structure")
+    assert ordered_names.index("resolve_product_selection") < ordered_names.index("expand_term_structure")
+    assert ordered_names.index("expand_term_structure") < ordered_names.index("check_market_data_coverage")
     assert ordered_names.index("expand_term_structure") < ordered_names.index("register_force_close_notices")
     assert ordered_names.index("expand_term_structure") < ordered_names.index("register_rollover_notices")
     assert ordered_names.index("expand_term_structure") < ordered_names.index("initialize_ledgers")

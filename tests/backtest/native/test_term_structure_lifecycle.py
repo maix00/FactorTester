@@ -117,6 +117,15 @@ class _CoverageOnlyTwoContractTermProduct(_TermProduct):
         ]
 
 
+class _CountingTermProduct(_TermProduct):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_contract_list(self, start_date=None, end_date=None):
+        self.calls += 1
+        return super().get_contract_list(start_date=start_date, end_date=end_date)
+
+
 def test_term_structure_registers_force_close_event_before_expiry():
     strategy = Strategy(alias="A")
     product = _TermProduct()
@@ -148,6 +157,38 @@ def test_term_structure_registers_force_close_event_before_expiry():
     assert captured[0].timestamp == pd.Timestamp("2026-01-29 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["notice_type"] == "force_close"
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
+
+
+def test_term_structure_expands_shared_product_once_across_strategies():
+    s1 = Strategy(alias="A1")
+    s2 = Strategy(alias="A2")
+    product = _CountingTermProduct()
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, field_values={
+            RunWindowModule.start_date: "2026-01-01",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2026-02-05",
+            RunWindowModule.end_time: "15:00",
+        }),
+        s2: StrategyConfig(strategy=s2, field_values={
+            RunWindowModule.start_date: "2026-01-01",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2026-02-05",
+            RunWindowModule.end_time: "15:00",
+        }),
+    })
+    account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(s1))
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s1, s2}))
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({product}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({product}))
+
+    _expand_term_structure(account, ctx)
+
+    s1_metadata = ctx.get_for(TermStructureExpandModule.contract_metadata, s1)
+    s2_metadata = ctx.get_for(TermStructureExpandModule.contract_metadata, s2)
+    assert product.calls == 1
+    assert s1_metadata == s2_metadata
+    assert s1_metadata[0] is not s2_metadata[0]
 
 
 def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatch):

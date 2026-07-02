@@ -82,7 +82,16 @@ class TermStructureExpandModule(ExecutableModule):
         "expand_term_structure",
         inputs=(ProductSelectionModule.products, RunWindowModule.run_window_envelope),
         outputs=(expanded_contracts, contract_metadata),
-        phase=Phase.PRE_REPLAY, order=39,
+        # order=20, not grouped with the other market_data.py PRE_REPLAY flows
+        # (37-45): MarketDataModule.check_market_data_coverage/load_raw_market_data
+        # need expanded_contracts to plan/load each concrete contract's own
+        # price series (not just the abstract product's continuous series --
+        # that's what a resolved target actually trades once rollover/force-
+        # close switches TermStructureExpandModule.resolve_tradable_target_weights'
+        # output to a concrete contract object), so this must run BEFORE them,
+        # not after (order=39 previously sat between check_market_data_coverage
+        # at 38 and load_raw_market_data at 40 -- too late for either to see it).
+        phase=Phase.PRE_REPLAY, order=20,
         after=(ProductSelectionModule.resolve_product_selection,),
         description="展开期限结构",
         compute=lambda state, ctx: _expand_term_structure(state, ctx),
@@ -224,15 +233,21 @@ def _expand_term_structure(state, ctx) -> None:
     end_date = _datatime_date_text(end_dt)
     all_contracts: dict[Any, frozenset] = {}
     all_metadata: dict[Any, tuple[dict[str, Any], ...]] = {}
+    product_expansion_cache: dict[tuple[Any, str | None, str | None], tuple[list[Any], list[dict[str, Any]]]] = {}
     strategies = ctx.active_strategies or frozenset(state.strategy_configs)
     for strategy in strategies:
         products = ctx.get_for(ProductSelectionModule.products, strategy)
         expanded: list[Any] = []
         metadata: list[dict[str, Any]] = []
         for product in products:
-            contracts, rows = _expand_product_contracts(product, start_date=start_date, end_date=end_date)
+            cache_key = (product, start_date, end_date)
+            if cache_key not in product_expansion_cache:
+                product_expansion_cache[cache_key] = _expand_product_contracts(
+                    product, start_date=start_date, end_date=end_date,
+                )
+            contracts, rows = product_expansion_cache[cache_key]
             expanded.extend(contracts)
-            metadata.extend(rows)
+            metadata.extend(dict(row) for row in rows)
         all_contracts[strategy] = frozenset(expanded)
         all_metadata[strategy] = tuple(metadata)
         ctx.set_for(TermStructureExpandModule.expanded_contracts, strategy, all_contracts[strategy])
