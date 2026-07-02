@@ -1,8 +1,11 @@
-"""CLI module registry.
+"""Client-side Module registry.
 
-CLI modules are the user-facing controllers, not backend ExecutableModules.
-Each module package owns its commands and registers them here through a small
-descriptor so the root app stays generic.
+This registry manages CLI controller modules, using the same user-facing
+"Module" concept as the frontend navigation layer. It intentionally does not
+import the server-side ``tools.testers.registry.Module`` class: the installed
+``factortester`` client can run on machines that do not have the server source
+tree. The relation is by registered key/route contract, not Python class
+identity.
 """
 
 from __future__ import annotations
@@ -17,23 +20,23 @@ from tools.cli.modules.single_factor_family_test import enter_single_factor_fami
 
 
 @dataclass(frozen=True, slots=True)
-class CliModule:
+class Module:
     key: str
     label: str
     order: int
     commands: tuple[click.Command, ...]
 
 
-class CliModuleRegistry:
+class ModuleRegistry:
     def __init__(self) -> None:
         self._modules = (
-            CliModule(
+            Module(
                 key="single_factor_family_test",
                 label="单因子家族测试",
                 order=10,
                 commands=(enter_single_factor_family_test,),
             ),
-            CliModule(
+            Module(
                 key="backtest",
                 label="回测",
                 order=20,
@@ -41,7 +44,7 @@ class CliModuleRegistry:
             ),
         )
 
-    def sorted_modules(self) -> list[CliModule]:
+    def sorted_modules(self) -> list[Module]:
         return sorted(self._modules, key=lambda module: module.order)
 
     def commands(self) -> Iterable[click.Command]:
@@ -50,6 +53,5 @@ class CliModuleRegistry:
 
 
 def register_cli_modules(cli: click.Group) -> None:
-    for command in CliModuleRegistry().commands():
+    for command in ModuleRegistry().commands():
         cli.add_command(command)
-
