@@ -232,6 +232,46 @@ def test_market_payload_serializes_prices_and_default_rules():
     assert payload["market_rules"]["margin_ratios"] == [[1.0, 1.0]] * 3
 
 
+def test_market_payload_handles_signal_multiindex_current_prices_table():
+    """current_prices_table's index can be a _SIGNAL@-prefixed MultiIndex
+    (custom/exact engine_mode market data carries a trading-day level
+    alongside the event-time level, same shape the LocalCNFutures lifecycle
+    MultiIndex bug hit) -- iterating it directly yields tuples per row, not
+    scalar Timestamps. Reproduced against a real backtrader run: crashed
+    inside translate_market_payload with the exact same TypeError as the
+    LocalCNFutures lifecycle bug, at a different call site."""
+    run_state = BacktestRunState()
+    strategy, config = _config(
+        "g1", split_count=1, group_index=0,
+        position_policy="rebalance_to_target", rebalance_trigger="on_factor_signal",
+        allocation_policy="equal_notional",
+        fee_mode="zero", margin_mode="none",
+        initial_capital_major=100_000.0,
+    )
+    run_state.strategy_configs = {strategy: config}
+    idx = pd.MultiIndex.from_tuples(
+        [
+            (pd.Timestamp("2026-01-05"), pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")),
+            (pd.Timestamp("2026-01-06"), pd.Timestamp("2026-01-06 09:01:00", tz="Asia/Shanghai")),
+        ],
+        names=["trading_day", "_SIGNAL@MIN1"],
+    )
+    run_state.market_data_store.current_prices_table = pd.DataFrame(
+        {"A": [10.0, 11.0], "B": [20.0, 19.0]}, index=idx,
+    )
+    signals = pd.DataFrame({"A": [1.0, 2.0], "B": [2.0, 1.0]}, index=idx)
+    run_state.factor_signal_store.put_precomputed_table("k", signals)
+    run_state.factor_signal_store.bind_precomputed_table(strategy, "k")
+
+    payload = translate_market_payload(run_state)
+
+    assert payload["timestamps"] == [
+        pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai").isoformat(),
+        pd.Timestamp("2026-01-06 09:01:00", tz="Asia/Shanghai").isoformat(),
+    ]
+    assert payload["prices"]["A"] == [10.0, 11.0]
+
+
 def test_membership_matches_native_quantile_bucketing():
     run_state, _ = _run_state_with_market_data()
     dialects = [{

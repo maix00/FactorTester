@@ -212,6 +212,7 @@ def translate_market_payload(run_state: "BacktestRunState") -> dict[str, Any]:
     Must be called after the PRE_REPLAY flows have populated
     ``market_data_store`` (the bridge does this; see bridge.py).
     """
+    from tools.data.types.time_index import DataIndex
     from tools.testers.backtest.modules.market_data import (
         current_prices_table_for,
         volume_table_for,
@@ -220,7 +221,15 @@ def translate_market_payload(run_state: "BacktestRunState") -> dict[str, Any]:
     prices_table = current_prices_table_for(run_state)
     if prices_table is None or prices_table.empty:
         raise ValueError("framework bridge requires loaded market data (current_prices_table is empty)")
-    timestamps = [pd.Timestamp(ts).isoformat() for ts in prices_table.index]
+    # current_prices_table's index can be a _SIGNAL@-prefixed MultiIndex
+    # (custom/exact engine_mode market data carries a trading-day level
+    # alongside the event-time level) -- iterating a MultiIndex directly
+    # yields tuples of level values per row, not scalar Timestamps, which
+    # pd.Timestamp(...) can't parse. DataIndex.event_timestamps() extracts
+    # just the signal time level for both plain DatetimeIndex and
+    # MultiIndex inputs.
+    event_index = DataIndex(prices_table.index).event_timestamps()
+    timestamps = [pd.Timestamp(ts).isoformat() for ts in event_index]
     instruments = [_instrument_name(col) for col in prices_table.columns]
     prices = {
         _instrument_name(col): [float(v) for v in prices_table[col].to_list()]
