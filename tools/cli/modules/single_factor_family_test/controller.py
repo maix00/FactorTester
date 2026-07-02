@@ -11,6 +11,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines, print_location_welcome, print_single_factor_family_welcome
 from tools.cli.core.errors import friendly_errors
 from tools.cli.modules.backtest import BACKTEST_PUBLIC_KEY, enter_backtest_state
+from tools.cli.modules.ic_test.controller import IC_TEST_KEY, enter_ic_test_state
 from tools.cli.state import SINGLE_FACTOR_BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 
 SINGLE_FACTOR_PAGE_SETTINGS_KEY = "single_factor_page"
@@ -100,6 +101,9 @@ def _print_single_factor_children(factor_family: str) -> None:
 def enter_child(state, key: str) -> None:
     if key == BACKTEST_PUBLIC_KEY:
         enter_backtest_state(state, scope=SINGLE_FACTOR_BACKTEST_SPACE)
+        return
+    if key == IC_TEST_KEY:
+        enter_ic_test_state(state)
         return
     ensure_child_available(state.current_parent, key)
     state.enter(key)

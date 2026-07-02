@@ -89,6 +89,11 @@ def print_location_welcome(state: CliState) -> None:
     if state.current_parent == "group_test":
         print_backtest_welcome(state)
         return
+    if state.current_parent == "ic_test":
+        from tools.cli.modules.ic_test.controller import print_ic_welcome
+
+        print_ic_welcome(state)
+        return
     click.echo(f"已进入: {state.location_label}")
     click.echo("下一步: factortester <module> list 或 factortester <module> --help 查看下一层。")
 

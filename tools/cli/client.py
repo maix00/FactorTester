@@ -150,6 +150,9 @@ class FactorTesterClient:
     def run_group_test_stream(self, payload: dict[str, Any]):
         yield from self.session.stream_post("/run_group_test_stream", payload)
 
+    def run_ic_test_stream(self, payload: dict[str, Any]):
+        yield from self.session.stream_post("/run_ic_test_stream", payload)
+
     def list_single_factor_setting_templates(self, factor_family: str) -> list[dict[str, Any]]:
         data = self._expect_success(self.session.get(f"/api/single_factor_setting_templates/{factor_family}"))
         templates = data.get("templates")

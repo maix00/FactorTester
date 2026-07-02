@@ -1611,6 +1611,162 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert "（空）" in result.output
 
 
+def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+    app.secret_key = "test-secret"
+    received_payloads: list[dict[str, object]] = []
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-ic-1")
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[
+                {"key": "ic_test", "label": "IC 测试", "kind": "module", "has_children": True},
+            ])
+        if parent == "ic_test":
+            return jsonify(success=True, parent=parent, modules=[])
+        return jsonify(success=True, modules=[
+            {"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True},
+            {"key": "ic_test", "label": "IC 测试", "kind": "module", "application": "ic_test", "has_children": True},
+        ])
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        base_defaults = {
+            "product_path_candidates": {
+                "value": [],
+                "label": "产品路径候选",
+                "control_template": "custom",
+                "tab_key": "product_path_selection",
+                "serialization": {"shared_page_field": "product_path_candidates"},
+            },
+            "factor_candidates": {
+                "value": [],
+                "label": "因子候选",
+                "control_template": "custom",
+                "tab_key": "factor",
+                "serialization": {"shared_page_field": "factor_candidates"},
+            },
+        }
+        if application == "single_factor_page":
+            return jsonify(success=True, application=application, defaults=base_defaults)
+        if application == "ic_test":
+            defaults = {
+                **base_defaults,
+                "product_path_selections": {
+                    "value": [],
+                    "label": "产品路径选择",
+                    "control_template": "custom",
+                    "tab_key": "product_path_selection",
+                },
+                "factor_selections": {
+                    "value": [],
+                    "label": "因子选择",
+                    "control_template": "custom",
+                    "tab_key": "factor",
+                },
+                "ic_correlation": {
+                    "value": "rank",
+                    "label": "默认 IC",
+                    "control_template": "select",
+                    "tab_key": "ic_method",
+                    "options": [
+                        {"value": "rank", "label": "Rank IC"},
+                        {"value": "pearson", "label": "Pearson IC"},
+                        {"value": "both", "label": "Rank + Pearson"},
+                    ],
+                },
+                "ic_lag": {
+                    "value": 0,
+                    "label": "IC Lag",
+                    "control_template": "number",
+                    "tab_key": "delay",
+                },
+                "rolling_window": {
+                    "value": 20,
+                    "label": "滚动窗口",
+                    "control_template": "number",
+                    "tab_key": "summary",
+                },
+            }
+            return jsonify(success=True, application=application, defaults=defaults)
+        return jsonify(success=False, error="unknown application"), 404
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘", "paths": ["Product/Futures/CNFutures/日盘"]}])
+
+    @app.post("/run_ic_test_stream")
+    def run_ic_test_stream():
+        payload = request.get_json() or {}
+        received_payloads.append(payload)
+
+        def stream():
+            yield 'event: start\ndata: {"total": 2, "groups": 1, "phase": "init"}\n\n'
+            yield 'event: progress\ndata: {"completed": 1, "total": 2, "phase": "eval"}\n\n'
+            yield (
+                'event: result\ndata: '
+                '{"success": true, "ic_stats": {"columns": ["index", "SgCCS|N:2m"], '
+                '"rows": [{"index": "mean", "SgCCS|N:2m": 0.123456}, '
+                '{"index": "ir", "SgCCS|N:2m": 1.5}]}, "factors": []}\n\n'
+            )
+
+        return Response(stream(), mimetype="text/event-stream")
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"]).exit_code == 0
+
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "ic_test"])
+        assert result.exit_code == 0
+        assert "IC 测试" in result.output
+
+        result = runner.invoke(cli, ["ic_test", "local-settings", "--ic-correlation", "both", "--ic-lag", "1"])
+        assert result.exit_code == 0
+        assert "已更新 IC local-settings" in result.output
+
+        result = runner.invoke(cli, [
+            "ic_test",
+            "config",
+            "--add",
+            "--name",
+            "日盘IC",
+            "--factor-family",
+            "SgCCS",
+            "--product-group",
+            "中国期货日盘",
+            "--factor",
+            "--alias",
+            "SgCCS|N:2m",
+        ])
+        assert result.exit_code == 0
+        assert "新增 IC 配置" in result.output
+        assert "产品路径=中国期货日盘" in result.output
+
+        result = runner.invoke(cli, ["ic_test", "--run", "--verbose"])
+        assert result.exit_code == 0
+        assert "开始运行 IC 测试: configs=1" in result.output
+        assert "进度: eval 1/2" in result.output
+        assert "mean: SgCCS|N:2m=0.123456" in result.output
+        assert received_payloads
+        assert received_payloads[-1]["page_uuid"] == "page-ic-1"
+        assert received_payloads[-1]["factor_family_alias"] == "SgCCS"
+        assert received_payloads[-1]["product_path_selection_id"] == "pg-day"
+        assert received_payloads[-1]["factors"] == [{"alias": "SgCCS|N:2m"}]
+        assert (received_payloads[-1]["settings"])["ic_correlation"] == "both"
+
+
 def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)
