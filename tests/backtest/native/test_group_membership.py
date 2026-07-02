@@ -45,6 +45,62 @@ def test_group_quantile_membership_selects_highest_bucket_first():
     assert sum(weights.values()) == pytest.approx(1.0)
 
 
+def test_group_quantile_membership_reuses_ranking_across_strategies_sharing_signal_value(monkeypatch):
+    """Strategies sharing a factor's precomputed schedule are dispatched in
+    the same SIGNAL batch (same ctx.active_strategies) and see byte-identical
+    filtered signal_value -- only their group_index/split_count differ. The
+    O(n log n) rank-and-sort should happen once per distinct signal_value
+    content, not once per strategy, even when split_count differs too."""
+    import tools.testers.backtest.modules.group_membership as group_membership_module
+
+    sort_calls = 0
+    real_sorted = sorted
+
+    def _counting_sorted(*args, **kwargs):
+        nonlocal sort_calls
+        sort_calls += 1
+        return real_sorted(*args, **kwargs)
+
+    monkeypatch.setattr(group_membership_module, "sorted", _counting_sorted, raising=False)
+
+    products = [_product() for _ in range(4)]
+    signal_value = {p: float(i) for i, p in enumerate(products)}
+    strategies = [Strategy(alias=f"S{i}") for i in range(5)]
+    configs = {
+        strategies[0]: StrategyConfig(strategy=strategies[0], field_values={
+            GroupMembershipModule.split_count: 5, GroupMembershipModule.group_index: 0,
+        }),
+        strategies[1]: StrategyConfig(strategy=strategies[1], field_values={
+            GroupMembershipModule.split_count: 5, GroupMembershipModule.group_index: 1,
+        }),
+        strategies[2]: StrategyConfig(strategy=strategies[2], field_values={
+            GroupMembershipModule.split_count: 5, GroupMembershipModule.group_index: 2,
+        }),
+        strategies[3]: StrategyConfig(strategy=strategies[3], field_values={
+            GroupMembershipModule.split_count: 5, GroupMembershipModule.group_index: 3,
+        }),
+        # different split_count, same signal_value content -- must still
+        # share the cached ranking, since the ranked order itself doesn't
+        # depend on split_count.
+        strategies[4]: StrategyConfig(strategy=strategies[4], field_values={
+            GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
+        }),
+    }
+    account = BacktestRunState(strategy_configs=configs)
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset(strategies))
+    for strategy in strategies:
+        ctx.set_for(FactorSignalModule.signal_value, strategy, dict(signal_value))
+
+    _group_quantile_membership(account, ctx)
+
+    assert sort_calls == 1
+    # sanity: each strategy still gets its own correct bucket
+    weights0 = ctx.get_for(GroupMembershipModule.target_weights, strategies[0])
+    weights4 = ctx.get_for(GroupMembershipModule.target_weights, strategies[4])
+    assert set(weights0) == {products[3]}  # split_count=5, group_index=0 -> top 1/5
+    assert set(weights4) == {products[2], products[3]}  # split_count=2, group_index=0 -> top half
+
+
 def test_group_quantile_membership_ignores_products_without_current_price():
     s = Strategy(alias="S")
     tradable, removed = _product(), _product()

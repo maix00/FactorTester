@@ -319,6 +319,16 @@ def build_membership_payload(
 
     strategies_by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     signal_tables = _signal_tables_by_strategy(run_state)
+    # Strategies sharing a factor's precomputed schedule get the exact same
+    # DataFrame object back from _signal_tables_by_strategy (the store hands
+    # out one shared table per schedule key, not a copy per strategy) -- only
+    # group_index/split_count differ per dialect. Cache the reindexed numpy
+    # view and the per-row descending ranking by table identity so this
+    # O(n log n) work happens once per distinct table+row, not once per
+    # dialect, matching the equivalent native-side optimization in
+    # GroupMembershipModule._group_quantile_membership.
+    table_prep_cache: dict[int, tuple[Any, list[int | None]]] = {}
+    rank_cache: dict[tuple[int, int], list[tuple[int, float]]] = {}
     for g_index, dialect in enumerate(strategy_dialects):
         if str(dialect.get("strategy_kind") or "group") == "long_short":
             continue  # composes source-group memberships; no bucket of its own
@@ -330,24 +340,37 @@ def build_membership_payload(
         resolver = _term_structure_resolver_for(run_state, strategy) if strategy is not None else None
         split_count = int(dialect.get("split_count") or 1)
         group_index = int(dialect.get("group_index") or 0)
-        signal_rows = table.reindex(index=event_timestamps).to_numpy(dtype=float)
-        signal_columns = [_instrument_name(col) for col in table.columns]
-        col_positions = [
-            signal_columns.index(name) if name in signal_columns else None
-            for name in instruments
-        ]
+        table_id = id(table)
+        prepared = table_prep_cache.get(table_id)
+        if prepared is None:
+            signal_rows = table.reindex(index=event_timestamps).to_numpy(dtype=float)
+            signal_columns = [_instrument_name(col) for col in table.columns]
+            col_positions = [
+                signal_columns.index(name) if name in signal_columns else None
+                for name in instruments
+            ]
+            prepared = (signal_rows, col_positions)
+            table_prep_cache[table_id] = prepared
+        signal_rows, col_positions = prepared
         last_members: frozenset[int] | None = None
         for row in range(n_rows):
-            values = {
-                n_index: signal_rows[row][pos]
-                for n_index, pos in enumerate(col_positions)
-                if pos is not None and np.isfinite(signal_rows[row][pos])
-            }
-            if not values:
+            rank_key = (table_id, row)
+            ranked = rank_cache.get(rank_key)
+            if ranked is None:
+                values = {
+                    n_index: signal_rows[row][pos]
+                    for n_index, pos in enumerate(col_positions)
+                    if pos is not None and np.isfinite(signal_rows[row][pos])
+                }
+                # Descending, matching GroupMembershipModule._group_quantile_membership:
+                # group_index=0 ("第1组") is the highest-factor-value bucket.
+                # Secondary key on instrument name makes tie-breaking
+                # deterministic by construction, not an accident of dict
+                # iteration order.
+                ranked = sorted(values.items(), key=lambda kv: (-kv[1], instruments[kv[0]]))
+                rank_cache[rank_key] = ranked
+            if not ranked:
                 continue
-            # Descending, matching GroupMembershipModule._group_quantile_membership:
-            # group_index=0 ("第1组") is the highest-factor-value bucket.
-            ranked = sorted(values.items(), key=lambda kv: kv[1], reverse=True)
             bucket_size = len(ranked) / split_count
             start = round(group_index * bucket_size)
             end = round((group_index + 1) * bucket_size)
