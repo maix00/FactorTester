@@ -1191,7 +1191,7 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         result = runner.invoke(cli, ["backtest", "--run"])
         assert result.exit_code == 0
         assert "开始运行回测: groups=2, long-short=1" in result.output
-        assert "[activity] 准备运行" in result.output
+        assert "当前: 准备运行" in result.output
         assert "回测完成" in result.output
 
     assert len(received_payloads) == 1
@@ -1201,6 +1201,106 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     assert {group["factor_family_alias"] for group in payload["groups"]} == {"SgCCS"}
     assert all(group["allocation_mode"] == "equal_notional" for group in payload["groups"])
     assert payload["ls_configs"][0]["name"] == "LS A1/A2"
+
+
+def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    app.secret_key = "test-secret"
+    register_home_modules(app)
+
+    @app.post("/login")
+    def login():
+        return jsonify(success=True, username="alice")
+
+    @app.post("/api/single_factor_test/page")
+    def page():
+        return jsonify(success=True, page_uuid="page-login-1")
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(success=True, application=application, defaults={
+            "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
+            "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
+            "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
+            "factor": {"value": "", "serialization": {"shared_page_field": "factor"}},
+        })
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:1m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[
+            {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
+        ])
+
+    @app.post("/run_group_test_stream")
+    def run_group_test_stream():
+        body = "\n".join([
+            "event: activity_manifest",
+            'data: {"phases":[{"key":"pre_replay","label":"准备","flows":[{"flow_key":"market_data","flow_label":"加载行情","display_order":1}]},{"key":"event_replay","label":"事件回放","flows":[{"flow_key":"signal.target","flow_label":"合成目标","display_order":1,"event_kind":"SIGNAL"},{"flow_key":"notice.roll","flow_label":"换月通知","display_order":2,"event_kind":"ORDER_NOTICE"},{"flow_key":"order.fill","flow_label":"成交记账","display_order":3,"event_kind":"ORDER"}]},{"key":"post_replay","label":"整理","flows":[{"flow_key":"risk","flow_label":"计算风险指标","display_order":1}]}]}',
+            "",
+            "event: activity",
+            'data: {"phase":"pre_replay","phase_label":"准备","flow_key":"market_data","flow_label":"加载行情","timestamp":"2026-01-02 09:00:00"}',
+            "",
+            "event: signal_progress",
+            'data: {"completed":1,"total":4,"phase":"event_replay"}',
+            "",
+            "event: activity",
+            'data: {"phase":"event_replay","phase_label":"事件回放","flow_key":"signal.target","flow_label":"合成目标","timestamp":"2026-01-02 09:01:00"}',
+            "",
+            "event: runtime_info",
+            'data: {"type":"产品路径","status":"已移除","detail":"ER.CZC(早籼稻)"}',
+            "",
+            "event: activity",
+            'data: {"phase":"post_replay","phase_label":"整理","flow_key":"risk","flow_label":"计算风险指标","timestamp":"2026-01-31 15:00:00"}',
+            "",
+            "event: complete",
+            "data: {}",
+            "",
+        ])
+        return Response(body, mimetype="text/event-stream")
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        assert runner.invoke(cli, ["login", "--username", "alice", "--password", "pw"]).exit_code == 0
+        assert runner.invoke(cli, ["backtest"]).exit_code == 0
+        assert runner.invoke(cli, [
+            "backtest", "group", "--add",
+            "--factor-family", "SgCCS",
+            "--group-name", "A1",
+            "--product-group", "from-candidates", "--name", "中国期货日盘",
+            "--factor", "--alias", "SgCCS|N:1m",
+        ]).exit_code == 0
+
+        result = runner.invoke(cli, ["backtest", "--run", "--verbose"])
+
+    assert result.exit_code == 0
+    assert "流程图:" in result.output
+    assert "准备: 加载行情" in result.output
+    assert "信号产单: 合成目标" in result.output
+    assert "通知产单: 换月通知" in result.output
+    assert "订单处理: 成交记账" in result.output
+    assert "整理: 计算风险指标" in result.output
+    assert "总进度:" in result.output
+    assert "准备: [################] 100.0%" in result.output
+    assert "事件回放: [####------------]  25.0%" in result.output
+    assert "整理: [################] 100.0%" in result.output
+    assert "1/4" not in result.output
+    assert "当前: 2026-01-02 09:00:00 1/1 加载行情" in result.output
+    assert "当前: 2026-01-02 09:01:00 合成目标" in result.output
+    assert "当前: 2026-01-31 15:00:00 1/1 计算风险指标" in result.output
+    assert "[activity] phase=event_replay flow=signal.target" in result.output
+    assert "[progress] phase=event_replay percent=25.00" in result.output
+    assert "[运行信息] 产品路径: ER.CZC(早籼稻)" in result.output
+    assert "回测完成" in result.output
 
 
 def test_backtest_group_add_help_and_batch_help_use_action_specific_text(tmp_path, monkeypatch) -> None:

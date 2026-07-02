@@ -29,6 +29,7 @@ from tools.cli.modules.backtest.shared.selectors import (
     resolve_product_group_selector,
     selection_label,
 )
+from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.state import load_state, save_state
 
 
@@ -54,11 +55,13 @@ _ADD_GROUP_SELECTOR_ROOTS = {
 
 @click.group("backtest", invoke_without_command=True, context_settings=SELECTOR_CONTEXT)
 @click.option("--run", is_flag=True, help="运行当前 backtest 草稿中的全部策略。")
+@click.option("--verbose", is_flag=True, help="运行时打印完整 SSE 进度事件摘要。")
 @click.pass_context
 @friendly_errors
 def backtest(
     ctx: click.Context,
     run: bool,
+    verbose: bool,
 ) -> None:
     """进入通用回测控制界面。
 
@@ -87,7 +90,7 @@ def backtest(
     enter_backtest_state(state)
     save_state(state)
     if run:
-        _run_backtest(state, groups=state.backtest_groups)
+        _run_backtest(state, groups=state.backtest_groups, verbose=verbose)
         return
     print_backtest_welcome(state)
 
@@ -163,6 +166,8 @@ def group(
         enter_backtest_state(state)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
+    verbose = "--verbose" in args
+    args = tuple(arg for arg in args if arg != "--verbose")
     help_target = _context_help_target(args)
     clean_args = _strip_context_help(args)
     if _is_list_action(clean_args):
@@ -200,7 +205,7 @@ def group(
         for group_item in _selected_groups(state, clean_args):
             _print_group(group_item)
     elif action == "run":
-        _run_backtest(state, groups=_selected_groups(state, clean_args, default_all=True))
+        _run_backtest(state, groups=_selected_groups(state, clean_args, default_all=True), verbose=verbose)
     else:
         raise click.ClickException("group 需要明确动作：list、--add、--edit、--describe 或 --run")
     save_state(state)
@@ -767,7 +772,7 @@ def _print_group(group: dict[str, Any]) -> None:
     click.echo(f"因子: {factor}")
 
 
-def _run_backtest(state, *, groups: list[dict[str, Any]]) -> None:
+def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False) -> None:
     if not state.page_uuid:
         raise click.ClickException("缺少 page_uuid；请先运行 factortester login 以创建页面上下文")
     if not groups:
@@ -775,14 +780,15 @@ def _run_backtest(state, *, groups: list[dict[str, Any]]) -> None:
     payload = _run_payload(state, groups=groups)
     click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
     client = client_from_config()
+    renderer = BacktestRunRenderer(verbose=verbose)
     for event in client.run_group_test_stream(payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
         if event_name == "error":
             message = data.get("error") if isinstance(data, dict) else data
             raise click.ClickException(f"分组测试失败: {message}")
-        if event_name in {"runtime_info", "progress", "activity", "signal_progress", "complete", "done"}:
-            _print_run_event(event_name, data)
+        if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "complete", "done"}:
+            renderer.handle(event_name, data)
 
 
 def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
