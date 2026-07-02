@@ -1260,6 +1260,9 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
             "event: activity",
             'data: {"phase":"post_replay","phase_label":"整理","flow_key":"risk","flow_label":"计算风险指标","timestamp":"2026-01-31 15:00:00"}',
             "",
+            "event: result",
+            'data: {"success":true,"groups":[{"name":"A1","total_equity":[100000000,100200000,100100000,100500000],"timestamps":[1,2,3,4]},{"name":"LS A1/A5","is_ls":true,"total_equity":[100000000,99900000,100300000],"timestamps":[1,2,3]}]}',
+            "",
             "event: complete",
             "data: {}",
             "",
@@ -1300,6 +1303,9 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "[activity] phase=event_replay flow=signal.target" in result.output
     assert "[progress] phase=event_replay percent=25.00" in result.output
     assert "[运行信息] 产品路径: ER.CZC(早籼稻)" in result.output
+    assert "结果摘要:" in result.output
+    assert "A1: final=100500000.00 points=4" in result.output
+    assert "LS A1/A5 · LS: final=100300000.00 points=3" in result.output
     assert "回测完成" in result.output
 
 

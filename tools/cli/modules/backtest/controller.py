@@ -787,7 +787,7 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
         if event_name == "error":
             message = data.get("error") if isinstance(data, dict) else data
             raise click.ClickException(f"分组测试失败: {message}")
-        if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "complete", "done"}:
+        if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
 
 

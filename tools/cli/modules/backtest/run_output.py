@@ -34,6 +34,9 @@ class BacktestRunRenderer:
         if event_name == "runtime_info":
             self._print_runtime_info(data)
             return
+        if event_name == "result":
+            self._print_result(data)
+            return
         if event_name == "activity":
             self._print_activity(data)
             return
@@ -46,6 +49,27 @@ class BacktestRunRenderer:
             return
         if self.verbose:
             click.echo(f"[{event_name}] {data}")
+
+    def _print_result(self, data: Any) -> None:
+        if not isinstance(data, dict):
+            if data:
+                click.echo(f"[result] {data}")
+            return
+        groups = data.get("groups")
+        if not isinstance(groups, list) or not groups:
+            return
+        click.echo("结果摘要:")
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            name = str(group.get("name") or group.get("key") or group.get("group_id") or "")
+            curve = _numeric_series(group.get("total_equity"))
+            if not curve:
+                continue
+            final_value = curve[-1]
+            spark = _sparkline(curve)
+            suffix = " · LS" if group.get("is_ls") else ""
+            click.echo(f"  {name}{suffix}: final={final_value:.2f} points={len(curve)} {spark}")
 
     def _print_manifest(self, data: Any) -> None:
         if self._manifest_printed:
@@ -221,3 +245,42 @@ def _bar(percent: float, *, width: int = 24) -> str:
     filled = int(round(width * percent / 100.0))
     filled = max(0, min(width, filled))
     return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+def _numeric_series(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    series: list[float] = []
+    for item in value:
+        try:
+            series.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return series
+
+
+def _sparkline(values: list[float], *, width: int = 32) -> str:
+    if not values:
+        return ""
+    if len(values) > width:
+        values = _downsample(values, width)
+    blocks = "▁▂▃▄▅▆▇█"
+    lo = min(values)
+    hi = max(values)
+    if hi <= lo:
+        return blocks[0] * len(values)
+    scale = (len(blocks) - 1) / (hi - lo)
+    return "".join(blocks[int(round((value - lo) * scale))] for value in values)
+
+
+def _downsample(values: list[float], width: int) -> list[float]:
+    if width <= 0 or len(values) <= width:
+        return values
+    if width == 1:
+        return [values[-1]]
+    sampled: list[float] = []
+    last = len(values) - 1
+    for index in range(width):
+        source_index = round(index * last / (width - 1))
+        sampled.append(values[source_index])
+    return sampled
