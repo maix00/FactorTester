@@ -132,9 +132,9 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         assert "单因子家族测试" in result.output
         assert "已选择 factor_family: SgCCS" in result.output
 
-        result = runner.invoke(cli, ["list"])
+        result = runner.invoke(cli, ["single_factor_test", "list"])
         assert result.exit_code == 0
-        assert "当前位置: 单因子家族测试 · SgCCS" in result.output
+        assert "当前位置: single_factor_test" in result.output
         assert "[module] backtest" in result.output
 
         result = runner.invoke(cli, ["backtest"])
@@ -143,12 +143,12 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        assert "当前位置: backtest" in result.output
-        assert "[tab] backtest/risk" in result.output
+        assert "当前位置: 首页" in result.output
+        assert "[module] single_factor_test" in result.output
 
         result = runner.invoke(cli, ["back"])
-        assert result.exit_code == 0
-        assert "单因子家族测试" in result.output
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
         result = runner.invoke(cli, ["edit", "group_test"], input="1\n1\n2\nq\n")
         assert result.exit_code == 0
@@ -236,10 +236,10 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
         assert "回测" in result.output
         assert "--factor-family SgCCS" in result.output
 
-        result = runner.invoke(cli, ["list"])
+        result = runner.invoke(cli, ["single_factor_test", "list"])
         assert result.exit_code == 0
-        assert "当前位置: backtest" in result.output
-        assert "[tab] backtest/time" in result.output
+        assert "当前位置: single_factor_test" in result.output
+        assert "[module] backtest" in result.output
 
 
 def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_path, monkeypatch) -> None:
@@ -344,8 +344,8 @@ def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_p
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        assert "当前位置: backtest" in result.output
-        assert "[tab] backtest/time" in result.output
+        assert "当前位置: 首页" in result.output
+        assert "[module] single_factor_test" in result.output
 
 
 def test_single_factor_test_backtest_add_group_reuses_factor_family_context(tmp_path, monkeypatch) -> None:
@@ -1172,6 +1172,16 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         assert "1. A1 · 分组数=2 · 分组序号=1" in result.output
         assert "2. A2 · 分组数=2 · 分组序号=2" in result.output
 
+        result = runner.invoke(cli, ["backtest", "group", "--group-name", "A1", "--derive", "--group-name", "A1a"])
+        assert result.exit_code == 0
+        assert "新增派生分组: 1" in result.output
+        assert "名称: A1a" in result.output
+
+        result = runner.invoke(cli, ["backtest", "group", "--group-name", "A2", "--copy", "--group-name", "A2-copy"])
+        assert result.exit_code == 0
+        assert "新增复制分组: 1" in result.output
+        assert "名称: A2-copy" in result.output
+
         result = runner.invoke(cli, ["backtest", "group", "--group-name", "A1", "--describe"])
         assert result.exit_code == 0
         assert "名称: A1" in result.output
@@ -1192,9 +1202,12 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         assert result.exit_code == 0
         assert "LS A1/A2" in result.output
 
-        result = runner.invoke(cli, ["backtest", "--run"])
+        result = runner.invoke(cli, ["backtest", "group", "--group-names", "A1", "A2", "--run"])
         assert result.exit_code == 0
         assert "开始运行回测: groups=2, long-short=1" in result.output
+        assert "策略信息:" in result.output
+        assert "A1 · 分组数=2 · 分组序号=1" in result.output
+        assert "产品路径=中国期货日盘" in result.output
         assert "当前: 准备运行" in result.output
         assert "回测完成" in result.output
 
@@ -1306,18 +1319,19 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
     assert "[live] 刷新净值曲线" in result.output
     assert "净值曲线:" in result.output
     assert result.output.index("净值曲线:") < result.output.index("结果摘要:")
-    assert "图例:" in result.output
     assert "A1" in result.output
     assert "LS A1/A5 LS" in result.output
     assert "结果摘要:" in result.output
-    summary_lines = [line for line in result.output.splitlines() if "final=" in line and "points=" in line]
+    summary_output = result.output.split("结果摘要:", 1)[1]
+    summary_lines = [line for line in summary_output.splitlines() if "100500000.00" in line or "100300000.00" in line]
     assert len(summary_lines) == 2
-    assert len({line.index("final=") for line in summary_lines}) == 1
-    assert len({line.index("points=") for line in summary_lines}) == 1
+    assert len({line.index("100") for line in summary_lines}) == 1
     assert "A1" in summary_lines[0]
-    assert "final=100500000.00  points=4" in summary_lines[0]
+    assert "100500000.00" in summary_lines[0]
+    assert "0.50%" in summary_lines[0]
     assert "LS A1/A5 · LS" in summary_lines[1]
-    assert "final=100300000.00  points=3" in summary_lines[1]
+    assert "100300000.00" in summary_lines[1]
+    assert "0.30%" in summary_lines[1]
     assert "回测完成" in result.output
 
 
@@ -1499,6 +1513,15 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert template_id == "tpl-20260602"
         return jsonify(success=True, template={"id": template_id, "name": "2026-06-02 07:20:47", "snapshot": snapshot})
 
+    saved_templates: list[dict[str, object]] = []
+
+    @app.post("/api/single_factor_setting_templates/<factor_family>")
+    def save_template(factor_family: str):
+        assert factor_family == "SgCCS"
+        payload = request.get_json() or {}
+        saved_templates.append(payload)
+        return jsonify(success=True, id="tpl-cli")
+
     registered_factors: list[dict[str, object]] = []
 
     @app.post("/login")
@@ -1526,6 +1549,11 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert result.exit_code == 0
         assert "2026-06-02 07:20:47 · id=tpl-20260602" in result.output
 
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "template", "help"])
+        assert result.exit_code == 0
+        assert "template 命令" in result.output
+        assert "save [模板名]" in result.output
+
         result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "template", "load", "2026-06-02 07:20:47"])
         assert result.exit_code == 0
         assert "已加载模板: 2026-06-02 07:20:47" in result.output
@@ -1547,6 +1575,18 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert result.exit_code == 0
         assert "LS A1/A5" in result.output
         assert "多头=g1" in result.output
+
+        result = runner.invoke(cli, ["backtest", "template", "save", "CLI 草稿"])
+        assert result.exit_code == 0
+        assert "已保存模板: CLI 草稿" in result.output
+        assert saved_templates[-1]["name"] == "CLI 草稿"
+        assert saved_templates[-1]["ff_alias"] == "SgCCS"
+        assert (saved_templates[-1]["snapshot"])["group_settings"]["groups"][0]["name"] == "A1"
+
+        result = runner.invoke(cli, ["backtest", "template", "help"])
+        assert result.exit_code == 0
+        assert "backtest template 命令" in result.output
+        assert "load <模板ID或名称>" in result.output
 
         result = runner.invoke(cli, ["backtest"])
         assert result.exit_code == 0
@@ -1612,7 +1652,7 @@ def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkey
         assert result.exit_code == 0
         assert "workspace show|root|build|sync|push" in result.output
 
-        result = runner.invoke(cli, ["list"])
+        result = runner.invoke(cli, ["custom_factors", "list"])
         assert result.exit_code == 0
         assert "custom_factors/factor-library" in result.output
         assert "custom_factors/workspace" in result.output
@@ -1799,18 +1839,16 @@ def test_products_and_custom_factors_expose_library_submodules_from_home(tmp_pat
         assert result.exit_code == 0
         assert "产品管理" in result.output
 
-        result = runner.invoke(cli, ["list"])
+        result = runner.invoke(cli, ["products", "list"])
         assert result.exit_code == 0
         assert "当前位置: products" in result.output
         assert "[module] products/product-groups: 产品组库" in result.output
 
-        result = runner.invoke(cli, ["home"])
-        assert result.exit_code == 0
         result = runner.invoke(cli, ["custom_factors"])
         assert result.exit_code == 0
         assert "因子管理" in result.output
 
-        result = runner.invoke(cli, ["list"])
+        result = runner.invoke(cli, ["custom_factors", "list"])
         assert result.exit_code == 0
         assert "当前位置: custom_factors" in result.output
         assert "[module] custom_factors/factor-library: 因子库" in result.output

@@ -13,14 +13,18 @@ from tools.cli.state import load_state, save_state
 @click.command("list")
 @friendly_errors
 def list_modules() -> None:
-    """List the next navigation layer from the current CLI location."""
-    state = load_state()
-    modules = client_from_config().list_modules(parent=state.current_parent)
-    click.echo(f"当前位置: {state.location_label}")
+    """List home modules.
+
+    Module-specific children are listed from that module command, for example:
+
+      factortester single_factor_test list
+      factortester backtest --help
+    """
+    modules = client_from_config().list_modules(parent=None)
+    click.echo("当前位置: 首页")
     for line in module_lines(modules):
         click.echo(line)
-    if state.current_parent is not None:
-        click.echo("返回上一层: factortester back")
+    click.echo("查看模块下一层: factortester <module> list 或 factortester <module> --help")
 
 
 @click.command()
@@ -41,4 +45,3 @@ def back() -> None:
     state.back()
     save_state(state)
     click.echo(f"已返回: {state.location_label}")
-

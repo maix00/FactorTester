@@ -7,6 +7,7 @@ adapter maps that public command to the backend group-test application.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import click
@@ -37,6 +38,7 @@ SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
 SELECTOR_HELP_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []}
 _ADD_GROUP_SELECTOR_ROOTS = {
     "--add", "--batch",
+    "--derive", "--copy",
     "--group-name", "--group_name",
     "--group-names", "--group_names",
     "--factor-family", "--factor_family",
@@ -76,7 +78,11 @@ def backtest(
       factortester backtest group --add --factor-family SgCCS --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
       factortester backtest group --add --factor-family SgCCS --factor add --param N=2m --param '$Rev=1'
       factortester backtest group --add --product-group from-candidates --name 中国期货日盘
+      factortester backtest group --group-name A1 --derive --group-name A1a --product-path ...
+      factortester backtest group --group-name A1 --copy --group-name A1-copy
       factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
+      factortester backtest template load "2026-06-02 07:20:47"
+      factortester backtest template save "CLI 草稿"
       factortester backtest clear
 
     字段级帮助:
@@ -93,6 +99,35 @@ def backtest(
         _run_backtest(state, groups=state.backtest_groups, verbose=verbose)
         return
     print_backtest_welcome(state)
+
+
+@backtest.command("template", context_settings=SELECTOR_HELP_CONTEXT)
+@click.pass_context
+@friendly_errors
+def template(ctx: click.Context) -> None:
+    """管理 single_factor_test 设置模板的便捷入口。"""
+    state = load_state()
+    args = tuple(ctx.args)
+    if not args or args[0] in {"help", "--help", "-h"}:
+        _print_backtest_template_help(state)
+        return
+    if not state.factor_family:
+        raise click.ClickException("template 命令需要先选择因子家族：factortester single_factor_test --factor-family SgCCS")
+    if args[0] in {"list", "ls"}:
+        _list_backtest_templates(state.factor_family)
+        return
+    if args[0] == "load":
+        if len(args) < 2:
+            raise click.ClickException("template load 需要模板 ID 或名称")
+        _load_backtest_template_into_state(state, args[1])
+        save_state(state)
+        return
+    if args[0] == "save":
+        name = args[1] if len(args) >= 2 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _save_backtest_template_from_state(state, name)
+        save_state(state)
+        return
+    raise click.ClickException("template 支持的动作: list, load, save, help")
 
 
 @backtest.command("local-settings", context_settings=SELECTOR_HELP_CONTEXT)
@@ -134,6 +169,122 @@ def clear(page_settings: bool) -> None:
         click.echo("已同时清空页面级设置")
 
 
+def _print_backtest_template_help(state) -> None:
+    click.echo("backtest template 命令")
+    current = state.factor_family or "（未选择）"
+    click.echo(f"当前因子家族: {current}")
+    click.echo("  list / ls                 列出当前因子家族的设置模板")
+    click.echo("  load <模板ID或名称>        加载模板到当前 CLI 草稿")
+    click.echo("  save [模板名]              保存当前 CLI 草稿为设置模板")
+    click.echo("")
+    click.echo("示例:")
+    click.echo("  factortester single_factor_test --factor-family SgCCS")
+    click.echo("  factortester backtest template list")
+    click.echo("  factortester backtest template load '2026-06-02 07:20:47'")
+    click.echo("  factortester backtest template save 'CLI 草稿'")
+
+
+def _list_backtest_templates(factor_family: str) -> None:
+    templates = client_from_config().list_single_factor_setting_templates(factor_family)
+    click.echo(f"{factor_family} 模板列表")
+    if not templates:
+        click.echo("  （空）")
+        return
+    for index, template in enumerate(templates, start=1):
+        click.echo(f"  {index}. {template.get('name') or template.get('id')} · id={template.get('id')}")
+
+
+def _load_backtest_template_into_state(state, selector: str) -> None:
+    client = client_from_config()
+    templates = client.list_single_factor_setting_templates(state.factor_family)
+    template_id = _resolve_template_id(selector, templates)
+    template = client.get_single_factor_setting_template(state.factor_family, template_id)
+    snapshot = template.get("snapshot")
+    if not isinstance(snapshot, dict):
+        raise click.ClickException("模板缺少 snapshot")
+    applied = _apply_snapshot_to_backtest_state(state, snapshot, template_name=str(template.get("name") or selector))
+    click.echo(f"已加载模板: {template.get('name') or selector}")
+    click.echo(
+        f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
+        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}"
+    )
+
+
+def _save_backtest_template_from_state(state, name: str) -> None:
+    snapshot = _snapshot_from_backtest_state(state)
+    data = client_from_config().save_single_factor_setting_template(state.factor_family, name=name, snapshot=snapshot)
+    template_id = data.get("id") or ""
+    state.page_settings["setting_template"] = name
+    click.echo(f"已保存模板: {name}")
+    if template_id:
+        click.echo(f"id={template_id}")
+
+
+def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:
+    for index, template in enumerate(templates, start=1):
+        keys = {str(index), str(template.get("id") or ""), str(template.get("name") or "")}
+        if selector in keys:
+            return str(template.get("id") or "")
+    raise click.ClickException(f"找不到模板: {selector}")
+
+
+def _apply_snapshot_to_backtest_state(state, snapshot: dict[str, Any], *, template_name: str) -> dict[str, int]:
+    factors = snapshot.get("factors") if isinstance(snapshot.get("factors"), dict) else {}
+    for key in ("factor_candidates", "factor"):
+        if key in factors:
+            state.page_settings[key] = factors[key]
+    state.page_settings["setting_template"] = template_name
+
+    local_settings = snapshot.get("local_settings") if isinstance(snapshot.get("local_settings"), dict) else {}
+    state.backtest_local_settings = dict(local_settings or {})
+
+    group_settings = snapshot.get("group_settings") if isinstance(snapshot.get("group_settings"), dict) else {}
+    state.backtest_groups = [_normalize_template_group(item) for item in (group_settings.get("groups") or []) if isinstance(item, dict)]
+    state.backtest_ls_configs = [_normalize_template_ls(item) for item in (group_settings.get("lsConfigs") or []) if isinstance(item, dict)]
+    return {
+        "page_settings": len(factors) + 1,
+        "local_settings": len(state.backtest_local_settings),
+        "groups": len(state.backtest_groups),
+        "ls_configs": len(state.backtest_ls_configs),
+    }
+
+
+def _snapshot_from_backtest_state(state) -> dict[str, Any]:
+    factors: dict[str, Any] = {}
+    for key in ("factor_candidates", "factor", "setting_template"):
+        if key in state.page_settings:
+            factors[key] = state.page_settings[key]
+    return {
+        "factors": factors,
+        "local_settings": dict(state.backtest_local_settings),
+        "group_settings": {
+            "groups": [dict(group) for group in state.backtest_groups],
+            "lsConfigs": [dict(config) for config in state.backtest_ls_configs],
+        },
+    }
+
+
+def _normalize_template_group(group: dict[str, Any]) -> dict[str, Any]:
+    out = dict(group)
+    _rename_if_present(out, "splitCount", "split_count")
+    _rename_if_present(out, "groupIndex", "group_index")
+    _rename_if_present(out, "factorAlias", "factor")
+    _rename_if_present(out, "isAllGroups", "is_all_groups")
+    return out
+
+
+def _normalize_template_ls(config: dict[str, Any]) -> dict[str, Any]:
+    out = dict(config)
+    _rename_if_present(out, "longGroupId", "long_group_id")
+    _rename_if_present(out, "shortGroupId", "short_group_id")
+    return out
+
+
+def _rename_if_present(target: dict[str, Any], old: str, new: str) -> None:
+    if old in target and new not in target:
+        target[new] = target[old]
+
+
 @backtest.command("group", context_settings=SELECTOR_HELP_CONTEXT)
 @click.pass_context
 @friendly_errors
@@ -148,6 +299,8 @@ def group(
       factortester group --add --group-name A1 --split-count 5 --group-index 1
       factortester group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5
       factortester group --group-name A1 --edit --factor --alias SgCCS|N:2m
+      factortester group --group-name A1 --derive --group-name A1a
+      factortester group --group-name A1 --copy --group-name A1-copy
       factortester group --group-names A1 A5 --edit --allocation-policy equal_notional
       factortester group --group-name A1 --describe
       factortester group --group-name A1 --run
@@ -200,6 +353,11 @@ def group(
             _edit_group(state, group_item, selectors=selectors, extra_values=group_settings)
         click.echo(f"已修改分组: {len(groups)}")
         for group_item in groups:
+            _print_group(group_item)
+    elif action in {"derive", "copy"}:
+        created = _derive_or_copy_groups(state, clean_args, selectors_args=tuple(selector_args), extra_values=group_settings, derived=action == "derive")
+        click.echo(f"新增{'派生' if action == 'derive' else '复制'}分组: {len(created)}")
+        for group_item in created:
             _print_group(group_item)
     elif action == "describe":
         for group_item in _selected_groups(state, clean_args):
@@ -335,6 +493,10 @@ def _is_list_action(args: tuple[str, ...]) -> bool:
 def _group_action(args: tuple[str, ...]) -> str:
     if "--add" in args:
         return "add"
+    if "--derive" in args:
+        return "derive"
+    if "--copy" in args:
+        return "copy"
     if "--edit" in args:
         return "edit"
     if "--describe" in args:
@@ -351,7 +513,7 @@ def _strip_group_action_args(args: tuple[str, ...]) -> tuple[str, ...]:
         if arg == "--add" and not removed_action_add:
             removed_action_add = True
             continue
-        if arg in {"--edit", "--describe", "--run", "--batch"}:
+        if arg in {"--edit", "--describe", "--run", "--batch", "--derive", "--copy"}:
             continue
         result.append(arg)
     return tuple(result)
@@ -589,6 +751,36 @@ def _remove_group_name_args(args: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _derive_or_copy_groups(
+    state,
+    args: tuple[str, ...],
+    *,
+    selectors_args: tuple[str, ...],
+    extra_values: dict[str, Any] | None,
+    derived: bool,
+) -> list[dict[str, Any]]:
+    names = _group_names_from_args(args)
+    if len(names) < 2:
+        raise click.ClickException("group --derive/--copy 需要先传源分组，再传至少一个新分组名：--group-name A1 --derive --group-name A1a")
+    source = _find_group_by_name(state, names[0])
+    selectors = parse_add_group_selectors(_remove_group_name_args(selectors_args))
+    created: list[dict[str, Any]] = []
+    for target_name in names[1:]:
+        group_item = dict(source)
+        group_item["id"] = f"group-{len(state.backtest_groups) + 1}"
+        group_item["name"] = target_name
+        if derived:
+            group_item["parent_id"] = source.get("id")
+            group_item["parentId"] = source.get("id")
+        else:
+            group_item.pop("parent_id", None)
+            group_item.pop("parentId", None)
+        _edit_group(state, group_item, selectors=selectors, extra_values=extra_values)
+        state.backtest_groups.append(group_item)
+        created.append(group_item)
+    return created
+
+
 def _append_group(
     state,
     *,
@@ -779,6 +971,7 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
         raise click.ClickException("没有可运行的分组；请先用 factortester group --add 新增分组")
     payload = _run_payload(state, groups=groups)
     click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
+    _print_run_strategy_info(groups, state.backtest_ls_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
     for event in client.run_group_test_stream(payload):
@@ -799,6 +992,33 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
         "groups": [dict(group) for group in groups],
         "ls_configs": list(state.backtest_ls_configs),
     }
+
+
+def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
+    click.echo("策略信息:")
+    for index, group in enumerate(groups, start=1):
+        name = group.get("name") or group.get("id") or f"group-{index}"
+        split_count = group.get("split_count", group.get("splitCount"))
+        group_index = group.get("group_index", group.get("groupIndex"))
+        factor = group.get("factor", group.get("factorAlias")) or "（未设置）"
+        product_path = selection_label(group.get("product_path_selection")) or "（未设置）"
+        pieces = [str(name)]
+        if split_count is not None:
+            pieces.append(f"分组数={split_count}")
+        if group_index is not None:
+            pieces.append(f"分组序号={group_index}")
+        pieces.append(f"产品路径={product_path}")
+        pieces.append(f"因子={factor}")
+        if group.get("parent_id") or group.get("parentId"):
+            pieces.append(f"派生自={group.get('parent_id') or group.get('parentId')}")
+        click.echo("  " + " · ".join(pieces))
+    for index, config in enumerate(ls_configs, start=1):
+        long_group = config.get("long_group") or {}
+        short_group = config.get("short_group") or {}
+        long_label = long_group.get("name") or long_group.get("id") or config.get("long_group_id") or config.get("longGroupId") or "?"
+        short_label = short_group.get("name") or short_group.get("id") or config.get("short_group_id") or config.get("shortGroupId") or "?"
+        name = config.get("name") or f"ls-{index}"
+        click.echo(f"  {name} · Long-Short · 多头={long_label} · 空头={short_label}")
 
 
 def _equity_curve_live_enabled(state, *, client=None) -> bool:

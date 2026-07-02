@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
-from tools.cli.core.display import print_location_welcome, print_single_factor_family_welcome
+from tools.cli.core.display import module_lines, print_location_welcome, print_single_factor_family_welcome
 from tools.cli.core.errors import friendly_errors
 from tools.cli.modules.backtest import BACKTEST_PUBLIC_KEY, enter_backtest_state
 from tools.cli.state import load_state, save_state
@@ -26,12 +27,13 @@ def enter_single_factor_family_test(factor_family: str, path: tuple[str, ...]) -
     示例:
 
       factortester single_factor_test --factor-family SgCCS
+      factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS backtest
       factortester single_factor_test --factor-family SgCCS single_factor_page template list
       factortester single_factor_test --factor-family SgCCS template list
       factortester single_factor_test --factor-family SgCCS template load <模板ID或名称>
 
-    进入后运行 factortester list 查看 IC 测试、回测等下一层模块。
+    使用 factortester single_factor_test list 查看 IC 测试、回测等下一层模块。
     """
     _enter_single_factor_page(factor_family, path)
 
@@ -46,18 +48,22 @@ def enter_single_factor_test(factor_family: str, path: tuple[str, ...]) -> None:
     示例:
 
       factortester single_factor_test --factor-family SgCCS
+      factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS backtest
       factortester single_factor_test --factor-family SgCCS single_factor_page template list
       factortester single_factor_test --factor-family SgCCS template list
       factortester single_factor_test --factor-family SgCCS template load <模板ID或名称>
 
-    进入后运行 factortester list 查看 IC 测试、回测等下一层模块。
+    使用 factortester single_factor_test list 查看 IC 测试、回测等下一层模块。
     """
     _enter_single_factor_page(factor_family, path)
 
 
 def _enter_single_factor_page(factor_family: str, path: tuple[str, ...]) -> None:
     """Enter the single-factor-family test page controller."""
+    if path and path[0] in {"list", "ls"}:
+        _print_single_factor_children(factor_family)
+        return
     if not factor_family:
         factor_family = click.prompt("因子家族", default="", show_default=False)
     if not factor_family:
@@ -78,6 +84,17 @@ def _enter_single_factor_page(factor_family: str, path: tuple[str, ...]) -> None
         print_location_welcome(state)
     else:
         print_single_factor_family_welcome(state)
+
+
+def _print_single_factor_children(factor_family: str) -> None:
+    modules = client_from_config().list_modules(parent="single_factor_family_test")
+    suffix = f" · {factor_family}" if factor_family else ""
+    click.echo(f"当前位置: single_factor_test{suffix}")
+    for line in module_lines(modules):
+        click.echo(line)
+    click.echo("进入下一级示例:")
+    click.echo("  factortester single_factor_test --factor-family SgCCS backtest")
+    click.echo("  factortester single_factor_test --factor-family SgCCS template list")
 
 
 def enter_child(state, key: str) -> None:
@@ -101,7 +118,7 @@ def _handle_settings_submodule_command(state, path: tuple[str, ...]) -> None:
     if command_path[0] == "template":
         _handle_template_command(state, command_path[1:])
         return
-    raise click.ClickException("因子家族测试设置支持的动作: template list, template load")
+    raise click.ClickException("因子家族测试设置支持的动作: template list, template load, template save")
 
 
 def _print_settings_submodule_welcome(state) -> None:
@@ -111,12 +128,18 @@ def _print_settings_submodule_welcome(state) -> None:
     click.echo("可用命令:")
     click.echo("  factortester single_factor_test --factor-family <因子家族> single_factor_page template list")
     click.echo("  factortester single_factor_test --factor-family <因子家族> single_factor_page template load <模板ID或名称>")
+    click.echo("  factortester single_factor_test --factor-family <因子家族> single_factor_page template save <模板名>")
     click.echo("")
     click.echo("简写:")
     click.echo("  factortester single_factor_test --factor-family <因子家族> template list")
+    click.echo("  factortester single_factor_test --factor-family <因子家族> template load <模板ID或名称>")
+    click.echo("  factortester single_factor_test --factor-family <因子家族> template save <模板名>")
 
 
 def _handle_template_command(state, args: tuple[str, ...]) -> None:
+    if not args or args[0] in {"help", "--help", "-h"}:
+        _print_template_help(state)
+        return
     if not args or args[0] in {"list", "ls"}:
         _list_templates(state.factor_family)
         return
@@ -125,7 +148,24 @@ def _handle_template_command(state, args: tuple[str, ...]) -> None:
             raise click.ClickException("template load 需要模板 ID 或名称")
         _load_template_into_state(state, args[1])
         return
-    raise click.ClickException("template 支持的动作: list, load")
+    if args[0] == "save":
+        name = args[1] if len(args) >= 2 else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _save_template_from_state(state, name)
+        return
+    raise click.ClickException("template 支持的动作: list, load, save, help")
+
+
+def _print_template_help(state) -> None:
+    click.echo("template 命令")
+    click.echo(f"当前因子家族: {state.factor_family}")
+    click.echo("  list / ls                 列出已保存模板")
+    click.echo("  load <模板ID或名称>        加载模板到 single_factor_test/backtest 草稿")
+    click.echo("  save [模板名]              保存当前页面设置、backtest 分组与 Long-Short 草稿")
+    click.echo("")
+    click.echo("示例:")
+    click.echo("  factortester single_factor_test --factor-family SgCCS template list")
+    click.echo("  factortester single_factor_test --factor-family SgCCS template load '2026-06-02 07:20:47'")
+    click.echo("  factortester single_factor_test --factor-family SgCCS template save 'CLI 草稿'")
 
 
 def _list_templates(factor_family: str) -> None:
@@ -154,6 +194,33 @@ def _load_template_into_state(state, selector: str) -> None:
         f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
         f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}{factor_text}"
     )
+
+
+def _save_template_from_state(state, name: str) -> None:
+    if not state.factor_family:
+        raise click.ClickException("保存模板前必须选择因子家族")
+    snapshot = _snapshot_from_state(state)
+    data = client_from_config().save_single_factor_setting_template(state.factor_family, name=name, snapshot=snapshot)
+    template_id = data.get("id") or ""
+    state.page_settings["setting_template"] = name
+    click.echo(f"已保存模板: {name}")
+    if template_id:
+        click.echo(f"id={template_id}")
+
+
+def _snapshot_from_state(state) -> dict[str, Any]:
+    factors: dict[str, Any] = {}
+    for key in ("factor_candidates", "factor", "setting_template"):
+        if key in state.page_settings:
+            factors[key] = state.page_settings[key]
+    return {
+        "factors": factors,
+        "local_settings": dict(state.backtest_local_settings),
+        "group_settings": {
+            "groups": [dict(group) for group in state.backtest_groups],
+            "lsConfigs": [dict(config) for config in state.backtest_ls_configs],
+        },
+    }
 
 
 def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:

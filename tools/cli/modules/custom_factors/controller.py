@@ -7,8 +7,8 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
+from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
-from tools.cli.state import load_state, save_state
 
 
 @click.group("custom_factors", invoke_without_command=True)
@@ -17,14 +17,21 @@ from tools.cli.state import load_state, save_state
 def custom_factors(ctx: click.Context) -> None:
     """Enter custom factors module."""
     if ctx.invoked_subcommand is None:
-        state = load_state()
         ensure_child_available(None, "custom_factors")
-        state.enter("custom_factors")
-        save_state(state)
         click.echo("因子管理")
+        click.echo("下一层: factortester custom_factors list")
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push")
+
+
+@custom_factors.command("list")
+@friendly_errors
+def list_custom_factor_children() -> None:
+    """List custom factor module children."""
+    click.echo("当前位置: custom_factors")
+    for line in module_lines(client_from_config().list_modules(parent="custom_factors")):
+        click.echo(line)
 
 
 @custom_factors.group("factor-library", invoke_without_command=True)

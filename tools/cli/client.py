@@ -164,6 +164,20 @@ class FactorTesterClient:
             raise ValueError("服务器模板详情响应格式错误")
         return template
 
+    def save_single_factor_setting_template(
+        self,
+        factor_family: str,
+        *,
+        name: str,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._expect_success(
+            self.session.post(
+                f"/api/single_factor_setting_templates/{factor_family}",
+                {"name": name, "ff_alias": factor_family, "snapshot": snapshot},
+            )
+        )
+
     def factor_workspace_source_root(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/custom-factors/api/source-root"))
 

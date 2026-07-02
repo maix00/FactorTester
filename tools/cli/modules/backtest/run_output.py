@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import shutil
 import sys
 import time
@@ -84,18 +86,25 @@ class BacktestRunRenderer:
                     self._echo(line)
         self._echo("结果摘要:")
         summary_rows = [
-            (f"{name} · LS" if is_ls else name, curve[-1], len(curve), _sparkline(curve))
+            (f"{name} · LS" if is_ls else name, curve[0], curve[-1], len(curve))
             for name, curve, is_ls in series
         ]
         name_width = max((len(row[0]) for row in summary_rows), default=0)
-        final_width = max((len(f"{row[1]:.2f}") for row in summary_rows), default=0)
-        points_width = max((len(str(row[2])) for row in summary_rows), default=0)
-        for display_name, final_value, point_count, spark in summary_rows:
+        final_width = max((len(f"{row[2]:.2f}") for row in summary_rows), default=0)
+        return_width = max((len(_return_text(row[1], row[2])) for row in summary_rows), default=0)
+        points_width = max((len(str(row[3])) for row in summary_rows), default=0)
+        self._echo(
+            f"  {'策略':<{name_width}}  "
+            f"{'最终权益':>{final_width}}  "
+            f"{'收益率':>{return_width}}  "
+            f"{'点数':>{points_width}}"
+        )
+        for display_name, start_value, final_value, point_count in summary_rows:
             self._echo(
                 f"  {display_name:<{name_width}}  "
-                f"final={final_value:>{final_width}.2f}  "
-                f"points={point_count:>{points_width}}  "
-                f"{spark}"
+                f"{final_value:>{final_width}.2f}  "
+                f"{_return_text(start_value, final_value):>{return_width}}  "
+                f"{point_count:>{points_width}}"
             )
 
     def _print_manifest(self, data: Any) -> None:
@@ -422,6 +431,9 @@ def _result_series(groups: list[Any]) -> list[tuple[str, list[float], bool]]:
 def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: int = 48, height: int = 10) -> list[str]:
     if not series:
         return []
+    plotext_lines = _plotext_chart(series, width=width, height=height)
+    if plotext_lines:
+        return plotext_lines
     symbols = list("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     rows = [(f"{name} LS" if is_ls else name, curve[-1], curve) for name, curve, is_ls in series if curve]
     if not rows:
@@ -437,6 +449,38 @@ def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: i
         spark = _sparkline(curve, width=spark_width)
         lines.append(f"  {symbol} {display_name:<{name_width}}  {spark}  末值 {final_value:>{final_width}.2f}")
     return lines
+
+
+def _plotext_chart(series: list[tuple[str, list[float], bool]], *, width: int, height: int) -> list[str]:
+    try:
+        import plotext as plt  # type: ignore[import-not-found]
+    except Exception:
+        return []
+    buffer = io.StringIO()
+    try:
+        plt.clear_figure()
+        plt.plotsize(width, height)
+        plt.title("净值曲线")
+        plt.xlabel("样本点")
+        plt.ylabel("权益")
+        for name, curve, is_ls in series:
+            label = f"{name} LS" if is_ls else name
+            plt.plot(list(range(len(curve))), curve, label=label)
+        with contextlib.redirect_stdout(buffer):
+            plt.show()
+        lines = [str(plt.uncolorize(line)).rstrip() for line in buffer.getvalue().splitlines() if line.strip()]
+        return lines
+    except Exception:
+        return []
+    finally:
+        with contextlib.suppress(Exception):
+            plt.clear_figure()
+
+
+def _return_text(start_value: float, final_value: float) -> str:
+    if start_value == 0:
+        return "n/a"
+    return f"{(final_value / start_value - 1.0) * 100:.2f}%"
 
 
 def _is_tty() -> bool:

@@ -7,8 +7,8 @@ from typing import Any
 import click
 
 from tools.cli.core.context import client_from_config, ensure_child_available
+from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
-from tools.cli.state import load_state, save_state
 
 
 @click.group("products", invoke_without_command=True)
@@ -17,12 +17,19 @@ from tools.cli.state import load_state, save_state
 def products(ctx: click.Context) -> None:
     """Enter products module."""
     if ctx.invoked_subcommand is None:
-        state = load_state()
         ensure_child_available(None, "products")
-        state.enter("products")
-        save_state(state)
         click.echo("产品管理")
+        click.echo("下一层: factortester products list")
         click.echo("可用功能: factortester products product-groups list|add")
+
+
+@products.command("list")
+@friendly_errors
+def list_products_children() -> None:
+    """List product module children."""
+    click.echo("当前位置: products")
+    for line in module_lines(client_from_config().list_modules(parent="products")):
+        click.echo(line)
 
 
 @products.group("product-groups", invoke_without_command=True)
