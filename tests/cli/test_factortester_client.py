@@ -96,3 +96,16 @@ def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> N
     assert client.tab_manifest("group_test", "engine")["tab"]["key"] == "engine"
     assert client.list_candidates("product_path_selection")[0]["id"] == "pg-1"
     assert client.list_candidates("factor_candidates")[0]["alias"] == "SgCCS|N:2m"
+
+
+def test_client_detects_old_module_endpoint_when_parent_is_ignored(tmp_path) -> None:
+    app = Flask(__name__)
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return jsonify(success=True, modules=[{"key": "single_factor_family_test"}])
+
+    with running_server(app) as url:
+        client = FactorTesterClient(HttpSession(url, cookies=tmp_path / "cookies.lwp"))
+        with pytest.raises(RuntimeError, match="分层导航版本"):
+            client.list_modules(parent="single_factor_family_test")

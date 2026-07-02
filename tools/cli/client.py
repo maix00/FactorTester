@@ -25,6 +25,11 @@ class FactorTesterClient:
     def list_modules(self, parent: str | None = None) -> list[dict[str, Any]]:
         query = {"parent": parent} if parent else None
         data = self._expect_success(self.session.get("/api/testers/modules", query=query))
+        if parent and data.get("parent") != parent:
+            raise RuntimeError(
+                "服务端 /api/testers/modules 还不是分层导航版本，"
+                "请更新并重启服务端后再访问下一层。"
+            )
         modules = data.get("modules")
         if not isinstance(modules, list):
             raise ValueError("服务器 modules 响应格式错误")
