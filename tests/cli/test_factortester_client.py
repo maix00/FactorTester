@@ -49,6 +49,10 @@ def fake_server() -> Iterator[str]:
             return jsonify(success=True, parent=parent, modules=[{"key": "single_factor_page/setting_template", "label": "模板", "kind": "tab"}])
         return jsonify(success=True, modules=[{"key": "single_factor_page", "label": "因子家族测试设置", "kind": "module", "has_children": True}])
 
+    @app.get("/static/config/modules.json")
+    def home_modules():
+        return jsonify(success=True, modules=[{"id": "single_factor_test", "title": "单因子测试"}])
+
     @app.get("/api/backtest/settings/<application>")
     def settings(application: str):
         return jsonify(
@@ -84,7 +88,7 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
 
     assert client.login("alice", "pw")["username"] == "alice"
     assert client.bootstrap_page()["page_uuid"] == "page-1"
-    assert client.list_modules()[0]["key"] == "single_factor_page"
+    assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
 
 

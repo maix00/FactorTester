@@ -27,8 +27,20 @@ def running_server(app: Flask) -> Iterator[str]:
         thread.join(timeout=5)
 
 
+def register_home_modules(app: Flask) -> None:
+    @app.get("/static/config/modules.json")
+    def home_modules():
+        return jsonify(success=True, modules=[
+            {"id": "single_factor_test", "title": "单因子测试", "path": "/single_factor_test"},
+            {"id": "backtest", "title": "回测", "path": "/single_factor_test?module=backtest"},
+            {"id": "products", "title": "产品管理", "path": "/products"},
+            {"id": "custom_factors", "title": "因子管理", "path": "/custom-factors/editor"},
+        ])
+
+
 def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
+    register_home_modules(app)
 
     @app.get("/api/backtest/settings/<application>")
     def settings(application: str):
@@ -82,7 +94,7 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         if parent == "backtest":
             return jsonify(success=True, parent=parent, modules=[{"key": "backtest/risk", "label": "风险", "kind": "tab", "application": "group_test", "has_children": True}])
         return jsonify(success=True, modules=[
-            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True},
             {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
         ])
 
@@ -99,7 +111,9 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
         assert "当前位置: 首页" in result.output
-        assert "[module] single_factor_family_test" in result.output
+        assert "[module] single_factor_test" in result.output
+        assert "[module] products" in result.output
+        assert "[module] custom_factors" in result.output
         assert "group_test/risk" not in result.output
 
         result = runner.invoke(cli, ["list", "single_factor_family_test"])
@@ -137,6 +151,7 @@ def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatc
 
 def test_click_login_failure_is_user_friendly(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
+    register_home_modules(app)
 
     @app.post("/login")
     def login():
@@ -158,6 +173,7 @@ def test_click_login_failure_is_user_friendly(tmp_path, monkeypatch) -> None:
 def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     app.secret_key = "test-secret"
+    register_home_modules(app)
 
     @app.post("/login")
     def login():
@@ -178,6 +194,7 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
 
 def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
+    register_home_modules(app)
 
     @app.get("/api/testers/modules")
     def modules():
@@ -189,7 +206,7 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
         if parent == "backtest":
             return jsonify(success=True, parent=parent, modules=[{"key": "backtest/time", "label": "时间范围", "kind": "tab", "application": "group_test", "has_children": True}])
         return jsonify(success=True, modules=[
-            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True},
             {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
         ])
 
@@ -212,6 +229,55 @@ def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkey
 
 def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        defaults = {
+            "allocation_mode": {
+                "value": "equal_risk",
+                "label": "分配方式",
+                "control_template": "select",
+                "tab_key": "risk",
+            },
+            "product_path_candidates": {
+                "value": [],
+                "label": "产品路径候选",
+                "serialization": {"shared_page_field": "product_path_candidates"},
+            },
+            "product_path_selection": {
+                "value": None,
+                "label": "产品路径",
+                "serialization": {"shared_page_field": "product_path_selection"},
+            },
+            "factor_candidates": {
+                "value": [],
+                "label": "因子候选",
+                "serialization": {"shared_page_field": "factor_candidates"},
+            },
+            "factor": {
+                "value": "",
+                "label": "因子",
+                "serialization": {"shared_page_field": "factor"},
+            },
+        }
+        if application == "single_factor_page":
+            return jsonify(success=True, application=application, defaults=defaults)
+        if application == "group_test":
+            return jsonify(success=True, application=application, tab_lists={"local-settings": []}, defaults=defaults)
+        return jsonify(success=False, error="unknown application"), 404
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘", "paths": ["Product/Futures/CNFutures/日盘"]}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        return jsonify(success=True, factors=[{
+            "factor_alias": "SgCCS|N:2m|$F:1m|$Rev",
+            "factor_family_alias": request.args.get("factor_family_alias"),
+            "product_group": request.args.get("product_group"),
+        }])
 
     @app.get("/api/testers/modules")
     def modules():
@@ -219,7 +285,7 @@ def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_p
         if parent == "backtest":
             return jsonify(success=True, parent=parent, modules=[{"key": "backtest/time", "label": "时间范围", "kind": "tab", "application": "group_test", "has_children": True}])
         return jsonify(success=True, modules=[
-            {"key": "single_factor_family_test", "label": "单因子家族测试", "kind": "module", "has_children": True},
+            {"key": "single_factor_test", "label": "单因子测试", "kind": "module", "has_children": True},
             {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
         ])
 
@@ -245,6 +311,8 @@ def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_p
         assert "start_date: 2026-01-01" in result.output
         assert "end_date: 2026-01-31" in result.output
         assert "A1 · 分组数=5 · 分组序号=1" in result.output
+        assert "产品路径=中国期货日盘" in result.output
+        assert "因子=SgCCS|N:2m|$F:1m|$Rev" in result.output
 
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
@@ -252,10 +320,107 @@ def test_backtest_can_enter_from_home_with_factor_family_and_draft_options(tmp_p
         assert "[tab] backtest/time" in result.output
 
 
+def test_single_factor_test_backtest_add_group_reuses_factor_family_context(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        defaults = {
+            "product_path_candidates": {
+                "value": [],
+                "label": "产品路径候选",
+                "serialization": {"shared_page_field": "product_path_candidates"},
+            },
+            "product_path_selection": {
+                "value": None,
+                "label": "产品路径",
+                "serialization": {"shared_page_field": "product_path_selection"},
+            },
+            "factor_candidates": {
+                "value": [],
+                "label": "因子候选",
+                "serialization": {"shared_page_field": "factor_candidates"},
+            },
+            "factor": {
+                "value": "",
+                "label": "因子",
+                "serialization": {"shared_page_field": "factor"},
+            },
+        }
+        return jsonify(success=True, application=application, defaults=defaults)
+
+    @app.get("/api/product-groups")
+    def product_groups():
+        return jsonify(success=True, groups=[{"id": "pg-day", "name": "中国期货日盘"}])
+
+    @app.get("/api/factor-library-overview")
+    def factor_library_overview():
+        assert request.args.get("factor_family_alias") == "SgCCS"
+        return jsonify(success=True, factors=[{"factor_alias": "SgCCS|N:2m"}])
+
+    @app.get("/api/testers/modules")
+    def modules():
+        parent = request.args.get("parent")
+        if parent == "single_factor_family_test":
+            return jsonify(success=True, parent=parent, modules=[{"key": "group_test", "label": "分组回测", "kind": "module", "has_children": True}])
+        if parent == "group_test":
+            return jsonify(success=True, parent=parent, modules=[])
+        return jsonify(success=True, modules=[])
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "backtest"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, [
+            "backtest",
+            "add-group",
+            "--name", "A1",
+            "--split-count", "5",
+            "--group-index", "1",
+        ])
+        assert result.exit_code == 0
+        assert "产品路径: 中国期货日盘" in result.output
+        assert "因子: SgCCS|N:2m" in result.output
+
+
+def test_products_and_custom_factors_expose_library_submodules_from_home(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+
+        result = runner.invoke(cli, ["products"])
+        assert result.exit_code == 0
+        assert "产品管理" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: products" in result.output
+        assert "[module] products/product-groups: 产品组库" in result.output
+
+        result = runner.invoke(cli, ["home"])
+        assert result.exit_code == 0
+        result = runner.invoke(cli, ["custom_factors"])
+        assert result.exit_code == 0
+        assert "因子管理" in result.output
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "当前位置: custom_factors" in result.output
+        assert "[module] custom_factors/factor-library: 因子库" in result.output
+
+
 def test_click_non_json_html_response_is_user_friendly(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
 
-    @app.get("/api/testers/modules")
+    @app.get("/static/config/modules.json")
     def modules():
         return "<!DOCTYPE html><html><head><title>工具箱</title></head><body>login</body></html>"
 

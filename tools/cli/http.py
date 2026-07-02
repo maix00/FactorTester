@@ -106,6 +106,9 @@ class HttpSession:
     def post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.request("POST", path, payload=payload or {})
 
+    def put(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.request("PUT", path, payload=payload or {})
+
     def request(
         self,
         method: str,
@@ -126,6 +129,11 @@ class HttpSession:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
+            if _looks_like_html(raw):
+                raise ValueError(
+                    "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
+                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                ) from exc
             raise HttpClientError(exc.code, url, raw) from exc
         finally:
             self._save_cookies()

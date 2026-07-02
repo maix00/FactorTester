@@ -25,7 +25,9 @@ def print_home_welcome() -> None:
     click.echo("欢迎使用 FactorTester CLI")
     click.echo("常用操作:")
     click.echo("  factortester list                         查看当前层级可进入模块")
-    click.echo("  factortester single_factor_family_test    进入单因子家族测试")
+    click.echo("  factortester single_factor_test           进入单因子测试")
+    click.echo("  factortester products                     进入产品管理")
+    click.echo("  factortester custom_factors               进入因子管理")
     click.echo("  factortester back                         返回上一层")
 
 
@@ -55,6 +57,11 @@ def print_backtest_welcome(state: CliState) -> None:
                 parts.append(f"分组数={group['split_count']}")
             if group.get("group_index") is not None:
                 parts.append(f"分组序号={group['group_index']}")
+            product_path = _product_path_label(group.get("product_path_selection"))
+            if product_path:
+                parts.append(f"产品路径={product_path}")
+            if group.get("factor"):
+                parts.append(f"因子={group['factor']}")
             click.echo(f"    {index}. " + " · ".join(parts))
     else:
         click.echo("  groups: （空）")
@@ -75,3 +82,9 @@ def print_location_welcome(state: CliState) -> None:
         return
     click.echo(f"已进入: {state.location_label}")
     click.echo("下一步: factortester list 查看下一层；factortester back 返回。")
+
+
+def _product_path_label(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("product_group") or value.get("label") or value.get("name") or value.get("product_path_selection_id") or "")
+    return str(value or "")

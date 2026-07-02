@@ -13,7 +13,9 @@ from typing import Iterable
 import click
 
 from tools.cli.modules.backtest import backtest
-from tools.cli.modules.single_factor_family_test import enter_single_factor_family_test
+from tools.cli.modules.custom_factors import custom_factors
+from tools.cli.modules.products import products
+from tools.cli.modules.single_factor_family_test import enter_single_factor_family_test, enter_single_factor_test
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,14 +29,24 @@ class ControllerRegistry:
     def __init__(self) -> None:
         self._adapters = (
             ControllerAdapter(
-                public_key="single_factor_family_test",
-                backend_key="single_factor_family_test",
-                commands=(enter_single_factor_family_test,),
+                public_key="single_factor_test",
+                backend_key="single_factor_test",
+                commands=(enter_single_factor_test, enter_single_factor_family_test),
             ),
             ControllerAdapter(
                 public_key="backtest",
                 backend_key="group_test",
                 commands=(backtest,),
+            ),
+            ControllerAdapter(
+                public_key="products",
+                backend_key="products",
+                commands=(products,),
+            ),
+            ControllerAdapter(
+                public_key="custom_factors",
+                backend_key="custom_factors",
+                commands=(custom_factors,),
             ),
         )
 
