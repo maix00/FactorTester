@@ -1057,7 +1057,10 @@ def _print_results_help() -> None:
     click.echo("  equity                          最近一次运行的多策略净值图")
     click.echo("  snapshot --index N              查看第 N 个时间点的持仓/资金快照")
     click.echo("  snapshot --timestamp-ms MS      查看指定 epoch 毫秒附近的快照")
-    click.echo("  order-flow [--group-name NAME]  查看订单流/下单过程记录")
+    click.echo("  order-flow [--group-name NAME]  查看订单流明细(时间/品种/数量/成交价/状态)")
+    click.echo("    --order-id ID                 只看某笔订单的完整生命周期")
+    click.echo("    --limit N                     每个策略最多显示的记录数(默认20, 0=全部)")
+    click.echo("    --counts-only                 只显示记录条数，不展开明细")
 
 
 def _require_last_result(state) -> dict[str, Any]:
@@ -1111,6 +1114,18 @@ def _print_snapshot_result(state, args: tuple[str, ...]) -> None:
 
 
 def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
+    """默认显示每个策略最近的订单流明细（时间、品种、步骤、数量、成交价、
+    状态），而不只是记录条数 -- 记录条数看不出策略实际交易了什么、有没有
+    在期望的品种上下单。
+
+    \b
+    可选参数:
+      --group-name NAME    只看指定策略
+      --timestamp-ms MS    只看某个时间点的记录
+      --order-id ID        只看某笔订单的完整生命周期
+      --limit N            每个策略最多显示的记录数(默认 20, 0=全部)
+      --counts-only        只显示每个策略的记录条数(旧行为)
+    """
     data = _require_last_result(state)
     payload: dict[str, Any] = {"page_uuid": state.page_uuid}
     group_name = _arg_value(args, "--group-name")
@@ -1123,15 +1138,55 @@ def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
     timestamp_ms = _arg_value(args, "--timestamp-ms")
     if timestamp_ms:
         payload["timestamp_ms"] = int(timestamp_ms)
+    order_id = _arg_value(args, "--order-id")
+    if order_id:
+        payload["order_id"] = order_id
     result = client_from_config().group_order_flow(payload)
     groups = result.get("groups") if isinstance(result.get("groups"), list) else []
     click.echo(f"订单流: records={result.get('record_count', 0)}")
+
+    counts_only = "--counts-only" in args
+    limit_raw = _arg_value(args, "--limit")
+    limit = int(limit_raw) if limit_raw else 20
+
     rows = []
     for group in groups:
         records = group.get("records") if isinstance(group, dict) else []
         rows.append((group.get("group_name") or group.get("group_id") or "", len(records or [])))
     for line in render_table(("策略", "记录数"), rows, indent="  ", aligns=("left", "right"), max_widths=(28, 8)):
         click.echo(line)
+
+    if counts_only:
+        return
+
+    for group in groups:
+        records = list(group.get("records") or []) if isinstance(group, dict) else []
+        if not records:
+            continue
+        name = group.get("group_name") or group.get("group_id") or ""
+        shown = records if limit <= 0 else records[:limit]
+        click.echo(f"\n{name} 订单流明细 (显示 {len(shown)}/{len(records)} 条):")
+        detail_rows = [
+            (
+                str(r.get("timestamp") or ""),
+                str(r.get("product") or ""),
+                str(r.get("step") or ""),
+                str(r.get("label") or ""),
+                f"{r.get('quantity') or 0.0:.4g}",
+                "" if r.get("effective_price") is None else f"{r.get('effective_price'):.6g}",
+                str(r.get("status") or ""),
+                str(r.get("reject_reason") or ""),
+            )
+            for r in shown
+        ]
+        for line in render_table(
+            ("时间", "品种", "步骤", "说明", "数量", "成交价", "状态", "拒绝原因"),
+            detail_rows, indent="  ", aligns=("left", "left", "left", "left", "right", "right", "left", "left"),
+            max_widths=(24, 14, 14, 16, 10, 10, 10, 20),
+        ):
+            click.echo(line)
+        if limit > 0 and len(records) > limit:
+            click.echo(f"  ... 还有 {len(records) - limit} 条，用 --limit 0 查看全部")
 
 
 def _result_timestamp_ms(data: dict[str, Any], args: tuple[str, ...]) -> int:
