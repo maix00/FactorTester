@@ -128,7 +128,12 @@ class HttpSession:
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"服务器没有返回 JSON: {raw[:200]}") from exc
+            if _looks_like_html(raw):
+                raise ValueError(
+                    "服务器返回了 HTML 页面而不是 JSON，可能尚未登录、登录已过期，"
+                    "或服务地址配置到了网页入口；请先运行 factortester login。"
+                ) from exc
+            raise ValueError("服务器没有返回合法 JSON。") from exc
         if not isinstance(parsed, dict):
             raise ValueError(f"服务器 JSON 顶层不是对象: {type(parsed).__name__}")
         return parsed
@@ -149,3 +154,7 @@ class HttpSession:
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
+
+def _looks_like_html(raw: str) -> bool:
+    text = raw.lstrip().lower()
+    return text.startswith("<!doctype html") or text.startswith("<html")

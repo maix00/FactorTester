@@ -122,6 +122,27 @@ def test_click_login_failure_is_user_friendly(tmp_path, monkeypatch) -> None:
         assert "tools/cli" not in result.output
 
 
+def test_click_non_json_html_response_is_user_friendly(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+
+    @app.get("/api/testers/modules")
+    def modules():
+        return "<!DOCTYPE html><html><head><title>工具箱</title></head><body>login</body></html>"
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        result = runner.invoke(cli, ["configure", "--base-url", url])
+        assert result.exit_code == 0
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code != 0
+        assert "服务器返回了 HTML 页面而不是 JSON" in result.output
+        assert "factortester login" in result.output
+        assert "<!DOCTYPE html>" not in result.output
+        assert "<html" not in result.output
+
+
 def test_backtest_error_wrapper_preserves_server_body() -> None:
     @click.command()
     @_backtest_errors
