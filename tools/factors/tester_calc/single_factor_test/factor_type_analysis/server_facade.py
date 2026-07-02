@@ -41,7 +41,7 @@ from tools.factors.tester_calc.single_factor_test.factor_type_analysis.correlati
 
 def _product_series_from_tester(
     tester,
-    factor_alias: str,
+    factor_or_alias: Any,
 ) -> dict[str, pd.Series]:
     """
     从 FactorTester 中提取某因子在所有产品上的序列。
@@ -50,22 +50,25 @@ def _product_series_from_tester(
         {product_name: pd.Series}
     """
     factors = getattr(tester, "_factors", [])
-    factor = next((f for f in factors if f.alias == factor_alias), None)
+    result = tester.results.get(factor_or_alias)
+    factor = factor_or_alias if result is not None else None
+    factor_alias = str(getattr(factor_or_alias, "alias", factor_or_alias))
     if factor is None:
-        # 尝试通过已计算的结果查找
+        factor = next((f for f in factors if getattr(f, "alias", None) == factor_alias), None)
+    if factor is None:
+        factor = next((f for f in factors if str(getattr(f, "alias", "")) == factor_alias), None)
+    if factor is None:
+        # Last resort for older FactorTester result stores keyed by factor objects
+        # that are not present in _factors.
         for f in getattr(tester, "_factors", []):
             result = tester.results.get(f)
             if result is not None:
-                table = (
-                    result.func_table if not result.func_table.empty
-                    else result.table if not result.table.empty
-                    else None
-                )
-                if table is not None:
-                    break
+                factor = f
+                break
+    if factor is None:
         return {}
 
-    result = tester.results.get(factor)
+    result = result or tester.results.get(factor)
     if result is None:
         return {}
 
@@ -194,10 +197,10 @@ class FactorTypeAnalysisRun:
         factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
         if not factor_family_alias or not factor_alias:
             raise ValueError("请先选择因子")
-        method = str(data.get("method") or "pearson").strip()
+        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+        method = str(data.get("method") or settings.get("correlation_method") or "pearson").strip()
         if method not in ("pearson", "spearman"):
             method = "pearson"
-        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
         raw_min_periods = data.get("min_periods")
         if raw_min_periods is None:
             raw_min_periods = settings.get("min_periods")
@@ -241,7 +244,7 @@ class FactorTypeAnalysisRun:
         )
 
         # 3) 提取目标因子在各产品上的序列
-        target_series = _product_series_from_tester(tester, self.factor_alias)
+        target_series = _product_series_from_tester(tester, target_factor)
         if not target_series:
             raise LookupError("目标因子没有可用的序列数据")
 
@@ -268,9 +271,7 @@ class FactorTypeAnalysisRun:
                     ref_def.factor_alias,
                     self.page_uuid,
                 )
-                ref_series = _product_series_from_tester(
-                    tester, ref_def.factor_alias
-                )
+                ref_series = _product_series_from_tester(tester, ref_factor)
                 if ref_series:
                     # 取与目标因子代表性产品相同的产品
                     rep_product = max(

@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from tools.cli.field_store import FieldStore
+from tools.cli.table import render_table
 
 
 def field_flag(key: str) -> str:
@@ -81,8 +82,44 @@ def render_settings_help(store: FieldStore, *, title: str) -> list[str]:
         if not fields:
             continue
         lines.append(f"{tab.get('label') or tab_key}:")
+        rows: list[tuple[str, str, str, str, str, str]] = []
+        details: list[str] = []
         for field_key, meta in fields:
-            lines.append(render_field_help_line(store, field_key, meta))
+            rows.append(_field_help_row(store, field_key, meta))
+            details.extend(_field_detail_lines(field_key, meta))
+        lines.extend(render_table(
+            ("字段", "名称", "状态", "类型", "默认值", "当前值"),
+            rows,
+            indent="  ",
+            max_widths=(28, 18, 8, 32, 24, 34),
+        ))
+        lines.extend(details)
+    return lines
+
+
+def _field_help_row(store: FieldStore, key: str, meta: Mapping[str, Any]) -> tuple[str, str, str, str, str, str]:
+    editable = "可编辑" if store.is_editable(key) else "不可编辑"
+    return (
+        field_flag(key),
+        str(meta.get("label") or key),
+        editable,
+        field_type_label(meta),
+        repr(meta.get("value")),
+        repr(store.effective(key)),
+    )
+
+
+def _field_detail_lines(key: str, meta: Mapping[str, Any]) -> list[str]:
+    lines: list[str] = []
+    prefix = f"    {field_flag(key)}"
+    if meta.get("visible_when"):
+        lines.append(f"{prefix} 显示条件: {meta['visible_when']!r}")
+    editable_when = meta.get("editable_when", meta.get("editible_when"))
+    if editable_when:
+        lines.append(f"{prefix} 编辑条件: {editable_when!r}")
+    help_text = meta.get("help_text")
+    if help_text:
+        lines.append(f"{prefix} 说明: {help_text}")
     return lines
 
 

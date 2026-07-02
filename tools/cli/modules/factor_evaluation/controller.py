@@ -13,6 +13,7 @@ from tools.cli.modules.single_factor_analysis_shared import (
     parse_run_selectors,
 )
 from tools.cli.state import load_state, save_state
+from tools.cli.table import render_table
 
 
 FACTOR_EVALUATION_KEY = "factor_evaluation"
@@ -96,8 +97,11 @@ def _print_result(result: dict) -> None:
     meta = result.get("meta") or {}
     if meta:
         click.echo(f"序列数: {meta.get('product_count')} · 耗时: {meta.get('elapsed_ms')}ms")
+    rows = []
     for item in (result.get("series") or [])[:5]:
         product = item.get("product")
         desc = item.get("desc")
         values = item.get("values") or []
-        click.echo(f"  {product}({desc}) points={len(values)}")
+        rows.append((product or "", desc or "", len(values)))
+    for line in render_table(("产品", "描述", "点数"), rows, indent="  ", aligns=("left", "left", "right"), max_widths=(18, 32, 10)):
+        click.echo(line)

@@ -937,12 +937,21 @@ def test_backtest_add_group_context_help_prints_registered_visible_and_editable_
         assert result.exit_code == 0
         assert "回测设置上下文" in result.output
         assert "执行引擎" in result.output
-        assert "--engine  执行引擎  [可编辑]" in result.output
-        assert "类型=Literal[Native, Backtrader]" in result.output
-        assert "--engine-mode  引擎模式  [可编辑]" in result.output
+        assert "字段" in result.output
+        assert "名称" in result.output
+        assert "状态" in result.output
+        assert "--engine" in result.output
+        assert "执行引擎" in result.output
+        assert "可编辑" in result.output
+        assert "Literal[Native, Backtrader]" in result.output
+        assert "--engine-mode" in result.output
+        assert "引擎模式" in result.output
         assert "因子执行" in result.output
-        assert "--warmup-mode  前摇模式  [可编辑]" in result.output
-        assert "--readonly-probe  只读字段  [不可编辑]" in result.output
+        assert "--warmup-mode" in result.output
+        assert "前摇模式" in result.output
+        assert "--readonly-probe" in result.output
+        assert "只读字段" in result.output
+        assert "不可编辑" in result.output
 
 
 def test_backtest_add_group_field_help_distinguishes_missing_value_from_context(tmp_path, monkeypatch) -> None:
@@ -993,7 +1002,8 @@ def test_backtest_add_group_field_help_distinguishes_missing_value_from_context(
         result = runner.invoke(cli, ["group", "--add", "--split-count", "5", "--help"])
         assert result.exit_code == 0
         assert "回测设置上下文" in result.output
-        assert "--split-count  分组数" in result.output
+        assert "--split-count" in result.output
+        assert "分组数" in result.output
         assert "执行引擎" in result.output
 
 
@@ -1763,7 +1773,12 @@ def test_ic_test_cli_adds_config_and_runs_stream(tmp_path, monkeypatch) -> None:
         assert result.exit_code == 0
         assert "开始运行 IC 测试: configs=1" in result.output
         assert "进度: eval 1/2" in result.output
-        assert "mean: SgCCS|N:2m=0.123456" in result.output
+        assert "IC 结果摘要" in result.output
+        assert "指标" in result.output
+        assert "因子" in result.output
+        assert "mean" in result.output
+        assert "SgCCS|N:2m" in result.output
+        assert "0.123456" in result.output
         assert received_payloads
         assert received_payloads[-1]["page_uuid"] == "page-ic-1"
         assert received_payloads[-1]["factor_family_alias"] == "SgCCS"
@@ -1876,7 +1891,11 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
         ])
         assert result.exit_code == 0
         assert "开始因子评估" in result.output
-        assert "AP.CZC(苹果) points=2" in result.output
+        assert "产品" in result.output
+        assert "描述" in result.output
+        assert "点数" in result.output
+        assert "AP.CZC" in result.output
+        assert "苹果" in result.output
         assert received["factor_evaluation"]["page_uuid"] == "page-analysis-1"
         assert received["factor_evaluation"]["paths"] == ["Product/Futures/CNFutures/日盘/_products/AP.CZC"]
 
@@ -1896,7 +1915,10 @@ def test_factor_evaluation_and_type_analysis_cli_run(tmp_path, monkeypatch) -> N
         ])
         assert result.exit_code == 0
         assert "开始因子类型分析" in result.output
-        assert "最佳类型: 趋势" in result.output
+        assert "最佳类型" in result.output
+        assert "类型" in result.output
+        assert "相关性" in result.output
+        assert "趋势" in result.output
         assert received["factor_type_analysis"]["settings"]["correlation_method"] == "spearman"
 
 

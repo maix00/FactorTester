@@ -12,6 +12,7 @@ from tools.cli.modules.single_factor_analysis_shared import (
     parse_run_selectors,
 )
 from tools.cli.state import load_state, save_state
+from tools.cli.table import render_table
 
 
 FACTOR_TYPE_ANALYSIS_KEY = "factor_type_analysis"
@@ -91,11 +92,15 @@ def _print_welcome(state) -> None:
 def _print_result(result: dict) -> None:
     best = result.get("best_match") or result.get("best_category") or {}
     if isinstance(best, dict) and best:
-        click.echo(
-            "最佳类型: "
-            + str(best.get("category_label") or best.get("category") or best.get("name") or "（未知）")
-            + f" · corr={best.get('correlation')}"
-        )
+        click.echo("最佳类型:")
+        for line in render_table(
+            ("类型", "相关性"),
+            [(best.get("category_label") or best.get("category") or best.get("name") or "（未知）", _format_value(best.get("correlation")))],
+            indent="  ",
+            aligns=("left", "right"),
+            max_widths=(24, 14),
+        ):
+            click.echo(line)
     categories = result.get("category_summary") or result.get("category_correlations") or []
     if isinstance(categories, dict):
         categories = [
@@ -104,11 +109,14 @@ def _print_result(result: dict) -> None:
         ]
     if categories:
         click.echo("类别相关性:")
+        rows = []
         for item in list(categories)[:8]:
             if not isinstance(item, dict):
                 continue
             name = item.get("category_label") or item.get("category") or item.get("name")
-            click.echo(f"  {name}: {item.get('correlation')}")
+            rows.append((name or "", _format_value(item.get("correlation"))))
+        for line in render_table(("类别", "相关性"), rows, indent="  ", aligns=("left", "right"), max_widths=(24, 14)):
+            click.echo(line)
     refs = result.get("reference_factors") or result.get("reference_correlations") or []
     if isinstance(refs, dict):
         refs = [
@@ -117,7 +125,16 @@ def _print_result(result: dict) -> None:
         ]
     if refs:
         click.echo("参照因子:")
+        rows = []
         for item in list(refs)[:8]:
             if not isinstance(item, dict):
                 continue
-            click.echo(f"  {item.get('name') or item.get('key')}: {item.get('correlation')}")
+            rows.append((item.get("name") or item.get("key") or "", _format_value(item.get("correlation"))))
+        for line in render_table(("因子", "相关性"), rows, indent="  ", aligns=("left", "right"), max_widths=(32, 14)):
+            click.echo(line)
+
+
+def _format_value(value) -> str:
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)

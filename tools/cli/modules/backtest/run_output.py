@@ -11,6 +11,8 @@ from typing import Any
 
 import click
 
+from tools.cli.table import display_width, pad_display, truncate_display
+
 
 EVENT_PHASE = "event_replay"
 
@@ -89,21 +91,21 @@ class BacktestRunRenderer:
             (f"{name} · LS" if is_ls else name, curve[0], curve[-1], len(curve))
             for name, curve, is_ls in series
         ]
-        name_width = max((len(row[0]) for row in summary_rows), default=0)
+        name_width = max((display_width(row[0]) for row in summary_rows), default=0)
         final_width = max((len(f"{row[2]:.2f}") for row in summary_rows), default=0)
-        return_width = max((len(_return_text(row[1], row[2])) for row in summary_rows), default=0)
+        return_width = max((display_width(_return_text(row[1], row[2])) for row in summary_rows), default=0)
         points_width = max((len(str(row[3])) for row in summary_rows), default=0)
         self._echo(
-            f"  {'策略':<{name_width}}  "
+            f"  {pad_display('策略', name_width)}  "
             f"{'最终权益':>{final_width}}  "
-            f"{'收益率':>{return_width}}  "
+            f"{pad_display('收益率', return_width, align='right')}  "
             f"{'点数':>{points_width}}"
         )
         for display_name, start_value, final_value, point_count in summary_rows:
             self._echo(
-                f"  {display_name:<{name_width}}  "
+                f"  {pad_display(display_name, name_width)}  "
                 f"{final_value:>{final_width}.2f}  "
-                f"{_return_text(start_value, final_value):>{return_width}}  "
+                f"{pad_display(_return_text(start_value, final_value), return_width, align='right')}  "
                 f"{point_count:>{points_width}}"
             )
 
@@ -439,7 +441,7 @@ def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: i
     if not rows:
         return []
     max_name_width = 24
-    name_width = min(max_name_width, max(len(row[0]) for row in rows))
+    name_width = min(max_name_width, max(display_width(row[0]) for row in rows))
     final_width = max(len(f"{row[1]:.2f}") for row in rows)
     spark_width = max(12, min(width, _terminal_width() - name_width - final_width - 16))
     lines = ["图例: 每行一条策略曲线，避免终端字符重叠"]
@@ -447,7 +449,7 @@ def _multi_series_chart(series: list[tuple[str, list[float], bool]], *, width: i
         symbol = symbols[index % len(symbols)]
         display_name = _truncate(name, name_width)
         spark = _sparkline(curve, width=spark_width)
-        lines.append(f"  {symbol} {display_name:<{name_width}}  {spark}  末值 {final_value:>{final_width}.2f}")
+        lines.append(f"  {symbol} {pad_display(display_name, name_width)}  {spark}  末值 {final_value:>{final_width}.2f}")
     return lines
 
 
@@ -496,11 +498,7 @@ def _chart_body_width() -> int:
 
 
 def _truncate(value: str, width: int) -> str:
-    if len(value) <= width:
-        return value
-    if width <= 1:
-        return value[:width]
-    return value[: width - 1] + "…"
+    return truncate_display(value, width)
 
 
 def _write_tty_line(text: str) -> None:

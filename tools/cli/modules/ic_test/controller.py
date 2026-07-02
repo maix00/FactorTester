@@ -20,6 +20,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 )
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.state import load_state, save_state
+from tools.cli.table import render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -345,8 +346,16 @@ def _print_config_list(state) -> None:
     if not state.ic_test_configs:
         click.echo("  （空）")
         return
-    for item in state.ic_test_configs:
-        click.echo("  " + _config_summary(item))
+    rows = [
+        (
+            item.get("name") or item.get("id") or "",
+            selection_label(item.get("product_path_selection")) or "（未设置）",
+            item.get("factor") or "（未设置）",
+        )
+        for item in state.ic_test_configs
+    ]
+    for line in render_table(("名称", "产品路径", "因子"), rows, indent="  ", max_widths=(20, 20, 42)):
+        click.echo(line)
 
 
 def _print_config(item: dict[str, Any]) -> None:
@@ -421,17 +430,19 @@ def _print_ic_result(result: dict[str, Any]) -> None:
     if not rows or not columns:
         click.echo("    （无统计结果）")
         return
+    table_rows: list[tuple[str, str, str]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
         index = str(row.get("index") or "")
         if index.lower() not in {"mean", "ir", "t_stat", "n", "ic_mean", "ic_ir"}:
             continue
-        pieces = [f"{index}:"]
         for col in columns:
             value = row.get(col)
             if isinstance(value, float):
-                pieces.append(f"{col}={value:.6g}")
+                display = f"{value:.6g}"
             else:
-                pieces.append(f"{col}={value}")
-        click.echo("    " + " ".join(pieces))
+                display = str(value)
+            table_rows.append((index, col, display))
+    for line in render_table(("指标", "因子", "值"), table_rows, indent="    ", aligns=("left", "left", "right"), max_widths=(12, 42, 14)):
+        click.echo(line)
