@@ -334,6 +334,44 @@ strategy, ()))` 改成 `state.term_structure_store.contract_metadata.get(strateg
 产品在同样的 monkeypatch 下还是走原来的静默排除路径——证明修复只收窄了
 期限结构合约这一类对象的行为，没有改变其它产品的既有语义。
 
+### 修复：`_last_valid_timestamp` 不认 MultiIndex，撞上了刚刚才真正跑到的推断分支
+
+上面这次让"数据缺口必须报错"的修复落地之后，用户反馈跑真实回测时在
+"登记交割强平通知"（`register_force_close_notices`）这一步炸了：
+
+```
+Cannot convert input [(Timestamp('2026-01-30 00:00:00'),
+Timestamp('2026-01-30 15:00:00+0800', tz='Asia/Shanghai'))] of type
+<class 'tuple'> to Timestamp
+```
+
+顺着 `_lifecycle_base_timestamp` 往下查：一个具体合约如果自己的
+`get_contract_list` 行里没有 `last_trade_date`/`auto_close_date` 这类字段
+（`AdjustableProductMixin.get_contract_list` 的默认实现只给 `start`/`end`/
+`start_ts`/`end_ts`，从不给这些），又没能在 OpenCTP 快照或 AKShare 生命周期表
+里查到（两边都单独验证过，字段是干净的标量字符串，没有重复列），就会走到
+最后一道兜底：`_local_cnfutures_inferred_lifecycle` → `infer_contract_end_from_coverage`
+→ `_last_valid_timestamp(contract_series)`。这个函数原来直接写
+`valid.index[-1]`——但 `raw_prices`（真实加载出来的行情表）的索引在这个仓库里
+可以是 `_SIGNAL@` 前缀的 MultiIndex（`DataIndex` 专门支持这种结构），对
+MultiIndex 取 `[-1]` 返回的是这一行各层级值组成的元组，不是标量，喂给
+`pd.Timestamp(...)` 直接炸——错误信息里两个时间戳（同一天的裸日期 + 带时区
+的精确时刻）正是 MultiIndex 两层的值。
+
+这是 `sources/LocalCNFutures/lifecycle.py` 里的既有 bug，跟这次改动本身无关，
+但只有在这次把"期限结构合约缺数据必须报错"改对之后，具体合约的真实每档行情
+才会被稳定加载进来、真正走到这条此前很可能从未被现实数据触发过的兜底推断分支——
+所以是被上一个修复带出来的，而不是新引入的。
+
+修法：`_last_valid_timestamp` 改用 `DataIndex(valid.index).event_timestamps()`
+取信号时间层的最后一个值，跟 `term_structure.py` 里 `_shift_on_event_axis`
+已经在用的手法保持一致，同时兼容普通 `DatetimeIndex` 和 MultiIndex。
+
+新增测试 `tests/data/test_local_cnfutures_lifecycle.py`：`_last_valid_timestamp`
+分别用普通 `DatetimeIndex`（含末尾 NaN 的情形）和 `_SIGNAL@` 前缀 MultiIndex
+两种索引验证；`infer_contract_end_from_coverage` 用 MultiIndex 行情表端到端
+验证。修复前，MultiIndex 用例复现了用户报的一模一样的 `TypeError`。
+
 ## 参考
 
 - ADR-018（事件运行时）、ADR-022（因子执行后端）、ADR-024（模块所有权与
