@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from typing import Any
 
@@ -425,10 +426,7 @@ def _is_tty() -> bool:
 
 
 def _terminal_width() -> int:
-    try:
-        return max(40, click.get_terminal_size()[0])
-    except OSError:
-        return 120
+    return max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
 
 
 def _sparkline(values: list[float], *, width: int = 32) -> str:
