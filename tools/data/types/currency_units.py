@@ -16,10 +16,11 @@ DEFAULT_MINOR_UNIT_SCALE = 100
 
 
 def major_to_minor_units(value: Any, *, scale: int = DEFAULT_MINOR_UNIT_SCALE) -> np.ndarray:
-    """Round major-unit amount(s) half-up to integer minor units."""
+    """Round major-unit amount(s) half-up away from zero to integer minor units."""
     arr = np.asarray(value, dtype=float)
     arr = np.where(np.isfinite(arr), arr, 0.0)
-    return np.floor(arr * int(scale) + 0.5 + 1e-9).astype(np.int64)
+    scaled = arr * int(scale)
+    return (np.sign(scaled) * np.floor(np.abs(scaled) + 0.5 + 1e-9)).astype(np.int64)
 
 
 def major_floor_to_minor_units(value: Any, *, scale: int = DEFAULT_MINOR_UNIT_SCALE) -> np.ndarray:
