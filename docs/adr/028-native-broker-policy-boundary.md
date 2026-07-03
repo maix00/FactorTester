@@ -1,7 +1,7 @@
 # ADR-028：Native Broker Policy 与 TargetStrategy 的边界
 
 > **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 本文档的 `BrokerModule`/`NativeBroker`
-> 已改名为 `StrategyBookModule`/`NativeStrategyBook`（只做策略登记+账本路由），
+> 已改名为 `StrategyBookModule`/`StrategyBookSimple`（只做策略登记+账本路由），
 > "迁移计划"里阶段 4-9（`BrokerModule` 暴露 9 个 policy selector，各模块调用
 > broker policy）的方向已被放弃——正文以下内容保留作历史决策记录，不再是当前架构。
 

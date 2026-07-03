@@ -23,7 +23,11 @@ from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.strategy_book import StrategyBookModule, assign_ledger_id_for_strategy
+from tools.testers.backtest.modules.strategy_book import (
+    StrategyBookModule,
+    assign_ledger_id_for_strategy,
+    strategy_book_for,
+)
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
     _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled,
@@ -62,7 +66,7 @@ class LedgerModule(ExecutableModule):
         "initialize_ledgers",
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
                  TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products,
-                 StrategyBookModule.ledger_mode, StrategyBookModule.ledger_id),
+                 StrategyBookModule.strategy_book_mode),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
@@ -95,6 +99,7 @@ class LedgerModule(ExecutableModule):
 def _initialize_ledgers(state, ctx) -> None:
     from tools.testers.backtest.engines.native.ledger import Ledger
 
+    strategy_book_for(state).provision_ledgers(state)
     for strategy, strategy_config in state.strategy_configs.items():
         ledger_id = assign_ledger_id_for_strategy(state, strategy, strategy_config)
         initial_capital = strategy_config.get(LedgerModule.initial_capital_major, 0.0)

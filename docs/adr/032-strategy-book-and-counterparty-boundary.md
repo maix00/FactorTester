@@ -32,13 +32,16 @@ ADR-028 打算把订单行为（撤单、成交价、现金约束、终态确认
 
 ### StrategyBook（`tools/testers/backtest/modules/strategy_book.py`）
 
-策略入口：注册哪些策略、每个策略用哪个 `ledger_id`（账本路由）、每个策略用哪种 target 生成
-方式（`GroupMembershipModule` 分组 / `LongShortCompositionModule` 多空）及其参数。
+策略入口：注册哪些策略、每个策略可以操作哪些 `ledger_id`（账本路由）、每个策略用哪种 target
+生成方式（`GroupMembershipModule` 分组 / `LongShortCompositionModule` 多空）及其参数。
 
-- `StrategyBookModule` 字段：`ledger_mode`（`private`/`shared`，原 `broker_model` 的
-  `native_broker`/`custom_broker`）、`ledger_id`（不变）。
-- `NativeStrategyBook`：`resolve_ledger_mode`/`ledger_id_for`/`assign_ledger_id_for_strategy`，
-  原 `NativeBroker` 的原样收编，行为不变。
+- `StrategyBookModule` 字段：`strategy_book_mode`，当前默认且唯一内置值为
+  `per_strategy_one_ledger`，表示每个 strategy 自动拥有一个私有 ledger。
+- `StrategyBook`：运行时策略簿对象，保存 `strategy -> ledger_id(s)` 与 ledger spec。可以用
+  `StrategyBook.from_dict(...)` 从声明式映射构造，也可以被子类覆写 `ledger_ids_for_strategy`、
+  `ledger_id_for_order`、`provision_ledgers` 等函数。
+- `StrategyBookSimple`：最小默认实现；`strategy_book_mode=per_strategy_one_ledger` 时使用它。
+  不保留旧默认类名，因为 StrategyBook 不是 native 引擎专属对象。
 - `FactorModule`/`ProductSelectionModule`/`RunWindowModule` 等策略级字段（`scope_policy`
   默认 `OVERRIDABLE`，不是 `LOCAL_ONLY`）天然属于 StrategyBook 的字段集合——**不新建
   "BacktestConfig"对象**，运行内共享的字段本来就该标 `scope_policy=local_only`
@@ -62,9 +65,10 @@ ADR-028 打算把订单行为（撤单、成交价、现金约束、终态确认
 `default_when={"engine_mode": {...}}` 按这三个值批量填默认值；`custom` 就是"自定义
 CounterParty"的开关。
 
-新增 `EngineModule.counterparty_profile` 字段（仅 `engine_mode=custom` 时可见，`scope_policy`
-默认 `OVERRIDABLE`——每个策略可以选不同的经纪商预设，写同一个 id 到所有策略即"整本
-StrategyBook 共用一个 CounterParty"）。`tools/testers/settings/counterparty.py` 的
+新增 `EngineModule.counterparty_profile` 字段（仅 `engine_mode=custom` 时可见）。该字段可以
+作为旧 per-strategy 设置入口，但进入回测前必须解析到 `ledger_id -> CounterPartyProfile`：
+同一 ledger 上多个 strategy 如果给出不同 CounterParty，应报错，除非调用方显式提供
+per-ledger 覆盖。`tools/testers/settings/counterparty.py` 的
 `register_counterparty_profile` 把一份 `field_defaults` 拼进目标字段自己的
 `default_when["counterparty_profile"]` 字典，跟现有的 `"engine_mode"` key 并列——复用
 `strategy_config_builder._default_value_for_field` 已经支持"一个字段的 default_when 有多个
@@ -90,7 +94,7 @@ source_key"这个能力，不需要新的结算前展开步骤。显式设置的
   `editable_when`/`default_when` 字面量和全部测试，跟本次范围不成比例）；如果/当有独立 CLI
   入口把这个字段暴露成 flag，展示层名字可以叫 `--counterparty_mode`，不涉及内部字段。
 - `--counterparty xxx.py`（导入自定义 CounterParty 行为）、`--strategy-book xxx.py`（直接
-  导入完整策略配置，含账本分配和自定义订单生成机制）**明确推迟**。已确认代码里有可复用的
+  导入完整策略簿，含账本分配和自定义决策融合/层级约束机制）**明确推迟**。已确认代码里有可复用的
   "动态导入用户 .py 文件"先例（`tools/data/sqlite/factor_metadata.py:73`、
   `tools/data/field_history.py:1541` 的 `importlib.util.spec_from_file_location` +
   `exec_module`），到时候照这个模式写。
@@ -105,9 +109,9 @@ source_key"这个能力，不需要新的结算前展开步骤。显式设置的
 - 清理了 8 个从未使用过的 policy selector 死脚手架。
 
 ### 权衡
-- `EngineModule.counterparty_profile` 和 `EngineModule.ledger_mode`（现 `StrategyBookModule.
-  ledger_mode`）分属两个不同模块但都由 `engine_mode=custom` 触发可见性，需要在两个模块的
-  `visible_when`/`editable_when` 里保持一致，未来如果 `engine_mode` 本身重构需要同步检查两处。
+- `EngineModule.counterparty_profile` 和 `StrategyBookModule.strategy_book_mode` 分属两个不同
+  模块。前者是交易条款入口，最终要落到 ledger；后者是账本拓扑入口，不能承担 CounterParty
+  解析职责。
 - `strategy_config_builder._resolve_active_flow_names` 的 `strategy_kind` 二选一硬编码保留
   为已知的未来扩展点，没有解决，只是记录在案。
 

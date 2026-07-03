@@ -19,7 +19,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.fee import FeeModule
-from tools.testers.backtest.modules.strategy_book import StrategyBookModule
+from tools.testers.backtest.modules.strategy_book import StrategyBook, StrategyBookModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
@@ -415,10 +415,16 @@ def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
     s2 = Strategy(alias="S2")
     p = _product()
     configs = {
-        s1: _strategy_config(s1, engine_mode="custom", ledger_mode="shared", ledger_id="shared-book", margin_mode="none"),
-        s2: _strategy_config(s2, engine_mode="custom", ledger_mode="shared", ledger_id="shared-book", margin_mode="none"),
+        s1: _strategy_config(s1, engine_mode="custom", margin_mode="none"),
+        s2: _strategy_config(s2, engine_mode="custom", margin_mode="none"),
     }
     account = BacktestRunState(strategy_configs=configs)
+    account.strategy_book = StrategyBook.from_dict({
+        "strategies": {
+            s1.alias: "shared-book",
+            s2.alias: "shared-book",
+        },
+    })
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s1, frozenset({p}))
     ctx.set_for(ProductSelectionModule.products, s2, frozenset({p}))
@@ -443,18 +449,22 @@ def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
 def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer_wins():
     s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
     config1 = StrategyConfig(strategy=s1, field_values={
-        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
-        StrategyBookModule.ledger_id: "shared-book",
+        EngineModule.engine_mode: "custom",
         LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "CNY",
         MarginModule.margin_mode: "none",
     })
     config2 = StrategyConfig(strategy=s2, field_values={
-        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
-        StrategyBookModule.ledger_id: "shared-book",
+        EngineModule.engine_mode: "custom",
         LedgerModule.initial_capital_major: 2_000_000.0, LedgerModule.base_currency: "CNY",
         MarginModule.margin_mode: "none",
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
+    account.strategy_book = StrategyBook.from_dict({
+        "strategies": {
+            s1.alias: "shared-book",
+            s2.alias: "shared-book",
+        },
+    })
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     with pytest.raises(ValueError, match="initial_capital_major"):
         _initialize_ledgers(account, ctx)
@@ -463,18 +473,22 @@ def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer
 def test_shared_ledger_rejects_mismatched_base_currency_instead_of_silently_swapping_it():
     s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
     config1 = StrategyConfig(strategy=s1, field_values={
-        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
-        StrategyBookModule.ledger_id: "shared-book",
+        EngineModule.engine_mode: "custom",
         LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "CNY",
         MarginModule.margin_mode: "none",
     })
     config2 = StrategyConfig(strategy=s2, field_values={
-        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
-        StrategyBookModule.ledger_id: "shared-book",
+        EngineModule.engine_mode: "custom",
         LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "USD",
         MarginModule.margin_mode: "none",
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
+    account.strategy_book = StrategyBook.from_dict({
+        "strategies": {
+            s1.alias: "shared-book",
+            s2.alias: "shared-book",
+        },
+    })
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     with pytest.raises(ValueError, match="base_currency"):
         _initialize_ledgers(account, ctx)

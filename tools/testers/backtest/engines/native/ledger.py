@@ -103,6 +103,7 @@ class BacktestRunState:
         "equity_curve_store",
         "term_structure_store",
         "market_data_store",
+        "strategy_book",
         "strategy_book_store",
     })
 
