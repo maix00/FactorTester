@@ -267,11 +267,13 @@ def close_position(
         realized = _consume_lots_hifo(entry.lots, quantity, fill_price, multiplier)
     elif method == "DailyMarkToMarket":
         basis = entry.settlement_price if entry.settlement_price is not None else (entry.average_cost or fill_price)
-        realized = _futures_money_difference(
+        realized = _mark_to_market_money_difference(
             fill_price,
             basis,
             multiplier,
             quantity * _position_sign(prior_quantity),
+            fields={},
+            product=product,
             currency=ledger.base_currency,
             use_minor_units=True,
         )
@@ -336,11 +338,13 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
                 price,
                 require_exact=require_exact,
             )
-            total += _futures_money_difference(
+            total += _mark_to_market_money_difference(
                 price,
                 basis,
                 multiplier,
                 float(entry.quantity),
+                fields=fields,
+                product=product,
                 currency=ledger.base_currency,
                 use_minor_units=True,
             )
@@ -424,11 +428,13 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             before_margin = _entry_margin_major(entry)
             after_margin = abs(quantity) * settlement * multiplier * _margin_ratio_for_position(
                 config, fields, quantity, settlement, multiplier)
-            pnl = _futures_money_difference(
+            pnl = _mark_to_market_money_difference(
                 settlement,
                 previous_settlement,
                 multiplier,
                 quantity,
+                fields=fields,
+                product=product,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
@@ -525,7 +531,40 @@ def _entry_margin_major(entry: Any) -> float:
     return float(equity_occupied.to_major())
 
 
-def _futures_money_difference(
+def _mark_to_market_money_difference(
+    current_price: float,
+    basis_price: float,
+    multiplier: float,
+    quantity: float,
+    *,
+    fields: Mapping[str, object],
+    product: Any,
+    currency: str,
+    use_minor_units: bool,
+) -> float:
+    if _money_calculation_policy(fields, product) != "per_contract_price_point":
+        return float(quantity) * (float(current_price) - float(basis_price)) * float(multiplier)
+    return _per_contract_price_point_money_difference(
+        current_price,
+        basis_price,
+        multiplier,
+        quantity,
+        currency=currency,
+        use_minor_units=use_minor_units,
+    )
+
+
+def _money_calculation_policy(fields: Mapping[str, object], product: Any) -> str:
+    value = fields.get("MoneyCalculationPolicy") or fields.get("money_calculation_policy")
+    policy = str(value or "aggregate").strip().lower()
+    if policy in {"per_contract_price_point", "per-contract-price-point", "cme_price_point"}:
+        return "per_contract_price_point"
+    if policy in {"aggregate", "cn_futures_aggregate", "total_amount"}:
+        return "aggregate"
+    raise ValueError(f"unsupported MoneyCalculationPolicy for {product}: {value}")
+
+
+def _per_contract_price_point_money_difference(
     current_price: float,
     basis_price: float,
     multiplier: float,
