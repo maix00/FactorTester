@@ -192,8 +192,8 @@ def _basic_cash_update(state, ctx) -> None:
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
         for order in ctx.payloads_for(strategy):
-            if order.status == OrderStatus.CANCELLED:
-                continue  # superseded before it fired (step 9) -- no ledger effect
+            if order.status == OrderStatus.CANCELLED or order.get("reject_reason"):
+                continue  # terminal before accounting -- no ledger effect
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()

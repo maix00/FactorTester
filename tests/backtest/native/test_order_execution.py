@@ -10,7 +10,9 @@ from tools.testers.backtest.engines.native.ledger import BacktestRunState, Strat
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule, _resolve_execution_price
+from tools.traderules import OrderTradeConstraint
 
 
 def _product() -> Product:
@@ -71,3 +73,47 @@ def test_execution_price_rejects_close_or_vwap_basis():
     import pytest
     with pytest.raises(ValueError, match="next-bar open"):
         _resolve_execution_price(account, ctx)
+
+
+def test_execution_constraint_rejects_buy_at_upper_limit_but_keeps_sell_allowed():
+    product = _product()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    price_ts = idx[1]
+    strategy = Strategy(alias="limit")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            OrderExecutionModule.execution_price_basis: "open",
+        }),
+    })
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
+    }
+    buy = Order(instrument=product, timestamp=price_ts, quantity=1.0, intent_quantity=1.0, strategy=strategy)
+    buy.set("price_timestamp", price_ts)
+    sell = Order(instrument=product, timestamp=price_ts, quantity=-1.0, intent_quantity=-1.0, strategy=strategy)
+    sell.set("price_timestamp", price_ts)
+    ctx = FlowContext(
+        timestamp=price_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [
+                EventDraft(EventKind.ORDER, price_ts, strategy, buy),
+                EventDraft(EventKind.ORDER, price_ts, strategy, sell),
+            ]
+        },
+    )
+    ctx.set(MarketDataModule.current_order_constraints, {
+        product: OrderTradeConstraint(
+            tradable=True,
+            can_buy=False,
+            can_sell=True,
+            reason="触及涨停，买入方向不可成交",
+        )
+    })
+
+    _resolve_execution_price(account, ctx)
+
+    assert buy.get("reject_reason") == "触及涨停，买入方向不可成交"
+    assert sell.get("reject_reason") is None
+    assert buy.get("effective_price") == sell.get("effective_price") == 20.0

@@ -30,6 +30,24 @@ class ExchangeTradingRule:
     provider: str = ""
     label: str = ""
     note: str = ""
+    field_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OrderTradeConstraint:
+    """Side-aware market microstructure constraint for one product timestamp.
+
+    ``tradable`` answers whether the product has any executable market state at
+    this timestamp. ``can_buy``/``can_sell`` are side-specific gates: a locked
+    upper-limit bar can still be sellable while buys should be rejected.
+    """
+
+    tradable: bool
+    can_buy: bool
+    can_sell: bool
+    reason: str = ""
+    limit_up_price: float | None = None
+    limit_down_price: float | None = None
 
 
 _EXCHANGE_RULES: dict[str, ExchangeClearingRule] = {}
@@ -96,6 +114,7 @@ def register_exchange_trading_rule(rule: ExchangeTradingRule) -> ExchangeTrading
         provider=rule.provider,
         label=rule.label,
         note=rule.note,
+        field_names=tuple(str(name) for name in rule.field_names),
     )
     _EXCHANGE_TRADING_RULES[exchange_id] = normalised
     return normalised
@@ -126,13 +145,23 @@ def exchange_tradable_status_for_snapshot(snapshot: Mapping[str, Mapping[Any, ob
     price for a product, do not attempt orders for it. Later halt/limit rules
     can extend this object without changing OrderBook/GroupMembership.
     """
+    return {
+        product: constraint.tradable
+        for product, constraint in exchange_order_constraints_for_snapshot(snapshot).items()
+    }
+
+
+def exchange_order_constraints_for_snapshot(
+    snapshot: Mapping[str, Mapping[Any, object]],
+) -> dict[Any, OrderTradeConstraint]:
+    """Resolve side-aware order constraints from exchange trading rules."""
     close_prices = snapshot.get("close") or {}
-    status: dict[Any, bool] = {}
+    constraints: dict[Any, OrderTradeConstraint] = {}
     for product, close_price in close_prices.items():
         rule = exchange_trading_rule_for_product(product)
         policy = rule.tradability_policy if rule is not None else "valid_close_price"
-        status[product] = _tradable_by_policy(policy, product, snapshot, close_price)
-    return status
+        constraints[product] = _constraint_by_policy(policy, product, snapshot, close_price)
+    return constraints
 
 
 def exchange_rule_manifest_for_product(
@@ -175,6 +204,7 @@ def exchange_trading_rule_manifest_for_product(product: Any) -> dict[str, object
         "label": rule.label,
         "note": rule.note,
         "tradability_policy": rule.tradability_policy,
+        "field_names": list(rule.field_names),
     }
 
 
@@ -224,13 +254,60 @@ def _tradable_by_policy(
     snapshot: Mapping[str, Mapping[Any, object]],
     close_price: object,
 ) -> bool:
+    return _constraint_by_policy(policy, product, snapshot, close_price).tradable
+
+
+def _constraint_by_policy(
+    policy: str,
+    product: Any,
+    snapshot: Mapping[str, Mapping[Any, object]],
+    close_price: object,
+) -> OrderTradeConstraint:
     if policy == "always":
-        return True
+        return OrderTradeConstraint(True, True, True)
     if policy == "valid_close_and_positive_volume":
         volume = (snapshot.get("volume") or {}).get(product)
-        return _usable_number(close_price) and _usable_number(volume)
+        tradable = _usable_number(close_price) and _usable_number(volume)
+        return OrderTradeConstraint(
+            tradable,
+            tradable,
+            tradable,
+            "" if tradable else "缺少有效价格或成交量",
+        )
+    if policy in {"valid_close_and_price_limits", "valid_close_with_price_limits"}:
+        return _price_limit_constraint(product, snapshot, close_price)
     # Default policy for exchange snapshots without explicit halt/limit fields.
-    return _usable_number(close_price)
+    tradable = _usable_number(close_price)
+    return OrderTradeConstraint(tradable, tradable, tradable, "" if tradable else "缺少有效价格")
+
+
+def _price_limit_constraint(
+    product: Any,
+    snapshot: Mapping[str, Mapping[Any, object]],
+    close_price: object,
+) -> OrderTradeConstraint:
+    if not _usable_number(close_price):
+        return OrderTradeConstraint(False, False, False, "缺少有效价格")
+    close = float(cast(Any, close_price))
+    upper = _number_or_none((snapshot.get("upper_limit") or {}).get(product))
+    lower = _number_or_none((snapshot.get("lower_limit") or {}).get(product))
+    can_buy = True
+    can_sell = True
+    reasons: list[str] = []
+    if upper is not None and upper > 0 and close >= upper:
+        can_buy = False
+        reasons.append("触及涨停，买入方向不可成交")
+    if lower is not None and lower > 0 and close <= lower:
+        can_sell = False
+        reasons.append("触及跌停，卖出方向不可成交")
+    return OrderTradeConstraint(
+        tradable=can_buy or can_sell,
+        can_buy=can_buy,
+        can_sell=can_sell,
+        reason="；".join(reasons),
+        limit_up_price=upper,
+        limit_down_price=lower,
+    )
 
 
 def _usable_number(value: object) -> bool:
@@ -239,3 +316,15 @@ def _usable_number(value: object) -> bool:
         return value is not None and number > 0.0 and number == number
     except (TypeError, ValueError):
         return False
+
+
+def _number_or_none(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        number = float(cast(Any, value))
+        if number != number:
+            return None
+        return number
+    except (TypeError, ValueError):
+        return None

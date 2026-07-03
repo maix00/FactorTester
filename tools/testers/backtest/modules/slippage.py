@@ -55,6 +55,8 @@ def _apply_slippage(state, ctx, base_compute) -> None:
         mode = config.get(SlippageModule.slippage_mode, "none")
         slippage_bps = config.get(SlippageModule.slippage_bps, 0.0) if mode == "fixed_bps" else 0.0
         for order in ctx.payloads_for(strategy):
+            if order.get("reject_reason"):
+                continue
             price = order.get("effective_price", prices[order.instrument])
             # buys execute at a worse (higher) price, sells at a worse
             # (lower) price -- sign of the adjustment follows the trade

@@ -15,6 +15,7 @@ import pandas as pd
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule, market_price_tables_for
+from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.time_index_lookup import row_at
 from .base import ExecutableModule, FieldDefinition, FieldRef
 
@@ -52,7 +53,7 @@ class OrderExecutionModule(ExecutableModule):
 
     resolve_execution_price: ClassVar[Flow] = Flow(
         "resolve_execution_price",
-        inputs=(execution_price_basis, MarketDataModule.current_prices),
+        inputs=(execution_price_basis, MarketDataModule.current_prices, MarketDataModule.current_order_constraints),
         outputs=(execution_prices,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,
@@ -89,6 +90,8 @@ def _execution_price_at(state: Any, order: Any, basis: str) -> float:
 
 def _resolve_execution_price(state: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
+    constraints = ctx.get(MarketDataModule.current_order_constraints, {})
+    store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         basis = _normalise_price_basis(config.get(OrderExecutionModule.execution_price_basis, "open"))
@@ -97,7 +100,40 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
             price = _execution_price_at(state, order, basis)
             order.set("execution_price_basis", basis)
             order.set("effective_price", price)
+            reject_reason = _reject_reason_for_order(order, constraints)
+            if reject_reason:
+                order.set("reject_reason", reject_reason)
+                store.record(
+                    order,
+                    step="execution_constraint",
+                    label="订单交易约束拒绝",
+                    timestamp=ctx.timestamp,
+                    details={"reject_reason": reject_reason},
+                )
+            else:
+                store.record(
+                    order,
+                    step="resolve_execution_price",
+                    label="解析成交价",
+                    timestamp=ctx.timestamp,
+                    details={"basis": basis, "price": float(price)},
+                )
             prices[order.instrument] = price
         ctx.set_for(OrderExecutionModule.execution_prices, strategy, prices)
         resolved[strategy] = prices
     ctx.set(OrderExecutionModule.execution_prices, resolved)
+
+
+def _reject_reason_for_order(order: Any, constraints: Any) -> str | None:
+    if not isinstance(constraints, dict):
+        return None
+    constraint = constraints.get(order.instrument)
+    if constraint is None:
+        return None
+    if not bool(getattr(constraint, "tradable", True)):
+        return str(getattr(constraint, "reason", "") or "当前不可交易")
+    if float(getattr(order, "quantity", 0.0) or 0.0) > 0 and not bool(getattr(constraint, "can_buy", True)):
+        return str(getattr(constraint, "reason", "") or "买入方向不可成交")
+    if float(getattr(order, "quantity", 0.0) or 0.0) < 0 and not bool(getattr(constraint, "can_sell", True)):
+        return str(getattr(constraint, "reason", "") or "卖出方向不可成交")
+    return None

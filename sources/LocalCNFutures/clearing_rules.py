@@ -62,12 +62,13 @@ def register_local_cnfutures_exchange_rules() -> None:
         register_exchange_trading_rule(
             ExchangeTradingRule(
                 exchange_id=exchange_id,
-                tradability_policy="valid_close_price",
+                tradability_policy="valid_close_and_price_limits",
                 provider="LocalCNFutures",
                 label="中国期货交易所默认交易状态规则",
                 note=(
                     "当前 LocalCNFutures 以事件时点是否存在有效 close 估值价格作为最小可交易门槛；"
-                    "后续可由停牌、涨跌停、只可平仓等更细交易状态字段覆盖。"
+                    "若行情快照包含涨跌停价，则触及涨停时拒绝买入方向、触及跌停时拒绝卖出方向。"
+                    "后续可由停牌、只可平仓等更细交易状态字段覆盖。"
                 ),
             )
         )

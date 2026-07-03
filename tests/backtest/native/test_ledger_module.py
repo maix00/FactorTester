@@ -173,6 +173,33 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
     assert cash_after == pytest.approx(1_000_000.0 - 10_000.0)
 
 
+def test_cash_update_skips_rejected_order_without_ledger_effect():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    t = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=t, quantity=1000.0, intent_quantity=1000.0, strategy=s)
+    order.set("reject_reason", "触及涨停，买入方向不可成交")
+    order_ctx = FlowContext(
+        timestamp=t,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, t, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+
+    _basic_cash_update(account, order_ctx)
+
+    ledger = account.ledgers[s]
+    assert ledger.get(LedgerModule.cash).to_major() == pytest.approx(1_000_000.0)
+    assert ledger.get(LedgerModule.positions)[p].quantity == 0.0
+
+
 def test_cash_update_and_equity_use_contract_multiplier():
     s = Strategy(alias="S")
     p = _product()

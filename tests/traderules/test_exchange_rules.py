@@ -6,6 +6,7 @@ from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_excha
 from tools.traderules import (
     ExchangeClearingRule,
     ExchangeTradingRule,
+    exchange_order_constraints_for_snapshot,
     exchange_rule_manifest_for_product,
     exchange_rule_defaults_for_product,
     exchange_tradable_status_for_snapshot,
@@ -101,7 +102,33 @@ def test_local_cnfutures_declares_exchange_trading_rule_defaults() -> None:
 
     rule = exchange_trading_rule_for_product(product)
     assert rule is not None
-    assert rule.tradability_policy == "valid_close_price"
+    assert rule.tradability_policy == "valid_close_and_price_limits"
 
     status = exchange_tradable_status_for_snapshot({"close": {product: 10.0}})
     assert status == {product: True}
+
+
+def test_price_limit_policy_is_side_aware() -> None:
+    register_exchange_trading_rule(
+        ExchangeTradingRule(
+            exchange_id="XLIM",
+            tradability_policy="valid_close_and_price_limits",
+        )
+    )
+    upper_locked = _ProductLike("UP.XLIM")
+    lower_locked = _ProductLike("DN.XLIM")
+    normal = _ProductLike("OK.XLIM")
+
+    constraints = exchange_order_constraints_for_snapshot({
+        "close": {upper_locked: 10.0, lower_locked: 8.0, normal: 9.0},
+        "upper_limit": {upper_locked: 10.0, lower_locked: 10.0, normal: 10.0},
+        "lower_limit": {upper_locked: 8.0, lower_locked: 8.0, normal: 8.0},
+    })
+
+    assert constraints[upper_locked].tradable is True
+    assert constraints[upper_locked].can_buy is False
+    assert constraints[upper_locked].can_sell is True
+    assert constraints[lower_locked].can_buy is True
+    assert constraints[lower_locked].can_sell is False
+    assert constraints[normal].can_buy is True
+    assert constraints[normal].can_sell is True
