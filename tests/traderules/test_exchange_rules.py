@@ -53,6 +53,13 @@ def test_local_cnfutures_declares_exchange_clearing_rule_defaults() -> None:
     assert exchange_rule_defaults_for_product(_ProductLike("AP.CZC"), ("MoneyCalculationPolicy",)) == {
         "MoneyCalculationPolicy": "aggregate"
     }
+    assert exchange_rule_defaults_for_product(
+        _ProductLike("AP.CZC"),
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
+    ) == {
+        "CostBasisMethod": "DailyMarkToMarket",
+        "MoneyCalculationPolicy": "aggregate",
+    }
     assert exchange_rule_defaults_for_product(_ProductLike("RU.SHF"), ("MoneyCalculationPolicy",)) == {
         "MoneyCalculationPolicy": "aggregate"
     }

@@ -1240,21 +1240,21 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
     fee_ref = FieldRef("fee_mode", owner="FeeModule")
     margin_ref = FieldRef("margin_mode", owner="MarginModule")
     allocation_ref = FieldRef("allocation_policy", owner="GroupMembershipModule")
-    accounting_ref = FieldRef("accounting_mode", owner="TradingRuleModule")
     for config in getattr(state, "strategy_configs", {}).values():
         from tools.testers.backtest.modules.fee import _resolve_fee_mode
+        from tools.testers.backtest.modules.trading_rule import _effective_accounting_mode
 
         fee_mode = _resolve_fee_mode(config)
         if fee_mode not in {"zero", "none"}:
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
         if fee_mode == "exact" or engine_mode_for(config) == "exact":
             fields.append("CostBasisMethod")
-        accounting_mode = str(config.get(accounting_ref, "") or "")
+        accounting_mode = _effective_accounting_mode(config)
         if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
-            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
+            fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
-            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
+            fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
             fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         margin_mode = str(config.get(margin_ref, "auto") or "auto")

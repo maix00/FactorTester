@@ -639,11 +639,28 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
             "RU.SHF": {"MoneyCalculationPolicy": "per_contract_price_point"},
         },
         ["AP.CZC", "RU.SHF"],
-        ("MoneyCalculationPolicy",),
+        ("CostBasisMethod", "MoneyCalculationPolicy"),
     )
 
+    assert result["AP.CZC"]["CostBasisMethod"] == "DailyMarkToMarket"
     assert result["AP.CZC"]["MoneyCalculationPolicy"] == "aggregate"
     assert result["RU.SHF"]["MoneyCalculationPolicy"] == "per_contract_price_point"
+
+
+def test_auto_accounting_subscribes_cost_basis_method_for_market_data():
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+    from tools.testers.backtest.modules.engine import EngineModule
+    from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
+
+    strategy = Strategy(alias="auto")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"}),
+    })
+
+    fields = _required_market_rule_field_names(account)
+
+    assert "CostBasisMethod" in fields
+    assert "MoneyCalculationPolicy" in fields
 
 
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():
