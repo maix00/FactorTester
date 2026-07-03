@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Any, Mapping
 from tools.testers.backtest.engines.native.ledger import StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+from tools.testers.settings.counterparty import (
+    CounterPartyProfile,
+    apply_counterparty_profiles_to_resolved_settings,
+)
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import BacktestRunState
@@ -216,5 +220,22 @@ def build_strategy_configs(
     return configs
 
 
-def apply_strategy_configs(state: "BacktestRunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
-    state.strategy_configs = build_strategy_configs(resolved_settings_by_alias)
+def apply_strategy_configs(
+    state: "BacktestRunState",
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    strategy_book: object | None = None,
+    counterparty: str | CounterPartyProfile | None = None,
+    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
+    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
+) -> None:
+    if strategy_book is not None:
+        state.strategy_book = strategy_book
+    resolved = apply_counterparty_profiles_to_resolved_settings(
+        resolved_settings_by_alias,
+        strategy_book=getattr(state, "strategy_book", None),
+        counterparty=counterparty,
+        counterparty_by_strategy=counterparty_by_strategy,
+        counterparty_by_ledger=counterparty_by_ledger,
+    )
+    state.strategy_configs = build_strategy_configs(resolved)

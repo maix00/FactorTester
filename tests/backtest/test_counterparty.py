@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tools.testers.backtest.engines.native.strategy_config_builder import build_strategy_configs
+from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.strategy_config_builder import (
+    apply_strategy_configs,
+    build_strategy_configs,
+)
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.margin import MarginModule
@@ -199,3 +203,66 @@ def test_counterparty_projection_keeps_strategy_config_builder_compatible():
     assert settings["A2"]["counterparty_profile"] == "exchange_base"
     configs = build_strategy_configs(settings)
     assert {config.get(FeeModule.fee_mode) for config in configs.values()} == {"auto"}
+
+
+def test_apply_strategy_configs_accepts_strategy_book_and_ledger_counterparty_override():
+    register_counterparty_profile(CounterPartyProfile(
+        id="__test_bootstrap_profile__",
+        label="测试入口预设",
+        field_defaults={FeeModule.fee_mode: "fixed"},
+    ))
+    apply_counterparty_profile_defaults()
+    try:
+        account = BacktestRunState()
+        book = StrategyBook.from_dict({
+            "strategies": {
+                "A1": "shared-book",
+                "A2": "shared-book",
+            },
+        })
+        apply_strategy_configs(
+            account,
+            {
+                "A1": {"engine_mode": "custom", **_GROUP_FIELDS},
+                "A2": {"engine_mode": "custom", **_GROUP_FIELDS},
+            },
+            strategy_book=book,
+            counterparty="exchange_base",
+            counterparty_by_ledger={"shared-book": "__test_bootstrap_profile__"},
+        )
+        assert account.strategy_book is book
+        assert {config.get(FeeModule.fee_mode) for config in account.strategy_configs.values()} == {"fixed"}
+    finally:
+        unregister_counterparty_profile("__test_bootstrap_profile__")
+
+
+def test_apply_strategy_configs_rejects_shared_ledger_counterparty_conflict():
+    register_counterparty_profile(CounterPartyProfile(
+        id="__test_bootstrap_conflict_profile__",
+        label="测试入口冲突预设",
+        field_defaults={FeeModule.fee_mode: "fixed"},
+    ))
+    apply_counterparty_profile_defaults()
+    try:
+        account = BacktestRunState()
+        book = StrategyBook.from_dict({
+            "strategies": {
+                "A1": "shared-book",
+                "A2": "shared-book",
+            },
+        })
+        try:
+            apply_strategy_configs(
+                account,
+                {
+                    "A1": {"counterparty_profile": "exchange_base", **_GROUP_FIELDS},
+                    "A2": {"counterparty_profile": "__test_bootstrap_conflict_profile__", **_GROUP_FIELDS},
+                },
+                strategy_book=book,
+            )
+        except ValueError as exc:
+            assert "conflicting counterparty profiles" in str(exc)
+        else:
+            raise AssertionError("expected counterparty conflict during strategy-config bootstrap")
+    finally:
+        unregister_counterparty_profile("__test_bootstrap_conflict_profile__")
