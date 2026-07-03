@@ -254,11 +254,13 @@ def _load_backtest_template_into_state(state, selector: str, *, source_module: s
     if not isinstance(snapshot, dict):
         raise click.ClickException("模板缺少 snapshot")
     applied = _apply_snapshot_to_backtest_state(state, snapshot, template_name=str(template.get("name") or selector))
+    registered = _register_template_factors(state, client)
     source = f"（来自 {source_module} 模板）" if source_module else ""
     click.echo(f"已加载模板: {template.get('name') or selector}{source}")
+    factor_text = f" · 已注册因子: {registered}" if registered else ""
     click.echo(
         f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
-        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}"
+        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}{factor_text}"
     )
 
 
@@ -281,7 +283,8 @@ def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:
 
 
 def _apply_snapshot_to_backtest_state(state, snapshot: dict[str, Any], *, template_name: str) -> dict[str, int]:
-    factors = snapshot.get("factors") if isinstance(snapshot.get("factors"), dict) else {}
+    factors_raw = snapshot.get("factors")
+    factors: dict[str, Any] = dict(factors_raw) if isinstance(factors_raw, dict) else {}
     for key in ("factor_candidates", "factor"):
         if key in factors:
             state.page_settings[key] = factors[key]
@@ -290,9 +293,18 @@ def _apply_snapshot_to_backtest_state(state, snapshot: dict[str, Any], *, templa
     local_settings = snapshot.get("local_settings") if isinstance(snapshot.get("local_settings"), dict) else {}
     state.backtest_local_settings = dict(local_settings or {})
 
-    group_settings = snapshot.get("group_settings") if isinstance(snapshot.get("group_settings"), dict) else {}
-    state.backtest_groups = [_normalize_template_group(item) for item in (group_settings.get("groups") or []) if isinstance(item, dict)]
-    state.backtest_ls_configs = [_normalize_template_ls(item) for item in (group_settings.get("lsConfigs") or []) if isinstance(item, dict)]
+    group_settings_raw = snapshot.get("group_settings")
+    group_settings: dict[str, Any] = dict(group_settings_raw) if isinstance(group_settings_raw, dict) else {}
+    state.backtest_groups = [
+        _normalize_template_group(item)
+        for item in (group_settings.get("groups") or [])
+        if isinstance(item, dict)
+    ]
+    state.backtest_ls_configs = [
+        _normalize_template_ls(item)
+        for item in (group_settings.get("lsConfigs") or [])
+        if isinstance(item, dict)
+    ]
     return {
         "page_settings": len(factors) + 1,
         "local_settings": len(state.backtest_local_settings),
@@ -335,6 +347,70 @@ def _normalize_template_ls(config: dict[str, Any]) -> dict[str, Any]:
 def _rename_if_present(target: dict[str, Any], old: str, new: str) -> None:
     if old in target and new not in target:
         target[new] = target[old]
+
+
+def _register_template_factors(state, client) -> int:
+    aliases = _template_factor_aliases(state)
+    if not aliases or not state.page_uuid:
+        return 0
+    candidates = list(state.page_settings.get("factor_candidates") or [])
+    known = {
+        str(item.get("factor_alias") or item.get("alias") or "")
+        for item in candidates
+        if isinstance(item, dict)
+    }
+    registered = 0
+    for alias in aliases:
+        params = _params_from_factor_alias(alias, state.factor_family)
+        data = client.add_candidate("factor", {
+            "factor_family_alias": state.factor_family,
+            "params": params,
+            "page_uuid": state.page_uuid,
+        })
+        factor_alias = str(data.get("factor_alias") or alias)
+        if factor_alias not in known:
+            candidates.append({"factor_alias": factor_alias, "params": params})
+            known.add(factor_alias)
+        registered += 1
+    state.page_settings["factor_candidates"] = candidates
+    if aliases:
+        state.page_settings["factor"] = aliases[0]
+    return registered
+
+
+def _template_factor_aliases(state) -> list[str]:
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for group in state.backtest_groups:
+        if not isinstance(group, dict):
+            continue
+        alias = str(group.get("factor") or group.get("factorAlias") or "").strip()
+        if alias and alias not in seen:
+            seen.add(alias)
+            aliases.append(alias)
+    return aliases
+
+
+def _params_from_factor_alias(alias: str, factor_family: str) -> dict[str, Any]:
+    prefix = f"{factor_family}|"
+    if alias == factor_family:
+        return {}
+    if not alias.startswith(prefix):
+        raise click.ClickException(f"模板因子 {alias} 不属于当前因子家族 {factor_family}")
+    params: dict[str, Any] = {}
+    for part in alias[len(prefix):].split("|"):
+        if not part:
+            continue
+        if ":" in part:
+            key, value = part.split(":", 1)
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            params[key] = value
+        elif part == "$Rev":
+            params[part] = "1"
+        else:
+            params[part] = True
+    return params
 
 
 @backtest.command("group", context_settings=SELECTOR_HELP_CONTEXT)
@@ -446,7 +522,7 @@ def long_short(ctx: click.Context) -> None:
     selector = parse_long_short_selector(tuple(arg for arg in clean_args if arg != "--add"))
     long_group = _resolve_ls_leg(state, selector.long_leg, side="long")
     short_group = _resolve_ls_leg(state, selector.short_leg, side="short")
-    config = {
+    config: dict[str, Any] = {
         "name": selector.name or f"LS {long_group.get('name') or long_group.get('id')} / {short_group.get('name') or short_group.get('id')}",
         "long_group": _group_ref(long_group),
         "short_group": _group_ref(short_group),
@@ -455,8 +531,10 @@ def long_short(ctx: click.Context) -> None:
     save_state(state)
     click.echo("新增 Long-Short")
     click.echo(f"名称: {config['name']}")
-    click.echo(f"多头: {config['long_group'].get('name') or config['long_group'].get('id')}")
-    click.echo(f"空头: {config['short_group'].get('name') or config['short_group'].get('id')}")
+    long_ref = config["long_group"]
+    short_ref = config["short_group"]
+    click.echo(f"多头: {long_ref.get('name') or long_ref.get('id')}")
+    click.echo(f"空头: {short_ref.get('name') or short_ref.get('id')}")
 
 
 def enter_backtest_state(state, *, scope: str = BACKTEST_SPACE) -> None:
@@ -489,12 +567,12 @@ def _parse_raw_settings(args: tuple[str, ...]) -> dict[str, Any]:
         if not key:
             raise click.ClickException("设置字段名不能为空")
         if i + 1 >= len(args) or args[i + 1].startswith("--"):
-            value: Any = True
+            parsed_value: Any = True
             i += 1
         else:
-            value = args[i + 1]
+            parsed_value = args[i + 1]
             i += 2
-        values[key] = value
+        values[key] = parsed_value
     return values
 
 
@@ -1108,8 +1186,10 @@ def _print_snapshot_result(state, args: tuple[str, ...]) -> None:
     click.echo(f"摘要: changed={summary.get('total_changed')} products={summary.get('total_prod_count')} turnover={summary.get('avg_turnover')}")
     matrices = result.get("matrices") if isinstance(result.get("matrices"), list) else []
     for matrix in matrices[:1]:
-        columns = matrix.get("columns") if isinstance(matrix, dict) else []
-        rows = matrix.get("rows") if isinstance(matrix, dict) else []
+        columns_raw = matrix.get("columns") if isinstance(matrix, dict) else []
+        rows_raw = matrix.get("rows") if isinstance(matrix, dict) else []
+        columns = columns_raw if isinstance(columns_raw, list) else []
+        rows = rows_raw if isinstance(rows_raw, list) else []
         click.echo(f"矩阵: {matrix.get('label') if isinstance(matrix, dict) else ''} · 列={len(columns)} · 行={len(rows)}")
 
 
@@ -1195,7 +1275,8 @@ def _result_timestamp_ms(data: dict[str, Any], args: tuple[str, ...]) -> int:
         return int(explicit)
     index_raw = _arg_value(args, "--index")
     index = int(index_raw or "1") - 1
-    groups = data.get("groups") if isinstance(data.get("groups"), list) else []
+    groups_raw = data.get("groups")
+    groups = groups_raw if isinstance(groups_raw, list) else []
     for group in groups:
         if not isinstance(group, dict):
             continue
