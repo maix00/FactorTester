@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from tools.traderules import ExchangeClearingRule, register_exchange_clearing_rule
+from tools.traderules import (
+    ExchangeClearingRule,
+    ExchangeTradingRule,
+    register_exchange_clearing_rule,
+    register_exchange_trading_rule,
+)
 
 
 _LOCAL_CNFUTURES_EXCHANGES: tuple[str, ...] = (
@@ -52,6 +57,18 @@ def register_local_cnfutures_exchange_rules() -> None:
                 ),
                 field_labels=_LOCAL_CNFUTURES_FIELD_LABELS,
                 field_notes=_LOCAL_CNFUTURES_FIELD_NOTES,
+            )
+        )
+        register_exchange_trading_rule(
+            ExchangeTradingRule(
+                exchange_id=exchange_id,
+                tradability_policy="valid_close_price",
+                provider="LocalCNFutures",
+                label="中国期货交易所默认交易状态规则",
+                note=(
+                    "当前 LocalCNFutures 以事件时点是否存在有效 close 估值价格作为最小可交易门槛；"
+                    "后续可由停牌、涨跌停、只可平仓等更细交易状态字段覆盖。"
+                ),
             )
         )
 

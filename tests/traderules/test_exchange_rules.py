@@ -5,9 +5,14 @@ from dataclasses import dataclass
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from tools.traderules import (
     ExchangeClearingRule,
+    ExchangeTradingRule,
     exchange_rule_manifest_for_product,
     exchange_rule_defaults_for_product,
+    exchange_tradable_status_for_snapshot,
+    exchange_trading_rule_for_product,
+    exchange_trading_rule_manifest_for_product,
     register_exchange_clearing_rule,
+    register_exchange_trading_rule,
 )
 
 
@@ -63,3 +68,40 @@ def test_local_cnfutures_declares_exchange_clearing_rule_defaults() -> None:
     assert exchange_rule_defaults_for_product(_ProductLike("RU.SHF"), ("MoneyCalculationPolicy",)) == {
         "MoneyCalculationPolicy": "aggregate"
     }
+
+
+def test_exchange_trading_rule_can_infer_tradable_status_from_snapshot() -> None:
+    register_exchange_trading_rule(
+        ExchangeTradingRule(
+            exchange_id="XTRD",
+            tradability_policy="valid_close_and_positive_volume",
+            provider="test",
+            label="测试交易规则",
+            note="需要有效价格和成交量",
+        )
+    )
+    tradable = _ProductLike("A.XTRD")
+    halted = _ProductLike("B.XTRD")
+
+    status = exchange_tradable_status_for_snapshot({
+        "close": {tradable: 10.0, halted: 10.0},
+        "volume": {tradable: 1.0, halted: 0.0},
+    })
+
+    assert status == {tradable: True, halted: False}
+    manifest = exchange_trading_rule_manifest_for_product(tradable)
+    assert manifest is not None
+    assert manifest["label"] == "测试交易规则"
+    assert manifest["tradability_policy"] == "valid_close_and_positive_volume"
+
+
+def test_local_cnfutures_declares_exchange_trading_rule_defaults() -> None:
+    register_local_cnfutures_exchange_rules()
+    product = _ProductLike("AP.CZC")
+
+    rule = exchange_trading_rule_for_product(product)
+    assert rule is not None
+    assert rule.tradability_policy == "valid_close_price"
+
+    status = exchange_tradable_status_for_snapshot({"close": {product: 10.0}})
+    assert status == {product: True}
