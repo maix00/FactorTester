@@ -28,6 +28,10 @@ class EventKind(IntEnum):
     ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
                   # are OrderStatus values inspected from the payload, not
                   # separate EventKinds)
+    LEDGER_NOTICE = 30  # account/clearing lifecycle notification (e.g. daily
+                        # futures settlement / mark-to-market). It mutates the
+                        # ledger directly and does not express strategy intent
+                        # to trade.
 
 
 @dataclass(frozen=True)

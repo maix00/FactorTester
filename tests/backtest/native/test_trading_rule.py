@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import uuid
 
+import pandas as pd
 import pytest
 
+from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.ledger import Ledger, Lot, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+from tools.testers.backtest.engines.native.ledger import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, infer_auto_cost_basis_method,
-    open_position,
+    open_position, _apply_daily_mark_to_market, _register_daily_mark_to_market_notices,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
@@ -210,6 +216,100 @@ def test_hifo_closes_highest_cost_lot_first():
     assert remaining_costs == [10.0, 20.0]
 
 
+def test_daily_mark_to_market_notice_uses_trading_day_last_bar_not_calendar_day():
+    strategy = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"register_daily_mark_to_market_notices"}),
+            field_values={
+                EngineModule.engine_mode: "auto",
+                TradingRuleModule.accounting_mode: "Auto",
+            },
+        )
+    })
+    trade_times = pd.DatetimeIndex([
+        pd.Timestamp("2026-03-09 21:00:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 09:01:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 15:00:00", tz="Asia/Shanghai"),
+    ])
+    trading_days = pd.DatetimeIndex(["2026-03-10", "2026-03-10", "2026-03-10"])
+    index = pd.MultiIndex.from_arrays([trading_days, trade_times], names=["trading_day", "_SIGNAL@MIN1"])
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0, 3.0]}, index=index)
+    queue = EventQueue()
+    captured = []
+    queue.set_dispatcher(EventKind.LEDGER_NOTICE, lambda batch: captured.extend(batch))
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+
+    _register_daily_mark_to_market_notices(account, ctx)
+    queue.run_until_drained()
+
+    assert len(captured) == 1
+    assert captured[0].timestamp == pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
+    assert captured[0].payload == {"kind": "daily_mark_to_market", "trading_day": "2026-03-10"}
+
+
+def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+            MarginModule.margin_mode: "auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(
+        _positions_ref(),
+        {
+            product: ProductPosition(
+                quantity=2.0,
+                average_cost=10.0,
+                equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            )
+        },
+    )
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    queue = EventQueue()
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=queue,
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 12.0},
+        "close": {product: 11.5},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "PreSettlementPrice": 10.0,
+            "SettlementPrice": 12.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    updated_cash = ledger.get(_cash_ref())
+    updated_position = ledger.get(_positions_ref())[product]
+    # pnl = 2 * (12 - 10) * 10 = 40
+    # margin grows from 2 to 2 * 12 * 10 * 0.1 = 24, so cash delta = 40 - 22
+    assert updated_cash.to_major() == pytest.approx(1018.0)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
+    assert updated_position.settlement_price == pytest.approx(12.0)
+    assert updated_position.average_cost == pytest.approx(12.0)
+
+
 def _positions_ref():
     from tools.testers.backtest.modules.ledger_module import LedgerModule
     return LedgerModule.positions
+
+
+def _cash_ref():
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    return LedgerModule.cash

@@ -46,6 +46,7 @@ class ProductPosition:
     average_cost: float | None = None
     lots: "deque[Lot] | None" = None
     equity_occupied: "DataMoney | None" = None
+    settlement_price: float | None = None
 
 
 def apply_quantity_delta(entry: ProductPosition, delta: float) -> None:
