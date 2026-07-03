@@ -147,16 +147,20 @@ def _factor_supports_incremental(factor: Any) -> bool:
 
 def _field_entries() -> list[tuple[str, Any, Any, frozenset[str]]]:
     """One entry per registered field: (field_name, FieldRef, FieldDefinition,
-    owning module's Flow names). The Flow-name set is what
+    Flow names that materially consume that field). The Flow-name set is what
     `frontend_only_default` enforcement checks against `active_flow_names`
     to decide whether a missing value actually matters for this strategy."""
     entries: list[tuple[str, Any, Any, frozenset[str]]] = []
     for cls in _ALL_MODULE_CLASSES:
-        owner_flow_names = frozenset(flow.name for flow in getattr(cls, "flows", ()))
+        module_flow_names = frozenset(flow.name for flow in getattr(cls, "flows", ()))
         for field_name, fd in getattr(cls, "fields", {}).items():
             ref = getattr(cls, field_name, None)
             if ref is not None:
-                entries.append((field_name, ref, fd, owner_flow_names))
+                consuming_flow_names = frozenset(
+                    flow.name for flow in getattr(cls, "flows", ())
+                    if ref in getattr(flow, "inputs", ())
+                )
+                entries.append((field_name, ref, fd, consuming_flow_names or module_flow_names))
     return entries
 
 
