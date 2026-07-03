@@ -171,6 +171,53 @@ def test_fee_mode_auto_splits_close_today_and_yesterday_from_position_lots():
     assert order.get("fee_cost") == pytest.approx(10.0 * 1.0 * 0.01 + 10.0 * 1.0 * 0.02)
 
 
+@pytest.mark.parametrize("fee_mode", ["custom", "exact"])
+def test_fee_mode_lot_aware_modes_split_close_today_and_yesterday_from_position_lots(fee_mode: str):
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-2.0, intent_quantity=-2.0, strategy=s)
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: fee_mode,
+        TradingRuleModule.accounting_mode: "Custom",
+        TradingRuleModule.cost_basis_method: "FIFO",
+        TradingRuleModule.daily_mark_to_market_enabled: True,
+    })
+    account = _account_with_ledger(s, config)
+    account.ledgers[s].set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=3.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=8.0, multiplier=1.0, is_today=False),
+                Lot(quantity=2.0, entry_price=9.0, multiplier=1.0, is_today=True),
+            ]),
+        )
+    })
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+            "CostBasisMethod": "FIFO",
+            "DailyMarkToMarketEnabled": True,
+        },
+    })
+
+    _apply_fee(account, ctx, lambda a, c: None)
+
+    assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
+    assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
+    assert order.get("fee_cost") == pytest.approx(10.0 * 1.0 * 0.01 + 10.0 * 1.0 * 0.02)
+
+
 def test_fee_mode_close_yesterday_overrides_today_lot_markers():
     s = Strategy(alias="S")
     p = _product()
