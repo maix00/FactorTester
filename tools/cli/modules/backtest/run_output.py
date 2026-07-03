@@ -35,6 +35,8 @@ class BacktestRunRenderer:
         self._progress_lines: dict[str, str] = {}
         self._last_log_progress_bucket: dict[str, int] = {}
         self._activity_line = ""
+        self._mode_line = ""
+        self._last_mode_line = ""
         self._latest_chart_lines: list[str] = []
         self._status_height = 0
         self._done = False
@@ -168,6 +170,10 @@ class BacktestRunRenderer:
                 activity_text = f"{activity_text} · {data.get('flow_key')}"
             if should_log_activity:
                 self._update_activity_line(activity_text)
+        mode_line = _format_mode_info(data.get("mode_info"))
+        if mode_line and mode_line != self._last_mode_line:
+            self._last_mode_line = mode_line
+            self._update_mode_line(mode_line, log_when_not_tty=should_log_activity)
         if self.verbose:
             flow_key = data.get("flow_key") or ""
             if not _is_tty() and should_log_activity:
@@ -285,6 +291,14 @@ class BacktestRunRenderer:
         self._activity_line = line
         self._render_status_region()
 
+    def _update_mode_line(self, line: str, *, log_when_not_tty: bool) -> None:
+        if not _is_tty():
+            if log_when_not_tty:
+                self._echo(line)
+            return
+        self._mode_line = line
+        self._render_status_region()
+
     def _should_log_progress(self, key: str) -> bool:
         percent = self._phase_progress.get(key, self._overall_percent() if key == "total" else 0.0)
         if key != "total" and key != EVENT_PHASE:
@@ -320,6 +334,8 @@ class BacktestRunRenderer:
             lines.append(self._progress_lines["total"])
         if self._activity_line:
             lines.append(self._activity_line)
+        if self._mode_line:
+            lines.append(self._mode_line)
         for key in self._phase_order:
             if key in self._progress_lines:
                 lines.append(self._progress_lines[key])
@@ -460,7 +476,7 @@ def _multi_series_chart(
 
 def _plotext_chart(series: list[tuple[str, list[float], bool]], *, width: int, height: int, title: str, ylabel: str) -> list[str]:
     try:
-        import plotext as plt  # type: ignore[import-not-found]
+        import plotext as plt  # type: ignore[import-not-found, import-untyped]
     except Exception:
         return []
     buffer = io.StringIO()
@@ -488,6 +504,24 @@ def _return_text(start_value: float, final_value: float) -> str:
     if start_value == 0:
         return "n/a"
     return f"{(final_value / start_value - 1.0) * 100:.2f}%"
+
+
+def _format_mode_info(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return ""
+    items: list[str] = []
+    for key in sorted(value):
+        raw = value.get(key)
+        if raw in (None, ""):
+            continue
+        text = str(raw)
+        if len(text) > 24:
+            text = text[:21] + "..."
+        items.append(f"{key}={text}")
+    if not items:
+        return ""
+    width = max(24, _terminal_width() - 8)
+    return truncate_display("模式: " + " · ".join(items), width)
 
 
 def _is_tty() -> bool:

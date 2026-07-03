@@ -380,13 +380,17 @@ class _ProgressTracker:
 
     def __init__(
         self,
+        state: "BacktestRunState",
         callback: Callable[[int, int, str], None] | None,
         activity_sink: ProgressSink | None,
         event_queue: EventQueue,
+        flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
     ) -> None:
+        self._state = state
         self._callback = callback
         self._activity_sink = activity_sink
         self._event_queue = event_queue
+        self._flow_strategies = flow_strategies or {}
         self._completed = 0
         self._signal_total = 0
         self._signal_completed = 0
@@ -419,11 +423,19 @@ class _ProgressTracker:
                 percent=10.0,
             )
 
-    def activity(self, flow: ResolvedFlow, *, timestamp: pd.Timestamp | None, phase: str | None = None) -> None:
+    def activity(
+        self,
+        flow: ResolvedFlow,
+        *,
+        timestamp: pd.Timestamp | None,
+        phase: str | None = None,
+        strategies: frozenset["Strategy"] | None = None,
+    ) -> None:
         if self._activity_sink is None:
             return
         activity_phase = phase or _activity_phase_for_flow(flow)
         ts_text = timestamp.isoformat() if timestamp is not None else ""
+        active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
         self._activity_sink.emit_activity(
             phase=activity_phase,
             phase_label=_PHASE_LABELS.get(activity_phase, activity_phase),
@@ -435,6 +447,7 @@ class _ProgressTracker:
             timestamp=ts_text,
             timezone=str(getattr(getattr(timestamp, "tzinfo", None), "zone", "") or ""),
             message=_activity_message(ts_text, flow.effective_description),
+            mode_info=_mode_info_for_flow(self._state, flow, active_strategies),
         )
 
     def tick(self, label: str, *, phase: Phase) -> None:
@@ -529,7 +542,7 @@ def make_dispatcher(
                 continue
             ctx.active_strategies = applicable
             if tracker is not None:
-                tracker.activity(f, timestamp=timestamp, phase="event_replay")
+                tracker.activity(f, timestamp=timestamp, phase="event_replay", strategies=applicable)
             _compute_flow(f, state, ctx)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
@@ -583,6 +596,81 @@ def _pre_post_applicable_strategies(
     return _strategies_using_flow(state, flow.name, flow_strategies)
 
 
+_MODE_FIELD_SUFFIXES = ("_mode", "_method", "_policy")
+_MODE_FIELD_NAMES = {
+    "engine_mode",
+    "accounting_mode",
+    "cost_basis_method",
+    "money_calculation_policy",
+    "factor_mode",
+    "warmup_mode",
+    "freq_mode",
+    "freq_fixed",
+    "data_source_mode",
+    "data_sources",
+    "margin_mode",
+    "fee_mode",
+    "liquidity_mode",
+    "slippage_mode",
+    "allocation_mode",
+    "rebalance_event_mode",
+    "equity_compute_live",
+    "matching_model",
+}
+_SKIP_MODE_FIELD_NAMES = {
+    "factor_candidates",
+    "product_path_candidates",
+    "product_path_selection",
+    "factor",
+}
+
+
+def _mode_info_for_flow(
+    state: "BacktestRunState",
+    flow: ResolvedFlow,
+    strategies: frozenset["Strategy"],
+) -> dict[str, Any]:
+    if not strategies:
+        return {}
+    values_by_name: dict[str, set[str]] = {}
+    for strategy in strategies:
+        config = state.config_for(strategy)
+        for ref, value in config.field_values.items():
+            name = str(getattr(ref, "name", ref) or "")
+            if not _is_mode_field(name):
+                continue
+            owner = str(getattr(ref, "owner", "") or "")
+            if owner and flow.owner and owner not in {flow.owner, "EngineModule", "MarketDataModule"}:
+                # Keep global run modes plus the flow owner's own modes; this
+                # keeps the fixed CLI line compact while still diagnosing why
+                # the current flow chose a branch.
+                continue
+            values_by_name.setdefault(name, set()).add(_mode_value_text(value))
+    mode_info: dict[str, Any] = {}
+    for name in sorted(values_by_name):
+        values = sorted(values_by_name[name])
+        mode_info[name] = values[0] if len(values) == 1 else f"多值[{len(values)}]"
+    return mode_info
+
+
+def _is_mode_field(name: str) -> bool:
+    if not name or name in _SKIP_MODE_FIELD_NAMES:
+        return False
+    return name in _MODE_FIELD_NAMES or name.endswith(_MODE_FIELD_SUFFIXES)
+
+
+def _mode_value_text(value: Any) -> str:
+    if value is None:
+        return "None"
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return f"{len(value)}项"
+    if isinstance(value, dict):
+        return f"{len(value)}项"
+    return type(value).__name__
+
+
 def run(
     state: "BacktestRunState",
     event_queue: EventQueue,
@@ -605,7 +693,7 @@ def run(
     pre_replay_flows = groups.get((Phase.PRE_REPLAY, None), ())
     post_replay_flows = groups.get((Phase.POST_REPLAY, None), ())
     flow_strategies = _all_flow_strategy_sets(state, groups)
-    tracker = _ProgressTracker(progress, activity_sink, event_queue)
+    tracker = _ProgressTracker(state, progress, activity_sink, event_queue, flow_strategies)
     tracker.emit_manifest(groups, state, flow_strategies)
     applicable_pre_flows = [
         f for f in pre_replay_flows
@@ -643,7 +731,7 @@ def run(
         if not applicable:
             continue
         ctx.active_strategies = applicable
-        tracker.activity(f, timestamp=None, phase="pre_replay")
+        tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
         _compute_flow(f, state, ctx)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
@@ -663,7 +751,7 @@ def run(
         if not applicable:
             continue
         ctx.active_strategies = applicable
-        tracker.activity(f, timestamp=None, phase="post_replay")
+        tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
         _compute_flow(f, state, ctx)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
