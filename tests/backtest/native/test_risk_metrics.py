@@ -39,6 +39,7 @@ def test_empty_returns_degrades_to_zeros_not_error():
     equity = pd.Series([100.0])
     returns = pd.Series(dtype=float)
     metrics = compute_metrics(equity, returns)
+    assert metrics["annual_return"] == 0.0
     assert metrics["sharpe_ratio"] == 0.0
     assert metrics["max_drawdown"] == 0.0
     assert metrics["win_rate"] == 0.0
