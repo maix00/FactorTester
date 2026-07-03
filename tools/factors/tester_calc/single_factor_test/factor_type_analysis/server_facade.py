@@ -197,7 +197,8 @@ class FactorTypeAnalysisRun:
         factor_alias = str(data.get("factor_alias") or data.get("factor_name") or "").strip()
         if not factor_family_alias or not factor_alias:
             raise ValueError("请先选择因子")
-        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+        raw_settings = data.get("settings")
+        settings: dict[str, Any] = raw_settings if isinstance(raw_settings, dict) else {}
         method = str(data.get("method") or settings.get("correlation_method") or "pearson").strip()
         if method not in ("pearson", "spearman"):
             method = "pearson"
