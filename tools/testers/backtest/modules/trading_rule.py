@@ -517,7 +517,13 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 use_minor_units=cash.use_minor_units,
             )
             entry.settlement_price = settlement
-            _reset_lots_to_daily_settlement(entry, settlement, multiplier)
+            from tools.testers.backtest.modules.fee import _resolve_fee_mode
+            _reset_lots_to_daily_settlement(
+                entry,
+                settlement,
+                multiplier,
+                track_today=_resolve_fee_mode(config) in {"auto", "custom", "exact"},
+            )
         ledger.set(TradingRuleModule._ledger_cash_ref, cash)
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
 
@@ -587,7 +593,13 @@ def _daily_mark_to_market_basis(entry: Any, fallback: float) -> float:
     return float(fallback)
 
 
-def _reset_lots_to_daily_settlement(entry: Any, settlement: float, multiplier: float) -> None:
+def _reset_lots_to_daily_settlement(
+    entry: Any,
+    settlement: float,
+    multiplier: float,
+    *,
+    track_today: bool,
+) -> None:
     from tools.testers.backtest.engines.native.ledger import Lot
 
     quantity = float(entry.quantity or 0.0)
@@ -599,7 +611,7 @@ def _reset_lots_to_daily_settlement(entry: Any, settlement: float, multiplier: f
             quantity=quantity,
             entry_price=settlement,
             multiplier=multiplier,
-            is_today=False,
+            is_today=False if track_today else None,
         )
     ])
 

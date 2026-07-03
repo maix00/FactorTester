@@ -18,6 +18,7 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_ca
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.margin import MarginModule
+from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
@@ -34,6 +35,7 @@ def _strategy_config(strategy, **trading_rule_values) -> StrategyConfig:
         ref = (
             getattr(EngineModule, key, None)
             or getattr(TradingRuleModule, key, None)
+            or getattr(FeeModule, key, None)
             or getattr(MarginModule, key)
         )
         field_values[ref] = value
@@ -378,6 +380,45 @@ def test_lot_based_accounting_without_daily_mark_to_market_keeps_today_marker_ab
     )
     order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
     order_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
+
+    _basic_cash_update(account, order_ctx)
+
+    entry = account.ledgers[s].get(LedgerModule.positions)[p]
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, None)]
+
+
+@pytest.mark.parametrize("fee_mode", ["zero", "fixed", "close_today", "close_yesterday"])
+def test_daily_mark_to_market_does_not_mark_today_when_fee_mode_does_not_need_lot_split(fee_mode: str):
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(
+        s,
+        engine_mode="custom",
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+        fee_mode=fee_mode,
+        fixed_fee_rate=0.001,
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ts = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=ts, quantity=2.0, intent_quantity=2.0, strategy=s)
+    order_ctx = FlowContext(
+        timestamp=ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, ts, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {p: {
+        "VolumeMultiple": 1.0,
+        "SettlementPrice": 10.0,
+        "LongMarginRatioByMoney": 0.1,
+    }})
 
     _basic_cash_update(account, order_ctx)
 
