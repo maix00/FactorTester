@@ -1273,7 +1273,7 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
-        if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
+        if accounting_mode == "Custom" and bool(config.get(FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule"), False)):
             fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         margin_mode = str(config.get(margin_ref, "auto") or "auto")
         allocation = str(config.get(allocation_ref, "") or "")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import deque
 
 import pandas as pd
 import pytest
@@ -15,8 +16,9 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, infer_auto_cost_basis_method,
-    mark_to_market, open_position, _apply_daily_mark_to_market, _register_daily_mark_to_market_notices,
+    TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_method, _resolve_use_int_position,
+    close_position, infer_auto_cost_basis_method, mark_to_market, open_position, _apply_daily_mark_to_market,
+    _register_daily_mark_to_market_notices,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
@@ -51,18 +53,23 @@ def test_resolve_method_auto_uses_explicit_historical_cost_basis_method():
     assert _resolve_method(config, _product(margin_traded=True), {"CostBasisMethod": "FIFO"}) == "FIFO"
 
 
-def test_resolve_method_auto_uses_daily_mark_to_market_when_close_today_field_exists():
+def test_resolve_method_auto_uses_fifo_and_daily_mark_to_market_when_close_today_field_exists():
     config = _config(engine_mode="auto")
     fields = {
         "CloseRatioByMoney": 0.0001,
         "CloseTodayRatioByMoney": 0.0001,
     }
-    assert _resolve_method(config, _product(margin_traded=False), fields) == "DailyMarkToMarket"
+    product = _product(margin_traded=False)
+    assert _resolve_method(config, product, fields) == "FIFO"
+    assert _resolve_daily_mark_to_market_enabled(config, product, fields) is True
 
 
-def test_resolve_method_auto_uses_daily_mark_to_market_when_settlement_field_exists():
+def test_resolve_method_auto_uses_fifo_and_daily_mark_to_market_when_settlement_field_exists():
     config = _config(engine_mode="auto")
-    assert _resolve_method(config, _product(margin_traded=False), {"SettlementPrice": 10.0}) == "DailyMarkToMarket"
+    product = _product(margin_traded=False)
+    fields = {"SettlementPrice": 10.0}
+    assert _resolve_method(config, product, fields) == "FIFO"
+    assert _resolve_daily_mark_to_market_enabled(config, product, fields) is True
 
 
 def test_resolve_method_auto_uses_fifo_when_fee_exists_without_close_today_fields():
@@ -72,6 +79,14 @@ def test_resolve_method_auto_uses_fifo_when_fee_exists_without_close_today_field
         "CloseRatioByMoney": 0.0001,
     }
     assert _resolve_method(config, _product(margin_traded=False), fields) == "FIFO"
+
+
+def test_legacy_daily_mark_to_market_cost_basis_field_means_fifo_plus_daily_settlement():
+    config = _config(engine_mode="auto")
+    product = _product(margin_traded=False)
+    fields = {"CostBasisMethod": "DailyMarkToMarket"}
+    assert _resolve_method(config, product, fields) == "FIFO"
+    assert _resolve_daily_mark_to_market_enabled(config, product, fields) is True
 
 
 def test_resolve_method_auto_without_fee_information_falls_back_to_weight_average():
@@ -267,7 +282,9 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
         {
             product: ProductPosition(
                 quantity=2.0,
-                average_cost=10.0,
+                lots=deque([
+                    Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False),
+                ]),
                 equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
             )
         },
@@ -302,7 +319,160 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert updated_cash.to_major() == pytest.approx(1018.0)
     assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
-    assert updated_position.average_cost == pytest.approx(12.0)
+    assert updated_position.average_cost is None
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
+
+
+def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+            MarginModule.margin_mode: "auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(
+        _positions_ref(),
+        {
+            product: ProductPosition(
+                quantity=2.0,
+                lots=deque([
+                    Lot(quantity=1.0, entry_price=20.0, multiplier=1.0, is_today=False),
+                    Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=True),
+                ]),
+                settlement_price=20.0,  # stale previous settlement for the old lot only
+                equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+            )
+        },
+    )
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 18.0},
+        "close": {product: 18.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 18.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    updated_cash = ledger.get(_cash_ref())
+    updated_position = ledger.get(_positions_ref())[product]
+    # Correct PnL: old lot (18-20) + new lot (18-10) = +6, equivalent to
+    # 2 * (18 - blended_basis 15). The stale settlement tag alone would
+    # produce 2 * (18 - 20) = -4 and an artificial equity drop.
+    # Margin falls from 4.0 to 2 * 18 * 0.1 = 3.6, so cash delta = 6 + 0.4.
+    assert updated_cash.to_major() == pytest.approx(1006.4)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(3.6)
+    assert updated_position.settlement_price == pytest.approx(18.0)
+    assert updated_position.average_cost is None
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 18.0, False)]
+
+
+def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settlement():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+            MarginModule.margin_mode: "auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=1.0,
+            lots=deque([Lot(quantity=1.0, entry_price=18.0, multiplier=1.0, is_today=True)]),
+            settlement_price=20.0,
+            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 18.0},
+        "close": {product: 18.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 1.0,
+            "PreSettlementPrice": 20.0,
+            "SettlementPrice": 18.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    # PnL is zero because the open lot's basis is already 18. The historical
+    # PreSettlementPrice belongs to old inventory and must not override lots.
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(1000.0 + 0.2)
+    entry = ledger.get(_positions_ref())[product]
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 18.0, False)]
+
+
+def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
+    product = _product()
+    config = _config(
+        engine_mode="custom",
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+    )
+    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger.set(
+        _positions_ref(),
+        {
+            product: ProductPosition(
+                quantity=2.0,
+                lots=deque([
+                    Lot(quantity=1.0, entry_price=20.0, multiplier=1.0, is_today=False),
+                    Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=True),
+                ]),
+                settlement_price=20.0,
+                equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+            )
+        },
+    )
+
+    realized = close_position(
+        ledger,
+        config,
+        product,
+        quantity=1.0,
+        fill_price=18.0,
+        multiplier=1.0,
+    )
+
+    # Daily mark-to-market is not a blended average-cost close. It consumes
+    # yesterday's lot first here, so closing at 18 against yesterday's 20 basis
+    # realizes -2; today's @10 lot remains open.
+    assert realized.to_major() == pytest.approx(18.0 - 20.0)
+    entry = ledger.get(_positions_ref())[product]
+    assert [lot.entry_price for lot in entry.lots] == [10.0]
 
 
 def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
@@ -319,7 +489,9 @@ def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=3.0,
-            average_cost=10.0,
+            lots=deque([
+                Lot(quantity=3.0, entry_price=12.0, multiplier=10.0, is_today=False),
+            ]),
             settlement_price=12.0,
             equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
         )
@@ -414,7 +586,9 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=3.0,
-            average_cost=10.0,
+            lots=deque([
+                Lot(quantity=3.0, entry_price=12.0, multiplier=10.0, is_today=False),
+            ]),
             settlement_price=12.0,
             equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
         )
@@ -437,10 +611,21 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
 
 def test_daily_mark_to_market_close_realizes_from_last_settlement_not_original_entry():
     product = _product()
-    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="DailyMarkToMarket")
+    config = _config(
+        engine_mode="custom",
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+    )
     ledger = Ledger(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
-        product: ProductPosition(quantity=3.0, average_cost=10.0, settlement_price=12.0)
+        product: ProductPosition(
+            quantity=3.0,
+            lots=deque([
+                Lot(quantity=3.0, entry_price=12.0, multiplier=10.0, is_today=False),
+            ]),
+            settlement_price=12.0,
+        )
     })
 
     realized = close_position(ledger, config, product, quantity=1.0, fill_price=13.5, multiplier=10.0)

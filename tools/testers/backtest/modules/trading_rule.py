@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
@@ -20,9 +21,9 @@ if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import Ledger, StrategyConfig
 
 AccountingMode = Literal["Basic", "Custom", "Auto"]
-CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"]
+CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO"]
 
-_VALID_COST_BASIS_METHODS = {"WeightAverage", "FIFO", "LIFO", "HIFO", "DailyMarkToMarket"}
+_VALID_COST_BASIS_METHODS = {"WeightAverage", "FIFO", "LIFO", "HIFO"}
 _FEE_FIELDS = (
     "OpenRatioByMoney",
     "OpenRatioByVolume",
@@ -52,8 +53,14 @@ _CUSTOM_TRADING_RULE_FIELDS = (
             ("FIFO", "先进先出"),
             ("LIFO", "后进先出"),
             ("HIFO", "高进先出"),
-            ("DailyMarkToMarket", "逐日盯市"),
         ),
+        "allow_time_range": False,
+    },
+    {
+        "value": "DailyMarkToMarketEnabled",
+        "label": "逐日盯市",
+        "unit": "bool",
+        "value_type": "boolean",
         "allow_time_range": False,
     },
 )
@@ -65,6 +72,7 @@ class TradingRuleModule(ExecutableModule):
 
     accounting_mode: ClassVar[FieldRef[AccountingMode]] = FieldRef("accounting_mode")
     cost_basis_method: ClassVar[FieldRef[CostBasisMethod]] = FieldRef("cost_basis_method")
+    daily_mark_to_market_enabled: ClassVar[FieldRef[bool]] = FieldRef("daily_mark_to_market_enabled")
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
     daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
 
@@ -82,10 +90,15 @@ class TradingRuleModule(ExecutableModule):
         "cost_basis_method": FieldDefinition(
             public=True, label="成本法", default="WeightAverage", control_template="select", tab="accounting",
             options=(("WeightAverage", "加权平均成本法"), ("FIFO", "先进先出"),
-                      ("LIFO", "后进先出"), ("HIFO", "高进先出"),
-                      ("DailyMarkToMarket", "逐日盯市")),
+                      ("LIFO", "后进先出"), ("HIFO", "高进先出")),
             editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
             chip_template="成本法: {value}", tab_label="记账规则", tab_order=180,
+        ),
+        "daily_mark_to_market_enabled": FieldDefinition(
+            public=True, label="逐日盯市", default=False, control_template="boolean", tab="accounting",
+            editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
+            default_when={"engine_mode": {"basic": False, "auto": True, "exact": True}},
+            chip_template="逐日盯市: {value}", tab_label="记账规则", tab_order=180,
         ),
         "use_int_position": FieldDefinition(
             public=True, label="整数持仓", default=False, control_template="boolean", tab="accounting",
@@ -107,7 +120,7 @@ class TradingRuleModule(ExecutableModule):
 
     register_daily_mark_to_market_notices: ClassVar[Flow] = Flow(
         "register_daily_mark_to_market_notices",
-        inputs=(EngineModule.engine_mode, accounting_mode, cost_basis_method),
+        inputs=(EngineModule.engine_mode, accounting_mode, daily_mark_to_market_enabled),
         outputs=(daily_mark_to_market_events,),
         phase=Phase.PRE_REPLAY,
         order=47,
@@ -152,8 +165,56 @@ def _resolve_method(
     if mode == "Basic":
         return "WeightAverage"
     if mode == "Custom":
-        return strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage")
+        method = strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage")
+        _validate_daily_mark_to_market_cost_basis(strategy_config, method, product)
+        return method
     return infer_auto_cost_basis_method(historical_fields, require_exact=require_exact, product=product)
+
+
+def _resolve_daily_mark_to_market_enabled(
+    strategy_config: "StrategyConfig",
+    product: "Product",
+    historical_fields: Mapping[str, object] | None = None,
+    *,
+    require_exact: bool = False,
+) -> bool:
+    mode = _effective_accounting_mode(strategy_config)
+    if mode == "Basic":
+        return False
+    fields = historical_fields or {}
+    if mode == "Custom":
+        enabled = bool(strategy_config.get(TradingRuleModule.daily_mark_to_market_enabled, False))
+        if enabled:
+            _validate_daily_mark_to_market_cost_basis(
+                strategy_config,
+                strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage"),
+                product,
+            )
+        return enabled
+    explicit = fields.get("DailyMarkToMarketEnabled")
+    if explicit not in (None, ""):
+        return _bool_field(explicit)
+    # Legacy historical data wrote DailyMarkToMarket as if it were a cost-basis
+    # method. Runtime treats that as FIFO lots plus daily settlement.
+    if str(fields.get("CostBasisMethod") or "") == "DailyMarkToMarket":
+        return True
+    if _has_daily_mark_to_market_indicator(fields):
+        return True
+    if require_exact:
+        raise KeyError(f"exact accounting requires DailyMarkToMarketEnabled for {product}")
+    return False
+
+
+def _validate_daily_mark_to_market_cost_basis(
+    strategy_config: "StrategyConfig",
+    method: str,
+    product: object,
+) -> None:
+    if bool(strategy_config.get(TradingRuleModule.daily_mark_to_market_enabled, False)) and method == "WeightAverage":
+        raise ValueError(
+            f"Daily mark-to-market requires a lot-based cost basis for {product}; "
+            "use FIFO, LIFO, or HIFO instead of WeightAverage"
+        )
 
 
 def infer_auto_cost_basis_method(
@@ -166,16 +227,26 @@ def infer_auto_cost_basis_method(
     explicit = fields.get("CostBasisMethod")
     if explicit not in (None, ""):
         method = str(explicit)
+        if method == "DailyMarkToMarket":
+            return "FIFO"
         if method not in _VALID_COST_BASIS_METHODS:
             raise ValueError(f"unsupported CostBasisMethod for {product}: {method}")
         return cast(CostBasisMethod, method)
     if require_exact:
         raise KeyError(f"exact accounting requires historical CostBasisMethod for {product}")
     if _has_daily_mark_to_market_indicator(fields):
-        return "DailyMarkToMarket"
+        return "FIFO"
     if _has_any_fee_field(fields):
         return "FIFO"
     return "WeightAverage"
+
+
+def _bool_field(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
 
 
 def _has_any_fee_field(fields: Mapping[str, object]) -> bool:
@@ -230,8 +301,6 @@ def open_position(
         # reducing/flipping a position is a close, not an open — close_position handles cost basis there
     elif method in ("FIFO", "LIFO", "HIFO"):
         entry.lots.append(Lot(quantity=quantity, entry_price=entry_price, multiplier=multiplier))
-    # DailyMarkToMarket: no per-lot/average-cost bookkeeping; settlement
-    # reads MarketDataModule.settlement_price directly, nothing to write here.
 
 
 def close_position(
@@ -265,18 +334,6 @@ def close_position(
         realized = _consume_lots(entry.lots, quantity, fill_price, multiplier, from_front=False)
     elif method == "HIFO":
         realized = _consume_lots_hifo(entry.lots, quantity, fill_price, multiplier)
-    elif method == "DailyMarkToMarket":
-        basis = entry.settlement_price if entry.settlement_price is not None else (entry.average_cost or fill_price)
-        realized = _mark_to_market_money_difference(
-            fill_price,
-            basis,
-            multiplier,
-            quantity * _position_sign(prior_quantity),
-            fields={},
-            product=product,
-            currency=ledger.base_currency,
-            use_minor_units=True,
-        )
     return DataMoney.from_major(realized, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -330,7 +387,12 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
         elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
             for lot in entry.lots:
                 total += lot.quantity * (price - lot.entry_price) * lot.multiplier
-        elif method == "DailyMarkToMarket":
+        elif _resolve_daily_mark_to_market_enabled(
+            strategy_config,
+            product,
+            fields,
+            require_exact=require_exact,
+        ):
             basis = _previous_settlement_for_product(
                 product,
                 entry,
@@ -408,7 +470,12 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             if abs(quantity) <= 1e-12:
                 continue
             fields = historical_fields_for_product(historical_fields, product)
-            if _resolve_method(config, product, fields, require_exact=engine_mode_for(config) == "exact") != "DailyMarkToMarket":
+            if not _resolve_daily_mark_to_market_enabled(
+                config,
+                product,
+                fields,
+                require_exact=engine_mode_for(config) == "exact",
+            ):
                 continue
             settlement = _settlement_price_for_product(
                 product,
@@ -450,7 +517,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 use_minor_units=cash.use_minor_units,
             )
             entry.settlement_price = settlement
-            entry.average_cost = settlement
+            _reset_lots_to_daily_settlement(entry, settlement, multiplier)
         ledger.set(TradingRuleModule._ledger_cash_ref, cash)
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
 
@@ -486,17 +553,55 @@ def _previous_settlement_for_product(
     *,
     require_exact: bool,
 ) -> float:
+    basis = _daily_mark_to_market_basis(entry, current_settlement)
+    if getattr(entry, "lots", None):
+        return basis
     if entry.settlement_price is not None:
-        return float(entry.settlement_price)
+        return basis
     for field_name in ("PreSettlementPrice", "LastSettlementPrice"):
         field_value = _number_or_none(fields.get(field_name))
         if field_value is not None:
             return field_value
-    if entry.average_cost is not None:
-        return float(entry.average_cost)
     if require_exact:
         raise KeyError(f"exact daily mark-to-market requires previous settlement price for {product}")
     return current_settlement
+
+
+def _daily_mark_to_market_basis(entry: Any, fallback: float) -> float:
+    """Current blended basis for a position under daily mark-to-market.
+
+    DMTM reuses the lot-based cost record. Yesterday-and-earlier lots are
+    reset to settlement by the LEDGER_NOTICE flow; intraday lots keep their
+    fill price until that reset. `average_cost` is intentionally not read.
+    """
+    lots = getattr(entry, "lots", None)
+    if lots:
+        total_abs = sum(abs(float(getattr(lot, "quantity", 0.0) or 0.0)) for lot in lots)
+        if total_abs > 1e-12:
+            return sum(
+                abs(float(lot.quantity)) * float(lot.entry_price)
+                for lot in lots
+            ) / total_abs
+    if entry.settlement_price is not None:
+        return float(entry.settlement_price)
+    return float(fallback)
+
+
+def _reset_lots_to_daily_settlement(entry: Any, settlement: float, multiplier: float) -> None:
+    from tools.testers.backtest.engines.native.ledger import Lot
+
+    quantity = float(entry.quantity or 0.0)
+    if abs(quantity) <= 1e-12:
+        entry.lots = deque()
+        return
+    entry.lots = deque([
+        Lot(
+            quantity=quantity,
+            entry_price=settlement,
+            multiplier=multiplier,
+            is_today=False,
+        )
+    ])
 
 
 def _margin_ratio_for_position(
@@ -555,6 +660,16 @@ def _mark_to_market_money_difference(
 
 
 def _money_calculation_policy(fields: Mapping[str, object], product: Any) -> str:
+    """"aggregate" (default, matches published CN-futures clearing rules and
+    CME's own variation-margin procedure: carry full precision through the
+    formula and round to the settlement currency's minor unit exactly once,
+    at the final money amount -- see DataMoney.from_major). "per_contract_price_point"
+    is for the narrower case of a market that defines its tick value as an
+    already-rounded per-contract constant (e.g. a fixed $/tick figure in a
+    contract spec) rather than a derived price*multiplier; it is an opt-in
+    override via MarketDataModule historical fields, not a second general
+    rounding convention -- only DailyMarkToMarket P&L honors it today, not
+    the WeightAverage/FIFO/LIFO/HIFO trade-cost or margin-fill cash legs."""
     value = fields.get("MoneyCalculationPolicy") or fields.get("money_calculation_policy")
     policy = str(value or "aggregate").strip().lower()
     if policy in {"per_contract_price_point", "per-contract-price-point", "cme_price_point"}:

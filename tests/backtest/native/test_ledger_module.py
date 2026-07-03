@@ -9,7 +9,7 @@ from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, Lot, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -320,6 +320,69 @@ def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
 
     assert account.ledgers[s].get(LedgerModule.cash).to_major() == pytest.approx(1_000_200.0)
     assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+
+
+def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="auto")
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ts = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=ts, quantity=2.0, intent_quantity=2.0, strategy=s)
+    order_ctx = FlowContext(
+        timestamp=ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, ts, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _basic_cash_update(account, order_ctx)
+
+    entry = account.ledgers[s].get(LedgerModule.positions)[p]
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, True)]
+
+
+def test_lot_based_accounting_without_daily_mark_to_market_keeps_today_marker_absent():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(
+        s,
+        engine_mode="custom",
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+    )
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ts = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=ts, quantity=2.0, intent_quantity=2.0, strategy=s)
+    order_ctx = FlowContext(
+        timestamp=ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, ts, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
+
+    _basic_cash_update(account, order_ctx)
+
+    entry = account.ledgers[s].get(LedgerModule.positions)[p]
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, None)]
 
 
 def test_two_strategies_independent_ledgers_do_not_cross_contaminate():

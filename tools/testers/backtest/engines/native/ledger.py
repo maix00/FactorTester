@@ -29,6 +29,7 @@ class Lot:
     quantity: float | int
     entry_price: float
     multiplier: float
+    is_today: bool | None = None
 
 
 @dataclass

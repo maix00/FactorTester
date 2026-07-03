@@ -25,7 +25,7 @@ from tools.testers.backtest.modules.product_selection import ProductSelectionMod
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
-    _resolve_use_int_position, mark_to_market,
+    _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled,
 )
 
 
@@ -115,12 +115,9 @@ def _initialize_ledgers(state, ctx) -> None:
             if method == "WeightAverage":
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, average_cost=0.0, equity_occupied=zero_equity_occupied)
-            elif method in ("FIFO", "LIFO", "HIFO"):
+            else:
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, lots=deque(), equity_occupied=zero_equity_occupied)
-            else:  # DailyMarkToMarket
-                positions[product] = ProductPosition(
-                    quantity=initial_quantity, equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
         state.ledgers[strategy] = ledger
 
@@ -265,20 +262,28 @@ def _apply_margin_accounting_fill(
         strategy_config, product, fields,
         require_exact=engine_mode_for(strategy_config) == "exact",
     )
+    daily_mark_to_market = _resolve_daily_mark_to_market_enabled(
+        strategy_config,
+        product,
+        fields,
+        require_exact=engine_mode_for(strategy_config) == "exact",
+    )
     if method in ("FIFO", "LIFO", "HIFO"):
         # Lot-based methods keep the lot queue as the cost-basis record --
         # mark_to_market reads entry.lots for floating P&L, so the fill
         # must maintain it; average_cost stays untouched (it would imply
         # a weighted-average basis that doesn't exist under these methods).
-        realized = _apply_lot_fill(entry, method, quantity, price, multiplier)
+        realized = _apply_lot_fill(
+            entry,
+            method,
+            quantity,
+            price,
+            multiplier,
+            is_today=True if daily_mark_to_market else None,
+        )
         if abs(new_quantity) <= 1e-12:
             new_quantity = 0.0
     else:
-        # WeightAverage keeps a blended average_cost. DailyMarkToMarket
-        # shares this arithmetic deliberately: the daily settlement flow
-        # sweeps average_cost to the settlement price every day, so
-        # "fill price - average_cost" here IS "fill price - last
-        # settlement", the mark-to-market realized P&L.
         prior_cost = float(entry.average_cost or price)
         realized = 0.0
         if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
@@ -310,7 +315,15 @@ def _apply_margin_accounting_fill(
     )
 
 
-def _apply_lot_fill(entry: ProductPosition, method: str, quantity: float, price: float, multiplier: float) -> float:
+def _apply_lot_fill(
+    entry: ProductPosition,
+    method: str,
+    quantity: float,
+    price: float,
+    multiplier: float,
+    *,
+    is_today: bool | None = None,
+) -> float:
     """Apply one fill to a lot-based (FIFO/LIFO/HIFO) position entry.
 
     Same-direction fills append a new lot. Opposite-direction fills consume
@@ -323,7 +336,7 @@ def _apply_lot_fill(entry: ProductPosition, method: str, quantity: float, price:
         entry.lots = deque()
     prior_quantity = float(entry.quantity or 0.0)
     if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
-        entry.lots.append(Lot(quantity=quantity, entry_price=price, multiplier=multiplier))
+        entry.lots.append(Lot(quantity=quantity, entry_price=price, multiplier=multiplier, is_today=is_today))
         return 0.0
 
     close_abs = min(abs(quantity), abs(prior_quantity))
@@ -339,7 +352,12 @@ def _apply_lot_fill(entry: ProductPosition, method: str, quantity: float, price:
 
     flip_abs = abs(quantity) - close_abs
     if flip_abs > 1e-12:
-        entry.lots.append(Lot(quantity=flip_abs * _sign(quantity), entry_price=price, multiplier=multiplier))
+        entry.lots.append(Lot(
+            quantity=flip_abs * _sign(quantity),
+            entry_price=price,
+            multiplier=multiplier,
+            is_today=is_today,
+        ))
     return realized
 
 
