@@ -254,7 +254,7 @@ def _split_close_today_yesterday(
         return close_qty, 0.0
     if policy == "close_yesterday":
         return 0.0, close_qty
-    if policy != "auto":
+    if policy not in {"auto", "custom", "exact"}:
         return 0.0, close_qty
     lots = getattr(position, "lots", None)
     if not lots:
