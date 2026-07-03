@@ -18,6 +18,9 @@ class ExchangeClearingRule:
     fields: Mapping[str, object] = field(default_factory=dict)
     provider: str = ""
     label: str = ""
+    note: str = ""
+    field_labels: Mapping[str, str] = field(default_factory=dict)
+    field_notes: Mapping[str, str] = field(default_factory=dict)
 
 
 _EXCHANGE_RULES: dict[str, ExchangeClearingRule] = {}
@@ -33,6 +36,9 @@ def register_exchange_clearing_rule(rule: ExchangeClearingRule) -> ExchangeClear
         fields=dict(rule.fields),
         provider=rule.provider,
         label=rule.label,
+        note=rule.note,
+        field_labels={str(key): str(value) for key, value in rule.field_labels.items()},
+        field_notes={str(key): str(value) for key, value in rule.field_notes.items()},
     )
     _EXCHANGE_RULES[exchange_id] = normalised
     return normalised
@@ -68,6 +74,36 @@ def exchange_rule_defaults_for_product(
 
 def registered_exchange_clearing_rules() -> dict[str, ExchangeClearingRule]:
     return dict(_EXCHANGE_RULES)
+
+
+def exchange_rule_manifest_for_product(
+    product: Any,
+    field_names: tuple[object, ...] | None = None,
+) -> dict[str, object] | None:
+    """Return the exchange clearing-rule metadata that applies to a product."""
+    requested = {str(name) for name in field_names} if field_names is not None else None
+    for exchange_id in _product_exchange_candidates(product):
+        rule = exchange_clearing_rule(exchange_id)
+        if rule is None:
+            continue
+        fields = [
+            {
+                "key": str(name),
+                "value": value,
+                "label": rule.field_labels.get(str(name), str(name)),
+                "note": rule.field_notes.get(str(name), ""),
+            }
+            for name, value in rule.fields.items()
+            if requested is None or str(name) in requested
+        ]
+        return {
+            "exchange_id": rule.exchange_id,
+            "provider": rule.provider,
+            "label": rule.label,
+            "note": rule.note,
+            "fields": fields,
+        }
+    return None
 
 
 def _product_exchange_candidates(product: Any) -> tuple[str, ...]:
