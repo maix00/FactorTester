@@ -13,7 +13,7 @@ from .contracts import WorkerRequest, WorkerResponse
 from ..cancellation import BacktestCancelled
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 class WorkerExecutionError(RuntimeError):

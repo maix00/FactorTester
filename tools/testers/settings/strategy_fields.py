@@ -25,7 +25,13 @@ def registered_option_values(key: str) -> frozenset[str]:
     defaults = app.manifest().get("defaults") or {}
     item = defaults.get(key) or {}
     options = item.get("options") or []
-    return frozenset(str(option.get("value")) for option in options if "value" in option)
+    values = frozenset(str(option.get("value")) for option in options if "value" in option)
+    if values:
+        return values
+    field = _registered_module_field(key)
+    if field is None:
+        return frozenset()
+    return frozenset(str(value) for value, _label in (field.options or ()))
 
 
 def registered_default_value(key: str) -> Any:
@@ -35,8 +41,21 @@ def registered_default_value(key: str) -> Any:
     defaults = app.manifest().get("defaults") or {}
     item = defaults.get(key) or {}
     if "value" not in item:
-        raise ValueError(f"missing registered default for strategy setting: {key}")
+        field = _registered_module_field(key)
+        if field is None:
+            raise ValueError(f"missing registered default for strategy setting: {key}")
+        return field.default
     return item["value"]
+
+
+def _registered_module_field(key: str) -> Any | None:
+    from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+
+    for cls in _ALL_MODULE_CLASSES:
+        field = getattr(cls, "fields", {}).get(key)
+        if field is not None:
+            return field
+    return None
 
 
 def strategy_value(config: Mapping[str, Any], key: str) -> str:

@@ -10,7 +10,12 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.targets import GroupTargetCalculator
-from tools.testers.settings.strategy_fields import validate_resolved_strategy_settings
+from tools.testers.settings.strategy_fields import (
+    OBSOLETE_REBALANCE_MODE,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+    required_strategy_value,
+)
 
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
@@ -108,7 +113,7 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
     if any(not value for value in strategy_ids) or len(set(strategy_ids)) != len(strategy_ids):
         raise ValueError("strategy ids must be non-empty and unique")
     for strategy in strategies:
-        validate_resolved_strategy_settings(strategy)
+        _validate_worker_strategy_settings(strategy)
     rules = payload.get("market_rules", {})
     multipliers = _parse_rule_matrix(
         rules.get("multipliers"), len(timestamps), len(instruments), "multipliers"
@@ -147,6 +152,18 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
         margin_ratios,
         volumes,
     )
+
+
+def _validate_worker_strategy_settings(strategy: Mapping[str, Any]) -> None:
+    """Validate shared split semantics without importing native-only timing policy."""
+
+    if OBSOLETE_REBALANCE_MODE in strategy:
+        raise ValueError(
+            f"{OBSOLETE_REBALANCE_MODE} is obsolete; use "
+            f"{REBALANCE_TRIGGER} and {POSITION_POLICY}"
+        )
+    required_strategy_value(strategy, REBALANCE_TRIGGER)
+    required_strategy_value(strategy, POSITION_POLICY)
 
 
 def target_rows(

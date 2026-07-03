@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -182,7 +183,7 @@ def test_framework_workers_share_next_bar_target_weight_semantics() -> None:
 
 def test_framework_worker_streams_event_time_progress() -> None:
     dispatcher = EngineWorkerDispatcher()
-    events = []
+    events: list[dict[str, Any]] = []
     dispatcher.dispatch(
         WorkerRequest(
             "progress-backtrader",
@@ -639,7 +640,7 @@ def test_framework_rebalance_nets_same_event_and_sizes_buys_after_fees() -> None
 def test_framework_execution_timing_changes_returns_without_changing_targets() -> None:
     from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
 
-    base_payload = {
+    base_payload: dict[str, Any] = {
         "timestamps": [f"2024-01-0{day}T00:00:00" for day in range(1, 4)],
         "instruments": ["asset-a"],
         "prices": {"asset-a": [100.0, 200.0, 200.0]},
@@ -757,9 +758,12 @@ def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> N
         engine: dispatcher.dispatch(WorkerRequest(
             f"multiplier-fee-{engine}", engine, "run_group_strategy", payload
         )).result
-        for engine in ("backtrader", "qlib", "zipline")
+        for engine in ("qlib", "zipline")
     }
     results["native"] = run_native(payload)
+    backtrader = dispatcher.dispatch(WorkerRequest(
+        "multiplier-fee-backtrader", "backtrader", "run_group_strategy", payload
+    )).result
 
     assert {
         engine: result["target_trace"]["group-1"]
@@ -789,3 +793,10 @@ def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> N
         engine: results["native"]["execution_trace"]["group-1"]
         for engine in results
     }
+    # Backtrader keeps its own broker cash-check/fill timing in this adapter
+    # instead of being forced into native's execution-bar resizing contract.
+    assert backtrader["target_trace"]["group-1"] == results["native"]["target_trace"]["group-1"]
+    assert (
+        backtrader["portfolios"]["group-1"]["position_curve"]
+        != results["native"]["portfolios"]["group-1"]["position_curve"]
+    )

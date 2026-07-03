@@ -36,12 +36,14 @@ from .common import (
 def run_group_strategy(
     payload: Mapping[str, Any], progress=None, *, engine: str = "reference"
 ) -> dict[str, Any]:
-    """ADR-029 event order: the order is SIZED at the SIGNAL bar (target
-    quantities, cash rescale, lot floor all use the signal bar's prices and
-    equity — the same values native's SIGNAL-phase size_order/cash-constraint
-    flows read) and FILLED at the due bar's price (matching_policy=
-    next_bar_open_full_fill). Deferring sizing to the fill bar is exactly the
-    drift the native-vs-worker consistency test rejects."""
+    """Reference worker replay for the compact framework payload.
+
+    This worker contract mirrors the external-framework runners: a target is
+    generated on the signal bar, then the executable quantity is resolved on
+    the due execution bar using that bar's cash, price, lot and liquidity
+    constraints. The native Event/Order/Flow server path owns the richer
+    signal/order split separately.
+    """
     request, memberships, updates, calculators = parse_group_strategy_input(payload)
     portfolios = {}
     total_replay_steps = len(request.timestamps) * len(request.strategies)
@@ -51,7 +53,7 @@ def run_group_strategy(
         strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
         cash = strategy_cash
         positions = {instrument: 0.0 for instrument in request.instruments}
-        pending_deltas: list[tuple[int, dict[str, float]]] = []
+        pending_targets: list[tuple[int, Any]] = []
         equity_curve = {}
         position_curve = {}
         notional_curve = {}
@@ -62,26 +64,28 @@ def run_group_strategy(
         timing = execution_timing(strategy)
         delay_bars = execution_delay_bars(strategy)
 
-        def _size_at_signal(row: int, target) -> dict[str, float]:
+        def _execute(row: int, timestamp, target) -> None:
+            nonlocal cash, positions, execution_trace_count
+            before = dict(positions)
+            cash_before = cash
             value = portfolio_value(request, row, positions, cash)
             desired = target_quantities(request, row, target, value, strategy)
-            return executable_deltas(request, row, strategy, desired, positions, cash)
+            deltas = executable_deltas(request, row, strategy, desired, positions, cash)
+            cash, positions = apply_deltas(request, row, strategy, positions, cash, deltas)
+            if any(abs(delta) > 1e-12 for delta in deltas.values()):
+                execution_trace_count += 1
+                if collect_trace:
+                    execution_trace[timestamp.isoformat()] = execution_trace_entry(
+                        request, row, strategy, before, deltas, cash_before
+                    )
 
         for row, timestamp in enumerate(request.timestamps):
-            due = [deltas for due_row, deltas in pending_deltas if due_row <= row]
-            pending_deltas = [
-                (due_row, deltas) for due_row, deltas in pending_deltas if due_row > row
+            due = [target for due_row, target in pending_targets if due_row <= row]
+            pending_targets = [
+                (due_row, target) for due_row, target in pending_targets if due_row > row
             ]
-            for deltas in due:
-                before = dict(positions)
-                cash_before = cash
-                cash, positions = apply_deltas(request, row, strategy, positions, cash, deltas)
-                if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                    execution_trace_count += 1
-                    if collect_trace:
-                        execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                            request, row, strategy, before, deltas, cash_before
-                        )
+            for pending in due:
+                _execute(row, timestamp, pending)
             target = calculator.update(
                 timestamp,
                 np.asarray([request.prices[name][row] for name in request.instruments]),
@@ -90,19 +94,10 @@ def run_group_strategy(
                 np.asarray(request.margin_ratios[row]),
             )
             if target is not None:
-                deltas = _size_at_signal(row, target)
                 if timing == "same_bar":
-                    before = dict(positions)
-                    cash_before = cash
-                    cash, positions = apply_deltas(request, row, strategy, positions, cash, deltas)
-                    if any(abs(delta) > 1e-12 for delta in deltas.values()):
-                        execution_trace_count += 1
-                        if collect_trace:
-                            execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                                request, row, strategy, before, deltas, cash_before
-                            )
+                    _execute(row, timestamp, target)
                 else:
-                    pending_deltas.append((row + delay_bars, deltas))
+                    pending_targets.append((row + delay_bars, target))
             equity_curve[timestamp.isoformat()] = float(
                 portfolio_value(request, row, positions, cash)
             )
