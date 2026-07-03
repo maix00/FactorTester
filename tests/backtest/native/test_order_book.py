@@ -13,6 +13,7 @@ from tools.testers.backtest.modules.group_membership import GroupMembershipModul
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_book import OrderBookModule, _basic_size_order, _construct_orders
+from tools.traderules import OrderTradeConstraint
 
 
 def _product() -> Product:
@@ -112,6 +113,39 @@ def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():
     assert ctx.get_for(OrderBookModule.raw_deltas, s) == {}
     assert account.runtime_info_rows
     assert account.runtime_info_rows[0]["code"] == "order_target_skipped_untradable"
+
+
+def test_basic_size_order_uses_coarse_tradability_not_side_constraints_for_closeout():
+    s = Strategy(alias="S")
+    p = _product()
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_tradable_status, {p: True})
+    ctx.set(MarketDataModule.current_order_constraints, {
+        p: OrderTradeConstraint(
+            tradable=True,
+            can_buy=False,
+            can_sell=True,
+            reason="触及涨停，买入方向不可成交",
+        )
+    })
+    ctx.set_for(LedgerModule.equity, s, 1000.0)
+    # Target dropped to zero. Even if the bar is upper-limit locked, sizing
+    # must still produce the sell delta; side-specific constraints are applied
+    # later by OrderExecutionModule once the order direction is known.
+    ctx.set_for(GroupMembershipModule.target_weights, s, {})
+
+    class _FakeLedger:
+        def get(self, ref, default=None):
+            return {p: ProductPosition(quantity=30.0)}
+
+    class _FakeAccount:
+        ledgers = {s: _FakeLedger()}
+
+    _basic_size_order(_FakeAccount(), ctx)
+
+    assert ctx.get_for(OrderBookModule.raw_deltas, s) == {p: -30.0}
 
 
 def test_construct_orders_skips_zero_deltas():

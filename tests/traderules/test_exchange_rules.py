@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from tools.traderules import (
     ExchangeClearingRule,
@@ -94,6 +96,16 @@ def test_exchange_trading_rule_can_infer_tradable_status_from_snapshot() -> None
     assert manifest is not None
     assert manifest["label"] == "测试交易规则"
     assert manifest["tradability_policy"] == "valid_close_and_positive_volume"
+
+
+def test_exchange_trading_rule_rejects_unknown_policy() -> None:
+    with pytest.raises(ValueError, match="unsupported tradability_policy"):
+        register_exchange_trading_rule(
+            ExchangeTradingRule(
+                exchange_id="XBROKEN",
+                tradability_policy="valid_close_and_prcie_limits",
+            )
+        )
 
 
 def test_local_cnfutures_declares_exchange_trading_rule_defaults() -> None:

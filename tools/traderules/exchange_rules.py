@@ -52,6 +52,13 @@ class OrderTradeConstraint:
 
 _EXCHANGE_RULES: dict[str, ExchangeClearingRule] = {}
 _EXCHANGE_TRADING_RULES: dict[str, ExchangeTradingRule] = {}
+_KNOWN_TRADABILITY_POLICIES = frozenset({
+    "always",
+    "valid_close_price",
+    "valid_close_and_positive_volume",
+    "valid_close_and_price_limits",
+    "valid_close_with_price_limits",
+})
 
 
 def register_exchange_clearing_rule(rule: ExchangeClearingRule) -> ExchangeClearingRule:
@@ -108,9 +115,13 @@ def register_exchange_trading_rule(rule: ExchangeTradingRule) -> ExchangeTrading
     exchange_id = _normalise_exchange_id(rule.exchange_id)
     if not exchange_id:
         raise ValueError("exchange_id is required")
+    policy = str(rule.tradability_policy or "valid_close_price")
+    if policy not in _KNOWN_TRADABILITY_POLICIES:
+        allowed = ", ".join(sorted(_KNOWN_TRADABILITY_POLICIES))
+        raise ValueError(f"unsupported tradability_policy {policy!r}; expected one of: {allowed}")
     normalised = ExchangeTradingRule(
         exchange_id=exchange_id,
-        tradability_policy=str(rule.tradability_policy or "valid_close_price"),
+        tradability_policy=policy,
         provider=rule.provider,
         label=rule.label,
         note=rule.note,

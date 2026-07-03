@@ -126,10 +126,10 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
 
 def _reject_reason_for_order(order: Any, constraints: Any) -> str | None:
     if not isinstance(constraints, dict):
-        return None
+        return "缺少订单交易约束"
     constraint = constraints.get(order.instrument)
     if constraint is None:
-        return None
+        return "缺少订单交易约束"
     if not bool(getattr(constraint, "tradable", True)):
         return str(getattr(constraint, "reason", "") or "当前不可交易")
     if float(getattr(order, "quantity", 0.0) or 0.0) > 0 and not bool(getattr(constraint, "can_buy", True)):
