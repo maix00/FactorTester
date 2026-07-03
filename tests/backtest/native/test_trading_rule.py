@@ -624,6 +624,40 @@ def test_daily_mark_to_market_can_use_per_contract_price_point_policy():
     assert pnl.to_major() == pytest.approx(0.02)
 
 
+def test_daily_mark_to_market_lot_positions_still_use_money_policy():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
+            settlement_price=10.0,
+            equity_occupied=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
+        )
+    })
+
+    pnl = mark_to_market(
+        ledger,
+        config,
+        {product: 10.005},
+        {product: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 10.005,
+            "MoneyCalculationPolicy": "per_contract_price_point",
+        }},
+    )
+
+    assert pnl.to_major() == pytest.approx(0.02)
+
+
 def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
     from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_equity
 

@@ -382,12 +382,7 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
         if price is None:
             continue
         multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
-        if method == "WeightAverage" and entry.average_cost is not None:
-            total += entry.quantity * (price - entry.average_cost) * multiplier
-        elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
-            for lot in entry.lots:
-                total += lot.quantity * (price - lot.entry_price) * lot.multiplier
-        elif _resolve_daily_mark_to_market_enabled(
+        if _resolve_daily_mark_to_market_enabled(
             strategy_config,
             product,
             fields,
@@ -410,6 +405,11 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
                 currency=ledger.base_currency,
                 use_minor_units=True,
             )
+        elif method == "WeightAverage" and entry.average_cost is not None:
+            total += entry.quantity * (price - entry.average_cost) * multiplier
+        elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
+            for lot in entry.lots:
+                total += lot.quantity * (price - lot.entry_price) * lot.multiplier
     return DataMoney.from_major(total, currency=ledger.base_currency, use_minor_units=False)
 
 
