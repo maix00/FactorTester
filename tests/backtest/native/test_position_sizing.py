@@ -29,14 +29,12 @@ def test_floor_to_lot_rounds_magnitude_down():
     p1, p2 = _product(), _product()
     account = _account(s, "floor_to_lot")
 
-    def base_compute(account, ctx) -> None:
-        ctx.set_for(OrderBookModule.deltas, s, {p1: 23.0, p2: -23.0})
-
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(OrderBookModule.raw_deltas, s, {p1: 23.0, p2: -23.0})
     ctx.set(MarketDataModule.lot_sizes, {p1: 10.0, p2: 10.0})
 
-    _round_to_lot_sizes(account, ctx, base_compute)
-    rounded = ctx.get_for(OrderBookModule.deltas, s)
+    _round_to_lot_sizes(account, ctx)
+    rounded = ctx.get_for(OrderBookModule.sized_deltas, s)
     assert rounded[p1] == 20.0    # floor(23/10)*10, never rounds up past the target
     assert rounded[p2] == -20.0   # magnitude floored, sign preserved
 
@@ -46,33 +44,27 @@ def test_nearest_lot_rounds_to_closest():
     p1, p2 = _product(), _product()
     account = _account(s, "nearest_lot")
 
-    def base_compute(account, ctx) -> None:
-        ctx.set_for(OrderBookModule.deltas, s, {p1: 23.0, p2: 7.0})
-
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(OrderBookModule.raw_deltas, s, {p1: 23.0, p2: 7.0})
     ctx.set(MarketDataModule.lot_sizes, {p1: 10.0, p2: 5.0})
 
-    _round_to_lot_sizes(account, ctx, base_compute)
-    rounded = ctx.get_for(OrderBookModule.deltas, s)
+    _round_to_lot_sizes(account, ctx)
+    rounded = ctx.get_for(OrderBookModule.sized_deltas, s)
     assert rounded[p1] == 20.0  # round(23/10)*10
     assert rounded[p2] == 5.0   # round(7/5)*5
 
 
-def test_base_compute_runs_before_rounding():
+def test_rounding_uses_existing_deltas_without_recomputing_size_order():
     s = Strategy(alias="S")
     p = _product()
     account = _account(s)
-    calls = []
-
-    def base_compute(account, ctx) -> None:
-        calls.append("base")
-        ctx.set_for(OrderBookModule.deltas, s, {p: 23.0})
 
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(OrderBookModule.raw_deltas, s, {p: 23.0})
     ctx.set(MarketDataModule.lot_sizes, {p: 10.0})
 
-    _round_to_lot_sizes(account, ctx, base_compute)
-    assert calls == ["base"]
+    _round_to_lot_sizes(account, ctx)
+    assert ctx.get_for(OrderBookModule.sized_deltas, s)[p] == 20.0
 
 
 def test_missing_lot_size_defaults_to_no_rounding():
@@ -80,11 +72,9 @@ def test_missing_lot_size_defaults_to_no_rounding():
     p = _product()
     account = _account(s)
 
-    def base_compute(account, ctx) -> None:
-        ctx.set_for(OrderBookModule.deltas, s, {p: 12.34})
-
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(OrderBookModule.raw_deltas, s, {p: 12.34})
     ctx.set(MarketDataModule.lot_sizes, {})
 
-    _round_to_lot_sizes(account, ctx, base_compute)
-    assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(12.34)
+    _round_to_lot_sizes(account, ctx)
+    assert ctx.get_for(OrderBookModule.sized_deltas, s)[p] == pytest.approx(12.34)

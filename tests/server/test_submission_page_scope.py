@@ -410,7 +410,7 @@ def test_single_factor_page_generates_and_registers_page_uuid(app, monkeypatch):
     }
 
 
-def test_testers_modules_endpoint_serializes_full_tree(app):
+def test_testers_modules_endpoint_serializes_one_navigation_layer(app):
     from server.modules.single_factor_test import backtest_settings as backtest_settings_routes
 
     with app.test_request_context("/api/testers/modules"):
@@ -419,16 +419,47 @@ def test_testers_modules_endpoint_serializes_full_tree(app):
     payload = response.get_json()
     assert payload["success"] is True
     top = payload["modules"]
-    assert [m["key"] for m in top] == ["single_factor_family_test"]
-    page = top[0]
-    assert [m["key"] for m in page["modules"]] == [
+    assert [m["key"] for m in top] == ["single_factor_family_test", "backtest"]
+    assert top[0]["kind"] == "module"
+    assert top[0]["has_children"] is True
+    assert top[1]["application"] == "group_test"
+
+    with app.test_request_context("/api/testers/modules?parent=single_factor_family_test"):
+        response = backtest_settings_routes.get_testers_modules()
+    payload = response.get_json()
+    page_children = payload["modules"]
+    assert [m["key"] for m in page_children] == [
         "single_factor_page", "factor_evaluation", "factor_type_analysis", "ic_test", "group_test",
     ]
-    leaf = next(m for m in page["modules"] if m["key"] == "ic_test")
-    assert leaf["modules"] == []
-    group_test = next(m for m in page["modules"] if m["key"] == "group_test")
-    assert group_test["modules"]  # expanded executable-module manifest, not nested Modules
-    assert "phases" in group_test["modules"][0]
+    assert all(child["kind"] == "module" for child in page_children)
+
+    with app.test_request_context("/api/testers/modules?parent=group_test"):
+        response = backtest_settings_routes.get_testers_modules()
+    payload = response.get_json()
+    group_tabs = payload["modules"]
+    assert group_tabs
+    assert all(tab["kind"] == "tab" for tab in group_tabs)
+    assert all(tab["application"] == "group_test" for tab in group_tabs)
+    assert all("phases" not in tab for tab in group_tabs)
+    first_tab = group_tabs[0]
+
+    with app.test_request_context(f"/api/testers/modules?parent={first_tab['key']}"):
+        response = backtest_settings_routes.get_testers_modules()
+    payload = response.get_json()
+    fields = payload["modules"]
+    assert fields
+    assert all(field["kind"] == "field" for field in fields)
+    assert all(field["application"] == "group_test" for field in fields)
+    assert all(field["has_children"] is False for field in fields)
+
+    with app.test_request_context("/api/testers/modules?parent=backtest"):
+        response = backtest_settings_routes.get_testers_modules()
+    payload = response.get_json()
+    backtest_tabs = payload["modules"]
+    assert backtest_tabs
+    assert all(tab["kind"] == "tab" for tab in backtest_tabs)
+    assert all(tab["key"].startswith("backtest/") for tab in backtest_tabs)
+    assert all(tab["application"] == "group_test" for tab in backtest_tabs)
 
 
 def test_single_factor_page_bootstrap_api_returns_page_uuid_without_html(app, monkeypatch):

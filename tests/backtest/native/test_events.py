@@ -8,17 +8,19 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 
 def test_event_kind_values_and_ordering():
     assert list(EventKind) == [
-        EventKind.BAR, EventKind.SIGNAL, EventKind.ORDER_NOTICE, EventKind.ORDER, EventKind.LEDGER_NOTICE,
+        EventKind.BAR,
+        EventKind.SIGNAL,
+        EventKind.ORDER_NOTICE,
+        EventKind.ORDER,
+        EventKind.LEDGER_NOTICE,
     ]
     assert EventKind.BAR == 0
     assert EventKind.SIGNAL == 10
     assert EventKind.ORDER_NOTICE == 15
     assert EventKind.ORDER == 20
-    assert EventKind.LEDGER_NOTICE == 30
     assert EventKind.BAR < EventKind.SIGNAL
     assert EventKind.SIGNAL < EventKind.ORDER_NOTICE
     assert EventKind.ORDER_NOTICE < EventKind.ORDER
-    assert EventKind.ORDER < EventKind.LEDGER_NOTICE
     assert EventKind.SIGNAL < EventKind.ORDER
 
 

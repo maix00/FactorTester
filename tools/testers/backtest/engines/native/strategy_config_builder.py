@@ -37,10 +37,10 @@ _TERM_STRUCTURE_FLOWS = {
 _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _DAILY_MARK_TO_MARKET_FLOWS = {
-    "lookup_current_prices_on_ledger_notice",
-    "lookup_historical_fields_on_ledger_notice",
     "register_daily_mark_to_market_notices",
     "apply_daily_mark_to_market",
+    "lookup_current_prices_on_ledger_notice",
+    "lookup_historical_fields_on_ledger_notice",
 }
 
 
@@ -60,13 +60,13 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
     if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
         excluded |= _TERM_STRUCTURE_FLOWS
+    if not _uses_daily_mark_to_market_flow(resolved_settings):
+        excluded |= _DAILY_MARK_TO_MARKET_FLOWS
     strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
     if strategy_kind == "long_short":
         excluded |= _GROUP_STRATEGY_FLOWS
     else:
         excluded |= _LONG_SHORT_STRATEGY_FLOWS
-    if not _uses_daily_mark_to_market_flow(resolved_settings):
-        excluded |= _DAILY_MARK_TO_MARKET_FLOWS
     return frozenset(names - excluded)
 
 

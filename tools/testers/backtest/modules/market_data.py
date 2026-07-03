@@ -95,6 +95,11 @@ class MarketDataModule(ExecutableModule):
     historical_field_policy: ClassVar[FieldRef[str]] = FieldRef("historical_field_policy")
     current_historical_fields: ClassVar[FieldRef[dict[Any, dict[str, object]]]] = FieldRef("current_historical_fields")
     current_prices: ClassVar[FieldRef[Any]] = FieldRef("current_prices")  # dict[Product, float], looked up per-timestamp
+    current_market_snapshot: ClassVar[FieldRef[Any]] = FieldRef("current_market_snapshot")
+        # dict[str, dict[Product, float]], looked up per timestamp. Price
+        # bases (open/high/low/close/vwap/settlement/pre_settlement) and
+        # volume share the same event timestamp semantics; legacy consumers
+        # still read current_prices as the close-price view.
     data_source_mode: ClassVar[FieldRef[str]] = FieldRef("data_source_mode")
     data_source: ClassVar[FieldRef[str]] = FieldRef("data_source")
         # which raw data source the data-prep stage should load raw_prices/
@@ -144,6 +149,7 @@ class MarketDataModule(ExecutableModule):
             ),
         ),
         "current_historical_fields": FieldDefinition(public=False),
+        "current_market_snapshot": FieldDefinition(public=False),
         "data_source_mode": FieldDefinition(
             public=True, label="数据源模式", default="auto", control_template="select", tab="data_source",
             options=(("auto", "自动选择"), ("list", "指定列表")),
@@ -237,28 +243,28 @@ class MarketDataModule(ExecutableModule):
     )
 
     lookup_current_prices_on_signal: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices,),
+        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices, current_market_snapshot),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
         description="读取信号时点价格",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
+        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices,),
+        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices, current_market_snapshot),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
         description="读取行情时点价格",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
+        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_order: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices,),
+        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices, current_market_snapshot),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
         description="读取订单时点价格",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
+        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_ledger_notice: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices,),
+        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices, current_market_snapshot),
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=1,
-        description="读取结算时点价格",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
+        description="读取账本通知时点价格",
+        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_volume_on_signal: ClassVar[Flow] = Flow(
         "lookup_volume_on_signal", inputs=(), outputs=(volume,),
@@ -284,10 +290,10 @@ class MarketDataModule(ExecutableModule):
     )
     lookup_historical_fields_on_ledger_notice: ClassVar[Flow] = Flow(
         "lookup_historical_fields_on_ledger_notice",
-        inputs=(_margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
+        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=2,
-        description="读取结算交易规则字段",
+        description="读取账本通知交易规则字段",
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
 
@@ -295,8 +301,7 @@ class MarketDataModule(ExecutableModule):
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
-        lookup_current_prices_on_order, lookup_volume_on_signal,
-        lookup_current_prices_on_ledger_notice,
+        lookup_current_prices_on_order, lookup_current_prices_on_ledger_notice, lookup_volume_on_signal,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
         lookup_historical_fields_on_ledger_notice,
     )
@@ -310,12 +315,6 @@ _MARGIN_FIELD_NAMES = (
     "ShortMarginRatioByMoney",
     "LongMarginRatioByVolume",
     "ShortMarginRatioByVolume",
-)
-_SETTLEMENT_FIELD_NAMES = (
-    "SettlementPrice",
-    "PreSettlementPrice",
-    "LastSettlementPrice",
-    "CostBasisMethod",
 )
 
 
@@ -802,6 +801,10 @@ def _load_raw_market_data(state, ctx) -> None:
         ("close", DataColumn.CLOSE.name),
         ("vwap", DataColumn.VWAP.name),
     )
+    optional_price_columns = (
+        ("settlement", DataColumn.SETTLEMENT_PRICE.name),
+        ("pre_settlement", DataColumn.PRE_SETTLEMENT_PRICE.name),
+    )
     price_series_by_basis: dict[str, dict[Any, pd.Series]] = {
         basis: {} for basis, _column in price_columns
     }
@@ -863,6 +866,11 @@ def _load_raw_market_data(state, ctx) -> None:
         for basis, column in price_columns:
             if column in df.columns:
                 price_series_by_basis[basis][product] = df[column]
+        for basis, column in optional_price_columns:
+            if column in df.columns:
+                price_series_by_basis.setdefault(basis, {})[product] = df[column]
+            else:
+                _load_optional_price_column(data_view, column, basis, product, price_series_by_basis, start_dt, end_dt, warmup_window, source)
         if DataColumn.VOLUME.name in df.columns:
             volume_series_by_product[product] = df[DataColumn.VOLUME.name]
     if missing_products:
@@ -879,6 +887,7 @@ def _load_raw_market_data(state, ctx) -> None:
     raw = {
         "raw_prices": raw_prices,
         "price_tables": price_tables,
+        "settlement_price": price_tables.get("settlement"),
         "historical_field_provider": load_market_rule_field_provider(),
         "historical_field_policy": request.get("policy", "latest_available"),
         "historical_field_names": _required_market_rule_field_names(state),
@@ -894,6 +903,32 @@ def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | 
         return plan_item
     product, freq = plan_item
     return product, freq, None
+
+
+def _load_optional_price_column(
+    data_view: Any,
+    column: str,
+    basis: str,
+    product: Any,
+    price_series_by_basis: dict[str, dict[Any, pd.Series]],
+    start_dt: Any,
+    end_dt: Any,
+    warmup_window: pd.Timedelta | None,
+    source: Any,
+) -> None:
+    try:
+        frame = data_view.get_and_adjust_cols(
+            [column],
+            copy=False,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            warmup_window=warmup_window,
+            source=source,
+        )
+    except (ValueError, KeyError):
+        return
+    if column in frame.columns:
+        price_series_by_basis.setdefault(basis, {})[product] = frame[column]
 
 
 def _live_market_data_load_warmup_window(state) -> pd.Timedelta | None:
@@ -1216,11 +1251,11 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
         accounting_mode = str(config.get(accounting_ref, "") or "")
         if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
-            fields.extend(_SETTLEMENT_FIELD_NAMES)
-        if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
-            fields.extend(_SETTLEMENT_FIELD_NAMES)
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
         if engine_mode_for(config) == "exact":
-            fields.extend(_SETTLEMENT_FIELD_NAMES)
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
+        if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
         margin_mode = str(config.get(margin_ref, "auto") or "auto")
         allocation = str(config.get(allocation_ref, "") or "")
         if margin_mode not in {"none", "zero"} or allocation == "equal_margin":
@@ -1231,6 +1266,13 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     market_data_store_for(state).current_prices_table = raw_prices.ffill()
+
+
+def _set_current_market_snapshot(state, ctx) -> None:
+    snapshot = current_market_snapshot_at(state, ctx.timestamp)
+    close_prices = snapshot.get("close", {})
+    ctx.set(MarketDataModule.current_market_snapshot, snapshot)
+    ctx.set(MarketDataModule.current_prices, close_prices)
 
 
 def _set_current_historical_fields(state, ctx) -> None:
@@ -1293,14 +1335,50 @@ def current_prices_at(state, timestamp: pd.Timestamp) -> dict:
     return {product: float(cast(Any, row[product])) for product in table.columns}
 
 
+def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
+    """Return the complete market observation snapshot for an event timestamp.
+
+    ``close`` is the legacy no-lookahead valuation view and is ffilled through
+    gaps. Other price bases come from the raw basis tables at/as-of the event
+    timestamp. Volume is not ffilled: a missing row means no observed volume
+    for that event bar. Settlement/pre-settlement are included when the data
+    source exposes them; daily settlement flows are responsible for only using
+    them on ledger-notice timestamps registered after a trading day's final bar.
+    """
+    snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
+    for basis, table in market_price_tables_for(state).items():
+        if basis == "close" or not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        values = _table_values_at(table, timestamp, asof=True)
+        if values:
+            snapshot[basis] = values
+    volume = current_volume_at(state, timestamp)
+    if volume:
+        snapshot["volume"] = volume
+    return snapshot
+
+
+def _table_values_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:
+    try:
+        row = row_at(table, timestamp, asof=asof)
+    except KeyError:
+        return {}
+    values: dict[Any, float] = {}
+    for product in table.columns:
+        value = row[product]
+        if pd.isna(value):
+            continue
+        values[product] = float(cast(Any, value))
+    return values
+
+
 def current_volume_at(state, timestamp: pd.Timestamp) -> dict:
     """Look up this bar's traded volume per product — no ffill (a gap means
     zero volume traded, not "carry the last observed volume forward")."""
     table = volume_table_for(state)
     if table is None:
         return {}
-    row = row_at(table, timestamp)
-    return {product: float(cast(Any, row[product])) for product in table.columns}
+    return _table_values_at(table, timestamp, asof=False)
 
 
 def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, dict[str, object]]:

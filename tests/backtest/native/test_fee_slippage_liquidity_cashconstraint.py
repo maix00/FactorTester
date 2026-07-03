@@ -191,10 +191,9 @@ def test_liquidity_uncapped_when_mode_infinite():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    def base_compute(a, c):
-        c.set_for(OrderBookModule.deltas, s, {p: 99999.0})
+    ctx.set_for(OrderBookModule.sized_deltas, s, {p: 99999.0})
 
-    _cap_to_liquidity(account, ctx, base_compute)
+    _cap_to_liquidity(account, ctx)
     assert ctx.get_for(OrderBookModule.deltas, s)[p] == 99999.0
 
 
@@ -208,10 +207,9 @@ def test_liquidity_caps_to_participation_rate_times_volume():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    def base_compute(a, c):
-        c.set_for(OrderBookModule.deltas, s, {p: 50.0})
+    ctx.set_for(OrderBookModule.sized_deltas, s, {p: 50.0})
 
-    _cap_to_liquidity(account, ctx, base_compute)
+    _cap_to_liquidity(account, ctx)
     assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(10.0)  # capped, 0.1*100
 
 
@@ -225,11 +223,9 @@ def test_liquidity_requires_volume_for_each_product():
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {})
 
-    def base_compute(a, c):
-        c.set_for(OrderBookModule.deltas, s, {p: 50.0})
-
     with pytest.raises(KeyError, match="requires MarketDataModule volume"):
-        _cap_to_liquidity(account, ctx, base_compute)
+        ctx.set_for(OrderBookModule.sized_deltas, s, {p: 50.0})
+        _cap_to_liquidity(account, ctx)
 
 
 def test_liquidity_does_not_defer_excess_to_next_bar():
@@ -242,10 +238,9 @@ def test_liquidity_does_not_defer_excess_to_next_bar():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    def base_compute(a, c):
-        c.set_for(OrderBookModule.deltas, s, {p: -50.0})
+    ctx.set_for(OrderBookModule.sized_deltas, s, {p: -50.0})
 
-    _cap_to_liquidity(account, ctx, base_compute)
+    _cap_to_liquidity(account, ctx)
     assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(-10.0)
 
 

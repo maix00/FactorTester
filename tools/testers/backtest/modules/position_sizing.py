@@ -1,9 +1,5 @@
-"""PositionSizingModule — rounds OrderBookModule.size_order's raw deltas to
-each product's minimum tradeable lot size. This is a real FlowOverride
-(not a parameter-default-degrades-to-no-op case like TradingRuleModule's
-margin/cost-basis fields) because rounding is an algorithm step layered on
-top of the base computation, not a value the base computation already
-reads.
+"""PositionSizingModule — rounds OrderBookModule.raw_deltas to each product's
+minimum tradeable lot size as an explicit sizing pipeline Flow.
 
 `quantity_rounding_policy`: "floor_to_lot" (default, matches the old
 quantity_rounding_policy default) rounds the magnitude DOWN toward zero --
@@ -18,8 +14,9 @@ from __future__ import annotations
 import math
 from typing import ClassVar
 
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule, market_data_store_for
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
@@ -39,17 +36,22 @@ class PositionSizingModule(ExecutableModule):
         ),
     }
 
-    overrides: ClassVar[tuple[FlowOverride, ...]] = (
-        FlowOverride(
-            flow_names=(OrderBookModule.size_order.name,),
-            extra_inputs=(MarketDataModule.lot_sizes, quantity_rounding_policy),
-            compute=lambda state, ctx, base_compute: _round_to_lot_sizes(state, ctx, base_compute),
-        ),
+    round_order_quantity: ClassVar[Flow] = Flow(
+        "round_order_quantity",
+        inputs=(OrderBookModule.raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy),
+        outputs=(OrderBookModule.sized_deltas,),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL,
+        order=22,
+        after=(OrderBookModule.size_order,),
+        description="按最小买入手数取整",
+        compute=lambda state, ctx: _round_to_lot_sizes(state, ctx),
     )
 
+    flows: ClassVar[tuple[Flow, ...]] = (round_order_quantity,)
 
-def _round_to_lot_sizes(state, ctx, base_compute) -> None:
-    base_compute(state, ctx)  # compute the base deltas first
+
+def _round_to_lot_sizes(state, ctx) -> None:
     # MarketDataModule.lot_sizes is only ever ctx.set() once, during
     # PRE_REPLAY's _publish_raw_market_data -- PER_EVENT/SIGNAL dispatch runs
     # on a fresh FlowContext (its own empty _values dict), so ctx.get here
@@ -63,12 +65,12 @@ def _round_to_lot_sizes(state, ctx, base_compute) -> None:
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         policy = state.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
-        deltas = ctx.get_for(OrderBookModule.deltas, strategy, {})
+        deltas = ctx.get_for(OrderBookModule.raw_deltas, strategy, {})
         rounded = {
             product: _round_one(quantity, lot_sizes.get(product), policy)
             for product, quantity in deltas.items()
         }
-        ctx.set_for(OrderBookModule.deltas, strategy, rounded)
+        ctx.set_for(OrderBookModule.sized_deltas, strategy, rounded)
         if rounded != deltas:
             store.record_strategy_step(
                 strategy,

@@ -119,13 +119,13 @@ class DataIndex:
             优先级高于 time_level 和 _SIGNAL@ 前缀的自动匹配。
         """
         if isinstance(index, DataIndex):
-            self.raw = index.raw
-            self._signal_cache = index._signal_cache
-            self._time_pref = index._time_pref
+            raw: pd.Index = index.raw
+            signal_cache: Optional[pd.DatetimeIndex] = index._signal_cache
+            time_pref: Any = index._time_pref
         else:
-            self.raw = index
-            self._signal_cache = None
-            self._time_pref = None
+            raw = index
+            signal_cache = None
+            time_pref = None
             if isinstance(index, pd.MultiIndex):
                 # 守卫：不允许 MultiIndex 中出现多个 _SIGNAL@ 层级
                 signal_names = [n for n in index.names if n and str(n).startswith(_SIGNAL_PREFIX)]
@@ -140,7 +140,7 @@ class DataIndex:
                             f"DataIndex: time_name='{time_name}' not found in "
                             f"MultiIndex names {list(index.names)}"
                         )
-                    self._time_pref = time_name  # 存 str，用于 _resolve_signal_level 优先匹配
+                    time_pref = time_name  # 存 str，用于 _resolve_signal_level 优先匹配
                 elif time_level is not None:
                     nlevels = index.nlevels
                     if time_level < 0 or time_level >= nlevels:
@@ -148,7 +148,10 @@ class DataIndex:
                             f"DataIndex: time_level={time_level} out of range "
                             f"for MultiIndex with {nlevels} levels"
                         )
-                    self._time_pref = time_level
+                    time_pref = time_level
+        self.raw = raw
+        self._signal_cache = signal_cache
+        self._time_pref = time_pref
 
     # ── 信号时间提取 ──────────────────────────────────────────────────────
 
@@ -409,24 +412,33 @@ class DataIndex:
         return _last_in_groups(DataIndex.normalized_days(ts))
 
     def trading_day_last_event_times(self) -> pd.Series:
-        """Return each trading day's last finest timestamp.
+        """返回每个交易日对应的最后一个最细粒度事件时间。
 
-        The returned Series is indexed by the trading-day key (tz-naive date)
-        and stores the finest event timestamp for that trading day, preserving
-        the event timestamp's timezone.  Night sessions are grouped by the
-        explicit trading-day level when present, rather than by calendar day.
+        交易日层通常只有日期信息且不带时区；它只能作为分组键。真正
+        注册事件时必须使用该交易日分组内最后一条 ``finest_index``
+        时间戳，这个时间戳保留原始时区。典型例子：夜盘时间
+        ``2026-03-09 21:00 Asia/Shanghai`` 属于 ``2026-03-10`` 交易日，
+        但交易日结算通知应注册在 ``2026-03-10`` 交易日最后一条
+        trade_time 之后，而不是把无时区交易日日期当成事件时间。
         """
-        if len(self.raw) == 0:
-            return pd.Series(dtype="datetime64[ns]")
-        mask = self.end_of_trading_day()
-        trading_days = self.trading_day_index()
         event_times = self.finest_index
-        return pd.Series(event_times[mask], index=trading_days[mask])
+        trading_days = self.trading_day_index()
+        if len(event_times) == 0:
+            return pd.Series(dtype="datetime64[ns]")
+        mask = _last_in_groups(trading_days)
+        return pd.Series(
+            event_times[mask],
+            index=pd.DatetimeIndex(trading_days[mask]),
+            name="event_time",
+        )
 
     @staticmethod
     def trading_day_last_event_times_from_index(index: pd.Index | DataIndex) -> pd.Series:
-        data_index = index if isinstance(index, DataIndex) else DataIndex(index)
-        return data_index.trading_day_last_event_times()
+        return (
+            index.trading_day_last_event_times()
+            if isinstance(index, DataIndex)
+            else DataIndex(index).trading_day_last_event_times()
+        )
 
     # ── 时间切片 ──────────────────────────────────────────────────────────
 

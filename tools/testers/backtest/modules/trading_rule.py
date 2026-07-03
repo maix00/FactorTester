@@ -66,7 +66,10 @@ class TradingRuleModule(ExecutableModule):
     accounting_mode: ClassVar[FieldRef[AccountingMode]] = FieldRef("accounting_mode")
     cost_basis_method: ClassVar[FieldRef[CostBasisMethod]] = FieldRef("cost_basis_method")
     use_int_position: ClassVar[FieldRef[bool]] = FieldRef("use_int_position")
-    daily_mark_to_market_notices: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_notices")
+    daily_mark_to_market_events: ClassVar[FieldRef[Any]] = FieldRef("daily_mark_to_market_events")
+
+    _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
+    _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
@@ -99,25 +102,26 @@ class TradingRuleModule(ExecutableModule):
             display_order=95,
             fields=_CUSTOM_TRADING_RULE_FIELDS,
         ),
-        "daily_mark_to_market_notices": FieldDefinition(public=False),
+        "daily_mark_to_market_events": FieldDefinition(public=False),
     }
 
     register_daily_mark_to_market_notices: ClassVar[Flow] = Flow(
         "register_daily_mark_to_market_notices",
-        inputs=(),
-        outputs=(daily_mark_to_market_notices,),
+        inputs=(EngineModule.engine_mode, accounting_mode, cost_basis_method),
+        outputs=(daily_mark_to_market_events,),
         phase=Phase.PRE_REPLAY,
-        order=46,
+        order=47,
         description="登记逐日盯市通知",
+        strategy_scoped=True,
         compute=lambda state, ctx: _register_daily_mark_to_market_notices(state, ctx),
     )
     apply_daily_mark_to_market: ClassVar[Flow] = Flow(
         "apply_daily_mark_to_market",
-        inputs=(),
-        outputs=(),
+        inputs=(_ledger_cash_ref, _ledger_positions_ref),
+        outputs=(_ledger_cash_ref, _ledger_positions_ref),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER_NOTICE,
-        order=10,
+        order=50,
         description="执行逐日盯市结算",
         compute=lambda state, ctx: _apply_daily_mark_to_market(state, ctx),
     )
@@ -262,11 +266,8 @@ def close_position(
     elif method == "HIFO":
         realized = _consume_lots_hifo(entry.lots, quantity, fill_price, multiplier)
     elif method == "DailyMarkToMarket":
-        # realized P&L is "fill price - last settlement price", not the
-        # original entry price — daily settlement already swept prior
-        # floating P&L into cash.
-        basis = entry.settlement_price if entry.settlement_price is not None else entry.average_cost
-        realized = 0.0 if basis is None else quantity * (fill_price - basis) * multiplier
+        basis = entry.settlement_price if entry.settlement_price is not None else (entry.average_cost or fill_price)
+        realized = quantity * (fill_price - basis) * _position_sign(prior_quantity) * multiplier
     return DataMoney.from_major(realized, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -305,98 +306,111 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
 
     positions = ledger.get(LedgerModule.positions, {})
     total = 0.0
+    require_exact = engine_mode_for(strategy_config) == "exact"
     for product, entry in positions.items():
         if entry.quantity == 0:
             continue
-        fields = historical_fields_for_product(historical_fields or {}, product)
-        method = _resolve_method(strategy_config, product, fields)
-        price = current_prices.get(product)
+        fields = historical_fields_for_product(historical_fields, product)
+        method = _resolve_method(strategy_config, product, fields, require_exact=require_exact)
+        price = _lookup_product_value(current_prices, product)
         if price is None:
             continue
+        multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
         if method == "WeightAverage" and entry.average_cost is not None:
-            multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
             total += entry.quantity * (price - entry.average_cost) * multiplier
         elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
             for lot in entry.lots:
                 total += lot.quantity * (price - lot.entry_price) * lot.multiplier
         elif method == "DailyMarkToMarket":
-            basis = _settlement_basis_for_position(entry, fields)
-            if basis is None:
-                basis = entry.average_cost
-            if basis is None:
-                continue
-            multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
-            total += entry.quantity * (price - basis) * multiplier
+            basis = _previous_settlement_for_product(
+                product,
+                entry,
+                fields,
+                price,
+                require_exact=require_exact,
+            )
+            total += float(entry.quantity) * (price - basis) * multiplier
     return DataMoney.from_major(total, currency=ledger.base_currency, use_minor_units=False)
 
 
-def _register_daily_mark_to_market_notices(state, ctx) -> None:
-    from tools.testers.backtest.modules.market_data import MarketDataModule
+def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
+    from tools.testers.backtest.modules.market_data import current_prices_table_for
 
-    raw_prices = ctx.get(MarketDataModule.raw_prices)
-    if raw_prices is None or getattr(raw_prices, "empty", True):
+    table = current_prices_table_for(state)
+    if table is None or getattr(table, "empty", True):
         return
-    last_event_times = DataIndex.trading_day_last_event_times_from_index(raw_prices.index)
-    if last_event_times.empty:
+    last_rows = DataIndex.trading_day_last_event_times_from_index(table.index)
+    if len(last_rows) == 0:
         return
     drafts: list[EventDraft] = []
-    strategies = ctx.active_strategies or frozenset(getattr(state, "strategy_configs", {}))
-    for timestamp in last_event_times:
-        notice_ts = pd.Timestamp(timestamp) + pd.Timedelta(1, "ns")
-        for strategy in strategies:
+    for strategy in ctx.active_strategies:
+        for trading_day, last_event_time in last_rows.items():
+            notice_time = pd.Timestamp(last_event_time) + pd.Timedelta(nanoseconds=1)
             drafts.append(
                 EventDraft(
                     EventKind.LEDGER_NOTICE,
-                    notice_ts,
+                    notice_time,
                     strategy,
-                    payload={"notice_type": "daily_mark_to_market"},
+                    payload={
+                        "kind": "daily_mark_to_market",
+                        "trading_day": _trading_day_text(trading_day),
+                    },
                 )
             )
-    ctx.set(TradingRuleModule.daily_mark_to_market_notices, drafts)
+    ctx.set(TradingRuleModule.daily_mark_to_market_events, drafts)
 
 
-def _apply_daily_mark_to_market(state, ctx) -> None:
-    from tools.testers.backtest.modules.ledger_module import LedgerModule
+def _trading_day_text(value: object) -> str:
+    timestamp = pd.Timestamp(cast(Any, value))
+    return str(timestamp.date())
+
+
+def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.market_data import (
         MarketDataModule,
-        contract_multiplier_from_fields,
         historical_fields_for_product,
+        contract_multiplier_from_fields,
     )
 
-    prices = ctx.get(MarketDataModule.current_prices, {})
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
+    settlement_prices = snapshot.get("settlement") or snapshot.get("close") or {}
+    close_prices = snapshot.get("close", {})
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         ledger = state.ledgers[strategy]
-        cash = ledger.get(LedgerModule.cash)
-        positions = ledger.get(LedgerModule.positions, {})
+        cash = ledger.get(TradingRuleModule._ledger_cash_ref)
+        positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        changed = False
         for product, entry in positions.items():
             quantity = float(entry.quantity or 0.0)
             if abs(quantity) <= 1e-12:
                 continue
             fields = historical_fields_for_product(historical_fields, product)
-            method = _resolve_method(
-                config,
+            if _resolve_method(config, product, fields, require_exact=engine_mode_for(config) == "exact") != "DailyMarkToMarket":
+                continue
+            settlement = _settlement_price_for_product(
                 product,
                 fields,
+                settlement_prices,
+                close_prices,
                 require_exact=engine_mode_for(config) == "exact",
             )
-            if method != "DailyMarkToMarket":
-                continue
-            settlement_price = _settlement_price_for_product(product, fields, prices)
-            prior_basis = _settlement_basis_for_position(entry, fields)
-            if prior_basis is None:
-                prior_basis = entry.average_cost if entry.average_cost is not None else settlement_price
+            previous_settlement = _previous_settlement_for_product(
+                product,
+                entry,
+                fields,
+                settlement,
+                require_exact=engine_mode_for(config) == "exact",
+            )
             multiplier = contract_multiplier_from_fields(historical_fields, product)
-            pnl = quantity * (settlement_price - prior_basis) * multiplier
             before_margin = _entry_margin_major(entry)
-            margin_ratio = _margin_ratio_for_position(config, fields, quantity, settlement_price, multiplier)
-            after_margin = abs(quantity) * settlement_price * multiplier * margin_ratio
+            after_margin = abs(quantity) * settlement * multiplier * _margin_ratio_for_position(
+                config, fields, quantity, settlement, multiplier)
+            pnl = quantity * (settlement - previous_settlement) * multiplier
             cash_delta = pnl - (after_margin - before_margin)
             cash = cash + DataMoney.from_major(
                 cash_delta,
@@ -408,34 +422,54 @@ def _apply_daily_mark_to_market(state, ctx) -> None:
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
-            entry.average_cost = settlement_price
-            entry.settlement_price = settlement_price
-            changed = True
-        if changed:
-            ledger.set(LedgerModule.positions, positions)
-            ledger.set(LedgerModule.cash, cash)
+            entry.settlement_price = settlement
+            entry.average_cost = settlement
+        ledger.set(TradingRuleModule._ledger_cash_ref, cash)
+        ledger.set(TradingRuleModule._ledger_positions_ref, positions)
 
 
-def _settlement_price_for_product(product: object, fields: Mapping[str, object], prices: Mapping[object, object]) -> float:
-    for name in ("SettlementPrice", "LastSettlementPrice"):
-        value = _number_or_none(fields.get(name))
-        if value is not None:
-            return value
-    price = prices.get(product)
-    if price is None:
-        raise KeyError(f"daily mark-to-market requires settlement or close price for {product}")
-    return float(cast(Any, price))
+def _settlement_price_for_product(
+    product: Any,
+    fields: Mapping[str, object],
+    settlement_prices: Mapping[Any, float],
+    close_prices: Mapping[Any, float],
+    *,
+    require_exact: bool,
+) -> float:
+    value = _lookup_product_value(settlement_prices, product)
+    if value is not None:
+        return value
+    for field_name in ("SettlementPrice", "LastSettlementPrice"):
+        field_value = _number_or_none(fields.get(field_name))
+        if field_value is not None:
+            return field_value
+    if require_exact:
+        raise KeyError(f"exact daily mark-to-market requires settlement price for {product}")
+    fallback = _lookup_product_value(close_prices, product)
+    if fallback is not None:
+        return fallback
+    raise KeyError(f"daily mark-to-market requires price for {product}")
 
 
-def _settlement_basis_for_position(entry: object, fields: Mapping[str, object]) -> float | None:
-    settlement = _number_or_none(getattr(entry, "settlement_price", None))
-    if settlement is not None:
-        return settlement
-    for name in ("PreSettlementPrice", "LastSettlementPrice"):
-        value = _number_or_none(fields.get(name))
-        if value is not None:
-            return value
-    return None
+def _previous_settlement_for_product(
+    product: Any,
+    entry: Any,
+    fields: Mapping[str, object],
+    current_settlement: float,
+    *,
+    require_exact: bool,
+) -> float:
+    if entry.settlement_price is not None:
+        return float(entry.settlement_price)
+    for field_name in ("PreSettlementPrice", "LastSettlementPrice"):
+        field_value = _number_or_none(fields.get(field_name))
+        if field_value is not None:
+            return field_value
+    if entry.average_cost is not None:
+        return float(entry.average_cost)
+    if require_exact:
+        raise KeyError(f"exact daily mark-to-market requires previous settlement price for {product}")
+    return current_settlement
 
 
 def _margin_ratio_for_position(
@@ -447,39 +481,62 @@ def _margin_ratio_for_position(
 ) -> float:
     from tools.testers.backtest.modules.margin import _resolve_margin_ratio
 
-    market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
-    ratio = _resolve_margin_ratio(strategy_config, market_ratio)
-    return float(1.0 if ratio is None else ratio)
-
-
-def _market_margin_ratio(fields: Mapping[str, object], quantity: float, price: float, multiplier: float) -> float | None:
     if quantity < 0:
         by_money = fields.get("ShortMarginRatioByMoney")
         by_volume = fields.get("ShortMarginRatioByVolume")
     else:
         by_money = fields.get("LongMarginRatioByMoney")
         by_volume = fields.get("LongMarginRatioByVolume")
-    ratio = _number_or_none(by_money)
-    if ratio is not None:
-        return ratio
-    fixed = _number_or_none(by_volume)
-    denominator = abs(price * multiplier)
-    if fixed is not None and denominator > 0:
-        return fixed / denominator
+    market_ratio = _number_or_none(by_money)
+    if market_ratio is None:
+        fixed = _number_or_none(by_volume)
+        denominator = abs(price * multiplier)
+        if fixed is not None and denominator > 0:
+            market_ratio = fixed / denominator
+    ratio = _resolve_margin_ratio(strategy_config, market_ratio)
+    return float(1.0 if ratio is None else ratio)
+
+
+def _entry_margin_major(entry: Any) -> float:
+    equity_occupied = getattr(entry, "equity_occupied", None)
+    if equity_occupied is None:
+        return 0.0
+    return float(equity_occupied.to_major())
+
+
+def _lookup_product_value(values: Mapping[Any, float], product: Any) -> float | None:
+    if product in values:
+        return float(values[product])
+    keys = _product_keys(product)
+    for candidate, value in values.items():
+        if keys & _product_keys(candidate):
+            return float(value)
     return None
 
 
-def _entry_margin_major(entry: object) -> float:
-    occupied = getattr(entry, "equity_occupied", None)
-    if occupied is None:
-        return 0.0
-    return float(occupied.to_major())
+def _product_keys(product: Any) -> set[str]:
+    keys: set[str] = set()
+    for value in (
+        product,
+        getattr(product, "name", None),
+        getattr(product, "alias", None),
+        getattr(product, "symbol", None),
+        getattr(product, "code", None),
+    ):
+        if value is not None and str(value).strip():
+            keys.add(str(value).strip())
+    return keys
 
 
 def _number_or_none(value: object) -> float | None:
     try:
-        if value is None:
+        if value is None or value == "":
             return None
-        return float(cast(Any, value))
+        number = float(cast(Any, value))
     except (TypeError, ValueError):
         return None
+    return None if number != number else number
+
+
+def _position_sign(value: float | int) -> float:
+    return 1.0 if float(value) >= 0 else -1.0

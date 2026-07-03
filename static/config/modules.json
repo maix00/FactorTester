@@ -13,6 +13,16 @@
       "roles": []
     },
     {
+      "id": "backtest",
+      "title": "回测",
+      "desc": "从因子库与产品组库选择输入，配置并运行回测",
+      "icon": "BT",
+      "sfSymbol": "chart.line.uptrend.xyaxis.circle",
+      "path": "/single_factor_test?module=backtest",
+      "requiresAuth": true,
+      "roles": []
+    },
+    {
       "id": "products",
       "title": "产品管理",
       "desc": "产品组管理、品种价格序列查看",
