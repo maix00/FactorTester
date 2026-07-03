@@ -28,6 +28,9 @@ class EventKind(IntEnum):
     ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
                   # are OrderStatus values inspected from the payload, not
                   # separate EventKinds)
+    LEDGER_NOTICE = 30  # accounting-only lifecycle notifications (e.g.
+                        # daily mark-to-market settlement) that must happen
+                        # after same-timestamp order effects.
 
 
 @dataclass(frozen=True)

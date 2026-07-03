@@ -49,7 +49,7 @@ def _is_day_level_name(name: str) -> bool:
 
 def _last_in_groups(values: pd.DatetimeIndex) -> np.ndarray:
     values = pd.DatetimeIndex(values)
-    mask = np.zeros(len(values), dtype=bool)
+    mask: np.ndarray = np.zeros(len(values), dtype=bool)
     if len(values) == 0:
         return mask
     if len(values) == 1:
@@ -94,6 +94,9 @@ class DataIndex:
     """
 
     __slots__ = ("raw", "_signal_cache", "_time_pref")
+    raw: pd.Index
+    _signal_cache: Optional[pd.DatetimeIndex]
+    _time_pref: Any
 
     def __init__(
         self,
@@ -118,11 +121,11 @@ class DataIndex:
         if isinstance(index, DataIndex):
             self.raw = index.raw
             self._signal_cache = index._signal_cache
-            self._time_pref: Any = index._time_pref
+            self._time_pref = index._time_pref
         else:
             self.raw = index
-            self._signal_cache: Optional[pd.DatetimeIndex] = None
-            self._time_pref: Any = None
+            self._signal_cache = None
+            self._time_pref = None
             if isinstance(index, pd.MultiIndex):
                 # 守卫：不允许 MultiIndex 中出现多个 _SIGNAL@ 层级
                 signal_names = [n for n in index.names if n and str(n).startswith(_SIGNAL_PREFIX)]
@@ -197,7 +200,6 @@ class DataIndex:
             return pd.DatetimeIndex(idx.get_level_values(pref), name=idx.names[pref])
         else:
             # 2) _SIGNAL@ 前缀自动匹配
-            signal_name: Optional[str] = None
             found = next(
                 (n for n in idx.names if n and str(n).startswith(_SIGNAL_PREFIX)),
                 None,
@@ -337,7 +339,7 @@ class DataIndex:
         # distinguish bar-close signal time from order action time.  Compare
         # in nanosecond integers so as-of lookup does not ask pandas to cast a
         # nanosecond Timestamp losslessly into a microsecond index.
-        sig_ns = sig.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)
+        sig_ns: np.ndarray = sig.to_numpy(dtype="datetime64[ns]").astype("int64", copy=False)
         pos = int(np.searchsorted(sig_ns, aligned.value, side="right") - 1)
         if pos < 0:
             raise KeyError(f"no signal_index value at or before {aligned!r}")
@@ -406,6 +408,26 @@ class DataIndex:
             return np.zeros(0, dtype=bool)
         return _last_in_groups(DataIndex.normalized_days(ts))
 
+    def trading_day_last_event_times(self) -> pd.Series:
+        """Return each trading day's last finest timestamp.
+
+        The returned Series is indexed by the trading-day key (tz-naive date)
+        and stores the finest event timestamp for that trading day, preserving
+        the event timestamp's timezone.  Night sessions are grouped by the
+        explicit trading-day level when present, rather than by calendar day.
+        """
+        if len(self.raw) == 0:
+            return pd.Series(dtype="datetime64[ns]")
+        mask = self.end_of_trading_day()
+        trading_days = self.trading_day_index()
+        event_times = self.finest_index
+        return pd.Series(event_times[mask], index=trading_days[mask])
+
+    @staticmethod
+    def trading_day_last_event_times_from_index(index: pd.Index | DataIndex) -> pd.Series:
+        data_index = index if isinstance(index, DataIndex) else DataIndex(index)
+        return data_index.trading_day_last_event_times()
+
     # ── 时间切片 ──────────────────────────────────────────────────────────
 
     def slice_by(self, start: Any = None, end: Any = None) -> np.ndarray:
@@ -413,7 +435,7 @@ class DataIndex:
 
         start/end 可以是任意 Timestamp-like，会自动做 tz 对齐。
         """
-        mask = np.ones(len(self.signal_index), dtype=bool)
+        mask: np.ndarray = np.ones(len(self.signal_index), dtype=bool)
         if start is not None:
             s = self.tz_align(start)
             mask &= self.signal_index >= s

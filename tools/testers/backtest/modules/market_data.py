@@ -254,6 +254,12 @@ class MarketDataModule(ExecutableModule):
         description="读取订单时点价格",
         compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
     )
+    lookup_current_prices_on_ledger_notice: ClassVar[Flow] = Flow(
+        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices,),
+        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=1,
+        description="读取结算时点价格",
+        compute=lambda state, ctx: ctx.set(MarketDataModule.current_prices, current_prices_at(state, ctx.timestamp)),
+    )
     lookup_volume_on_signal: ClassVar[Flow] = Flow(
         "lookup_volume_on_signal", inputs=(), outputs=(volume,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
@@ -276,13 +282,23 @@ class MarketDataModule(ExecutableModule):
         description="读取订单交易规则字段",
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
+    lookup_historical_fields_on_ledger_notice: ClassVar[Flow] = Flow(
+        "lookup_historical_fields_on_ledger_notice",
+        inputs=(_margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
+        outputs=(current_historical_fields,),
+        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=2,
+        description="读取结算交易规则字段",
+        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
+    )
 
     flows: ClassVar[tuple[Flow, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_volume_on_signal,
+        lookup_current_prices_on_ledger_notice,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
+        lookup_historical_fields_on_ledger_notice,
     )
 
 
@@ -294,6 +310,12 @@ _MARGIN_FIELD_NAMES = (
     "ShortMarginRatioByMoney",
     "LongMarginRatioByVolume",
     "ShortMarginRatioByVolume",
+)
+_SETTLEMENT_FIELD_NAMES = (
+    "SettlementPrice",
+    "PreSettlementPrice",
+    "LastSettlementPrice",
+    "CostBasisMethod",
 )
 
 
@@ -1194,6 +1216,11 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
         accounting_mode = str(config.get(accounting_ref, "") or "")
         if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
+            fields.extend(_SETTLEMENT_FIELD_NAMES)
+        if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
+            fields.extend(_SETTLEMENT_FIELD_NAMES)
+        if engine_mode_for(config) == "exact":
+            fields.extend(_SETTLEMENT_FIELD_NAMES)
         margin_mode = str(config.get(margin_ref, "auto") or "auto")
         allocation = str(config.get(allocation_ref, "") or "")
         if margin_mode not in {"none", "zero"} or allocation == "equal_margin":

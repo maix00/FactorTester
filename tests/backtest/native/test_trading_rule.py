@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import uuid
 
+import pandas as pd
 import pytest
 
+from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import Ledger, Lot, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger, Lot, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, infer_auto_cost_basis_method,
-    open_position,
+    mark_to_market, open_position,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
@@ -208,6 +213,109 @@ def test_hifo_closes_highest_cost_lot_first():
     assert realized.to_major() == pytest.approx(10.0 * (35.0 - 30.0))
     remaining_costs = sorted(lot.entry_price for lot in ledger.get(_positions_ref())[product].lots)
     assert remaining_costs == [10.0, 20.0]
+
+
+def test_daily_mark_to_market_close_uses_last_settlement_basis():
+    product = _product()
+    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="DailyMarkToMarket")
+    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(quantity=10.0, average_cost=100.0, settlement_price=105.0),
+    })
+
+    realized = close_position(ledger, config, product, quantity=4.0, fill_price=108.0, multiplier=2.0)
+
+    assert realized.to_major() == pytest.approx(4.0 * (108.0 - 105.0) * 2.0)
+
+
+def test_daily_mark_to_market_floating_pnl_uses_last_settlement_basis():
+    product = _product()
+    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="DailyMarkToMarket")
+    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(quantity=10.0, average_cost=100.0, settlement_price=105.0),
+    })
+
+    pnl = mark_to_market(
+        ledger,
+        config,
+        {product: 108.0},
+        {product: {"VolumeMultiple": 2.0}},
+    )
+
+    assert pnl.to_major() == pytest.approx(10.0 * (108.0 - 105.0) * 2.0)
+
+
+def test_register_daily_mark_to_market_notice_uses_trading_day_last_bar_plus_one_ns():
+    strategy = Strategy(alias="S")
+    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="DailyMarkToMarket")
+    state = BacktestRunState(strategy_configs={strategy: config})
+    queue = EventQueue()
+    ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
+    trading_days = pd.to_datetime(["2026-03-10", "2026-03-10", "2026-03-11"])
+    event_times = pd.DatetimeIndex([
+        pd.Timestamp("2026-03-09 21:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-03-10 21:00", tz="Asia/Shanghai"),
+    ])
+    index = pd.MultiIndex.from_arrays([trading_days, event_times], names=["trading_day", "_SIGNAL@MIN1"])
+    ctx.set(MarketDataModule.raw_prices, pd.DataFrame({_product(): [1.0, 2.0, 3.0]}, index=index))
+
+    TradingRuleModule.register_daily_mark_to_market_notices.compute(state, ctx)
+
+    captured = []
+    queue.set_dispatcher(TradingRuleModule.apply_daily_mark_to_market.event_kind, lambda batch: captured.extend(batch))
+    queue.run_until_drained()
+    assert [draft.timestamp for draft in captured] == [
+        pd.Timestamp("2026-03-10 15:00", tz="Asia/Shanghai") + pd.Timedelta(1, "ns"),
+        pd.Timestamp("2026-03-10 21:00", tz="Asia/Shanghai") + pd.Timedelta(1, "ns"),
+    ]
+
+
+def test_apply_daily_mark_to_market_moves_pnl_to_cash_and_recomputes_margin():
+    strategy = Strategy(alias="S")
+    product = _product()
+    config = _config(
+        engine_mode="custom",
+        accounting_mode="Custom",
+        cost_basis_method="DailyMarkToMarket",
+        margin_mode="auto",
+    )
+    state = BacktestRunState(strategy_configs={strategy: config})
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(LedgerModule.cash, DataMoney.from_major(9_000.0, currency="CNY", use_minor_units=False))
+    ledger.set(LedgerModule.positions, {
+        product: ProductPosition(
+            quantity=10.0,
+            average_cost=100.0,
+            settlement_price=100.0,
+            equity_occupied=DataMoney.from_major(1_000.0, currency="CNY", use_minor_units=False),
+        ),
+    })
+    state.ledgers[strategy] = ledger
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-02 15:00", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_prices, {product: 112.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 2.0,
+            "SettlementPrice": 110.0,
+            "PreSettlementPrice": 100.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    TradingRuleModule.apply_daily_mark_to_market.compute(state, ctx)
+
+    entry = ledger.get(LedgerModule.positions)[product]
+    # PnL=10*(110-100)*2=200; margin 1000 -> 10*110*2*0.1=220; cash += 200-(220-1000)
+    assert ledger.get(LedgerModule.cash).to_major() == pytest.approx(9_980.0)
+    assert entry.equity_occupied.to_major() == pytest.approx(220.0)
+    assert entry.settlement_price == pytest.approx(110.0)
+    assert entry.average_cost == pytest.approx(110.0)
 
 
 def _positions_ref():

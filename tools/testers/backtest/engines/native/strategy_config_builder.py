@@ -36,6 +36,12 @@ _TERM_STRUCTURE_FLOWS = {
 }
 _GROUP_STRATEGY_FLOWS = {"group_quantile_membership"}
 _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
+_DAILY_MARK_TO_MARKET_FLOWS = {
+    "lookup_current_prices_on_ledger_notice",
+    "lookup_historical_fields_on_ledger_notice",
+    "register_daily_mark_to_market_notices",
+    "apply_daily_mark_to_market",
+}
 
 
 def _all_flow_names() -> set[str]:
@@ -59,7 +65,23 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= _GROUP_STRATEGY_FLOWS
     else:
         excluded |= _LONG_SHORT_STRATEGY_FLOWS
+    if not _uses_daily_mark_to_market_flow(resolved_settings):
+        excluded |= _DAILY_MARK_TO_MARKET_FLOWS
     return frozenset(names - excluded)
+
+
+def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> bool:
+    engine_mode = str(resolved_settings.get("engine_mode", "auto") or "auto").lower()
+    if engine_mode == "basic":
+        return False
+    if engine_mode in {"auto", "exact"}:
+        return True
+    accounting_mode = str(resolved_settings.get("accounting_mode", "Auto") or "Auto")
+    if accounting_mode == "Basic":
+        return False
+    if accounting_mode == "Custom":
+        return str(resolved_settings.get("cost_basis_method", "") or "") == "DailyMarkToMarket"
+    return True
 
 
 def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:
