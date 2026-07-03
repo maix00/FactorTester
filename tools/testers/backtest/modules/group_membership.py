@@ -151,12 +151,16 @@ def _group_quantile_membership(state, ctx) -> None:
     trading happens without needing a separate skip-flag anywhere else.
 
     `rebalance_trigger="membership_change"`: even though the signal moved,
-    if the resulting bucket membership SET is unchanged from last time
-    (same products selected, equal weight within a bucket never differs
-    unless membership size changes), reuse the previous target_weights
-    instead of the freshly computed (but equivalent) one -- avoids
-    needless turnover/fees on a signal that didn't actually change who's
-    in or out of the group. "scheduled" is not implemented (see field
+    if the resulting bucket membership SET is unchanged from last time,
+    reuse the previous target_weights instead of the freshly computed (but
+    equivalent) one -- avoids needless turnover/fees on a signal that
+    didn't actually change who's in or out of the group. This reuse is only
+    valid under `allocation_policy="equal_notional"`, where weight is a
+    pure function of membership size (same set, same size -> same weights,
+    provably); `inverse_volatility`/`equal_margin` derive weight from
+    time-varying inputs that drift even when membership doesn't, so this
+    trigger rejects those allocation policies outright rather than serve a
+    silently stale allocation. "scheduled" is not implemented (see field
     docstring)."""
     store = state.target_store
     established = store.strategy_established_target_weights
@@ -196,6 +200,19 @@ def _group_quantile_membership(state, ctx) -> None:
             raise NotImplementedError(
                 'rebalance_trigger="scheduled" requires a calendar-driven SIGNAL '
                 "schedule independent of factor timing, not implemented this round")
+        if trigger == "membership_change":
+            allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+            if allocation_policy != "equal_notional":
+                raise ValueError(
+                    'rebalance_trigger="membership_change" only reduces turnover correctly '
+                    'under allocation_policy="equal_notional" -- weight there is a pure '
+                    "function of membership size, so \"same membership\" really does mean "
+                    f'"same weights". allocation_policy={allocation_policy!r} computes weights '
+                    "from time-varying inputs (trailing volatility / current margin ratios) that "
+                    "drift even when membership does not, so reusing the previous weights here "
+                    'would silently serve a stale, no-longer-risk-balanced allocation. Use '
+                    'rebalance_trigger="on_factor_signal" with this allocation_policy instead.'
+                )
 
         signal_value = _tradable_signal_values(
             ctx.get_for(FactorSignalModule.signal_value, strategy, {}),

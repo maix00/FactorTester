@@ -625,3 +625,51 @@ def test_historical_fields_at_does_not_look_ahead_before_first_row():
     fields = _historical_fields_at_from_frames(frames, ["EG.DCE"], event_ts)
 
     assert fields["EG.DCE"] == {}
+
+
+def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():
+    """Every consumer of current_historical_fields reads via
+    ctx.get_for(ref, strategy, ctx.get(ref, {})) -- a strategy that doesn't
+    customize should never get a per-strategy ctx.set_for entry at all (it
+    would just be an identical copy of base_fields under a redundant key);
+    it should transparently fall through to the one shared base_fields
+    object via that fallback. A strategy that genuinely customizes should
+    still get its own distinct per-strategy entry."""
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+    from tools.testers.backtest.modules.custom_product import CustomProductModule
+    from tools.testers.backtest.modules.engine import EngineModule
+    from tools.testers.backtest.modules.fee import FeeModule
+    from tools.testers.backtest.modules.market_data import _set_current_historical_fields
+
+    plain = Strategy(alias="plain")
+    custom = Strategy(alias="custom")
+    plain_config = StrategyConfig(strategy=plain, field_values={})
+    custom_config = StrategyConfig(strategy=custom, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "custom",
+        CustomProductModule.custom_product_fields: [
+            {"product": "P1", "field": "VolumeMultiple", "value": 5.0},
+        ],
+    })
+    account = BacktestRunState(strategy_configs={plain: plain_config, custom: custom_config})
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-01-01"), event_queue=EventQueue(),
+        active_strategies=frozenset({plain, custom}),
+    )
+
+    _set_current_historical_fields(account, ctx)
+
+    sentinel = object()
+    assert ctx.get_for(MarketDataModule.current_historical_fields, plain, sentinel) is sentinel
+
+    base_fields = ctx.get(MarketDataModule.current_historical_fields)
+    resolved_for_plain = ctx.get_for(
+        MarketDataModule.current_historical_fields, plain,
+        ctx.get(MarketDataModule.current_historical_fields, {}),
+    )
+    assert resolved_for_plain is base_fields
+
+    resolved_for_custom = ctx.get_for(MarketDataModule.current_historical_fields, custom, sentinel)
+    assert resolved_for_custom is not sentinel
+    assert resolved_for_custom is not base_fields
+    assert resolved_for_custom["P1"]["VolumeMultiple"] == 5.0

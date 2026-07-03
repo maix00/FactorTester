@@ -543,6 +543,61 @@ def test_scheduled_trigger_raises_not_implemented():
         _group_quantile_membership(account, ctx)
 
 
+def test_membership_change_trigger_rejects_inverse_volatility_allocation():
+    """membership_change's reuse-shortcut assumes weight is a pure function
+    of membership size ("same set -> same weights"), true only for
+    equal_notional. inverse_volatility derives weight from trailing
+    volatility at ctx.timestamp -- a rolling window that drifts every bar
+    even for a fixed membership set -- so reusing stale weights here would
+    silently serve a no-longer-risk-balanced allocation. Must reject, not
+    silently misbehave."""
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(2)]
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.rebalance_trigger: "membership_change",
+        GroupMembershipModule.allocation_policy: "inverse_volatility",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
+    with pytest.raises(ValueError, match="membership_change"):
+        _group_quantile_membership(account, ctx)
+
+
+def test_membership_change_trigger_rejects_equal_margin_allocation():
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(2)]
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.rebalance_trigger: "membership_change",
+        GroupMembershipModule.allocation_policy: "equal_margin",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
+    with pytest.raises(ValueError, match="membership_change"):
+        _group_quantile_membership(account, ctx)
+
+
+def test_membership_change_trigger_still_allowed_with_equal_notional_allocation():
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(2)]
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+        GroupMembershipModule.rebalance_trigger: "membership_change",
+        GroupMembershipModule.allocation_policy: "equal_notional",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(FactorSignalModule.signal_value, s, {p: float(i) for i, p in enumerate(products)})
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, s)
+    assert set(weights) == set(products)
+
+
 def test_inverse_volatility_allocates_more_to_calmer_product():
     s = Strategy(alias="S")
     p_calm, p_volatile = _product(), _product()

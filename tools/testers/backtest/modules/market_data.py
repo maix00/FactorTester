@@ -1211,11 +1211,15 @@ def _set_current_historical_fields(state, ctx) -> None:
     ctx.set(MarketDataModule.current_historical_fields, base_fields)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        ctx.set_for(
-            MarketDataModule.current_historical_fields,
-            strategy,
-            _historical_fields_for_strategy(base_fields, config, ctx.timestamp),
-        )
+        fields = _historical_fields_for_strategy(base_fields, config, ctx.timestamp)
+        if fields is base_fields:
+            # No customization applies to this strategy -- every consumer
+            # reads via ctx.get_for(ref, strategy, ctx.get(ref, {})), so
+            # simply not writing a per-strategy entry makes it transparently
+            # reference the same shared base_fields already set above,
+            # instead of writing back an identical copy under a redundant key.
+            continue
+        ctx.set_for(MarketDataModule.current_historical_fields, strategy, fields)
 
 
 def _historical_fields_for_strategy(
