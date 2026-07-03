@@ -176,7 +176,7 @@ class BacktestRunState:
             return
         if name in self._declared_runtime_attrs:
             return
-        warned = getattr(self, "_warned_dynamic_writes", set())
+        warned: set[str] = getattr(self, "_warned_dynamic_writes", set())
         if name in warned:
             return
         warned.add(name)
