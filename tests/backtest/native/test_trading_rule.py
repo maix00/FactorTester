@@ -16,7 +16,7 @@ from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_method, _resolve_use_int_position, close_position, infer_auto_cost_basis_method,
-    open_position, _apply_daily_mark_to_market, _register_daily_mark_to_market_notices,
+    mark_to_market, open_position, _apply_daily_mark_to_market, _register_daily_mark_to_market_notices,
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
@@ -303,6 +303,87 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert updated_position.average_cost == pytest.approx(12.0)
+
+
+def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=3.0,
+            average_cost=10.0,
+            settlement_price=12.0,
+            equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
+        )
+    })
+
+    pnl = mark_to_market(
+        ledger,
+        config,
+        {product: 13.5},
+        {product: {"VolumeMultiple": 10.0, "SettlementPrice": 12.0}},
+    )
+
+    assert pnl.to_major() == pytest.approx(3.0 * (13.5 - 12.0) * 10.0)
+
+
+def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
+    from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_equity
+
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=3.0,
+            average_cost=10.0,
+            settlement_price=12.0,
+            equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 10:00:00", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_prices, {product: 13.5})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {"VolumeMultiple": 10.0, "SettlementPrice": 12.0}
+    })
+
+    _basic_equity(account, ctx)
+
+    assert ctx.get_for(LedgerModule.equity, strategy) == pytest.approx(1000.0 + 36.0 + 45.0)
+
+
+def test_daily_mark_to_market_close_realizes_from_last_settlement_not_original_entry():
+    product = _product()
+    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="DailyMarkToMarket")
+    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(quantity=3.0, average_cost=10.0, settlement_price=12.0)
+    })
+
+    realized = close_position(ledger, config, product, quantity=1.0, fill_price=13.5, multiplier=10.0)
+
+    assert realized.to_major() == pytest.approx((13.5 - 12.0) * 10.0)
 
 
 def _positions_ref():

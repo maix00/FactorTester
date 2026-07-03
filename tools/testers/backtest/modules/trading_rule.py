@@ -266,11 +266,8 @@ def close_position(
     elif method == "HIFO":
         realized = _consume_lots_hifo(entry.lots, quantity, fill_price, multiplier)
     elif method == "DailyMarkToMarket":
-        # realized P&L is "fill price - last settlement price", not the
-        # original entry price — daily settlement already swept prior
-        # floating P&L into cash.
-        realized = 0.0  # placeholder: requires MarketDataModule.settlement_price,
-                          # wired in the daily-settlement Flow (not built this round)
+        basis = entry.settlement_price if entry.settlement_price is not None else (entry.average_cost or fill_price)
+        realized = quantity * (fill_price - basis) * _position_sign(prior_quantity) * multiplier
     return DataMoney.from_major(realized, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -305,25 +302,34 @@ def _consume_lots_hifo(lots, quantity: float, fill_price: float, multiplier: flo
 def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
                     current_prices: dict, historical_fields: dict[object, dict[str, object]] | None = None) -> "DataMoney":
     from .ledger_module import LedgerModule
-    from .market_data import contract_multiplier_from_fields
+    from .market_data import contract_multiplier_from_fields, historical_fields_for_product
 
     positions = ledger.get(LedgerModule.positions, {})
     total = 0.0
+    require_exact = engine_mode_for(strategy_config) == "exact"
     for product, entry in positions.items():
         if entry.quantity == 0:
             continue
-        method = _resolve_method(strategy_config, product)
-        price = current_prices.get(product)
+        fields = historical_fields_for_product(historical_fields, product)
+        method = _resolve_method(strategy_config, product, fields, require_exact=require_exact)
+        price = _lookup_product_value(current_prices, product)
         if price is None:
             continue
+        multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
         if method == "WeightAverage" and entry.average_cost is not None:
-            multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
             total += entry.quantity * (price - entry.average_cost) * multiplier
         elif method in ("FIFO", "LIFO", "HIFO") and entry.lots:
             for lot in entry.lots:
                 total += lot.quantity * (price - lot.entry_price) * lot.multiplier
-        # DailyMarkToMarket: floating P&L relative to last settlement price,
-        # not implemented this round (requires MarketDataModule.settlement_price)
+        elif method == "DailyMarkToMarket":
+            basis = _previous_settlement_for_product(
+                product,
+                entry,
+                fields,
+                price,
+                require_exact=require_exact,
+            )
+            total += float(entry.quantity) * (price - basis) * multiplier
     return DataMoney.from_major(total, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -530,3 +536,7 @@ def _number_or_none(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return None if number != number else number
+
+
+def _position_sign(value: float | int) -> float:
+    return 1.0 if float(value) >= 0 else -1.0
