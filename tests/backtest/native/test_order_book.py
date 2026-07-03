@@ -36,7 +36,7 @@ def test_basic_size_order_computes_deltas_from_target_weights():
         ledgers = {s: _FakeLedger()}
 
     _basic_size_order(_FakeAccount(), ctx)
-    deltas = ctx.get_for(OrderBookModule.deltas, s)
+    deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
     assert deltas[p1] == pytest.approx(50.0)   # 0.5*1000/10
     assert deltas[p2] == pytest.approx(25.0)   # 0.5*1000/20
 
@@ -59,7 +59,7 @@ def test_basic_size_order_uses_contract_multiplier_for_futures_notional():
         ledgers = {s: _FakeLedger()}
 
     _basic_size_order(_FakeAccount(), ctx)
-    deltas = ctx.get_for(OrderBookModule.deltas, s)
+    deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
     assert deltas[p] == pytest.approx(5.0)   # 0.5*1000/(10 price * 10 multiplier)
 
 
@@ -80,7 +80,7 @@ def test_basic_size_order_subtracts_existing_position():
         ledgers = {s: _FakeLedger()}
 
     _basic_size_order(_FakeAccount(), ctx)
-    deltas = ctx.get_for(OrderBookModule.deltas, s)
+    deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
     assert deltas[p1] == pytest.approx(100.0 - 30.0)  # target 100, already hold 30
 
 

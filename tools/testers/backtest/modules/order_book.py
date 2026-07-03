@@ -1,8 +1,9 @@
-"""OrderBookModule — turns target_weights into deltas (size_order) then
-into concrete Order objects (construct_orders). Owns the "how much should
-we trade" decision; LedgerModule owns account state, OrderLifecycleModule
-owns "did this Order's standoff chain accept/reject it" — three distinct
-concerns, three distinct modules."""
+"""OrderBookModule — turns target_weights into raw trade deltas, then into
+concrete Order objects after optional sizing/liquidity/cash pipeline steps.
+
+Owns the base "how much should we trade before execution constraints" decision;
+LedgerModule owns account state, OrderLifecycleModule owns "did this Order's
+standoff chain accept/reject it" — distinct concerns, distinct modules."""
 
 from __future__ import annotations
 
@@ -24,10 +25,14 @@ class OrderBookModule(ExecutableModule):
     key: ClassVar[str] = "order_book"
     label: ClassVar[str] = "订单"
 
-    deltas: ClassVar[FieldRef[Any]] = FieldRef("deltas")    # dict[Product, float], ctx-scoped, not persisted in Ledger
+    raw_deltas: ClassVar[FieldRef[Any]] = FieldRef("raw_deltas")  # target-minus-position before execution constraints
+    sized_deltas: ClassVar[FieldRef[Any]] = FieldRef("sized_deltas")  # after lot-size/position-sizing constraints
+    deltas: ClassVar[FieldRef[Any]] = FieldRef("deltas")    # dict[Product, float], ctx-scoped final executable deltas
     orders: ClassVar[FieldRef[Any]] = FieldRef("orders")    # list[Order], ctx-scoped
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
+        "raw_deltas": FieldDefinition(public=False),
+        "sized_deltas": FieldDefinition(public=False),
         "deltas": FieldDefinition(public=False),
         "orders": FieldDefinition(public=False),
     }
@@ -37,9 +42,9 @@ class OrderBookModule(ExecutableModule):
         inputs=(_TARGET_WEIGHTS_REF, LedgerModule.equity,
                  MarketDataModule.current_prices, MarketDataModule.current_historical_fields,
                  LedgerModule.positions),
-        outputs=(deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        outputs=(raw_deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=20, after=(LedgerModule.equity_on_signal,),
-        description="计算目标下单量",
+        description="计算原始目标下单量",
         compute=lambda state, ctx: _basic_size_order(state, ctx),
     )
     construct_orders: ClassVar[Flow] = Flow(
@@ -76,7 +81,7 @@ def _basic_size_order(state, ctx) -> None:
             multiplier = contract_multiplier_from_fields(historical_fields, product)
             target_quantity = target_weights.get(product, 0.0) * equity / (prices[product] * multiplier)
             deltas[product] = target_quantity - getattr(positions.get(product), "quantity", 0.0)
-        ctx.set_for(OrderBookModule.deltas, strategy, deltas)
+        ctx.set_for(OrderBookModule.raw_deltas, strategy, deltas)
 
 
 def _construct_orders(state, ctx) -> None:
