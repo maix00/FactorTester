@@ -89,9 +89,7 @@ def _ensure_buffer(state) -> dict:
 
 def _snapshot_strategy_state(state, strategy, prices: dict, historical_fields: dict) -> dict | None:
     equity = None  # filled by caller; this only builds positions/notional/margin
-    ledger = state.ledgers.get(strategy)
-    if ledger is None:
-        return None
+    ledger = state.ledger_for_strategy(strategy)
     positions_obj = ledger.get(LedgerModule.positions, {})
     positions: dict[str, float] = {}
     notional: dict[str, float] = {}
@@ -106,6 +104,8 @@ def _snapshot_strategy_state(state, strategy, prices: dict, historical_fields: d
             notional[name] = contract_notional(price, entry.quantity, historical_fields, product)
         if entry.equity_occupied is not None:
             margin[name] = entry.equity_occupied.to_major()
+    if not positions and not notional and not margin:
+        return None
     record: dict = {"positions": positions, "notional": notional}
     if margin:
         record["margin"] = margin

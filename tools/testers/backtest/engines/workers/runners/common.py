@@ -30,7 +30,7 @@ def should_report_progress(completed: int, total: int, max_updates: int = 100) -
 # express and reject the rest — never silently substitute (ADR-024/ADR-028).
 
 BROKER_POLICY_DEFAULTS: dict[str, str] = {
-    "broker_model": "native_default",
+    "broker_model": "native_broker",
     "cancel_policy": "replace_pending_same_product",
     "order_validity": "next_signal",
     "matching_policy": "next_bar_open_full_fill",

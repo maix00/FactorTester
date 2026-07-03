@@ -457,7 +457,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     close_prices = snapshot.get("close", {})
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        ledger = state.ledgers[strategy]
+        ledger = state.ledger_for_strategy(strategy)
         cash = ledger.get(TradingRuleModule._ledger_cash_ref)
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
         historical_fields = ctx.get_for(

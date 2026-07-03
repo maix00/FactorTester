@@ -23,7 +23,7 @@ def test_ledger_get_set_roundtrip():
 
 def test_ledger_has_no_named_business_fields():
     names = {f.name for f in dataclasses.fields(Ledger)}
-    assert names == {"strategy", "base_currency", "fields"}
+    assert names == {"strategy", "base_currency", "ledger_id", "fields"}
 
 
 def test_run_state_ledger_for_isolates_strategies():

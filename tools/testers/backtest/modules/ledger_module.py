@@ -23,6 +23,7 @@ from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
+from tools.testers.backtest.modules.broker import BrokerModule, assign_ledger_id_for_strategy
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
     _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled,
@@ -60,7 +61,8 @@ class LedgerModule(ExecutableModule):
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
-                 TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products),
+                 TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products,
+                 BrokerModule.broker_model, BrokerModule.ledger_id),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
@@ -94,13 +96,16 @@ def _initialize_ledgers(state, ctx) -> None:
     from tools.testers.backtest.engines.native.ledger import Ledger
 
     for strategy, strategy_config in state.strategy_configs.items():
+        ledger_id = assign_ledger_id_for_strategy(state, strategy, strategy_config)
         initial_capital = strategy_config.get(LedgerModule.initial_capital_major, 0.0)
         base_currency = strategy_config.get(LedgerModule.base_currency, "CNY")
         # MinorUnitModule.use_minor_units default_when locks this to False
         # for engine_mode="basic" and True otherwise (auto/custom/exact) --
         # read the resolved field, don't re-decide the policy here.
         use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
-        ledger = Ledger(strategy=strategy, base_currency=base_currency)
+        ledger = state.ledgers.get(ledger_id)
+        if ledger is None:
+            ledger = Ledger(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
         ledger.set(LedgerModule.cash, DataMoney.from_major(
             initial_capital, currency=base_currency, use_minor_units=use_minor_units))
 
@@ -108,9 +113,11 @@ def _initialize_ledgers(state, ctx) -> None:
         initial_quantity = 0 if use_int else 0.0
         zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=use_minor_units)
 
-        positions: dict = {}
+        positions = ledger.get(LedgerModule.positions, {})
         products = _products_for_backtest_window(state, ctx, strategy)
         for product in products:
+            if product in positions:
+                continue
             method = _resolve_method(strategy_config, product)
             if method == "WeightAverage":
                 positions[product] = ProductPosition(
@@ -119,7 +126,7 @@ def _initialize_ledgers(state, ctx) -> None:
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, lots=deque(), equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
-        state.ledgers[strategy] = ledger
+        state.ledgers[ledger_id] = ledger
 
 
 def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
@@ -134,7 +141,7 @@ def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
 def _basic_equity(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     for strategy in ctx.active_strategies:
-        ledger = state.ledgers[strategy]
+        ledger = state.ledger_for_strategy(strategy)
         cash = ledger.get(LedgerModule.cash)
         positions = ledger.get(LedgerModule.positions, {})
         historical_fields = ctx.get_for(
@@ -180,9 +187,6 @@ def _basic_cash_update(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
-        ledger = state.ledgers[strategy]
-        positions = ledger.get(LedgerModule.positions, {})
-        cash = ledger.get(LedgerModule.cash)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
@@ -191,6 +195,9 @@ def _basic_cash_update(state, ctx) -> None:
         for order in ctx.payloads_for(strategy):
             if order.status == OrderStatus.CANCELLED or order.get("reject_reason"):
                 continue  # terminal before accounting -- no ledger effect
+            ledger = state.ledger_for(order)
+            positions = ledger.get(LedgerModule.positions, {})
+            cash = ledger.get(LedgerModule.cash)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
@@ -226,8 +233,8 @@ def _basic_cash_update(state, ctx) -> None:
                     "cash_after": float(cash.to_major()),
                 },
             )
-        ledger.set(LedgerModule.positions, positions)
-        ledger.set(LedgerModule.cash, cash)
+            ledger.set(LedgerModule.positions, positions)
+            ledger.set(LedgerModule.cash, cash)
 
 
 def _uses_margin_accounting(strategy_config, historical_fields: dict, product) -> bool:

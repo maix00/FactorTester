@@ -50,7 +50,7 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        ledger = state.ledgers[strategy]
+        ledger = state.ledger_for_strategy(strategy)
         buy_cost = sum(
             contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
             for o in orders if o.quantity > 0

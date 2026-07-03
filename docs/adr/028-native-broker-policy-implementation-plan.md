@@ -57,7 +57,7 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
 
 | selector | 默认值 | 映射自 |
 |---|---|---|
-| `broker_model` | `native_default` | 新概念 |
+| `broker_model` | `native_broker` | 新概念 |
 | `cancel_policy` | `replace_pending_same_product` | `GroupMembershipModule._schedule_order_execution` 现有行为 |
 | `order_validity` | `next_signal` | 同上 |
 | `matching_policy` | `next_bar_open_full_fill` | `OrderExecutionModule.matching_model` |

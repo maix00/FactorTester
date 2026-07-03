@@ -121,10 +121,10 @@ def _apply_fee(state, ctx, base_compute) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        positions = state.ledgers[strategy].get(LedgerModule.positions, {})
         for order in ctx.payloads_for(strategy):
             if order.get("reject_reason"):
                 continue
+            positions = state.ledger_for(order).get(LedgerModule.positions, {})
             price = order.get("effective_price", prices[order.instrument])
             multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
             fixed_fee = _resolve_fixed_fee_cost(

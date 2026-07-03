@@ -1,8 +1,8 @@
 """Ledger and BacktestRunState primitives for the native backtest engine.
 
-`Ledger` is per-strategy account state. `BacktestRunState` is the whole native run's
-long-lived container: strategy registry, ledgers, result store, and module
-caches that must survive across FlowContext batches.
+`Ledger` is account-book state keyed by ledger_id. `BacktestRunState` is the
+whole native run's long-lived container: strategy registry, ledgers, result
+store, and module caches that must survive across FlowContext batches.
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ def apply_quantity_delta(entry: ProductPosition, delta: float) -> None:
 class Ledger:
     strategy: "Strategy"
     base_currency: str
+    ledger_id: str = ""
     fields: dict["FieldRef", Any] = field(default_factory=dict)
 
     def get(self, ref: "FieldRef", default: Any = None) -> Any:
@@ -102,11 +103,12 @@ class BacktestRunState:
         "equity_curve_store",
         "term_structure_store",
         "market_data_store",
+        "broker_store",
     })
 
     def __init__(
         self,
-        ledgers: dict["Strategy", Ledger] | None = None,
+        ledgers: dict[str, Ledger] | None = None,
         strategy_configs: dict["Strategy", StrategyConfig] | None = None,
     ) -> None:
         from tools.testers.backtest.engines.native.result_store import ResultStore  # local import:
@@ -117,7 +119,7 @@ class BacktestRunState:
         self._initializing = True
         self._audit_dynamic_writes = False
         self._warned_dynamic_writes: set[str] = set()
-        self.ledgers: dict["Strategy", Ledger] = ledgers if ledgers is not None else {}
+        self.ledgers: dict[str, Ledger] = ledgers if ledgers is not None else {}
         self.strategy_configs: dict["Strategy", StrategyConfig] = (
             strategy_configs if strategy_configs is not None else {}
         )
@@ -159,7 +161,42 @@ class BacktestRunState:
         self.market_data_store.request = value
 
     def ledger_for(self, order: "Order") -> Ledger:
-        return self.ledgers[order.strategy]
+        from tools.testers.backtest.modules.broker import assign_ledger_id_for_strategy
+
+        if order.strategy in self.ledgers:
+            return self.ledgers[order.strategy]
+        config = self.config_for(order.strategy)
+        ledger_id = assign_ledger_id_for_strategy(self, order.strategy, config, order)
+        ledger = self.ledgers.get(ledger_id)
+        if ledger is None:
+            ledger = self._empty_ledger_for(order.strategy, ledger_id)
+            self.ledgers[ledger_id] = ledger
+        return ledger
+
+    def ledger_for_strategy(self, strategy: "Strategy") -> Ledger:
+        from tools.testers.backtest.modules.broker import broker_store_for, assign_ledger_id_for_strategy
+
+        if strategy in self.ledgers:
+            return self.ledgers[strategy]
+        store = broker_store_for(self)
+        ledger_id = store.default_ledger_id_by_strategy.get(strategy)
+        if ledger_id is None:
+            ledger_id = assign_ledger_id_for_strategy(self, strategy, self.config_for(strategy))
+        ledger = self.ledgers.get(ledger_id)
+        if ledger is None:
+            ledger = self._empty_ledger_for(strategy, ledger_id)
+            self.ledgers[ledger_id] = ledger
+        return ledger
+
+    def _empty_ledger_for(self, strategy: "Strategy", ledger_id: str) -> Ledger:
+        try:
+            config = self.config_for(strategy)
+        except KeyError:
+            return Ledger(strategy=strategy, base_currency="CNY", ledger_id=ledger_id)
+        from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+        base_currency = str(config.get(LedgerModule.base_currency, "CNY"))
+        return Ledger(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
 
     def config_for(self, strategy: "Strategy") -> StrategyConfig:
         return self.strategy_configs[strategy]
