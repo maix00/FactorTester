@@ -267,7 +267,14 @@ def close_position(
         realized = _consume_lots_hifo(entry.lots, quantity, fill_price, multiplier)
     elif method == "DailyMarkToMarket":
         basis = entry.settlement_price if entry.settlement_price is not None else (entry.average_cost or fill_price)
-        realized = quantity * (fill_price - basis) * _position_sign(prior_quantity) * multiplier
+        realized = _futures_money_difference(
+            fill_price,
+            basis,
+            multiplier,
+            quantity * _position_sign(prior_quantity),
+            currency=ledger.base_currency,
+            use_minor_units=True,
+        )
     return DataMoney.from_major(realized, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -329,7 +336,14 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
                 price,
                 require_exact=require_exact,
             )
-            total += float(entry.quantity) * (price - basis) * multiplier
+            total += _futures_money_difference(
+                price,
+                basis,
+                multiplier,
+                float(entry.quantity),
+                currency=ledger.base_currency,
+                use_minor_units=True,
+            )
     return DataMoney.from_major(total, currency=ledger.base_currency, use_minor_units=False)
 
 
@@ -410,7 +424,14 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             before_margin = _entry_margin_major(entry)
             after_margin = abs(quantity) * settlement * multiplier * _margin_ratio_for_position(
                 config, fields, quantity, settlement, multiplier)
-            pnl = quantity * (settlement - previous_settlement) * multiplier
+            pnl = _futures_money_difference(
+                settlement,
+                previous_settlement,
+                multiplier,
+                quantity,
+                currency=cash.currency,
+                use_minor_units=cash.use_minor_units,
+            )
             cash_delta = pnl - (after_margin - before_margin)
             cash = cash + DataMoney.from_major(
                 cash_delta,
@@ -502,6 +523,28 @@ def _entry_margin_major(entry: Any) -> float:
     if equity_occupied is None:
         return 0.0
     return float(equity_occupied.to_major())
+
+
+def _futures_money_difference(
+    current_price: float,
+    basis_price: float,
+    multiplier: float,
+    quantity: float,
+    *,
+    currency: str,
+    use_minor_units: bool,
+) -> float:
+    current_value = DataMoney.from_major(
+        float(current_price) * float(multiplier),
+        currency=currency,
+        use_minor_units=use_minor_units,
+    ).to_major()
+    basis_value = DataMoney.from_major(
+        float(basis_price) * float(multiplier),
+        currency=currency,
+        use_minor_units=use_minor_units,
+    ).to_major()
+    return float(quantity) * (float(current_value) - float(basis_value))
 
 
 def _lookup_product_value(values: Mapping[Any, float], product: Any) -> float | None:
