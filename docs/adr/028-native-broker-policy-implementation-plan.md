@@ -1,5 +1,9 @@
 # ADR-028 实施计划：Native Broker Policy 迁移
 
+> **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 只有"阶段 1：
+> BrokerModule 骨架"（改名为 StrategyBookModule/NativeStrategyBook）落地了；阶段 2 起把各模块
+> 改成调用 broker policy 的方向已放弃，不再执行。
+
 - **对应决策**：[028-native-broker-policy-boundary.md](028-native-broker-policy-boundary.md)
 - **日期**：2026-07-01
 - **状态**：草案，未开始执行

@@ -20,7 +20,7 @@ from tools.data.modules.registry import ModuleRegistry
 
 from .base import ExecutableModule
 from .engine import EngineModule
-from .broker import BrokerModule
+from .strategy_book import StrategyBookModule
 from .run_window import RunWindowModule
 from .fee import FeeModule
 from .slippage import SlippageModule
@@ -56,7 +56,7 @@ from .risk_metrics import RiskMetricsModule
 
 _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     EngineModule,
-    BrokerModule,
+    StrategyBookModule,
     RunWindowModule,
     LedgerModule,
     OrderBookModule,
@@ -125,7 +125,12 @@ def register_all_module_settings(app: Any) -> None:
     """
     from tools.testers.settings.contracts import ScopePolicy, SettingDefinition, SettingModule, SettingOption, TabMountPoint
 
+    from tools.testers.settings.counterparty import apply_counterparty_profile_defaults  # local import:
+        # tools.testers.settings/__init__.py eagerly imports applications.py, which imports
+        # register_all_module_settings from this module -- a top-level import here would be circular.
+
     refresh_custom_product_field_definitions()
+    apply_counterparty_profile_defaults()
 
     _SCOPE_MAP = {p.value: p for p in ScopePolicy}
     for cls in sorted(_ALL_MODULE_CLASSES, key=lambda c: getattr(c, "order", 0)):

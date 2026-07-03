@@ -19,7 +19,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "group_strategy", "cost", "order", "liquidity", "margin",
+        "position_policy", "group_strategy", "cost", "order", "liquidity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
@@ -30,7 +30,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
         "rebalance_trigger", "position_policy",
-        "group_strategy", "cost", "order", "liquidity", "margin",
+        "group_strategy", "cost", "order", "liquidity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
@@ -75,6 +75,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["fee_mode"]["default_when"] == {
         "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
+        "counterparty_profile": {"exchange_base": "auto"},
     }
     assert {option["value"] for option in index["defaults"]["fee_mode"]["options"]} == {
         "auto", "exact", "custom", "close_yesterday", "close_today", "fixed", "zero",
@@ -97,6 +98,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["margin_mode"]["default_when"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
+        "counterparty_profile": {"exchange_base": "auto"},
     }
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],
@@ -162,7 +164,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "historical_field_policy", "equity_compute_live", "custom_product_fields",
     ]
     executable_public_fields = {
         key
@@ -386,7 +388,7 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
     assert [setting["key"] for setting in tab.get_json()["settings"]] == [
-        "engine", "engine_mode", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "historical_field_policy", "equity_compute_live", "custom_product_fields",
     ]
     assert missing.status_code == 404
 

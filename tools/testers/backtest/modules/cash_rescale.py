@@ -39,8 +39,16 @@ class LedgerCashConstraintModule(ExecutableModule):
 
 
 def _constrain_to_ledger_cash(state, ctx) -> None:
+    """Groups by ledger, not by strategy: two strategies sharing one
+    CustomBroker ledger_id draw on the same pool of cash in this batch, so
+    the haircut must be computed against their COMBINED buy cost vs that one
+    ledger's cash -- computing it per strategy against the ledger's full
+    balance would let each strategy independently assume it can spend the
+    whole pool, jointly overspending it."""
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
+
+    groups: dict[int, tuple[object, list[tuple[object, list, dict]]]] = {}
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
         if not orders:
@@ -51,33 +59,40 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
         ledger = state.ledger_for_strategy(strategy)
+        group = groups.setdefault(id(ledger), (ledger, []))
+        group[1].append((strategy, orders, historical_fields))
+
+    for ledger, entries in groups.values():
         buy_cost = sum(
             contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
+            for _strategy, orders, historical_fields in entries
             for o in orders if o.quantity > 0
         )
         if buy_cost <= 0:
             continue
         sell_proceeds = sum(
             -contract_notional(prices[o.instrument], o.quantity, historical_fields, o.instrument)
+            for _strategy, orders, historical_fields in entries
             for o in orders if o.quantity < 0
         )
         available = ledger.get(LedgerModule.cash).to_major() + sell_proceeds
         if buy_cost <= available:
             continue
         scale = available / buy_cost
-        for o in orders:
-            if o.quantity > 0:
-                before = float(o.quantity)
-                o.quantity *= scale
-                store.record(
-                    o,
-                    step="cash_rescale",
-                    label="按现金约束调整订单",
-                    timestamp=ctx.timestamp,
-                    details={
-                        "before_quantity": before,
-                        "scale": float(scale),
-                        "available_cash": float(available),
-                        "same_batch_sell_proceeds": float(sell_proceeds),
-                    },
-                )
+        for _strategy, orders, _historical_fields in entries:
+            for o in orders:
+                if o.quantity > 0:
+                    before = float(o.quantity)
+                    o.quantity *= scale
+                    store.record(
+                        o,
+                        step="cash_rescale",
+                        label="按现金约束调整订单",
+                        timestamp=ctx.timestamp,
+                        details={
+                            "before_quantity": before,
+                            "scale": float(scale),
+                            "available_cash": float(available),
+                            "same_batch_sell_proceeds": float(sell_proceeds),
+                        },
+                    )

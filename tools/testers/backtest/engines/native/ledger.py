@@ -103,7 +103,7 @@ class BacktestRunState:
         "equity_curve_store",
         "term_structure_store",
         "market_data_store",
-        "broker_store",
+        "strategy_book_store",
     })
 
     def __init__(
@@ -161,10 +161,8 @@ class BacktestRunState:
         self.market_data_store.request = value
 
     def ledger_for(self, order: "Order") -> Ledger:
-        from tools.testers.backtest.modules.broker import assign_ledger_id_for_strategy
+        from tools.testers.backtest.modules.strategy_book import assign_ledger_id_for_strategy
 
-        if order.strategy in self.ledgers:
-            return self.ledgers[order.strategy]
         config = self.config_for(order.strategy)
         ledger_id = assign_ledger_id_for_strategy(self, order.strategy, config, order)
         ledger = self.ledgers.get(ledger_id)
@@ -174,11 +172,9 @@ class BacktestRunState:
         return ledger
 
     def ledger_for_strategy(self, strategy: "Strategy") -> Ledger:
-        from tools.testers.backtest.modules.broker import broker_store_for, assign_ledger_id_for_strategy
+        from tools.testers.backtest.modules.strategy_book import strategy_book_store_for, assign_ledger_id_for_strategy
 
-        if strategy in self.ledgers:
-            return self.ledgers[strategy]
-        store = broker_store_for(self)
+        store = strategy_book_store_for(self)
         ledger_id = store.default_ledger_id_by_strategy.get(strategy)
         if ledger_id is None:
             ledger_id = assign_ledger_id_for_strategy(self, strategy, self.config_for(strategy))

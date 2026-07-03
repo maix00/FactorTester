@@ -35,6 +35,8 @@ def test_basic_size_order_computes_deltas_from_target_weights():
 
     class _FakeAccount:
         ledgers = {s: _FakeLedger()}
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
 
     _basic_size_order(_FakeAccount(), ctx)
     deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
@@ -58,6 +60,8 @@ def test_basic_size_order_uses_contract_multiplier_for_futures_notional():
 
     class _FakeAccount:
         ledgers = {s: _FakeLedger()}
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
 
     _basic_size_order(_FakeAccount(), ctx)
     deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
@@ -79,6 +83,8 @@ def test_basic_size_order_subtracts_existing_position():
 
     class _FakeAccount:
         ledgers = {s: _FakeLedger()}
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
 
     _basic_size_order(_FakeAccount(), ctx)
     deltas = ctx.get_for(OrderBookModule.raw_deltas, s)
@@ -104,6 +110,8 @@ def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():
 
     class _FakeAccount:
         ledgers = {s: _FakeLedger()}
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
         runtime_info_rows = []
         runtime_info_sink = None
 
@@ -142,6 +150,8 @@ def test_basic_size_order_uses_coarse_tradability_not_side_constraints_for_close
 
     class _FakeAccount:
         ledgers = {s: _FakeLedger()}
+        def ledger_for_strategy(self, strategy):
+            return self.ledgers[strategy]
 
     _basic_size_order(_FakeAccount(), ctx)
 

@@ -19,7 +19,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.fee import FeeModule
-from tools.testers.backtest.modules.broker import BrokerModule
+from tools.testers.backtest.modules.strategy_book import StrategyBookModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
@@ -35,7 +35,7 @@ def _strategy_config(strategy, **trading_rule_values) -> StrategyConfig:
     for key, value in trading_rule_values.items():
         ref = (
             getattr(EngineModule, key, None)
-            or getattr(BrokerModule, key, None)
+            or getattr(StrategyBookModule, key, None)
             or getattr(TradingRuleModule, key, None)
             or getattr(FeeModule, key, None)
             or getattr(MarginModule, key)
@@ -389,7 +389,7 @@ def test_lot_based_accounting_without_daily_mark_to_market_keeps_today_marker_ab
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, None)]
 
 
-def test_native_broker_uses_one_private_ledger_per_strategy():
+def test_strategy_book_private_mode_uses_one_ledger_per_strategy():
     s = Strategy(alias="S")
     p = _product()
     s2 = Strategy(alias="T")
@@ -405,18 +405,18 @@ def test_native_broker_uses_one_private_ledger_per_strategy():
 
     assert account.ledger_for_strategy(s) is not account.ledger_for_strategy(s2)
     assert sorted(account.ledgers) == sorted([
-        f"native_broker:{s.alias}",
-        f"native_broker:{s2.alias}",
+        f"private:{s.alias}",
+        f"private:{s2.alias}",
     ])
 
 
-def test_custom_broker_can_share_one_ledger_across_strategies():
+def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
     s1 = Strategy(alias="S1")
     s2 = Strategy(alias="S2")
     p = _product()
     configs = {
-        s1: _strategy_config(s1, engine_mode="custom", broker_model="custom_broker", ledger_id="shared-book", margin_mode="none"),
-        s2: _strategy_config(s2, engine_mode="custom", broker_model="custom_broker", ledger_id="shared-book", margin_mode="none"),
+        s1: _strategy_config(s1, engine_mode="custom", ledger_mode="shared", ledger_id="shared-book", margin_mode="none"),
+        s2: _strategy_config(s2, engine_mode="custom", ledger_mode="shared", ledger_id="shared-book", margin_mode="none"),
     }
     account = BacktestRunState(strategy_configs=configs)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -438,6 +438,46 @@ def test_custom_broker_can_share_one_ledger_across_strategies():
     assert list(account.ledgers) == ["shared-book"]
     assert account.ledger_for_strategy(s1) is account.ledger_for_strategy(s2)
     assert account.ledger_for_strategy(s2).get(LedgerModule.positions)[p].quantity == pytest.approx(2.0)
+
+
+def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer_wins():
+    s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
+    config1 = StrategyConfig(strategy=s1, field_values={
+        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
+        StrategyBookModule.ledger_id: "shared-book",
+        LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "CNY",
+        MarginModule.margin_mode: "none",
+    })
+    config2 = StrategyConfig(strategy=s2, field_values={
+        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
+        StrategyBookModule.ledger_id: "shared-book",
+        LedgerModule.initial_capital_major: 2_000_000.0, LedgerModule.base_currency: "CNY",
+        MarginModule.margin_mode: "none",
+    })
+    account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    with pytest.raises(ValueError, match="initial_capital_major"):
+        _initialize_ledgers(account, ctx)
+
+
+def test_shared_ledger_rejects_mismatched_base_currency_instead_of_silently_swapping_it():
+    s1, s2 = Strategy(alias="S1"), Strategy(alias="S2")
+    config1 = StrategyConfig(strategy=s1, field_values={
+        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
+        StrategyBookModule.ledger_id: "shared-book",
+        LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "CNY",
+        MarginModule.margin_mode: "none",
+    })
+    config2 = StrategyConfig(strategy=s2, field_values={
+        EngineModule.engine_mode: "custom", StrategyBookModule.ledger_mode: "shared",
+        StrategyBookModule.ledger_id: "shared-book",
+        LedgerModule.initial_capital_major: 1_000_000.0, LedgerModule.base_currency: "USD",
+        MarginModule.margin_mode: "none",
+    })
+    account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    with pytest.raises(ValueError, match="base_currency"):
+        _initialize_ledgers(account, ctx)
 
 
 @pytest.mark.parametrize("fee_mode", ["zero", "fixed", "close_today", "close_yesterday"])

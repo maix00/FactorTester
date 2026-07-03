@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.engines.adapters.frameworks import UnsupportedFrameworkPlan
-from tools.testers.backtest.engines.workers.runners.common import BROKER_POLICY_DEFAULTS
+from tools.testers.backtest.engines.workers.runners.common import WORKER_EXECUTION_POLICY_DEFAULTS
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.fee import FeeModule
@@ -92,7 +92,7 @@ def translate_strategy_config(
 
     out["fee_rate"] = _translate_fee(alias, config, framework=framework, fallbacks=fallbacks)
     _translate_margin(alias, config, out, framework=framework, fallbacks=fallbacks)
-    out.update(_broker_policy_selectors(alias, config, framework=framework))
+    out.update(_worker_execution_policy_selectors(alias, config, framework=framework))
     _note_minor_unit_precision(alias, config, framework=framework, fallbacks=fallbacks)
 
     if fallbacks:
@@ -123,19 +123,19 @@ def _note_minor_unit_precision(
     })
 
 
-def _broker_policy_selectors(
+def _worker_execution_policy_selectors(
     alias: str, config: "StrategyConfig", *, framework: str
 ) -> dict[str, str]:
-    """ADR-028 broker policy selectors from the real module fields.
+    """Worker execution policy selectors from the real module fields.
 
-    Per ADR-028's mapping table: ``min_lot_policy`` comes from
-    ``PositionSizingModule.quantity_rounding_policy`` and ``fill_cap_policy``
-    from ``LiquidityModule.liquidity_mode``; the remaining selectors have no
-    owning fields yet (BrokerModule is a separate migration, see
-    028-native-broker-policy-implementation-plan) so they carry NativeBroker
-    defaults. Runners re-validate on their side (require_broker_policies).
+    ``min_lot_policy`` comes from ``PositionSizingModule.
+    quantity_rounding_policy`` and ``fill_cap_policy`` from ``LiquidityModule.
+    liquidity_mode`` -- these are the only two selectors any runner actually
+    checks (see ADR-032; this is deliberately not a general broker/account
+    policy object). Runners re-validate on their side
+    (require_worker_execution_policies).
     """
-    selectors = dict(BROKER_POLICY_DEFAULTS)
+    selectors = dict(WORKER_EXECUTION_POLICY_DEFAULTS)
     rounding = str(config.get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot") or "floor_to_lot")
     if rounding != "floor_to_lot":
         # Workers implement only the floor; nearest_lot would silently change

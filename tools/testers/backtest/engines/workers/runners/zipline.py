@@ -22,7 +22,7 @@ from .common import (
     parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
-    require_broker_policies,
+    require_worker_execution_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -161,7 +161,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
-        require_broker_policies(
+        require_worker_execution_policies(
             strategy,
             engine="zipline",
             supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},

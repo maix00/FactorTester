@@ -23,7 +23,7 @@ from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
-from tools.testers.backtest.modules.broker import BrokerModule, assign_ledger_id_for_strategy
+from tools.testers.backtest.modules.strategy_book import StrategyBookModule, assign_ledger_id_for_strategy
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
     _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled,
@@ -62,7 +62,7 @@ class LedgerModule(ExecutableModule):
         "initialize_ledgers",
         inputs=(EngineModule.engine_mode, TradingRuleModule.accounting_mode, TradingRuleModule.cost_basis_method,
                  TradingRuleModule.use_int_position, MinorUnitModule.use_minor_units, ProductSelectionModule.products,
-                 BrokerModule.broker_model, BrokerModule.ledger_id),
+                 StrategyBookModule.ledger_mode, StrategyBookModule.ledger_id),
         outputs=(cash, positions),
         phase=Phase.PRE_REPLAY, order=41, after=(MarketDataModule.load_raw_market_data,),
         description="初始化交易账本",
@@ -106,8 +106,19 @@ def _initialize_ledgers(state, ctx) -> None:
         ledger = state.ledgers.get(ledger_id)
         if ledger is None:
             ledger = Ledger(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
-        ledger.set(LedgerModule.cash, DataMoney.from_major(
-            initial_capital, currency=base_currency, use_minor_units=use_minor_units))
+            ledger.set(LedgerModule.cash, DataMoney.from_major(
+                initial_capital, currency=base_currency, use_minor_units=use_minor_units))
+        else:
+            # A CustomBroker ledger_id shared by an earlier strategy in this
+            # same loop -- it's one pool of money, funded once. A second
+            # strategy joining it must describe the same pool, not silently
+            # overwrite it with its own initial_capital/currency (that was
+            # the previous behavior: last strategy processed always won).
+            _require_matching_shared_ledger_config(
+                ledger, strategy, ledger_id,
+                base_currency=base_currency, initial_capital=initial_capital,
+                use_minor_units=use_minor_units,
+            )
 
         use_int = _resolve_use_int_position(strategy_config)
         initial_quantity = 0 if use_int else 0.0
@@ -127,6 +138,35 @@ def _initialize_ledgers(state, ctx) -> None:
                     quantity=initial_quantity, lots=deque(), equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
         state.ledgers[ledger_id] = ledger
+
+
+def _require_matching_shared_ledger_config(
+    ledger, strategy, ledger_id: str, *, base_currency: str, initial_capital: float, use_minor_units: bool,
+) -> None:
+    if ledger.base_currency != base_currency:
+        raise ValueError(
+            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
+            f"with base_currency={base_currency!r}, but that ledger was already established "
+            f"with base_currency={ledger.base_currency!r} -- a shared ledger is one pool of "
+            f"money in one currency; give this strategy its own ledger_id instead of joining "
+            f"one whose currency doesn't match."
+        )
+    existing_cash = ledger.get(LedgerModule.cash)
+    if existing_cash.use_minor_units != use_minor_units:
+        raise ValueError(
+            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
+            f"with use_minor_units={use_minor_units}, but that ledger was already established "
+            f"with use_minor_units={existing_cash.use_minor_units} -- give this strategy its own "
+            f"ledger_id instead of joining one with a different minor-unit policy."
+        )
+    if abs(existing_cash.to_major() - initial_capital) > 1e-6:
+        raise ValueError(
+            f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
+            f"with initial_capital_major={initial_capital!r}, but that ledger was already funded "
+            f"with {existing_cash.to_major()!r} -- a shared ledger is funded once; every strategy "
+            f"joining it must declare the same initial_capital_major (it is not summed or "
+            f"overwritten per strategy)."
+        )
 
 
 def _products_for_backtest_window(state, ctx, strategy) -> frozenset:

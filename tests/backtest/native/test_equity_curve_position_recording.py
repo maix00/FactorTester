@@ -29,7 +29,7 @@ def test_records_positions_and_notional_alongside_equity():
         p1: ProductPosition(quantity=10.0),
         p2: ProductPosition(quantity=0.0),  # zero position -- should be omitted
     })
-    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p1: 20.0, p2: 5.0})
@@ -48,7 +48,7 @@ def test_margin_curve_is_none_when_never_tracked():
     p = _product()
     ledger = Ledger(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=5.0)})  # equity_occupied=None
-    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
@@ -67,7 +67,7 @@ def test_margin_curve_present_when_equity_occupied_is_tracked():
         p: ProductPosition(quantity=5.0, equity_occupied=DataMoney.from_major(
             50.0, currency="CNY", use_minor_units=False)),
     })
-    account = BacktestRunState(ledgers={s: ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})

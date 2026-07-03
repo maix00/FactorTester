@@ -17,7 +17,7 @@ from .common import (
     parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
-    require_broker_policies,
+    require_worker_execution_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -289,7 +289,7 @@ def _configure_backtrader_broker(cerebro, strategy: Mapping[str, Any]) -> None:
     - fill_cap_policy: no_cap → no filler; volume_participation →
       bt.fillers.FixedBarPerc.
     """
-    require_broker_policies(
+    require_worker_execution_policies(
         strategy,
         engine="backtrader",
         supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},

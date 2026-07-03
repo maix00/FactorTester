@@ -559,11 +559,8 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     account = BacktestRunState(strategy_configs={
         strategy: StrategyConfig(strategy=strategy),
     })
-    from tools.testers.backtest.engines.native.ledger import Ledger
-
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = account.ledger_for_strategy(strategy)
     ledger.set(LedgerModule.positions, {contract: ProductPosition(quantity=3)})
-    account.ledgers[strategy] = ledger
     queue = EventQueue()
     order_events: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
@@ -842,11 +839,8 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
         ),
     })
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
-    from tools.testers.backtest.engines.native.ledger import Ledger
-
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = account.ledger_for_strategy(strategy)
     ledger.set(LedgerModule.positions, {old_contract: ProductPosition(quantity=3)})
-    account.ledgers[strategy] = ledger
 
     queue = EventQueue()
     order_events: list[EventDraft] = []

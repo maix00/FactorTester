@@ -67,7 +67,7 @@ def _basic_size_order(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     tradable_status = ctx.get(MarketDataModule.current_tradable_status, None)
     for strategy in ctx.active_strategies:
-        ledger = _ledger_for_strategy(state, strategy)
+        ledger = state.ledger_for_strategy(strategy)
         equity = ctx.get_for(LedgerModule.equity, strategy)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
@@ -95,13 +95,6 @@ def _basic_size_order(state, ctx) -> None:
             target_quantity = target_weights.get(product, 0.0) * equity / (float(price) * multiplier)
             deltas[product] = target_quantity - getattr(positions.get(product), "quantity", 0.0)
         ctx.set_for(OrderBookModule.raw_deltas, strategy, deltas)
-
-
-def _ledger_for_strategy(state, strategy):
-    resolver = getattr(state, "ledger_for_strategy", None)
-    if callable(resolver):
-        return resolver(strategy)
-    return state.ledgers[strategy]
 
 
 def _construct_orders(state, ctx) -> None:

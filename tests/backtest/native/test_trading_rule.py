@@ -296,7 +296,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
         },
     )
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
-    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
     queue = EventQueue()
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -357,7 +357,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
         },
     )
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
-    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -412,7 +412,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
             equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
-    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -468,7 +468,7 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
             equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
         )
     })
-    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -648,7 +648,7 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
             equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
         )
     })
-    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 10:00:00", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
