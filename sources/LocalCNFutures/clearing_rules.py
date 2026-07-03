@@ -17,14 +17,20 @@ _LOCAL_CNFUTURES_EXCHANGES: tuple[str, ...] = (
 _LOCAL_CNFUTURES_DEFAULT_FIELDS: dict[str, object] = {
     # 中国期货公开保证金/手续费/逐日盯市公式通常以合约总额口径表达；
     # 具体历史费率和乘数仍由 FieldHistory/OpenCTP 等更细字段覆盖。
+    "CostBasisMethod": "DailyMarkToMarket",
     "MoneyCalculationPolicy": "aggregate",
 }
 
 _LOCAL_CNFUTURES_FIELD_LABELS: dict[str, str] = {
+    "CostBasisMethod": "成本法",
     "MoneyCalculationPolicy": "金额计算口径",
 }
 
 _LOCAL_CNFUTURES_FIELD_NOTES: dict[str, str] = {
+    "CostBasisMethod": (
+        "中国期货默认采用逐日盯市：日终按结算价重估持仓、释放旧保证金、占用新保证金，"
+        "并将当日盈亏划入现金/结算准备金。"
+    ),
     "MoneyCalculationPolicy": (
         "LocalCNFutures 默认按合约/持仓总额公式计算保证金、手续费和逐日盯市盈亏，"
         "再在现金/保证金账户落账时按币种精度处理；产品级或合约级历史字段优先。"

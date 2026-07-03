@@ -49,6 +49,9 @@ def test_product_public_fields_reflect_backend_attrs_and_futures_specs(monkeypat
     assert fields['MoneyCalculationPolicy']['label'] == '金额计算口径'
     assert fields['MoneyCalculationPolicy']['source'] == '中国期货交易所默认清算规则'
     assert '历史字段' in fields['MoneyCalculationPolicy']['source_note']
+    assert fields['CostBasisMethod']['value'] == 'DailyMarkToMarket'
+    assert fields['CostBasisMethod']['label'] == '成本法'
+    assert '逐日盯市' in fields['CostBasisMethod']['note']
 
 
 def test_contract_public_fields_fall_back_to_variety_specs(monkeypatch):
