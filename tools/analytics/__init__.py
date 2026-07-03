@@ -5,6 +5,7 @@ from .result_metrics import (
     ResultMetricContext,
     compute_result_metrics,
     register_result_metric,
+    result_metric_manifest,
     registered_result_metrics,
     unregister_result_metric,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "ResultMetricContext",
     "compute_result_metrics",
     "register_result_metric",
+    "result_metric_manifest",
     "registered_result_metrics",
     "unregister_result_metric",
 ]

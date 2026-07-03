@@ -52,6 +52,18 @@ def registered_result_metrics() -> Mapping[str, ResultMetric]:
     return dict(_RESULT_METRICS)
 
 
+def result_metric_manifest() -> list[dict[str, object]]:
+    _ensure_default_metrics()
+    return [
+        {
+            "key": metric.key,
+            "label": metric.label,
+            "description": metric.description,
+        }
+        for metric in _RESULT_METRICS.values()
+    ]
+
+
 def compute_result_metrics(equity: pd.Series, returns: pd.Series) -> dict[str, MetricValue]:
     _ensure_default_metrics()
     ctx = ResultMetricContext(equity=equity, returns=returns)

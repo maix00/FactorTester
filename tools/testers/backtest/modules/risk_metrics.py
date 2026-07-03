@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, cast
 import pandas as pd
 
-from tools.analytics import compute_result_metrics
+from tools.analytics import compute_result_metrics, result_metric_manifest
 from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, returns_for
@@ -24,6 +24,10 @@ class RiskMetricsModule(ExecutableModule):
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (compute_risk_metrics,)
+
+    @classmethod
+    def result_metric_manifest(cls) -> list[dict[str, object]]:
+        return result_metric_manifest()
 
 
 def _compute_risk_metrics(state, ctx) -> None:
