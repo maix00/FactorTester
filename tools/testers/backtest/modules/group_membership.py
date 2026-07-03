@@ -260,12 +260,21 @@ def _group_quantile_membership(state, ctx) -> None:
 
 
 def _tradable_signal_values(signal_value: dict, current_prices: dict | None) -> dict:
-    if current_prices is None:
-        return signal_value
-    if not signal_value or not current_prices:
+    """The rankable cross-section: products must have a price (tradable)
+    AND a real signal value. A NaN factor value cannot be ranked -- NaN
+    comparisons are undefined under sorted()'s total-order assumption, so
+    without this filter the product would silently land in an arbitrary
+    bucket. Dropping it here also shrinks the bucket boundaries to the
+    valid universe, matching cross-section quantile convention."""
+    if not signal_value:
         return {}
-    tradable = set(current_prices)
-    return {product: value for product, value in signal_value.items() if product in tradable}
+    if current_prices is not None and not current_prices:
+        return {}
+    tradable = None if current_prices is None else set(current_prices)
+    return {
+        product: value for product, value in signal_value.items()
+        if (tradable is None or product in tradable) and not pd.isna(value)
+    }
 
 
 def _product_name(product: Any) -> str:

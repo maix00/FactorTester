@@ -705,3 +705,60 @@ def test_target_trace_not_recorded_when_membership_change_skips_recompute():
     trace = target_trace_for(account, s)
     assert t1.isoformat() in trace
     assert t2.isoformat() not in trace  # membership unchanged, no fresh trace entry
+
+
+def test_nan_signal_values_are_excluded_from_every_bucket():
+    """A product whose factor value is NaN on this cross-section cannot be
+    ranked. Industry cross-section convention (Alphalens/Qlib quantile
+    bucketing): NaN samples are dropped from the ranking entirely and the
+    bucket boundaries are computed over the valid universe -- a NaN product
+    silently landing in some bucket (wherever an undefined NaN comparison
+    happens to leave it in the sort) is a correctness bug, not a tie."""
+    s_top, s_bottom = Strategy(alias="TOP"), Strategy(alias="BOTTOM")
+    products = [_product() for _ in range(4)]
+    nan_product = _product()
+    signal_value = {p: float(i) for i, p in enumerate(products)}  # p0 < p1 < p2 < p3
+    signal_value[nan_product] = float("nan")
+
+    config_top = StrategyConfig(strategy=s_top, field_values={
+        GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 0,
+    })
+    config_bottom = StrategyConfig(strategy=s_bottom, field_values={
+        GroupMembershipModule.split_count: 2, GroupMembershipModule.group_index: 1,
+    })
+    account = BacktestRunState(strategy_configs={s_top: config_top, s_bottom: config_bottom})
+    ctx = FlowContext(
+        timestamp=None, event_queue=EventQueue(),
+        active_strategies=frozenset({s_top, s_bottom}),
+    )
+    ctx.set_for(FactorSignalModule.signal_value, s_top, dict(signal_value))
+    ctx.set_for(FactorSignalModule.signal_value, s_bottom, dict(signal_value))
+
+    _group_quantile_membership(account, ctx)
+
+    top = ctx.get_for(GroupMembershipModule.target_weights, s_top)
+    bottom = ctx.get_for(GroupMembershipModule.target_weights, s_bottom)
+    assert nan_product not in top and nan_product not in bottom
+    # bucket boundaries over the 4 valid products: top half / bottom half
+    assert set(top) == {products[2], products[3]}
+    assert set(bottom) == {products[0], products[1]}
+    assert sum(top.values()) == pytest.approx(1.0)
+    assert sum(bottom.values()) == pytest.approx(1.0)
+
+
+def test_all_nan_cross_section_produces_empty_target():
+    """When every signal value is NaN at a timestamp (e.g. factor warmup not
+    yet satisfied for any product), the rebalance target must be empty --
+    not an arbitrary bucket of unrankable products."""
+    s = Strategy(alias="S")
+    products = [_product() for _ in range(3)]
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 3, GroupMembershipModule.group_index: 0,
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(FactorSignalModule.signal_value, s, {p: float("nan") for p in products})
+
+    _group_quantile_membership(account, ctx)
+
+    assert ctx.get_for(GroupMembershipModule.target_weights, s) == {}
