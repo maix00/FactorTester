@@ -22,9 +22,10 @@ from tools.testers.backtest.modules.market_data import (
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
-from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_method, _resolve_use_int_position, mark_to_market,
+    TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
+    _resolve_use_int_position, mark_to_market,
 )
 
 
@@ -258,25 +259,43 @@ def _apply_margin_accounting_fill(
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = _entry_margin_major(entry)
     prior_quantity = float(entry.quantity or 0.0)
-    prior_cost = float(entry.average_cost or price)
     new_quantity = prior_quantity + quantity
-    realized = 0.0
 
-    if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
-        new_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
-    else:
-        close_abs = min(abs(quantity), abs(prior_quantity))
-        realized = close_abs * (price - prior_cost) * _sign(prior_quantity) * multiplier
+    method = _resolve_method(
+        strategy_config, product, fields,
+        require_exact=engine_mode_for(strategy_config) == "exact",
+    )
+    if method in ("FIFO", "LIFO", "HIFO"):
+        # Lot-based methods keep the lot queue as the cost-basis record --
+        # mark_to_market reads entry.lots for floating P&L, so the fill
+        # must maintain it; average_cost stays untouched (it would imply
+        # a weighted-average basis that doesn't exist under these methods).
+        realized = _apply_lot_fill(entry, method, quantity, price, multiplier)
         if abs(new_quantity) <= 1e-12:
             new_quantity = 0.0
-            new_cost = 0.0
-        elif abs(quantity) > abs(prior_quantity):
-            new_cost = price
+    else:
+        # WeightAverage keeps a blended average_cost. DailyMarkToMarket
+        # shares this arithmetic deliberately: the daily settlement flow
+        # sweeps average_cost to the settlement price every day, so
+        # "fill price - average_cost" here IS "fill price - last
+        # settlement", the mark-to-market realized P&L.
+        prior_cost = float(entry.average_cost or price)
+        realized = 0.0
+        if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
+            new_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
         else:
-            new_cost = prior_cost
+            close_abs = min(abs(quantity), abs(prior_quantity))
+            realized = close_abs * (price - prior_cost) * _sign(prior_quantity) * multiplier
+            if abs(new_quantity) <= 1e-12:
+                new_quantity = 0.0
+                new_cost = 0.0
+            elif abs(quantity) > abs(prior_quantity):
+                new_cost = price
+            else:
+                new_cost = prior_cost
+        entry.average_cost = new_cost
 
     entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
-    entry.average_cost = new_cost
     after_margin = abs(new_quantity) * price * multiplier * margin_ratio
     entry.equity_occupied = DataMoney.from_major(
         after_margin,
@@ -289,6 +308,39 @@ def _apply_margin_accounting_fill(
         currency=cash.currency,
         use_minor_units=cash.use_minor_units,
     )
+
+
+def _apply_lot_fill(entry: ProductPosition, method: str, quantity: float, price: float, multiplier: float) -> float:
+    """Apply one fill to a lot-based (FIFO/LIFO/HIFO) position entry.
+
+    Same-direction fills append a new lot. Opposite-direction fills consume
+    existing lots per the method's order and realize P&L against each
+    consumed lot's own entry price; a fill larger than the position flips
+    it, opening the remainder as a fresh lot at the fill price."""
+    from tools.testers.backtest.engines.native.ledger import Lot
+
+    if entry.lots is None:
+        entry.lots = deque()
+    prior_quantity = float(entry.quantity or 0.0)
+    if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
+        entry.lots.append(Lot(quantity=quantity, entry_price=price, multiplier=multiplier))
+        return 0.0
+
+    close_abs = min(abs(quantity), abs(prior_quantity))
+    if method == "FIFO":
+        raw = _consume_lots(entry.lots, close_abs, price, multiplier, from_front=True)
+    elif method == "LIFO":
+        raw = _consume_lots(entry.lots, close_abs, price, multiplier, from_front=False)
+    else:
+        raw = _consume_lots_hifo(entry.lots, close_abs, price, multiplier)
+    # _consume_lots computes take*(fill - entry): the long-side sign. A short
+    # position closing realizes (entry - fill) per lot instead.
+    realized = raw if prior_quantity > 0 else -raw
+
+    flip_abs = abs(quantity) - close_abs
+    if flip_abs > 1e-12:
+        entry.lots.append(Lot(quantity=flip_abs * _sign(quantity), entry_price=price, multiplier=multiplier))
+    return realized
 
 
 def _resolved_margin_ratio_for_order(strategy_config, fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float:
