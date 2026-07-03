@@ -333,17 +333,9 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
     table = current_prices_table_for(state)
     if table is None or getattr(table, "empty", True):
         return
-    data_index = DataIndex(table.index)
-    # trading_day is a date-like grouping key without timezone. The event
-    # timestamp must come from the finest trade-time level in that trading-day
-    # group, preserving its timezone (night sessions belong to the next
-    # trading_day but still carry their real local timestamp).
-    event_times = data_index.finest_index
-    trading_days = data_index.trading_day_index()
-    if len(event_times) == 0:
+    last_rows = DataIndex.trading_day_last_event_times_from_index(table.index)
+    if len(last_rows) == 0:
         return
-    grouped = pd.DataFrame({"event_time": event_times, "trading_day": trading_days})
-    last_rows = grouped.groupby("trading_day", sort=True, observed=True)["event_time"].max()
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
         for trading_day, last_event_time in last_rows.items():
