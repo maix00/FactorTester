@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from collections import deque
 
 import pandas as pd
 import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger, Lot, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -22,6 +23,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, _histor
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_lifecycle import _finalize_order
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
+from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.data.types.data_money import DataMoney
 
 
@@ -129,6 +131,126 @@ def test_fee_mode_auto_uses_historical_fields():
 
     _apply_fee(account, ctx, lambda a, c: None)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.002)
+
+
+def test_fee_mode_auto_splits_close_today_and_yesterday_from_position_lots():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-2.0, intent_quantity=-2.0, strategy=s)
+    config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "auto"})
+    account = _account_with_ledger(s, config)
+    account.ledgers[s].set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=3.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=8.0, multiplier=1.0, is_today=False),
+                Lot(quantity=2.0, entry_price=9.0, multiplier=1.0, is_today=True),
+            ]),
+        )
+    })
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
+
+    _apply_fee(account, ctx, lambda a, c: None)
+
+    assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
+    assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
+    assert order.get("fee_cost") == pytest.approx(10.0 * 1.0 * 0.01 + 10.0 * 1.0 * 0.02)
+
+
+def test_fee_mode_close_yesterday_overrides_today_lot_markers():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-1.0, intent_quantity=-1.0, strategy=s)
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        FeeModule.fee_mode: "close_yesterday",
+    })
+    account = _account_with_ledger(s, config)
+    account.ledgers[s].set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=1.0,
+            lots=deque([Lot(quantity=1.0, entry_price=9.0, multiplier=1.0, is_today=True)]),
+        )
+    })
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
+
+    _apply_fee(account, ctx, lambda a, c: None)
+
+    assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
+    assert order.get("fee_close_today_quantity") == pytest.approx(0.0)
+    assert order.get("fee_cost") == pytest.approx(10.0 * 0.01)
+
+
+def test_fee_mode_auto_uses_configured_lot_close_order_for_today_split():
+    s = Strategy(alias="S")
+    p = _product()
+    order = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-1.0, intent_quantity=-1.0, strategy=s)
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+        TradingRuleModule.accounting_mode: "Custom",
+        TradingRuleModule.cost_basis_method: "LIFO",
+        TradingRuleModule.daily_mark_to_market_enabled: True,
+        FeeModule.fee_mode: "auto",
+    })
+    account = _account_with_ledger(s, config)
+    account.ledgers[s].set(LedgerModule.positions, {
+        p: ProductPosition(
+            quantity=2.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=8.0, multiplier=1.0, is_today=False),
+                Lot(quantity=1.0, entry_price=9.0, multiplier=1.0, is_today=True),
+            ]),
+        )
+    })
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s, order)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
+    ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "OpenRatioByMoney": 0.0,
+            "OpenRatioByVolume": 0.0,
+            "CloseRatioByMoney": 0.01,
+            "CloseRatioByVolume": 0.0,
+            "CloseTodayRatioByMoney": 0.02,
+            "CloseTodayRatioByVolume": 0.0,
+            "VolumeMultiple": 1.0,
+        },
+    })
+
+    _apply_fee(account, ctx, lambda a, c: None)
+
+    assert order.get("fee_close_yesterday_quantity") == pytest.approx(0.0)
+    assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
+    assert order.get("fee_cost") == pytest.approx(10.0 * 0.02)
 
 
 def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_cost():

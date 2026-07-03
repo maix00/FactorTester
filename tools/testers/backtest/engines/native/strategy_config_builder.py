@@ -80,7 +80,7 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
     if accounting_mode == "Basic":
         return False
     if accounting_mode == "Custom":
-        return str(resolved_settings.get("cost_basis_method", "") or "") == "DailyMarkToMarket"
+        return bool(resolved_settings.get("daily_mark_to_market_enabled", False))
     return True
 
 

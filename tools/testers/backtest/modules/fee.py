@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.market_data import (
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.trading_rule import _resolve_method
 
 
 _FEE_FIELDS = (
@@ -144,14 +145,21 @@ def _apply_fee(state, ctx, base_compute) -> None:
                 )
                 continue
             fields = historical_fields_for_product(historical_fields, order.instrument)
+            cost_basis_method = _resolve_method(
+                config,
+                order.instrument,
+                fields,
+                require_exact=engine_mode_for(config) == "exact",
+            )
             order.set(
                 "fee_cost",
                 _market_fee_cost(
                     order,
                     price=float(price),
                     fields=fields,
-                    current_quantity=float(getattr(positions.get(order.instrument), "quantity", 0.0)),
+                    position=positions.get(order.instrument),
                     fee_mode=mode,
+                    cost_basis_method=cost_basis_method,
                 ),
             )
             store.record(
@@ -164,7 +172,15 @@ def _apply_fee(state, ctx, base_compute) -> None:
     base_compute(state, ctx)
 
 
-def _market_fee_cost(order, *, price: float, fields: dict[str, object], current_quantity: float, fee_mode: str) -> float:
+def _market_fee_cost(
+    order,
+    *,
+    price: float,
+    fields: dict[str, object],
+    position: object | None,
+    fee_mode: str,
+    cost_basis_method: str = "FIFO",
+) -> float:
     missing = [field for field in _FEE_FIELDS if field not in fields]
     if "VolumeMultiple" not in fields:
         missing.append("VolumeMultiple")
@@ -177,10 +193,15 @@ def _market_fee_cost(order, *, price: float, fields: dict[str, object], current_
         return 0.0
     multiplier = _number(fields.get("VolumeMultiple"), 1.0)
     quantity = float(order.quantity)
+    current_quantity = float(getattr(position, "quantity", 0.0))
     open_qty, close_qty = _split_open_close_quantity(quantity, current_quantity)
-    close_today = _is_close_today(order, fee_mode)
-    close_money_field = "CloseTodayRatioByMoney" if close_today else "CloseRatioByMoney"
-    close_volume_field = "CloseTodayRatioByVolume" if close_today else "CloseRatioByVolume"
+    close_today_qty, close_yesterday_qty = _split_close_today_yesterday(
+        quantity,
+        position,
+        close_qty,
+        fee_mode,
+        cost_basis_method,
+    )
     open_fee = _fee_part(
         open_qty,
         price=price,
@@ -188,17 +209,26 @@ def _market_fee_cost(order, *, price: float, fields: dict[str, object], current_
         ratio=_number(fields.get("OpenRatioByMoney"), 0.0),
         fixed=_number(fields.get("OpenRatioByVolume"), 0.0),
     )
-    close_fee = _fee_part(
-        close_qty,
+    close_yesterday_fee = _fee_part(
+        close_yesterday_qty,
         price=price,
         multiplier=multiplier,
-        ratio=_number(fields.get(close_money_field), 0.0),
-        fixed=_number(fields.get(close_volume_field), 0.0),
+        ratio=_number(fields.get("CloseRatioByMoney"), 0.0),
+        fixed=_number(fields.get("CloseRatioByVolume"), 0.0),
+    )
+    close_today_fee = _fee_part(
+        close_today_qty,
+        price=price,
+        multiplier=multiplier,
+        ratio=_number(fields.get("CloseTodayRatioByMoney"), 0.0),
+        fixed=_number(fields.get("CloseTodayRatioByVolume"), 0.0),
     )
     order.set("fee_open_quantity", open_qty)
     order.set("fee_close_quantity", close_qty)
-    order.set("fee_close_today", close_today)
-    return open_fee + close_fee
+    order.set("fee_close_today_quantity", close_today_qty)
+    order.set("fee_close_yesterday_quantity", close_yesterday_qty)
+    order.set("fee_close_today", bool(close_today_qty and not close_yesterday_qty))
+    return open_fee + close_yesterday_fee + close_today_fee
 
 
 def _split_open_close_quantity(quantity: float, current_quantity: float) -> tuple[float, float]:
@@ -211,12 +241,49 @@ def _split_open_close_quantity(quantity: float, current_quantity: float) -> tupl
     return open_qty, close_qty
 
 
-def _is_close_today(order, policy: str) -> bool:
+def _split_close_today_yesterday(
+    quantity: float,
+    position: object | None,
+    close_qty: float,
+    policy: str,
+    cost_basis_method: str,
+) -> tuple[float, float]:
+    if close_qty <= 1e-12:
+        return 0.0, 0.0
     if policy == "close_today":
-        return True
-    if policy == "auto":
-        return bool(order.get("close_today", False))
-    return False
+        return close_qty, 0.0
+    if policy == "close_yesterday":
+        return 0.0, close_qty
+    if policy != "auto":
+        return 0.0, close_qty
+    lots = getattr(position, "lots", None)
+    if not lots:
+        return 0.0, close_qty
+    remaining = close_qty
+    today = 0.0
+    yesterday = 0.0
+    ordered_lots = _ordered_lots_for_close(lots, cost_basis_method)
+    # Fee estimation follows the same close order as the ledger. If lots have
+    # no DMTM marker, treat them as yesterday/ordinary close.
+    for lot in ordered_lots:
+        if remaining <= 1e-12:
+            break
+        take = min(remaining, abs(float(getattr(lot, "quantity", 0.0) or 0.0)))
+        if bool(getattr(lot, "is_today", False)):
+            today += take
+        else:
+            yesterday += take
+        remaining -= take
+    yesterday += max(0.0, remaining)
+    return today, yesterday
+
+
+def _ordered_lots_for_close(lots, cost_basis_method: str):
+    if cost_basis_method == "LIFO":
+        return list(reversed(lots))
+    if cost_basis_method == "HIFO":
+        return sorted(lots, key=lambda lot: getattr(lot, "entry_price", 0.0), reverse=True)
+    return list(lots)
 
 
 def _requires_complete_fee_fields(mode: str) -> bool:
