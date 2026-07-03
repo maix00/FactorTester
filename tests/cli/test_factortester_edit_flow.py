@@ -12,7 +12,7 @@ from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
 
 from tools.cli.app import _backtest_errors, cli
-from tools.cli.http import HttpClientError
+from tools.cli.http import ClientConfig, HttpClientError, save_config
 import tools.cli.modules.backtest.run_output as run_output
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
@@ -40,6 +40,41 @@ def register_home_modules(app: Flask) -> None:
             {"id": "products", "title": "产品管理", "path": "/products"},
             {"id": "custom_factors", "title": "因子管理", "path": "/custom-factors/editor"},
         ])
+
+
+def test_products_info_prints_backend_field_notes(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/product_fields")
+    def product_fields():
+        assert request.args.get("name") == "AP.CZC"
+        return jsonify(
+            success=True,
+            name="AP.CZC",
+            fields={
+                "name": {"value": "AP.CZC", "type": "str"},
+                "MoneyCalculationPolicy": {
+                    "value": "aggregate",
+                    "type": "str",
+                    "label": "金额计算口径",
+                    "source": "中国期货交易所默认清算规则",
+                    "source_note": "历史字段优先。",
+                    "note": "总额公式后落账。",
+                },
+            },
+        )
+
+    with running_server(app) as base_url:
+        monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+        save_config(ClientConfig(base_url=base_url))
+        result = CliRunner().invoke(cli, ["products", "info", "AP.CZC"])
+
+    assert result.exit_code == 0
+    assert "产品后端信息: AP.CZC" in result.output
+    assert "金额计算口径" in result.output
+    assert "aggregate" in result.output
+    assert "历史字段优先" in result.output
 
 
 def test_click_describe_and_edit_flow_uses_remote_manifests(tmp_path, monkeypatch) -> None:

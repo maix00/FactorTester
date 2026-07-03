@@ -26,7 +26,10 @@ class FactorTesterClient:
         if parent is None:
             return self.home_modules()
         if parent == "products":
-            return [{"key": "products/product-groups", "label": "产品组库", "kind": "module", "has_children": False}]
+            return [
+                {"key": "products/info", "label": "产品后端信息", "kind": "module", "has_children": False},
+                {"key": "products/product-groups", "label": "产品组库", "kind": "module", "has_children": False},
+            ]
         if parent == "custom_factors":
             return [
                 {"key": "custom_factors/factor-library", "label": "因子库", "kind": "module", "has_children": False},
@@ -112,6 +115,9 @@ class FactorTesterClient:
 
     def create_product_group(self, *, name: str, paths: list[str]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/product-groups", {"name": name, "paths": paths}))
+
+    def product_fields(self, name: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/api/product_fields", query={"name": name}))
 
     def factor_library_overview(
         self,
