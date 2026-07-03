@@ -16,8 +16,10 @@ from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
-    _resolve_market_data_request, current_prices_at, historical_fields_for_product,
+    _resolve_market_data_request, current_market_snapshot_at, current_prices_at,
+    historical_fields_for_product, order_constraints_from_snapshot,
 )
+from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
@@ -31,6 +33,53 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     _load_raw_market_data(account, ctx)
     assert ctx.get(MarketDataModule.raw_prices) is raw_prices
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
+
+
+def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints():
+    class _Product:
+        name = "P.XLIM"
+        exchange_id = "XLIM"
+        desc = "测试品种"
+
+        def __init__(self):
+            self.MIN1 = self
+
+        def list_available_freqs(self):
+            return [DataFreq.MIN1]
+
+        def get_and_adjust_cols(self, columns, **_kwargs):
+            index = pd.date_range("2024-01-01 09:01", periods=1, freq="1min")
+            frame = pd.DataFrame({
+                DataColumn.OPEN.name: [10.0],
+                DataColumn.HIGH.name: [10.0],
+                DataColumn.LOW.name: [10.0],
+                DataColumn.CLOSE.name: [10.0],
+                DataColumn.VWAP.name: [10.0],
+                DataColumn.VOLUME.name: [1.0],
+                DataColumn.UPPER_LIMIT_PRICE.name: [10.0],
+                DataColumn.LOWER_LIMIT_PRICE.name: [8.0],
+            }, index=index)
+            return frame.loc[:, [column for column in columns if column in frame.columns]]
+
+    from tools.traderules import ExchangeTradingRule, register_exchange_trading_rule
+
+    register_exchange_trading_rule(ExchangeTradingRule(
+        exchange_id="XLIM",
+        tradability_policy="valid_close_and_price_limits",
+    ))
+    product = _Product()
+    account = BacktestRunState()
+    account.market_data_store.load_plan = [(product, DataFreq.MIN1, None)]
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+
+    _load_raw_market_data(account, ctx)
+    _causal_valuation(account, ctx)
+    snapshot = current_market_snapshot_at(account, pd.Timestamp("2024-01-01 09:01"))
+    constraints = order_constraints_from_snapshot(snapshot)
+
+    assert snapshot["upper_limit"][product] == 10.0
+    assert constraints[product].can_buy is False
+    assert constraints[product].can_sell is True
 
 
 def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
