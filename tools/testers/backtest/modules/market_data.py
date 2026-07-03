@@ -47,6 +47,7 @@ from tools.data.field_history import (
     resolve_historical_fields_for_product,
 )
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
+from tools.traderules import exchange_rule_defaults_for_product
 
 
 @dataclass
@@ -1410,8 +1411,9 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     instruments = list(table.columns) if table is not None else []
     frames = store.historical_field_frames
     if isinstance(frames, dict):
-        return _historical_fields_at_from_frames(frames, instruments, timestamp)
-    result: dict[Any, dict[str, object]] = {}
+        frame_result = _historical_fields_at_from_frames(frames, instruments, timestamp)
+        return _apply_exchange_rule_defaults(frame_result, instruments, field_names)
+    resolved_result: dict[Any, dict[str, object]] = {}
     for instrument in instruments:
         try:
             values = resolve_historical_fields_for_product(
@@ -1424,8 +1426,8 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
             )
         except HistoricalFieldLookupError:
             raise
-        result[instrument] = values
-    return result
+        resolved_result[instrument] = values
+    return _apply_exchange_rule_defaults(resolved_result, instruments, field_names)
 
 
 def historical_field_frames_for_market_data(
@@ -1476,6 +1478,19 @@ def _historical_fields_at_from_frames(
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:
                 result[instrument][str(field_name)] = row[str(column)]
+    return result
+
+
+def _apply_exchange_rule_defaults(
+    result: dict[Any, dict[str, object]],
+    instruments: list[Any],
+    field_names: tuple[object, ...],
+) -> dict[Any, dict[str, object]]:
+    for instrument in instruments:
+        values = result.setdefault(instrument, {})
+        defaults = exchange_rule_defaults_for_product(instrument, field_names)
+        for field_name, value in defaults.items():
+            values.setdefault(str(field_name), value)
     return result
 
 

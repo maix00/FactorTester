@@ -5,6 +5,7 @@ from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from sources.LocalCNFutures import SOURCE_DATA_DIR
+from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
 from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
 
@@ -61,6 +62,7 @@ exchange_map = {
 }
 
 exchange_map_reversed = {v: k for k, v in exchange_map.items()}
+register_local_cnfutures_exchange_rules()
 datacolumn_map_reversed = {v: k for k, v in DataColumnMapping.items()}
 
 code_col_name = '品种代码'
@@ -199,6 +201,7 @@ class CNFutures(Futures):
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
+        self.exchange_id = exchange_map_reversed.get(exchange_short, exchange_short)
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
         _CNFUTURES_BY_NAME[self.name] = self

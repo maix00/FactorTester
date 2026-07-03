@@ -14,7 +14,8 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
-    _desired_factor_frequencies, _historical_fields_at_from_frames, _load_raw_market_data,
+    _apply_exchange_rule_defaults, _desired_factor_frequencies,
+    _historical_fields_at_from_frames, _load_raw_market_data,
     _resolve_market_data_request, current_prices_at, historical_fields_for_product,
 )
 from tools.data.types.time import DataTime
@@ -625,6 +626,24 @@ def test_historical_fields_at_does_not_look_ahead_before_first_row():
     fields = _historical_fields_at_from_frames(frames, ["EG.DCE"], event_ts)
 
     assert fields["EG.DCE"] == {}
+
+
+def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite():
+    from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
+
+    register_local_cnfutures_exchange_rules()
+
+    result = _apply_exchange_rule_defaults(
+        {
+            "AP.CZC": {},
+            "RU.SHF": {"MoneyCalculationPolicy": "per_contract_price_point"},
+        },
+        ["AP.CZC", "RU.SHF"],
+        ("MoneyCalculationPolicy",),
+    )
+
+    assert result["AP.CZC"]["MoneyCalculationPolicy"] == "aggregate"
+    assert result["RU.SHF"]["MoneyCalculationPolicy"] == "per_contract_price_point"
 
 
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():
