@@ -262,6 +262,8 @@ def _apply_margin_accounting_fill(
         strategy_config, product, fields,
         require_exact=engine_mode_for(strategy_config) == "exact",
     )
+    from tools.testers.backtest.modules.fee import _resolve_fee_mode
+    fee_mode = _resolve_fee_mode(strategy_config)
     daily_mark_to_market = _resolve_daily_mark_to_market_enabled(
         strategy_config,
         product,
@@ -279,7 +281,7 @@ def _apply_margin_accounting_fill(
             quantity,
             price,
             multiplier,
-            is_today=True if daily_mark_to_market else None,
+            is_today=True if daily_mark_to_market and fee_mode in {"auto", "custom", "exact"} else None,
         )
         if abs(new_quantity) <= 1e-12:
             new_quantity = 0.0

@@ -15,6 +15,7 @@ from tools.testers.backtest.engines.native.ledger import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_method, _resolve_use_int_position,
     close_position, infer_auto_cost_basis_method, mark_to_market, open_position, _apply_daily_mark_to_market,
@@ -33,7 +34,12 @@ def _config(**values) -> StrategyConfig:
     s = Strategy(alias="S")
     field_values = {}
     for key, value in values.items():
-        ref = getattr(EngineModule, key, None) or getattr(TradingRuleModule, key, None) or getattr(MarginModule, key)
+        ref = (
+            getattr(EngineModule, key, None)
+            or getattr(TradingRuleModule, key, None)
+            or getattr(FeeModule, key, None)
+            or getattr(MarginModule, key)
+        )
         field_values[ref] = value
     return StrategyConfig(strategy=s, field_values=field_values)
 
@@ -432,6 +438,55 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
     assert ledger.get(_cash_ref()).to_major() == pytest.approx(1000.0 + 0.2)
     entry = ledger.get(_positions_ref())[product]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 18.0, False)]
+
+
+def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode_does_not_need_split():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "custom",
+            TradingRuleModule.accounting_mode: "Custom",
+            TradingRuleModule.cost_basis_method: "FIFO",
+            TradingRuleModule.daily_mark_to_market_enabled: True,
+            FeeModule.fee_mode: "zero",
+            MarginModule.margin_mode: "auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([
+                Lot(quantity=1.0, entry_price=20.0, multiplier=1.0, is_today=None),
+                Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=None),
+            ]),
+            settlement_price=20.0,
+            equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={strategy: ledger})
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 18.0}, "close": {product: 18.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 18.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 18.0, None)]
 
 
 def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
