@@ -51,7 +51,14 @@ class DataMoney:
         return DataMoney(self.amount - other.amount, self.currency, self.use_minor_units, self.scale)
 
     def __mul__(self, rate: Any) -> "DataMoney":
-        # rate is a dimensionless ratio (fee rate, margin ratio, ...), not another DataMoney
+        # rate is a dimensionless ratio (fee rate, margin ratio, ...), not another DataMoney.
+        # In minor-unit mode this rounds to the minor unit on every call (via
+        # from_major) -- fine for a single scaling, but chaining several
+        # DataMoney multiplications rounds once per step instead of once at
+        # the final amount. Production accounting code deliberately avoids
+        # this: it composes the underlying float arithmetic first and wraps
+        # the final result in one DataMoney.from_major call (the "aggregate"
+        # convention -- see trading_rule._money_calculation_policy).
         if self.use_minor_units:
             return DataMoney.from_major(
                 self.to_major() * rate, currency=self.currency,
