@@ -101,6 +101,12 @@ class MarketDataModule(ExecutableModule):
         # bases (open/high/low/close/vwap/settlement/pre_settlement) and
         # volume share the same event timestamp semantics; legacy consumers
         # still read current_prices as the close-price view.
+    current_tradable_status: ClassVar[FieldRef[Any]] = FieldRef("current_tradable_status")
+        # dict[Product, bool] for the current event timestamp. This is the
+        # market-mechanics gate ("can an order be attempted now?"), distinct
+        # from factor membership. Today it is inferred from usable prices;
+        # exchange-rule modules can later override/extend it with halt/limit
+        # state without changing strategy modules.
     data_source_mode: ClassVar[FieldRef[str]] = FieldRef("data_source_mode")
     data_source: ClassVar[FieldRef[str]] = FieldRef("data_source")
         # which raw data source the data-prep stage should load raw_prices/
@@ -151,6 +157,7 @@ class MarketDataModule(ExecutableModule):
         ),
         "current_historical_fields": FieldDefinition(public=False),
         "current_market_snapshot": FieldDefinition(public=False),
+        "current_tradable_status": FieldDefinition(public=False),
         "data_source_mode": FieldDefinition(
             public=True, label="数据源模式", default="auto", control_template="select", tab="data_source",
             options=(("auto", "自动选择"), ("list", "指定列表")),
@@ -244,25 +251,25 @@ class MarketDataModule(ExecutableModule):
     )
 
     lookup_current_prices_on_signal: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices, current_market_snapshot),
+        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
         description="读取信号时点价格",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices, current_market_snapshot),
+        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
         description="读取行情时点价格",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_order: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices, current_market_snapshot),
+        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
         description="读取订单时点价格",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_ledger_notice: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices, current_market_snapshot),
+        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status),
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=1,
         description="读取账本通知时点价格",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
@@ -1274,6 +1281,7 @@ def _set_current_market_snapshot(state, ctx) -> None:
     close_prices = snapshot.get("close", {})
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
     ctx.set(MarketDataModule.current_prices, close_prices)
+    ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
 
 
 def _set_current_historical_fields(state, ctx) -> None:
@@ -1333,7 +1341,13 @@ def current_prices_at(state, timestamp: pd.Timestamp) -> dict:
     """
     table = current_prices_table_for(state)
     row = row_at(table, timestamp, asof=True)
-    return {product: float(cast(Any, row[product])) for product in table.columns}
+    prices: dict[Any, float] = {}
+    for product in table.columns:
+        value = row[product]
+        if pd.isna(value):
+            continue
+        prices[product] = float(cast(Any, value))
+    return prices
 
 
 def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
@@ -1357,6 +1371,26 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
     if volume:
         snapshot["volume"] = volume
     return snapshot
+
+
+def tradable_status_from_snapshot(snapshot: dict[str, dict[Any, float]]) -> dict[Any, bool]:
+    close_prices = snapshot.get("close") or {}
+    return {product: True for product, price in close_prices.items() if _usable_price(price)}
+
+
+def is_product_tradable(tradable_status: dict[Any, bool] | None, product: Any, prices: dict[Any, float] | None = None) -> bool:
+    if tradable_status is not None:
+        return bool(tradable_status.get(product, False))
+    if prices is None:
+        return True
+    return _usable_price(prices.get(product))
+
+
+def _usable_price(value: object) -> bool:
+    try:
+        return value is not None and not pd.isna(cast(Any, value)) and float(cast(Any, value)) > 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _table_values_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:

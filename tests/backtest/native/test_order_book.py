@@ -84,6 +84,36 @@ def test_basic_size_order_subtracts_existing_position():
     assert deltas[p1] == pytest.approx(100.0 - 30.0)  # target 100, already hold 30
 
 
+def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():
+    s = Strategy(alias="S")
+    p = _product()
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:01"), event_queue=EventQueue(),
+                       active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {})
+    ctx.set(MarketDataModule.current_tradable_status, {p: False})
+    ctx.set_for(LedgerModule.equity, s, 1000.0)
+    # Target dropped to zero, but the product cannot trade at this timestamp.
+    # The engine must keep the position instead of crashing on prices[p] or
+    # generating an impossible sell order.
+    ctx.set_for(GroupMembershipModule.target_weights, s, {})
+
+    class _FakeLedger:
+        def get(self, ref, default=None):
+            return {p: ProductPosition(quantity=30.0)}
+
+    class _FakeAccount:
+        ledgers = {s: _FakeLedger()}
+        runtime_info_rows = []
+        runtime_info_sink = None
+
+    account = _FakeAccount()
+    _basic_size_order(account, ctx)
+
+    assert ctx.get_for(OrderBookModule.raw_deltas, s) == {}
+    assert account.runtime_info_rows
+    assert account.runtime_info_rows[0]["code"] == "order_target_skipped_untradable"
+
+
 def test_construct_orders_skips_zero_deltas():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
