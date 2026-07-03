@@ -47,7 +47,7 @@ from tools.data.field_history import (
     resolve_historical_fields_for_product,
 )
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
-from tools.traderules import exchange_rule_defaults_for_product
+from tools.traderules import exchange_rule_defaults_for_product, exchange_tradable_status_for_snapshot
 
 
 @dataclass
@@ -1374,8 +1374,7 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
 
 
 def tradable_status_from_snapshot(snapshot: dict[str, dict[Any, float]]) -> dict[Any, bool]:
-    close_prices = snapshot.get("close") or {}
-    return {product: True for product, price in close_prices.items() if _usable_price(price)}
+    return exchange_tradable_status_for_snapshot(snapshot)
 
 
 def is_product_tradable(tradable_status: dict[Any, bool] | None, product: Any, prices: dict[Any, float] | None = None) -> bool:
