@@ -20,6 +20,17 @@ _LOCAL_CNFUTURES_DEFAULT_FIELDS: dict[str, object] = {
     "MoneyCalculationPolicy": "aggregate",
 }
 
+_LOCAL_CNFUTURES_FIELD_LABELS: dict[str, str] = {
+    "MoneyCalculationPolicy": "金额计算口径",
+}
+
+_LOCAL_CNFUTURES_FIELD_NOTES: dict[str, str] = {
+    "MoneyCalculationPolicy": (
+        "LocalCNFutures 默认按合约/持仓总额公式计算保证金、手续费和逐日盯市盈亏，"
+        "再在现金/保证金账户落账时按币种精度处理；产品级或合约级历史字段优先。"
+    ),
+}
+
 
 def register_local_cnfutures_exchange_rules() -> None:
     for exchange_id in _LOCAL_CNFUTURES_EXCHANGES:
@@ -29,6 +40,12 @@ def register_local_cnfutures_exchange_rules() -> None:
                 fields=_LOCAL_CNFUTURES_DEFAULT_FIELDS,
                 provider="LocalCNFutures",
                 label="中国期货交易所默认清算规则",
+                note=(
+                    "交易所级默认值只补足产品/合约历史字段缺口；费率、乘数、保证金率等"
+                    "时间变化字段仍由 FieldHistory/OpenCTP 等更细来源覆盖。"
+                ),
+                field_labels=_LOCAL_CNFUTURES_FIELD_LABELS,
+                field_notes=_LOCAL_CNFUTURES_FIELD_NOTES,
             )
         )
 

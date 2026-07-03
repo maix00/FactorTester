@@ -38,8 +38,16 @@
         html += '</tr></thead><tbody>';
         keys.forEach(function(key) {
             var entry = fields[key] || {};
+            var label = entry.label || key;
+            var note = entry.note || entry.source_note || '';
+            var source = entry.source || '';
             html += '<tr style="border-bottom:1px solid #eef2f7;">';
-            html += '<td style="padding:5px 10px;font-family:monospace;color:#334155;">' + escapeHTML(key) + '</td>';
+            html += '<td style="padding:5px 10px;color:#334155;">';
+            html += '<div style="font-weight:600;">' + escapeHTML(label) + '</div>';
+            if (label !== key) html += '<div style="font-family:monospace;color:#94a3b8;font-size:11px;">' + escapeHTML(key) + '</div>';
+            if (source) html += '<div style="color:#64748b;font-size:11px;margin-top:1px;">' + escapeHTML(source) + '</div>';
+            if (note) html += '<div style="color:#667085;font-size:11px;line-height:1.35;margin-top:2px;">' + escapeHTML(note) + '</div>';
+            html += '</td>';
             html += '<td style="padding:5px 10px;color:#555;word-break:break-all;">' + formatValue(entry.value) + '</td>';
             html += '<td style="padding:5px 10px;color:#94a3b8;">' + escapeHTML(entry.type || '') + '</td>';
             html += '</tr>';

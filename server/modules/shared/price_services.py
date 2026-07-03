@@ -26,6 +26,7 @@ from tools.products.Futures import (
 )
 from tools.products.Product import Product
 from tools.products.categories.Category import CategoryTree, combine_trees
+from tools.traderules import exchange_rule_manifest_for_product
 
 
 @lru_cache(maxsize=1)
@@ -331,9 +332,36 @@ def reflect_public_fields(obj: Any, *, extra: dict[str, Any] | None = None) -> d
     return fields
 
 
+def _exchange_rule_fields(product: Any) -> dict[str, dict[str, Any]]:
+    manifest = exchange_rule_manifest_for_product(product)
+    if not manifest:
+        return {}
+    source_label = str(manifest.get('label') or manifest.get('provider') or '交易所默认规则')
+    rule_note = str(manifest.get('note') or '')
+    fields: dict[str, dict[str, Any]] = {}
+    for item in manifest.get('fields', []):
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get('key') or '')
+        if not key:
+            continue
+        item_note = str(item.get('note') or '')
+        fields[key] = {
+            'value': _serialize_field_value(item.get('value')),
+            'type': type(item.get('value')).__name__,
+            'label': item.get('label') or key,
+            'note': item_note,
+            'source': source_label,
+            'source_note': rule_note,
+        }
+    return fields
+
+
 def product_public_fields(product: Any) -> dict[str, Any]:
     """Reflect current backend product fields (class, public attrs, fee/trading-spec fields)."""
-    return reflect_public_fields(product, extra=cn_futures_trading_spec_fields(product))
+    fields = reflect_public_fields(product, extra=cn_futures_trading_spec_fields(product))
+    fields.update(_exchange_rule_fields(product))
+    return fields
 
 
 def supports_adjusted_price(product) -> bool:
