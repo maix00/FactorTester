@@ -14,8 +14,9 @@ module re-implements. See ADR-032.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Protocol, cast
 
 from tools.testers.backtest.engines.native.fields import FieldRef
 
@@ -28,6 +29,13 @@ class CounterPartyProfile:
 
 
 _COUNTERPARTY_PROFILES: dict[str, CounterPartyProfile] = {}
+
+
+class _StrategyBookLike(Protocol):
+    ledger_specs: Mapping[str, Any]
+
+    def ledger_ids_for_strategy(self, strategy: object) -> tuple[str, ...]:
+        ...
 
 
 def register_counterparty_profile(profile: CounterPartyProfile) -> CounterPartyProfile:
@@ -45,6 +53,112 @@ def registered_counterparty_profiles() -> dict[str, CounterPartyProfile]:
     return dict(_COUNTERPARTY_PROFILES)
 
 
+def resolve_counterparty_profiles_by_ledger(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    strategy_book: object | None = None,
+    counterparty: str | CounterPartyProfile | None = None,
+    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
+    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
+) -> dict[str, str]:
+    """Resolve CounterParty input to ledger-level profiles.
+
+    Existing settings are per-strategy because StrategyConfig is per-strategy.
+    Real CounterParty semantics are per-ledger: two strategies sharing one
+    ledger cannot disagree on fee/margin/accounting terms. Per-ledger input is
+    the explicit override; per-strategy values that collide on the same ledger
+    raise instead of silently picking one.
+    """
+    from tools.testers.backtest.modules.strategy_book import StrategyBookSimple
+
+    book = cast(_StrategyBookLike, strategy_book or StrategyBookSimple())
+    aliases = tuple(str(alias) for alias in resolved_settings_by_alias)
+    ledger_ids_by_alias = {
+        alias: tuple(str(value) for value in book.ledger_ids_for_strategy(alias))
+        for alias in aliases
+    }
+    result: dict[str, str] = {}
+
+    for alias, ledger_ids in ledger_ids_by_alias.items():
+        for ledger_id in ledger_ids:
+            spec = getattr(book, "ledger_specs", {}).get(ledger_id)
+            _put_counterparty_profile(
+                result,
+                ledger_id,
+                getattr(spec, "counterparty_profile", None),
+                source=f"strategy_book.ledgers[{ledger_id!r}]",
+            )
+
+    unified_profile = _profile_id(counterparty)
+    if unified_profile:
+        for ledger_ids in ledger_ids_by_alias.values():
+            for ledger_id in ledger_ids:
+                result.setdefault(ledger_id, unified_profile)
+
+    strategy_overrides = counterparty_by_strategy or {}
+    for alias, settings in resolved_settings_by_alias.items():
+        raw_profile = strategy_overrides.get(str(alias), settings.get("counterparty_profile"))
+        profile_id = _profile_id(raw_profile)
+        if not profile_id:
+            continue
+        for ledger_id in ledger_ids_by_alias[str(alias)]:
+            _put_counterparty_profile(
+                result,
+                ledger_id,
+                profile_id,
+                source=f"strategy {alias!r}",
+            )
+
+    for ledger_id, raw_profile in (counterparty_by_ledger or {}).items():
+        profile_id = _profile_id(raw_profile)
+        if profile_id:
+            result[str(ledger_id)] = profile_id
+    return result
+
+
+def apply_counterparty_profiles_to_resolved_settings(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    strategy_book: object | None = None,
+    counterparty: str | CounterPartyProfile | None = None,
+    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
+    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Project ledger-level CounterParty profiles back to per-strategy settings.
+
+    This is the compatibility bridge for the current StrategyConfig builder.
+    A strategy that can operate multiple ledgers must have the same profile on
+    all of them for this projection to be valid; richer per-ledger execution
+    can consume resolve_counterparty_profiles_by_ledger directly later.
+    """
+    from tools.testers.backtest.modules.strategy_book import StrategyBookSimple
+
+    book = cast(_StrategyBookLike, strategy_book or StrategyBookSimple())
+    profiles_by_ledger = resolve_counterparty_profiles_by_ledger(
+        resolved_settings_by_alias,
+        strategy_book=book,
+        counterparty=counterparty,
+        counterparty_by_strategy=counterparty_by_strategy,
+        counterparty_by_ledger=counterparty_by_ledger,
+    )
+    resolved = {alias: dict(settings) for alias, settings in resolved_settings_by_alias.items()}
+    for alias in resolved:
+        ledger_profiles = {
+            profiles_by_ledger[ledger_id]
+            for ledger_id in book.ledger_ids_for_strategy(alias)
+            if ledger_id in profiles_by_ledger
+        }
+        if not ledger_profiles:
+            continue
+        if len(ledger_profiles) > 1:
+            raise ValueError(
+                f"strategy {alias!r} maps to ledgers with different counterparty profiles: "
+                f"{sorted(ledger_profiles)}"
+            )
+        resolved[alias].setdefault("counterparty_profile", next(iter(ledger_profiles)))
+    return resolved
+
+
 def unregister_counterparty_profile(profile_id: str) -> None:
     """Remove a profile and its injected `default_when` entries. Mainly for
     test isolation (this registry is process-global mutable state, same as
@@ -56,6 +170,31 @@ def unregister_counterparty_profile(profile_id: str) -> None:
     for ref in profile.field_defaults:
         _remove_default_when(ref, profile_id)
     _refresh_counterparty_profile_options()
+
+
+def _profile_id(profile: str | CounterPartyProfile | None) -> str | None:
+    if profile in (None, ""):
+        return None
+    if isinstance(profile, CounterPartyProfile):
+        register_counterparty_profile(profile)
+        return profile.id
+    profile_id = str(profile)
+    if profile_id and profile_id not in _COUNTERPARTY_PROFILES:
+        raise ValueError(f"unknown counterparty profile: {profile_id!r}")
+    return profile_id or None
+
+
+def _put_counterparty_profile(result: dict[str, str], ledger_id: str, profile: object, *, source: str) -> None:
+    profile_id = _profile_id(profile) if isinstance(profile, (str, CounterPartyProfile)) or profile is None else str(profile)
+    if not profile_id:
+        return
+    existing = result.get(ledger_id)
+    if existing is not None and existing != profile_id:
+        raise ValueError(
+            f"ledger {ledger_id!r} has conflicting counterparty profiles: "
+            f"{existing!r} vs {profile_id!r} from {source}"
+        )
+    result[ledger_id] = profile_id
 
 
 def _remove_default_when(ref: FieldRef, profile_id: str) -> None:

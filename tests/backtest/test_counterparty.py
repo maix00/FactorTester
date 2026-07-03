@@ -8,10 +8,13 @@ from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.settings.counterparty import (
     CounterPartyProfile,
     apply_counterparty_profile_defaults,
+    apply_counterparty_profiles_to_resolved_settings,
     counterparty_profile,
     register_counterparty_profile,
+    resolve_counterparty_profiles_by_ledger,
     unregister_counterparty_profile,
 )
+from tools.testers.backtest.modules.strategy_book import StrategyBook
 
 # GroupMembershipModule's core Flows are unconditionally active (see
 # test_strategy_config_builder.py's _GROUP_FIELDS comment) -- split_count/
@@ -109,3 +112,90 @@ def test_registering_a_second_profile_does_not_clobber_the_first():
         # other test module in the same pytest session -- leaking this
         # test-only profile would corrupt other tests' manifest assertions.
         unregister_counterparty_profile("__test_second_profile__")
+
+
+def test_counterparty_resolves_to_ledger_level_for_shared_strategy_book():
+    book = StrategyBook.from_dict({
+        "strategies": {
+            "A1": "shared-book",
+            "A2": "shared-book",
+        },
+    })
+    resolved = resolve_counterparty_profiles_by_ledger(
+        {
+            "A1": {"counterparty_profile": "exchange_base", **_GROUP_FIELDS},
+            "A2": {"counterparty_profile": "exchange_base", **_GROUP_FIELDS},
+        },
+        strategy_book=book,
+    )
+    assert resolved == {"shared-book": "exchange_base"}
+
+
+def test_counterparty_rejects_conflicting_strategy_profiles_on_shared_ledger():
+    register_counterparty_profile(CounterPartyProfile(
+        id="__test_other_profile__",
+        label="测试另一预设",
+        field_defaults={FeeModule.fee_mode: "fixed"},
+    ))
+    try:
+        book = StrategyBook.from_dict({
+            "strategies": {
+                "A1": "shared-book",
+                "A2": "shared-book",
+            },
+        })
+        try:
+            resolve_counterparty_profiles_by_ledger(
+                {
+                    "A1": {"counterparty_profile": "exchange_base", **_GROUP_FIELDS},
+                    "A2": {"counterparty_profile": "__test_other_profile__", **_GROUP_FIELDS},
+                },
+                strategy_book=book,
+            )
+        except ValueError as exc:
+            assert "conflicting counterparty profiles" in str(exc)
+        else:
+            raise AssertionError("expected shared-ledger counterparty conflict")
+    finally:
+        unregister_counterparty_profile("__test_other_profile__")
+
+
+def test_counterparty_per_ledger_override_can_resolve_shared_ledger_conflict():
+    register_counterparty_profile(CounterPartyProfile(
+        id="__test_ledger_override_profile__",
+        label="测试账本覆盖预设",
+        field_defaults={FeeModule.fee_mode: "fixed"},
+    ))
+    try:
+        book = StrategyBook.from_dict({
+            "strategies": {
+                "A1": "shared-book",
+                "A2": "shared-book",
+            },
+        })
+        resolved = resolve_counterparty_profiles_by_ledger(
+            {
+                "A1": {**_GROUP_FIELDS},
+                "A2": {**_GROUP_FIELDS},
+            },
+            strategy_book=book,
+            counterparty="exchange_base",
+            counterparty_by_ledger={"shared-book": "__test_ledger_override_profile__"},
+        )
+        assert resolved == {"shared-book": "__test_ledger_override_profile__"}
+    finally:
+        unregister_counterparty_profile("__test_ledger_override_profile__")
+
+
+def test_counterparty_projection_keeps_strategy_config_builder_compatible():
+    settings = apply_counterparty_profiles_to_resolved_settings(
+        {
+            "A1": {**_GROUP_FIELDS},
+            "A2": {**_GROUP_FIELDS},
+        },
+        counterparty="exchange_base",
+    )
+    assert settings["A1"]["counterparty_profile"] == "exchange_base"
+    assert settings["A2"]["counterparty_profile"] == "exchange_base"
+    configs = build_strategy_configs(settings)
+    assert {config.get(FeeModule.fee_mode) for config in configs.values()} == {"auto"}
