@@ -335,7 +335,7 @@ def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
     assert pnl.to_major() == pytest.approx(3.0 * (13.5 - 12.0) * 10.0)
 
 
-def test_daily_mark_to_market_rounds_contract_price_points_before_position_quantity():
+def test_daily_mark_to_market_defaults_to_aggregate_money_formula():
     product = _product()
     strategy = Strategy(alias="S")
     config = StrategyConfig(
@@ -359,6 +359,39 @@ def test_daily_mark_to_market_rounds_contract_price_points_before_position_quant
         config,
         {product: 10.005},
         {product: {"VolumeMultiple": 1.0, "SettlementPrice": 10.005}},
+    )
+
+    assert pnl.to_major() == pytest.approx(0.01)
+
+
+def test_daily_mark_to_market_can_use_per_contract_price_point_policy():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            settlement_price=10.0,
+            equity_occupied=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
+        )
+    })
+
+    pnl = mark_to_market(
+        ledger,
+        config,
+        {product: 10.005},
+        {product: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 10.005,
+            "MoneyCalculationPolicy": "per_contract_price_point",
+        }},
     )
 
     assert pnl.to_major() == pytest.approx(0.02)

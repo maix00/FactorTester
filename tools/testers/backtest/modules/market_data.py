@@ -1251,11 +1251,11 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
         accounting_mode = str(config.get(accounting_ref, "") or "")
         if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
-            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
-            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if accounting_mode == "Custom" and str(config.get(FieldRef("cost_basis_method", owner="TradingRuleModule"), "") or "") == "DailyMarkToMarket":
-            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice"))
+            fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         margin_mode = str(config.get(margin_ref, "auto") or "auto")
         allocation = str(config.get(allocation_ref, "") or "")
         if margin_mode not in {"none", "zero"} or allocation == "equal_margin":
