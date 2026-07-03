@@ -167,6 +167,24 @@ def test_group_quantile_membership_ignores_products_without_current_price():
     assert weights == {tradable: pytest.approx(1.0)}
 
 
+def test_group_quantile_membership_uses_explicit_tradable_status():
+    s = Strategy(alias="S")
+    tradable, halted = _product(), _product()
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.split_count: 1, GroupMembershipModule.group_index: 0,
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set(MarketDataModule.current_prices, {tradable: 10.0, halted: 10.0})
+    ctx.set(MarketDataModule.current_tradable_status, {tradable: True, halted: False})
+    ctx.set_for(FactorSignalModule.signal_value, s, {halted: 100.0, tradable: 1.0})
+
+    _group_quantile_membership(account, ctx)
+
+    weights = ctx.get_for(GroupMembershipModule.target_weights, s)
+    assert weights == {tradable: pytest.approx(1.0)}
+
+
 def test_group_quantile_membership_applies_product_mask_after_full_bucket_selection():
     s = Strategy(alias="S")
     products = [_product() for _ in range(4)]

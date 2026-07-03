@@ -30,6 +30,7 @@ from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_prices_table_for,
     historical_fields_for_product,
+    is_product_tradable,
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_book import OrderBookModule
@@ -217,6 +218,7 @@ def _group_quantile_membership(state, ctx) -> None:
         signal_value = _tradable_signal_values(
             ctx.get_for(FactorSignalModule.signal_value, strategy, {}),
             ctx.get(MarketDataModule.current_prices),
+            ctx.get(MarketDataModule.current_tradable_status, None),
         )
         n_groups = config.get(GroupMembershipModule.split_count, 1)
         group_index = config.get(GroupMembershipModule.group_index, 0)
@@ -259,21 +261,30 @@ def _group_quantile_membership(state, ctx) -> None:
         _record_target_trace(state, strategy, ctx.timestamp, weights)
 
 
-def _tradable_signal_values(signal_value: dict, current_prices: dict | None) -> dict:
-    """The rankable cross-section: products must have a price (tradable)
-    AND a real signal value. A NaN factor value cannot be ranked -- NaN
-    comparisons are undefined under sorted()'s total-order assumption, so
-    without this filter the product would silently land in an arbitrary
-    bucket. Dropping it here also shrinks the bucket boundaries to the
-    valid universe, matching cross-section quantile convention."""
+def _tradable_signal_values(
+    signal_value: dict,
+    current_prices: dict | None,
+    tradable_status: dict | None = None,
+) -> dict:
+    """The rankable cross-section: products must be tradable candidates AND
+    have a real signal value.
+
+    ``tradable_status`` is the market-mechanics gate. ``current_prices`` is
+    only a compatibility fallback for tests/legacy callers that do not yet
+    publish the explicit status field. A NaN factor value cannot be ranked --
+    NaN comparisons are undefined under sorted()'s total-order assumption, so
+    without this filter the product would silently land in an arbitrary bucket.
+    Dropping it here also shrinks the bucket boundaries to the valid universe,
+    matching cross-section quantile convention."""
     if not signal_value:
         return {}
-    if current_prices is not None and not current_prices:
+    if tradable_status is not None and not tradable_status:
         return {}
-    tradable = None if current_prices is None else set(current_prices)
+    if tradable_status is None and current_prices is not None and not current_prices:
+        return {}
     return {
         product: value for product, value in signal_value.items()
-        if (tradable is None or product in tradable) and not pd.isna(value)
+        if is_product_tradable(tradable_status, product, current_prices) and not pd.isna(value)
     }
 
 
