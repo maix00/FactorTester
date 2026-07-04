@@ -217,7 +217,10 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
         return False
     fields = historical_fields or {}
     if mode == "Custom":
-        return bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
+        enabled = bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
+        if enabled:
+            _validate_daily_mark_to_market_ledger_config(product, ledger_config=ledger_config)
+        return enabled
     explicit = getattr(ledger_config, "daily_mark_to_market_enabled", None)
     if explicit is not None:
         return bool(explicit)
@@ -248,6 +251,15 @@ def _validate_daily_mark_to_market_cost_basis(
     ledger_config=None,
 ) -> None:
     if bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)) and method == "WeightAverage":
+        raise ValueError(
+            f"Daily mark-to-market requires a lot-based cost basis for {product}; "
+            "use FIFO, LIFO, or HIFO instead of WeightAverage"
+        )
+
+
+def _validate_daily_mark_to_market_ledger_config(product: object, *, ledger_config=None) -> None:
+    method = str(getattr(ledger_config, "cost_basis_method", None) or "WeightAverage")
+    if method == "WeightAverage":
         raise ValueError(
             f"Daily mark-to-market requires a lot-based cost basis for {product}; "
             "use FIFO, LIFO, or HIFO instead of WeightAverage"

@@ -122,8 +122,27 @@ def test_ledger_custom_daily_mark_to_market_respects_explicit_switch():
     assert _resolve_daily_mark_to_market_enabled_for_ledger(
         product,
         {},
-        ledger_config=_ledger_config(accounting_mode="Custom", daily_mark_to_market_enabled=True),
+        ledger_config=_ledger_config(
+            accounting_mode="Custom",
+            cost_basis_method="FIFO",
+            daily_mark_to_market_enabled=True,
+        ),
     ) is True
+
+
+def test_ledger_custom_daily_mark_to_market_rejects_weight_average_basis():
+    product = _product()
+
+    with pytest.raises(ValueError, match="lot-based cost basis"):
+        _resolve_daily_mark_to_market_enabled_for_ledger(
+            product,
+            {},
+            ledger_config=_ledger_config(
+                accounting_mode="Custom",
+                cost_basis_method="WeightAverage",
+                daily_mark_to_market_enabled=True,
+            ),
+        )
 
 
 def test_resolve_method_auto_uses_fifo_when_fee_exists_without_close_today_fields():
@@ -398,6 +417,57 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert updated_position.average_cost is None
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
+
+
+def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_basis():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+            MarginModule.margin_mode: "auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=-2.0,
+            lots=deque([
+                Lot(quantity=-2.0, entry_price=10.0, multiplier=10.0, is_today=False),
+            ]),
+            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
+    account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({strategy}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 12.0}, "close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "SettlementPrice": 12.0,
+            "ShortMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    updated_cash = ledger.get(_cash_ref())
+    updated_position = ledger.get(_positions_ref())[product]
+    # Short PnL = -2 * (12 - 10) * 10 = -40. Margin grows from 2 to 24,
+    # so cash delta = -40 - 22.
+    assert updated_cash.to_major() == pytest.approx(938.0)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
+    assert updated_position.settlement_price == pytest.approx(12.0)
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(-2.0, 12.0, False)]
 
 
 def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger_notice():
