@@ -125,6 +125,27 @@ def test_initialize_ledgers_uses_effective_backtest_product_universe():
     assert set(positions) == {in_range}
 
 
+def test_initialize_ledgers_funds_empty_ledger_created_before_initialization():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="auto")
+    account = _state_with_ledger_configs({s: config})
+    # Some PRE_REPLAY flows ask for the strategy ledger identity before the
+    # ledger initialization flow runs. That creates an empty LedgerState; init
+    # must fund it instead of treating it as an already-funded shared ledger.
+    empty = account.ledger_for_strategy(s)
+    assert empty.get(LedgerModule.cash) is None
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+
+    _initialize_ledgers(account, ctx)
+
+    ledger = account.ledger_for_strategy(s)
+    assert ledger is empty
+    assert ledger.get(LedgerModule.cash).to_major() == pytest.approx(1_000_000.0)
+    assert p in ledger.get(LedgerModule.positions)
+
+
 def test_cash_zeros_after_full_rebalance_with_two_products():
     """Σ target_weights = 1 -> cash should be exactly zero after a full
     rebalance trade batch (algebraic result, not approximation)."""
@@ -349,6 +370,58 @@ def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
 
     assert account.ledger_for_strategy(s).get(LedgerModule.cash).to_major() == pytest.approx(1_000_200.0)
     assert close_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_200.0)
+
+
+def test_margin_recalculation_uses_remaining_position_side_not_order_side():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(
+        s,
+        engine_mode="custom",
+        accounting_mode="Auto",
+        margin_mode="auto",
+    )
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    fields = {
+        p: {
+            "VolumeMultiple": 1.0,
+            "LongMarginRatioByMoney": 0.10,
+            "ShortMarginRatioByMoney": 0.90,
+        }
+    }
+    open_ts = pd.Timestamp("2024-01-01")
+    open_order = Order(instrument=p, timestamp=open_ts, quantity=10.0, intent_quantity=10.0, strategy=s)
+    open_ctx = FlowContext(
+        timestamp=open_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, open_ts, s, open_order)]},
+    )
+    open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    open_ctx.set(MarketDataModule.current_historical_fields, fields)
+    _basic_cash_update(account, open_ctx)
+
+    close_ts = pd.Timestamp("2024-01-02")
+    close_order = Order(instrument=p, timestamp=close_ts, quantity=-4.0, intent_quantity=-4.0, strategy=s)
+    close_ctx = FlowContext(
+        timestamp=close_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, close_ts, s, close_order)]},
+    )
+    close_ctx.set(MarketDataModule.current_prices, {p: 110.0})
+    close_ctx.set(MarketDataModule.current_historical_fields, fields)
+
+    _basic_cash_update(account, close_ctx)
+
+    entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
+    assert entry.quantity == pytest.approx(6.0)
+    assert entry.equity_occupied.to_major() == pytest.approx(6.0 * 110.0 * 0.10)
+    assert account.ledger_for_strategy(s).get(LedgerModule.cash).to_major() == pytest.approx(999_974.0)
 
 
 def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():

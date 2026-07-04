@@ -109,8 +109,13 @@ def _initialize_ledgers(state, ctx) -> None:
         # read the resolved field, don't re-decide the policy here.
         use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
         ledger = state.ledgers.get(ledger_key)
+        existing_cash = ledger.get(LedgerModule.cash) if ledger is not None else None
         if ledger is None:
             ledger = LedgerState(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
+            ledger.set(LedgerModule.cash, DataMoney.from_major(
+                initial_capital, currency=base_currency, use_minor_units=use_minor_units))
+        elif existing_cash is None:
+            ledger.base_currency = base_currency
             ledger.set(LedgerModule.cash, DataMoney.from_major(
                 initial_capital, currency=base_currency, use_minor_units=use_minor_units))
         else:
@@ -310,7 +315,6 @@ def _apply_margin_accounting_fill(
 ) -> DataMoney:
     fields = historical_fields_for_product(historical_fields, product)
     multiplier = contract_multiplier_from_fields(historical_fields, product)
-    margin_ratio = _resolved_margin_ratio_for_order(strategy_config, fields, quantity, price, multiplier, ledger_config)
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = _entry_margin_major(entry)
     prior_quantity = float(entry.quantity or 0.0)
@@ -361,7 +365,14 @@ def _apply_margin_accounting_fill(
         entry.average_cost = new_cost
 
     entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
-    after_margin = abs(new_quantity) * price * multiplier * margin_ratio
+    after_margin = abs(new_quantity) * price * multiplier * _resolved_margin_ratio_for_position_after_fill(
+        strategy_config,
+        fields,
+        new_quantity,
+        price,
+        multiplier,
+        ledger_config,
+    )
     entry.equity_occupied = DataMoney.from_major(
         after_margin,
         currency=cash.currency,
@@ -429,6 +440,31 @@ def _resolved_margin_ratio_for_order(
     market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
     ratio = _resolve_margin_ratio(strategy_config, market_ratio, ledger_config)
     return float(1.0 if ratio is None else ratio)
+
+
+def _resolved_margin_ratio_for_position_after_fill(
+    strategy_config,
+    fields: dict[str, object],
+    new_quantity: float,
+    price: float,
+    multiplier: float,
+    ledger_config=None,
+) -> float:
+    if abs(new_quantity) <= 1e-12:
+        return 0.0
+    # Margin is a property of the remaining position, not of the order used to
+    # reach it. A sell that reduces a long position must still use the long
+    # margin fields for the remaining long exposure; a buy reducing a short
+    # must still use the short fields. If the order flips the position, the
+    # new_quantity sign naturally selects the new side.
+    return _resolved_margin_ratio_for_order(
+        strategy_config,
+        fields,
+        new_quantity,
+        price,
+        multiplier,
+        ledger_config,
+    )
 
 
 def _market_margin_ratio(fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float | None:
