@@ -181,7 +181,7 @@ def test_final_cash_reflects_per_method_realized_pnl(method: str):
     lot-accounting contract -- weighted-average realized P&L under a FIFO
     setting is wrong even though total equity hides the difference."""
     account, strategy = _run_gold_standard(method)
-    cash = account.ledgers[strategy].get(LedgerModule.cash).to_major()
+    cash = account.ledger_for_strategy(strategy).get(LedgerModule.cash).to_major()
     assert cash == pytest.approx(_EXPECTED_FINAL_CASH[method], abs=1.0)
 
 
@@ -191,7 +191,7 @@ def test_lot_methods_track_open_lots_in_the_ledger(method: str):
     Lot-based methods must actually maintain the lot queue through engine
     fills -- an empty lot queue means floating P&L silently reads as zero."""
     account, strategy = _run_gold_standard(method)
-    positions = account.ledgers[strategy].get(LedgerModule.positions)
+    positions = account.ledger_for_strategy(strategy).get(LedgerModule.positions)
     lot_totals = sorted(
         float(sum(abs(lot.quantity) for lot in entry.lots or ()))
         for entry in positions.values()

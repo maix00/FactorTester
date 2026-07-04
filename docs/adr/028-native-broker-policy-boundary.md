@@ -1,5 +1,10 @@
 # ADR-028：Native Broker Policy 与 TargetStrategy 的边界
 
+> **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 本文档的 `BrokerModule`/`NativeBroker`
+> 已改名为 `StrategyBookModule`/`StrategyBookSimple`（只做策略登记+账本路由），
+> "迁移计划"里阶段 4-9（`BrokerModule` 暴露 9 个 policy selector，各模块调用
+> broker policy）的方向已被放弃——正文以下内容保留作历史决策记录，不再是当前架构。
+
 - **日期**：2026-07-01
 - **状态**：已接受（2026-07-01 审计后修订，见下）
 - **决策者**：FactorTester 团队
@@ -107,7 +112,7 @@ TargetStrategyModule -> OrderBookModule -> BrokerModule policies -> LedgerModule
 
 当前 native 默认行为应被命名并复刻为 `NativeBroker`，默认字段为：
 
-- `broker_model = native_default`
+- `broker_model = native_broker`
 - `cancel_policy = replace_pending_same_product`
 - `order_validity = next_signal`
 - `matching_policy = next_bar_open_full_fill`（映射自 `OrderExecutionModule.
@@ -151,8 +156,15 @@ Custom broker 可以覆写完整 broker，也可以只覆写部分 policy。未�
 `BrokerStore` 只保存 broker runtime 自身状态，例如：
 
 - `broker_by_strategy`
+- `ledger_ids_by_strategy`
 - broker policy cache
 - broker session state
+
+`ledger_id` 是账本标识，不是 broker 自己的持仓容器。`BrokerModule` 负责把
+strategy/order 路由到 `ledger_id`；现金、`ProductPosition` 和 `lots` deque 仍由
+`Ledger` 保存，并由 `BacktestRunState.ledgers[ledger_id]` 索引。`NativeBroker`
+为每个 strategy 分配私有 `ledger_id`，`CustomBroker` 可以让多个 strategy 共享同一
+`ledger_id`，也可以在订单级覆盖 `ledger_id` 来支持同一 strategy 操纵多个账本。
 
 现阶段 `OrderStore.pending_orders` 先保留在 `OrderStore`。如果后续确认它只表示
 broker-side open orders，再迁移或重命名为 `BrokerStore.open_orders`。

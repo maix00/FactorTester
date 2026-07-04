@@ -67,7 +67,7 @@ def _basic_size_order(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     tradable_status = ctx.get(MarketDataModule.current_tradable_status, None)
     for strategy in ctx.active_strategies:
-        ledger = state.ledgers[strategy]
+        ledger = state.ledger_for_strategy(strategy)
         equity = ctx.get_for(LedgerModule.equity, strategy)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,

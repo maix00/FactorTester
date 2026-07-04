@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 if TYPE_CHECKING:
+    from .ledger import Ledger
     from tools.testers.backtest.engines.native.strategy import Strategy
 
 
@@ -38,10 +39,10 @@ class EventKind(IntEnum):
 class EventDraft:
     kind: EventKind
     timestamp: pd.Timestamp
-    strategy: "Strategy"   # which strategy this event belongs to — different
-                            # strategies' SIGNAL events can legitimately land on the
-                            # same timestamp; the scheduler batches/dispatches by this
-                            # field, not by payload (a SIGNAL event has no Order yet)
+    strategy: "Strategy | None" = None
+        # Strategy-scoped events: BAR/SIGNAL/ORDER/ORDER_NOTICE.  LEDGER_NOTICE
+        # can set this to None and route by ledger instead.
     payload: Any = None
     index_key: Any = None
     index_names: tuple[Any, ...] = ()
+    ledger: "Ledger | None" = None

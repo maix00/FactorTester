@@ -322,27 +322,6 @@ def _safe_bool(obj) -> bool:
     return bool(obj)
 
 
-def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
-    """Parse initial capital with a stable backend default."""
-    if raw in (None, ''):
-        return float(default)
-    value = _safe_float(raw)
-    if value is None or value <= 0:
-        raise ValueError(f'初始金额必须是正数，收到: {raw!r}')
-    return float(value)
-
-
-def _parse_currency_code(raw: Any, default: str = "CNY") -> str:
-    return normalize_currency(raw, default)
-
-
-def _parse_nonnegative_rate(raw: Any, default: float = 0.0) -> float:
-    value = _safe_float(default if raw in (None, '') else raw)
-    if value is None or value < 0:
-        raise ValueError(f'换汇佣金率必须是非负数，收到: {raw!r}')
-    return float(value)
-
-
 def _resolve_flat_backtest_settings(
     payload: dict[str, Any],
     groups: list[dict[str, Any]],
@@ -3190,9 +3169,6 @@ def run_group_test_stream():
                 raise ValueError(f'当前分组测试不支持数据源 {data_source}，请使用自动')
             if frequency and frequency != 'auto':
                 raise ValueError(f'当前分组测试不支持数据频率 {frequency}，请使用自动')
-            _parse_initial_capital(local_settings.get('initial_capital'))
-            _parse_currency_code(local_settings.get('base_currency'))
-
             resolved_backtest_settings = _resolve_flat_backtest_settings(
                 payload, flat_groups, flat_ls_configs)
             run_registry = _get_group_test_registry()

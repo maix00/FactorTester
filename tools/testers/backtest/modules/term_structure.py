@@ -360,8 +360,8 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
 
 def _handle_rollover_notice(state, ctx) -> None:
     for strategy in ctx.active_strategies:
-        ledger = state.ledgers.get(strategy)
-        positions = ledger.get(_POSITIONS_REF, {}) if ledger is not None else {}
+        ledger = state.ledger_for_strategy(strategy)
+        positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
         for raw_payload in ctx.payloads_for(strategy):
             payload = raw_payload if isinstance(raw_payload, dict) else {}
@@ -409,9 +409,7 @@ def _handle_rollover_notice(state, ctx) -> None:
 
 def _handle_delivery_force_close_notice(state, ctx) -> None:
     for strategy in ctx.active_strategies:
-        ledger = state.ledgers.get(strategy)
-        if ledger is None:
-            continue
+        ledger = state.ledger_for_strategy(strategy)
         positions = ledger.get(_POSITIONS_REF, {})
         orders: list[Order] = []
         for raw_payload in ctx.payloads_for(strategy):

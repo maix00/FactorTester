@@ -99,7 +99,7 @@ def _resolve_fixed_fee_cost(
     price: float,
     multiplier: float,
 ) -> float | None:
-    if mode in {"zero", "none"}:
+    if mode == "zero":
         return 0.0
     if mode == "fixed":
         return abs(quantity) * price * multiplier * fixed_rate
@@ -114,17 +114,19 @@ def _apply_fee(state, ctx, base_compute) -> None:
         # once per strategy, not once per order, even when a strategy has
         # several simultaneous orders in this batch.
         config = state.config_for(strategy)
-        mode = _resolve_fee_mode(config)
-        fixed_rate = _strategy_value(config, FeeModule.fixed_fee_rate, 0.0)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        positions = state.ledgers[strategy].get(LedgerModule.positions, {})
         for order in ctx.payloads_for(strategy):
             if order.get("reject_reason"):
                 continue
+            ledger = state.ledger_for(order)
+            ledger_config = state.ledger_config_for(ledger)
+            mode = _resolve_fee_mode(config, ledger_config)
+            fixed_rate = getattr(ledger_config, "fixed_fee_rate", None) or 0.0
+            positions = ledger.get(LedgerModule.positions, {})
             price = order.get("effective_price", prices[order.instrument])
             multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
             fixed_fee = _resolve_fixed_fee_cost(
@@ -150,6 +152,7 @@ def _apply_fee(state, ctx, base_compute) -> None:
                 order.instrument,
                 fields,
                 require_exact=engine_mode_for(config) == "exact",
+                ledger_config=ledger_config,
             )
             order.set(
                 "fee_cost",
@@ -169,6 +172,8 @@ def _apply_fee(state, ctx, base_compute) -> None:
                 timestamp=ctx.timestamp,
                 details={"mode": mode},
             )
+    from tools.testers.backtest.modules.cash_rescale import constrain_order_batch_to_execution_cash
+    constrain_order_batch_to_execution_cash(state, ctx)
     base_compute(state, ctx)
 
 
@@ -301,14 +306,21 @@ def _fee_part(quantity: float, *, price: float, multiplier: float, ratio: float,
 
 def _normalise_fee_mode(value: object) -> str:
     mode = str(value or "auto")
-    legacy = {
-        "none": "zero",
-        "market": "auto",
+    allowed = {
+        "auto",
+        "exact",
+        "custom",
+        "close_yesterday",
+        "close_today",
+        "fixed",
+        "zero",
     }
-    return legacy.get(mode, mode)
+    if mode not in allowed:
+        raise ValueError(f"unsupported fee_mode: {mode!r}")
+    return mode
 
 
-def _resolve_fee_mode(config) -> str:
+def _resolve_fee_mode(config, ledger_config=None) -> str:
     engine_mode = engine_mode_for(config)
     if engine_mode == "basic":
         return "zero"
@@ -316,7 +328,11 @@ def _resolve_fee_mode(config) -> str:
         return "auto"
     if engine_mode == "exact":
         return "exact"
-    return _normalise_fee_mode(config.get(FeeModule.fee_mode, "auto"))
+    return _resolve_fee_mode_from_ledger_config(ledger_config)
+
+
+def _resolve_fee_mode_from_ledger_config(ledger_config=None) -> str:
+    return _normalise_fee_mode(getattr(ledger_config, "fee_mode", None) or "auto")
 
 
 def _strategy_value(config, ref: FieldRef, default: Any) -> Any:

@@ -10,7 +10,12 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.targets import GroupTargetCalculator
-from tools.testers.settings.strategy_fields import validate_resolved_strategy_settings
+from tools.testers.settings.strategy_fields import (
+    OBSOLETE_REBALANCE_MODE,
+    POSITION_POLICY,
+    REBALANCE_TRIGGER,
+    required_strategy_value,
+)
 
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
@@ -21,37 +26,33 @@ def should_report_progress(completed: int, total: int, max_updates: int = 100) -
     return completed % stride == 0
 
 
-# ── ADR-028 broker policy selectors ────────────────────────────────
-# NativeBroker's default selector values. Framework runners implement these
-# defaults through their own machinery (backtrader: cancel(previous)/market
-# order next-bar-open fill/FixedBarPerc filler; common helpers: cash rescale
-# in executable_deltas, lot floor, volume-participation cap). A runner must
-# validate the requested selectors against what its framework can actually
-# express and reject the rest — never silently substitute (ADR-024/ADR-028).
+# ── worker execution policy selectors ───────────────────────────────
+# These two selectors are the only ones ever sourced from a real per-strategy
+# field (translator.py's _worker_execution_policy_selectors reads
+# PositionSizingModule.quantity_rounding_policy / LiquidityModule.
+# liquidity_mode) or checked against a real per-engine `supported` set (see
+# zipline.py/backtrader.py/qlib.py's require_worker_execution_policies calls)
+# -- this is deliberately narrow, not a general broker/account policy
+# object (that's StrategyBook for ledger routing, CounterParty for fee/
+# margin/liquidity commercial terms, see ADR-032). A runner must validate the
+# requested selectors against what its framework can actually express and
+# reject the rest — never silently substitute (ADR-024).
 
-BROKER_POLICY_DEFAULTS: dict[str, str] = {
-    "broker_model": "native_default",
-    "cancel_policy": "replace_pending_same_product",
-    "order_validity": "next_signal",
-    "matching_policy": "next_bar_open_full_fill",
-    "accept_policy": "always_accept",
-    "cash_policy": "rescale_buy_orders",
+WORKER_EXECUTION_POLICY_DEFAULTS: dict[str, str] = {
     "min_lot_policy": "floor_to_lot",
     "fill_cap_policy": "no_cap",
-    "price_band_policy": "ignore",
-    "order_state_model": "simple_filled_rejected_cancelled",
 }
 
 
-def broker_policies(strategy: Mapping[str, Any]) -> dict[str, str]:
-    """Requested broker policy selectors, defaulted to NativeBroker values."""
+def worker_execution_policies(strategy: Mapping[str, Any]) -> dict[str, str]:
+    """Requested worker execution policy selectors, defaulted above."""
     return {
         key: str(strategy.get(key) or default)
-        for key, default in BROKER_POLICY_DEFAULTS.items()
+        for key, default in WORKER_EXECUTION_POLICY_DEFAULTS.items()
     }
 
 
-def require_broker_policies(
+def require_worker_execution_policies(
     strategy: Mapping[str, Any],
     *,
     engine: str,
@@ -59,12 +60,12 @@ def require_broker_policies(
 ) -> dict[str, str]:
     """Validate selectors; a value outside the engine's supported set raises."""
     supported = supported or {}
-    policies = broker_policies(strategy)
+    policies = worker_execution_policies(strategy)
     for key, value in policies.items():
-        allowed = supported.get(key, frozenset({BROKER_POLICY_DEFAULTS[key]}))
+        allowed = supported.get(key, frozenset({WORKER_EXECUTION_POLICY_DEFAULTS[key]}))
         if value not in allowed:
             raise ValueError(
-                f"{engine} cannot express broker policy {key}={value!r}; "
+                f"{engine} cannot express worker execution policy {key}={value!r}; "
                 f"supported: {sorted(allowed)}"
             )
     return policies
@@ -112,7 +113,7 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
     if any(not value for value in strategy_ids) or len(set(strategy_ids)) != len(strategy_ids):
         raise ValueError("strategy ids must be non-empty and unique")
     for strategy in strategies:
-        validate_resolved_strategy_settings(strategy)
+        _validate_worker_strategy_settings(strategy)
     rules = payload.get("market_rules", {})
     multipliers = _parse_rule_matrix(
         rules.get("multipliers"), len(timestamps), len(instruments), "multipliers"
@@ -151,6 +152,18 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
         margin_ratios,
         volumes,
     )
+
+
+def _validate_worker_strategy_settings(strategy: Mapping[str, Any]) -> None:
+    """Validate shared split semantics without importing native-only timing policy."""
+
+    if OBSOLETE_REBALANCE_MODE in strategy:
+        raise ValueError(
+            f"{OBSOLETE_REBALANCE_MODE} is obsolete; use "
+            f"{REBALANCE_TRIGGER} and {POSITION_POLICY}"
+        )
+    required_strategy_value(strategy, REBALANCE_TRIGGER)
+    required_strategy_value(strategy, POSITION_POLICY)
 
 
 def target_rows(

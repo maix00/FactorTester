@@ -25,9 +25,9 @@ def test_resolved_settings_map_to_matching_field_refs():
     })
     strategy = next(iter(configs))
     config = configs[strategy]
-    assert config.get(FeeModule.fixed_fee_rate) == 0.001
+    assert config.get(FeeModule.fixed_fee_rate) is None
     assert config.get(EngineModule.engine_mode) == "custom"
-    assert config.get(TradingRuleModule.accounting_mode) == "Custom"
+    assert config.get(TradingRuleModule.accounting_mode) is None
     assert config.get(GroupMembershipModule.split_count) == 5
 
 
@@ -51,8 +51,8 @@ def test_two_strategies_get_independent_configs():
         "A2": {"fixed_fee_rate": 0.002, **_GROUP_FIELDS},
     })
     by_alias = {s.alias: c for s, c in configs.items()}
-    assert by_alias["A1"].get(FeeModule.fixed_fee_rate) == 0.001
-    assert by_alias["A2"].get(FeeModule.fixed_fee_rate) == 0.002
+    assert by_alias["A1"].get(FeeModule.fixed_fee_rate) is None
+    assert by_alias["A2"].get(FeeModule.fixed_fee_rate) is None
 
 
 def test_factor_mode_incremental_activates_signal_live_not_precomputed():
@@ -139,12 +139,57 @@ def test_non_variant_flows_are_always_active():
     assert config.uses_flow("initialize_ledgers")
 
 
+def test_long_short_strategy_does_not_require_group_membership_fields():
+    configs = build_strategy_configs({
+        "LS A1/A5": {
+            "strategy_kind": "long_short",
+            "long_leg_strategy_ids": [{"strategy_id": "A1"}],
+            "short_leg_strategy_ids": [{"strategy_id": "A5"}],
+        },
+    })
+    config = next(iter(configs.values()))
+    assert config.uses_flow("compose_long_short_target")
+    assert not config.uses_flow("group_quantile_membership")
+
+
+def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
+    auto = next(iter(build_strategy_configs({"A1": {"engine_mode": "auto", **_GROUP_FIELDS}}).values()))
+    exact = next(iter(build_strategy_configs({"A1": {"engine_mode": "exact", **_GROUP_FIELDS}}).values()))
+    basic = next(iter(build_strategy_configs({"A1": {"engine_mode": "basic", **_GROUP_FIELDS}}).values()))
+    custom_off = next(iter(build_strategy_configs({
+        "A1": {
+            "engine_mode": "custom",
+            "accounting_mode": "Custom",
+            "cost_basis_method": "FIFO",
+            "daily_mark_to_market_enabled": False,
+            **_GROUP_FIELDS,
+        },
+    }).values()))
+    custom_on = next(iter(build_strategy_configs({
+        "A1": {
+            "engine_mode": "custom",
+            "accounting_mode": "Custom",
+            "cost_basis_method": "FIFO",
+            "daily_mark_to_market_enabled": True,
+            **_GROUP_FIELDS,
+        },
+    }).values()))
+
+    for config in (auto, exact, custom_on):
+        assert config.uses_flow("register_daily_mark_to_market_notices")
+        assert config.uses_flow("apply_daily_mark_to_market")
+    for config in (basic, custom_off):
+        assert not config.uses_flow("register_daily_mark_to_market_notices")
+        assert not config.uses_flow("apply_daily_mark_to_market")
+
+
 def test_apply_strategy_configs_sets_account_attribute():
     account = BacktestRunState()
     apply_strategy_configs(account, {"A1": {"fixed_fee_rate": 0.001, **_GROUP_FIELDS}})
     assert len(account.strategy_configs) == 1
     strategy = next(iter(account.strategy_configs))
-    assert account.strategy_configs[strategy].get(FeeModule.fixed_fee_rate) == 0.001
+    assert account.strategy_configs[strategy].get(FeeModule.fixed_fee_rate) is None
+    assert account.ledger_config_for(f"private:{strategy.alias}").fixed_fee_rate == 0.001
 
 
 def test_missing_frontend_only_default_field_raises():
@@ -160,7 +205,7 @@ def test_ordinary_field_missing_value_materializes_real_default():
     default as a genuine backend fallback when absent -- unlike split_count."""
     configs = build_strategy_configs({"A1": _GROUP_FIELDS})
     config = next(iter(configs.values()))
-    assert config.get(FeeModule.fixed_fee_rate) == 0.0
+    assert config.get(FeeModule.fixed_fee_rate) is None
 
 
 def test_use_minor_units_defaults_to_true_outside_basic_engine_mode():

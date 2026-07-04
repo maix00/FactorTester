@@ -63,7 +63,7 @@ class MarginModule(ExecutableModule):
     }
 
 
-def _resolve_margin_mode(strategy_config) -> str:
+def _resolve_margin_mode(strategy_config, ledger_config=None) -> str:
     engine_mode = engine_mode_for(strategy_config)
     if engine_mode == "basic":
         return "none"
@@ -71,15 +71,30 @@ def _resolve_margin_mode(strategy_config) -> str:
         return "auto"
     if engine_mode == "exact":
         return "exact"
-    return str(strategy_config.get(MarginModule.margin_mode, "auto") or "auto")
+    return str(getattr(ledger_config, "margin_mode", None) or "auto")
 
 
-def _resolve_margin_ratio(strategy_config, market_margin_ratio: float | None) -> float:
-    mode = _resolve_margin_mode(strategy_config)
+def _resolve_margin_mode_from_ledger_config(ledger_config=None) -> str:
+    return str(getattr(ledger_config, "margin_mode", None) or "auto")
+
+
+def _resolve_margin_ratio(strategy_config, market_margin_ratio: float | None, ledger_config=None) -> float:
+    mode = _resolve_margin_mode(strategy_config, ledger_config)
     if mode == "none":
         return 0.0
     if mode == "fixed":
-        return strategy_config.get(MarginModule.fixed_margin_ratio, 1.0)
+        return float(getattr(ledger_config, "fixed_margin_ratio", None) or 1.0)
     if mode == "exact" and market_margin_ratio is None:
         raise KeyError("exact margin mode requires historical MarginRatio")
-    return market_margin_ratio
+    return float(market_margin_ratio or 0.0)
+
+
+def _resolve_margin_ratio_from_ledger_config(market_margin_ratio: float | None, ledger_config=None) -> float:
+    mode = _resolve_margin_mode_from_ledger_config(ledger_config)
+    if mode == "none":
+        return 0.0
+    if mode == "fixed":
+        return float(getattr(ledger_config, "fixed_margin_ratio", None) or 1.0)
+    if mode == "exact" and market_margin_ratio is None:
+        raise KeyError("exact margin mode requires historical MarginRatio")
+    return float(market_margin_ratio or 0.0)

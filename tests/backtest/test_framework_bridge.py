@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from tools.testers.backtest.engines.adapters.frameworks import UnsupportedFrameworkPlan
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.workers import bridge as bridge_module
 from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
@@ -58,6 +58,16 @@ def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
     return strategy, StrategyConfig(strategy=strategy, field_values=values)
 
 
+def _ledger_config(**values: Any) -> LedgerConfig:
+    return LedgerConfig(
+        initial_capital_major=values.get("initial_capital_major"),
+        fee_mode=values.get("fee_mode"),
+        fixed_fee_rate=values.get("fixed_fee_rate"),
+        margin_mode=values.get("margin_mode"),
+        fixed_margin_ratio=values.get("fixed_margin_ratio"),
+    )
+
+
 def test_translate_passes_registered_settings_through_by_field_name():
     _, config = _config(
         "g1",
@@ -71,7 +81,19 @@ def test_translate_passes_registered_settings_through_by_field_name():
         slippage_mode="fixed_bps", slippage_bps=10.0,
         initial_capital_major=250_000.0,
     )
-    out = translate_strategy_config("g1", config, {}, framework="backtrader", membership_index=3)
+    out = translate_strategy_config(
+        "g1",
+        config,
+        {},
+        framework="backtrader",
+        membership_index=3,
+        ledger_config=_ledger_config(
+            initial_capital_major=250_000.0,
+            fee_mode="fixed",
+            fixed_fee_rate=0.001,
+            margin_mode="none",
+        ),
+    )
     assert out["strategy_id"] == "g1"
     assert out["membership_index"] == 3
     assert out["split_count"] == 5
@@ -87,28 +109,43 @@ def test_translate_passes_registered_settings_through_by_field_name():
 
 
 def test_translate_fee_zero_and_fixed_are_representable():
-    _, zero = _config("z", fee_mode="zero")
-    assert translate_strategy_config("z", zero, {}, framework="qlib", membership_index=0)["fee_rate"] == 0.0
-    _, fixed = _config("f", fee_mode="fixed", fixed_fee_rate=0.0005)
-    assert translate_strategy_config("f", fixed, {}, framework="qlib", membership_index=0)["fee_rate"] == 0.0005
+    _, zero = _config("z")
+    assert translate_strategy_config(
+        "z", zero, {}, framework="qlib", membership_index=0,
+        ledger_config=_ledger_config(fee_mode="zero"),
+    )["fee_rate"] == 0.0
+    _, fixed = _config("f")
+    assert translate_strategy_config(
+        "f", fixed, {}, framework="qlib", membership_index=0,
+        ledger_config=_ledger_config(fee_mode="fixed", fixed_fee_rate=0.0005),
+    )["fee_rate"] == 0.0005
 
 
 def test_translate_rejects_per_leg_fee_schedules_instead_of_flattening():
-    _, config = _config("g1", fee_mode="auto")
+    _, config = _config("g1")
     with pytest.raises(UnsupportedFrameworkPlan, match="fee_mode"):
-        translate_strategy_config("g1", config, {}, framework="backtrader", membership_index=0)
+        translate_strategy_config(
+            "g1", config, {}, framework="backtrader", membership_index=0,
+            ledger_config=_ledger_config(fee_mode="auto"),
+        )
 
 
 def test_translate_rejects_historical_margin_modes():
-    _, config = _config("g1", fee_mode="zero", margin_mode="exact")
+    _, config = _config("g1")
     with pytest.raises(UnsupportedFrameworkPlan, match="margin_mode"):
-        translate_strategy_config("g1", config, {}, framework="zipline", membership_index=0)
+        translate_strategy_config(
+            "g1", config, {}, framework="zipline", membership_index=0,
+            ledger_config=_ledger_config(fee_mode="zero", margin_mode="exact"),
+        )
 
 
 def test_translate_copies_long_short_wiring_from_raw_settings():
-    _, config = _config("ls1", fee_mode="zero", margin_mode="none")
+    _, config = _config("ls1")
     raw = {"strategy_kind": "long_short", "long_indices": [0], "short_indices": [1]}
-    out = translate_strategy_config("ls1", config, raw, framework="backtrader", membership_index=2)
+    out = translate_strategy_config(
+        "ls1", config, raw, framework="backtrader", membership_index=2,
+        ledger_config=_ledger_config(fee_mode="zero", margin_mode="none"),
+    )
     assert out["strategy_kind"] == "long_short"
     assert out["long_indices"] == [0]
     assert out["short_indices"] == [1]
@@ -119,8 +156,11 @@ def test_translate_records_minor_unit_fallback_when_requested(monkeypatch):
     # default_when resolution), so use_minor_units must be set explicitly --
     # this asserts the translator's own fallback-recording, not the
     # engine_mode="basic" default policy (covered by ledger_module tests).
-    _, config = _config("g1", fee_mode="zero", margin_mode="none", use_minor_units=True)
-    out = translate_strategy_config("g1", config, {}, framework="qlib", membership_index=0)
+    _, config = _config("g1", use_minor_units=True)
+    out = translate_strategy_config(
+        "g1", config, {}, framework="qlib", membership_index=0,
+        ledger_config=_ledger_config(fee_mode="zero", margin_mode="none"),
+    )
     assert out["_setting_fallbacks"] == [{
         "setting_key": "use_minor_units",
         "module": "minor_unit",
@@ -132,8 +172,11 @@ def test_translate_records_minor_unit_fallback_when_requested(monkeypatch):
 
 
 def test_translate_records_no_fallback_when_major_units_requested():
-    _, config = _config("g1", fee_mode="zero", margin_mode="none", use_minor_units=False)
-    out = translate_strategy_config("g1", config, {}, framework="qlib", membership_index=0)
+    _, config = _config("g1", use_minor_units=False)
+    out = translate_strategy_config(
+        "g1", config, {}, framework="qlib", membership_index=0,
+        ledger_config=_ledger_config(fee_mode="zero", margin_mode="none"),
+    )
     assert "_setting_fallbacks" not in out
 
 
@@ -150,6 +193,11 @@ def _run_state_with_market_data() -> tuple[BacktestRunState, Strategy]:
         initial_capital_major=100_000.0,
     )
     run_state.strategy_configs = {strategy: config}
+    run_state.ledger_configs[run_state.ledger_for_strategy(strategy).ledger] = _ledger_config(
+        initial_capital_major=100_000.0,
+        fee_mode="zero",
+        margin_mode="none",
+    )
     idx = pd.DatetimeIndex([
         pd.Timestamp("2026-01-05 15:00"),
         pd.Timestamp("2026-01-06 15:00"),

@@ -22,7 +22,7 @@ from .common import (
     parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
-    require_broker_policies,
+    require_worker_execution_policies,
     setting_fallback_diagnostics,
     target_quantities,
     target_rows,
@@ -161,7 +161,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
     for strategy_position, (strategy, calculator) in enumerate(
         zip(request.strategies, calculators, strict=True)
     ):
-        require_broker_policies(
+        require_worker_execution_policies(
             strategy,
             engine="zipline",
             supported={"fill_cap_policy": frozenset({"no_cap", "volume_participation"})},
@@ -170,7 +170,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         ledger = Ledger(request.timestamps, strategy_cash, "daily")
         timing = execution_timing(strategy)
         delay_bars = execution_delay_bars(strategy)
-        pending_targets: list[tuple[int, Any]] = []
+        pending_deltas: list[tuple[int, dict[str, float]]] = []
         transaction_number = 0
         equity_curve = {}
         position_curve = {}
@@ -189,24 +189,39 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 for instrument, asset in assets.items()
             }
 
-        def _execute(row: int, timestamp, target) -> None:
-            nonlocal transaction_number, execution_trace_count
+        def _deltas_for_target(row: int, target) -> dict[str, float]:
             ledger._dirty_portfolio = True
             value = float(ledger.portfolio.portfolio_value)
             desired = target_quantities(request, row, target, value, strategy)
             current = _positions()
-            deltas = _zipline_executable_deltas(
+            return _zipline_executable_deltas(
                 request, row, strategy, desired, current, float(ledger.portfolio.cash),
             )
-            if any(abs(delta) > 1e-12 for delta in deltas.values()):
+
+        def _execute(row: int, timestamp, deltas: Mapping[str, float]) -> None:
+            nonlocal transaction_number, execution_trace_count
+            ledger._dirty_portfolio = True
+            current = _positions()
+            executable = _zipline_executable_deltas(
+                request,
+                row,
+                strategy,
+                {
+                    instrument: float(current.get(instrument, 0.0)) + float(deltas.get(instrument, 0.0))
+                    for instrument in request.instruments
+                },
+                current,
+                float(ledger.portfolio.cash),
+            )
+            if any(abs(delta) > 1e-12 for delta in executable.values()):
                 execution_trace_count += 1
                 if collect_trace:
                     execution_trace[timestamp.isoformat()] = execution_trace_entry(
-                        request, row, strategy, current, deltas,
+                        request, row, strategy, current, executable,
                         float(ledger.portfolio.cash),
                     )
             for sell_first in (True, False):
-                for instrument, delta in deltas.items():
+                for instrument, delta in executable.items():
                     if abs(delta) <= 1e-12 or (delta < 0) != sell_first:
                         continue
                     transaction_number += 1
@@ -232,11 +247,11 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                     last_sale_price=current_prices[instrument],
                     last_sale_date=timestamp,
                 )
-            due_targets = [target for due_row, target in pending_targets if due_row <= row]
-            pending_targets = [
-                (due_row, target) for due_row, target in pending_targets if due_row > row
+            due_deltas = [deltas for due_row, deltas in pending_deltas if due_row <= row]
+            pending_deltas = [
+                (due_row, deltas) for due_row, deltas in pending_deltas if due_row > row
             ]
-            for pending in due_targets:
+            for pending in due_deltas:
                 _execute(row, timestamp, pending)
             target = calculator.update(
                 timestamp,
@@ -246,10 +261,11 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
                 np.asarray(request.margin_ratios[row]),
             )
             if target is not None:
+                deltas = _deltas_for_target(row, target)
                 if timing == "same_bar":
-                    _execute(row, timestamp, target)
+                    _execute(row, timestamp, deltas)
                 else:
-                    pending_targets.append((row + delay_bars, target))
+                    pending_deltas.append((row + delay_bars, deltas))
             ledger._dirty_portfolio = True
             equity_curve[timestamp.isoformat()] = float(ledger.portfolio.portfolio_value)
             positions_row = _positions()

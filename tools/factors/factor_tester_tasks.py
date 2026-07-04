@@ -8,13 +8,20 @@ its own. Behavior is unchanged from the pre-refactor methods.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Set
 
 import pandas as pd
-from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.data.types import DataColumn
+
+def tqdm(iterable, *args: Any, **kwargs: Any):
+    try:
+        progress = getattr(import_module("tqdm"), "tqdm")
+    except ModuleNotFoundError:  # pragma: no cover - exercised in slim worker envs
+        return iterable
+    return progress(iterable, *args, **kwargs)
 
 if TYPE_CHECKING:
     from tools.data.types import DataTime

@@ -17,9 +17,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
-from tools.testers.backtest.engines.native.ledger import StrategyConfig
+from tools.testers.backtest.engines.native.ledger import (
+    LedgerConfig,
+    Ledger,
+    StrategyConfig,
+    ledger_config_field_values,
+    ledger_config_from_mapping,
+    ledger_identity,
+    merge_ledger_configs,
+)
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+from tools.testers.backtest.modules.strategy_book import StrategyBookSimple, materialize_strategy_book_store
+from tools.testers.settings.counterparty import (
+    CounterPartyProfile,
+    counterparty_profile,
+    resolve_counterparty_profiles_by_ledger,
+)
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.ledger import BacktestRunState
@@ -41,6 +55,20 @@ _DAILY_MARK_TO_MARKET_FLOWS = {
     "apply_daily_mark_to_market",
     "lookup_current_prices_on_ledger_notice",
     "lookup_historical_fields_on_ledger_notice",
+}
+_LEDGER_OWNED_SETTING_NAMES = {
+    "initial_capital_major",
+    "base_currency",
+    "fee_mode",
+    "fixed_fee_rate",
+    "margin_mode",
+    "fixed_margin_ratio",
+    "accounting_mode",
+    "daily_mark_to_market_enabled",
+    "cost_basis_method",
+    "use_int_position",
+    "tradability_policy",
+    "clearing_rounding_policy",
 }
 
 
@@ -87,7 +115,7 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
 def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:
     requested = str(resolved_settings.get("factor_mode", "auto") or "auto")
     if requested not in {"auto", "precomputed", "incremental"}:
-        requested = "auto"
+        raise ValueError(f"unsupported factor_mode: {requested!r}")
     can_vectorize = _factor_supports_vectorized(resolved_settings.get("factor"))
     if requested == "precomputed":
         if not can_vectorize:
@@ -143,16 +171,20 @@ def _factor_supports_incremental(factor: Any) -> bool:
 
 def _field_entries() -> list[tuple[str, Any, Any, frozenset[str]]]:
     """One entry per registered field: (field_name, FieldRef, FieldDefinition,
-    owning module's Flow names). The Flow-name set is what
+    Flow names that materially consume that field). The Flow-name set is what
     `frontend_only_default` enforcement checks against `active_flow_names`
     to decide whether a missing value actually matters for this strategy."""
     entries: list[tuple[str, Any, Any, frozenset[str]]] = []
     for cls in _ALL_MODULE_CLASSES:
-        owner_flow_names = frozenset(flow.name for flow in getattr(cls, "flows", ()))
+        module_flow_names = frozenset(flow.name for flow in getattr(cls, "flows", ()))
         for field_name, fd in getattr(cls, "fields", {}).items():
             ref = getattr(cls, field_name, None)
             if ref is not None:
-                entries.append((field_name, ref, fd, owner_flow_names))
+                consuming_flow_names = frozenset(
+                    flow.name for flow in getattr(cls, "flows", ())
+                    if ref in getattr(flow, "inputs", ())
+                )
+                entries.append((field_name, ref, fd, consuming_flow_names or module_flow_names))
     return entries
 
 
@@ -178,6 +210,9 @@ def _default_value_for_field(
 
 def build_strategy_configs(
     resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    flow_settings_by_alias: Mapping[str, Mapping[str, Any]] | None = None,
+    strategies_by_alias: Mapping[str, Strategy] | None = None,
 ) -> dict[Strategy, StrategyConfig]:
     """`resolved_settings_by_alias`: {shortAlias: {setting_key: value, ...}}
     -- one raw dict per strategy, taken directly from the frontend's
@@ -195,12 +230,17 @@ def build_strategy_configs(
     entries = _field_entries()
     configs: dict[Strategy, StrategyConfig] = {}
     for alias, resolved in resolved_settings_by_alias.items():
-        strategy = Strategy(alias=alias)
-        active_flow_names = _resolve_active_flow_names(resolved)
+        flow_resolved = flow_settings_by_alias.get(alias, resolved) if flow_settings_by_alias else resolved
+        strategy = strategies_by_alias.get(alias, Strategy(alias=alias)) if strategies_by_alias else Strategy(alias=alias)
+        active_flow_names = _resolve_active_flow_names(flow_resolved)
         field_values: dict[Any, Any] = {}
         for field_name, ref, fd, owner_flow_names in entries:
             if field_name in resolved:
+                if field_name in _LEDGER_OWNED_SETTING_NAMES:
+                    continue
                 field_values[ref] = resolved[field_name]
+                continue
+            if field_name in _LEDGER_OWNED_SETTING_NAMES:
                 continue
             module_active = bool(owner_flow_names & active_flow_names)
             if fd.frontend_only_default and module_active:
@@ -216,5 +256,204 @@ def build_strategy_configs(
     return configs
 
 
-def apply_strategy_configs(state: "BacktestRunState", resolved_settings_by_alias: Mapping[str, Mapping[str, Any]]) -> None:
-    state.strategy_configs = build_strategy_configs(resolved_settings_by_alias)
+def apply_strategy_configs(
+    state: "BacktestRunState",
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    strategy_book: object | None = None,
+    ledger_configs: Mapping[str, Mapping[str, Any] | LedgerConfig] | None = None,
+    counterparty: str | CounterPartyProfile | None = None,
+    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
+    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
+) -> None:
+    book = strategy_book or StrategyBookSimple()
+    resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
+    strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
+    materialize_strategy_book_store(state, book, strategy_objects)
+    state.ledger_configs = _resolve_ledger_configs(
+        resolved,
+        state=state,
+        strategies_by_alias=strategy_objects,
+        ledger_configs=ledger_configs,
+        counterparty=counterparty,
+        counterparty_by_strategy=counterparty_by_strategy,
+        counterparty_by_ledger=counterparty_by_ledger,
+    )
+    flow_settings = _flow_settings_with_ledger_configs(resolved, state, strategy_objects, state.ledger_configs)
+    state.strategy_configs = build_strategy_configs(
+        resolved,
+        flow_settings_by_alias=flow_settings,
+        strategies_by_alias=strategy_objects,
+    )
+
+
+def _resolve_ledger_configs(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    state: "BacktestRunState",
+    strategies_by_alias: Mapping[str, Strategy],
+    ledger_configs: Mapping[str, Mapping[str, Any] | LedgerConfig] | None,
+    counterparty: str | CounterPartyProfile | None,
+    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None,
+    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None,
+) -> dict[Ledger, LedgerConfig]:
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    store = strategy_book_store_for(state)
+    entries = _field_entries()
+    explicit = {
+        str(ledger_id): ledger_config_from_mapping(config)
+        for ledger_id, config in (ledger_configs or {}).items()
+    }
+    profiles = resolve_counterparty_profiles_by_ledger(
+        resolved_settings_by_alias,
+        ledger_ids_by_alias={
+            alias: tuple(sorted(ledger.name for ledger in store.ledgers_for_strategy(state, strategy)))
+            for alias, strategy in strategies_by_alias.items()
+        },
+        counterparty=counterparty,
+        counterparty_by_strategy=counterparty_by_strategy,
+        counterparty_by_ledger=counterparty_by_ledger,
+    )
+    default_settings_by_ledger: dict[str, LedgerConfig] = {}
+    explicit_settings_by_ledger: dict[str, LedgerConfig] = {}
+    for alias, settings in resolved_settings_by_alias.items():
+        strategy = strategies_by_alias[str(alias)]
+        active_flow_names = _resolve_active_flow_names(settings)
+        materialized = _materialized_ledger_owned_settings(settings, active_flow_names, entries)
+        explicit_ledger_owned = {
+            key: settings[key]
+            for key in _LEDGER_OWNED_SETTING_NAMES
+            if key in settings
+        }
+        default_config = ledger_config_from_mapping({
+            key: value
+            for key, value in materialized.items()
+            if key not in explicit_ledger_owned
+        })
+        explicit_config = ledger_config_from_mapping(explicit_ledger_owned)
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            _merge_strategy_ledger_config(
+                default_settings_by_ledger,
+                ledger.name,
+                default_config,
+                source=f"strategy {alias!r}",
+            )
+            _merge_strategy_ledger_config(
+                explicit_settings_by_ledger,
+                ledger.name,
+                explicit_config,
+                source=f"strategy {alias!r}",
+            )
+    ledger_ids = {
+        ledger.name
+        for strategy in strategies_by_alias.values()
+        for ledger in store.ledgers_for_strategy(state, strategy)
+    } | set(explicit) | set(profiles)
+    result: dict[Ledger, LedgerConfig] = {}
+    for ledger_id in ledger_ids:
+        profile_config = _ledger_config_from_counterparty_profile(profiles.get(str(ledger_id)))
+        result[ledger_identity(ledger_id)] = merge_ledger_configs(
+            default_settings_by_ledger.get(str(ledger_id), LedgerConfig()),
+            profile_config,
+            explicit_settings_by_ledger.get(str(ledger_id), LedgerConfig()),
+            explicit.get(str(ledger_id), LedgerConfig()),
+        )
+    return result
+
+
+def _merge_strategy_ledger_config(
+    target: dict[str, LedgerConfig],
+    ledger_id: str,
+    config: LedgerConfig,
+    *,
+    source: str,
+) -> None:
+    if not ledger_config_field_values(config):
+        return
+    existing = target.get(ledger_id)
+    if existing is None:
+        target[ledger_id] = config
+        return
+    _raise_on_conflicting_ledger_config(existing, config, ledger_id=ledger_id, source=source)
+    target[ledger_id] = merge_ledger_configs(existing, config)
+
+
+def _materialized_ledger_owned_settings(
+    resolved: Mapping[str, Any],
+    active_flow_names: frozenset[str],
+    entries: list[tuple[str, Any, Any, frozenset[str]]],
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    materialized_refs: dict[Any, Any] = {}
+    for field_name, ref, fd, owner_flow_names in entries:
+        if field_name not in _LEDGER_OWNED_SETTING_NAMES:
+            continue
+        if field_name in resolved:
+            value = resolved[field_name]
+        else:
+            module_active = bool(owner_flow_names & active_flow_names)
+            if fd.frontend_only_default and module_active:
+                raise ValueError(
+                    f"ledger-owned field {field_name!r} is required because {ref.owner} is active "
+                    "but only has a frontend display default"
+                )
+            if fd.frontend_only_default:
+                continue
+            value = _default_value_for_field(fd, resolved, materialized_refs, entries)
+        values[field_name] = value
+        materialized_refs[ref] = value
+    return values
+
+
+def _raise_on_conflicting_ledger_config(left: LedgerConfig, right: LedgerConfig, *, ledger_id: str, source: str) -> None:
+    for key in _LEDGER_OWNED_SETTING_NAMES:
+        left_value = getattr(left, key, None)
+        right_value = getattr(right, key, None)
+        if left_value is None or right_value is None or left_value == right_value:
+            continue
+        raise ValueError(
+            f"ledger {ledger_id!r} receives conflicting {key}: {left_value!r} vs {right_value!r} from {source}"
+        )
+
+
+def _ledger_config_from_counterparty_profile(profile_id: str | None) -> LedgerConfig:
+    if not profile_id:
+        return LedgerConfig()
+    profile = counterparty_profile(profile_id)
+    if profile is None:
+        raise ValueError(f"unknown counterparty profile: {profile_id!r}")
+    values: dict[str, Any] = {}
+    for ref, value in profile.field_defaults.items():
+        values[ref.name] = value
+    return ledger_config_from_mapping(values)
+
+
+def _flow_settings_with_ledger_configs(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    state: "BacktestRunState",
+    strategies_by_alias: Mapping[str, Strategy],
+    ledger_configs: Mapping[Ledger, LedgerConfig],
+) -> dict[str, dict[str, Any]]:
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    store = strategy_book_store_for(state)
+    result = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
+    for alias, settings in result.items():
+        strategy = strategies_by_alias[alias]
+        values_by_field: dict[str, set[Any]] = {}
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            for key, value in ledger_config_field_values(
+                ledger_configs.get(ledger, LedgerConfig())
+            ).items():
+                values_by_field.setdefault(key, set()).add(value)
+        for key, values in values_by_field.items():
+            if key in settings:
+                continue
+            if len(values) > 1:
+                raise ValueError(
+                    f"strategy {alias!r} maps to ledgers with conflicting {key}: "
+                    f"{sorted(str(value) for value in values)}"
+                )
+            settings[key] = next(iter(values))
+    return result

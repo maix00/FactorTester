@@ -13,6 +13,7 @@ class EngineModule(ExecutableModule):
 
     engine: ClassVar[FieldRef[str]] = FieldRef("engine")
     engine_mode: ClassVar[FieldRef[str]] = FieldRef("engine_mode")
+    counterparty_profile: ClassVar[FieldRef[str | None]] = FieldRef("counterparty_profile")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "engine": FieldDefinition(
@@ -49,6 +50,25 @@ class EngineModule(ExecutableModule):
             chip_template="模式: {value}",
             tab_label="执行引擎",
             tab_order=10,
+        ),
+        "counterparty_profile": FieldDefinition(
+            public=True,
+            label="经纪商预设",
+            default="",
+            control_template="select",
+            tab="engine",
+            options=(("", "不使用预设"),),  # real profiles appended by
+                # counterparty.apply_counterparty_profile_defaults()
+
+            visible_when={"engine_mode": ("custom",)},
+            editable_when={"engine_mode": ("custom",)},
+            chip_template="经纪商预设: {value}",
+            tab_label="执行引擎",
+            tab_order=10,
+            help_text=(
+                "自定义模式下选择一个经纪商预设，批量填好费用/保证金/流动性等字段的默认值；"
+                "字段仍可单独覆写，显式设置的值优先于预设。"
+            ),
         ),
     }
 

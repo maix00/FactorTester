@@ -13,11 +13,21 @@ Each row represents one tradable contract for one product on one trading day.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, cast
+from importlib import import_module
+from typing import Any, Dict, Iterable, List, Optional, TypeVar, cast
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+
+_T = TypeVar("_T")
+
+
+def tqdm(iterable: Iterable[_T], *args: Any, **kwargs: Any) -> Iterable[_T]:
+    try:
+        progress = getattr(import_module("tqdm"), "tqdm")
+    except ModuleNotFoundError:  # pragma: no cover - exercised in slim worker envs
+        return iterable
+    return cast(Iterable[_T], progress(iterable, *args, **kwargs))
 
 
 TERM_PRODUCT_COL = 'PRODUCT'
@@ -47,18 +57,17 @@ class TermStructureStore:
         trading_day: Optional[Any] = None,
         columns: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        filters = []
+        filters: list[tuple[str, str, Any]] = []
         if product:
             filters.append((TERM_PRODUCT_COL, '==', product))
         if trading_day is not None:
             day = cast(pd.Timestamp, pd.Timestamp(trading_day)).normalize()
             filters.append((TERM_TRADING_DAY_COL, '==', day))
-        kwargs = {}
-        if filters:
-            kwargs['filters'] = filters
-        if columns:
-            kwargs['columns'] = columns
-        return pd.read_parquet(self.path, **kwargs)
+        return pd.read_parquet(
+            self.path,
+            filters=filters or None,
+            columns=columns,
+        )
 
     def contract_pool(self, product: str, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
         df = self.load(product=product, trading_day=trading_day)
@@ -192,21 +201,22 @@ class AdjustableProductMixin:
         filtered['min'] = pd.to_datetime(filtered['min'])
         filtered['max'] = pd.to_datetime(filtered['max'])
 
-        contracts = [
-            {
+        contracts: list[dict[str, Any]] = []
+        for row in tqdm(
+            filtered.itertuples(index=True),
+            total=len(filtered),
+            desc=f"Build contract list {getattr(self, 'name', 'product')}",
+        ):
+            start = pd.Timestamp(cast(Any, row.min))
+            end = pd.Timestamp(cast(Any, row.max))
+            contracts.append({
                 'contract': str(row.first),
                 'uid': str(row.Index),
-                'start': row.min.strftime('%Y-%m-%d'),
-                'end': row.max.strftime('%Y-%m-%d'),
-                'start_ts': int(row.min.timestamp() * 1000),
-                'end_ts': int(row.max.timestamp() * 1000),
-            }
-            for row in tqdm(
-                filtered.itertuples(index=True),
-                total=len(filtered),
-                desc=f"Build contract list {getattr(self, 'name', 'product')}",
-            )
-        ]
+                'start': start.strftime('%Y-%m-%d'),
+                'end': end.strftime('%Y-%m-%d'),
+                'start_ts': int(start.timestamp() * 1000),
+                'end_ts': int(end.timestamp() * 1000),
+            })
 
         return contracts
 
