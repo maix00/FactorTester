@@ -25,12 +25,11 @@ from tools.testers.backtest.modules.product_selection import ProductSelectionMod
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBookModule,
-    assign_ledger_id_for_strategy,
-    strategy_book_for,
+    assign_ledger_for_strategy,
 )
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
-    _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled,
+    _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled_for_ledger,
 )
 
 
@@ -97,20 +96,21 @@ class LedgerModule(ExecutableModule):
 
 
 def _initialize_ledgers(state, ctx) -> None:
-    from tools.testers.backtest.engines.native.ledger import Ledger
+    from tools.testers.backtest.engines.native.ledger import LedgerState
 
-    strategy_book_for(state).provision_ledgers(state)
     for strategy, strategy_config in state.strategy_configs.items():
-        ledger_id = assign_ledger_id_for_strategy(state, strategy, strategy_config)
-        initial_capital = strategy_config.get(LedgerModule.initial_capital_major, 0.0)
-        base_currency = strategy_config.get(LedgerModule.base_currency, "CNY")
+        ledger_key = assign_ledger_for_strategy(state, strategy, strategy_config)
+        ledger_id = ledger_key.name
+        ledger_config = state.ledger_config_for(ledger_key)
+        initial_capital = float(ledger_config.initial_capital_major or 0.0)
+        base_currency = ledger_config.base_currency or "CNY"
         # MinorUnitModule.use_minor_units default_when locks this to False
         # for engine_mode="basic" and True otherwise (auto/custom/exact) --
         # read the resolved field, don't re-decide the policy here.
         use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
-        ledger = state.ledgers.get(ledger_id)
+        ledger = state.ledgers.get(ledger_key)
         if ledger is None:
-            ledger = Ledger(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
+            ledger = LedgerState(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
             ledger.set(LedgerModule.cash, DataMoney.from_major(
                 initial_capital, currency=base_currency, use_minor_units=use_minor_units))
         else:
@@ -125,7 +125,7 @@ def _initialize_ledgers(state, ctx) -> None:
                 use_minor_units=use_minor_units,
             )
 
-        use_int = _resolve_use_int_position(strategy_config)
+        use_int = _resolve_use_int_position(strategy_config, ledger_config)
         initial_quantity = 0 if use_int else 0.0
         zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=use_minor_units)
 
@@ -134,7 +134,7 @@ def _initialize_ledgers(state, ctx) -> None:
         for product in products:
             if product in positions:
                 continue
-            method = _resolve_method(strategy_config, product)
+            method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
             if method == "WeightAverage":
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, average_cost=0.0, equity_occupied=zero_equity_occupied)
@@ -142,7 +142,7 @@ def _initialize_ledgers(state, ctx) -> None:
                 positions[product] = ProductPosition(
                     quantity=initial_quantity, lots=deque(), equity_occupied=zero_equity_occupied)
         ledger.set(LedgerModule.positions, positions)
-        state.ledgers[ledger_id] = ledger
+        state.ledgers[ledger_key] = ledger
 
 
 def _require_matching_shared_ledger_config(
@@ -194,6 +194,8 @@ def _basic_equity(state, ctx) -> None:
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
+        config = state.config_for(strategy)
+        ledger_config = state.ledger_config_for(ledger)
         margin_occupied = sum(
             entry.equity_occupied.to_major()
             for entry in positions.values()
@@ -202,9 +204,10 @@ def _basic_equity(state, ctx) -> None:
         if margin_occupied > 0:
             floating_pnl = mark_to_market(
                 ledger,
-                state.config_for(strategy),
+                config,
                 prices,
                 historical_fields,
+                ledger_config=ledger_config,
             ).to_major()
             ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + margin_occupied + floating_pnl)
             continue
@@ -241,12 +244,13 @@ def _basic_cash_update(state, ctx) -> None:
             if order.status == OrderStatus.CANCELLED or order.get("reject_reason"):
                 continue  # terminal before accounting -- no ledger effect
             ledger = state.ledger_for(order)
+            ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
             cash = ledger.get(LedgerModule.cash)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
-            if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument):
+            if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument, ledger_config):
                 cash = _apply_margin_accounting_fill(
                     cash,
                     positions,
@@ -256,6 +260,7 @@ def _basic_cash_update(state, ctx) -> None:
                     price=float(price),
                     fee_cost=float(fee_cost or 0.0),
                     historical_fields=historical_fields,
+                    ledger_config=ledger_config,
                 )
             else:
                 entry = positions.setdefault(order.instrument, ProductPosition())
@@ -282,10 +287,10 @@ def _basic_cash_update(state, ctx) -> None:
             ledger.set(LedgerModule.cash, cash)
 
 
-def _uses_margin_accounting(strategy_config, historical_fields: dict, product) -> bool:
+def _uses_margin_accounting(strategy_config, historical_fields: dict, product, ledger_config=None) -> bool:
     from tools.testers.backtest.modules.margin import _resolve_margin_mode
 
-    mode = _resolve_margin_mode(strategy_config)
+    mode = _resolve_margin_mode(strategy_config, ledger_config)
     if mode in {"none", "zero"}:
         return False
     return True
@@ -301,10 +306,11 @@ def _apply_margin_accounting_fill(
     price: float,
     fee_cost: float,
     historical_fields: dict,
+    ledger_config=None,
 ) -> DataMoney:
     fields = historical_fields_for_product(historical_fields, product)
     multiplier = contract_multiplier_from_fields(historical_fields, product)
-    margin_ratio = _resolved_margin_ratio_for_order(strategy_config, fields, quantity, price, multiplier)
+    margin_ratio = _resolved_margin_ratio_for_order(strategy_config, fields, quantity, price, multiplier, ledger_config)
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = _entry_margin_major(entry)
     prior_quantity = float(entry.quantity or 0.0)
@@ -313,14 +319,14 @@ def _apply_margin_accounting_fill(
     method = _resolve_method(
         strategy_config, product, fields,
         require_exact=engine_mode_for(strategy_config) == "exact",
+        ledger_config=ledger_config,
     )
     from tools.testers.backtest.modules.fee import _resolve_fee_mode
-    fee_mode = _resolve_fee_mode(strategy_config)
-    daily_mark_to_market = _resolve_daily_mark_to_market_enabled(
-        strategy_config,
+    fee_mode = _resolve_fee_mode(strategy_config, ledger_config)
+    daily_mark_to_market = _resolve_daily_mark_to_market_enabled_for_ledger(
         product,
         fields,
-        require_exact=engine_mode_for(strategy_config) == "exact",
+        ledger_config=ledger_config,
     )
     if method in ("FIFO", "LIFO", "HIFO"):
         # Lot-based methods keep the lot queue as the cost-basis record --
@@ -415,11 +421,13 @@ def _apply_lot_fill(
     return realized
 
 
-def _resolved_margin_ratio_for_order(strategy_config, fields: dict[str, object], quantity: float, price: float, multiplier: float) -> float:
+def _resolved_margin_ratio_for_order(
+    strategy_config, fields: dict[str, object], quantity: float, price: float, multiplier: float, ledger_config=None,
+) -> float:
     from tools.testers.backtest.modules.margin import _resolve_margin_ratio
 
     market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
-    ratio = _resolve_margin_ratio(strategy_config, market_ratio)
+    ratio = _resolve_margin_ratio(strategy_config, market_ratio, ledger_config)
     return float(1.0 if ratio is None else ratio)
 
 

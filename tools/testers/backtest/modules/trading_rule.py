@@ -18,7 +18,7 @@ from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.testers.backtest.engines.native.ledger import Ledger, StrategyConfig
+    from tools.testers.backtest.engines.native.ledger import LedgerState, StrategyConfig
 
 AccountingMode = Literal["Basic", "Custom", "Auto"]
 CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO"]
@@ -145,12 +145,12 @@ class TradingRuleModule(ExecutableModule):
     )
 
 
-def _effective_accounting_mode(strategy_config: "StrategyConfig") -> str:
+def _effective_accounting_mode(strategy_config: "StrategyConfig", ledger_config=None) -> str:
     engine_mode = engine_mode_for(strategy_config)
     if engine_mode == "basic":
         return "Basic"
     if engine_mode == "custom":
-        return strategy_config.get(TradingRuleModule.accounting_mode, "Auto")
+        return getattr(ledger_config, "accounting_mode", None) or "Auto"
     return "Auto"
 
 
@@ -160,13 +160,14 @@ def _resolve_method(
     historical_fields: Mapping[str, object] | None = None,
     *,
     require_exact: bool = False,
+    ledger_config=None,
 ) -> str:
-    mode = _effective_accounting_mode(strategy_config)
+    mode = _effective_accounting_mode(strategy_config, ledger_config)
     if mode == "Basic":
         return "WeightAverage"
     if mode == "Custom":
-        method = strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage")
-        _validate_daily_mark_to_market_cost_basis(strategy_config, method, product)
+        method = getattr(ledger_config, "cost_basis_method", None) or "WeightAverage"
+        _validate_daily_mark_to_market_cost_basis(strategy_config, method, product, ledger_config=ledger_config)
         return method
     return infer_auto_cost_basis_method(historical_fields, require_exact=require_exact, product=product)
 
@@ -177,18 +178,20 @@ def _resolve_daily_mark_to_market_enabled(
     historical_fields: Mapping[str, object] | None = None,
     *,
     require_exact: bool = False,
+    ledger_config=None,
 ) -> bool:
-    mode = _effective_accounting_mode(strategy_config)
+    mode = _effective_accounting_mode(strategy_config, ledger_config)
     if mode == "Basic":
         return False
     fields = historical_fields or {}
     if mode == "Custom":
-        enabled = bool(strategy_config.get(TradingRuleModule.daily_mark_to_market_enabled, False))
+        enabled = bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
         if enabled:
             _validate_daily_mark_to_market_cost_basis(
                 strategy_config,
-                strategy_config.get(TradingRuleModule.cost_basis_method, "WeightAverage"),
+                getattr(ledger_config, "cost_basis_method", None) or "WeightAverage",
                 product,
+                ledger_config=ledger_config,
             )
         return enabled
     explicit = fields.get("DailyMarkToMarketEnabled")
@@ -205,12 +208,48 @@ def _resolve_daily_mark_to_market_enabled(
     return False
 
 
+def _resolve_daily_mark_to_market_enabled_for_ledger(
+    product: "Product",
+    historical_fields: Mapping[str, object] | None = None,
+    *,
+    ledger_config=None,
+) -> bool:
+    mode = str(getattr(ledger_config, "accounting_mode", None) or "Auto")
+    if mode == "Basic":
+        return False
+    fields = historical_fields or {}
+    if mode == "Custom":
+        return bool(getattr(ledger_config, "daily_mark_to_market_enabled", False))
+    explicit = getattr(ledger_config, "daily_mark_to_market_enabled", None)
+    if explicit is not None:
+        return bool(explicit)
+    explicit_field = fields.get("DailyMarkToMarketEnabled")
+    if explicit_field not in (None, ""):
+        return _bool_field(explicit_field)
+    if str(fields.get("CostBasisMethod") or "") == "DailyMarkToMarket":
+        return True
+    if _has_daily_mark_to_market_indicator(fields):
+        return True
+    if _ledger_requires_exact(ledger_config):
+        raise KeyError(f"exact accounting requires DailyMarkToMarketEnabled for {product}")
+    return False
+
+
+def _ledger_requires_exact(ledger_config=None) -> bool:
+    return any(
+        str(getattr(ledger_config, name, "") or "").lower() == "exact"
+        for name in ("fee_mode", "margin_mode")
+    )
+
+
 def _validate_daily_mark_to_market_cost_basis(
     strategy_config: "StrategyConfig",
     method: str,
     product: object,
+    *,
+    ledger_config=None,
 ) -> None:
-    if bool(strategy_config.get(TradingRuleModule.daily_mark_to_market_enabled, False)) and method == "WeightAverage":
+    if bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)) and method == "WeightAverage":
         raise ValueError(
             f"Daily mark-to-market requires a lot-based cost basis for {product}; "
             "use FIFO, LIFO, or HIFO instead of WeightAverage"
@@ -259,19 +298,20 @@ def _has_daily_mark_to_market_indicator(fields: Mapping[str, object]) -> bool:
     )
 
 
-def _resolve_use_int_position(strategy_config: "StrategyConfig") -> bool:
-    mode = _effective_accounting_mode(strategy_config)
+def _resolve_use_int_position(strategy_config: "StrategyConfig", ledger_config=None) -> bool:
+    mode = _effective_accounting_mode(strategy_config, ledger_config)
     if mode == "Basic":
         return False
     if mode == "Auto":
         return True
-    return strategy_config.get(TradingRuleModule.use_int_position, False)
+    return bool(getattr(ledger_config, "use_int_position", False))
 
 
 def open_position(
-    ledger: "Ledger", strategy_config: "StrategyConfig", product: "Product",
+    ledger: "LedgerState", strategy_config: "StrategyConfig", product: "Product",
     quantity: float, entry_price: float, multiplier: float,
     market_margin_ratio: float = 1.0,
+    ledger_config=None,
 ) -> None:
     from .ledger_module import LedgerModule
     from .margin import _resolve_margin_ratio
@@ -281,12 +321,12 @@ def open_position(
     entry = positions[product]
     apply_quantity_delta(entry, quantity)
 
-    margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio)
+    margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio, ledger_config)
     notional = abs(entry.quantity) * entry_price * multiplier
     entry.equity_occupied = DataMoney.from_major(
         notional * margin_ratio, currency=ledger.base_currency, use_minor_units=False)
 
-    method = _resolve_method(strategy_config, product)
+    method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
     if method == "WeightAverage":
         prior_cost = entry.average_cost or 0.0
         prior_quantity = entry.quantity - quantity
@@ -304,9 +344,10 @@ def open_position(
 
 
 def close_position(
-    ledger: "Ledger", strategy_config: "StrategyConfig", product: "Product",
+    ledger: "LedgerState", strategy_config: "StrategyConfig", product: "Product",
     quantity: float, fill_price: float, multiplier: float,
     market_margin_ratio: float = 1.0,
+    ledger_config=None,
 ) -> "DataMoney":
     from .ledger_module import LedgerModule
     from .margin import _resolve_margin_ratio
@@ -317,12 +358,12 @@ def close_position(
     prior_quantity = entry.quantity
     apply_quantity_delta(entry, -quantity)
 
-    margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio)
+    margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio, ledger_config)
     notional = abs(entry.quantity) * fill_price * multiplier
     entry.equity_occupied = DataMoney.from_major(
         notional * margin_ratio, currency=ledger.base_currency, use_minor_units=False)
 
-    method = _resolve_method(strategy_config, product)
+    method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
     realized = 0.0
     if method == "WeightAverage":
         cost = entry.average_cost or 0.0
@@ -365,8 +406,14 @@ def _consume_lots_hifo(lots, quantity: float, fill_price: float, multiplier: flo
     return realized
 
 
-def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
-                    current_prices: dict, historical_fields: dict[object, dict[str, object]] | None = None) -> "DataMoney":
+def mark_to_market(
+    ledger: "LedgerState",
+    strategy_config: "StrategyConfig",
+    current_prices: dict,
+    historical_fields: dict[object, dict[str, object]] | None = None,
+    *,
+    ledger_config=None,
+) -> "DataMoney":
     from .ledger_module import LedgerModule
     from .market_data import contract_multiplier_from_fields, historical_fields_for_product
 
@@ -377,17 +424,12 @@ def mark_to_market(ledger: "Ledger", strategy_config: "StrategyConfig",
         if entry.quantity == 0:
             continue
         fields = historical_fields_for_product(historical_fields, product)
-        method = _resolve_method(strategy_config, product, fields, require_exact=require_exact)
+        method = _resolve_method(strategy_config, product, fields, require_exact=require_exact, ledger_config=ledger_config)
         price = _lookup_product_value(current_prices, product)
         if price is None:
             continue
         multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
-        if _resolve_daily_mark_to_market_enabled(
-            strategy_config,
-            product,
-            fields,
-            require_exact=require_exact,
-        ):
+        if _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
             basis = _previous_settlement_for_product(
                 product,
                 entry,
@@ -423,18 +465,22 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
     if len(last_rows) == 0:
         return
     drafts: list[EventDraft] = []
+    ledgers: set[Any] = set()
     for strategy in ctx.active_strategies:
+        ledgers.add(state.ledger_for_strategy(strategy).ledger)
+    for ledger in ledgers:
         for trading_day, last_event_time in last_rows.items():
             notice_time = pd.Timestamp(last_event_time) + pd.Timedelta(nanoseconds=1)
             drafts.append(
                 EventDraft(
                     EventKind.LEDGER_NOTICE,
                     notice_time,
-                    strategy,
                     payload={
                         "kind": "daily_mark_to_market",
                         "trading_day": _trading_day_text(trading_day),
+                        "ledger_id": ledger.name,
                     },
+                    ledger=ledger,
                 )
             )
     ctx.set(TradingRuleModule.daily_mark_to_market_events, drafts)
@@ -455,46 +501,36 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
     settlement_prices = snapshot.get("settlement") or snapshot.get("close") or {}
     close_prices = snapshot.get("close", {})
-    for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
-        ledger = state.ledger_for_strategy(strategy)
+    for ledger in _ledger_notice_targets(state, ctx):
+        ledger_config = state.ledger_config_for(ledger)
         cash = ledger.get(TradingRuleModule._ledger_cash_ref)
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
-        historical_fields = ctx.get_for(
-            MarketDataModule.current_historical_fields,
-            strategy,
-            ctx.get(MarketDataModule.current_historical_fields, {}),
-        )
+        historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
         for product, entry in positions.items():
             quantity = float(entry.quantity or 0.0)
             if abs(quantity) <= 1e-12:
                 continue
             fields = historical_fields_for_product(historical_fields, product)
-            if not _resolve_daily_mark_to_market_enabled(
-                config,
-                product,
-                fields,
-                require_exact=engine_mode_for(config) == "exact",
-            ):
+            if not _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
                 continue
             settlement = _settlement_price_for_product(
                 product,
                 fields,
                 settlement_prices,
                 close_prices,
-                require_exact=engine_mode_for(config) == "exact",
+                require_exact=_ledger_requires_exact(ledger_config),
             )
             previous_settlement = _previous_settlement_for_product(
                 product,
                 entry,
                 fields,
                 settlement,
-                require_exact=engine_mode_for(config) == "exact",
+                require_exact=_ledger_requires_exact(ledger_config),
             )
             multiplier = contract_multiplier_from_fields(historical_fields, product)
             before_margin = _entry_margin_major(entry)
             after_margin = abs(quantity) * settlement * multiplier * _margin_ratio_for_position(
-                config, fields, quantity, settlement, multiplier)
+                fields, quantity, settlement, multiplier, ledger_config)
             pnl = _mark_to_market_money_difference(
                 settlement,
                 previous_settlement,
@@ -517,15 +553,54 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 use_minor_units=cash.use_minor_units,
             )
             entry.settlement_price = settlement
-            from tools.testers.backtest.modules.fee import _resolve_fee_mode
+            from tools.testers.backtest.modules.fee import _resolve_fee_mode_from_ledger_config
             _reset_lots_to_daily_settlement(
                 entry,
                 settlement,
                 multiplier,
-                track_today=_resolve_fee_mode(config) in {"auto", "custom", "exact"},
+                track_today=_resolve_fee_mode_from_ledger_config(ledger_config) in {"auto", "custom", "exact"},
             )
         ledger.set(TradingRuleModule._ledger_cash_ref, cash)
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
+
+
+def _ledger_notice_targets(state: Any, ctx: Any) -> list[Any]:
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+
+    targets: list[Any] = []
+    seen: set[Any] = set()
+    active_ledgers = ctx.active_ledgers or frozenset(getattr(state, "ledgers", {}))
+    for ledger in active_ledgers:
+        payloads = [payload for payload in ctx.payloads_for_ledger(ledger) if isinstance(payload, dict)]
+        if not payloads:
+            target_ledger = state.ledgers.get(ledger_identity(ledger))
+            if target_ledger is not None:
+                key = target_ledger.ledger
+                if key not in seen:
+                    seen.add(key)
+                    targets.append(target_ledger)
+            continue
+        for payload in payloads:
+            if str(payload.get("kind") or "") != "daily_mark_to_market":
+                continue
+            ledger_id = payload.get("ledger_id")
+            if ledger_id in (None, ""):
+                target_ledger = state.ledgers.get(ledger_identity(ledger))
+                if target_ledger is None:
+                    raise KeyError(f"daily mark-to-market notice references unknown ledger={ledger!r}")
+                key = target_ledger.ledger
+                if key not in seen:
+                    seen.add(key)
+                    targets.append(target_ledger)
+                continue
+            target_ledger = state.ledgers.get(ledger_identity(str(ledger_id)))
+            if target_ledger is None:
+                raise KeyError(f"daily mark-to-market notice references unknown ledger_id={ledger_id!r}")
+            key = target_ledger.ledger
+            if key not in seen:
+                seen.add(key)
+                targets.append(target_ledger)
+    return targets
 
 
 def _settlement_price_for_product(
@@ -617,13 +692,13 @@ def _reset_lots_to_daily_settlement(
 
 
 def _margin_ratio_for_position(
-    strategy_config: "StrategyConfig",
     fields: Mapping[str, object],
     quantity: float,
     price: float,
     multiplier: float,
+    ledger_config=None,
 ) -> float:
-    from tools.testers.backtest.modules.margin import _resolve_margin_ratio
+    from tools.testers.backtest.modules.margin import _resolve_margin_ratio_from_ledger_config
 
     if quantity < 0:
         by_money = fields.get("ShortMarginRatioByMoney")
@@ -637,7 +712,7 @@ def _margin_ratio_for_position(
         denominator = abs(price * multiplier)
         if fixed is not None and denominator > 0:
             market_ratio = fixed / denominator
-    ratio = _resolve_margin_ratio(strategy_config, market_ratio)
+    ratio = _resolve_margin_ratio_from_ledger_config(market_ratio, ledger_config)
     return float(1.0 if ratio is None else ratio)
 
 

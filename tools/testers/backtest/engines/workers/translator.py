@@ -12,7 +12,7 @@ explicitly mapped (recorded in ``_setting_fallbacks``), or rejected with
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -37,7 +37,7 @@ from tools.testers.backtest.modules.term_structure import (
 )
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+    from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig
 
 
 # FieldRefs whose value passes through unchanged under the same key. The
@@ -72,6 +72,7 @@ def translate_strategy_config(
     *,
     framework: str,
     membership_index: int,
+    ledger_config: "LedgerConfig | None" = None,
 ) -> dict[str, Any]:
     """One strategy's worker-dialect config dict, or raise UnsupportedFrameworkPlan."""
     out: dict[str, Any] = {"strategy_id": alias, "membership_index": membership_index}
@@ -86,12 +87,12 @@ def translate_strategy_config(
         if key in raw_settings:
             out[key] = raw_settings[key]
 
-    capital = config.get(LedgerModule.initial_capital_major, None)
+    capital = getattr(ledger_config, "initial_capital_major", None)
     if capital is not None:
         out["initial_capital"] = float(capital)
 
-    out["fee_rate"] = _translate_fee(alias, config, framework=framework, fallbacks=fallbacks)
-    _translate_margin(alias, config, out, framework=framework, fallbacks=fallbacks)
+    out["fee_rate"] = _translate_fee(alias, config, ledger_config, framework=framework, fallbacks=fallbacks)
+    _translate_margin(alias, config, ledger_config, out, framework=framework, fallbacks=fallbacks)
     out.update(_worker_execution_policy_selectors(alias, config, framework=framework))
     _note_minor_unit_precision(alias, config, framework=framework, fallbacks=fallbacks)
 
@@ -152,13 +153,18 @@ def _worker_execution_policy_selectors(
 
 
 def _translate_fee(
-    alias: str, config: "StrategyConfig", *, framework: str, fallbacks: list[dict[str, Any]]
+    alias: str,
+    config: "StrategyConfig",
+    ledger_config: "LedgerConfig | None",
+    *,
+    framework: str,
+    fallbacks: list[dict[str, Any]],
 ) -> float:
-    mode = str(config.get(FeeModule.fee_mode, "auto") or "auto")
+    mode = str(getattr(ledger_config, "fee_mode", None) or "auto")
     if mode in {"zero", "none"}:
         return 0.0
     if mode == "fixed":
-        return float(config.get(FeeModule.fixed_fee_rate, 0.0) or 0.0)
+        return float(getattr(ledger_config, "fixed_fee_rate", None) or 0.0)
     # auto/exact/custom/close_yesterday/close_today are CTP per-leg fee
     # schedules; workers only understand one proportional fee_rate. Silently
     # flattening them would produce a different cost than the user configured.
@@ -170,16 +176,24 @@ def _translate_fee(
 
 
 def _translate_margin(
-    alias: str, config: "StrategyConfig", out: dict[str, Any], *, framework: str,
+    alias: str,
+    config: "StrategyConfig",
+    ledger_config: "LedgerConfig | None",
+    out: dict[str, Any],
+    *,
+    framework: str,
     fallbacks: list[dict[str, Any]],
 ) -> None:
-    mode = str(config.get(MarginModule.margin_mode, "none") or "none")
+    mode = str(getattr(ledger_config, "margin_mode", None) or "none")
     if mode == "none":
         out["margin_mode"] = "none"
         return
     if mode == "fixed":
         out["margin_mode"] = "fixed"
-        out["fixed_margin_ratio"] = float(config.get(MarginModule.fixed_margin_ratio, 1.0) or 1.0)
+        out["fixed_margin_ratio"] = float(
+            getattr(ledger_config, "fixed_margin_ratio", None)
+            or 1.0
+        )
         return
     raise UnsupportedFrameworkPlan(
         f"strategy {alias!r}: margin_mode={mode!r} needs historical margin "
@@ -197,8 +211,15 @@ def translate_strategy_configs(
     configs: list[dict[str, Any]] = []
     for index, (strategy, config) in enumerate(run_state.strategy_configs.items()):
         raw = settings_by_strategy.get(strategy.alias, {})
+        ledger = run_state.ledger_for_strategy(strategy)
+        ledger_config = run_state.ledger_config_for(ledger)
         configs.append(translate_strategy_config(
-            strategy.alias, config, raw, framework=framework, membership_index=index,
+            strategy.alias,
+            config,
+            raw,
+            framework=framework,
+            membership_index=index,
+            ledger_config=ledger_config,
         ))
     return configs
 
@@ -323,8 +344,8 @@ def build_membership_payload(
     instrument_index = {name: idx for idx, name in enumerate(instruments)}
     n_rows = len(event_timestamps)
     n_groups_axis = len(strategy_dialects)
-    membership = np.zeros((n_rows, n_groups_axis, len(instruments)), dtype=bool)
-    signal_updates = np.zeros((n_rows, n_groups_axis), dtype=bool)
+    membership: Any = np.zeros((n_rows, n_groups_axis, len(instruments)), dtype=bool)
+    signal_updates: Any = np.zeros((n_rows, n_groups_axis), dtype=bool)
 
     strategies_by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     signal_tables = _signal_tables_by_strategy(run_state)
@@ -373,8 +394,8 @@ def build_membership_payload(
             rank_key = (table_id, row)
             ranked = rank_cache.get(rank_key)
             if ranked is None:
-                values = {
-                    n_index: signal_rows[row][pos]
+                values: dict[int, float] = {
+                    n_index: float(signal_rows[row][pos])
                     for n_index, pos in enumerate(col_positions)
                     if pos is not None and np.isfinite(signal_rows[row][pos])
                 }
@@ -399,7 +420,7 @@ def build_membership_payload(
             for n_index, _value in selected:
                 target_idx = n_index
                 if resolver is not None:
-                    product = table.columns[col_positions[n_index]]
+                    product = table.columns[cast(int, col_positions[n_index])]
                     target_idx = resolver(product, event_timestamps[row], instrument_index)
                 members.add(target_idx)
             frozen_members = frozenset(members)

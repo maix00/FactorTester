@@ -1,18 +1,16 @@
 """CounterParty templates for building ledger-owned rule settings.
 
 CounterPartyProfile is a saved template, not a runtime dependency. Applying a
-profile resolves to LedgerConfig/per-strategy builder fields before the native
-engine starts; flows should ultimately read ledger-owned rules, not re-query a
-profile registry during event replay. The current StrategyConfig projection is
-only a compatibility bridge while fee/margin/settlement flows are being moved
-to ledger-level reads.
+profile resolves directly to ledger-owned LedgerConfig fields before the native
+engine starts; event replay flows read ledger rules from the ledger, not from
+StrategyConfig and not from this registry.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from tools.testers.backtest.engines.native.fields import FieldRef
 
@@ -25,13 +23,6 @@ class CounterPartyProfile:
 
 
 _COUNTERPARTY_PROFILES: dict[str, CounterPartyProfile] = {}
-
-
-class _StrategyBookLike(Protocol):
-    ledger_configs: Mapping[str, Any]
-
-    def ledger_ids_for_strategy(self, strategy: object) -> tuple[str, ...]:
-        ...
 
 
 def register_counterparty_profile(profile: CounterPartyProfile) -> CounterPartyProfile:
@@ -53,6 +44,7 @@ def resolve_counterparty_profiles_by_ledger(
     resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
     *,
     strategy_book: object | None = None,
+    ledger_ids_by_alias: Mapping[str, tuple[str, ...]] | None = None,
     counterparty: str | CounterPartyProfile | None = None,
     counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
     counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
@@ -67,28 +59,19 @@ def resolve_counterparty_profiles_by_ledger(
     """
     from tools.testers.backtest.modules.strategy_book import StrategyBookSimple
 
-    book = cast(_StrategyBookLike, strategy_book or StrategyBookSimple())
+    book = cast(Any, strategy_book or StrategyBookSimple())
     aliases = tuple(str(alias) for alias in resolved_settings_by_alias)
-    ledger_ids_by_alias = {
-        alias: tuple(str(value) for value in book.ledger_ids_for_strategy(alias))
-        for alias in aliases
-    }
+    resolved_ledger_ids_by_alias = dict(ledger_ids_by_alias or {})
+    if not resolved_ledger_ids_by_alias:
+        resolved_ledger_ids_by_alias = {
+            alias: _ledger_ids_from_strategy_book_alias(book, alias)
+            for alias in aliases
+        }
     result: dict[str, str] = {}
-
-    for alias, ledger_ids in ledger_ids_by_alias.items():
-        for ledger_id in ledger_ids:
-            config = getattr(book, "ledger_configs", {}).get(ledger_id)
-            metadata = getattr(config, "metadata", {}) or {}
-            _put_counterparty_profile(
-                result,
-                ledger_id,
-                metadata.get("counterparty_profile"),
-                source=f"strategy_book.ledgers[{ledger_id!r}]",
-            )
 
     unified_profile = _profile_id(counterparty)
     if unified_profile:
-        for ledger_ids in ledger_ids_by_alias.values():
+        for ledger_ids in resolved_ledger_ids_by_alias.values():
             for ledger_id in ledger_ids:
                 result.setdefault(ledger_id, unified_profile)
 
@@ -98,7 +81,7 @@ def resolve_counterparty_profiles_by_ledger(
         profile_id = _profile_id(raw_profile)
         if not profile_id:
             continue
-        for ledger_id in ledger_ids_by_alias[str(alias)]:
+        for ledger_id in resolved_ledger_ids_by_alias[str(alias)]:
             _put_counterparty_profile(
                 result,
                 ledger_id,
@@ -113,47 +96,17 @@ def resolve_counterparty_profiles_by_ledger(
     return result
 
 
-def apply_counterparty_profiles_to_resolved_settings(
-    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
-    *,
-    strategy_book: object | None = None,
-    counterparty: str | CounterPartyProfile | None = None,
-    counterparty_by_strategy: Mapping[str, str | CounterPartyProfile | None] | None = None,
-    counterparty_by_ledger: Mapping[str, str | CounterPartyProfile | None] | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Project ledger-level CounterParty profiles back to per-strategy settings.
-
-    This is the compatibility bridge for the current StrategyConfig builder.
-    A strategy that can operate multiple ledgers must have the same profile on
-    all of them for this projection to be valid; richer per-ledger execution
-    can consume resolve_counterparty_profiles_by_ledger directly later.
-    """
-    from tools.testers.backtest.modules.strategy_book import StrategyBookSimple
-
-    book = cast(_StrategyBookLike, strategy_book or StrategyBookSimple())
-    profiles_by_ledger = resolve_counterparty_profiles_by_ledger(
-        resolved_settings_by_alias,
-        strategy_book=book,
-        counterparty=counterparty,
-        counterparty_by_strategy=counterparty_by_strategy,
-        counterparty_by_ledger=counterparty_by_ledger,
-    )
-    resolved = {alias: dict(settings) for alias, settings in resolved_settings_by_alias.items()}
-    for alias in resolved:
-        ledger_profiles = {
-            profiles_by_ledger[ledger_id]
-            for ledger_id in book.ledger_ids_for_strategy(alias)
-            if ledger_id in profiles_by_ledger
-        }
-        if not ledger_profiles:
-            continue
-        if len(ledger_profiles) > 1:
-            raise ValueError(
-                f"strategy {alias!r} maps to ledgers with different counterparty profiles: "
-                f"{sorted(ledger_profiles)}"
-            )
-        resolved[alias].setdefault("counterparty_profile", next(iter(ledger_profiles)))
-    return resolved
+def _ledger_ids_from_strategy_book_alias(book: object, alias: str) -> tuple[str, ...]:
+    alias_text = str(alias)
+    mapping = getattr(book, "strategy_ledger_ids_by_alias", {})
+    ledger_ids = mapping.get(alias_text)
+    if ledger_ids:
+        return tuple(str(value) for value in ledger_ids)
+    default_mapping = getattr(book, "default_ledger_id_by_alias", {})
+    default = default_mapping.get(alias_text)
+    if default:
+        return (str(default),)
+    return (f"private:{alias_text}",)
 
 
 def unregister_counterparty_profile(profile_id: str) -> None:

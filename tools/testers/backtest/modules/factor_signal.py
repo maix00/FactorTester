@@ -58,8 +58,10 @@ class FactorSignalStore:
     def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
         self.precomputed_table_keys[strategy] = key
 
-    def precomputed_table_for(self, strategy: Any, fallback_key: Any = None) -> Any:
-        key = self.precomputed_table_keys.get(strategy, fallback_key)
+    def precomputed_table_for(self, strategy: Any) -> Any:
+        key = self.precomputed_table_keys.get(strategy)
+        if key is None:
+            raise KeyError(f"precomputed signal table is not bound for strategy {strategy!r}")
         return self.precomputed_tables.get(key)
 
 
@@ -334,7 +336,6 @@ def _strategy_market_data_key(config) -> tuple:
         _market_data_source_key(config.get(MarketDataModule.data_source)),
         str(config.get(MarketDataModule.freq_mode, "auto") or "auto"),
         str(config.get(MarketDataModule.freq_fixed, "") or ""),
-        str(config.get(MarketDataModule.frequency, "") or ""),
     )
 
 
@@ -572,13 +573,9 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
     store = state.factor_signal_store
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        factor = config.get(FactorModule.factor)
-        calculation_key = _factor_calculation_key(factor_runtime_key(factor), config)
-        fallback_key = _precomputed_schedule_key(calculation_key, config)
-        table = store.precomputed_table_for(strategy, fallback_key)
+        table = store.precomputed_table_for(strategy)
         if table is None:
-            ctx.set_for(FactorSignalModule.signal_value, strategy, {})
-            continue
+            raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
         try:
             draft = ctx.draft_for(strategy)
             row = row_at_index_key(table, draft.index_key) if draft.index_key is not None else row_at(table, ctx.timestamp)

@@ -7,7 +7,7 @@ import pytest
 
 from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, Ledger, ProductPosition, StrategyConfig
+from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerState, ProductPosition, StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.equity_curve import (
@@ -24,7 +24,7 @@ def _product() -> Product:
 def test_records_positions_and_notional_alongside_equity():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
-    ledger = Ledger(strategy=s, base_currency="CNY")
+    ledger = LedgerState(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.positions, {
         p1: ProductPosition(quantity=10.0),
         p2: ProductPosition(quantity=0.0),  # zero position -- should be omitted
@@ -46,7 +46,7 @@ def test_records_positions_and_notional_alongside_equity():
 def test_margin_curve_is_none_when_never_tracked():
     s = Strategy(alias="S")
     p = _product()
-    ledger = Ledger(strategy=s, base_currency="CNY")
+    ledger = LedgerState(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=5.0)})  # equity_occupied=None
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
     t = pd.Timestamp("2024-01-01")
@@ -62,7 +62,7 @@ def test_margin_curve_is_none_when_never_tracked():
 def test_margin_curve_present_when_equity_occupied_is_tracked():
     s = Strategy(alias="S")
     p = _product()
-    ledger = Ledger(strategy=s, base_currency="CNY")
+    ledger = LedgerState(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.positions, {
         p: ProductPosition(quantity=5.0, equity_occupied=DataMoney.from_major(
             50.0, currency="CNY", use_minor_units=False)),

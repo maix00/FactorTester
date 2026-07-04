@@ -679,6 +679,9 @@ def test_framework_execution_timing_changes_returns_without_changing_targets() -
 
     assert same_bar["target_trace"] == next_bar["target_trace"]
     assert same_bar["portfolios"]["group-1"]["positions"]["asset-a"] == 1000.0
+    # The next-bar order is intended from the signal row, but the final
+    # broker cash check happens at the actual execution row. At 200.0, only
+    # 500 contracts fit in the 100_000 cash ledger.
     assert next_bar["portfolios"]["group-1"]["positions"]["asset-a"] == 500.0
     assert same_bar["portfolios"]["group-1"]["final_value"] == 200_000.0
     assert next_bar["portfolios"]["group-1"]["final_value"] == 100_000.0

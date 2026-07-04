@@ -23,6 +23,7 @@ from .flow import Flow, FlowOverride, Phase
 
 if TYPE_CHECKING:
     from .ledger import BacktestRunState
+    from .ledger import Ledger
     from .strategy import Strategy
     from tools.testers.backtest.modules.base import FieldRef
 
@@ -197,16 +198,20 @@ class FlowContext:
         timestamp: pd.Timestamp | None,
         event_queue: "EventQueue",
         active_strategies: frozenset["Strategy"] = frozenset(),
+        active_ledgers: frozenset["Ledger"] = frozenset(),
         drafts_by_strategy: dict["Strategy", list[EventDraft]] | None = None,
+        drafts_by_ledger: dict["Ledger", list[EventDraft]] | None = None,
         audit_contract: bool = False,
         enforce_contract: bool = False,
     ) -> None:
         self.timestamp = timestamp
         self.active_strategies = active_strategies
+        self.active_ledgers = active_ledgers
         # A strategy can have multiple simultaneous drafts in one dispatch
         # batch (e.g. several ORDER events for different products firing at
         # the same timestamp) -- always a list, never collapsed to one.
         self._drafts_by_strategy: dict["Strategy", list[EventDraft]] = drafts_by_strategy or {}
+        self._drafts_by_ledger: dict["Ledger", list[EventDraft]] = drafts_by_ledger or {}
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
         self._values_by_strategy: dict["FieldRef", dict["Strategy", Any]] = {}
@@ -307,6 +312,17 @@ class FlowContext:
         product being rebalanced) -- all of them must be processed, not
         just the last one."""
         return [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
+
+    def payloads_for_ledger(self, ledger: "Ledger") -> list[Any]:
+        """All payloads for this ledger in this dispatch batch.
+
+        Ledger-scoped events intentionally do not require a strategy carrier.
+        Strategy routing remains available separately only to gate which flows
+        are active for the strategies attached to this ledger.
+        """
+        from .ledger import ledger_identity
+
+        return [draft.payload for draft in self._drafts_by_ledger.get(ledger_identity(ledger), ())]
 
     def draft_for(self, strategy: "Strategy") -> EventDraft:
         drafts = self._drafts_by_strategy[strategy]
@@ -521,9 +537,20 @@ def make_dispatcher(
         # ORDER events for different products at the same timestamp) --
         # group by strategy without dropping any draft. One pass, O(batch).
         drafts_by_strategy: dict["Strategy", list[EventDraft]] = {}
+        drafts_by_ledger: dict[Any, list[EventDraft]] = {}
+        ledger_active_strategies: set["Strategy"] = set()
         for draft in batch:
-            drafts_by_strategy.setdefault(draft.strategy, []).append(draft)
-        all_active = frozenset(drafts_by_strategy)
+            if draft.strategy is not None:
+                drafts_by_strategy.setdefault(draft.strategy, []).append(draft)
+            if draft.ledger is not None:
+                drafts_by_ledger.setdefault(draft.ledger, []).append(draft)
+                ledger_active_strategies.update(_strategies_for_ledger(state, draft.ledger))
+            if draft.strategy is None and draft.ledger is None:
+                raise SchedulerError(
+                    f"{draft.kind.name} event at {draft.timestamp} has neither strategy nor ledger"
+                )
+        all_active = frozenset(set(drafts_by_strategy) | ledger_active_strategies)
+        all_active_ledgers = frozenset(drafts_by_ledger)
         # ONE ctx for the whole batch -- this is what lets one Flow's
         # ctx.set_for(...) be read by a later Flow in the same batch (e.g.
         # LedgerModule.equity_on_signal -> OrderBookModule.size_order).
@@ -532,7 +559,9 @@ def make_dispatcher(
         # persist across the whole batch.
         ctx = FlowContext(
             timestamp=timestamp, event_queue=event_queue,
-            active_strategies=all_active, drafts_by_strategy=drafts_by_strategy,
+            active_strategies=all_active, active_ledgers=all_active_ledgers,
+            drafts_by_strategy=drafts_by_strategy,
+            drafts_by_ledger=drafts_by_ledger,
             audit_contract=audit_contract,
             enforce_contract=enforce_contract,
         )
@@ -549,6 +578,17 @@ def make_dispatcher(
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
             tracker.signal_batch_done(len(batch))
     return handler
+
+
+def _strategies_for_ledger(state: "BacktestRunState", ledger: Any) -> frozenset["Strategy"]:
+    from .ledger import ledger_identity
+
+    target = ledger_identity(ledger)
+    strategies: set["Strategy"] = set()
+    for strategy in state.strategy_configs:
+        if state.ledger_for_strategy(strategy).ledger == target:
+            strategies.add(strategy)
+    return frozenset(strategies)
 
 
 def _flow_strategy_sets(

@@ -1,14 +1,20 @@
-"""LedgerCashConstraintModule — haircuts a strategy's buy-side orders
-(built in the same SIGNAL batch) proportionally if their total estimated
-cost exceeds that strategy's available Ledger.cash. A real Flow (not a
-FlowOverride) since this is a genuine constraint step in its own right, not
-a parameter of OrderBookModule.construct_orders."""
+"""LedgerCashConstraintModule — cash and margin availability checks.
+
+The SIGNAL flow is an early estimate: it uses the signal timestamp prices
+because that is all order construction is allowed to know. The ORDER-stage
+helper below is the final broker constraint: after the real execution price,
+slippage and fee are known, it proportionally haircuts orders that would make
+their shared ledger cash negative.
+"""
 
 from __future__ import annotations
 
-from typing import ClassVar
+from collections import deque
+from typing import Any, ClassVar
 
+from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.events import EventKind
+from tools.testers.backtest.engines.native.order import OrderStatus
 from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -48,7 +54,7 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
 
-    groups: dict[int, tuple[object, list[tuple[object, list, dict]]]] = {}
+    groups: dict[int, tuple[Any, list[tuple[Any, list[Any], dict]]]] = {}
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderBookModule.orders, strategy, [])
         if not orders:
@@ -96,3 +102,173 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
                             "same_batch_sell_proceeds": float(sell_proceeds),
                         },
                     )
+
+
+def constrain_order_batch_to_execution_cash(state, ctx) -> None:
+    """Final ORDER-stage broker cash/margin check.
+
+    This runs after execution price, slippage and fee have been resolved and
+    before LedgerModule.cash_update mutates the ledger. It is deliberately
+    grouped by ledger, not by strategy, so strategies that share a ledger also
+    share its available cash.
+    """
+    store = order_flow_store_for(state)
+    groups: dict[int, tuple[Any, list[tuple[Any, list[Any], dict]]]] = {}
+    for strategy in ctx.active_strategies:
+        orders = [
+            order for order in ctx.payloads_for(strategy)
+            if order.status != OrderStatus.CANCELLED and not order.get("reject_reason")
+        ]
+        if not orders:
+            continue
+        historical_fields = ctx.get_for(
+            MarketDataModule.current_historical_fields,
+            strategy,
+            ctx.get(MarketDataModule.current_historical_fields, {}),
+        )
+        ledger = state.ledger_for_strategy(strategy)
+        group = groups.setdefault(id(ledger), (ledger, []))
+        group[1].append((strategy, orders, historical_fields))
+
+    for ledger, entries in groups.values():
+        cash = ledger.get(LedgerModule.cash)
+        if cash is None:
+            raise KeyError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash field")
+        available = float(cash.to_major())
+        required_orders: list[tuple[Any, Any, float]] = []
+        released = 0.0
+        simulated_positions = _clone_positions_for_cash_check(ledger.get(LedgerModule.positions, {}))
+        simulated_cash = cash
+        for strategy, orders, historical_fields in entries:
+            config = state.config_for(strategy)
+            ledger_config = state.ledger_config_for(ledger)
+            for order in orders:
+                cash_delta = _estimated_execution_cash_delta(
+                    simulated_cash,
+                    simulated_positions,
+                    config,
+                    order,
+                    historical_fields,
+                    ledger_config,
+                    ctx.get(MarketDataModule.current_prices, {}),
+                )
+                if cash_delta < -1e-12:
+                    required_orders.append((strategy, order, -cash_delta))
+                elif cash_delta > 1e-12:
+                    released += cash_delta
+                simulated_cash = simulated_cash + DataMoney.from_major(
+                    cash_delta,
+                    currency=cash.currency,
+                    use_minor_units=cash.use_minor_units,
+                )
+        capacity = available + released
+        required = sum(amount for _strategy, _order, amount in required_orders)
+        if required <= max(capacity, 0.0) + 1e-9:
+            continue
+        if required <= 0 or capacity <= 0:
+            scale = 0.0
+        else:
+            scale = capacity / required
+        for strategy, order, _amount in required_orders:
+            before = float(order.quantity)
+            scaled = _round_execution_scaled_quantity(state, strategy, order, before * scale)
+            order.quantity = scaled
+            actual_scale = 0.0 if abs(before) <= 1e-12 else float(scaled / before)
+            _scale_linear_fee_fields(order, actual_scale)
+            if abs(order.quantity) <= 1e-12:
+                order.set("reject_reason", "现金不足，订单数量缩减为 0")
+            store.record(
+                order,
+                step="execution_cash_constraint",
+                label="成交现金约束",
+                timestamp=ctx.timestamp,
+                details={
+                    "before_quantity": before,
+                    "after_quantity": float(order.quantity),
+                    "scale": float(actual_scale),
+                    "raw_scale": float(scale),
+                    "available_cash": float(capacity),
+                    "required_cash": float(required),
+                },
+            )
+
+
+def _estimated_execution_cash_delta(
+    cash: DataMoney,
+    positions: dict,
+    strategy_config,
+    order,
+    historical_fields: dict,
+    ledger_config,
+    current_prices: dict,
+) -> float:
+    from tools.testers.backtest.modules.ledger_module import (
+        _apply_margin_accounting_fill,
+        _uses_margin_accounting,
+    )
+
+    price = float(order.get("effective_price", current_prices[order.instrument]))
+    fee_cost = float(order.get("fee_cost", 0.0) or 0.0)
+    if _uses_margin_accounting(strategy_config, historical_fields, order.instrument, ledger_config):
+        after = _apply_margin_accounting_fill(
+            cash,
+            positions,
+            strategy_config,
+            order.instrument,
+            quantity=float(order.quantity),
+            price=price,
+            fee_cost=fee_cost,
+            historical_fields=historical_fields,
+            ledger_config=ledger_config,
+        )
+        return float(after.to_major() - cash.to_major())
+    return -(
+        contract_notional(price, order.quantity, historical_fields, order.instrument)
+        + fee_cost
+    )
+
+
+def _clone_positions_for_cash_check(positions: dict) -> dict:
+    from tools.testers.backtest.engines.native.ledger import Lot, ProductPosition
+
+    cloned = {}
+    for product, entry in positions.items():
+        lots = getattr(entry, "lots", None)
+        cloned[product] = ProductPosition(
+            quantity=getattr(entry, "quantity", 0.0),
+            average_cost=getattr(entry, "average_cost", None),
+            lots=deque(
+                Lot(
+                    quantity=lot.quantity,
+                    entry_price=lot.entry_price,
+                    multiplier=lot.multiplier,
+                    is_today=lot.is_today,
+                )
+                for lot in lots
+            ) if lots is not None else None,
+            equity_occupied=getattr(entry, "equity_occupied", None),
+            settlement_price=getattr(entry, "settlement_price", None),
+        )
+    return cloned
+
+
+def _round_execution_scaled_quantity(state, strategy, order, quantity: float) -> float:
+    from tools.testers.backtest.modules.position_sizing import PositionSizingModule, _round_one
+    from tools.testers.backtest.modules.market_data import market_data_store_for
+
+    lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
+    policy = state.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
+    return _round_one(quantity, lot_sizes.get(order.instrument), policy)
+
+
+def _scale_linear_fee_fields(order, scale: float) -> None:
+    for key in (
+        "fee_cost",
+        "fee_open_quantity",
+        "fee_close_quantity",
+        "fee_close_today_quantity",
+        "fee_close_yesterday_quantity",
+    ):
+        value = order.get(key, None)
+        if value is not None:
+            order.set(key, float(value) * scale)

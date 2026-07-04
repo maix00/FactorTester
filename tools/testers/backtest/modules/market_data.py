@@ -122,10 +122,6 @@ class MarketDataModule(ExecutableModule):
         # strategy_config_builder), not by any Flow in this module itself
     freq_mode: ClassVar[FieldRef[str]] = FieldRef("freq_mode")
     freq_fixed: ClassVar[FieldRef[str]] = FieldRef("freq_fixed")
-    frequency: ClassVar[FieldRef[str]] = FieldRef("frequency")
-        # bar granularity of the underlying market data (distinct from
-        # FactorSignalModule.signal_freq, which is how often the strategy
-        # rebalances -- a strategy can rebalance daily on top of minute bars)
     required_data_source: ClassVar[FieldRef[Any]] = FieldRef("required_data_source")
     required_frequency: ClassVar[FieldRef[DataFreq]] = FieldRef("required_frequency")
 
@@ -196,20 +192,13 @@ class MarketDataModule(ExecutableModule):
             tab_label="数据频率",
             tab_order=36,
         ),
-        "frequency": FieldDefinition(
-            public=False, label="Bar频率", default="", control_template="select", tab="frequency",
-            options=(("", "自动"),),
-            chip_template="Bar频率: {value}",
-            tab_label="数据频率",
-            tab_order=36,
-        ),
         "required_frequency": FieldDefinition(public=False),
         "required_data_source": FieldDefinition(public=False),
     }
 
     resolve_market_data_request: ClassVar[Flow] = Flow(
         "resolve_market_data_request",
-        inputs=(data_source_mode, data_source, freq_mode, freq_fixed, frequency, FactorModule.factor),
+        inputs=(data_source_mode, data_source, freq_mode, freq_fixed, FactorModule.factor),
         outputs=(required_data_source, required_frequency),
         phase=Phase.PRE_REPLAY, order=37,
         after=(RunWindowModule.resolve_run_window, ProductSelectionModule.resolve_product_selection),
@@ -431,11 +420,13 @@ def _data_source_instance_label(source: Any | None) -> str:
 
 def _required_frequency_for_strategy(config, products: list[Any]) -> DataFreq:
     mode = str(config.get(MarketDataModule.freq_mode, "") or "").strip().lower()
-    legacy_frequency = str(config.get(MarketDataModule.frequency, "") or "").strip()
     if not mode:
-        mode = "fixed" if legacy_frequency else "auto"
+        mode = "auto"
     if mode == "fixed":
-        return DataFreq(config.get(MarketDataModule.freq_fixed) or legacy_frequency or "MIN1")
+        fixed = str(config.get(MarketDataModule.freq_fixed, "") or "").strip()
+        if not fixed:
+            raise ValueError("数据频率模式为固定时，必须提供 freq_fixed")
+        return DataFreq(fixed)
     if mode != "auto":
         raise ValueError(f"不支持的数据频率模式: {mode!r}")
     return _infer_required_frequency_from_factor(config.get(FactorModule.factor), products)
@@ -1244,9 +1235,11 @@ def _historical_field_policy_for_engine(state, raw_policy: object | None) -> str
         mode = engine_mode_for(next(iter(configs.values())))
     if mode == "exact":
         return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
-    fee_ref = FieldRef("fee_mode", owner="FeeModule")
-    for config in getattr(state, "strategy_configs", {}).values():
-        if str(config.get(fee_ref, "") or "") == "exact":
+    for strategy, config in getattr(state, "strategy_configs", {}).items():
+        from tools.testers.backtest.modules.fee import _resolve_fee_mode
+
+        ledger = state.ledger_for_strategy(strategy)
+        if _resolve_fee_mode(config, state.ledger_config_for(ledger)) == "exact":
             return str(HistoricalFieldFallbackPolicy.STRICT_HISTORICAL.value)
     if mode in {"auto", "custom"}:
         return str(raw_policy or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value)
@@ -1255,27 +1248,28 @@ def _historical_field_policy_for_engine(state, raw_policy: object | None) -> str
 
 def _required_market_rule_field_names(state) -> tuple[str, ...]:
     fields: list[str] = list(_MARKET_RULE_FIELD_NAMES)
-    fee_ref = FieldRef("fee_mode", owner="FeeModule")
-    margin_ref = FieldRef("margin_mode", owner="MarginModule")
     allocation_ref = FieldRef("allocation_policy", owner="GroupMembershipModule")
-    for config in getattr(state, "strategy_configs", {}).values():
+    for strategy, config in getattr(state, "strategy_configs", {}).items():
         from tools.testers.backtest.modules.fee import _resolve_fee_mode
+        from tools.testers.backtest.modules.margin import _resolve_margin_mode
         from tools.testers.backtest.modules.trading_rule import _effective_accounting_mode
 
-        fee_mode = _resolve_fee_mode(config)
-        if fee_mode not in {"zero", "none"}:
+        ledger = state.ledger_for_strategy(strategy)
+        ledger_config = state.ledger_config_for(ledger)
+        fee_mode = _resolve_fee_mode(config, ledger_config)
+        if fee_mode != "zero":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
         if fee_mode == "exact" or engine_mode_for(config) == "exact":
             fields.append("CostBasisMethod")
-        accounting_mode = _effective_accounting_mode(config)
+        accounting_mode = _effective_accounting_mode(config, ledger_config)
         if accounting_mode == "Auto":
             fields.extend(TRANSACTION_FEE_FIELD_NAMES)
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
-        if accounting_mode == "Custom" and bool(config.get(FieldRef("daily_mark_to_market_enabled", owner="TradingRuleModule"), False)):
+        if accounting_mode == "Custom" and bool(getattr(ledger_config, "daily_mark_to_market_enabled", False)):
             fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
-        margin_mode = str(config.get(margin_ref, "auto") or "auto")
+        margin_mode = _resolve_margin_mode(config, ledger_config)
         allocation = str(config.get(allocation_ref, "") or "")
         if margin_mode not in {"none", "zero"} or allocation == "equal_margin":
             fields.extend(_MARGIN_FIELD_NAMES)
@@ -1301,7 +1295,13 @@ def _set_current_historical_fields(state, ctx) -> None:
     ctx.set(MarketDataModule.current_historical_fields, base_fields)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        fields = _historical_fields_for_strategy(base_fields, config, ctx.timestamp)
+        ledger = state.ledger_for_strategy(strategy)
+        fields = _historical_fields_for_strategy(
+            base_fields,
+            config,
+            ctx.timestamp,
+            ledger_config=state.ledger_config_for(ledger),
+        )
         if fields is base_fields:
             # No customization applies to this strategy -- every consumer
             # reads via ctx.get_for(ref, strategy, ctx.get(ref, {})), so
@@ -1316,23 +1316,25 @@ def _historical_fields_for_strategy(
     base_fields: dict[Any, dict[str, object]],
     strategy_config,
     timestamp: pd.Timestamp,
+    *,
+    ledger_config=None,
 ) -> dict[Any, dict[str, object]]:
     if engine_mode_for(strategy_config) != "custom":
         return base_fields
-    if not _custom_historical_fields_enabled(strategy_config):
+    if not _custom_historical_fields_enabled(strategy_config, ledger_config):
         return base_fields
     return apply_custom_product_fields(base_fields, strategy_config, timestamp)
 
 
-def _custom_historical_fields_enabled(strategy_config) -> bool:
+def _custom_historical_fields_enabled(strategy_config, ledger_config=None) -> bool:
     from tools.testers.backtest.modules.fee import _resolve_fee_mode
     from tools.testers.backtest.modules.margin import _resolve_margin_mode
     from tools.testers.backtest.modules.trading_rule import _effective_accounting_mode
 
     return (
-        _resolve_fee_mode(strategy_config) == "custom"
-        or _resolve_margin_mode(strategy_config) == "custom"
-        or _effective_accounting_mode(strategy_config) == "Custom"
+        _resolve_fee_mode(strategy_config, ledger_config) == "custom"
+        or _resolve_margin_mode(strategy_config, ledger_config) == "custom"
+        or _effective_accounting_mode(strategy_config, ledger_config) == "Custom"
     )
 
 
@@ -1526,7 +1528,7 @@ def _historical_fields_at_from_frames(
         for instrument in instruments:
             column = _historical_field_frame_column_for(frame, instrument)
             if column is not None:
-                result[instrument][str(field_name)] = row[str(column)]
+                result[instrument][str(field_name)] = row[cast(Any, column)]
     return result
 
 

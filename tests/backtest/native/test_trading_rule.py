@@ -8,14 +8,23 @@ import pytest
 
 from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.engines.native.ledger import Ledger, Lot, ProductPosition, StrategyConfig
-from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
+from tools.testers.backtest.engines.native.ledger import (
+    LedgerConfig, LedgerState, Lot, ProductPosition, StrategyConfig, ledger_identity,
+)
+from tools.testers.backtest.engines.native.scheduler import (
+    EventQueue,
+    FlowContext,
+    FlowRegistry,
+    make_dispatcher,
+    sort_and_validate,
+)
 from tools.testers.backtest.engines.native.ledger import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_method, _resolve_use_int_position,
     close_position, infer_auto_cost_basis_method, mark_to_market, open_position, _apply_daily_mark_to_market,
@@ -44,14 +53,27 @@ def _config(**values) -> StrategyConfig:
     return StrategyConfig(strategy=s, field_values=field_values)
 
 
+def _ledger_config(**values) -> LedgerConfig:
+    return LedgerConfig(
+        fee_mode=values.get("fee_mode"),
+        fixed_fee_rate=values.get("fixed_fee_rate"),
+        margin_mode=values.get("margin_mode"),
+        fixed_margin_ratio=values.get("fixed_margin_ratio"),
+        accounting_mode=values.get("accounting_mode"),
+        daily_mark_to_market_enabled=values.get("daily_mark_to_market_enabled"),
+        cost_basis_method=values.get("cost_basis_method"),
+        use_int_position=values.get("use_int_position"),
+    )
+
+
 def test_resolve_method_basic_is_always_weight_average():
     config = _config(engine_mode="basic")
     assert _resolve_method(config, _product()) == "WeightAverage"
 
 
 def test_resolve_method_custom_reads_field():
-    config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="FIFO")
-    assert _resolve_method(config, _product()) == "FIFO"
+    config = _config(engine_mode="custom")
+    assert _resolve_method(config, _product(), ledger_config=_ledger_config(accounting_mode="Custom", cost_basis_method="FIFO")) == "FIFO"
 
 
 def test_resolve_method_auto_uses_explicit_historical_cost_basis_method():
@@ -114,15 +136,15 @@ def test_infer_auto_cost_basis_rejects_unknown_explicit_method():
 def test_resolve_use_int_position_basic_false_auto_true_custom_reads_field():
     assert _resolve_use_int_position(_config(engine_mode="basic")) is False
     assert _resolve_use_int_position(_config(engine_mode="auto")) is True
-    assert _resolve_use_int_position(_config(engine_mode="custom", accounting_mode="Custom", use_int_position=True)) is True
-    assert _resolve_use_int_position(_config(engine_mode="custom", accounting_mode="Custom")) is False
+    assert _resolve_use_int_position(_config(engine_mode="custom"), _ledger_config(accounting_mode="Custom", use_int_position=True)) is True
+    assert _resolve_use_int_position(_config(engine_mode="custom"), _ledger_config(accounting_mode="Custom")) is False
 
 
 def test_resolve_margin_mode_defaults_auto_and_reads_field():
     assert _resolve_margin_mode(_config(engine_mode="basic")) == "none"
     assert _resolve_margin_mode(_config(engine_mode="auto")) == "auto"
     assert _resolve_margin_mode(_config(engine_mode="custom")) == "auto"
-    assert _resolve_margin_mode(_config(engine_mode="custom", margin_mode="fixed")) == "fixed"
+    assert _resolve_margin_mode(_config(engine_mode="custom"), _ledger_config(margin_mode="fixed")) == "fixed"
 
 
 def test_resolve_margin_ratio_basic_is_zero():
@@ -132,12 +154,12 @@ def test_resolve_margin_ratio_basic_is_zero():
 
 def test_resolve_margin_ratio_none_is_zero():
     config = _config(engine_mode="custom", margin_mode="none")
-    assert _resolve_margin_ratio(config, market_margin_ratio=0.1) == 0.0
+    assert _resolve_margin_ratio(config, market_margin_ratio=0.1, ledger_config=_ledger_config(margin_mode="none")) == 0.0
 
 
 def test_resolve_margin_ratio_fixed_uses_fixed_field():
     config = _config(engine_mode="custom", margin_mode="fixed", fixed_margin_ratio=0.2)
-    assert _resolve_margin_ratio(config, market_margin_ratio=0.9) == 0.2
+    assert _resolve_margin_ratio(config, market_margin_ratio=0.9, ledger_config=_ledger_config(margin_mode="fixed", fixed_margin_ratio=0.2)) == 0.2
 
 
 def test_resolve_margin_ratio_auto_uses_caller_supplied_market_ratio():
@@ -148,7 +170,7 @@ def test_resolve_margin_ratio_auto_uses_caller_supplied_market_ratio():
 def test_equity_occupied_basic_accounting_has_zero_margin():
     product = _product()
     config = _config(engine_mode="basic")
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0,
                                                               equity_occupied=None)})
     open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0)
@@ -160,9 +182,12 @@ def test_equity_occupied_fixed_margin_ratio_discounts_notional():
     product = _product()
     config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="WeightAverage",
                      margin_mode="fixed", fixed_margin_ratio=0.1)
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(accounting_mode="Custom", cost_basis_method="WeightAverage",
+                                   margin_mode="fixed", fixed_margin_ratio=0.1)
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0)})
-    open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0)
+    open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0,
+                  ledger_config=ledger_config)
     entry = ledger.get(_positions_ref())[product]
     assert entry.equity_occupied.to_major() == pytest.approx(5.0)  # 10*5*1*0.1
 
@@ -170,7 +195,7 @@ def test_equity_occupied_fixed_margin_ratio_discounts_notional():
 def test_weight_average_open_then_partial_close_realizes_pnl_at_average_cost():
     product = _product()
     config = _config(engine_mode="basic")
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0)})
 
     open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0)
@@ -188,14 +213,18 @@ def test_weight_average_open_then_partial_close_realizes_pnl_at_average_cost():
 def test_fifo_closes_earliest_lot_first():
     product = _product()
     config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="FIFO")
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(accounting_mode="Custom", cost_basis_method="FIFO")
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     from collections import deque
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, lots=deque())})
 
-    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0)
-    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0)
+    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0,
+                  ledger_config=ledger_config)
+    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0,
+                  ledger_config=ledger_config)
 
-    realized = close_position(ledger, config, product, quantity=10.0, fill_price=25.0, multiplier=1.0)
+    realized = close_position(ledger, config, product, quantity=10.0, fill_price=25.0, multiplier=1.0,
+                              ledger_config=ledger_config)
     # FIFO closes the first lot (entry_price=10) first
     assert realized.to_major() == pytest.approx(10.0 * (25.0 - 10.0))
     entry = ledger.get(_positions_ref())[product]
@@ -207,14 +236,18 @@ def test_fifo_closes_earliest_lot_first():
 def test_lifo_closes_latest_lot_first():
     product = _product()
     config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="LIFO")
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(accounting_mode="Custom", cost_basis_method="LIFO")
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     from collections import deque
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, lots=deque())})
 
-    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0)
-    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0)
+    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0,
+                  ledger_config=ledger_config)
+    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0,
+                  ledger_config=ledger_config)
 
-    realized = close_position(ledger, config, product, quantity=10.0, fill_price=25.0, multiplier=1.0)
+    realized = close_position(ledger, config, product, quantity=10.0, fill_price=25.0, multiplier=1.0,
+                              ledger_config=ledger_config)
     assert realized.to_major() == pytest.approx(10.0 * (25.0 - 20.0))
     entry = ledger.get(_positions_ref())[product]
     assert entry.lots[0].entry_price == 10.0
@@ -223,15 +256,20 @@ def test_lifo_closes_latest_lot_first():
 def test_hifo_closes_highest_cost_lot_first():
     product = _product()
     config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="HIFO")
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(accounting_mode="Custom", cost_basis_method="HIFO")
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     from collections import deque
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, lots=deque())})
 
-    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0)
-    open_position(ledger, config, product, quantity=10.0, entry_price=30.0, multiplier=1.0)  # highest cost, middle in time
-    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0)
+    open_position(ledger, config, product, quantity=10.0, entry_price=10.0, multiplier=1.0,
+                  ledger_config=ledger_config)
+    open_position(ledger, config, product, quantity=10.0, entry_price=30.0, multiplier=1.0,
+                  ledger_config=ledger_config)  # highest cost, middle in time
+    open_position(ledger, config, product, quantity=10.0, entry_price=20.0, multiplier=1.0,
+                  ledger_config=ledger_config)
 
-    realized = close_position(ledger, config, product, quantity=10.0, fill_price=35.0, multiplier=1.0)
+    realized = close_position(ledger, config, product, quantity=10.0, fill_price=35.0, multiplier=1.0,
+                              ledger_config=ledger_config)
     assert realized.to_major() == pytest.approx(10.0 * (35.0 - 30.0))
     remaining_costs = sorted(lot.entry_price for lot in ledger.get(_positions_ref())[product].lots)
     assert remaining_costs == [10.0, 20.0]
@@ -267,7 +305,13 @@ def test_daily_mark_to_market_notice_uses_trading_day_last_bar_not_calendar_day(
 
     assert len(captured) == 1
     assert captured[0].timestamp == pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
-    assert captured[0].payload == {"kind": "daily_mark_to_market", "trading_day": "2026-03-10"}
+    assert captured[0].strategy is None
+    assert captured[0].ledger == ledger_identity("private:S")
+    assert captured[0].payload == {
+        "kind": "daily_mark_to_market",
+        "trading_day": "2026-03-10",
+        "ledger_id": "private:S",
+    }
 
 
 def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
@@ -282,7 +326,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
             MarginModule.margin_mode: "auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(
         _positions_ref(),
         {
@@ -297,6 +341,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     )
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     queue = EventQueue()
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -329,6 +374,155 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
 
 
+def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger_notice():
+    product = _product()
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    config1 = StrategyConfig(
+        strategy=s1,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={EngineModule.engine_mode: "auto", TradingRuleModule.accounting_mode: "Auto"},
+    )
+    config2 = StrategyConfig(
+        strategy=s2,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={EngineModule.engine_mode: "auto", TradingRuleModule.accounting_mode: "Auto"},
+    )
+    ledger_key = ledger_identity("shared-book")
+    ledger = LedgerState(strategy=s1, base_currency="CNY", ledger=ledger_key)
+    ledger.set(_cash_ref(), DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=1.0,
+            lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
+            settlement_price=10.0,
+            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account = BacktestRunState(strategy_configs={s1: config1, s2: config2}, ledgers={ledger_key: ledger})
+    account.ledger_configs[ledger_key] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger_key}),
+        drafts_by_ledger={
+            ledger_key: [
+                EventDraft(
+                    EventKind.LEDGER_NOTICE,
+                    pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+                    payload={"kind": "daily_mark_to_market", "ledger_id": "shared-book"},
+                    ledger=ledger_key,
+                )
+            ]
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 12.0}, "close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 12.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_daily_mark_to_market(account, ctx)
+
+    # One settlement: pnl +2.0, margin increases 1.0 -> 1.2, so cash changes by
+    # +1.8. If this were still strategy-scoped, the shared ledger would be
+    # settled twice.
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(101.8)
+    entry = ledger.get(_positions_ref())[product]
+    assert entry.equity_occupied.to_major() == pytest.approx(1.2)
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
+
+
+def test_ledger_notice_dispatch_loads_market_data_and_settles_ledger_once():
+    product = _product()
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    flow_names = frozenset({
+        "lookup_current_prices_on_ledger_notice",
+        "lookup_historical_fields_on_ledger_notice",
+        "apply_daily_mark_to_market",
+    })
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(
+            strategy=s1,
+            active_flow_names=flow_names,
+            field_values={EngineModule.engine_mode: "auto", TradingRuleModule.accounting_mode: "Auto"},
+        ),
+        s2: StrategyConfig(
+            strategy=s2,
+            active_flow_names=flow_names,
+            field_values={EngineModule.engine_mode: "auto", TradingRuleModule.accounting_mode: "Auto"},
+        ),
+    })
+    ledger = ledger_identity("shared-book")
+    shared = LedgerState(strategy=s1, base_currency="CNY", ledger=ledger)
+    shared.set(_cash_ref(), DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
+    shared.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=1.0,
+            lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
+            settlement_price=10.0,
+            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account.ledgers = {ledger: shared}
+    account.ledger_configs[ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
+    store = strategy_book_store_for(account)
+    store.register_strategy_ledgers(s1, (ledger.name,), default_ledger_id=ledger.name)
+    store.register_strategy_ledgers(s2, (ledger.name,), default_ledger_id=ledger.name)
+
+    event_time = pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
+    market_time = event_time - pd.Timedelta(nanoseconds=1)
+    close = pd.DataFrame({product: [12.0]}, index=pd.DatetimeIndex([market_time]))
+    settlement = pd.DataFrame({product: [12.0]}, index=pd.DatetimeIndex([market_time]))
+    account.market_data_store.current_prices_table = close
+    account.market_data_store.market_price_tables = {"settlement": settlement}
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    account.market_data_store.historical_field_names = (
+        "VolumeMultiple",
+        "SettlementPrice",
+        "LongMarginRatioByMoney",
+    )
+    field_index = pd.DatetimeIndex([market_time.tz_localize(None)])
+    account.market_data_store.historical_field_frames = {
+        "VolumeMultiple": pd.DataFrame({product: [1.0]}, index=field_index),
+        "SettlementPrice": pd.DataFrame({product: [12.0]}, index=field_index),
+        "LongMarginRatioByMoney": pd.DataFrame({product: [0.1]}, index=field_index),
+    }
+
+    registry = FlowRegistry()
+    for flow in (
+        MarketDataModule.lookup_current_prices_on_ledger_notice,
+        MarketDataModule.lookup_historical_fields_on_ledger_notice,
+        TradingRuleModule.apply_daily_mark_to_market,
+    ):
+        registry.register_flow(flow)
+    groups = sort_and_validate(registry.resolve())
+    queue = EventQueue()
+    dispatcher = make_dispatcher(groups[(TradingRuleModule.apply_daily_mark_to_market.phase, EventKind.LEDGER_NOTICE)], account, queue)
+    queue.set_dispatcher(EventKind.LEDGER_NOTICE, dispatcher)
+    queue.push_event(EventDraft(
+        EventKind.LEDGER_NOTICE,
+        event_time,
+        payload={"kind": "daily_mark_to_market", "ledger_id": ledger.name},
+        ledger=ledger,
+    ))
+
+    queue.run_until_drained()
+
+    # MarketData lookup flows must have fed the ledger-scoped DMTM flow. The
+    # shared ledger is attached to two strategies, but the notice itself is a
+    # ledger event, so settlement happens once: +2 PnL and +0.2 extra margin.
+    assert shared.get(_cash_ref()).to_major() == pytest.approx(101.8)
+    entry = shared.get(_positions_ref())[product]
+    assert entry.equity_occupied.to_major() == pytest.approx(1.2)
+    assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
+
+
 def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
     product = _product()
     strategy = Strategy(alias="S")
@@ -341,7 +535,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
             MarginModule.margin_mode: "auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(
         _positions_ref(),
         {
@@ -358,6 +552,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
     )
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -402,7 +597,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
             MarginModule.margin_mode: "auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
@@ -413,6 +608,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -455,7 +651,7 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
             MarginModule.margin_mode: "auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
@@ -469,6 +665,13 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+        fee_mode="zero",
+        margin_mode="auto",
+    )
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -497,7 +700,12 @@ def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
         cost_basis_method="FIFO",
         daily_mark_to_market_enabled=True,
     )
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+    )
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(
         _positions_ref(),
         {
@@ -520,6 +728,7 @@ def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
         quantity=1.0,
         fill_price=18.0,
         multiplier=1.0,
+        ledger_config=ledger_config,
     )
 
     # Daily mark-to-market is not a blended average-cost close. It consumes
@@ -540,7 +749,7 @@ def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
             TradingRuleModule.accounting_mode: "Auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=3.0,
@@ -557,6 +766,7 @@ def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
         config,
         {product: 13.5},
         {product: {"VolumeMultiple": 10.0, "SettlementPrice": 12.0}},
+        ledger_config=_ledger_config(accounting_mode="Auto"),
     )
 
     assert pnl.to_major() == pytest.approx(3.0 * (13.5 - 12.0) * 10.0)
@@ -572,7 +782,7 @@ def test_daily_mark_to_market_defaults_to_aggregate_money_formula():
             TradingRuleModule.accounting_mode: "Auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -586,6 +796,7 @@ def test_daily_mark_to_market_defaults_to_aggregate_money_formula():
         config,
         {product: 10.005},
         {product: {"VolumeMultiple": 1.0, "SettlementPrice": 10.005}},
+        ledger_config=_ledger_config(accounting_mode="Auto"),
     )
 
     assert pnl.to_major() == pytest.approx(0.01)
@@ -601,7 +812,7 @@ def test_daily_mark_to_market_can_use_per_contract_price_point_policy():
             TradingRuleModule.accounting_mode: "Auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -619,6 +830,7 @@ def test_daily_mark_to_market_can_use_per_contract_price_point_policy():
             "SettlementPrice": 10.005,
             "MoneyCalculationPolicy": "per_contract_price_point",
         }},
+        ledger_config=_ledger_config(accounting_mode="Auto"),
     )
 
     assert pnl.to_major() == pytest.approx(0.02)
@@ -634,7 +846,7 @@ def test_daily_mark_to_market_lot_positions_still_use_money_policy():
             TradingRuleModule.accounting_mode: "Auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -653,6 +865,7 @@ def test_daily_mark_to_market_lot_positions_still_use_money_policy():
             "SettlementPrice": 10.005,
             "MoneyCalculationPolicy": "per_contract_price_point",
         }},
+        ledger_config=_ledger_config(accounting_mode="Auto"),
     )
 
     assert pnl.to_major() == pytest.approx(0.02)
@@ -670,7 +883,7 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
             TradingRuleModule.accounting_mode: "Auto",
         },
     )
-    ledger = Ledger(strategy=strategy, base_currency="CNY")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
@@ -683,6 +896,7 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 10:00:00", tz="Asia/Shanghai"),
         event_queue=EventQueue(),
@@ -706,7 +920,12 @@ def test_daily_mark_to_market_close_realizes_from_last_settlement_not_original_e
         cost_basis_method="FIFO",
         daily_mark_to_market_enabled=True,
     )
-    ledger = Ledger(strategy=config.strategy, base_currency="CNY")
+    ledger_config = _ledger_config(
+        accounting_mode="Custom",
+        cost_basis_method="FIFO",
+        daily_mark_to_market_enabled=True,
+    )
+    ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=3.0,
@@ -717,7 +936,10 @@ def test_daily_mark_to_market_close_realizes_from_last_settlement_not_original_e
         )
     })
 
-    realized = close_position(ledger, config, product, quantity=1.0, fill_price=13.5, multiplier=10.0)
+    realized = close_position(
+        ledger, config, product, quantity=1.0, fill_price=13.5, multiplier=10.0,
+        ledger_config=ledger_config,
+    )
 
     assert realized.to_major() == pytest.approx((13.5 - 12.0) * 10.0)
 

@@ -12,7 +12,6 @@ from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.settings.counterparty import (
     CounterPartyProfile,
     apply_counterparty_profile_defaults,
-    apply_counterparty_profiles_to_resolved_settings,
     counterparty_profile,
     register_counterparty_profile,
     resolve_counterparty_profiles_by_ledger,
@@ -39,61 +38,50 @@ def test_exchange_base_profile_is_registered_at_import_time():
     assert profile.label
 
 
-def test_counterparty_profile_expands_fee_and_margin_defaults():
-    configs = build_strategy_configs({
-        "A1": {
-            "engine_mode": "custom",
-            "counterparty_profile": "exchange_base",
-            **_GROUP_FIELDS,
-        },
-    })
-    strategy = next(iter(configs))
-    config = configs[strategy]
-    assert config.get(FeeModule.fee_mode) == "auto"
-    assert config.get(MarginModule.margin_mode) == "auto"
-    assert config.get(TradingRuleModule.accounting_mode) == "Auto"
-    assert config.get(TradingRuleModule.use_int_position) is True
+def test_counterparty_profile_resolves_to_ledger_config_not_strategy_config():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", **_GROUP_FIELDS}},
+        counterparty="exchange_base",
+    )
+    ledger_id = next(iter(account.ledger_configs))
+    ledger_config = account.ledger_config_for(ledger_id)
+    assert ledger_config.fee_mode == "auto"
+    assert ledger_config.margin_mode == "auto"
+    assert ledger_config.accounting_mode == "Auto"
+    assert ledger_config.use_int_position is True
+    config = next(iter(account.strategy_configs.values()))
+    assert config.get(FeeModule.fee_mode, None) is None
+    assert config.get(MarginModule.margin_mode, None) is None
+    assert config.get(TradingRuleModule.accounting_mode, None) is None
 
 
-def test_explicit_field_value_wins_over_counterparty_profile():
+def test_build_strategy_configs_does_not_materialize_ledger_owned_fields():
     configs = build_strategy_configs({
         "A1": {
             "engine_mode": "custom",
             "counterparty_profile": "exchange_base",
             "fee_mode": "fixed",
+            "margin_mode": "fixed",
+            "accounting_mode": "Custom",
             **_GROUP_FIELDS,
         },
     })
     strategy = next(iter(configs))
     config = configs[strategy]
-    assert config.get(FeeModule.fee_mode) == "fixed"
-    # margin_mode still comes from the profile -- only fee_mode was overridden
-    assert config.get(MarginModule.margin_mode) == "auto"
+    assert config.get(FeeModule.fee_mode, None) is None
+    assert config.get(MarginModule.margin_mode, None) is None
+    assert config.get(TradingRuleModule.accounting_mode, None) is None
 
 
-def test_no_profile_selected_is_bit_identical_to_current_custom_mode_behavior():
-    configs = build_strategy_configs({
-        "A1": {"engine_mode": "custom", **_GROUP_FIELDS},
-    })
-    strategy = next(iter(configs))
-    config = configs[strategy]
-    # engine_mode=custom with no counterparty_profile and no explicit fee_mode/
-    # margin_mode falls back to each field's own bare `default` (unchanged
-    # from before this feature existed) -- not the exchange_base profile.
-    assert config.get(FeeModule.fee_mode) == "auto"  # FeeModule.fee_mode's own bare default
-    assert config.get(MarginModule.margin_mode) == "auto"  # MarginModule.margin_mode's own bare default
-
-
-def test_engine_mode_basic_auto_exact_presets_unaffected_by_counterparty_profile():
+def test_engine_mode_basic_auto_exact_presets_do_not_write_ledger_fields_to_strategy_config():
     configs = build_strategy_configs({
         "basic": {"engine_mode": "basic", **_GROUP_FIELDS},
         "auto": {"engine_mode": "auto", **_GROUP_FIELDS},
         "exact": {"engine_mode": "exact", **_GROUP_FIELDS},
     })
-    by_alias = {s.alias: s for s in configs}
-    assert configs[by_alias["basic"]].get(FeeModule.fee_mode) == "zero"
-    assert configs[by_alias["auto"]].get(FeeModule.fee_mode) == "auto"
-    assert configs[by_alias["exact"]].get(FeeModule.fee_mode) == "exact"
+    assert {config.get(FeeModule.fee_mode, None) for config in configs.values()} == {None}
 
 
 def test_registering_a_second_profile_does_not_clobber_the_first():
@@ -104,13 +92,21 @@ def test_registering_a_second_profile_does_not_clobber_the_first():
     ))
     apply_counterparty_profile_defaults()
     try:
-        configs = build_strategy_configs({
-            "first": {"engine_mode": "custom", "counterparty_profile": "exchange_base", **_GROUP_FIELDS},
-            "second": {"engine_mode": "custom", "counterparty_profile": "__test_second_profile__", **_GROUP_FIELDS},
-        })
-        by_alias = {s.alias: s for s in configs}
-        assert configs[by_alias["first"]].get(FeeModule.fee_mode) == "auto"
-        assert configs[by_alias["second"]].get(FeeModule.fee_mode) == "fixed"
+        account = BacktestRunState()
+        apply_strategy_configs(
+            account,
+            {
+                "first": {"engine_mode": "custom", **_GROUP_FIELDS},
+                "second": {"engine_mode": "custom", **_GROUP_FIELDS},
+            },
+            counterparty_by_strategy={
+                "first": "exchange_base",
+                "second": "__test_second_profile__",
+            },
+        )
+        configs_by_ledger = {ledger_id: config.fee_mode for ledger_id, config in account.ledger_configs.items()}
+        assert "auto" in set(configs_by_ledger.values())
+        assert "fixed" in set(configs_by_ledger.values())
     finally:
         # This registry is process-global mutable state shared with every
         # other test module in the same pytest session -- leaking this
@@ -133,6 +129,36 @@ def test_counterparty_resolves_to_ledger_level_for_shared_strategy_book():
         strategy_book=book,
     )
     assert resolved == {"shared-book": "exchange_base"}
+
+
+def test_counterparty_profile_can_be_applied_to_ledger_config():
+    register_counterparty_profile(CounterPartyProfile(
+        id="__test_ledger_config_profile__",
+        label="测试账本配置预设",
+        field_defaults={FeeModule.fee_mode: "fixed"},
+    ))
+    apply_counterparty_profile_defaults()
+    try:
+        account = BacktestRunState()
+        book = StrategyBook.from_dict({
+            "strategies": {
+                "A1": "shared-book",
+                "A2": "shared-book",
+            }
+        })
+        apply_strategy_configs(
+            account,
+            {
+                "A1": {"engine_mode": "custom", **_GROUP_FIELDS},
+                "A2": {"engine_mode": "custom", **_GROUP_FIELDS},
+            },
+            strategy_book=book,
+            counterparty_by_ledger={"shared-book": "__test_ledger_config_profile__"},
+        )
+        assert account.ledger_config_for("shared-book").fee_mode == "fixed"
+        assert {config.get(FeeModule.fee_mode, None) for config in account.strategy_configs.values()} == {None}
+    finally:
+        unregister_counterparty_profile("__test_ledger_config_profile__")
 
 
 def test_counterparty_rejects_conflicting_strategy_profiles_on_shared_ledger():
@@ -191,20 +217,6 @@ def test_counterparty_per_ledger_override_can_resolve_shared_ledger_conflict():
         unregister_counterparty_profile("__test_ledger_override_profile__")
 
 
-def test_counterparty_projection_keeps_strategy_config_builder_compatible():
-    settings = apply_counterparty_profiles_to_resolved_settings(
-        {
-            "A1": {**_GROUP_FIELDS},
-            "A2": {**_GROUP_FIELDS},
-        },
-        counterparty="exchange_base",
-    )
-    assert settings["A1"]["counterparty_profile"] == "exchange_base"
-    assert settings["A2"]["counterparty_profile"] == "exchange_base"
-    configs = build_strategy_configs(settings)
-    assert {config.get(FeeModule.fee_mode) for config in configs.values()} == {"auto"}
-
-
 def test_apply_strategy_configs_accepts_strategy_book_and_ledger_counterparty_override():
     register_counterparty_profile(CounterPartyProfile(
         id="__test_bootstrap_profile__",
@@ -230,8 +242,8 @@ def test_apply_strategy_configs_accepts_strategy_book_and_ledger_counterparty_ov
             counterparty="exchange_base",
             counterparty_by_ledger={"shared-book": "__test_bootstrap_profile__"},
         )
-        assert account.strategy_book is book
-        assert {config.get(FeeModule.fee_mode) for config in account.strategy_configs.values()} == {"fixed"}
+        assert account.ledger_config_for("shared-book").fee_mode == "fixed"
+        assert {config.get(FeeModule.fee_mode, None) for config in account.strategy_configs.values()} == {None}
     finally:
         unregister_counterparty_profile("__test_bootstrap_profile__")
 
@@ -243,15 +255,6 @@ def test_apply_strategy_configs_projects_ledger_config_fields():
             "A1": "shared-book",
             "A2": "shared-book",
         },
-        "ledgers": {
-            "shared-book": {
-                "fee_mode": "fixed",
-                "margin_mode": "fixed",
-                "accounting_mode": "Custom",
-                "daily_mark_to_market_enabled": True,
-                "cost_basis_method": "FIFO",
-            },
-        },
     })
     apply_strategy_configs(
         account,
@@ -260,14 +263,23 @@ def test_apply_strategy_configs_projects_ledger_config_fields():
             "A2": {"engine_mode": "custom", **_GROUP_FIELDS},
         },
         strategy_book=book,
+        ledger_configs={
+            "shared-book": {
+                "fee_mode": "fixed",
+                "margin_mode": "fixed",
+                "accounting_mode": "Custom",
+                "daily_mark_to_market_enabled": True,
+                "cost_basis_method": "FIFO",
+            },
+        },
     )
-    assert account.strategy_book is book
-    for config in account.strategy_configs.values():
-        assert config.get(FeeModule.fee_mode) == "fixed"
-        assert config.get(MarginModule.margin_mode) == "fixed"
-        assert config.get(TradingRuleModule.accounting_mode) == "Custom"
-        assert config.get(TradingRuleModule.daily_mark_to_market_enabled) is True
-        assert config.get(TradingRuleModule.cost_basis_method) == "FIFO"
+    ledger_config = account.ledger_config_for("shared-book")
+    assert ledger_config.fee_mode == "fixed"
+    assert ledger_config.margin_mode == "fixed"
+    assert ledger_config.accounting_mode == "Custom"
+    assert ledger_config.daily_mark_to_market_enabled is True
+    assert ledger_config.cost_basis_method == "FIFO"
+    assert {config.get(FeeModule.fee_mode, None) for config in account.strategy_configs.values()} == {None}
 
 
 def test_apply_strategy_configs_rejects_conflicting_ledger_config_fields():
@@ -276,16 +288,16 @@ def test_apply_strategy_configs_rejects_conflicting_ledger_config_fields():
         "strategies": {
             "A1": {"ledger_ids": ["book-a", "book-b"], "default_ledger_id": "book-a"},
         },
-        "ledgers": {
-            "book-a": {"fee_mode": "fixed"},
-            "book-b": {"fee_mode": "zero"},
-        },
     })
     try:
         apply_strategy_configs(
             account,
             {"A1": {"engine_mode": "custom", **_GROUP_FIELDS}},
             strategy_book=book,
+            ledger_configs={
+            "book-a": {"fee_mode": "fixed"},
+            "book-b": {"fee_mode": "zero"},
+            },
         )
     except ValueError as exc:
         assert "conflicting fee_mode" in str(exc)
