@@ -97,7 +97,6 @@ class TradingRuleModule(ExecutableModule):
         "daily_mark_to_market_enabled": FieldDefinition(
             public=True, label="逐日盯市", default=False, control_template="boolean", tab="accounting",
             editable_when={"engine_mode": ("custom",), "accounting_mode": ("Custom",)},
-            default_when={"engine_mode": {"basic": False, "auto": True, "exact": True}},
             chip_template="逐日盯市: {value}", tab_label="记账规则", tab_order=180,
         ),
         "use_int_position": FieldDefinition(
@@ -120,12 +119,11 @@ class TradingRuleModule(ExecutableModule):
 
     register_daily_mark_to_market_notices: ClassVar[Flow] = Flow(
         "register_daily_mark_to_market_notices",
-        inputs=(EngineModule.engine_mode, accounting_mode, daily_mark_to_market_enabled),
+        inputs=(EngineModule.engine_mode, accounting_mode),
         outputs=(daily_mark_to_market_events,),
         phase=Phase.PRE_REPLAY,
         order=47,
         description="登记逐日盯市通知",
-        strategy_scoped=True,
         compute=lambda state, ctx: _register_daily_mark_to_market_notices(state, ctx),
     )
     apply_daily_mark_to_market: ClassVar[Flow] = Flow(

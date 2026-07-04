@@ -70,6 +70,13 @@ _LEDGER_OWNED_SETTING_NAMES = {
     "tradability_policy",
     "clearing_rounding_policy",
 }
+_LEDGER_INFERRED_SETTING_NAMES = {
+    # In Auto/Exact accounting, this is inferred from historical trading-rule
+    # fields at the ledger/product timestamp. Materializing the UI default here
+    # would short-circuit that inference and make every auto ledger behave as
+    # explicitly enabled/disabled.
+    "daily_mark_to_market_enabled",
+}
 
 
 def _all_flow_names() -> set[str]:
@@ -392,6 +399,8 @@ def _materialized_ledger_owned_settings(
         if field_name in resolved:
             value = resolved[field_name]
         else:
+            if field_name in _LEDGER_INFERRED_SETTING_NAMES:
+                continue
             module_active = bool(owner_flow_names & active_flow_names)
             if fd.frontend_only_default and module_active:
                 raise ValueError(

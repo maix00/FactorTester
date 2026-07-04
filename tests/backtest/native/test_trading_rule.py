@@ -26,7 +26,8 @@ from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.trading_rule import (
-    TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_method, _resolve_use_int_position,
+    TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_daily_mark_to_market_enabled_for_ledger,
+    _resolve_method, _resolve_use_int_position,
     close_position, infer_auto_cost_basis_method, mark_to_market, open_position, _apply_daily_mark_to_market,
     _register_daily_mark_to_market_notices,
 )
@@ -98,6 +99,31 @@ def test_resolve_method_auto_uses_fifo_and_daily_mark_to_market_when_settlement_
     fields = {"SettlementPrice": 10.0}
     assert _resolve_method(config, product, fields) == "FIFO"
     assert _resolve_daily_mark_to_market_enabled(config, product, fields) is True
+
+
+def test_ledger_auto_daily_mark_to_market_infers_from_historical_fields_only():
+    product = _product()
+    ledger_config = _ledger_config(accounting_mode="Auto")
+
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(product, {}, ledger_config=ledger_config) is False
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(
+        product, {"SettlementPrice": 10.0}, ledger_config=ledger_config,
+    ) is True
+
+
+def test_ledger_custom_daily_mark_to_market_respects_explicit_switch():
+    product = _product()
+
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(
+        product,
+        {"SettlementPrice": 10.0},
+        ledger_config=_ledger_config(accounting_mode="Custom", daily_mark_to_market_enabled=False),
+    ) is False
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(
+        product,
+        {},
+        ledger_config=_ledger_config(accounting_mode="Custom", daily_mark_to_market_enabled=True),
+    ) is True
 
 
 def test_resolve_method_auto_uses_fifo_when_fee_exists_without_close_today_fields():

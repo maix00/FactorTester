@@ -48,7 +48,7 @@ def test_pre_replay_flow_produces_event_processed_by_per_event_flow():
     registry.register_flow(f_emit)
     registry.register_flow(f_handle)
 
-    account = _account([s], active_flow_names=frozenset({"handle_signal"}))
+    account = _account([s], active_flow_names=frozenset({"emit_signal", "handle_signal"}))
     queue = EventQueue()
     run(account, queue, registry.resolve())
 
@@ -93,7 +93,7 @@ def test_chained_event_production_is_consumed_not_dropped():
     registry.register_flow(f_on_signal)
     registry.register_flow(f_on_order)
 
-    account = _account([s], active_flow_names=frozenset({"on_signal", "on_order"}))
+    account = _account([s], active_flow_names=frozenset({"emit_signal2", "on_signal", "on_order"}))
     queue = EventQueue()
     run(account, queue, registry.resolve())
 
@@ -157,7 +157,7 @@ def test_flow_not_applicable_to_any_strategy_is_skipped():
     assert called == []
 
 
-def test_strategy_scoped_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
+def test_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
     s = Strategy(alias="S")
     called: list[str] = []
 
@@ -178,7 +178,28 @@ def test_strategy_scoped_pre_replay_flow_is_skipped_when_no_strategy_uses_it():
 
     run(account, EventQueue(), registry.resolve())
 
-    assert called == ["global"]
+    assert called == []
+
+
+def test_global_pre_replay_flow_runs_once_for_all_applicable_strategies():
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    active_seen: list[frozenset[Strategy]] = []
+
+    global_flow = Flow(
+        "global_pre", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: active_seen.append(ctx.active_strategies),
+    )
+
+    registry = FlowRegistry()
+    registry.register_flow(global_flow)
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"global_pre"})),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset()),
+    })
+
+    run(account, EventQueue(), registry.resolve())
+
+    assert active_seen == [frozenset({s1})]
 
 
 def test_strategy_scoped_pre_replay_flow_runs_for_applicable_strategies():
@@ -256,7 +277,7 @@ def test_progress_fires_across_all_three_phases_with_description():
     registry.register_flow(post)
     registry.register_flow(on_signal)
 
-    account = _account([s], active_flow_names=frozenset({"on_signal"}))
+    account = _account([s], active_flow_names=frozenset({"pre_flow", "on_signal", "post_flow"}))
     queue = EventQueue()
     queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), s))
 
