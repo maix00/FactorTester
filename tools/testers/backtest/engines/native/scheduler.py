@@ -582,11 +582,13 @@ def make_dispatcher(
 
 def _strategies_for_ledger(state: "BacktestRunState", ledger: Any) -> frozenset["Strategy"]:
     from .ledger import ledger_identity
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 
     target = ledger_identity(ledger)
+    store = strategy_book_store_for(state)
     strategies: set["Strategy"] = set()
     for strategy in state.strategy_configs:
-        if state.ledger_for_strategy(strategy).ledger == target:
+        if target in store.ledgers_for_strategy(state, strategy):
             strategies.add(strategy)
     return frozenset(strategies)
 

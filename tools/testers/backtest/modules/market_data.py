@@ -266,6 +266,12 @@ class MarketDataModule(ExecutableModule):
         description="读取订单时点价格",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
+    lookup_current_prices_on_trade_intent: ClassVar[Flow] = Flow(
+        "lookup_current_prices_on_trade_intent", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+        phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=1,
+        description="读取交易意图时点价格",
+        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+    )
     lookup_current_prices_on_ledger: ClassVar[Flow] = Flow(
         "lookup_current_prices_on_ledger", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER, order=1,
@@ -294,6 +300,14 @@ class MarketDataModule(ExecutableModule):
         description="读取订单交易规则字段",
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
+    lookup_historical_fields_on_trade_intent: ClassVar[Flow] = Flow(
+        "lookup_historical_fields_on_trade_intent",
+        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
+        outputs=(current_historical_fields,),
+        phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=2,
+        description="读取交易意图交易规则字段",
+        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
+    )
     lookup_historical_fields_on_ledger: ClassVar[Flow] = Flow(
         "lookup_historical_fields_on_ledger",
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
@@ -307,9 +321,10 @@ class MarketDataModule(ExecutableModule):
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
-        lookup_current_prices_on_order, lookup_current_prices_on_ledger, lookup_volume_on_signal,
+        lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
+        lookup_current_prices_on_ledger, lookup_volume_on_signal,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
-        lookup_historical_fields_on_ledger,
+        lookup_historical_fields_on_trade_intent, lookup_historical_fields_on_ledger,
     )
 
 

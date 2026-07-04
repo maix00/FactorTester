@@ -223,6 +223,28 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
     assert cash_after == pytest.approx(1_000_000.0 - 10_000.0)
 
 
+def test_equity_requires_ffilled_price_for_held_position():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="basic")
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+    ledger = account.ledger_for_strategy(s)
+    ledger.get(LedgerModule.positions)[p] = ProductPosition(quantity=10.0)
+
+    signal_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01 09:01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+    )
+    signal_ctx.set(MarketDataModule.current_prices, {})
+
+    with pytest.raises(KeyError, match="current price missing for held product"):
+        _basic_equity(account, signal_ctx)
+
+
 def test_cash_update_skips_rejected_order_without_ledger_effect():
     s = Strategy(alias="S")
     p = _product()

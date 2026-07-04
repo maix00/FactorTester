@@ -61,10 +61,14 @@ def _ledger_config(**values) -> LedgerConfig:
         fixed_fee_rate=values.get("fixed_fee_rate"),
         margin_mode=values.get("margin_mode"),
         fixed_margin_ratio=values.get("fixed_margin_ratio"),
+        margin_call_mode=values.get("margin_call_mode"),
+        liquidation_target_buffer=values.get("liquidation_target_buffer"),
         accounting_mode=values.get("accounting_mode"),
         daily_mark_to_market_enabled=values.get("daily_mark_to_market_enabled"),
         cost_basis_method=values.get("cost_basis_method"),
         use_int_position=values.get("use_int_position"),
+        cash_reserve_ratio=values.get("cash_reserve_ratio"),
+        cash_reserve_major=values.get("cash_reserve_major"),
     )
 
 
@@ -619,6 +623,102 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
 
 
+def test_margin_check_dispatch_enters_trade_intent_before_order():
+    product = _product()
+    strategy = Strategy(alias="S")
+    flow_names = frozenset({
+        "lookup_current_prices_on_ledger",
+        "lookup_historical_fields_on_ledger",
+        "lookup_current_prices_on_trade_intent",
+        "lookup_historical_fields_on_trade_intent",
+        "apply_margin_requirement_change",
+        "handle_margin_liquidation_notice",
+    })
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=flow_names,
+            field_values={EngineModule.engine_mode: "auto"},
+        ),
+    })
+    ledger_key = ledger_identity("risk-book")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger=ledger_key)
+    ledger.set(_cash_ref(), DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    account.ledgers = {ledger_key: ledger}
+    account.ledger_configs[ledger_key] = _ledger_config(
+        margin_mode="auto",
+        margin_call_mode="liquidate",
+        liquidation_target_buffer=0.0,
+    )
+    strategy_book_store_for(account).register_strategy_ledgers(
+        strategy,
+        (ledger_key.name,),
+        default_ledger_id=ledger_key.name,
+    )
+
+    event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
+    market_time = event_time - pd.Timedelta(nanoseconds=2)
+    close = pd.DataFrame({product: [12.0]}, index=pd.DatetimeIndex([market_time]))
+    account.market_data_store.current_prices_table = close
+    account.market_data_store.historical_field_names = (
+        "VolumeMultiple",
+        "LongMarginRatioByMoney",
+    )
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    field_index = pd.DatetimeIndex([market_time.tz_localize(None)])
+    account.market_data_store.historical_field_frames = {
+        "VolumeMultiple": pd.DataFrame({product: [10.0]}, index=field_index),
+        "LongMarginRatioByMoney": pd.DataFrame({product: [0.1]}, index=field_index),
+    }
+
+    registry = FlowRegistry()
+    for flow in (
+        MarketDataModule.lookup_current_prices_on_ledger,
+        MarketDataModule.lookup_historical_fields_on_ledger,
+        MarketDataModule.lookup_current_prices_on_trade_intent,
+        MarketDataModule.lookup_historical_fields_on_trade_intent,
+        MarginModule.apply_margin_requirement_change,
+        MarginModule.handle_margin_liquidation_notice,
+    ):
+        registry.register_flow(flow)
+    groups = sort_and_validate(registry.resolve())
+    queue = EventQueue()
+    captured_orders: list[EventDraft] = []
+    queue.set_dispatcher(
+        EventKind.LEDGER,
+        make_dispatcher(groups[(MarginModule.apply_margin_requirement_change.phase, EventKind.LEDGER)], account, queue),
+    )
+    queue.set_dispatcher(
+        EventKind.TRADE_INTENT,
+        make_dispatcher(groups[(MarginModule.handle_margin_liquidation_notice.phase, EventKind.TRADE_INTENT)], account, queue),
+    )
+    queue.set_dispatcher(EventKind.ORDER, lambda batch: captured_orders.extend(batch))
+    queue.push_event(EventDraft(
+        EventKind.LEDGER,
+        event_time,
+        payload={"kind": "margin_check", "ledger_id": ledger_key.name},
+        ledger=ledger_key,
+    ))
+
+    queue.run_until_drained()
+
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert captured_orders
+    order = captured_orders[0].payload
+    assert order.instrument is product
+    assert order.quantity < 0
+    assert order.get("liquidation_reason") == "margin_deficit"
+
+
 def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
     product = _product()
     strategy = Strategy(alias="S")
@@ -984,6 +1084,35 @@ def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
     assert realized.to_major() == pytest.approx(18.0 - 20.0)
     entry = ledger.get(_positions_ref())[product]
     assert [lot.entry_price for lot in entry.lots] == [10.0]
+
+
+def test_mark_to_market_requires_ffilled_price_for_held_position():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=1.0,
+            lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
+            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+        )
+    })
+
+    with pytest.raises(KeyError, match="current price missing for held product"):
+        mark_to_market(
+            ledger,
+            config,
+            {},
+            {product: {"SettlementPrice": 10.0, "VolumeMultiple": 1.0}},
+            ledger_config=_ledger_config(accounting_mode="Auto"),
+        )
 
 
 def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():

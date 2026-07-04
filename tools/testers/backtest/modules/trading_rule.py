@@ -437,7 +437,10 @@ def mark_to_market(
         method = _resolve_method(strategy_config, product, fields, require_exact=require_exact, ledger_config=ledger_config)
         price = _lookup_product_value(current_prices, product)
         if price is None:
-            continue
+            raise KeyError(
+                f"current price missing for held product {product}; "
+                "mark_to_market expects MarketDataModule.current_prices to be causal-ffilled"
+            )
         multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
         if _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
             basis = _previous_settlement_for_product(

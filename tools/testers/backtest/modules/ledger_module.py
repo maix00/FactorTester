@@ -217,7 +217,7 @@ def _basic_equity(state, ctx) -> None:
             ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + margin_occupied + floating_pnl)
             continue
         market_value = sum(
-            contract_notional(prices[product], entry.quantity, historical_fields, product)
+            contract_notional(_required_current_price(prices, product, ctx.timestamp), entry.quantity, historical_fields, product)
             for product, entry in positions.items()
         )
         ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + market_value)
@@ -512,3 +512,13 @@ def _number_or_none(value: object) -> float | None:
         return float(cast(Any, value))
     except (TypeError, ValueError):
         return None
+
+
+def _required_current_price(prices: dict, product, timestamp) -> float:
+    if isinstance(prices, dict) and product in prices:
+        return float(prices[product])
+    raise KeyError(
+        f"current price missing for held product {product} at {timestamp}; "
+        "current_prices is expected to be causal-ffilled by MarketDataModule, "
+        "so this usually means the position product was not included in the loaded market-data universe"
+    )
