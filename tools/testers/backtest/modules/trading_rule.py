@@ -131,7 +131,7 @@ class TradingRuleModule(ExecutableModule):
         inputs=(_ledger_cash_ref, _ledger_positions_ref),
         outputs=(_ledger_cash_ref, _ledger_positions_ref),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.LEDGER_NOTICE,
+        event_kind=EventKind.LEDGER,
         order=50,
         description="执行逐日盯市结算",
         compute=lambda state, ctx: _apply_daily_mark_to_market(state, ctx),
@@ -483,7 +483,7 @@ def _register_daily_mark_to_market_notices(state: Any, ctx: Any) -> None:
             notice_time = pd.Timestamp(last_event_time) + pd.Timedelta(nanoseconds=1)
             drafts.append(
                 EventDraft(
-                    EventKind.LEDGER_NOTICE,
+                    EventKind.LEDGER,
                     notice_time,
                     payload={
                         "kind": "daily_mark_to_market",
@@ -511,7 +511,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
     settlement_prices = snapshot.get("settlement") or snapshot.get("close") or {}
     close_prices = snapshot.get("close", {})
-    for ledger in _ledger_notice_targets(state, ctx):
+    for ledger in _ledger_targets(state, ctx):
         ledger_config = state.ledger_config_for(ledger)
         cash = ledger.get(TradingRuleModule._ledger_cash_ref)
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
@@ -538,9 +538,6 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 require_exact=_ledger_requires_exact(ledger_config),
             )
             multiplier = contract_multiplier_from_fields(historical_fields, product)
-            before_margin = _entry_margin_major(entry)
-            after_margin = abs(quantity) * settlement * multiplier * _margin_ratio_for_position(
-                fields, quantity, settlement, multiplier, ledger_config)
             pnl = _mark_to_market_money_difference(
                 settlement,
                 previous_settlement,
@@ -551,17 +548,12 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
-            cash_delta = pnl - (after_margin - before_margin)
             cash = cash + DataMoney.from_major(
-                cash_delta,
+                pnl,
                 currency=cash.currency,
                 use_minor_units=cash.use_minor_units,
             )
-            entry.equity_occupied = DataMoney.from_major(
-                after_margin,
-                currency=cash.currency,
-                use_minor_units=cash.use_minor_units,
-            )
+            cash = _pin_cash_and_emit_margin_deficit_notice(ledger, cash, ctx, ledger_config)
             entry.settlement_price = settlement
             from tools.testers.backtest.modules.fee import _resolve_fee_mode_from_ledger_config
             _reset_lots_to_daily_settlement(
@@ -574,7 +566,37 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
 
 
-def _ledger_notice_targets(state: Any, ctx: Any) -> list[Any]:
+def _pin_cash_and_emit_margin_deficit_notice(
+    ledger: Any,
+    cash: DataMoney,
+    ctx: Any,
+    ledger_config: Any,
+) -> DataMoney:
+    if cash.to_major() >= -1e-12:
+        if cash.to_major() < 0:
+            return DataMoney.from_major(0, currency=cash.currency, use_minor_units=cash.use_minor_units)
+        return cash
+    shortfall = -cash.to_major()
+    from tools.testers.backtest.modules.margin import MarginModule, _resolve_margin_call_mode_from_ledger_config
+
+    existing = float(ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
+    ledger.set(MarginModule.margin_deficit, existing + shortfall)
+    if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "liquidate":
+        ctx.set(MarginModule.margin_liquidation_orders, EventDraft(
+            EventKind.TRADE_INTENT,
+            cast(pd.Timestamp, ctx.timestamp) + pd.Timedelta(nanoseconds=1),
+            payload={
+                "kind": "margin_liquidation",
+                "ledger_id": ledger.ledger_id,
+                "deficit": existing + shortfall,
+                "source": {"kind": "daily_mark_to_market"},
+            },
+            ledger=ledger.ledger,
+        ))
+    return DataMoney.from_major(0, currency=cash.currency, use_minor_units=cash.use_minor_units)
+
+
+def _ledger_targets(state: Any, ctx: Any) -> list[Any]:
     from tools.testers.backtest.engines.native.ledger import ledger_identity
 
     targets: list[Any] = []
@@ -662,7 +684,7 @@ def _daily_mark_to_market_basis(entry: Any, fallback: float) -> float:
     """Current blended basis for a position under daily mark-to-market.
 
     DMTM reuses the lot-based cost record. Yesterday-and-earlier lots are
-    reset to settlement by the LEDGER_NOTICE flow; intraday lots keep their
+    reset to settlement by the LEDGER flow; intraday lots keep their
     fill price until that reset. `average_cost` is intentionally not read.
     """
     lots = getattr(entry, "lots", None)

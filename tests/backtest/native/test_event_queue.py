@@ -14,12 +14,14 @@ def test_pop_order_by_timestamp_then_kind():
 
     queue.set_dispatcher(EventKind.BAR, lambda batch: seen.append((batch[0].timestamp, EventKind.BAR)))
     queue.set_dispatcher(EventKind.SIGNAL, lambda batch: seen.append((batch[0].timestamp, EventKind.SIGNAL)))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: seen.append((batch[0].timestamp, EventKind.TRADE_INTENT)))
     queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.append((batch[0].timestamp, EventKind.ORDER)))
-    queue.set_dispatcher(EventKind.LEDGER_NOTICE, lambda batch: seen.append((batch[0].timestamp, EventKind.LEDGER_NOTICE)))
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: seen.append((batch[0].timestamp, EventKind.LEDGER)))
 
     t1, t2 = pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
-    queue.push_event(EventDraft(EventKind.LEDGER_NOTICE, t1, s))
+    queue.push_event(EventDraft(EventKind.LEDGER, t1, s))
     queue.push_event(EventDraft(EventKind.ORDER, t1, s))  # pushed first but ORDER value > SIGNAL
+    queue.push_event(EventDraft(EventKind.TRADE_INTENT, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t1, s))
     queue.push_event(EventDraft(EventKind.BAR, t1, s))
     queue.push_event(EventDraft(EventKind.SIGNAL, t2, s))
@@ -28,8 +30,9 @@ def test_pop_order_by_timestamp_then_kind():
     assert seen == [
         (t1, EventKind.BAR),
         (t1, EventKind.SIGNAL),
+        (t1, EventKind.TRADE_INTENT),
         (t1, EventKind.ORDER),
-        (t1, EventKind.LEDGER_NOTICE),
+        (t1, EventKind.LEDGER),
         (t2, EventKind.SIGNAL),
     ]
 

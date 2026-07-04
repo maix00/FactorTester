@@ -53,8 +53,15 @@ _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
     "apply_daily_mark_to_market",
-    "lookup_current_prices_on_ledger_notice",
-    "lookup_historical_fields_on_ledger_notice",
+}
+_MARGIN_NOTICE_FLOWS = {
+    "register_margin_check_notices",
+    "apply_margin_requirement_change",
+    "handle_margin_liquidation_notice",
+}
+_LEDGER_LOOKUP_FLOWS = {
+    "lookup_current_prices_on_ledger",
+    "lookup_historical_fields_on_ledger",
 }
 _LEDGER_OWNED_SETTING_NAMES = {
     "initial_capital_major",
@@ -69,6 +76,10 @@ _LEDGER_OWNED_SETTING_NAMES = {
     "use_int_position",
     "tradability_policy",
     "clearing_rounding_policy",
+    "cash_reserve_ratio",
+    "cash_reserve_major",
+    "margin_call_mode",
+    "liquidation_target_buffer",
 }
 _LEDGER_INFERRED_SETTING_NAMES = {
     # In Auto/Exact accounting, this is inferred from historical trading-rule
@@ -95,8 +106,14 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
     if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
         excluded |= _TERM_STRUCTURE_FLOWS
-    if not _uses_daily_mark_to_market_flow(resolved_settings):
+    uses_dmtm = _uses_daily_mark_to_market_flow(resolved_settings)
+    uses_margin_notice = _uses_margin_notice_flow(resolved_settings)
+    if not uses_dmtm:
         excluded |= _DAILY_MARK_TO_MARKET_FLOWS
+    if not uses_margin_notice:
+        excluded |= _MARGIN_NOTICE_FLOWS
+    if not (uses_dmtm or uses_margin_notice):
+        excluded |= _LEDGER_LOOKUP_FLOWS
     strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
     if strategy_kind == "long_short":
         excluded |= _GROUP_STRATEGY_FLOWS
@@ -117,6 +134,17 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
     if accounting_mode == "Custom":
         return bool(resolved_settings.get("daily_mark_to_market_enabled", False))
     return True
+
+
+def _uses_margin_notice_flow(resolved_settings: Mapping[str, Any]) -> bool:
+    engine_mode = str(resolved_settings.get("engine_mode", "auto") or "auto").lower()
+    if engine_mode == "basic":
+        return False
+    margin_mode = str(resolved_settings.get("margin_mode", "auto") or "auto").lower()
+    if margin_mode in {"none", "zero"}:
+        return False
+    margin_call_mode = str(resolved_settings.get("margin_call_mode", "auto") or "auto").lower()
+    return margin_call_mode != "off"
 
 
 def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:

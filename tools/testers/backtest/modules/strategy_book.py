@@ -32,6 +32,8 @@ class StrategyBookModule(ExecutableModule):
     order: ClassVar[int] = 155
 
     strategy_book_mode: ClassVar[FieldRef[StrategyBookMode]] = FieldRef("strategy_book_mode")
+    cash_reserve_ratio: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio")
+    cash_reserve_major: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "strategy_book_mode": FieldDefinition(
@@ -53,6 +55,33 @@ class StrategyBookModule(ExecutableModule):
             tab_order=155,
             help_text="默认模式：每个 strategy 使用一个私有 ledger。共享账本或一策略多账本由 StrategyBook.from_dict 或子类提供。",
         ),
+        "cash_reserve_ratio": FieldDefinition(
+            public=True,
+            label="现金保留比例",
+            default=0.0,
+            control_template="number",
+            tab="strategy_book",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+            chip_template="现金保留比例: {value}",
+            tab_label="策略簿",
+            tab_order=155,
+            help_text="ledger 级风控缓冲；交易和保证金追缴只能使用扣除该比例后的可动用现金。",
+        ),
+        "cash_reserve_major": FieldDefinition(
+            public=True,
+            label="现金保留金额",
+            default=0.0,
+            control_template="number",
+            tab="strategy_book",
+            minimum=0.0,
+            step=1.0,
+            chip_template="现金保留金额: {value}",
+            tab_label="策略簿",
+            tab_order=155,
+            help_text="ledger 级固定现金缓冲；与现金保留比例同时生效。",
+        ),
     }
 
 
@@ -61,6 +90,7 @@ class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     order_ledger_router: Callable[[object, object], str | Ledger] | None = None
+    available_cash_resolver: Callable[[object, object, float, str], float] | None = None
     merge_trade_decisions: Callable[[object, object], object] = lambda decisions, ctx: decisions
     apply_hierarchy_constraints: Callable[[object, object], object] = lambda decision, ctx: decision
 
@@ -120,6 +150,7 @@ def materialize_strategy_book_store(state: object, strategy_book: object, strate
     book = strategy_book if hasattr(strategy_book, "ledger_ids_for_strategy") else StrategyBookSimple()
     store = strategy_book_store_for(state)
     store.order_ledger_router = getattr(strategy_book, "order_ledger_router", None)
+    store.available_cash_resolver = getattr(strategy_book, "available_cash_resolver", None)
     store.merge_trade_decisions = getattr(book, "merge_trade_decisions", store.merge_trade_decisions)
     store.apply_hierarchy_constraints = getattr(book, "apply_hierarchy_constraints", store.apply_hierarchy_constraints)
     for alias, strategy in strategies.items():
@@ -279,3 +310,14 @@ def assign_ledger_for_strategy(
 
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
+
+
+def available_cash_for_ledger(state: object, ledger_state: object, cash_major: float, *, reason: str) -> float:
+    store = strategy_book_store_for(state)
+    if store.available_cash_resolver is not None:
+        return max(0.0, float(store.available_cash_resolver(state, ledger_state, cash_major, reason)))
+    ledger_config = state.ledger_config_for(ledger_state)  # type: ignore[attr-defined]
+    ratio = max(0.0, min(1.0, float(getattr(ledger_config, "cash_reserve_ratio", None) or 0.0)))
+    fixed = max(0.0, float(getattr(ledger_config, "cash_reserve_major", None) or 0.0))
+    reserve = cash_major * ratio + fixed
+    return max(0.0, cash_major - reserve)

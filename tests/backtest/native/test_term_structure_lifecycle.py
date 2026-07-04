@@ -145,7 +145,7 @@ def test_term_structure_registers_force_close_event_before_expiry():
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -215,7 +215,7 @@ def test_term_structure_does_not_treat_coverage_end_as_lifecycle_date(monkeypatc
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -260,7 +260,7 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
     }, index=idx)
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -342,7 +342,7 @@ def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypa
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -541,7 +541,7 @@ def test_term_structure_force_close_offset_accepts_intraday_window():
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -565,7 +565,7 @@ def test_force_close_event_emits_reverse_order_for_existing_position():
     order_events: list[EventDraft] = []
     queue.set_dispatcher(EventKind.ORDER, lambda batch: order_events.extend(batch))
     ts = pd.Timestamp("2026-01-29 15:00")
-    draft = EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload={
+    draft = EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={
         "notice_type": "force_close",
         "contract_object": contract,
     })
@@ -805,7 +805,7 @@ def test_rollover_module_registers_rollover_notice_independently():
     account.run_window_store.envelope = strategy_run_window_datetimes(account.config_for(strategy))
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 
@@ -850,7 +850,7 @@ def test_rollover_notice_emits_close_and_open_orders_for_existing_position():
     _expand_term_structure(account, expand_ctx)
 
     ts = pd.Timestamp("2026-01-26 15:00")
-    draft = EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload={
+    draft = EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload={
         "notice_type": "rollover",
         "notice_reason": "date_before_expiry",
         "product": "P.DCE",
@@ -907,7 +907,7 @@ def test_rollover_day_window_uses_trading_axis_not_calendar_days():
     account.market_data_store.current_prices_table = pd.DataFrame({"P2601.DCE": range(len(axis))}, index=axis)
     queue = EventQueue()
     captured: list[EventDraft] = []
-    queue.set_dispatcher(EventKind.ORDER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.TRADE_INTENT, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
     ctx.set_for(ProductSelectionModule.products, strategy, frozenset({product}))
 

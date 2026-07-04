@@ -16,23 +16,22 @@ if TYPE_CHECKING:
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
-    scheduler.EventQueue). BAR before SIGNAL before ORDER: live factors first
-    observe market data, then strategies read signal values, then orders whose
-    action time has arrived are processed. Values are spaced so a future
+    scheduler.EventQueue). BAR before SIGNAL before TRADE_INTENT before ORDER
+    before LEDGER: live factors first observe market data, strategies read
+    signal values, non-signal trade intents create orders, orders execute, and
+    ledger lifecycle events settle account state. Values are spaced so a future
     EventKind can be inserted without renumbering everything after it."""
     BAR = 0       # a market bar has arrived; live factors may update state
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
-    ORDER_NOTICE = 15  # an order/position lifecycle notification (e.g.
-                       # contract rollover, auto-close/force-close warning).
-                       # Domain modules interpret the payload and may emit
-                       # ORDER events.
+    TRADE_INTENT = 15  # a non-signal trade intent (e.g. contract rollover,
+                       # auto-close/force-close or risk liquidation). Domain
+                       # modules interpret the payload and may emit ORDER events.
     ORDER = 20    # an Order has reached its action moment (schedule/cancel/fill
                   # are OrderStatus values inspected from the payload, not
                   # separate EventKinds)
-    LEDGER_NOTICE = 30  # account/clearing lifecycle notification (e.g. daily
-                        # futures settlement / mark-to-market). It mutates the
-                        # ledger directly and does not express strategy intent
-                        # to trade.
+    LEDGER = 30  # account/clearing lifecycle event (e.g. daily futures
+                 # settlement / mark-to-market). It mutates the ledger and does
+                 # not express strategy intent to trade.
 
 
 @dataclass(frozen=True)
@@ -40,7 +39,7 @@ class EventDraft:
     kind: EventKind
     timestamp: pd.Timestamp
     strategy: "Strategy | None" = None
-        # Strategy-scoped events: BAR/SIGNAL/ORDER/ORDER_NOTICE.  LEDGER_NOTICE
+        # Strategy-scoped events: BAR/SIGNAL/TRADE_INTENT/ORDER.  LEDGER
         # can set this to None and route by ledger instead.
     payload: Any = None
     index_key: Any = None

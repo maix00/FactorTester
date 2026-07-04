@@ -32,7 +32,8 @@ from tools.testers.backtest.modules.trading_rule import (
     _register_daily_mark_to_market_notices,
 )
 from tools.testers.backtest.modules.margin import (
-    MarginModule, _resolve_margin_mode, _resolve_margin_ratio,
+    MarginModule, _apply_margin_requirement_change, _handle_margin_liquidation_notice,
+    _resolve_margin_mode, _resolve_margin_ratio,
 )
 
 
@@ -342,7 +343,7 @@ def test_daily_mark_to_market_notice_uses_trading_day_last_bar_not_calendar_day(
     account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1.0, 2.0, 3.0]}, index=index)
     queue = EventQueue()
     captured = []
-    queue.set_dispatcher(EventKind.LEDGER_NOTICE, lambda batch: captured.extend(batch))
+    queue.set_dispatcher(EventKind.LEDGER, lambda batch: captured.extend(batch))
     ctx = FlowContext(timestamp=None, event_queue=queue, active_strategies=frozenset({strategy}))
 
     _register_daily_mark_to_market_notices(account, ctx)
@@ -410,10 +411,10 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
 
     updated_cash = ledger.get(_cash_ref())
     updated_position = ledger.get(_positions_ref())[product]
-    # pnl = 2 * (12 - 10) * 10 = 40
-    # margin grows from 2 to 2 * 12 * 10 * 0.1 = 24, so cash delta = 40 - 22
-    assert updated_cash.to_major() == pytest.approx(1018.0)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
+    # DMTM settles variation PnL only: 2 * (12 - 10) * 10 = 40.
+    # Margin requirement changes are handled by MarginModule notice flows.
+    assert updated_cash.to_major() == pytest.approx(1040.0)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(2.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert updated_position.average_cost is None
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
@@ -462,15 +463,15 @@ def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_
 
     updated_cash = ledger.get(_cash_ref())
     updated_position = ledger.get(_positions_ref())[product]
-    # Short PnL = -2 * (12 - 10) * 10 = -40. Margin grows from 2 to 24,
-    # so cash delta = -40 - 22.
-    assert updated_cash.to_major() == pytest.approx(938.0)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(24.0)
+    # Short PnL = -2 * (12 - 10) * 10 = -40. Margin requirement changes
+    # are handled by MarginModule notice flows, not DMTM.
+    assert updated_cash.to_major() == pytest.approx(960.0)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(2.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(-2.0, 12.0, False)]
 
 
-def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger_notice():
+def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
     product = _product()
     s1 = Strategy(alias="S1")
     s2 = Strategy(alias="S2")
@@ -504,7 +505,7 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger_notice():
         drafts_by_ledger={
             ledger_key: [
                 EventDraft(
-                    EventKind.LEDGER_NOTICE,
+                    EventKind.LEDGER,
                     pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
                     payload={"kind": "daily_mark_to_market", "ledger_id": "shared-book"},
                     ledger=ledger_key,
@@ -523,22 +524,21 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger_notice():
 
     _apply_daily_mark_to_market(account, ctx)
 
-    # One settlement: pnl +2.0, margin increases 1.0 -> 1.2, so cash changes by
-    # +1.8. If this were still strategy-scoped, the shared ledger would be
-    # settled twice.
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(101.8)
+    # One settlement: pnl +2.0. If this were still strategy-scoped, the shared
+    # ledger would be settled twice.
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(102.0)
     entry = ledger.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(1.2)
+    assert entry.equity_occupied.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
 
 
-def test_ledger_notice_dispatch_loads_market_data_and_settles_ledger_once():
+def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
     product = _product()
     s1 = Strategy(alias="S1")
     s2 = Strategy(alias="S2")
     flow_names = frozenset({
-        "lookup_current_prices_on_ledger_notice",
-        "lookup_historical_fields_on_ledger_notice",
+        "lookup_current_prices_on_ledger",
+        "lookup_historical_fields_on_ledger",
         "apply_daily_mark_to_market",
     })
     account = BacktestRunState(strategy_configs={
@@ -592,17 +592,17 @@ def test_ledger_notice_dispatch_loads_market_data_and_settles_ledger_once():
 
     registry = FlowRegistry()
     for flow in (
-        MarketDataModule.lookup_current_prices_on_ledger_notice,
-        MarketDataModule.lookup_historical_fields_on_ledger_notice,
+        MarketDataModule.lookup_current_prices_on_ledger,
+        MarketDataModule.lookup_historical_fields_on_ledger,
         TradingRuleModule.apply_daily_mark_to_market,
     ):
         registry.register_flow(flow)
     groups = sort_and_validate(registry.resolve())
     queue = EventQueue()
-    dispatcher = make_dispatcher(groups[(TradingRuleModule.apply_daily_mark_to_market.phase, EventKind.LEDGER_NOTICE)], account, queue)
-    queue.set_dispatcher(EventKind.LEDGER_NOTICE, dispatcher)
+    dispatcher = make_dispatcher(groups[(TradingRuleModule.apply_daily_mark_to_market.phase, EventKind.LEDGER)], account, queue)
+    queue.set_dispatcher(EventKind.LEDGER, dispatcher)
     queue.push_event(EventDraft(
-        EventKind.LEDGER_NOTICE,
+        EventKind.LEDGER,
         event_time,
         payload={"kind": "daily_mark_to_market", "ledger_id": ledger.name},
         ledger=ledger,
@@ -612,10 +612,10 @@ def test_ledger_notice_dispatch_loads_market_data_and_settles_ledger_once():
 
     # MarketData lookup flows must have fed the ledger-scoped DMTM flow. The
     # shared ledger is attached to two strategies, but the notice itself is a
-    # ledger event, so settlement happens once: +2 PnL and +0.2 extra margin.
-    assert shared.get(_cash_ref()).to_major() == pytest.approx(101.8)
+    # ledger event, so settlement happens once: +2 PnL.
+    assert shared.get(_cash_ref()).to_major() == pytest.approx(102.0)
     entry = shared.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(1.2)
+    assert entry.equity_occupied.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
 
 
@@ -673,9 +673,9 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
     # Correct PnL: old lot (18-20) + new lot (18-10) = +6, equivalent to
     # 2 * (18 - blended_basis 15). The stale settlement tag alone would
     # produce 2 * (18 - 20) = -4 and an artificial equity drop.
-    # Margin falls from 4.0 to 2 * 18 * 0.1 = 3.6, so cash delta = 6 + 0.4.
-    assert updated_cash.to_major() == pytest.approx(1006.4)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(3.6)
+    # Margin requirement changes are handled by MarginModule notice flows.
+    assert updated_cash.to_major() == pytest.approx(1006.0)
+    assert updated_position.equity_occupied.to_major() == pytest.approx(4.0)
     assert updated_position.settlement_price == pytest.approx(18.0)
     assert updated_position.average_cost is None
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 18.0, False)]
@@ -727,9 +727,160 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
 
     # PnL is zero because the open lot's basis is already 18. The historical
     # PreSettlementPrice belongs to old inventory and must not override lots.
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(1000.0 + 0.2)
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(1000.0)
     entry = ledger.get(_positions_ref())[product]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 18.0, False)]
+
+
+def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidation_notice():
+    product = _product()
+    strategy = Strategy(alias="S")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    state = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
+        ledgers={f"private:{strategy.alias}": ledger},
+    )
+    state.ledger_configs[ledger.ledger] = LedgerConfig(margin_mode="auto", margin_call_mode="liquidate")
+    event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
+    queue = EventQueue()
+    ctx = FlowContext(
+        timestamp=event_time,
+        event_queue=queue,
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                event_time,
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger_id},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 12.0}, "close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_margin_requirement_change(state, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(0.0)
+    assert entry.equity_occupied.to_major() == pytest.approx(12.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
+    assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
+    assert queue.pending_count_by_kind(EventKind.ORDER) == 0
+
+
+def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_layer():
+    product = _product()
+    strategy = Strategy(alias="S")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            equity_occupied=DataMoney.from_major(12.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    state = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
+        ledgers={f"private:{strategy.alias}": ledger},
+    )
+    state.ledger_configs[ledger.ledger] = LedgerConfig(
+        margin_mode="auto",
+        margin_call_mode="liquidate",
+        liquidation_target_buffer=0.0,
+    )
+    event_time = pd.Timestamp("2026-03-10 15:00:00.000000003", tz="Asia/Shanghai")
+    queue = EventQueue()
+    ctx = FlowContext(
+        timestamp=event_time,
+        event_queue=queue,
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.TRADE_INTENT,
+                event_time,
+                payload={"kind": "margin_liquidation", "ledger_id": ledger.ledger_id, "deficit": 12.0},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 12.0}, "close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _handle_margin_liquidation_notice(state, ctx)
+
+    assert queue.pending_count_by_kind(EventKind.ORDER) == 1
+
+
+def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
+    product = _product()
+    strategy = Strategy(alias="S")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_cash_ref(), DataMoney.from_major(30.0, currency="CNY", use_minor_units=False))
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    state = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
+        ledgers={f"private:{strategy.alias}": ledger},
+    )
+    state.ledger_configs[ledger.ledger] = LedgerConfig(
+        margin_mode="auto",
+        margin_call_mode="warn",
+        cash_reserve_ratio=0.5,
+    )
+    event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=event_time,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                event_time,
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger_id},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {"settlement": {product: 12.0}, "close": {product: 12.0}})
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_margin_requirement_change(state, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert ledger.get(_cash_ref()).to_major() == pytest.approx(15.0)
+    assert entry.equity_occupied.to_major() == pytest.approx(17.0)
+    assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.0)
 
 
 def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode_does_not_need_split():
