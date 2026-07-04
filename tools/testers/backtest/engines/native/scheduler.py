@@ -631,8 +631,6 @@ def _pre_post_applicable_strategies(
     flow: ResolvedFlow,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> frozenset["Strategy"]:
-    if not flow.strategy_scoped:
-        return frozenset(state.strategy_configs)
     return _strategies_using_flow(state, flow.name, flow_strategies)
 
 
@@ -858,8 +856,6 @@ def _flow_applicable_to_any_strategy(
     flow: ResolvedFlow,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> bool:
-    if not flow.strategy_scoped and flow.phase is not Phase.PER_EVENT:
-        return bool(state.strategy_configs) or not flow.strategy_scoped
     return bool(_strategies_using_flow(state, flow.name, flow_strategies))
 
 

@@ -192,6 +192,17 @@ def test_apply_strategy_configs_sets_account_attribute():
     assert account.ledger_config_for(f"private:{strategy.alias}").fixed_fee_rate == 0.001
 
 
+def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():
+    account = BacktestRunState()
+    apply_strategy_configs(account, {"A1": {"engine_mode": "auto", **_GROUP_FIELDS}})
+
+    strategy = next(iter(account.strategy_configs))
+    ledger_config = account.ledger_config_for(f"private:{strategy.alias}")
+
+    assert ledger_config.accounting_mode == "Auto"
+    assert ledger_config.daily_mark_to_market_enabled is None
+
+
 def test_missing_frontend_only_default_field_raises():
     """split_count's `default=5` is a UI display suggestion only
     (frontend_only_default=True) -- a strategy that doesn't supply it must
