@@ -41,12 +41,16 @@ def test_clean_instrument_rows_maps_openctp_fields():
     specs = _clean_instrument_rows([_instrument_row()])
 
     row = specs.iloc[0]
-    assert row["exchange"] == "CFFEX"
-    assert row["contract_code"] == "IF2606"
-    assert row["variety_code"] == "IF"
-    assert row["multiplier"] == 300
-    assert row["min_tick"] == 0.2
-    assert row["min_trade_quantity"] == 1
+    assert row["ExchangeID"] == "CFFEX"
+    assert row["InstrumentID"] == "IF2606"
+    assert row["ProductID"] == "IF"
+    assert row["VolumeMultiple"] == 300
+    assert row["PriceTick"] == 0.2
+    assert row["MinLimitOrderVolume"] == 1
+    assert row["LongMarginRatioByMoney"] == 0.12
+    assert row["ShortMarginRatioByMoney"] == 0.13
+    assert row["LongMarginRatioByVolume"] == 0
+    assert row["ShortMarginRatioByVolume"] == 0
     assert row["NormalizedInstrumentID"] == "IF2606"
 
 
@@ -128,7 +132,9 @@ def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_pat
     with sqlite3.connect(tmp_path / "localdata" / "unifieddata.sqlite") as conn:
         count = conn.execute("SELECT count(*) FROM openctp_responses").fetchone()[0]
         spec = conn.execute(
-            "SELECT instrument_id, product_id, open_ratio, open_fixed FROM openctp_cnfutures_contract_specs"
+            "SELECT InstrumentID, ProductID, OpenRatioByMoney, OpenRatioByVolume, "
+            "LongMarginRatioByMoney, ShortMarginRatioByMoney "
+            "FROM openctp_cnfutures_contract_specs"
         ).fetchone()
     assert count == 1
-    assert spec == ("IF2606", None, None, None)
+    assert spec == ("IF2606", None, None, None, None, None)

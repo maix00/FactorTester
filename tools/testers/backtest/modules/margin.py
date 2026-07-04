@@ -14,7 +14,34 @@ from .custom_product import custom_product_editor_definition
 from .engine import engine_mode_for
 
 _CUSTOM_MARGIN_FIELDS = (
-    {"value": "MarginRatio", "label": "保证金率", "unit": "ratio", "value_type": "number", "allow_time_range": True},
+    {
+        "value": "LongMarginRatioByMoney",
+        "label": "多头保证金率",
+        "unit": "ratio",
+        "value_type": "number",
+        "allow_time_range": True,
+    },
+    {
+        "value": "ShortMarginRatioByMoney",
+        "label": "空头保证金率",
+        "unit": "ratio",
+        "value_type": "number",
+        "allow_time_range": True,
+    },
+    {
+        "value": "LongMarginRatioByVolume",
+        "label": "多头每手保证金",
+        "unit": "currency/lot",
+        "value_type": "number",
+        "allow_time_range": True,
+    },
+    {
+        "value": "ShortMarginRatioByVolume",
+        "label": "空头每手保证金",
+        "unit": "currency/lot",
+        "value_type": "number",
+        "allow_time_range": True,
+    },
 )
 
 
@@ -85,7 +112,7 @@ def _resolve_margin_ratio(strategy_config, market_margin_ratio: float | None, le
     if mode == "fixed":
         return float(getattr(ledger_config, "fixed_margin_ratio", None) or 1.0)
     if mode == "exact" and market_margin_ratio is None:
-        raise KeyError("exact margin mode requires historical MarginRatio")
+        raise KeyError("exact margin mode requires historical long/short margin fields")
     return float(market_margin_ratio or 0.0)
 
 
@@ -96,5 +123,5 @@ def _resolve_margin_ratio_from_ledger_config(market_margin_ratio: float | None, 
     if mode == "fixed":
         return float(getattr(ledger_config, "fixed_margin_ratio", None) or 1.0)
     if mode == "exact" and market_margin_ratio is None:
-        raise KeyError("exact margin mode requires historical MarginRatio")
+        raise KeyError("exact margin mode requires historical long/short margin fields")
     return float(market_margin_ratio or 0.0)

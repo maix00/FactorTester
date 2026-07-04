@@ -111,7 +111,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert index["defaults"]["custom_product_fields"]["serialization"]["kind"] == "custom_product_overrides"
     custom_fields = index["defaults"]["custom_product_fields"]["serialization"]["fields"]
     assert {field["value"] for field in custom_fields} >= {
-        "MarginRatio",
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
         "OpenRatioByMoney",
         "CostBasisMethod",
     }
@@ -138,6 +141,13 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "margin_mode": ["custom"],
     }
     assert index["defaults"]["margin_custom_product_fields"]["serialization"]["module_filter"] == "margin"
+    margin_fields = index["defaults"]["margin_custom_product_fields"]["serialization"]["fields"]
+    assert {field["value"] for field in margin_fields} == {
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
+    }
     assert index["defaults"]["trading_rule_custom_product_fields"]["tab_key"] == "accounting"
     assert index["defaults"]["trading_rule_custom_product_fields"]["chip_template"] is None
     assert index["defaults"]["trading_rule_custom_product_fields"]["visible_when"] == {
