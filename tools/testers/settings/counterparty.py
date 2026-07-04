@@ -1,15 +1,11 @@
-"""CounterParty — declarative fee/margin/liquidity commercial-terms presets.
+"""CounterParty templates for building ledger-owned rule settings.
 
-Not a runtime object: registering a profile injects its field defaults into
-the SAME `default_when` mechanism `EngineModule.engine_mode`'s basic/auto/
-exact presets already use -- a `"counterparty_profile"` source_key alongside
-the existing `"engine_mode"` one on each target field (`FeeModule.fee_mode`,
-`MarginModule.margin_mode`, ...), so `strategy_config_builder.
-_default_value_for_field` resolves it with zero new resolution passes and no
-change to `resolve_group_settings`/`build_strategy_configs`. A strategy's
-explicitly-set field value always wins over any `default_when` expansion --
-that's `_default_value_for_field`'s existing behavior, not something this
-module re-implements. See ADR-032.
+CounterPartyProfile is a saved template, not a runtime dependency. Applying a
+profile resolves to LedgerConfig/per-strategy builder fields before the native
+engine starts; flows should ultimately read ledger-owned rules, not re-query a
+profile registry during event replay. The current StrategyConfig projection is
+only a compatibility bridge while fee/margin/settlement flows are being moved
+to ledger-level reads.
 """
 
 from __future__ import annotations
@@ -32,7 +28,7 @@ _COUNTERPARTY_PROFILES: dict[str, CounterPartyProfile] = {}
 
 
 class _StrategyBookLike(Protocol):
-    ledger_specs: Mapping[str, Any]
+    ledger_configs: Mapping[str, Any]
 
     def ledger_ids_for_strategy(self, strategy: object) -> tuple[str, ...]:
         ...
@@ -81,11 +77,12 @@ def resolve_counterparty_profiles_by_ledger(
 
     for alias, ledger_ids in ledger_ids_by_alias.items():
         for ledger_id in ledger_ids:
-            spec = getattr(book, "ledger_specs", {}).get(ledger_id)
+            config = getattr(book, "ledger_configs", {}).get(ledger_id)
+            metadata = getattr(config, "metadata", {}) or {}
             _put_counterparty_profile(
                 result,
                 ledger_id,
-                getattr(spec, "counterparty_profile", None),
+                metadata.get("counterparty_profile"),
                 source=f"strategy_book.ledgers[{ledger_id!r}]",
             )
 

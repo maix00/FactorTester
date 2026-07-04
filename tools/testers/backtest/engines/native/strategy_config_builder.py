@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from tools.testers.backtest.engines.native.ledger import StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+from tools.testers.backtest.modules.strategy_book import apply_ledger_configs_to_resolved_settings
 from tools.testers.settings.counterparty import (
     CounterPartyProfile,
     apply_counterparty_profiles_to_resolved_settings,
@@ -241,5 +242,9 @@ def apply_strategy_configs(
         counterparty=counterparty,
         counterparty_by_strategy=counterparty_by_strategy,
         counterparty_by_ledger=counterparty_by_ledger,
+    )
+    resolved = apply_ledger_configs_to_resolved_settings(
+        resolved,
+        strategy_book=getattr(state, "strategy_book", None),
     )
     state.strategy_configs = build_strategy_configs(resolved)

@@ -236,6 +236,63 @@ def test_apply_strategy_configs_accepts_strategy_book_and_ledger_counterparty_ov
         unregister_counterparty_profile("__test_bootstrap_profile__")
 
 
+def test_apply_strategy_configs_projects_ledger_config_fields():
+    account = BacktestRunState()
+    book = StrategyBook.from_dict({
+        "strategies": {
+            "A1": "shared-book",
+            "A2": "shared-book",
+        },
+        "ledgers": {
+            "shared-book": {
+                "fee_mode": "fixed",
+                "margin_mode": "fixed",
+                "accounting_mode": "Custom",
+                "daily_mark_to_market_enabled": True,
+                "cost_basis_method": "FIFO",
+            },
+        },
+    })
+    apply_strategy_configs(
+        account,
+        {
+            "A1": {"engine_mode": "custom", **_GROUP_FIELDS},
+            "A2": {"engine_mode": "custom", **_GROUP_FIELDS},
+        },
+        strategy_book=book,
+    )
+    assert account.strategy_book is book
+    for config in account.strategy_configs.values():
+        assert config.get(FeeModule.fee_mode) == "fixed"
+        assert config.get(MarginModule.margin_mode) == "fixed"
+        assert config.get(TradingRuleModule.accounting_mode) == "Custom"
+        assert config.get(TradingRuleModule.daily_mark_to_market_enabled) is True
+        assert config.get(TradingRuleModule.cost_basis_method) == "FIFO"
+
+
+def test_apply_strategy_configs_rejects_conflicting_ledger_config_fields():
+    account = BacktestRunState()
+    book = StrategyBook.from_dict({
+        "strategies": {
+            "A1": {"ledger_ids": ["book-a", "book-b"], "default_ledger_id": "book-a"},
+        },
+        "ledgers": {
+            "book-a": {"fee_mode": "fixed"},
+            "book-b": {"fee_mode": "zero"},
+        },
+    })
+    try:
+        apply_strategy_configs(
+            account,
+            {"A1": {"engine_mode": "custom", **_GROUP_FIELDS}},
+            strategy_book=book,
+        )
+    except ValueError as exc:
+        assert "conflicting fee_mode" in str(exc)
+    else:
+        raise AssertionError("expected conflicting ledger config fields to fail")
+
+
 def test_apply_strategy_configs_rejects_shared_ledger_counterparty_conflict():
     register_counterparty_profile(CounterPartyProfile(
         id="__test_bootstrap_conflict_profile__",

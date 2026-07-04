@@ -23,6 +23,15 @@ if TYPE_CHECKING:
 
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
+LEDGER_CONFIG_FIELD_NAMES: tuple[str, ...] = (
+    "fee_mode",
+    "margin_mode",
+    "accounting_mode",
+    "daily_mark_to_market_enabled",
+    "cost_basis_method",
+    "tradability_policy",
+    "clearing_rounding_policy",
+)
 
 
 class StrategyBookModule(ExecutableModule):
@@ -70,10 +79,23 @@ def strategy_book_store_for(state: object) -> StrategyBookStore:
 
 
 @dataclass(frozen=True)
-class LedgerSpec:
+class LedgerConfig:
+    """Ledger-owned accounting and execution-rule configuration.
+
+    StrategyConfig owns signal/target generation. StrategyBook owns
+    strategy->ledger routing. LedgerConfig owns ledger-level commercial and
+    clearing rules: fee, margin, accounting, settlement and tradability.
+    """
+
     initial_capital_major: float | None = None
     base_currency: str | None = None
-    counterparty_profile: str | None = None
+    fee_mode: str | None = None
+    margin_mode: str | None = None
+    accounting_mode: str | None = None
+    daily_mark_to_market_enabled: bool | None = None
+    cost_basis_method: str | None = None
+    tradability_policy: str | None = None
+    clearing_rounding_policy: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -89,7 +111,7 @@ class StrategyBook:
 
     strategy_ledger_ids_by_alias: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     default_ledger_id_by_alias: Mapping[str, str] = field(default_factory=dict)
-    ledger_specs: Mapping[str, LedgerSpec] = field(default_factory=dict)
+    ledger_configs: Mapping[str, LedgerConfig] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "StrategyBook":
@@ -124,7 +146,7 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias=ledger_ids_by_alias,
             default_ledger_id_by_alias=default_by_alias,
-            ledger_specs=_parse_ledger_specs(payload.get("ledgers", {})),
+            ledger_configs=_parse_ledger_configs(payload.get("ledgers", {})),
         )
 
     @classmethod
@@ -143,7 +165,7 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias={alias: (ledger_id,) for alias, ledger_id in resolved.items()},
             default_ledger_id_by_alias=resolved,
-            ledger_specs={ledger_id: LedgerSpec() for ledger_id in set(resolved.values())},
+            ledger_configs={ledger_id: LedgerConfig() for ledger_id in set(resolved.values())},
         )
 
     def ledger_ids_for_strategy(self, strategy: object) -> tuple[str, ...]:
@@ -189,6 +211,9 @@ class StrategyBook:
     def provision_ledgers(self, state: object) -> None:
         for strategy, strategy_config in getattr(state, "strategy_configs", {}).items():
             self.assign_ledger_id_for_strategy(state, strategy, strategy_config)
+
+    def ledger_config(self, ledger_id: str) -> LedgerConfig:
+        return self.ledger_configs.get(ledger_id, LedgerConfig())
 
     def merge_trade_decisions(self, decisions: object, ctx: object) -> object:
         return decisions
@@ -240,6 +265,57 @@ def strategy_book_for(state: object) -> StrategyBook:
     return _STRATEGY_BOOK_SIMPLE
 
 
+def ledger_config_for_ledger(state: object, ledger_id: str) -> LedgerConfig:
+    return strategy_book_for(state).ledger_config(str(ledger_id))
+
+
+def ledger_config_for_strategy(state: object, strategy: object) -> LedgerConfig:
+    book = strategy_book_for(state)
+    return book.ledger_config(book.default_ledger_id_for_strategy(strategy))
+
+
+def ledger_config_for_order(state: object, strategy: object, strategy_config: "StrategyConfig", order: object) -> LedgerConfig:
+    book = strategy_book_for(state)
+    return book.ledger_config(book.ledger_id_for_order(strategy, strategy_config, order))
+
+
+def apply_ledger_configs_to_resolved_settings(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    strategy_book: object | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Project ledger-owned rule defaults into the current StrategyConfig builder.
+
+    This is a compatibility bridge while fee/margin/settlement flows still
+    read StrategyConfig directly. The source of truth is already ledger-level:
+    explicit strategy values win, one strategy's ledgers must not disagree on
+    a projected field, and missing ledger values do not invent fallbacks.
+    """
+
+    book = strategy_book if isinstance(strategy_book, StrategyBook) else StrategyBookSimple()
+    resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
+    for alias, settings in resolved.items():
+        ledgers = book.ledger_ids_for_strategy(alias)
+        for field_name in LEDGER_CONFIG_FIELD_NAMES:
+            if field_name in settings:
+                continue
+            values = {
+                value
+                for ledger_id in ledgers
+                for value in (getattr(book.ledger_config(ledger_id), field_name),)
+                if value is not None
+            }
+            if not values:
+                continue
+            if len(values) > 1:
+                raise ValueError(
+                    f"strategy {alias!r} maps to ledgers with conflicting {field_name}: "
+                    f"{sorted(str(value) for value in values)}"
+                )
+            settings[field_name] = next(iter(values))
+    return resolved
+
+
 def resolve_strategy_book_mode(strategy_config: "StrategyConfig") -> StrategyBookMode:
     return _STRATEGY_BOOK_SIMPLE.resolve_strategy_book_mode(strategy_config)
 
@@ -257,20 +333,30 @@ def assign_ledger_id_for_strategy(
     return strategy_book_for(state).assign_ledger_id_for_strategy(state, strategy, strategy_config, order)
 
 
-def _parse_ledger_specs(raw_ledgers: object) -> dict[str, LedgerSpec]:
+def _parse_ledger_configs(raw_ledgers: object) -> dict[str, LedgerConfig]:
     if raw_ledgers is None:
         return {}
     if not isinstance(raw_ledgers, Mapping):
         raise ValueError("StrategyBook.from_dict requires a mapping at 'ledgers'")
-    result: dict[str, LedgerSpec] = {}
+    result: dict[str, LedgerConfig] = {}
     for ledger_id, raw_spec in raw_ledgers.items():
         if raw_spec is None:
-            result[str(ledger_id)] = LedgerSpec()
+            result[str(ledger_id)] = LedgerConfig()
             continue
         if not isinstance(raw_spec, Mapping):
             raise ValueError(f"ledger spec for {ledger_id!r} must be a mapping")
-        known = {"initial_capital_major", "base_currency", "counterparty_profile"}
-        result[str(ledger_id)] = LedgerSpec(
+        known = {
+            "initial_capital_major",
+            "base_currency",
+            "fee_mode",
+            "margin_mode",
+            "accounting_mode",
+            "daily_mark_to_market_enabled",
+            "cost_basis_method",
+            "tradability_policy",
+            "clearing_rounding_policy",
+        }
+        result[str(ledger_id)] = LedgerConfig(
             initial_capital_major=(
                 float(raw_spec["initial_capital_major"])
                 if raw_spec.get("initial_capital_major") is not None else None
@@ -279,10 +365,13 @@ def _parse_ledger_specs(raw_ledgers: object) -> dict[str, LedgerSpec]:
                 str(raw_spec["base_currency"])
                 if raw_spec.get("base_currency") is not None else None
             ),
-            counterparty_profile=(
-                str(raw_spec["counterparty_profile"])
-                if raw_spec.get("counterparty_profile") is not None else None
-            ),
+            fee_mode=_optional_str(raw_spec.get("fee_mode")),
+            margin_mode=_optional_str(raw_spec.get("margin_mode")),
+            accounting_mode=_optional_str(raw_spec.get("accounting_mode")),
+            daily_mark_to_market_enabled=_optional_bool(raw_spec.get("daily_mark_to_market_enabled")),
+            cost_basis_method=_optional_str(raw_spec.get("cost_basis_method")),
+            tradability_policy=_optional_str(raw_spec.get("tradability_policy")),
+            clearing_rounding_policy=_optional_str(raw_spec.get("clearing_rounding_policy")),
             metadata={str(key): value for key, value in raw_spec.items() if key not in known},
         )
     return result
@@ -290,3 +379,23 @@ def _parse_ledger_specs(raw_ledgers: object) -> dict[str, LedgerSpec]:
 
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
+
+
+def _optional_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
