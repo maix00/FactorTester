@@ -16,6 +16,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.workers import bridge as bridge_module
 from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
 from tools.testers.backtest.engines.workers.contracts import WorkerResponse
+from tools.testers.backtest.engines.workers.operations import RUN_STRATEGY_INTENTS
 from tools.testers.backtest.engines.workers.translator import (
     build_membership_payload,
     translate_market_payload,
@@ -545,7 +546,7 @@ def test_bridge_dispatches_translated_payload_and_wraps_result(monkeypatch):
 
     payload = dispatcher.request.payload
     assert dispatcher.request.engine == "backtrader"
-    assert dispatcher.request.operation == "run_group_strategy"
+    assert dispatcher.request.operation == RUN_STRATEGY_INTENTS
     assert payload["instruments"] == ["A", "B"]
     assert payload["strategy_configs"][0]["strategy_id"] == "g1"
     assert payload["strategy_configs"][0]["fee_rate"] == 0.0

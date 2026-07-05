@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from tools.testers.backtest.engines.workers import (
@@ -11,6 +14,7 @@ from tools.testers.backtest.engines.workers import (
     WorkerExecutionError,
     WorkerRequest,
 )
+from tools.testers.backtest.engines.workers.operations import RUN_STRATEGY_INTENTS
 
 
 def _strategy_settings(**overrides):
@@ -20,6 +24,72 @@ def _strategy_settings(**overrides):
     }
     values.update(overrides)
     return values
+
+
+def _real_group_payload_or_skip() -> dict[str, Any]:
+    try:
+        from sources.LocalCNFutures import SOURCE_DATA_DIR
+    except Exception as exc:  # pragma: no cover - source module unavailable
+        pytest.skip(f"LocalCNFutures unavailable: {exc}")
+
+    root = Path(SOURCE_DATA_DIR) / "main_dayk"
+    instruments = ("A.DCE", "AG.SHF")
+    if not all((root / f"{instrument}.parquet").is_file() for instrument in instruments):
+        pytest.skip("LocalCNFutures main_dayk real-data files are not available")
+
+    series = []
+    for instrument in instruments:
+        frame = pd.read_parquet(root / f"{instrument}.parquet", columns=["trading_day", "close_price"])
+        values = pd.Series(
+            frame["close_price"].to_numpy(dtype=float),
+            index=pd.DatetimeIndex(pd.to_datetime(frame["trading_day"])),
+        ).dropna().sort_index()
+        series.append(values[~values.index.duplicated(keep="last")])
+    index = series[0].index.intersection(series[1].index).sort_values()[-8:]
+    if len(index) < 8:
+        pytest.skip(f"not enough overlapping real trading days: {len(index)}")
+    prices = {
+        instrument: [float(value) for value in values.reindex(index)]
+        for instrument, values in zip(instruments, series, strict=True)
+    }
+    momentum = pd.DataFrame(prices, index=index).pct_change(2).fillna(0.0)
+    membership = []
+    for _, row in momentum.iterrows():
+        ranked = row.sort_values(ascending=False).index.tolist()
+        high = set(ranked[:1])
+        low = set(ranked[1:])
+        membership.append([
+            [True, True],
+            [instruments[0] in high, instruments[1] in high],
+            [instruments[0] in low, instruments[1] in low],
+        ])
+    return {
+        "timestamps": [timestamp.isoformat() for timestamp in index],
+        "instruments": list(instruments),
+        "prices": prices,
+        "membership": membership,
+        "signal_updates": [[True, True, True] for _ in index],
+        "initial_cash": 1_000_000.0,
+        "market_rules": {
+            "margin_ratios": [[1.0, 1.0]] * len(index),
+            "multipliers": [[1.0, 1.0]] * len(index),
+            "lot_sizes": [[1.0, 1.0]] * len(index),
+        },
+        "strategy_configs": [
+            _strategy_settings(
+                strategy_id="top-momentum",
+                membership_index=1,
+                allocation_policy="equal_notional",
+            ),
+            _strategy_settings(
+                strategy_id="long-short",
+                strategy_kind="long_short",
+                long_indices=[1],
+                short_indices=[2],
+                allocation_policy="equal_notional",
+            ),
+        ],
+    }
 
 
 def test_worker_contract_rejects_unknown_schema_version() -> None:
@@ -55,6 +125,39 @@ def test_dispatcher_has_no_implicit_native_fallback() -> None:
     with pytest.raises(WorkerExecutionError, match="no worker registered"):
         EngineWorkerDispatcher().dispatch(WorkerRequest(
             "request-1", "unknown-engine", "health",
+        ))
+
+
+def test_worker_health_exposes_strategy_intent_operation_manifest() -> None:
+    health = EngineWorkerDispatcher().dispatch(WorkerRequest(
+        "health-backtrader", "backtrader", "health",
+    )).result
+
+    assert RUN_STRATEGY_INTENTS in health["operations"]
+    assert "run_group_strategy" in health["operations"]
+    manifest = health["operation_manifest"]
+    assert manifest[RUN_STRATEGY_INTENTS]["aliases"] == ["run_group_strategy"]
+    assert "strategy_kind" in manifest[RUN_STRATEGY_INTENTS]["description"]
+
+
+def test_strategy_intent_worker_rejects_unregistered_strategy_kind() -> None:
+    payload = {
+        "timestamps": ["2024-01-01", "2024-01-02"],
+        "instruments": ["asset-a"],
+        "prices": {"asset-a": [100.0, 101.0]},
+        "membership": [[[True]], [[True]]],
+        "signal_updates": [[True], [True]],
+        "initial_cash": 100_000.0,
+        "strategy_configs": [_strategy_settings(
+            strategy_id="cross-over",
+            strategy_kind="technical_cross_over",
+            allocation_policy="equal_notional",
+        )],
+    }
+
+    with pytest.raises(WorkerExecutionError, match="strategy_kind='technical_cross_over'"):
+        EngineWorkerDispatcher().dispatch(WorkerRequest(
+            "unknown-intent", "backtrader", RUN_STRATEGY_INTENTS, payload,
         ))
 
 
@@ -409,6 +512,54 @@ def test_frameworks_preserve_equal_risk_and_equal_notional_equity_difference() -
             result["portfolios"]["equal-risk"]["final_value"]
             != result["portfolios"]["equal-notional"]["final_value"]
         ), engine
+
+
+def test_framework_workers_match_native_on_small_real_group_payload(record_property) -> None:
+    """Real-data smoke for the worker boundary, not just synthetic prices.
+
+    This catches framework-specific broker/order lifecycle drift. In
+    particular, Backtrader's raw per-order submit cash check does not express
+    FactorTester's atomic sell-first rebalance contract, so the Backtrader
+    group worker must use the portable worker kernel for this operation.
+    """
+    from tools.testers.backtest.engines.workers.runners.native import run_group_strategy as run_native
+
+    payload = _real_group_payload_or_skip()
+    dispatcher = EngineWorkerDispatcher()
+    timings: dict[str, float] = {}
+    results = {}
+    for engine in ("backtrader", "qlib", "zipline"):
+        started = time.perf_counter()
+        results[engine] = dispatcher.dispatch(WorkerRequest(
+            f"real-group-{engine}", engine, RUN_STRATEGY_INTENTS, payload
+        ), timeout_seconds=120).result
+        timings[engine] = time.perf_counter() - started
+    started = time.perf_counter()
+    results["native"] = run_native(payload)
+    timings["native"] = time.perf_counter() - started
+    record_property("framework_worker_timings_seconds", {
+        engine: round(elapsed, 6) for engine, elapsed in timings.items()
+    })
+    assert all(elapsed >= 0.0 for elapsed in timings.values())
+
+    for strategy in ("top-momentum", "long-short"):
+        traces = {
+            engine: result["target_trace"][strategy]
+            for engine, result in results.items()
+        }
+        assert traces == {engine: traces["native"] for engine in traces}
+
+        equity = {
+            engine: result["portfolios"][strategy]["equity_curve"]
+            for engine, result in results.items()
+        }
+        assert equity == {engine: equity["native"] for engine in equity}
+
+        positions = {
+            engine: result["portfolios"][strategy]["position_curve"]
+            for engine, result in results.items()
+        }
+        assert positions == {engine: positions["native"] for engine in positions}
 
 
 @pytest.mark.parametrize("engine", ["native", "backtrader", "qlib", "zipline"])
@@ -796,10 +947,15 @@ def test_framework_group_execution_matches_with_multiplier_fee_and_timing() -> N
         engine: results["native"]["execution_trace"]["group-1"]
         for engine in results
     }
-    # Backtrader keeps its own broker cash-check/fill timing in this adapter
-    # instead of being forced into native's execution-bar resizing contract.
+    # Backtrader's raw broker behavior remains covered by run_target_weights.
+    # The higher-level strategy-intent operation must match FactorTester's
+    # atomic sell-first, execution-bar resizing contract.
     assert backtrader["target_trace"]["group-1"] == results["native"]["target_trace"]["group-1"]
     assert (
         backtrader["portfolios"]["group-1"]["position_curve"]
-        != results["native"]["portfolios"]["group-1"]["position_curve"]
+        == results["native"]["portfolios"]["group-1"]["position_curve"]
+    )
+    assert (
+        backtrader["portfolios"]["group-1"]["equity_curve"]
+        == results["native"]["portfolios"]["group-1"]["equity_curve"]
     )

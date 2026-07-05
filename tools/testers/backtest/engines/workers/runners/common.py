@@ -17,6 +17,11 @@ from tools.testers.settings.strategy_fields import (
     required_strategy_value,
 )
 
+WORKER_STRATEGY_INTENT_POLICIES: dict[str, str] = {
+    "group": "membership_target_weights",
+    "long_short": "membership_target_weights",
+}
+
 
 def should_report_progress(completed: int, total: int, max_updates: int = 100) -> bool:
     """Bound progress transport cost without changing event replay semantics."""
@@ -157,6 +162,11 @@ def parse_target_weight_input(payload: Mapping[str, Any]) -> TargetWeightInput:
 def _validate_worker_strategy_settings(strategy: Mapping[str, Any]) -> None:
     """Validate shared split semantics without importing native-only timing policy."""
 
+    kind = str(strategy.get("strategy_kind") or "group")
+    if kind not in WORKER_STRATEGY_INTENT_POLICIES:
+        raise ValueError(
+            f"strategy_kind={kind!r} is not registered for framework worker strategy-intent replay"
+        )
     if OBSOLETE_REBALANCE_MODE in strategy:
         raise ValueError(
             f"{OBSOLETE_REBALANCE_MODE} is obsolete; use "

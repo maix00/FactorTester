@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
     from .reference import run_group_strategy as run_reference_group_strategy
 
     if progress is None:
@@ -28,3 +28,7 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         progress(completed, bar_count, timestamp)
 
     return run_reference_group_strategy(payload, progress=_progress, engine="native")
+
+
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)

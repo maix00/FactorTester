@@ -32,6 +32,7 @@ from tools.testers.backtest.engines.native.scheduler import (
 )
 from tools.testers.backtest.engines.workers.contracts import WorkerRequest
 from tools.testers.backtest.engines.workers.dispatcher import EngineWorkerDispatcher
+from tools.testers.backtest.engines.workers.operations import RUN_STRATEGY_INTENTS
 from tools.testers.backtest.engines.workers.translator import (
     build_membership_payload,
     translate_market_payload,
@@ -111,7 +112,7 @@ def run_framework_backtest_task(
         WorkerRequest(
             request_id=f"{run_id}-{uuid.uuid4().hex[:8]}",
             engine=engine,
-            operation="run_group_strategy",
+            operation=RUN_STRATEGY_INTENTS,
             payload=payload,
         ),
         timeout_seconds=timeout_seconds,
@@ -171,6 +172,7 @@ def _bridge_manifest(engine_label: str) -> list[dict[str, Any]]:
             self.name = name
             self.effective_description = description
             self.event_kind = None
+            self.input_materialization = False
 
     return [
         _phase_spec("pre_replay", [

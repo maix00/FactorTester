@@ -131,8 +131,8 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "zipline", "portfolios": portfolios}
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    """Event-driven group replay through Zipline's Ledger transaction lifecycle.
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Event-driven strategy-intent replay through Zipline's Ledger transaction lifecycle.
 
     Per bar: mark positions to market on Zipline's PositionTracker, execute
     due targets as Zipline Transactions processed by its Ledger (fees via
@@ -315,6 +315,10 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         "event_count": len(request.timestamps),
         "signal_kind": payload.get("signal_kind"),
     }
+
+
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)
 
 
 def _zipline_executable_deltas(

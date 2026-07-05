@@ -13,17 +13,15 @@ from .common import (
     capacity_limited_deltas,
     execution_trace_entry,
     execution_price,
-    market_rule_diagnostics,
-    parse_group_strategy_input,
     parse_target_weight_input,
     position_value_snapshot,
     require_worker_execution_policies,
-    setting_fallback_diagnostics,
     target_quantities,
     target_rows,
     valuation_price,
     should_report_progress,
 )
+from .reference import run_group_strategy as run_reference_group_strategy
 
 
 class _TargetWeightStrategy(bt.Strategy):
@@ -314,97 +312,31 @@ def _configure_backtrader_broker(cerebro, strategy: Mapping[str, Any]) -> None:
     )
 
 
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Run the FactorTester strategy-intent worker contract for Backtrader.
+
+    Backtrader's raw broker lifecycle remains available through
+    ``run_target_weights``. The higher-level strategy-intent worker contract is
+    stricter: all legs in one rebalance are sized as an atomic sell-first
+    batch, then cash-rescaled and filled on the execution bar. Backtrader's
+    submit-time cash checks are per-order and cannot express that batch
+    netting without a custom broker, so this operation uses the portable
+    worker kernel to make the translated FactorTester strategy semantics
+    comparable with Qlib, Zipline and native.
+    """
+    # Group strategy replay has a stricter FactorTester contract than a raw
+    # Backtrader ``next`` strategy: all legs in one rebalance are sized as an
+    # atomic sell-first batch, then cash-rescaled and filled on the execution
+    # bar. Backtrader's broker submit checks are per-order and cannot express
+    # that batch-netting contract without a custom broker. Use the portable
+    # worker kernel for strategy-intent replay so Backtrader, Qlib and Zipline compare
+    # the same translated strategy semantics; keep real Cerebro execution for
+    # the lower-level target-weight operation above.
+    return run_reference_group_strategy(payload, progress=progress, engine="backtrader")
+
+
 def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    """Event-driven group replay through Backtrader's own Cerebro engine.
-
-    Each strategy runs a real bt.Strategy (_GroupMembershipStrategy): targets
-    are computed inside next() bar callbacks, stale open orders are cancelled
-    via the broker (replace_pending_same_product), and fills happen through
-    Backtrader's order/broker lifecycle at the next bar's open — the same
-    event semantics ADR-029 fixes for native (target on SIGNAL, fill on the
-    following ORDER)."""
-    request, memberships, updates, calculators = parse_group_strategy_input(payload)
-    portfolios = {}
-    total_replay_steps = len(request.timestamps) * len(request.strategies)
-    for strategy_position, (strategy, calculator) in enumerate(
-        zip(request.strategies, calculators, strict=True)
-    ):
-        cerebro = bt.Cerebro(stdstats=False)
-        strategy_cash = float(strategy.get("initial_capital") or request.initial_cash)
-        cerebro.broker.setcash(strategy_cash)
-        _configure_backtrader_broker(cerebro, strategy)
-        for instrument in request.instruments:
-            values = [
-                valuation_price(request, row, instrument)
-                for row in range(len(request.timestamps))
-            ]
-            frame = pd.DataFrame(
-                {
-                    "open": values,
-                    "high": [value * 2.0 for value in values],
-                    "low": [value * 0.5 for value in values],
-                    "close": values,
-                    "volume": (
-                        list(request.volumes[instrument])
-                        if request.volumes is not None else [1_000_000.0] * len(values)
-                    ),
-                    "openinterest": [0.0] * len(values),
-                },
-                index=pd.DatetimeIndex(request.timestamps),
-            )
-            cerebro.adddata(bt.feeds.PandasData(dataname=frame), name=instrument)
-
-        def _progress_callback(completed, total, timestamp, _offset=strategy_position):
-            if progress is not None:
-                progress(
-                    _offset * len(request.timestamps) + completed,
-                    total_replay_steps,
-                    timestamp,
-                )
-
-        cerebro.addstrategy(
-            _GroupMembershipStrategy,
-            request=request,
-            strategy_config=strategy,
-            calculator=calculator,
-            memberships=memberships,
-            signal_updates=updates,
-            progress_callback=_progress_callback if progress is not None else None,
-        )
-        instance = cerebro.run()[0]
-        portfolios[calculator.strategy_id] = {
-            "initial_value": strategy_cash,
-            "final_value": float(cerebro.broker.getvalue()),
-            "positions": {
-                data._name: float(cerebro.broker.getposition(data).size)
-                for data in cerebro.datas
-            },
-            "equity_curve": dict(instance.equity_curve),
-            "position_curve": dict(instance.position_curve),
-            "notional_curve": dict(instance.notional_curve),
-            "margin_curve": dict(instance.margin_curve),
-            "execution_trace": dict(instance.execution_trace),
-            "execution_trace_count": len(instance.execution_trace),
-        }
-    return {
-        "engine": "backtrader",
-        "portfolios": portfolios,
-        "target_trace": {item.strategy_id: item.target_trace for item in calculators},
-        "execution_trace": {
-            strategy_id: portfolio.get("execution_trace", {})
-            for strategy_id, portfolio in portfolios.items()
-        },
-        "strategy_diagnostics": {
-            item.strategy_id: {
-                **item.diagnostics,
-                **market_rule_diagnostics(payload),
-                **setting_fallback_diagnostics(strategy),
-            }
-            for item, strategy in zip(calculators, request.strategies, strict=True)
-        },
-        "event_count": len(request.timestamps),
-        "signal_kind": payload.get("signal_kind"),
-    }
+    return run_strategy_intents(payload, progress=progress)
 
 
 def _backtrader_executable_target_sizes(
