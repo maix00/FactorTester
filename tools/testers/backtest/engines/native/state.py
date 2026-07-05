@@ -57,8 +57,7 @@ class BacktestRunState:
         from tools.testers.backtest.modules.equity_curve import EquityCurveStore
         from tools.testers.backtest.modules.factor_signal import FactorSignalStore
         from tools.testers.backtest.modules.market_data import MarketDataStore
-        from tools.testers.backtest.modules.order_flow import OrderFlowStore
-        from tools.testers.backtest.modules.order_lifecycle import OrderStore
+        from tools.testers.backtest.modules.order_flow import OrderFlowStore, OrderStore
         from tools.testers.backtest.modules.run_window import RunWindowStore
         from tools.testers.backtest.modules.target import TargetStore
         from tools.testers.backtest.modules.term_structure import TermStructureStore

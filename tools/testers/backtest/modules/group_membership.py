@@ -33,8 +33,9 @@ from tools.testers.backtest.modules.market_data import (
     is_product_tradable,
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
-from tools.testers.backtest.modules.order_book import OrderBookModule
-from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.strategy_book import apply_pending_order_conflict_policy
+from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
 
 
 class GroupMembershipModule(TargetStrategyModule):
@@ -126,14 +127,15 @@ class GroupMembershipModule(TargetStrategyModule):
             FactorSignalModule.signal_value, split_count, group_index,
             MarketDataModule.current_historical_fields,
         ),
-        outputs=(target_weights,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        outputs=(target_weights, TargetStrategyModule.trade_intent),
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算分组隶属",
         order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
-        "schedule_order_execution", inputs=(OrderBookModule.orders,), outputs=(),
+        "schedule_order_execution", inputs=(OrderConstructModule.orders,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
-        after=(OrderBookModule.construct_orders,),
+        after=(OrderConstructModule.construct_orders,),
         description="登记订单执行事件",
         compute=lambda state, ctx: _schedule_order_execution(state, ctx),
     )
@@ -147,7 +149,7 @@ def _group_quantile_membership(state, ctx) -> None:
     exact same allocation (cached on the shared target strategy store)
     instead of recomputing from the current signal_value -- real holding
     behavior, not "rebalance every period but happen to get the same
-    answer." `OrderBookModule.size_order` naturally produces zero deltas
+    answer." `OrderConstructModule.size_order` naturally produces zero deltas
     once the position already matches that frozen target, so no further
     trading happens without needing a separate skip-flag anywhere else.
 
@@ -194,6 +196,8 @@ def _group_quantile_membership(state, ctx) -> None:
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
         if policy == "buy_and_hold" and strategy in established:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established[strategy])
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                established[strategy], reason="buy_and_hold_established_target"))
             continue
 
         trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
@@ -224,6 +228,8 @@ def _group_quantile_membership(state, ctx) -> None:
         group_index = config.get(GroupMembershipModule.group_index, 0)
         if not signal_value or n_groups <= 0:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, {})
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                {}, reason="empty_group_membership"))
             continue
         cache_key = frozenset(signal_value.items())
         ranked = ranked_cache.get(cache_key)
@@ -252,10 +258,14 @@ def _group_quantile_membership(state, ctx) -> None:
 
         if trigger == "membership_change" and last_membership.get(strategy) == members:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established.get(strategy, {}))
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                established.get(strategy, {}), reason="membership_unchanged"))
             continue
 
         weights = _allocate_weights(state, ctx, strategy, members)
         ctx.set_for(GroupMembershipModule.target_weights, strategy, weights)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+            weights, reason="group_membership"))
         last_membership[strategy] = members
         established[strategy] = weights
         _record_target_trace(state, strategy, ctx.timestamp, weights)
@@ -423,7 +433,7 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
     if table is None:
         return current_ts, current_ts
     index = signal_timestamps(table)
-    pos = index.get_indexer([current_ts], method="bfill")[0]
+    pos = index.get_indexer(pd.Index([current_ts]), method="bfill")[0]
     delay = max(int(delay or 1), 1)
     price_pos = min(pos + delay, len(index) - 1)
     price_ts = cast(pd.Timestamp, index[price_pos])
@@ -441,29 +451,16 @@ def _resolve_execution_timestamp(state, ctx, strategy) -> pd.Timestamp:
 
 
 def _schedule_order_execution(state, ctx) -> None:
-    """Cancellation of a still-pending order for the same (strategy,
-    product) is done by mutating the queued Order object in place (the
-    EventQueue holds the same object reference) -- not by emitting a new
-    event kind.
-
-    Only cancels a stale order whose own scheduled timestamp is STRICTLY
-    AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
-    is already due at this signal boundary; keep it intact rather than treating
-    it as still-cancellable future work."""
+    """Schedule orders and apply StrategyBook's pending-order conflict policy."""
     pending = state.order_store.pending_orders
 
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
-        orders = ctx.get_for(OrderBookModule.orders, strategy, [])
+        orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
         execution_ts, price_ts = _resolve_execution_schedule(state, ctx, strategy)
         for order in orders:
             key = (strategy, order.instrument)
-            stale = pending.get(key)
-            if (
-                stale is not None and stale.status == OrderStatus.SCHEDULED
-                and stale.get("price_timestamp", stale.timestamp) > ctx.timestamp
-            ):
-                stale.status = OrderStatus.CANCELLED
+            apply_pending_order_conflict_policy(state, strategy, order, ctx.timestamp)
             order.status = OrderStatus.SCHEDULED
             order.timestamp = execution_ts
             order.set("price_timestamp", price_ts)

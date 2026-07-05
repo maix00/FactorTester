@@ -19,7 +19,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
-from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
@@ -31,14 +31,14 @@ class LedgerCashConstraintModule(ExecutableModule):
 
     constrain_to_ledger_cash: ClassVar[Flow] = Flow(
         "constrain_to_ledger_cash",
-        inputs=(OrderBookModule.orders, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
-        outputs=(OrderBookModule.orders,),
+        inputs=(OrderConstructModule.orders, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
+        outputs=(OrderConstructModule.orders,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=35,  # between construct_orders (30) and
                     # GroupMembershipModule.schedule_order_execution (40) --
                     # must haircut buy-side quantities BEFORE they're
                     # scheduled for execution, not after
-        after=(OrderBookModule.construct_orders,),
+        after=(OrderConstructModule.construct_orders,),
         description="按现金约束调整订单",
         compute=lambda state, ctx: _constrain_to_ledger_cash(state, ctx),
     )
@@ -58,7 +58,7 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
 
     groups: dict[int, tuple[Any, list[tuple[Any, list[Any], dict]]]] = {}
     for strategy in ctx.active_strategies:
-        orders = ctx.get_for(OrderBookModule.orders, strategy, [])
+        orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
         if not orders:
             continue
         historical_fields = ctx.get_for(
@@ -84,7 +84,10 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
             for _strategy, orders, historical_fields in entries
             for o in orders if o.quantity < 0
         )
-        raw_cash = cash_for_ledger(state, ledger).to_major()
+        cash = cash_for_ledger(state, ledger)
+        if cash is None:
+            raise RuntimeError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash pool")
+        raw_cash = cash.to_major()
         available = available_cash_for_ledger(state, ledger, raw_cash, reason="signal_order") + sell_proceeds
         if buy_cost <= available:
             continue
@@ -258,12 +261,12 @@ def _clone_positions_for_cash_check(positions: dict) -> dict:
 
 
 def _round_execution_scaled_quantity(state, strategy, order, quantity: float) -> float:
-    from tools.testers.backtest.modules.position_sizing import PositionSizingModule, _round_one
+    from tools.testers.backtest.modules.order_construct import OrderConstructModule, default_round_order_quantity
     from tools.testers.backtest.modules.market_data import market_data_store_for
 
     lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
-    policy = state.config_for(strategy).get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot")
-    return _round_one(quantity, lot_sizes.get(order.instrument), policy)
+    policy = state.config_for(strategy).get(OrderConstructModule.quantity_rounding_policy, "floor_to_lot")
+    return default_round_order_quantity(quantity, lot_sizes.get(order.instrument), policy)
 
 
 def _scale_linear_fee_fields(order, scale: float) -> None:

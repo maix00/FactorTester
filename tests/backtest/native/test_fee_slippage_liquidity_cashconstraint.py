@@ -25,8 +25,7 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
 from tools.testers.backtest.modules.liquidity import LiquidityModule, _cap_to_liquidity
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
-from tools.testers.backtest.modules.order_book import OrderBookModule
-from tools.testers.backtest.modules.order_lifecycle import _finalize_order
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.data.types.data_money import DataMoney
@@ -385,10 +384,10 @@ def test_liquidity_uncapped_when_mode_infinite():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderBookModule.sized_deltas, s, {p: 99999.0})
+    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 99999.0})
 
     _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderBookModule.deltas, s)[p] == 99999.0
+    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == 99999.0
 
 
 def test_liquidity_caps_to_participation_rate_times_volume():
@@ -401,10 +400,10 @@ def test_liquidity_caps_to_participation_rate_times_volume():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderBookModule.sized_deltas, s, {p: 50.0})
+    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 50.0})
 
     _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(10.0)  # capped, 0.1*100
+    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == pytest.approx(10.0)  # capped, 0.1*100
 
 
 def test_liquidity_requires_volume_for_each_product():
@@ -418,7 +417,7 @@ def test_liquidity_requires_volume_for_each_product():
     ctx.set(MarketDataModule.volume, {})
 
     with pytest.raises(KeyError, match="requires MarketDataModule volume"):
-        ctx.set_for(OrderBookModule.sized_deltas, s, {p: 50.0})
+        ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 50.0})
         _cap_to_liquidity(account, ctx)
 
 
@@ -432,10 +431,10 @@ def test_liquidity_does_not_defer_excess_to_next_bar():
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderBookModule.sized_deltas, s, {p: -50.0})
+    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: -50.0})
 
     _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderBookModule.deltas, s)[p] == pytest.approx(-10.0)
+    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == pytest.approx(-10.0)
 
 
 def test_cash_constraint_haircuts_buy_orders_proportionally():
@@ -449,7 +448,7 @@ def test_cash_constraint_haircuts_buy_orders_proportionally():
     buy2 = Order(instrument=p2, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p1: 10.0, p2: 10.0})  # total cost 200 > 100 cash
-    ctx.set_for(OrderBookModule.orders, s, [buy1, buy2])
+    ctx.set_for(OrderConstructModule.orders, s, [buy1, buy2])
 
     _constrain_to_ledger_cash(account, ctx)
     assert buy1.quantity == pytest.approx(5.0)  # scaled by 100/200 = 0.5
@@ -466,7 +465,7 @@ def test_cash_constraint_does_not_touch_sell_orders():
     sell = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
-    ctx.set_for(OrderBookModule.orders, s, [sell])
+    ctx.set_for(OrderConstructModule.orders, s, [sell])
 
     _constrain_to_ledger_cash(account, ctx)
     assert sell.quantity == -10.0
@@ -483,7 +482,7 @@ def test_cash_constraint_counts_same_batch_sell_proceeds_before_scaling_buys():
     buy = Order(instrument=p_buy, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.current_prices, {p_sell: 10.0, p_buy: 10.0})
-    ctx.set_for(OrderBookModule.orders, s, [sell, buy])
+    ctx.set_for(OrderConstructModule.orders, s, [sell, buy])
 
     _constrain_to_ledger_cash(account, ctx)
 
@@ -507,8 +506,8 @@ def test_cash_constraint_isolates_strategies():
     buy2 = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s2)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s1, s2}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
-    ctx.set_for(OrderBookModule.orders, s1, [buy1])
-    ctx.set_for(OrderBookModule.orders, s2, [buy2])
+    ctx.set_for(OrderConstructModule.orders, s1, [buy1])
+    ctx.set_for(OrderConstructModule.orders, s2, [buy2])
 
     _constrain_to_ledger_cash(account, ctx)
     assert buy1.quantity == pytest.approx(1.0)   # 10 cash / 100 cost
@@ -536,8 +535,8 @@ def test_cash_constraint_combines_buys_across_strategies_sharing_one_ledger():
     buy2 = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s2)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s1, s2}))
     ctx.set(MarketDataModule.current_prices, {p: 10.0})  # each order costs 100, combined cost 200 > 100 cash
-    ctx.set_for(OrderBookModule.orders, s1, [buy1])
-    ctx.set_for(OrderBookModule.orders, s2, [buy2])
+    ctx.set_for(OrderConstructModule.orders, s1, [buy1])
+    ctx.set_for(OrderConstructModule.orders, s2, [buy2])
 
     _constrain_to_ledger_cash(account, ctx)
 
@@ -613,13 +612,12 @@ def test_order_flow_records_fee_slippage_ledger_and_final_status():
     _apply_slippage(account, ctx)
     _resolve_fee_cost(account, ctx)
     _apply_order_fill(account, ctx)
-    _finalize_order(account, ctx)
 
     records = account.order_flow_store.records_for_order("order-1")
     assert [row["step"] for row in records] == [
         "slippage",
         "fee",
         "ledger_update",
-        "finalize_order",
+        "order_terminal",
     ]
     assert records[-1]["status"] == "filled"

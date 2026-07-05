@@ -27,7 +27,7 @@ from tools.testers.backtest.modules.liquidity import LiquidityModule
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
-from tools.testers.backtest.modules.position_sizing import PositionSizingModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.slippage import SlippageModule
 from tools.testers.backtest.modules.term_structure import (
     DeliveryForceCloseModule,
@@ -130,7 +130,7 @@ def _worker_execution_policy_selectors(
 ) -> dict[str, str]:
     """Worker execution policy selectors from the real module fields.
 
-    ``min_lot_policy`` comes from ``PositionSizingModule.
+    ``min_lot_policy`` comes from ``OrderConstructModule.
     quantity_rounding_policy`` and ``fill_cap_policy`` from ``LiquidityModule.
     liquidity_mode`` -- these are the only two selectors any runner actually
     checks (see ADR-032; this is deliberately not a general broker/account
@@ -138,7 +138,7 @@ def _worker_execution_policy_selectors(
     (require_worker_execution_policies).
     """
     selectors = dict(WORKER_EXECUTION_POLICY_DEFAULTS)
-    rounding = str(config.get(PositionSizingModule.quantity_rounding_policy, "floor_to_lot") or "floor_to_lot")
+    rounding = str(config.get(OrderConstructModule.quantity_rounding_policy, "floor_to_lot") or "floor_to_lot")
     if rounding != "floor_to_lot":
         # Workers implement only the floor; nearest_lot would silently change
         # committed quantities relative to what the user configured.

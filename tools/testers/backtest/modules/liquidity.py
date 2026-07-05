@@ -14,8 +14,7 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule
-from tools.testers.backtest.modules.order_book import OrderBookModule
-from tools.testers.backtest.modules.position_sizing import PositionSizingModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
@@ -41,12 +40,12 @@ class LiquidityModule(ExecutableModule):
 
     cap_order_liquidity: ClassVar[Flow] = Flow(
         "cap_order_liquidity",
-        inputs=(OrderBookModule.sized_deltas, liquidity_mode, participation_rate, MarketDataModule.volume),
-        outputs=(OrderBookModule.deltas,),
+        inputs=(OrderConstructModule.sized_deltas, liquidity_mode, participation_rate, MarketDataModule.volume),
+        outputs=(OrderConstructModule.deltas,),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=24,
-        after=(PositionSizingModule.round_order_quantity,),
+        after=(OrderConstructModule.round_order_quantity,),
         description="按流动性上限截断下单量",
         compute=lambda state, ctx: _cap_to_liquidity(state, ctx),
     )
@@ -59,9 +58,9 @@ def _cap_to_liquidity(state, ctx) -> None:
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
-        deltas = ctx.get_for(OrderBookModule.sized_deltas, strategy, {})
+        deltas = ctx.get_for(OrderConstructModule.sized_deltas, strategy, {})
         if config.get(LiquidityModule.liquidity_mode, "infinite") != "volume_participation":
-            ctx.set_for(OrderBookModule.deltas, strategy, deltas)
+            ctx.set_for(OrderConstructModule.deltas, strategy, deltas)
             continue
         rate = config.get(LiquidityModule.participation_rate, 0.1)
         missing_volume_products = [product for product in deltas if product not in volume]
@@ -74,7 +73,7 @@ def _cap_to_liquidity(state, ctx) -> None:
             product: _cap_one(quantity, rate * volume[product])
             for product, quantity in deltas.items()
         }
-        ctx.set_for(OrderBookModule.deltas, strategy, capped)
+        ctx.set_for(OrderConstructModule.deltas, strategy, capped)
         if capped != deltas:
             store.record_strategy_step(
                 strategy,

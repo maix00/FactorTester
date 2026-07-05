@@ -108,7 +108,7 @@ def _scenario(
     run_state.raw_market_data = {
         "raw_prices": raw_prices,
         "price_tables": {"open": raw_prices, "close": raw_prices},
-        # whole-contract trading on both sides: native PositionSizingModule
+        # whole-contract trading on both sides: native OrderConstructModule
         # floors to this lot; the translator carries the same values into the
         # worker payload's lot_sizes matrix (workers cannot express fractional
         # contracts — their target_quantities always floors to lot).

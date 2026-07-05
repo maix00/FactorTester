@@ -26,6 +26,13 @@ if TYPE_CHECKING:
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
 
+OrderRoutingPolicy = Callable[[object, object], str | Ledger]
+CashAvailabilityPolicy = Callable[[object, object, float, str], float]
+OrderSizingPolicy = Callable[[object, object, object, dict[Any, float]], dict[Any, float]]
+PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
+TradeDecisionMergePolicy = Callable[[object, object], object]
+HierarchyConstraintPolicy = Callable[[object, object], object]
+
 
 class StrategyBookModule(ExecutableModule):
     key: ClassVar[str] = "strategy_book"
@@ -87,14 +94,28 @@ class StrategyBookModule(ExecutableModule):
 
 
 @dataclass
+class StrategyBookPolicies:
+    """StrategyBook extension points.
+
+    Policy slots describe user-overridable decisions that cross strategy,
+    ledger, or pending-order boundaries. Default business behavior belongs to
+    the owning module helper; StrategyBook only hosts the override slot.
+    """
+
+    order_routing: OrderRoutingPolicy | None = None
+    cash_availability: CashAvailabilityPolicy | None = None
+    order_sizing: OrderSizingPolicy | None = None
+    pending_order_conflict: PendingOrderConflictPolicy | None = None
+    trade_decision_merge: TradeDecisionMergePolicy | None = None
+    hierarchy_constraints: HierarchyConstraintPolicy | None = None
+
+
+@dataclass
 class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
-    order_ledger_router: Callable[[object, object], str | Ledger] | None = None
-    available_cash_resolver: Callable[[object, object, float, str], float] | None = None
-    merge_trade_decisions: Callable[[object, object], object] = lambda decisions, ctx: decisions
-    apply_hierarchy_constraints: Callable[[object, object], object] = lambda decision, ctx: decision
+    policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
 
     def register_strategy_ledgers(
         self,
@@ -127,8 +148,8 @@ class StrategyBookStore:
 
     def ledger_for_order(self, state: object, order: object) -> Ledger:
         strategy = getattr(order, "strategy")
-        if self.order_ledger_router is not None:
-            ledger = ledger_identity(str(self.order_ledger_router(state, order)))
+        if self.policies.order_routing is not None:
+            ledger = ledger_identity(str(self.policies.order_routing(state, order)))
         else:
             order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
             ledger = (
@@ -167,10 +188,7 @@ def strategy_book_store_for(state: object) -> StrategyBookStore:
 def materialize_strategy_book_store(state: object, strategy_book: object, strategies: Mapping[str, object]) -> StrategyBookStore:
     book = strategy_book if hasattr(strategy_book, "ledger_ids_for_strategy") else StrategyBookSimple()
     store = strategy_book_store_for(state)
-    store.order_ledger_router = getattr(strategy_book, "order_ledger_router", None)
-    store.available_cash_resolver = getattr(strategy_book, "available_cash_resolver", None)
-    store.merge_trade_decisions = getattr(book, "merge_trade_decisions", store.merge_trade_decisions)
-    store.apply_hierarchy_constraints = getattr(book, "apply_hierarchy_constraints", store.apply_hierarchy_constraints)
+    store.policies = _policies_from_strategy_book(strategy_book, book)
     for alias, strategy in strategies.items():
         ledger_ids = tuple(str(value) for value in _book_ledger_ids_for_alias(book, alias))
         if not ledger_ids:
@@ -375,19 +393,56 @@ def assign_ledger_for_strategy(
     return store.ledger_for_order(state, order)
 
 
+def apply_order_sizing_policy(
+    state: object,
+    ctx: object,
+    strategy: object,
+    deltas: dict[Any, float],
+) -> dict[Any, float]:
+    policy = strategy_book_store_for(state).policies.order_sizing
+    if policy is None:
+        return deltas
+    return policy(state, ctx, strategy, deltas)
+
+
+def apply_pending_order_conflict_policy(
+    state: object,
+    strategy: object,
+    order: object,
+    signal_timestamp: object,
+) -> None:
+    policy = strategy_book_store_for(state).policies.pending_order_conflict
+    if policy is not None:
+        policy(state, strategy, order, signal_timestamp)
+        return
+    from tools.testers.backtest.modules.order_flow import default_pending_order_conflict_policy
+
+    default_pending_order_conflict_policy(state, strategy, order, signal_timestamp)
+
+
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
 
 
 def available_cash_for_ledger(state: object, ledger_state: object, cash_major: float, *, reason: str) -> float:
     store = strategy_book_store_for(state)
-    if store.available_cash_resolver is not None:
-        return max(0.0, float(store.available_cash_resolver(state, ledger_state, cash_major, reason)))
+    if store.policies.cash_availability is not None:
+        return max(0.0, float(store.policies.cash_availability(state, ledger_state, cash_major, reason)))
     ledger_config = state.ledger_config_for(ledger_state)  # type: ignore[attr-defined]
     ratio = max(0.0, min(1.0, float(getattr(ledger_config, "cash_reserve_ratio", None) or 0.0)))
     fixed = max(0.0, float(getattr(ledger_config, "cash_reserve_major", None) or 0.0))
     reserve = cash_major * ratio + fixed
     return max(0.0, cash_major - reserve)
+
+
+def _policies_from_strategy_book(strategy_book: object, book: object) -> StrategyBookPolicies:
+    explicit = getattr(strategy_book, "policies", None)
+    if isinstance(explicit, StrategyBookPolicies):
+        return explicit
+    return StrategyBookPolicies(
+        trade_decision_merge=getattr(book, "merge_trade_decisions", None),
+        hierarchy_constraints=getattr(book, "apply_hierarchy_constraints", None),
+    )
 
 
 def cash_pool_id_for_ledger(state: object, ledger: str | Ledger | object) -> str:

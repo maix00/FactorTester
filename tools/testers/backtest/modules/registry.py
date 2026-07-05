@@ -29,10 +29,9 @@ from .liquidity import LiquidityModule
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
 from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
-from .position_sizing import PositionSizingModule
+from .order_construct import OrderConstructModule
 from .cash_rescale import LedgerCashConstraintModule
 from .ledger_module import LedgerModule
-from .order_book import OrderBookModule
 from .trading_rule import TradingRuleModule
 from .product_selection import ProductSelectionModule
 from .term_structure import (
@@ -47,7 +46,6 @@ from .factor import FactorModule
 from .factor_signal import FactorSignalModule
 from .group_membership import GroupMembershipModule
 from .long_short import LongShortCompositionModule
-from .order_lifecycle import OrderLifecycleModule
 from .order_flow import OrderFlowModule
 from .equity_curve import EquityCurveModule
 from .risk_metrics import RiskMetricsModule
@@ -61,7 +59,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     CashPoolModule,
     RunWindowModule,
     LedgerModule,
-    OrderBookModule,
+    OrderConstructModule,
     TradingRuleModule,
     ProductSelectionModule,
     TermStructureExpandModule,
@@ -79,10 +77,8 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     LiquidityModule,
     MarginModule,
     OrderExecutionModule,
-    PositionSizingModule,
     CustomProductModule,
     LedgerCashConstraintModule,
-    OrderLifecycleModule,
     OrderFlowModule,
     EquityCurveModule,
     RiskMetricsModule,
@@ -109,7 +105,7 @@ def register_all_module_settings(app: Any) -> None:
     (FieldRef name -> FieldDefinition, the issue-114 replacement for the old
     `setting_definitions` tuple-of-dict mechanism), and calls
     app.register_setting() for every `public=True` field. Internal/ctx-scoped
-    fields (`public=False`, e.g. LedgerModule.cash, OrderBookModule.deltas)
+    fields (`public=False`, e.g. LedgerModule.cash, OrderConstructModule.deltas)
     are intentionally skipped — they were never part of the old
     setting_definitions contract either.
 

@@ -1,8 +1,8 @@
-"""Common target-weight strategy state.
+"""Common strategy intent state.
 
-Concrete strategy modules such as group membership and long-short composition
-produce target weights in different ways.  This module owns the shared,
-long-lived state for those target-producing flows.
+Concrete strategy modules such as group membership, long-short composition, or
+technical rules produce trade intents in different ways. Target weights are one
+intent representation, not the universal strategy abstraction.
 """
 
 from __future__ import annotations
@@ -13,10 +13,27 @@ from typing import Any, ClassVar
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldRef
 
 
-class TargetStrategyModule(ExecutableModule):
-    """Base class for modules that produce strategy target weights."""
+@dataclass(frozen=True)
+class TargetWeightIntent:
+    weights: dict[Any, float]
+    reason: str = "target_weights"
 
+
+@dataclass(frozen=True)
+class OrderDeltaIntent:
+    deltas: dict[Any, float]
+    reason: str = "order_deltas"
+
+
+class TargetStrategyModule(ExecutableModule):
+    """Base class for modules that produce strategy trade intents."""
+
+    trade_intent: ClassVar[FieldRef[Any]] = FieldRef("trade_intent")
     target_weights: ClassVar[FieldRef[Any]] = FieldRef("target_weights")
+
+
+def target_weight_intent(weights: dict[Any, float], *, reason: str) -> TargetWeightIntent:
+    return TargetWeightIntent(dict(weights), reason=reason)
 
 
 @dataclass

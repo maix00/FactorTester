@@ -12,7 +12,7 @@ from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
-from tools.testers.backtest.modules.order_lifecycle import _finalize_order
+from tools.testers.backtest.modules.order_flow import record_order_terminal_state
 
 
 def _product() -> Product:
@@ -33,7 +33,7 @@ def test_scheduled_order_without_terminal_status_raises():
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
     with pytest.raises(RuntimeError, match="without terminal status"):
-        _finalize_order(account, _ctx_for(order, s))
+        record_order_terminal_state(account, _ctx_for(order, s))
 
 
 def test_rejected_order_is_recorded():
@@ -43,7 +43,7 @@ def test_rejected_order_is_recorded():
     order.set("reject_reason", "insufficient margin")
     order.reject_reason = "insufficient margin"
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
-    _finalize_order(account, _ctx_for(order, s))
+    record_order_terminal_state(account, _ctx_for(order, s))
     assert order.status == OrderStatus.REJECTED
     assert order.reject_reason == "insufficient margin"
 
@@ -53,7 +53,7 @@ def test_cancelled_order_is_left_untouched():
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.CANCELLED)
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
-    _finalize_order(account, _ctx_for(order, s))
+    record_order_terminal_state(account, _ctx_for(order, s))
     assert order.status == OrderStatus.CANCELLED
 
 
@@ -73,6 +73,6 @@ def test_multiple_orders_in_one_batch_finalize_independently():
         active_strategies=frozenset({s1, s2}), drafts_by_strategy={s1: [draft1], s2: [draft2]},
     )
     account = BacktestRunState(strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)})
-    _finalize_order(account, ctx)
+    record_order_terminal_state(account, ctx)
     assert order1.status == OrderStatus.FILLED
     assert order2.status == OrderStatus.REJECTED

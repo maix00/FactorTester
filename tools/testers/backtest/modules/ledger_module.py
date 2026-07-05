@@ -20,7 +20,7 @@ from tools.testers.backtest.modules.market_data import (
     historical_fields_for_product,
 )
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
-from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.order_flow import order_flow_store_for, record_order_terminal_state
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.strategy_book import (
@@ -274,7 +274,9 @@ def _apply_order_fill(state, ctx) -> None:
             ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
             cash = _required_cash_for_ledger(state, ledger)
-            price = order.get("effective_price", prices[order.instrument])
+            price = order.get("effective_price")
+            if price is None:
+                price = prices[order.instrument]
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
             if _uses_margin_accounting(state.config_for(strategy), historical_fields, order.instrument, ledger_config):
@@ -321,6 +323,7 @@ def _apply_order_fill(state, ctx) -> None:
             set_cash_for_ledger_pool(state, ledger, cash)
             _sync_ledger_margin_reserved(ledger, positions)
             order.status = OrderStatus.FILLED
+    record_order_terminal_state(state, ctx)
 
 
 def _required_cash_for_ledger(state, ledger) -> DataMoney:

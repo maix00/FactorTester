@@ -29,7 +29,7 @@ def should_report_progress(completed: int, total: int, max_updates: int = 100) -
 # ── worker execution policy selectors ───────────────────────────────
 # These two selectors are the only ones ever sourced from a real per-strategy
 # field (translator.py's _worker_execution_policy_selectors reads
-# PositionSizingModule.quantity_rounding_policy / LiquidityModule.
+# OrderConstructModule.quantity_rounding_policy / LiquidityModule.
 # liquidity_mode) or checked against a real per-engine `supported` set (see
 # zipline.py/backtrader.py/qlib.py's require_worker_execution_policies calls)
 # -- this is deliberately narrow, not a general broker/account policy

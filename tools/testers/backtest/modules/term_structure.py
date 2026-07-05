@@ -16,7 +16,7 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
-from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
 
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
@@ -108,7 +108,7 @@ class TermStructureExpandModule(ExecutableModule):
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
         "resolve_tradable_target_weights",
         inputs=(contract_metadata, _TARGET_WEIGHTS_REF),
-        outputs=(_TARGET_WEIGHTS_REF,),
+        outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=15,
@@ -354,6 +354,8 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             mapped[target] = mapped.get(target, 0.0) + weight
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+            mapped, reason="term_structure_resolved_target"))
         if mapping_trace:
             state.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 

@@ -553,7 +553,7 @@ def make_dispatcher(
         all_active_ledgers = frozenset(drafts_by_ledger)
         # ONE ctx for the whole batch -- this is what lets one Flow's
         # ctx.set_for(...) be read by a later Flow in the same batch (e.g.
-        # LedgerModule.equity_on_signal -> OrderBookModule.size_order).
+        # LedgerModule.equity_on_signal -> OrderConstructModule.size_order).
         # active_strategies is narrowed per Flow call (different Flows can
         # apply to different subsets), but _values/_values_by_strategy
         # persist across the whole batch.

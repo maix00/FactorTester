@@ -19,7 +19,8 @@ from tools.testers.backtest.modules.group_membership import (
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
-from tools.testers.backtest.modules.order_book import OrderBookModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.strategy_book import StrategyBookPolicies, strategy_book_store_for
 
 
 def _product() -> Product:
@@ -352,7 +353,7 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
     t = pd.Timestamp("2024-01-01")
     order = Order(instrument=p, timestamp=t, quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
-    ctx.set_for(OrderBookModule.orders, s, [order])
+    ctx.set_for(OrderConstructModule.orders, s, [order])
 
     _schedule_order_execution(account, ctx)
 
@@ -383,7 +384,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
 
     old_order = Order(instrument=p, timestamp=t1, quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx1 = FlowContext(timestamp=t1, event_queue=queue, active_strategies=frozenset({s}))
-    ctx1.set_for(OrderBookModule.orders, s, [old_order])
+    ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
     assert old_order.status == OrderStatus.SCHEDULED
     assert old_order.timestamp == pd.Timestamp("2024-01-02") + pd.Timedelta(nanoseconds=1)
@@ -391,7 +392,7 @@ def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_f
 
     new_order = Order(instrument=p, timestamp=t2, quantity=20.0, intent_quantity=20.0, strategy=s)
     ctx2 = FlowContext(timestamp=t2, event_queue=queue, active_strategies=frozenset({s}))
-    ctx2.set_for(OrderBookModule.orders, s, [new_order])
+    ctx2.set_for(OrderConstructModule.orders, s, [new_order])
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
@@ -417,16 +418,47 @@ def test_schedule_order_execution_replaces_pending_next_bar_open_order_at_same_s
 
     old_order = Order(instrument=p, timestamp=t, quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx1 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
-    ctx1.set_for(OrderBookModule.orders, s, [old_order])
+    ctx1.set_for(OrderConstructModule.orders, s, [old_order])
     _schedule_order_execution(account, ctx1)
     assert old_order.status == OrderStatus.SCHEDULED
 
     new_order = Order(instrument=p, timestamp=t, quantity=20.0, intent_quantity=20.0, strategy=s)
     ctx2 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
-    ctx2.set_for(OrderBookModule.orders, s, [new_order])
+    ctx2.set_for(OrderConstructModule.orders, s, [new_order])
     _schedule_order_execution(account, ctx2)
 
     assert old_order.status == OrderStatus.CANCELLED
+    assert new_order.status == OrderStatus.SCHEDULED
+
+
+def test_schedule_order_execution_respects_strategy_book_pending_order_policy():
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        GroupMembershipModule.execution_delay_bars: 1,
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
+    strategy_book_store_for(account).policies = StrategyBookPolicies(
+        pending_order_conflict=lambda _state, _strategy, _order, _timestamp: None
+    )
+    queue = EventQueue()
+    t = pd.Timestamp("2024-01-01")
+
+    old_order = Order(instrument=p, timestamp=t, quantity=10.0, intent_quantity=10.0, strategy=s)
+    ctx1 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
+    ctx1.set_for(OrderConstructModule.orders, s, [old_order])
+    _schedule_order_execution(account, ctx1)
+
+    new_order = Order(instrument=p, timestamp=t, quantity=20.0, intent_quantity=20.0, strategy=s)
+    ctx2 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
+    ctx2.set_for(OrderConstructModule.orders, s, [new_order])
+    _schedule_order_execution(account, ctx2)
+
+    assert old_order.status == OrderStatus.SCHEDULED
     assert new_order.status == OrderStatus.SCHEDULED
 
 
@@ -445,12 +477,12 @@ def test_schedule_order_execution_does_not_cancel_across_different_products():
 
     order1 = Order(instrument=p1, timestamp=t, quantity=10.0, intent_quantity=10.0, strategy=s)
     ctx1 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
-    ctx1.set_for(OrderBookModule.orders, s, [order1])
+    ctx1.set_for(OrderConstructModule.orders, s, [order1])
     _schedule_order_execution(account, ctx1)
 
     order2 = Order(instrument=p2, timestamp=t, quantity=20.0, intent_quantity=20.0, strategy=s)
     ctx2 = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
-    ctx2.set_for(OrderBookModule.orders, s, [order2])
+    ctx2.set_for(OrderConstructModule.orders, s, [order2])
     _schedule_order_execution(account, ctx2)
 
     assert order1.status == OrderStatus.SCHEDULED  # untouched, different product

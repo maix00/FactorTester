@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class OrderStatus(str, Enum):
-    DRAFT = "draft"          # just instantiated by OrderBookModule.construct_orders
+    DRAFT = "draft"          # just instantiated by OrderConstructModule.construct_orders
     SCHEDULED = "scheduled"  # SignalToOrderModule has set the expected fill timestamp
                               # and pushed an EventKind.ORDER event; waiting for it to fire
     CANCELLED = "cancelled"  # superseded by a newer signal before it fired

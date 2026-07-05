@@ -18,7 +18,7 @@ from .fee import FeeModule
 from .slippage import SlippageModule
 from .liquidity import LiquidityModule
 from .margin import MarginModule
-from .position_sizing import PositionSizingModule
+from .order_construct import OrderConstructModule
 from .cash_rescale import LedgerCashConstraintModule
 from .registry import (
     BacktestModuleRegistry,
@@ -32,7 +32,7 @@ __all__ = [
     "SlippageModule",
     "LiquidityModule",
     "MarginModule",
-    "PositionSizingModule",
+    "OrderConstructModule",
     "LedgerCashConstraintModule",
     "ModuleRegistry",
     "BacktestModuleRegistry",
