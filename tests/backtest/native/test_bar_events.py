@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import pandas as pd
 
+from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.native.events import EventKind
-from tools.testers.backtest.modules.bar_events import BarEventModule, _schedule_bar_events
+from tools.testers.backtest.modules.bar_events import (
+    BarEventModule,
+    _bar_event_drafts_for_strategy,
+    _schedule_bar_events,
+)
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -83,6 +89,63 @@ def test_bar_events_deduplicate_strategies_sharing_one_live_factor():
     assert [event.timestamp for event in events] == list(account.market_data_store.current_prices_table.index)
     assert {event.strategy for event in events} == {first}
     assert queue.pending_count() == 2
+
+
+def test_bar_events_register_field_visibility_offsets_at_schedule_time():
+    strategy = Strategy(alias="live")
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    table = pd.DataFrame({"P1": [10.0, 20.0]}, index=idx)
+    config = StrategyConfig(strategy=strategy, field_values={
+        BarEventModule.bar_price_bases: ("open", "close"),
+    })
+
+    events = _bar_event_drafts_for_strategy(table, strategy, config)
+
+    assert [(event.timestamp, event.payload["bar_basis"], event.index_key) for event in events] == [
+        (idx[0] + pd.Timedelta(0), "close", idx[0]),
+        (idx[0] + pd.Timedelta(microseconds=1), "open", idx[1]),
+        (idx[1] + pd.Timedelta(0), "close", idx[1]),
+    ]
+
+
+def test_bar_open_visibility_does_not_leak_across_session_gap():
+    strategy = Strategy(alias="live")
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-06 14:59", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-06 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-07 09:01", tz="Asia/Shanghai"),
+    ])
+    table = pd.DataFrame({"P1": [10.0, 20.0, 30.0]}, index=idx)
+    config = StrategyConfig(strategy=strategy, field_values={
+        BarEventModule.bar_price_bases: ("open",),
+        EngineModule.bar_open_visibility_delay: "1us",
+    })
+
+    events = _bar_event_drafts_for_strategy(table, strategy, config)
+
+    assert [(event.timestamp, event.payload["bar_basis"], event.index_key) for event in events] == [
+        (pd.Timestamp("2026-01-06 14:59:00.000001", tz="Asia/Shanghai"), "open", idx[1]),
+        (pd.Timestamp("2026-01-07 09:00:00.000001", tz="Asia/Shanghai"), "open", idx[2]),
+    ]
+
+
+def test_bar_events_use_resolved_market_data_frequency():
+    strategy = Strategy(alias="live")
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-06 15:00", tz="Asia/Shanghai"),
+        pd.Timestamp("2026-01-07 09:31", tz="Asia/Shanghai"),
+    ])
+    table = pd.DataFrame({"P1": [10.0, 20.0]}, index=idx)
+    config = StrategyConfig(strategy=strategy, field_values={
+        BarEventModule.bar_price_bases: ("open",),
+        EngineModule.bar_open_visibility_delay: "1us",
+    })
+
+    events = _bar_event_drafts_for_strategy(table, strategy, config, bar_freq=DataFreq("MIN30"))
+
+    assert [(event.timestamp, event.payload["bar_basis"], event.index_key) for event in events] == [
+        (pd.Timestamp("2026-01-07 09:01:00.000001", tz="Asia/Shanghai"), "open", idx[1]),
+    ]
 
 
 def test_bar_events_split_shared_factor_by_strategy_warmup_window():

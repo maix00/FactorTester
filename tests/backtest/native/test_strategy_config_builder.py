@@ -63,12 +63,14 @@ def test_factor_mode_incremental_activates_signal_live_not_precomputed():
     assert config.uses_flow("signal_live")
     assert config.uses_flow("schedule_bar_events")
     assert not config.uses_flow("signal_precomputed")
+    assert not config.uses_flow("precompute_strategy_intents")
 
 
 def test_factor_mode_precomputed_activates_signal_precomputed_not_live():
     configs = build_strategy_configs({"A1": {"factor_mode": "precomputed", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
+    assert config.uses_flow("precompute_strategy_intents")
     assert not config.uses_flow("signal_live")
     assert not config.uses_flow("schedule_bar_events")
 
@@ -77,6 +79,7 @@ def test_factor_mode_auto_defaults_to_signal_precomputed():
     configs = build_strategy_configs({"A1": {"factor_mode": "auto", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
+    assert config.uses_flow("precompute_strategy_intents")
     assert not config.uses_flow("signal_live")
     assert not config.uses_flow("schedule_bar_events")
 
@@ -152,6 +155,7 @@ def test_long_short_strategy_does_not_require_group_membership_fields():
     config = next(iter(configs.values()))
     assert config.uses_flow("compose_long_short_target")
     assert not config.uses_flow("group_quantile_membership")
+    assert not config.uses_flow("precompute_strategy_intents")
 
 
 def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
