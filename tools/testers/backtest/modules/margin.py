@@ -248,7 +248,7 @@ def _register_margin_check_notices(state: Any, ctx: Any) -> None:
         return
     drafts: list[EventDraft] = []
     store = market_data_store_for(state)
-    required_field_names = set(getattr(store, "historical_field_names", ()) or ())
+    required_field_names: set[str] = set(getattr(store, "historical_field_names", ()) or ())
     for ledger in _ledgers_requiring_margin_checks(state, ctx, required_field_names):
         for timestamp in timestamps:
             drafts.append(EventDraft(
@@ -477,14 +477,26 @@ def _margin_requirement_price(ctx: Any, product: Any) -> float:
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
     for field in ("settlement", "close"):
         mapping = snapshot.get(field) or {}
-        value = _lookup_product_value(mapping, product)
-        if value is not None:
-            return float(value)
+        price = _positive_finite_price_or_none(_lookup_product_value(mapping, product))
+        if price is not None:
+            return price
     prices = ctx.get(MarketDataModule.current_prices, {}) or {}
-    value = _lookup_product_value(prices, product)
-    if value is None:
+    price = _positive_finite_price_or_none(_lookup_product_value(prices, product))
+    if price is None:
         raise KeyError(f"margin requirement requires current price for {product}")
-    return float(value)
+    return price
+
+
+def _positive_finite_price_or_none(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.notna(number) and number > 0.0:
+        return number
+    return None
 
 
 def _ledger_payloads(state: Any, ctx: Any, *, kind: str) -> list[tuple[Any, dict[str, Any]]]:

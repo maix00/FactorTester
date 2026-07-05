@@ -911,6 +911,58 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     assert queue.pending_count_by_kind(EventKind.ORDER) == 0
 
 
+def test_margin_requirement_ignores_intraday_zero_settlement_and_uses_close_price():
+    product = _product()
+    strategy = Strategy(alias="S")
+    ledger = LedgerState(strategy=strategy, base_currency="CNY")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+        )
+    })
+    state = BacktestRunState(
+        strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
+        ledgers={f"private:{strategy.alias}": ledger},
+    )
+    _set_cash(state, ledger, 100.0)
+    state.ledger_configs[ledger.ledger] = LedgerConfig(margin_mode="auto", margin_call_mode="warn")
+    event_time = pd.Timestamp("2026-03-10 14:39:00.000000002", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=event_time,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+        drafts_by_ledger={
+            ledger.ledger: [EventDraft(
+                EventKind.LEDGER,
+                event_time,
+                payload={"kind": "margin_check", "ledger_id": ledger.ledger_id},
+                ledger=ledger.ledger,
+            )],
+        },
+    )
+    # Settlement is a daily-end field.  Intraday LocalCNFutures snapshots may
+    # carry a zero placeholder; that must not clear all reserved margin.
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 0.0},
+        "close": {product: 12.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_margin_requirement_change(state, ctx)
+
+    entry = ledger.get(_positions_ref())[product]
+    assert entry.margin_reserved is not None
+    assert entry.margin_reserved.to_major() == pytest.approx(24.0)
+    assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
+
+
 def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_layer():
     product = _product()
     strategy = Strategy(alias="S")
