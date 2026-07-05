@@ -49,11 +49,13 @@ from tools.testers.backtest.modules.time_index_lookup import (
 class FactorSignalStore:
     precomputed_tables: dict[Any, Any] = field(default_factory=dict)
     precomputed_table_keys: dict[Any, Any] = field(default_factory=dict)
+    precomputed_signal_value_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     live_price_tables: dict[Any, Any] = field(default_factory=dict)
     live_executors: dict[Any, Any] = field(default_factory=dict)
 
     def put_precomputed_table(self, key: Any, table: Any) -> None:
         self.precomputed_tables[key] = table
+        self.precomputed_signal_value_cache.clear()
 
     def bind_precomputed_table(self, strategy: Any, key: Any) -> None:
         self.precomputed_table_keys[strategy] = key
@@ -572,18 +574,38 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
     re-evaluation here."""
     store = state.factor_signal_store
     for strategy in ctx.active_strategies:
-        config = state.config_for(strategy)
         table = store.precomputed_table_for(strategy)
         if table is None:
             raise KeyError(f"precomputed signal table is missing for strategy {strategy!r}")
-        try:
-            draft = ctx.draft_for(strategy)
-            row = row_at_index_key(table, draft.index_key) if draft.index_key is not None else row_at(table, ctx.timestamp)
-        except KeyError:
-            ctx.set_for(FactorSignalModule.signal_value, strategy, {})
-            continue
-        ctx.set_for(FactorSignalModule.signal_value, strategy,
-                     {product: float(cast(Any, row[product])) for product in table.columns})
+        ctx.set_for(FactorSignalModule.signal_value, strategy, _precomputed_signal_values_for_event(store, table, ctx, strategy))
+
+
+def _precomputed_signal_values_for_event(store: FactorSignalStore, table: pd.DataFrame, ctx, strategy) -> dict[Any, float]:
+    try:
+        draft = ctx.draft_for(strategy)
+        index_key = draft.index_key
+    except Exception:
+        index_key = None
+    cache_key = (id(table), _precomputed_signal_cache_key(index_key if index_key is not None else ctx.timestamp))
+    cached = store.precomputed_signal_value_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        row = row_at_index_key(table, index_key) if index_key is not None else row_at(table, ctx.timestamp)
+    except KeyError:
+        values: dict[Any, float] = {}
+    else:
+        values = {product: float(cast(Any, row[product])) for product in table.columns}
+    store.precomputed_signal_value_cache[cache_key] = values
+    return values
+
+
+def _precomputed_signal_cache_key(index_key: Any) -> Any:
+    try:
+        hash(index_key)
+    except TypeError:
+        return repr(index_key)
+    return index_key
 
 
 def _observe_signal_live_bar(state, ctx) -> None:
