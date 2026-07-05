@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.config import CashPoolConfig
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 
 if TYPE_CHECKING:
@@ -221,6 +222,7 @@ class StrategyBook:
     strategy_ledger_ids_by_alias: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     default_ledger_id_by_alias: Mapping[str, str] = field(default_factory=dict)
     cash_pool_id_by_ledger: Mapping[str, str] = field(default_factory=dict)
+    cash_pool_configs_by_id: Mapping[str, CashPoolConfig] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "StrategyBook":
@@ -234,6 +236,10 @@ class StrategyBook:
         cash_pool_by_ledger = {
             str(ledger_id): str(pool_id)
             for ledger_id, pool_id in _cash_pool_mapping_from_payload(payload).items()
+        }
+        cash_pool_configs = {
+            str(pool_id): _cash_pool_config_from_payload(raw_config)
+            for pool_id, raw_config in _cash_pool_config_mapping_from_payload(payload).items()
         }
         for alias, raw in strategies.items():
             alias_text = str(alias)
@@ -260,6 +266,7 @@ class StrategyBook:
             strategy_ledger_ids_by_alias=ledger_ids_by_alias,
             default_ledger_id_by_alias=default_by_alias,
             cash_pool_id_by_ledger=cash_pool_by_ledger,
+            cash_pool_configs_by_id=cash_pool_configs,
         )
 
     @classmethod
@@ -279,6 +286,23 @@ class StrategyBook:
             strategy_ledger_ids_by_alias={alias: (ledger_id,) for alias, ledger_id in resolved.items()},
             default_ledger_id_by_alias=resolved,
             cash_pool_id_by_ledger={ledger_id: ledger_id for ledger_id in resolved.values()},
+        )
+
+    def cash_pool_config_for_strategy_settings(
+        self,
+        state: object,
+        strategy: object,
+        ledger: str | Ledger,
+        resolved_settings: Mapping[str, Any],
+    ) -> CashPoolConfig:
+        pool_id = cash_pool_id_for_ledger(state, ledger)
+        explicit = self.cash_pool_configs_by_id.get(pool_id)
+        if explicit is not None:
+            return explicit
+        return CashPoolConfig(
+            initial_capital_major=_optional_float(resolved_settings.get("initial_capital_major")),
+            base_currency=_optional_str(resolved_settings.get("base_currency")),
+            currency_conversion_fee_rate=_optional_float(resolved_settings.get("currency_conversion_fee_rate")),
         )
 
     def ledger_ids_for_strategy(self, state: object, strategy: object) -> tuple[str, ...]:
@@ -392,3 +416,36 @@ def _cash_pool_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, 
     if not isinstance(raw, Mapping):
         raise ValueError("StrategyBook cash_pools must map ledger_id to cash_pool_id")
     return {str(ledger_id): str(pool_id) for ledger_id, pool_id in raw.items()}
+
+
+def _cash_pool_config_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = payload.get("cash_pool_configs", {})
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pool_configs must map cash_pool_id to config mapping")
+    return raw
+
+
+def _cash_pool_config_from_payload(raw: Any) -> CashPoolConfig:
+    if isinstance(raw, CashPoolConfig):
+        return raw
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pool_configs entries must be mappings")
+    return CashPoolConfig(
+        initial_capital_major=_optional_float(raw.get("initial_capital_major")),
+        base_currency=_optional_str(raw.get("base_currency")),
+        currency_conversion_fee_rate=_optional_float(raw.get("currency_conversion_fee_rate")),
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    return float(value)  # type: ignore[arg-type]

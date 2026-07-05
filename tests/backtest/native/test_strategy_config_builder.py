@@ -6,10 +6,12 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import (
     apply_strategy_configs, build_strategy_configs,
 )
+from tools.testers.backtest.modules.cash_pool import cash_pool_store_for
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.strategy_book import StrategyBook
 
 # GroupMembershipModule's core Flows are unconditionally active for every
 # strategy this round (no second SignalToOrderModule exists yet to opt out
@@ -190,6 +192,31 @@ def test_apply_strategy_configs_sets_account_attribute():
     strategy = next(iter(account.strategy_configs))
     assert account.strategy_configs[strategy].get(FeeModule.fixed_fee_rate) is None
     assert account.ledger_config_for(f"private:{strategy.alias}").fixed_fee_rate == 0.001
+
+
+def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
+    account = BacktestRunState()
+    book = StrategyBook.from_dict({
+        "strategies": {"A1": "book-a"},
+        "cash_pools": {"book-a": "pool-main"},
+        "cash_pool_configs": {
+            "pool-main": {
+                "initial_capital_major": 2_500_000.0,
+                "base_currency": "USD",
+                "currency_conversion_fee_rate": 0.0002,
+            },
+        },
+    })
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", "margin_mode": "none", **_GROUP_FIELDS}},
+        strategy_book=book,
+    )
+
+    config = cash_pool_store_for(account).config_by_pool["pool-main"]
+    assert config.initial_capital_major == 2_500_000.0
+    assert config.base_currency == "USD"
+    assert config.currency_conversion_fee_rate == 0.0002
 
 
 def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():
