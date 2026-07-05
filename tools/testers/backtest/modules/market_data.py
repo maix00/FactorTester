@@ -26,7 +26,7 @@ from tools.data.types import DataColumn
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.factor import FactorModule
@@ -248,81 +248,72 @@ class MarketDataModule(ExecutableModule):
         compute=lambda state, ctx: _causal_valuation(state, ctx),
     )
 
-    lookup_current_prices_on_signal: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
-        description="读取信号时点价格",
+    lookup_market_snapshot: ClassVar[FlowDefinition] = FlowDefinition(
+        "lookup_market_snapshot",
+        inputs=(),
+        outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints, volume),
+        description="读取市场快照",
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
-    lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_signal: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_signal",
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
+        description="读取信号时点市场快照",
+    )
+    lookup_current_prices_on_bar: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_bar",
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
-        description="读取行情时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取行情时点市场快照",
     )
-    lookup_current_prices_on_order: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_order: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
-        description="读取订单时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取订单时点市场快照",
     )
-    lookup_current_prices_on_trade_intent: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_trade_intent", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_trade_intent: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_trade_intent",
         phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=1,
-        description="读取交易意图时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取交易意图时点市场快照",
     )
-    lookup_current_prices_on_ledger: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_ledger", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_ledger: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_ledger",
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER, order=1,
-        description="读取账本事件时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取账本事件时点市场快照",
     )
-    lookup_volume_on_signal: ClassVar[Flow] = Flow(
-        "lookup_volume_on_signal", inputs=(), outputs=(volume,),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
-        description="读取成交量",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.volume, current_volume_at(state, ctx.timestamp)),
-    )
-    lookup_historical_fields_on_signal: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_signal",
+    lookup_historical_fields: ClassVar[FlowDefinition] = FlowDefinition(
+        "lookup_historical_fields",
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
         description="读取交易规则字段",
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
-    lookup_historical_fields_on_order: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_order",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
-        outputs=(current_historical_fields,),
+    lookup_historical_fields_on_signal: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_signal",
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
+        description="读取信号交易规则字段",
+    )
+    lookup_historical_fields_on_order: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
         description="读取订单交易规则字段",
-        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
-    lookup_historical_fields_on_trade_intent: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_trade_intent",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
-        outputs=(current_historical_fields,),
+    lookup_historical_fields_on_trade_intent: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_trade_intent",
         phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=2,
         description="读取交易意图交易规则字段",
-        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
-    lookup_historical_fields_on_ledger: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_ledger",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
-        outputs=(current_historical_fields,),
+    lookup_historical_fields_on_ledger: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_ledger",
         phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER, order=2,
         description="读取账本事件交易规则字段",
-        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (
+    flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
-        lookup_current_prices_on_ledger, lookup_volume_on_signal,
+        lookup_current_prices_on_ledger,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
         lookup_historical_fields_on_trade_intent, lookup_historical_fields_on_ledger,
     )
@@ -1301,6 +1292,7 @@ def _set_current_market_snapshot(state, ctx) -> None:
     close_prices = snapshot.get("close", {})
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
     ctx.set(MarketDataModule.current_prices, close_prices)
+    ctx.set(MarketDataModule.volume, snapshot.get("volume", {}))
     ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
     ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
 

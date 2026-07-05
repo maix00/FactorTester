@@ -1,5 +1,4 @@
-"""SlippageModule — worsens the effective fill price by slippage_bps,
-applied as a FlowOverride on LedgerModule.cash_update.
+"""SlippageModule — worsens the effective fill price by slippage_bps.
 
 `slippage_mode="none"` (the default) trades at the unadjusted market price;
 `slippage_mode="fixed_bps"` applies a flat `slippage_bps` adjustment."""
@@ -8,10 +7,11 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import FlowOverride
-from tools.testers.backtest.modules.ledger_module import LedgerModule
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 
 
@@ -35,16 +35,21 @@ class SlippageModule(ExecutableModule):
         ),
     }
 
-    overrides: ClassVar[tuple[FlowOverride, ...]] = (
-        FlowOverride(
-            flow_names=(LedgerModule.cash_update.name,),
-            extra_inputs=(slippage_mode, slippage_bps),
-            compute=lambda state, ctx, base_compute: _apply_slippage(state, ctx, base_compute),
-        ),
+    apply_slippage: ClassVar[Flow] = Flow(
+        "apply_slippage",
+        inputs=(slippage_mode, slippage_bps, MarketDataModule.current_prices, OrderExecutionModule.execution_prices),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=6,
+        description="计算滑点价格",
+        compute=lambda state, ctx: _apply_slippage(state, ctx),
     )
 
+    flows: ClassVar[tuple[Flow, ...]] = (apply_slippage,)
 
-def _apply_slippage(state, ctx, base_compute) -> None:
+
+def _apply_slippage(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
@@ -75,4 +80,3 @@ def _apply_slippage(state, ctx, base_compute) -> None:
                     "base_price": float(price),
                 },
             )
-    base_compute(state, ctx)

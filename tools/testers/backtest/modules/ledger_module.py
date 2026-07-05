@@ -1,8 +1,8 @@
 """LedgerModule — owns the Ledger field schema (cash/positions) AND the
 mandatory baseline economic model (unlimited liquidity, fractional
 positions, no margin). EngineModule/TradingRuleModule/FeeModule/etc. are optional layers
-stacked on top via FlowOverride; this module's own Flows never depend on
-them."""
+registered as neighboring flows; this module consumes the fields they write
+onto orders during apply_order_fill."""
 
 from __future__ import annotations
 
@@ -70,21 +70,21 @@ class LedgerModule(ExecutableModule):
         description="计算信号时点权益",
         order=10, compute=lambda state, ctx: _basic_equity(state, ctx),
     )
-    cash_update: ClassVar[Flow] = Flow(
-        "cash_update", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
+    apply_order_fill: ClassVar[Flow] = Flow(
+        "apply_order_fill", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
-        description="更新现金与持仓",
-        compute=lambda state, ctx: _basic_cash_update(state, ctx),
+        description="成交落账",
+        compute=lambda state, ctx: _apply_order_fill(state, ctx),
     )
     equity_on_order: ClassVar[Flow] = Flow(
         "equity_on_order", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields, cash, positions),
         outputs=(equity,), phase=Phase.PER_EVENT, event_kind=EventKind.ORDER,
         description="计算订单后权益",
-        order=900, after=(cash_update,), compute=lambda state, ctx: _basic_equity(state, ctx),
+        order=900, after=(apply_order_fill,), compute=lambda state, ctx: _basic_equity(state, ctx),
     )
 
     flows: ClassVar[tuple[Flow, ...]] = (
-        initialize_ledgers, equity_on_signal, cash_update, equity_on_order,
+        initialize_ledgers, equity_on_signal, apply_order_fill, equity_on_order,
     )
 
 
@@ -203,7 +203,7 @@ def _basic_equity(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy)
-        cash = cash_for_ledger(state, ledger)
+        cash = _required_cash_for_ledger(state, ledger)
         positions = ledger.get(LedgerModule.positions, {})
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
@@ -234,12 +234,11 @@ def _basic_equity(state, ctx) -> None:
         ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + market_value)
 
 
-def _basic_cash_update(state, ctx) -> None:
+def _apply_order_fill(state, ctx) -> None:
     """`order.fields["effective_price"]`/`order.fields["fee_cost"]` are
-    optional hooks for FlowOverride layers (SlippageModule/FeeModule,
-    step 6) to set before this base computation runs — absent either, this
-    degrades to "trade at the unadjusted market price, no fee", the same
-    "field value is the parameter" pattern as TradingRuleModule's
+    written by explicit ORDER flows before this settlement flow runs. Absent
+    either, this degrades to "trade at the unadjusted market price, no fee",
+    the same "field value is the parameter" pattern as TradingRuleModule's
     margin_mode="none".
 
     A strategy can have several simultaneous orders in this batch (one per
@@ -257,12 +256,24 @@ def _basic_cash_update(state, ctx) -> None:
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
         for order in ctx.payloads_for(strategy):
-            if order.status == OrderStatus.CANCELLED or order.get("reject_reason"):
+            if order.status == OrderStatus.CANCELLED:
                 continue  # terminal before accounting -- no ledger effect
+            reject_reason = order.get("reject_reason")
+            if reject_reason:
+                order.status = OrderStatus.REJECTED
+                order.reject_reason = str(reject_reason)
+                store.record(
+                    order,
+                    step="apply_order_fill",
+                    label="订单拒绝",
+                    timestamp=ctx.timestamp,
+                    details={"reject_reason": str(reject_reason)},
+                )
+                continue
             ledger = state.ledger_for(order)
             ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
-            cash = cash_for_ledger(state, ledger)
+            cash = _required_cash_for_ledger(state, ledger)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
@@ -297,7 +308,7 @@ def _basic_cash_update(state, ctx) -> None:
             store.record(
                 order,
                 step="ledger_update",
-                label="更新账本",
+                label="成交落账",
                 timestamp=ctx.timestamp,
                 details={
                     "price": float(price),
@@ -309,6 +320,14 @@ def _basic_cash_update(state, ctx) -> None:
             ledger.set(LedgerModule.positions, positions)
             set_cash_for_ledger_pool(state, ledger, cash)
             _sync_ledger_margin_reserved(ledger, positions)
+            order.status = OrderStatus.FILLED
+
+
+def _required_cash_for_ledger(state, ledger) -> DataMoney:
+    cash = cash_for_ledger(state, ledger)
+    if cash is None:
+        raise RuntimeError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash pool")
+    return cash
 
 
 def _uses_margin_accounting(strategy_config, historical_fields: dict, product, ledger_config=None) -> bool:

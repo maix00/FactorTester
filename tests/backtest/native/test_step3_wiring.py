@@ -33,14 +33,14 @@ def _register_all():
     return registry
 
 
-def test_order_group_orders_cash_update_before_equity_before_finalize():
+def test_order_group_orders_apply_order_fill_before_equity_before_finalize():
     registry = _register_all()
     groups = sort_and_validate(registry.resolve())
     ordered_names = [f.name for f in groups[(Phase.PER_EVENT, EventKind.ORDER)]]
-    assert ordered_names.index("lookup_current_prices_on_order") < ordered_names.index("cash_update")
+    assert ordered_names.index("lookup_current_prices_on_order") < ordered_names.index("apply_order_fill")
     assert ordered_names.index("lookup_current_prices_on_order") < ordered_names.index("resolve_execution_price")
-    assert ordered_names.index("resolve_execution_price") < ordered_names.index("cash_update")
-    assert ordered_names.index("cash_update") < ordered_names.index("equity_on_order")
+    assert ordered_names.index("resolve_execution_price") < ordered_names.index("apply_order_fill")
+    assert ordered_names.index("apply_order_fill") < ordered_names.index("equity_on_order")
     assert ordered_names.index("equity_on_order") < ordered_names.index("finalize_order")
 
 

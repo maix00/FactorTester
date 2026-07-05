@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 import pandas as pd
+import pytest
 
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
@@ -26,21 +27,21 @@ def _ctx_for(order, strategy):
     )
 
 
-def test_order_without_reject_reason_is_filled():
+def test_scheduled_order_without_terminal_status_raises():
     s = Strategy(alias="S")
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
                    quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
-    _finalize_order(account, _ctx_for(order, s))
-    assert order.status == OrderStatus.FILLED
-    assert account.order_flow_store.records_for_strategy(s)[0]["step"] == "finalize_order"
+    with pytest.raises(RuntimeError, match="without terminal status"):
+        _finalize_order(account, _ctx_for(order, s))
 
 
-def test_order_with_reject_reason_is_rejected():
+def test_rejected_order_is_recorded():
     s = Strategy(alias="S")
     order = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
-                   quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.SCHEDULED)
+                   quantity=1.0, intent_quantity=1.0, strategy=s, status=OrderStatus.REJECTED)
     order.set("reject_reason", "insufficient margin")
+    order.reject_reason = "insufficient margin"
     account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
     _finalize_order(account, _ctx_for(order, s))
     assert order.status == OrderStatus.REJECTED
@@ -59,10 +60,11 @@ def test_cancelled_order_is_left_untouched():
 def test_multiple_orders_in_one_batch_finalize_independently():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
     order1 = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
-                    quantity=1.0, intent_quantity=1.0, strategy=s1, status=OrderStatus.SCHEDULED)
+                    quantity=1.0, intent_quantity=1.0, strategy=s1, status=OrderStatus.FILLED)
     order2 = Order(instrument=_product(), timestamp=pd.Timestamp("2024-01-01"),
-                    quantity=1.0, intent_quantity=1.0, strategy=s2, status=OrderStatus.SCHEDULED)
+                    quantity=1.0, intent_quantity=1.0, strategy=s2, status=OrderStatus.REJECTED)
     order2.set("reject_reason", "no liquidity")
+    order2.reject_reason = "no liquidity"
 
     draft1 = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s1, order1)
     draft2 = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01"), s2, order2)

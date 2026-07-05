@@ -1,5 +1,5 @@
-"""The scheduler — FlowRegistry (collects Flow/FlowOverride into decorator
-chains), sort_and_validate (per-(phase, event_kind) ordering + dependency
+"""The scheduler — FlowRegistry (collects Flow/FlowBinding definitions),
+sort_and_validate (per-(phase, event_kind) ordering + dependency
 checks), FlowContext (per-dispatch-batch scratch), EventQueue (priority
 queue, batches same (timestamp, kind)), and run() (wires it all together).
 
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 import pandas as pd
 
 from .events import EventDraft, EventKind
-from .flow import Flow, FlowOverride, Phase
+from .flow import Flow, FlowBinding, Phase
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -64,11 +64,12 @@ class ResolvedFlow:
     phase: Phase
     event_kind: EventKind | None
     order: int
-    after: tuple[Flow, ...]
-    before: tuple[Flow, ...]
+    after: tuple[Any, ...]
+    before: tuple[Any, ...]
     compute: Callable[..., None]
     description: str = ""
     strategy_scoped: bool = False
+    definition_name: str = ""
 
     @property
     def effective_description(self) -> str:
@@ -84,12 +85,6 @@ def _flow_qualified_name(flow: ResolvedFlow) -> str:
     return f"{flow.owner}.{flow.name}" if getattr(flow, "owner", "") else f".{flow.name}"
 
 
-def _wrap(override_compute: Callable, base_compute: Callable) -> Callable:
-    def wrapped(state, ctx) -> None:
-        override_compute(state, ctx, base_compute)
-    return wrapped
-
-
 class FlowRegistry:
     """Keyed by (name, phase, event_kind), not name alone -- a logical
     Flow "name" can legitimately be registered twice under the SAME name
@@ -101,38 +96,43 @@ class FlowRegistry:
     that's a real conflict, not an intentional phase-split."""
 
     def __init__(self) -> None:
-        self._flows: dict[tuple[str, Phase, EventKind | None], Flow] = {}
-        self._overrides: dict[str, list[FlowOverride]] = defaultdict(list)
+        self._flows: dict[tuple[str, Phase, EventKind | None], Flow | FlowBinding] = {}
 
-    def register_flow(self, flow: Flow) -> None:
-        key = (flow.name, flow.phase, flow.event_kind)
+    def register_flow(self, flow: Flow | FlowBinding) -> None:
+        key = (_flow_name(flow), flow.phase, flow.event_kind)
         if key in self._flows:
             raise ValueError(f"duplicate flow registration: {key}")
         self._flows[key] = flow
-
-    def register_override(self, override: FlowOverride) -> None:
-        for name in override.flow_names:
-            self._overrides[name].append(override)
-
-    def overrides_for(self, flow_name: str) -> list[FlowOverride]:
-        return list(self._overrides.get(flow_name, ()))
 
     def resolve(self) -> list[ResolvedFlow]:
         resolved: list[ResolvedFlow] = []
         for (name, _phase, _event_kind), base in self._flows.items():
             compute = base.compute
             inputs = set(base.inputs)
-            for ov in self._overrides.get(name, ()):
-                inputs |= set(ov.extra_inputs)
-                if ov.compute is not None:
-                    compute = _wrap(ov.compute, compute)
             resolved.append(ResolvedFlow(
-                name=name, owner=base.owner, inputs=tuple(inputs), outputs=base.outputs,
+                name=name, definition_name=_flow_definition_name(base),
+                owner=base.owner, inputs=tuple(inputs), outputs=base.outputs,
                 phase=base.phase, event_kind=base.event_kind, order=base.order,
                 after=base.after, before=base.before, compute=compute,
-                description=base.description, strategy_scoped=base.strategy_scoped,
+                description=base.effective_description, strategy_scoped=_flow_strategy_scoped(base),
             ))
         return resolved
+
+
+def _flow_name(flow: Flow | FlowBinding) -> str:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_name
+    return flow.name
+
+
+def _flow_definition_name(flow: Flow | FlowBinding) -> str:
+    return flow.definition_name
+
+
+def _flow_strategy_scoped(flow: Flow | FlowBinding) -> bool:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_strategy_scoped
+    return flow.strategy_scoped
 
 
 # ── sort_and_validate ─────────────────────────────────────────────

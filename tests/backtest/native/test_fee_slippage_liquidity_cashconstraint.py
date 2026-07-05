@@ -19,10 +19,10 @@ from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash, constrain_order_batch_to_execution_cash
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules.fee import FeeModule, _apply_fee, _resolve_fee_mode
+from tools.testers.backtest.modules.fee import FeeModule, _resolve_fee_cost, _resolve_fee_mode
 from tools.testers.backtest.modules.custom_product import CustomProductModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.ledger_module import _basic_cash_update
+from tools.testers.backtest.modules.ledger_module import _apply_order_fill
 from tools.testers.backtest.modules.liquidity import LiquidityModule, _cap_to_liquidity
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_book import OrderBookModule
@@ -74,9 +74,7 @@ def test_fee_mode_zero_means_no_fee():
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
-    called = []
-    _apply_fee(account, ctx, lambda a, c: called.append(True))
-    assert called == [True]
+    _resolve_fee_cost(account, ctx)
     assert order.get("fee_cost") == 0.0
 
 
@@ -113,7 +111,7 @@ def test_fee_mode_custom_uses_unified_product_field_overrides():
                 ),
     )
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.01)
 
 
@@ -131,7 +129,7 @@ def test_engine_mode_exact_uses_exact_fee_and_requires_historical_fields():
     assert config.get(FeeModule.fee_mode) is None
     assert _resolve_fee_mode(config) == "exact"
     with pytest.raises(KeyError):
-        _apply_fee(account, ctx, lambda a, c: None)
+        _resolve_fee_cost(account, ctx)
 
 
 def test_fee_mode_auto_uses_historical_fields():
@@ -156,7 +154,7 @@ def test_fee_mode_auto_uses_historical_fields():
         },
     })
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
     assert order.get("fee_cost") == pytest.approx(10.0 * 10.0 * 0.002)
 
 
@@ -191,7 +189,7 @@ def test_fee_mode_auto_splits_close_today_and_yesterday_from_position_lots():
         },
     })
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
 
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
@@ -238,7 +236,7 @@ def test_fee_mode_lot_aware_modes_split_close_today_and_yesterday_from_position_
         },
     })
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
 
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
@@ -276,7 +274,7 @@ def test_fee_mode_close_yesterday_overrides_today_lot_markers():
         },
     })
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
 
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(1.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(0.0)
@@ -320,7 +318,7 @@ def test_fee_mode_auto_uses_configured_lot_close_order_for_today_split():
         },
     })
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
 
     assert order.get("fee_close_yesterday_quantity") == pytest.approx(0.0)
     assert order.get("fee_close_today_quantity") == pytest.approx(1.0)
@@ -339,7 +337,7 @@ def test_fee_mode_auto_without_fee_fields_falls_back_to_zero_cost():
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
     ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 10.0}})
 
-    _apply_fee(account, ctx, lambda a, c: None)
+    _resolve_fee_cost(account, ctx)
     assert order.get("fee_cost") == 0.0
 
 
@@ -354,7 +352,7 @@ def test_slippage_zero_means_unadjusted_price():
                        active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
-    _apply_slippage(account, ctx, lambda a, c: None)
+    _apply_slippage(account, ctx)
     assert order.get("effective_price") == pytest.approx(10.0)
 
 
@@ -373,7 +371,7 @@ def test_slippage_worsens_buy_and_sell_price_in_opposite_directions():
         ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(),
                            active_strategies=frozenset({s}), drafts_by_strategy={s: [draft]})
         ctx.set(MarketDataModule.current_prices, {p: 10.0})
-        _apply_slippage(account, ctx, lambda a, c: None)
+        _apply_slippage(account, ctx)
 
     assert buy.get("effective_price") == pytest.approx(10.1)   # worse (higher) for buys
     assert sell.get("effective_price") == pytest.approx(9.9)   # worse (lower) for sells
@@ -575,7 +573,7 @@ def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_upd
     ctx.set(MarketDataModule.current_prices, {p: 200.0})
 
     constrain_order_batch_to_execution_cash(account, ctx)
-    _basic_cash_update(account, ctx)
+    _apply_order_fill(account, ctx)
 
     assert order.quantity == pytest.approx(0.5)
     assert _cash_major(account, ledger) == pytest.approx(0.0)
@@ -612,9 +610,9 @@ def test_order_flow_records_fee_slippage_ledger_and_final_status():
     ctx.set(MarketDataModule.current_prices, {p: 10.0})
     ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
 
-    _apply_slippage(account, ctx, lambda a, c: None)
-    _apply_fee(account, ctx, lambda a, c: None)
-    _basic_cash_update(account, ctx)
+    _apply_slippage(account, ctx)
+    _resolve_fee_cost(account, ctx)
+    _apply_order_fill(account, ctx)
     _finalize_order(account, ctx)
 
     records = account.order_flow_store.records_for_order("order-1")

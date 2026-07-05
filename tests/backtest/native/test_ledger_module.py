@@ -17,7 +17,7 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
-from tools.testers.backtest.modules.ledger_module import LedgerModule, _basic_cash_update, _basic_equity, _initialize_ledgers
+from tools.testers.backtest.modules.ledger_module import LedgerModule, _apply_order_fill, _basic_equity, _initialize_ledgers
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.margin import MarginModule
@@ -178,7 +178,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
         drafts_by_strategy={s: [draft1]},
     )
     order_ctx.set(MarketDataModule.current_prices, prices)
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     # second order processed in its own batch (same strategy, different
     # product) -- payload_for looks up by strategy, so reuse same pattern
@@ -187,7 +187,7 @@ def test_cash_zeros_after_full_rebalance_with_two_products():
         drafts_by_strategy={s: [draft2]},
     )
     order_ctx2.set(MarketDataModule.current_prices, prices)
-    _basic_cash_update(account, order_ctx2)
+    _apply_order_fill(account, order_ctx2)
 
     assert _cash_major(account, s) == pytest.approx(0.0, abs=1e-6)
 
@@ -216,7 +216,7 @@ def test_equity_on_signal_and_on_order_recompute_after_fill():
         drafts_by_strategy={s: [draft]},
     )
     order_ctx.set(MarketDataModule.current_prices, prices)
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
     _basic_equity(account, order_ctx)
 
     # equity unchanged by a fair-price trade (bought 1000 @ 10 = 10_000 cash
@@ -248,7 +248,7 @@ def test_equity_requires_ffilled_price_for_held_position():
         _basic_equity(account, signal_ctx)
 
 
-def test_cash_update_skips_rejected_order_without_ledger_effect():
+def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="basic")
@@ -268,14 +268,16 @@ def test_cash_update_skips_rejected_order_without_ledger_effect():
     )
     order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     ledger = account.ledger_for_strategy(s)
     assert cash_for_ledger(account, ledger).to_major() == pytest.approx(1_000_000.0)
     assert ledger.get(LedgerModule.positions)[p].quantity == 0.0
+    assert order.status == OrderStatus.REJECTED
+    assert order.reject_reason == "触及涨停，买入方向不可成交"
 
 
-def test_cash_update_and_equity_use_contract_multiplier():
+def test_apply_order_fill_and_equity_use_contract_multiplier():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(s, engine_mode="basic")
@@ -296,11 +298,12 @@ def test_cash_update_and_equity_use_contract_multiplier():
     order_ctx.set(MarketDataModule.current_prices, prices)
     order_ctx.set(MarketDataModule.current_historical_fields, historical_fields)
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
     _basic_equity(account, order_ctx)
 
     assert _cash_major(account, s) == pytest.approx(900_000.0)
     assert order_ctx.get_for(LedgerModule.equity, s) == pytest.approx(1_000_000.0)
+    assert order.status == OrderStatus.FILLED
 
 
 def test_equity_uses_margin_and_floating_pnl_when_margin_is_tracked():
@@ -337,7 +340,7 @@ def test_equity_uses_margin_and_floating_pnl_when_margin_is_tracked():
     assert signal_ctx.get_for(LedgerModule.equity, s) == pytest.approx(991_200.0)
 
 
-def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
+def test_margin_accounting_apply_order_fill_locks_margin_and_realizes_pnl():
     s = Strategy(alias="S")
     p = _product()
     config = _strategy_config(
@@ -363,7 +366,7 @@ def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
     open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
     open_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
 
-    _basic_cash_update(account, open_ctx)
+    _apply_order_fill(account, open_ctx)
     _basic_equity(account, open_ctx)
 
     assert _cash_major(account, s) == pytest.approx(999_800.0)
@@ -390,7 +393,7 @@ def test_margin_accounting_cash_update_locks_margin_and_realizes_pnl():
     close_ctx.set(MarketDataModule.current_prices, {p: 110.0})
     close_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 2.0}})
 
-    _basic_cash_update(account, close_ctx)
+    _apply_order_fill(account, close_ctx)
     _basic_equity(account, close_ctx)
 
     assert _cash_major(account, s) == pytest.approx(1_000_200.0)
@@ -428,7 +431,7 @@ def test_margin_recalculation_uses_remaining_position_side_not_order_side():
     )
     open_ctx.set(MarketDataModule.current_prices, {p: 100.0})
     open_ctx.set(MarketDataModule.current_historical_fields, fields)
-    _basic_cash_update(account, open_ctx)
+    _apply_order_fill(account, open_ctx)
 
     close_ts = pd.Timestamp("2024-01-02")
     close_order = Order(instrument=p, timestamp=close_ts, quantity=-4.0, intent_quantity=-4.0, strategy=s)
@@ -441,7 +444,7 @@ def test_margin_recalculation_uses_remaining_position_side_not_order_side():
     close_ctx.set(MarketDataModule.current_prices, {p: 110.0})
     close_ctx.set(MarketDataModule.current_historical_fields, fields)
 
-    _basic_cash_update(account, close_ctx)
+    _apply_order_fill(account, close_ctx)
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert entry.quantity == pytest.approx(6.0)
@@ -474,7 +477,7 @@ def test_auto_margin_mode_cash_accounts_products_without_margin_rules():
     order_ctx.set(MarketDataModule.current_prices, {p: 100.0})
     order_ctx.set(MarketDataModule.current_historical_fields, {p: {}})
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     ledger = account.ledger_for_strategy(s)
     entry = ledger.get(LedgerModule.positions)[p]
@@ -509,7 +512,7 @@ def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():
         }
     })
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, True)]
@@ -557,7 +560,7 @@ def test_daily_mark_to_market_fill_uses_ledger_config_not_strategy_field():
         }
     })
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, True)]
@@ -588,7 +591,7 @@ def test_lot_based_accounting_without_daily_mark_to_market_keeps_today_marker_ab
     order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
     order_ctx.set(MarketDataModule.current_historical_fields, {p: {"VolumeMultiple": 1.0}})
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, None)]
@@ -645,7 +648,7 @@ def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
         drafts_by_strategy={s1: [EventDraft(EventKind.ORDER, ts, s1, order)]},
     )
     order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     assert [ledger.name for ledger in account.ledgers] == ["shared-book"]
     assert account.ledger_for_strategy(s1) is account.ledger_for_strategy(s2)
@@ -698,7 +701,7 @@ def test_strategy_book_declares_cash_pool_across_distinct_ledgers():
     order_ctx.set(MarketDataModule.current_prices, {p1: 10.0})
     order_ctx.set(MarketDataModule.current_historical_fields, {p1: {}})
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     assert account.ledger_for_strategy(s1).get(LedgerModule.positions)[p1].quantity == pytest.approx(2.0)
     assert p1 not in account.ledger_for_strategy(s2).get(LedgerModule.positions)
@@ -823,7 +826,7 @@ def test_daily_mark_to_market_does_not_mark_today_when_fee_mode_does_not_need_lo
         "LongMarginRatioByMoney": 0.1,
     }})
 
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, None)]
@@ -850,7 +853,7 @@ def test_two_strategies_independent_ledgers_do_not_cross_contaminate():
         drafts_by_strategy={s1: [draft1]},
     )
     order_ctx.set(MarketDataModule.current_prices, {p: 5.0})
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     assert account.ledger_for_strategy(s1).get(LedgerModule.positions)[p].quantity == 100.0
     assert account.ledger_for_strategy(s2).get(LedgerModule.positions)[p].quantity == 0.0
@@ -875,7 +878,7 @@ def test_cancelled_order_has_no_ledger_effect():
         drafts_by_strategy={s: [draft]},
     )
     order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     assert account.ledger_for_strategy(s).get(LedgerModule.positions)[p].quantity == 0.0
     assert _cash_major(account, s) == pytest.approx(1_000_000.0)
@@ -909,7 +912,7 @@ def test_multiple_simultaneous_orders_for_one_strategy_are_all_applied():
         drafts_by_strategy={s: [draft1, draft2, draft3]},
     )
     order_ctx.set(MarketDataModule.current_prices, {p1: 1.0, p2: 1.0, p3: 1.0})
-    _basic_cash_update(account, order_ctx)
+    _apply_order_fill(account, order_ctx)
 
     positions = account.ledger_for_strategy(s).get(LedgerModule.positions)
     assert positions[p1].quantity == 10.0

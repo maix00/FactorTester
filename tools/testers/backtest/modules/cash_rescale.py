@@ -112,7 +112,7 @@ def constrain_order_batch_to_execution_cash(state, ctx) -> None:
     """Final ORDER-stage broker cash/margin check.
 
     This runs after execution price, slippage and fee have been resolved and
-    before LedgerModule.cash_update mutates the ledger. It is deliberately
+    before LedgerModule.apply_order_fill mutates the ledger. It is deliberately
     grouped by ledger, not by strategy, so strategies that share a ledger also
     share its available cash.
     """

@@ -150,8 +150,6 @@ def _run_pre_replay_flows(run_state: "BacktestRunState") -> None:
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     groups = sort_and_validate(registry.resolve())
     flow_strategies = _all_flow_strategy_sets(run_state, groups)
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())

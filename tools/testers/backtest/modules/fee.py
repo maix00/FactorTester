@@ -1,17 +1,18 @@
-"""FeeModule — transaction cost, applied as a FlowOverride on
-LedgerModule.cash_update.
+"""FeeModule — resolves transaction cost for order settlement.
 
 Market data ownership stays in MarketDataModule: it supplies CTP/OpenCTP-style
 fee fields through FieldHistory. FeeModule only decides which fee leg applies
-to the order and performs the arithmetic.
+to the order and writes ``order.fee_cost``; LedgerModule.apply_order_fill performs
+the actual cash settlement together with the fill.
 """
 
 from __future__ import annotations
 
 from typing import Any, ClassVar, cast
 
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import FlowOverride
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.custom_product import custom_product_editor_definition
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
@@ -83,13 +84,18 @@ class FeeModule(ExecutableModule):
         ),
     }
 
-    overrides: ClassVar[tuple[FlowOverride, ...]] = (
-        FlowOverride(
-            flow_names=(LedgerModule.cash_update.name,),
-            extra_inputs=(fee_mode, fixed_fee_rate),
-            compute=lambda state, ctx, base_compute: _apply_fee(state, ctx, base_compute),
-        ),
+    resolve_fee_cost: ClassVar[Flow] = Flow(
+        "resolve_fee_cost",
+        inputs=(fee_mode, fixed_fee_rate, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        order=7,
+        description="计算交易费用",
+        compute=lambda state, ctx: _resolve_fee_cost(state, ctx),
     )
+
+    flows: ClassVar[tuple[Flow, ...]] = (resolve_fee_cost,)
 
 
 def _resolve_fixed_fee_cost(
@@ -106,7 +112,7 @@ def _resolve_fixed_fee_cost(
     return None
 
 
-def _apply_fee(state, ctx, base_compute) -> None:
+def _resolve_fee_cost(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
@@ -174,7 +180,6 @@ def _apply_fee(state, ctx, base_compute) -> None:
             )
     from tools.testers.backtest.modules.cash_rescale import constrain_order_batch_to_execution_cash
     constrain_order_batch_to_execution_cash(state, ctx)
-    base_compute(state, ctx)
 
 
 def _market_fee_cost(

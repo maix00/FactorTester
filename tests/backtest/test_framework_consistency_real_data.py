@@ -144,8 +144,6 @@ def _native_curves(products):
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     run(run_state, EventQueue(), registry.resolve())
     strategy = next(iter(run_state.strategy_configs))
     equity = {
