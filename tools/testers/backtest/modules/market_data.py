@@ -79,8 +79,10 @@ class MarketDataStore:
     table_values_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
     historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
     historical_field_frame_column_cache: dict[tuple[str, tuple[str, ...]], object | None] = field(default_factory=dict)
+    historical_field_frame_column_map_cache: dict[Any, list[tuple[Any, int]]] = field(default_factory=dict)
     historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
     historical_field_frame_index_cache: dict[int, tuple[pd.Index, Any]] = field(default_factory=dict)
+    historical_field_frame_values_cache: dict[int, tuple[pd.DataFrame, Any]] = field(default_factory=dict)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
@@ -96,8 +98,10 @@ class MarketDataStore:
         self.table_values_cache.clear()
         self.historical_fields_cache.clear()
         self.historical_field_frame_column_cache.clear()
+        self.historical_field_frame_column_map_cache.clear()
         self.historical_field_frame_row_cache.clear()
         self.historical_field_frame_index_cache.clear()
+        self.historical_field_frame_values_cache.clear()
 
 
 class MarketDataModule(ExecutableModule):
@@ -1712,8 +1716,10 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
             instruments,
             timestamp,
             column_cache=store.historical_field_frame_column_cache,
+            column_map_cache=store.historical_field_frame_column_map_cache,
             row_cache=store.historical_field_frame_row_cache,
             index_cache=store.historical_field_frame_index_cache,
+            values_cache=store.historical_field_frame_values_cache,
         )
         resolved = _apply_exchange_rule_defaults(state, frame_result, instruments, field_names, timestamp)
         store.historical_fields_cache[cache_key] = resolved
@@ -1817,8 +1823,10 @@ def _historical_fields_at_from_frames(
     timestamp: pd.Timestamp,
     *,
     column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None = None,
+    column_map_cache: dict[Any, list[tuple[Any, int]]] | None = None,
     row_cache: dict[Any, dict[Any, dict[str, object]]] | None = None,
     index_cache: dict[int, tuple[pd.Index, Any]] | None = None,
+    values_cache: dict[int, tuple[pd.DataFrame, Any]] | None = None,
 ) -> dict[Any, dict[str, object]]:
     row_positions = _historical_field_frame_row_positions(
         frames,
@@ -1841,19 +1849,75 @@ def _historical_fields_at_from_frames(
         row_pos = row_positions.get(str(field_name))
         if row_pos is None:
             continue
-        row = frame.iloc[row_pos]
-        for instrument in instruments:
-            column = _historical_field_frame_column_for(
-                frame,
-                instrument,
-                field_name=str(field_name),
-                column_cache=column_cache,
-            )
-            if column is not None:
-                result[instrument][str(field_name)] = row[cast(Any, column)]
+        values = _historical_field_frame_values(frame, values_cache=values_cache)
+        row_values = values[row_pos]
+        for instrument, column_pos in _historical_field_frame_column_positions(
+            frame,
+            instruments,
+            field_name=str(field_name),
+            column_cache=column_cache,
+            column_map_cache=column_map_cache,
+        ):
+            result[instrument][str(field_name)] = row_values[column_pos]
     if row_cache is not None:
         row_cache[cache_key] = result
     return result
+
+
+def _historical_field_frame_column_positions(
+    frame: pd.DataFrame,
+    instruments: list[Any],
+    *,
+    field_name: str,
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None = None,
+    column_map_cache: dict[Any, list[tuple[Any, int]]] | None = None,
+) -> list[tuple[Any, int]]:
+    cache_key = (field_name, id(frame), tuple(id(instrument) for instrument in instruments))
+    if column_map_cache is not None:
+        cached = column_map_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    positions: list[tuple[Any, int]] = []
+    columns = frame.columns
+    for instrument in instruments:
+        column = _historical_field_frame_column_for(
+            frame,
+            instrument,
+            field_name=field_name,
+            column_cache=column_cache,
+        )
+        if column is None:
+            continue
+        column_pos = columns.get_loc(cast(Any, column))
+        if isinstance(column_pos, slice):
+            column_pos = column_pos.start
+        if isinstance(column_pos, (list, tuple)):
+            column_pos = column_pos[0]
+        if hasattr(column_pos, "nonzero"):
+            nonzero = column_pos.nonzero()[0]
+            if len(nonzero) == 0:
+                continue
+            column_pos = int(nonzero[0])
+        positions.append((instrument, int(column_pos)))
+    if column_map_cache is not None:
+        column_map_cache[cache_key] = positions
+    return positions
+
+
+def _historical_field_frame_values(
+    frame: pd.DataFrame,
+    *,
+    values_cache: dict[int, tuple[pd.DataFrame, Any]] | None = None,
+) -> Any:
+    cache_key = id(frame)
+    if values_cache is not None:
+        cached = values_cache.get(cache_key)
+        if cached is not None and cached[0] is frame:
+            return cached[1]
+    values = frame.to_numpy(copy=False)
+    if values_cache is not None:
+        values_cache[cache_key] = (frame, values)
+    return values
 
 
 def _historical_field_frame_row_positions(
