@@ -557,6 +557,7 @@ def make_dispatcher(
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> Callable[[list[EventDraft]], None]:
     applicable_by_flow = flow_strategies or _flow_strategy_sets(state, ordered_flows)
+    strategies_by_ledger = _ledger_strategy_sets(state)
 
     def handler(batch: list[EventDraft]) -> None:
         timestamp = batch[0].timestamp
@@ -571,7 +572,7 @@ def make_dispatcher(
                 drafts_by_strategy.setdefault(draft.strategy, []).append(draft)
             if draft.ledger is not None:
                 drafts_by_ledger.setdefault(draft.ledger, []).append(draft)
-                ledger_active_strategies.update(_strategies_for_ledger(state, draft.ledger))
+                ledger_active_strategies.update(strategies_by_ledger.get(_ledger_identity_for_scheduler(draft.ledger), frozenset()))
             if draft.strategy is None and draft.ledger is None:
                 raise SchedulerError(
                     f"{draft.kind.name} event at {draft.timestamp} has neither strategy nor ledger"
@@ -608,17 +609,21 @@ def make_dispatcher(
     return handler
 
 
-def _strategies_for_ledger(state: "BacktestRunState", ledger: Any) -> frozenset["Strategy"]:
+def _ledger_identity_for_scheduler(ledger: Any) -> Any:
     from .ledger import ledger_identity
+
+    return ledger_identity(ledger)
+
+
+def _ledger_strategy_sets(state: "BacktestRunState") -> dict[Any, frozenset["Strategy"]]:
     from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 
-    target = ledger_identity(ledger)
     store = strategy_book_store_for(state)
-    strategies: set["Strategy"] = set()
+    result: dict[Any, set["Strategy"]] = {}
     for strategy in state.strategy_configs:
-        if target in store.ledgers_for_strategy(state, strategy):
-            strategies.add(strategy)
-    return frozenset(strategies)
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            result.setdefault(_ledger_identity_for_scheduler(ledger), set()).add(strategy)
+    return {ledger: frozenset(strategies) for ledger, strategies in result.items()}
 
 
 def _flow_strategy_sets(

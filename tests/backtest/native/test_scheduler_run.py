@@ -256,6 +256,41 @@ def test_make_dispatcher_processes_all_drafts_for_one_strategy_in_one_batch():
     assert seen_payloads == [[payload1, payload2, payload3]]
 
 
+def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():
+    """Ledger dispatch must match the old scan-all-strategies semantics.
+
+    A cached ledger->strategy map is only a performance optimization; it must
+    not change which strategies participate in ledger-scoped calculations.
+    """
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    s1, s2, s3 = Strategy(alias="A"), Strategy(alias="B"), Strategy(alias="C")
+    shared = ledger_identity("shared-book")
+    other = ledger_identity("other-book")
+    seen: list[frozenset] = []
+
+    flow = Flow(
+        "ledger_flow", inputs=(), outputs=(), phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER,
+        compute=lambda account, ctx: seen.append(frozenset(ctx.active_strategies)),
+    )
+    registry = FlowRegistry()
+    registry.register_flow(flow)
+    account = _account([s1, s2, s3], active_flow_names=frozenset({"ledger_flow"}))
+    store = strategy_book_store_for(account)
+    store.register_strategy_ledgers(s1, (shared.name,), default_ledger_id=shared.name)
+    store.register_strategy_ledgers(s2, (shared.name,), default_ledger_id=shared.name)
+    store.register_strategy_ledgers(s3, (other.name,), default_ledger_id=other.name)
+    queue = EventQueue()
+
+    from tools.testers.backtest.engines.native.scheduler import make_dispatcher, sort_and_validate
+    groups = sort_and_validate(registry.resolve())
+    dispatcher = make_dispatcher(groups[(Phase.PER_EVENT, EventKind.LEDGER)], account, queue)
+    dispatcher([EventDraft(EventKind.LEDGER, pd.Timestamp("2024-01-01"), ledger=shared)])
+
+    assert seen == [frozenset({s1, s2})]
+
+
 def test_progress_fires_across_all_three_phases_with_description():
     s = Strategy(alias="S")
     seen: list[tuple[int, int, str]] = []
