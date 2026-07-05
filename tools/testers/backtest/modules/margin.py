@@ -62,8 +62,10 @@ class MarginModule(ExecutableModule):
     liquidation_target_buffer: ClassVar[FieldRef[float]] = FieldRef("liquidation_target_buffer")
 
     margin_check_events: ClassVar[FieldRef[Any]] = FieldRef("margin_check_events")
-    margin_deficit: ClassVar[FieldRef[float]] = FieldRef("margin_deficit")
     margin_requirement: ClassVar[FieldRef[float]] = FieldRef("margin_requirement")
+    margin_reserved: ClassVar[FieldRef[float]] = FieldRef("margin_reserved")
+    margin_deficit: ClassVar[FieldRef[float]] = FieldRef("margin_deficit")
+    margin_excess: ClassVar[FieldRef[float]] = FieldRef("margin_excess")
     margin_liquidation_orders: ClassVar[FieldRef[Any]] = FieldRef("margin_liquidation_orders")
 
     _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
@@ -123,8 +125,10 @@ class MarginModule(ExecutableModule):
             fields=_CUSTOM_MARGIN_FIELDS,
         ),
         "margin_check_events": FieldDefinition(public=False),
-        "margin_deficit": FieldDefinition(public=False),
         "margin_requirement": FieldDefinition(public=False),
+        "margin_reserved": FieldDefinition(public=False),
+        "margin_deficit": FieldDefinition(public=False),
+        "margin_excess": FieldDefinition(public=False),
         "margin_liquidation_orders": FieldDefinition(public=False),
     }
 
@@ -140,7 +144,7 @@ class MarginModule(ExecutableModule):
     apply_margin_requirement_change: ClassVar[Flow] = Flow(
         "apply_margin_requirement_change",
         inputs=(_ledger_cash_ref, _ledger_positions_ref),
-        outputs=(margin_deficit, margin_requirement),
+        outputs=(margin_requirement, margin_reserved, margin_deficit, margin_excess),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
         order=60,
@@ -200,6 +204,27 @@ def _resolve_margin_ratio_from_ledger_config(market_margin_ratio: float | None, 
     if mode == "exact" and market_margin_ratio is None:
         raise KeyError("exact margin mode requires historical long/short margin fields")
     return float(market_margin_ratio or 0.0)
+
+
+def product_uses_margin_accounting(fields: dict[str, object], ledger_config=None) -> bool:
+    """Whether this product should be accounted through margin rather than cash notional.
+
+    ``margin_mode`` is ledger-level policy, but auto/custom/exact must still be
+    product-aware: a futures contract with margin fields uses margin; a cash
+    equity/spot product without margin fields remains full-cash accounting.
+    ``exact`` refuses futures-like rows that expose a multiplier but no margin
+    rule, because that means the trading-rule data is incomplete.
+    """
+    mode = _resolve_margin_mode_from_ledger_config(ledger_config)
+    if mode in {"none", "zero"}:
+        return False
+    if mode == "fixed":
+        return True
+    if _has_market_margin_fields(fields):
+        return True
+    if mode == "exact" and _has_contract_multiplier(fields):
+        raise KeyError("exact margin mode requires historical long/short margin fields")
+    return False
 
 
 def _resolve_margin_call_mode_from_ledger_config(ledger_config=None) -> str:
@@ -263,6 +288,15 @@ def _margin_field_names() -> set[str]:
     }
 
 
+def _has_market_margin_fields(fields: dict[str, object]) -> bool:
+    return any(_number_or_none(fields.get(name)) not in (None, 0.0) for name in _margin_field_names())
+
+
+def _has_contract_multiplier(fields: dict[str, object]) -> bool:
+    multiplier = _number_or_none(fields.get("VolumeMultiple"))
+    return multiplier not in (None, 0.0, 1.0)
+
+
 def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
@@ -296,7 +330,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 use_minor_units=cash.use_minor_units,
             )
             for product, required in requirements.items():
-                positions[product].equity_occupied = DataMoney.from_major(
+                positions[product].margin_reserved = DataMoney.from_major(
                     required,
                     currency=cash.currency,
                     use_minor_units=cash.use_minor_units,
@@ -312,7 +346,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                 target = reserved + max(required - reserved, 0.0) * ratio
                 if required < reserved:
                     target = required
-                entry.equity_occupied = DataMoney.from_major(
+                entry.margin_reserved = DataMoney.from_major(
                     target,
                     currency=cash.currency,
                     use_minor_units=cash.use_minor_units,
@@ -325,7 +359,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
             deficit = max(reserve_delta - paid, 0.0)
         else:
             for product, required in requirements.items():
-                positions[product].equity_occupied = DataMoney.from_major(
+                positions[product].margin_reserved = DataMoney.from_major(
                     required,
                     currency=cash.currency,
                     use_minor_units=cash.use_minor_units,
@@ -334,7 +368,10 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
         ledger.set(LedgerModule.cash, cash)
         ledger.set(LedgerModule.positions, positions)
         ledger.set(MarginModule.margin_requirement, total_required)
+        reserved_after = _current_margin_reserved(positions)
+        ledger.set(MarginModule.margin_reserved, reserved_after)
         ledger.set(MarginModule.margin_deficit, deficit)
+        ledger.set(MarginModule.margin_excess, max(reserved_after - total_required, 0.0))
         if deficit > 1e-12 and _resolve_margin_call_mode_from_ledger_config(ledger_config) == "liquidate":
             ctx.set(MarginModule.margin_liquidation_orders, EventDraft(
                 EventKind.TRADE_INTENT,
@@ -478,7 +515,7 @@ def _current_margin_reserved(positions: dict[Any, Any]) -> float:
 
 
 def _entry_margin_major(entry: Any) -> float:
-    occupied = getattr(entry, "equity_occupied", None)
+    occupied = getattr(entry, "margin_reserved", None)
     if occupied is None:
         return 0.0
     return float(occupied.to_major())
@@ -492,3 +529,12 @@ def _lookup_product_value(mapping: Any, product: Any) -> float | None:
             value = mapping[key]
             return None if value is None else float(value)
     return None
+
+
+def _number_or_none(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None

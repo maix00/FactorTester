@@ -33,7 +33,7 @@ from tools.testers.backtest.modules.trading_rule import (
 )
 from tools.testers.backtest.modules.margin import (
     MarginModule, _apply_margin_requirement_change, _handle_margin_liquidation_notice,
-    _resolve_margin_mode, _resolve_margin_ratio,
+    _resolve_margin_mode, _resolve_margin_ratio, product_uses_margin_accounting,
 )
 
 
@@ -217,18 +217,36 @@ def test_resolve_margin_ratio_auto_uses_caller_supplied_market_ratio():
     assert _resolve_margin_ratio(config, market_margin_ratio=0.15) == 0.15
 
 
-def test_equity_occupied_basic_accounting_has_zero_margin():
+def test_auto_margin_accounting_is_product_level_not_ledger_wide():
+    ledger_config = _ledger_config(margin_mode="auto")
+
+    assert product_uses_margin_accounting(
+        {"VolumeMultiple": 10.0, "LongMarginRatioByMoney": 0.12},
+        ledger_config,
+    )
+    assert not product_uses_margin_accounting({}, ledger_config)
+
+
+def test_exact_margin_requires_rules_for_multiplier_products_only():
+    ledger_config = _ledger_config(margin_mode="exact")
+
+    assert not product_uses_margin_accounting({}, ledger_config)
+    with pytest.raises(KeyError, match="exact margin mode requires"):
+        product_uses_margin_accounting({"VolumeMultiple": 10.0}, ledger_config)
+
+
+def test_margin_reserved_basic_accounting_has_zero_margin():
     product = _product()
     config = _config(engine_mode="basic")
     ledger = LedgerState(strategy=config.strategy, base_currency="CNY")
     ledger.set(_positions_ref(), {product: ProductPosition(quantity=0.0, average_cost=0.0,
-                                                              equity_occupied=None)})
+                                                              margin_reserved=None)})
     open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0)
     entry = ledger.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(0.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(0.0)
 
 
-def test_equity_occupied_fixed_margin_ratio_discounts_notional():
+def test_margin_reserved_fixed_margin_ratio_discounts_notional():
     product = _product()
     config = _config(engine_mode="custom", accounting_mode="Custom", cost_basis_method="WeightAverage",
                      margin_mode="fixed", fixed_margin_ratio=0.1)
@@ -239,7 +257,7 @@ def test_equity_occupied_fixed_margin_ratio_discounts_notional():
     open_position(ledger, config, product, quantity=10.0, entry_price=5.0, multiplier=1.0,
                   ledger_config=ledger_config)
     entry = ledger.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(5.0)  # 10*5*1*0.1
+    assert entry.margin_reserved.to_major() == pytest.approx(5.0)  # 10*5*1*0.1
 
 
 def test_weight_average_open_then_partial_close_realizes_pnl_at_average_cost():
@@ -385,7 +403,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
                 lots=deque([
                     Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False),
                 ]),
-                equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+                margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
             )
         },
     )
@@ -418,7 +436,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
     # DMTM settles variation PnL only: 2 * (12 - 10) * 10 = 40.
     # Margin requirement changes are handled by MarginModule notice flows.
     assert updated_cash.to_major() == pytest.approx(1040.0)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(2.0)
+    assert updated_position.margin_reserved.to_major() == pytest.approx(2.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert updated_position.average_cost is None
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 12.0, False)]
@@ -443,7 +461,7 @@ def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_
             lots=deque([
                 Lot(quantity=-2.0, entry_price=10.0, multiplier=10.0, is_today=False),
             ]),
-            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
     ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
@@ -470,7 +488,7 @@ def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_
     # Short PnL = -2 * (12 - 10) * 10 = -40. Margin requirement changes
     # are handled by MarginModule notice flows, not DMTM.
     assert updated_cash.to_major() == pytest.approx(960.0)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(2.0)
+    assert updated_position.margin_reserved.to_major() == pytest.approx(2.0)
     assert updated_position.settlement_price == pytest.approx(12.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(-2.0, 12.0, False)]
 
@@ -497,7 +515,7 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
             quantity=1.0,
             lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
             settlement_price=10.0,
-            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
         )
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2}, ledgers={ledger_key: ledger})
@@ -532,7 +550,7 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
     # ledger would be settled twice.
     assert ledger.get(_cash_ref()).to_major() == pytest.approx(102.0)
     entry = ledger.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(1.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
 
 
@@ -565,7 +583,7 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
             quantity=1.0,
             lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
             settlement_price=10.0,
-            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
         )
     })
     account.ledgers = {ledger: shared}
@@ -619,7 +637,7 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
     # ledger event, so settlement happens once: +2 PnL.
     assert shared.get(_cash_ref()).to_major() == pytest.approx(102.0)
     entry = shared.get(_positions_ref())[product]
-    assert entry.equity_occupied.to_major() == pytest.approx(1.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
 
 
@@ -648,7 +666,7 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
         product: ProductPosition(
             quantity=2.0,
             lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
-            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
     account.ledgers = {ledger_key: ledger}
@@ -742,7 +760,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
                     Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=True),
                 ]),
                 settlement_price=20.0,  # stale previous settlement for the old lot only
-                equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+                margin_reserved=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
             )
         },
     )
@@ -775,7 +793,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
     # produce 2 * (18 - 20) = -4 and an artificial equity drop.
     # Margin requirement changes are handled by MarginModule notice flows.
     assert updated_cash.to_major() == pytest.approx(1006.0)
-    assert updated_position.equity_occupied.to_major() == pytest.approx(4.0)
+    assert updated_position.margin_reserved.to_major() == pytest.approx(4.0)
     assert updated_position.settlement_price == pytest.approx(18.0)
     assert updated_position.average_cost is None
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in updated_position.lots] == [(2.0, 18.0, False)]
@@ -800,7 +818,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
             quantity=1.0,
             lots=deque([Lot(quantity=1.0, entry_price=18.0, multiplier=1.0, is_today=True)]),
             settlement_price=20.0,
-            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
@@ -841,7 +859,7 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
         product: ProductPosition(
             quantity=2.0,
             lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
-            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
     state = BacktestRunState(
@@ -876,7 +894,7 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
 
     entry = ledger.get(_positions_ref())[product]
     assert ledger.get(_cash_ref()).to_major() == pytest.approx(0.0)
-    assert entry.equity_occupied.to_major() == pytest.approx(12.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(12.0)
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
     assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
     assert queue.pending_count_by_kind(EventKind.TRADE_INTENT) == 1
@@ -892,7 +910,7 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
         product: ProductPosition(
             quantity=2.0,
             lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
-            equity_occupied=DataMoney.from_major(12.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(12.0, currency="CNY", use_minor_units=False),
         )
     })
     state = BacktestRunState(
@@ -941,7 +959,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
         product: ProductPosition(
             quantity=2.0,
             lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
-            equity_occupied=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
     state = BacktestRunState(
@@ -979,7 +997,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
 
     entry = ledger.get(_positions_ref())[product]
     assert ledger.get(_cash_ref()).to_major() == pytest.approx(15.0)
-    assert entry.equity_occupied.to_major() == pytest.approx(17.0)
+    assert entry.margin_reserved.to_major() == pytest.approx(17.0)
     assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.0)
 
 
@@ -1008,7 +1026,7 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
                 Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=None),
             ]),
             settlement_price=20.0,
-            equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
@@ -1063,7 +1081,7 @@ def test_daily_mark_to_market_close_uses_fifo_mark_to_market_lots():
                     Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=True),
                 ]),
                 settlement_price=20.0,
-                equity_occupied=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
+                margin_reserved=DataMoney.from_major(4.0, currency="CNY", use_minor_units=False),
             )
         },
     )
@@ -1101,7 +1119,7 @@ def test_mark_to_market_requires_ffilled_price_for_held_position():
         product: ProductPosition(
             quantity=1.0,
             lots=deque([Lot(quantity=1.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
-            equity_occupied=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(1.0, currency="CNY", use_minor_units=False),
         )
     })
 
@@ -1133,7 +1151,7 @@ def test_daily_mark_to_market_intraday_equity_uses_last_settlement_basis():
                 Lot(quantity=3.0, entry_price=12.0, multiplier=10.0, is_today=False),
             ]),
             settlement_price=12.0,
-            equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
         )
     })
 
@@ -1163,7 +1181,7 @@ def test_daily_mark_to_market_defaults_to_aggregate_money_formula():
         product: ProductPosition(
             quantity=2.0,
             settlement_price=10.0,
-            equity_occupied=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
+            margin_reserved=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
         )
     })
 
@@ -1193,7 +1211,7 @@ def test_daily_mark_to_market_can_use_per_contract_price_point_policy():
         product: ProductPosition(
             quantity=2.0,
             settlement_price=10.0,
-            equity_occupied=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
+            margin_reserved=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
         )
     })
 
@@ -1228,7 +1246,7 @@ def test_daily_mark_to_market_lot_positions_still_use_money_policy():
             quantity=2.0,
             lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=1.0, is_today=False)]),
             settlement_price=10.0,
-            equity_occupied=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
+            margin_reserved=DataMoney.from_major(0.0, currency="CNY", use_minor_units=True),
         )
     })
 
@@ -1268,7 +1286,7 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
                 Lot(quantity=3.0, entry_price=12.0, multiplier=10.0, is_today=False),
             ]),
             settlement_price=12.0,
-            equity_occupied=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
+            margin_reserved=DataMoney.from_major(36.0, currency="CNY", use_minor_units=False),
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})

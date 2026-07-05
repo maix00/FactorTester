@@ -44,13 +44,14 @@ class ProductPosition:
     to — this class itself never records which method is in use (that's
     derived from the Product/StrategyConfig, not stored here).
 
-    `equity_occupied` applies uniformly across all five cost-basis methods
-    (including DailyMarkToMarket, which doesn't use `lots`) — equals full
-    notional when margin_mode="none" (margin_ratio=1.0), not absent."""
+    `margin_reserved` is the product-level margin actually locked from ledger
+    cash. Cash-accounted products leave it absent; margin-accounted products
+    keep it here so ledger-level margin_reserved can be aggregated without
+    losing per-product attribution."""
     quantity: float | int = 0.0
     average_cost: float | None = None
     lots: "deque[Lot] | None" = None
-    equity_occupied: "DataMoney | None" = None
+    margin_reserved: "DataMoney | None" = None
     settlement_price: float | None = None
 
 

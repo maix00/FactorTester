@@ -333,7 +333,7 @@ def open_position(
 
     margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio, ledger_config)
     notional = abs(entry.quantity) * entry_price * multiplier
-    entry.equity_occupied = DataMoney.from_major(
+    entry.margin_reserved = DataMoney.from_major(
         notional * margin_ratio, currency=ledger.base_currency, use_minor_units=False)
 
     method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
@@ -370,7 +370,7 @@ def close_position(
 
     margin_ratio = _resolve_margin_ratio(strategy_config, market_margin_ratio, ledger_config)
     notional = abs(entry.quantity) * fill_price * multiplier
-    entry.equity_occupied = DataMoney.from_major(
+    entry.margin_reserved = DataMoney.from_major(
         notional * margin_ratio, currency=ledger.base_currency, use_minor_units=False)
 
     method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
@@ -752,10 +752,10 @@ def _margin_ratio_for_position(
 
 
 def _entry_margin_major(entry: Any) -> float:
-    equity_occupied = getattr(entry, "equity_occupied", None)
-    if equity_occupied is None:
+    margin_reserved = getattr(entry, "margin_reserved", None)
+    if margin_reserved is None:
         return 0.0
-    return float(equity_occupied.to_major())
+    return float(margin_reserved.to_major())
 
 
 def _mark_to_market_money_difference(

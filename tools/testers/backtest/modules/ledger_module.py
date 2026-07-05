@@ -132,8 +132,9 @@ def _initialize_ledgers(state, ctx) -> None:
 
         use_int = _resolve_use_int_position(strategy_config, ledger_config)
         initial_quantity = 0 if use_int else 0.0
-        zero_equity_occupied = DataMoney.from_major(0, currency=base_currency, use_minor_units=use_minor_units)
+        from tools.testers.backtest.modules.margin import MarginModule, _resolve_margin_mode_from_ledger_config
 
+        margin_mode = _resolve_margin_mode_from_ledger_config(ledger_config)
         positions = ledger.get(LedgerModule.positions, {})
         products = _products_for_backtest_window(state, ctx, strategy)
         for product in products:
@@ -142,11 +143,16 @@ def _initialize_ledgers(state, ctx) -> None:
             method = _resolve_method(strategy_config, product, ledger_config=ledger_config)
             if method == "WeightAverage":
                 positions[product] = ProductPosition(
-                    quantity=initial_quantity, average_cost=0.0, equity_occupied=zero_equity_occupied)
+                    quantity=initial_quantity, average_cost=0.0, margin_reserved=None)
             else:
                 positions[product] = ProductPosition(
-                    quantity=initial_quantity, lots=deque(), equity_occupied=zero_equity_occupied)
+                    quantity=initial_quantity, lots=deque(), margin_reserved=None)
         ledger.set(LedgerModule.positions, positions)
+        if margin_mode not in {"none", "zero"}:
+            ledger.set(MarginModule.margin_requirement, 0.0)
+            ledger.set(MarginModule.margin_reserved, 0.0)
+            ledger.set(MarginModule.margin_deficit, 0.0)
+            ledger.set(MarginModule.margin_excess, 0.0)
         state.ledgers[ledger_key] = ledger
 
 
@@ -202,9 +208,9 @@ def _basic_equity(state, ctx) -> None:
         config = state.config_for(strategy)
         ledger_config = state.ledger_config_for(ledger)
         margin_occupied = sum(
-            entry.equity_occupied.to_major()
+            entry.margin_reserved.to_major()
             for entry in positions.values()
-            if entry.equity_occupied is not None and entry.equity_occupied.to_major() > 0
+            if entry.margin_reserved is not None and entry.margin_reserved.to_major() > 0
         )
         if margin_occupied > 0:
             floating_pnl = mark_to_market(
@@ -268,8 +274,15 @@ def _basic_cash_update(state, ctx) -> None:
                     ledger_config=ledger_config,
                 )
             else:
-                entry = positions.setdefault(order.instrument, ProductPosition())
-                apply_quantity_delta(entry, order.quantity)
+                _apply_cash_accounting_position_fill(
+                    positions,
+                    state.config_for(strategy),
+                    order.instrument,
+                    quantity=float(order.quantity),
+                    price=float(price),
+                    historical_fields=historical_fields,
+                    ledger_config=ledger_config,
+                )
                 trade_cost = DataMoney.from_major(
                     contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
                     currency=cash.currency,
@@ -290,15 +303,14 @@ def _basic_cash_update(state, ctx) -> None:
             )
             ledger.set(LedgerModule.positions, positions)
             ledger.set(LedgerModule.cash, cash)
+            _sync_ledger_margin_reserved(ledger, positions)
 
 
 def _uses_margin_accounting(strategy_config, historical_fields: dict, product, ledger_config=None) -> bool:
-    from tools.testers.backtest.modules.margin import _resolve_margin_mode
+    from tools.testers.backtest.modules.margin import product_uses_margin_accounting
 
-    mode = _resolve_margin_mode(strategy_config, ledger_config)
-    if mode in {"none", "zero"}:
-        return False
-    return True
+    fields = historical_fields_for_product(historical_fields, product)
+    return product_uses_margin_accounting(fields, ledger_config)
 
 
 def _apply_margin_accounting_fill(
@@ -373,7 +385,7 @@ def _apply_margin_accounting_fill(
         multiplier,
         ledger_config,
     )
-    entry.equity_occupied = DataMoney.from_major(
+    entry.margin_reserved = DataMoney.from_major(
         after_margin,
         currency=cash.currency,
         use_minor_units=cash.use_minor_units,
@@ -384,6 +396,60 @@ def _apply_margin_accounting_fill(
         currency=cash.currency,
         use_minor_units=cash.use_minor_units,
     )
+
+
+def _apply_cash_accounting_position_fill(
+    positions: dict,
+    strategy_config,
+    product,
+    *,
+    quantity: float,
+    price: float,
+    historical_fields: dict,
+    ledger_config=None,
+) -> None:
+    fields = historical_fields_for_product(historical_fields, product)
+    multiplier = contract_multiplier_from_fields(historical_fields, product)
+    entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
+    prior_quantity = float(entry.quantity or 0.0)
+    new_quantity = prior_quantity + quantity
+    method = _resolve_method(
+        strategy_config,
+        product,
+        fields,
+        require_exact=engine_mode_for(strategy_config) == "exact",
+        ledger_config=ledger_config,
+    )
+    if method in ("FIFO", "LIFO", "HIFO"):
+        _apply_lot_fill(entry, method, quantity, price, multiplier, is_today=None)
+        if abs(new_quantity) <= 1e-12:
+            new_quantity = 0.0
+    else:
+        prior_cost = float(entry.average_cost or price)
+        if prior_quantity == 0 or _same_direction(prior_quantity, quantity):
+            entry.average_cost = _weighted_average_cost(prior_quantity, prior_cost, quantity, price)
+        elif abs(new_quantity) <= 1e-12:
+            entry.average_cost = 0.0
+            new_quantity = 0.0
+        elif abs(quantity) > abs(prior_quantity):
+            entry.average_cost = price
+    entry.quantity = int(round(new_quantity)) if isinstance(entry.quantity, int) else new_quantity
+
+
+def _sync_ledger_margin_reserved(ledger, positions: dict) -> None:
+    from tools.testers.backtest.modules.margin import MarginModule
+
+    reserved = sum(_entry_margin_major(entry) for entry in positions.values())
+    if ledger.get(MarginModule.margin_requirement, None) is None and reserved <= 0:
+        return
+    ledger.set(MarginModule.margin_reserved, reserved)
+    required = float(ledger.get(MarginModule.margin_requirement, reserved) or 0.0)
+    deficit = float(ledger.get(MarginModule.margin_deficit, 0.0) or 0.0)
+    ledger.set(MarginModule.margin_excess, max(reserved - required, 0.0))
+    if reserved >= required:
+        ledger.set(MarginModule.margin_deficit, 0.0)
+    else:
+        ledger.set(MarginModule.margin_deficit, deficit)
 
 
 def _apply_lot_fill(
@@ -485,9 +551,9 @@ def _market_margin_ratio(fields: dict[str, object], quantity: float, price: floa
 
 
 def _entry_margin_major(entry: ProductPosition) -> float:
-    if entry.equity_occupied is None:
+    if entry.margin_reserved is None:
         return 0.0
-    return float(entry.equity_occupied.to_major())
+    return float(entry.margin_reserved.to_major())
 
 
 def _weighted_average_cost(prior_quantity: float, prior_cost: float, quantity: float, price: float) -> float:

@@ -88,7 +88,7 @@ def test_initialize_ledgers_builds_correct_shape_per_method():
     entry1 = account.ledger_for_strategy(s1).get(LedgerModule.positions)[p1]
     assert entry1.average_cost == 0.0
     assert entry1.lots is None
-    assert entry1.equity_occupied.to_major() == 0.0
+    assert entry1.margin_reserved is None
 
     entry2 = account.ledger_for_strategy(s2).get(LedgerModule.positions)[p2]
     assert entry2.average_cost is None
@@ -316,7 +316,7 @@ def test_equity_uses_margin_and_floating_pnl_when_margin_is_tracked():
         p: ProductPosition(
             quantity=10.0,
             average_cost=100.0,
-            equity_occupied=DataMoney.from_major(
+            margin_reserved=DataMoney.from_major(
                 1_000.0, currency="CNY", use_minor_units=False),
         )
     })
@@ -442,8 +442,42 @@ def test_margin_recalculation_uses_remaining_position_side_not_order_side():
 
     entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
     assert entry.quantity == pytest.approx(6.0)
-    assert entry.equity_occupied.to_major() == pytest.approx(6.0 * 110.0 * 0.10)
+    assert entry.margin_reserved.to_major() == pytest.approx(6.0 * 110.0 * 0.10)
     assert account.ledger_for_strategy(s).get(LedgerModule.cash).to_major() == pytest.approx(999_974.0)
+
+
+def test_auto_margin_mode_cash_accounts_products_without_margin_rules():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(
+        s,
+        engine_mode="custom",
+        accounting_mode="Custom",
+        margin_mode="auto",
+    )
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ts = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=ts, quantity=10.0, intent_quantity=10.0, strategy=s)
+    order_ctx = FlowContext(
+        timestamp=ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, ts, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 100.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {p: {}})
+
+    _basic_cash_update(account, order_ctx)
+
+    ledger = account.ledger_for_strategy(s)
+    entry = ledger.get(LedgerModule.positions)[p]
+    assert entry.quantity == pytest.approx(10.0)
+    assert entry.margin_reserved is None
+    assert ledger.get(LedgerModule.cash).to_major() == pytest.approx(999_000.0)
 
 
 def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():

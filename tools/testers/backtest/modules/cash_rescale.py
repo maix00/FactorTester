@@ -250,7 +250,7 @@ def _clone_positions_for_cash_check(positions: dict) -> dict:
                 )
                 for lot in lots
             ) if lots is not None else None,
-            equity_occupied=getattr(entry, "equity_occupied", None),
+            margin_reserved=getattr(entry, "margin_reserved", None),
             settlement_price=getattr(entry, "settlement_price", None),
         )
     return cloned

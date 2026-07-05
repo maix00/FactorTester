@@ -47,7 +47,7 @@ def test_margin_curve_is_none_when_never_tracked():
     s = Strategy(alias="S")
     p = _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=5.0)})  # equity_occupied=None
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=5.0)})  # margin_reserved=None
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -59,12 +59,12 @@ def test_margin_curve_is_none_when_never_tracked():
     assert margin_curve_for(account, s) is None
 
 
-def test_margin_curve_present_when_equity_occupied_is_tracked():
+def test_margin_curve_present_when_margin_reserved_is_tracked():
     s = Strategy(alias="S")
     p = _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
     ledger.set(LedgerModule.positions, {
-        p: ProductPosition(quantity=5.0, equity_occupied=DataMoney.from_major(
+        p: ProductPosition(quantity=5.0, margin_reserved=DataMoney.from_major(
             50.0, currency="CNY", use_minor_units=False)),
     })
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})

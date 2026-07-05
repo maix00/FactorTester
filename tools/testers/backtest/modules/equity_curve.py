@@ -11,10 +11,9 @@ same per-event buffer.
 Recorded per (strategy, timestamp): `equity` (float), `positions` (dict
 str(Product) -> quantity, zero positions omitted), `notional` (dict
 str(Product) -> quantity*price), and `margin` (dict str(Product) ->
-equity_occupied, present only for products where TradingRuleModule has
-actually been tracking it -- omitted entirely for a strategy that never
-populates `equity_occupied`, matching the old "margin_curve is None unless
-margin is tracked" contract).
+    margin_reserved, present only for products where margin accounting has
+    actually reserved cash -- omitted entirely for a strategy that never
+    tracks margin.
 """
 
 from __future__ import annotations
@@ -102,8 +101,8 @@ def _snapshot_strategy_state(state, strategy, prices: dict, historical_fields: d
         price = prices.get(product)
         if price is not None:
             notional[name] = contract_notional(price, entry.quantity, historical_fields, product)
-        if entry.equity_occupied is not None:
-            margin[name] = entry.equity_occupied.to_major()
+        if entry.margin_reserved is not None:
+            margin[name] = entry.margin_reserved.to_major()
     if not positions and not notional and not margin:
         return None
     record: dict = {"positions": positions, "notional": notional}
