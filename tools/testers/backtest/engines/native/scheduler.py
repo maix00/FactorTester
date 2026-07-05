@@ -222,6 +222,8 @@ class FlowContext:
         # the same timestamp) -- always a list, never collapsed to one.
         self._drafts_by_strategy: dict["Strategy", list[EventDraft]] = drafts_by_strategy or {}
         self._drafts_by_ledger: dict["Ledger", list[EventDraft]] = drafts_by_ledger or {}
+        self._payloads_by_strategy_cache: dict["Strategy", list[Any]] = {}
+        self._payloads_by_ledger_cache: dict["Ledger", list[Any]] = {}
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
         self._values_by_strategy: dict["FieldRef", dict["Strategy", Any]] = {}
@@ -321,7 +323,11 @@ class FlowContext:
         have several simultaneous ORDER events at one timestamp (one per
         product being rebalanced) -- all of them must be processed, not
         just the last one."""
-        return [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
+        cached = self._payloads_by_strategy_cache.get(strategy)
+        if cached is None:
+            cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
+            self._payloads_by_strategy_cache[strategy] = cached
+        return cached
 
     def payloads_for_ledger(self, ledger: "Ledger") -> list[Any]:
         """All payloads for this ledger in this dispatch batch.
@@ -332,7 +338,12 @@ class FlowContext:
         """
         from .ledger import ledger_identity
 
-        return [draft.payload for draft in self._drafts_by_ledger.get(ledger_identity(ledger), ())]
+        ledger_key = ledger_identity(ledger)
+        cached = self._payloads_by_ledger_cache.get(ledger_key)
+        if cached is None:
+            cached = [draft.payload for draft in self._drafts_by_ledger.get(ledger_key, ())]
+            self._payloads_by_ledger_cache[ledger_key] = cached
+        return cached
 
     def draft_for(self, strategy: "Strategy") -> EventDraft:
         drafts = self._drafts_by_strategy[strategy]
@@ -366,6 +377,10 @@ class EventQueue:
 
     def push_events(self, drafts: list[EventDraft]) -> None:
         if not drafts:
+            return
+        if len(drafts) < 64 or len(drafts) * 4 < len(self._heap):
+            for draft in drafts:
+                heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
             return
         self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
         heapq.heapify(self._heap)
