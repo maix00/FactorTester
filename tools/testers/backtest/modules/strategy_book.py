@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
@@ -89,6 +89,7 @@ class StrategyBookModule(ExecutableModule):
 class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
+    cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
     order_ledger_router: Callable[[object, object], str | Ledger] | None = None
     available_cash_resolver: Callable[[object, object, float, str], float] | None = None
     merge_trade_decisions: Callable[[object, object], object] = lambda decisions, ctx: decisions
@@ -100,6 +101,7 @@ class StrategyBookStore:
         ledger_ids: Sequence[str],
         *,
         default_ledger_id: str,
+        cash_pool_ids_by_ledger: Mapping[str, str] | None = None,
     ) -> None:
         allowed = {ledger_identity(str(ledger_id)) for ledger_id in ledger_ids}
         if not allowed:
@@ -112,6 +114,9 @@ class StrategyBookStore:
             )
         self.ledgers_by_strategy[strategy] = allowed
         self._default_ledger_by_strategy[strategy] = default
+        pool_mapping = cash_pool_ids_by_ledger or {}
+        for ledger in allowed:
+            self.cash_pool_by_ledger.setdefault(ledger, str(pool_mapping.get(ledger.name) or ledger.name))
 
     def ledgers_for_strategy(self, state: object, strategy: object) -> set[Ledger]:
         return self.ledgers_by_strategy.get(strategy, {ledger_identity(f"private:{_strategy_alias(strategy)}")})
@@ -137,6 +142,18 @@ class StrategyBookStore:
             )
         return ledger
 
+    def cash_pool_for_ledger(self, ledger: str | Ledger) -> str:
+        ledger_key = ledger_identity(ledger)
+        return str(self.cash_pool_by_ledger.get(ledger_key) or ledger_key.name)
+
+    def ledgers_for_cash_pool(self, cash_pool_id: str) -> set[Ledger]:
+        target = str(cash_pool_id)
+        return {
+            ledger
+            for ledger, pool_id in self.cash_pool_by_ledger.items()
+            if str(pool_id) == target
+        }
+
 
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
@@ -158,7 +175,16 @@ def materialize_strategy_book_store(state: object, strategy_book: object, strate
         if not ledger_ids:
             ledger_ids = (f"private:{alias}",)
         default = str(_book_default_ledger_id_for_alias(book, alias, ledger_ids[0]))
-        store.register_strategy_ledgers(strategy, ledger_ids, default_ledger_id=default)
+        cash_pool_ids = {
+            ledger_id: _book_cash_pool_id_for_ledger(book, ledger_id)
+            for ledger_id in ledger_ids
+        }
+        store.register_strategy_ledgers(
+            strategy,
+            ledger_ids,
+            default_ledger_id=default,
+            cash_pool_ids_by_ledger=cash_pool_ids,
+        )
     return store
 
 
@@ -175,6 +201,11 @@ def _book_default_ledger_id_for_alias(book: object, alias: str, fallback: str) -
     return str(mapping.get(str(alias), fallback))
 
 
+def _book_cash_pool_id_for_ledger(book: object, ledger_id: str) -> str:
+    mapping = getattr(book, "cash_pool_id_by_ledger", {})
+    return str(mapping.get(str(ledger_id), ledger_id))
+
+
 @dataclass(frozen=True)
 class StrategyBook:
     """Declarative strategy-to-ledger topology.
@@ -189,6 +220,7 @@ class StrategyBook:
 
     strategy_ledger_ids_by_alias: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     default_ledger_id_by_alias: Mapping[str, str] = field(default_factory=dict)
+    cash_pool_id_by_ledger: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "StrategyBook":
@@ -199,6 +231,10 @@ class StrategyBook:
             raise ValueError("StrategyBook.from_dict requires a mapping at 'strategies'")
         ledger_ids_by_alias: dict[str, tuple[str, ...]] = {}
         default_by_alias: dict[str, str] = {}
+        cash_pool_by_ledger = {
+            str(ledger_id): str(pool_id)
+            for ledger_id, pool_id in _cash_pool_mapping_from_payload(payload).items()
+        }
         for alias, raw in strategies.items():
             alias_text = str(alias)
             ledger_ids: tuple[str, ...]
@@ -223,6 +259,7 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias=ledger_ids_by_alias,
             default_ledger_id_by_alias=default_by_alias,
+            cash_pool_id_by_ledger=cash_pool_by_ledger,
         )
 
     @classmethod
@@ -241,6 +278,7 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias={alias: (ledger_id,) for alias, ledger_id in resolved.items()},
             default_ledger_id_by_alias=resolved,
+            cash_pool_id_by_ledger={ledger_id: ledger_id for ledger_id in resolved.values()},
         )
 
     def ledger_ids_for_strategy(self, state: object, strategy: object) -> tuple[str, ...]:
@@ -302,7 +340,12 @@ def assign_ledger_for_strategy(
     store = strategy_book_store_for(state)
     if strategy not in store.ledgers_by_strategy:
         default = f"private:{_strategy_alias(strategy)}"
-        store.register_strategy_ledgers(strategy, (default,), default_ledger_id=default)
+        store.register_strategy_ledgers(
+            strategy,
+            (default,),
+            default_ledger_id=default,
+            cash_pool_ids_by_ledger={default: default},
+        )
     if order is None:
         return store.default_ledger_for_strategy(state, strategy)
     return store.ledger_for_order(state, order)
@@ -321,3 +364,31 @@ def available_cash_for_ledger(state: object, ledger_state: object, cash_major: f
     fixed = max(0.0, float(getattr(ledger_config, "cash_reserve_major", None) or 0.0))
     reserve = cash_major * ratio + fixed
     return max(0.0, cash_major - reserve)
+
+
+def cash_pool_id_for_ledger(state: object, ledger: str | Ledger | object) -> str:
+    ledger_key = _ledger_identity_from_any(ledger)
+    return strategy_book_store_for(state).cash_pool_for_ledger(ledger_key)
+
+
+def ledgers_for_cash_pool(state: object, ledger: str | Ledger | object) -> set[Ledger]:
+    store = strategy_book_store_for(state)
+    pool_id = cash_pool_id_for_ledger(state, ledger)
+    ledgers = store.ledgers_for_cash_pool(pool_id)
+    if ledgers:
+        return ledgers
+    return {_ledger_identity_from_any(ledger)}
+
+
+def _ledger_identity_from_any(ledger: str | Ledger | object) -> Ledger:
+    value = getattr(ledger, "ledger", ledger)
+    return ledger_identity(cast(str | Ledger, value))
+
+
+def _cash_pool_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, str]:
+    raw = payload.get("cash_pools", payload.get("cash_pool_id_by_ledger", {}))
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pools must map ledger_id to cash_pool_id")
+    return {str(ledger_id): str(pool_id) for ledger_id, pool_id in raw.items()}

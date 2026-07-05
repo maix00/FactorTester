@@ -21,6 +21,7 @@ from tools.data.modules.registry import ModuleRegistry
 from .base import ExecutableModule
 from .engine import EngineModule
 from .strategy_book import StrategyBookModule
+from .cash_pool import CashPoolModule
 from .run_window import RunWindowModule
 from .fee import FeeModule
 from .slippage import SlippageModule
@@ -57,6 +58,7 @@ from .risk_metrics import RiskMetricsModule
 _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     EngineModule,
     StrategyBookModule,
+    CashPoolModule,
     RunWindowModule,
     LedgerModule,
     OrderBookModule,

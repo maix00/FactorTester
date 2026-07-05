@@ -24,6 +24,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.cash_pool import CashPoolModule, cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _resolve_daily_mark_to_market_enabled, _resolve_daily_mark_to_market_enabled_for_ledger,
@@ -70,6 +71,15 @@ def _ledger_config(**values) -> LedgerConfig:
         cash_reserve_ratio=values.get("cash_reserve_ratio"),
         cash_reserve_major=values.get("cash_reserve_major"),
     )
+
+
+def _set_cash(state: BacktestRunState, ledger: LedgerState, amount: float) -> None:
+    set_cash_for_ledger_pool(state, ledger, DataMoney.from_major(
+        amount, currency="CNY", use_minor_units=False))
+
+
+def _cash_major(state: BacktestRunState, ledger: LedgerState) -> float:
+    return cash_for_ledger(state, ledger).to_major()
 
 
 def test_resolve_method_basic_is_always_weight_average():
@@ -407,8 +417,8 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
             )
         },
     )
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     queue = EventQueue()
     ctx = FlowContext(
@@ -431,7 +441,7 @@ def test_daily_mark_to_market_updates_cash_margin_and_settlement_basis():
 
     _apply_daily_mark_to_market(account, ctx)
 
-    updated_cash = ledger.get(_cash_ref())
+    updated_cash = cash_for_ledger(account, ledger)
     updated_position = ledger.get(_positions_ref())[product]
     # DMTM settles variation PnL only: 2 * (12 - 10) * 10 = 40.
     # Margin requirement changes are handled by MarginModule notice flows.
@@ -464,8 +474,8 @@ def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_
             margin_reserved=DataMoney.from_major(2.0, currency="CNY", use_minor_units=False),
         )
     })
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -483,7 +493,7 @@ def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_
 
     _apply_daily_mark_to_market(account, ctx)
 
-    updated_cash = ledger.get(_cash_ref())
+    updated_cash = cash_for_ledger(account, ledger)
     updated_position = ledger.get(_positions_ref())[product]
     # Short PnL = -2 * (12 - 10) * 10 = -40. Margin requirement changes
     # are handled by MarginModule notice flows, not DMTM.
@@ -509,7 +519,6 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
     )
     ledger_key = ledger_identity("shared-book")
     ledger = LedgerState(strategy=s1, base_currency="CNY", ledger=ledger_key)
-    ledger.set(_cash_ref(), DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=1.0,
@@ -519,6 +528,7 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
         )
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2}, ledgers={ledger_key: ledger})
+    _set_cash(account, ledger, 100.0)
     account.ledger_configs[ledger_key] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -548,7 +558,7 @@ def test_daily_mark_to_market_shared_ledger_settles_once_per_ledger():
 
     # One settlement: pnl +2.0. If this were still strategy-scoped, the shared
     # ledger would be settled twice.
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(102.0)
+    assert _cash_major(account, ledger) == pytest.approx(102.0)
     entry = ledger.get(_positions_ref())[product]
     assert entry.margin_reserved.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
@@ -577,7 +587,6 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
     })
     ledger = ledger_identity("shared-book")
     shared = LedgerState(strategy=s1, base_currency="CNY", ledger=ledger)
-    shared.set(_cash_ref(), DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
     shared.set(_positions_ref(), {
         product: ProductPosition(
             quantity=1.0,
@@ -587,6 +596,7 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
         )
     })
     account.ledgers = {ledger: shared}
+    _set_cash(account, shared, 100.0)
     account.ledger_configs[ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     store = strategy_book_store_for(account)
     store.register_strategy_ledgers(s1, (ledger.name,), default_ledger_id=ledger.name)
@@ -635,7 +645,7 @@ def test_ledger_dispatch_loads_market_data_and_settles_ledger_once():
     # MarketData lookup flows must have fed the ledger-scoped DMTM flow. The
     # shared ledger is attached to two strategies, but the notice itself is a
     # ledger event, so settlement happens once: +2 PnL.
-    assert shared.get(_cash_ref()).to_major() == pytest.approx(102.0)
+    assert _cash_major(account, shared) == pytest.approx(102.0)
     entry = shared.get(_positions_ref())[product]
     assert entry.margin_reserved.to_major() == pytest.approx(1.0)
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 12.0, False)]
@@ -661,7 +671,6 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
     })
     ledger_key = ledger_identity("risk-book")
     ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger=ledger_key)
-    ledger.set(_cash_ref(), DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -670,6 +679,7 @@ def test_margin_check_dispatch_enters_trade_intent_before_order():
         )
     })
     account.ledgers = {ledger_key: ledger}
+    _set_cash(account, ledger, 10.0)
     account.ledger_configs[ledger_key] = _ledger_config(
         margin_mode="auto",
         margin_call_mode="liquidate",
@@ -764,8 +774,8 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
             )
         },
     )
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -786,7 +796,7 @@ def test_daily_mark_to_market_uses_blended_intraday_basis_after_same_day_add():
 
     _apply_daily_mark_to_market(account, ctx)
 
-    updated_cash = ledger.get(_cash_ref())
+    updated_cash = cash_for_ledger(account, ledger)
     updated_position = ledger.get(_positions_ref())[product]
     # Correct PnL: old lot (18-20) + new lot (18-10) = +6, equivalent to
     # 2 * (18 - blended_basis 15). The stale settlement tag alone would
@@ -812,7 +822,6 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
         },
     )
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=1.0,
@@ -822,6 +831,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto", margin_mode="auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
@@ -845,7 +855,7 @@ def test_daily_mark_to_market_prefers_lot_basis_even_when_equal_to_current_settl
 
     # PnL is zero because the open lot's basis is already 18. The historical
     # PreSettlementPrice belongs to old inventory and must not override lots.
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(1000.0)
+    assert _cash_major(account, ledger) == pytest.approx(1000.0)
     entry = ledger.get(_positions_ref())[product]
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(1.0, 18.0, False)]
 
@@ -854,7 +864,6 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     product = _product()
     strategy = Strategy(alias="S")
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -866,6 +875,7 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
         strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
         ledgers={f"private:{strategy.alias}": ledger},
     )
+    _set_cash(state, ledger, 10.0)
     state.ledger_configs[ledger.ledger] = LedgerConfig(margin_mode="auto", margin_call_mode="liquidate")
     event_time = pd.Timestamp("2026-03-10 15:00:00.000000002", tz="Asia/Shanghai")
     queue = EventQueue()
@@ -893,7 +903,7 @@ def test_margin_requirement_change_never_makes_cash_negative_and_emits_liquidati
     _apply_margin_requirement_change(state, ctx)
 
     entry = ledger.get(_positions_ref())[product]
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(0.0)
+    assert _cash_major(state, ledger) == pytest.approx(0.0)
     assert entry.margin_reserved.to_major() == pytest.approx(12.0)
     assert ledger.get(MarginModule.margin_requirement) == pytest.approx(24.0)
     assert ledger.get(MarginModule.margin_deficit) == pytest.approx(12.0)
@@ -905,7 +915,6 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
     product = _product()
     strategy = Strategy(alias="S")
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -917,6 +926,7 @@ def test_margin_liquidation_trade_intent_generates_order_only_in_trade_intent_la
         strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
         ledgers={f"private:{strategy.alias}": ledger},
     )
+    _set_cash(state, ledger, 0.0)
     state.ledger_configs[ledger.ledger] = LedgerConfig(
         margin_mode="auto",
         margin_call_mode="liquidate",
@@ -954,7 +964,6 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
     product = _product()
     strategy = Strategy(alias="S")
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(30.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -966,6 +975,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
         strategy_configs={strategy: StrategyConfig(strategy=strategy, field_values={EngineModule.engine_mode: "auto"})},
         ledgers={f"private:{strategy.alias}": ledger},
     )
+    _set_cash(state, ledger, 30.0)
     state.ledger_configs[ledger.ledger] = LedgerConfig(
         margin_mode="auto",
         margin_call_mode="warn",
@@ -996,7 +1006,7 @@ def test_margin_requirement_respects_strategy_book_cash_reserve_ratio():
     _apply_margin_requirement_change(state, ctx)
 
     entry = ledger.get(_positions_ref())[product]
-    assert ledger.get(_cash_ref()).to_major() == pytest.approx(15.0)
+    assert _cash_major(state, ledger) == pytest.approx(15.0)
     assert entry.margin_reserved.to_major() == pytest.approx(17.0)
     assert ledger.get(MarginModule.margin_deficit) == pytest.approx(7.0)
 
@@ -1017,7 +1027,6 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
         },
     )
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=2.0,
@@ -1030,6 +1039,7 @@ def test_daily_mark_to_market_settlement_keeps_today_marker_absent_when_fee_mode
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(
         accounting_mode="Custom",
         cost_basis_method="FIFO",
@@ -1278,7 +1288,6 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
         },
     )
     ledger = LedgerState(strategy=strategy, base_currency="CNY")
-    ledger.set(_cash_ref(), DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     ledger.set(_positions_ref(), {
         product: ProductPosition(
             quantity=3.0,
@@ -1290,6 +1299,7 @@ def test_daily_mark_to_market_equity_flow_includes_intraday_floating_pnl():
         )
     })
     account = BacktestRunState(strategy_configs={strategy: config}, ledgers={f"private:{strategy.alias}": ledger})
+    _set_cash(account, ledger, 1000.0)
     account.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto")
     ctx = FlowContext(
         timestamp=pd.Timestamp("2026-03-10 10:00:00", tz="Asia/Shanghai"),
@@ -1344,5 +1354,4 @@ def _positions_ref():
 
 
 def _cash_ref():
-    from tools.testers.backtest.modules.ledger_module import LedgerModule
-    return LedgerModule.cash
+    return CashPoolModule.cash

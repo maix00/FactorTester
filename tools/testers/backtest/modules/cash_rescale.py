@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 from tools.testers.backtest.modules.order_book import OrderBookModule
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
+from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
 
@@ -83,7 +84,7 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
             for _strategy, orders, historical_fields in entries
             for o in orders if o.quantity < 0
         )
-        raw_cash = ledger.get(LedgerModule.cash).to_major()
+        raw_cash = cash_for_ledger(state, ledger).to_major()
         available = available_cash_for_ledger(state, ledger, raw_cash, reason="signal_order") + sell_proceeds
         if buy_cost <= available:
             continue
@@ -135,7 +136,7 @@ def constrain_order_batch_to_execution_cash(state, ctx) -> None:
             group[1].append((strategy, [order], historical_fields))
 
     for ledger, entries in groups.values():
-        cash = ledger.get(LedgerModule.cash)
+        cash = cash_for_ledger(state, ledger)
         if cash is None:
             raise KeyError(f"ledger {getattr(ledger, 'ledger_id', ledger)!r} has no cash field")
         available = available_cash_for_ledger(state, ledger, float(cash.to_major()), reason="execution_order")

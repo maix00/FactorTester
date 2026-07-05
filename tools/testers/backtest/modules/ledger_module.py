@@ -26,7 +26,9 @@ from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.strategy_book import (
     StrategyBookModule,
     assign_ledger_for_strategy,
+    cash_pool_id_for_ledger,
 )
+from tools.testers.backtest.modules.cash_pool import CashPoolModule, cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
     _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled_for_ledger,
@@ -38,28 +40,14 @@ class LedgerModule(ExecutableModule):
         # SettingModule("portfolio_capital", "组合资金", ...) -- same concept
     label: ClassVar[str] = "账本"
 
-    cash: ClassVar[FieldRef[Any]] = FieldRef("cash")
+    cash: ClassVar[FieldRef[Any]] = CashPoolModule.cash
     positions: ClassVar[FieldRef[Any]] = FieldRef("positions")
     equity: ClassVar[FieldRef[float]] = FieldRef("equity")
-    initial_capital_major: ClassVar[FieldRef[float]] = FieldRef("initial_capital_major")
-    base_currency: ClassVar[FieldRef[str]] = FieldRef("base_currency")
-    currency_conversion_fee_rate: ClassVar[FieldRef[float]] = FieldRef("currency_conversion_fee_rate")
+    initial_capital_major: ClassVar[FieldRef[float]] = CashPoolModule.initial_capital_major
+    base_currency: ClassVar[FieldRef[str]] = CashPoolModule.base_currency
+    currency_conversion_fee_rate: ClassVar[FieldRef[float]] = CashPoolModule.currency_conversion_fee_rate
 
-    fields: ClassVar[dict[str, FieldDefinition]] = {
-        "initial_capital_major": FieldDefinition(
-            public=True, label="初始资金", control_template="number", default=100_000_000.0, tab="capital",
-            chip_template="初始资金: {value}", tab_label="资金", tab_order=50,
-        ),
-        "base_currency": FieldDefinition(
-            public=True, label="币种", control_template="select", default="CNY", tab="capital",
-            chip_template="币种: {value}", tab_label="资金", tab_order=50,
-        ),
-        "currency_conversion_fee_rate": FieldDefinition(
-            public=True, label="换汇费率", control_template="number", default=0.0, tab="capital",
-            minimum=0.0, step=0.000001,
-            chip_template="换汇费率: {value}", tab_label="资金", tab_order=50,
-        ),
-    }
+    fields: ClassVar[dict[str, FieldDefinition]] = {}
 
     initialize_ledgers: ClassVar[Flow] = Flow(
         "initialize_ledgers",
@@ -109,25 +97,23 @@ def _initialize_ledgers(state, ctx) -> None:
         # read the resolved field, don't re-decide the policy here.
         use_minor_units = bool(strategy_config.get(MinorUnitModule.use_minor_units, True))
         ledger = state.ledgers.get(ledger_key)
-        existing_cash = ledger.get(LedgerModule.cash) if ledger is not None else None
         if ledger is None:
             ledger = LedgerState(strategy=strategy, base_currency=base_currency, ledger_id=ledger_id)
-            ledger.set(LedgerModule.cash, DataMoney.from_major(
-                initial_capital, currency=base_currency, use_minor_units=use_minor_units))
-        elif existing_cash is None:
-            ledger.base_currency = base_currency
-            ledger.set(LedgerModule.cash, DataMoney.from_major(
+        existing_cash = cash_for_ledger(state, ledger)
+        if existing_cash is None:
+            set_cash_for_ledger_pool(state, ledger, DataMoney.from_major(
                 initial_capital, currency=base_currency, use_minor_units=use_minor_units))
         else:
-            # A CustomBroker ledger_id shared by an earlier strategy in this
-            # same loop -- it's one pool of money, funded once. A second
-            # strategy joining it must describe the same pool, not silently
-            # overwrite it with its own initial_capital/currency (that was
-            # the previous behavior: last strategy processed always won).
-            _require_matching_shared_ledger_config(
+            # Ledgers in the same StrategyBook cash pool share one cash object.
+            # They must therefore agree on currency and minor-unit policy; any
+            # cross-currency movement must be represented by explicit FX events,
+            # not by silently sharing a cash pool.
+            _require_matching_cash_pool_config(
                 ledger, strategy, ledger_id,
+                existing_cash=existing_cash,
                 base_currency=base_currency, initial_capital=initial_capital,
                 use_minor_units=use_minor_units,
+                cash_pool_id=cash_pool_id_for_ledger(state, ledger),
             )
 
         use_int = _resolve_use_int_position(strategy_config, ledger_config)
@@ -156,30 +142,38 @@ def _initialize_ledgers(state, ctx) -> None:
         state.ledgers[ledger_key] = ledger
 
 
-def _require_matching_shared_ledger_config(
-    ledger, strategy, ledger_id: str, *, base_currency: str, initial_capital: float, use_minor_units: bool,
+def _require_matching_cash_pool_config(
+    ledger,
+    strategy,
+    ledger_id: str,
+    *,
+    existing_cash,
+    base_currency: str,
+    initial_capital: float,
+    use_minor_units: bool,
+    cash_pool_id: str,
 ) -> None:
-    if ledger.base_currency != base_currency:
+    existing_currency = getattr(existing_cash, "currency", ledger.base_currency)
+    if existing_currency != base_currency:
         raise ValueError(
             f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"with base_currency={base_currency!r}, but that ledger was already established "
-            f"with base_currency={ledger.base_currency!r} -- a shared ledger is one pool of "
-            f"money in one currency; give this strategy its own ledger_id instead of joining "
-            f"one whose currency doesn't match."
+            f"in cash_pool {cash_pool_id!r} with base_currency={base_currency!r}, but that cash pool was already established "
+            f"with base_currency={existing_currency!r} -- a shared cash pool is one pool of "
+            f"money in one currency; route cross-currency movement through FX trade events "
+            f"instead of sharing one cash pool."
         )
-    existing_cash = ledger.get(LedgerModule.cash)
     if existing_cash.use_minor_units != use_minor_units:
         raise ValueError(
             f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"with use_minor_units={use_minor_units}, but that ledger was already established "
+            f"in cash_pool {cash_pool_id!r} with use_minor_units={use_minor_units}, but that cash pool was already established "
             f"with use_minor_units={existing_cash.use_minor_units} -- give this strategy its own "
-            f"ledger_id instead of joining one with a different minor-unit policy."
+            f"cash pool instead of joining one with a different minor-unit policy."
         )
     if abs(existing_cash.to_major() - initial_capital) > 1e-6:
         raise ValueError(
             f"strategy {getattr(strategy, 'alias', strategy)!r} shares ledger {ledger_id!r} "
-            f"with initial_capital_major={initial_capital!r}, but that ledger was already funded "
-            f"with {existing_cash.to_major()!r} -- a shared ledger is funded once; every strategy "
+            f"in cash_pool {cash_pool_id!r} with initial_capital_major={initial_capital!r}, but that cash pool was already funded "
+            f"with {existing_cash.to_major()!r} -- a cash pool is funded once; every strategy "
             f"joining it must declare the same initial_capital_major (it is not summed or "
             f"overwritten per strategy)."
         )
@@ -198,7 +192,7 @@ def _basic_equity(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy)
-        cash = ledger.get(LedgerModule.cash)
+        cash = cash_for_ledger(state, ledger)
         positions = ledger.get(LedgerModule.positions, {})
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
@@ -257,7 +251,7 @@ def _basic_cash_update(state, ctx) -> None:
             ledger = state.ledger_for(order)
             ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
-            cash = ledger.get(LedgerModule.cash)
+            cash = cash_for_ledger(state, ledger)
             price = order.get("effective_price", prices[order.instrument])
             fee_cost = order.get("fee_cost", 0.0)
             cash_before = cash.to_major()
@@ -302,7 +296,7 @@ def _basic_cash_update(state, ctx) -> None:
                 },
             )
             ledger.set(LedgerModule.positions, positions)
-            ledger.set(LedgerModule.cash, cash)
+            set_cash_for_ledger_pool(state, ledger, cash)
             _sync_ledger_margin_reserved(ledger, positions)
 
 

@@ -299,13 +299,14 @@ def _has_contract_multiplier(fields: dict[str, object]) -> bool:
 
 def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
     from tools.testers.backtest.modules.strategy_book import available_cash_for_ledger
 
     for ledger, payload in _ledger_payloads(state, ctx, kind="margin_check"):
         ledger_config = state.ledger_config_for(ledger)
         if _resolve_margin_call_mode_from_ledger_config(ledger_config) == "off":
             continue
-        cash = ledger.get(LedgerModule.cash)
+        cash = cash_for_ledger(state, ledger)
         if cash is None:
             raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for margin requirement check")
         positions = ledger.get(LedgerModule.positions, {})
@@ -365,7 +366,7 @@ def _apply_margin_requirement_change(state: Any, ctx: Any) -> None:
                     use_minor_units=cash.use_minor_units,
                 )
             deficit = 0.0
-        ledger.set(LedgerModule.cash, cash)
+        set_cash_for_ledger_pool(state, ledger, cash)
         ledger.set(LedgerModule.positions, positions)
         ledger.set(MarginModule.margin_requirement, total_required)
         reserved_after = _current_margin_reserved(positions)

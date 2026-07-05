@@ -510,13 +510,14 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
         historical_fields_for_product,
         contract_multiplier_from_fields,
     )
+    from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
     settlement_prices = snapshot.get("settlement") or snapshot.get("close") or {}
     close_prices = snapshot.get("close", {})
     for ledger in _ledger_targets(state, ctx):
         ledger_config = state.ledger_config_for(ledger)
-        cash = ledger.get(TradingRuleModule._ledger_cash_ref)
+        cash = cash_for_ledger(state, ledger)
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
         historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
         for product, entry in positions.items():
@@ -565,7 +566,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 multiplier,
                 track_today=_resolve_fee_mode_from_ledger_config(ledger_config) in {"auto", "custom", "exact"},
             )
-        ledger.set(TradingRuleModule._ledger_cash_ref, cash)
+        set_cash_for_ledger_pool(state, ledger, cash)
         ledger.set(TradingRuleModule._ledger_positions_ref, positions)
 
 

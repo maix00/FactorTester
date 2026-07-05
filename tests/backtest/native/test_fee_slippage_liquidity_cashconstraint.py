@@ -21,6 +21,7 @@ from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash, constrain_order_batch_to_execution_cash
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule, _apply_fee, _resolve_fee_mode
@@ -50,9 +51,18 @@ def _account_with_ledger(strategy: Strategy, config: StrategyConfig) -> Backtest
         cost_basis_method=config.get(TradingRuleModule.cost_basis_method),
     )
     ledger = account.ledger_for_strategy(strategy)
-    ledger.set(LedgerModule.cash, DataMoney.from_major(1_000_000.0, currency="CNY", use_minor_units=False))
+    set_cash_for_ledger_pool(account, ledger, DataMoney.from_major(1_000_000.0, currency="CNY", use_minor_units=False))
     ledger.set(LedgerModule.positions, {})
     return account
+
+
+def _set_cash(account: BacktestRunState, ledger: LedgerState, amount: float) -> None:
+    set_cash_for_ledger_pool(account, ledger, DataMoney.from_major(
+        amount, currency="CNY", use_minor_units=False))
+
+
+def _cash_major(account: BacktestRunState, ledger: LedgerState) -> float:
+    return cash_for_ledger(account, ledger).to_major()
 
 
 def test_fee_mode_zero_means_no_fee():
@@ -439,8 +449,8 @@ def test_cash_constraint_haircuts_buy_orders_proportionally():
     s = Strategy(alias="S")
     p1, p2 = _product(), _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    ledger.set(LedgerModule.cash, DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    _set_cash(account, ledger, 100.0)
 
     buy1 = Order(instrument=p1, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
     buy2 = Order(instrument=p2, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -457,8 +467,8 @@ def test_cash_constraint_does_not_touch_sell_orders():
     s = Strategy(alias="S")
     p = _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    ledger.set(LedgerModule.cash, DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    _set_cash(account, ledger, 0.0)
 
     sell = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
@@ -473,8 +483,8 @@ def test_cash_constraint_counts_same_batch_sell_proceeds_before_scaling_buys():
     s = Strategy(alias="S")
     p_sell, p_buy = _product(), _product()
     ledger = LedgerState(strategy=s, base_currency="CNY")
-    ledger.set(LedgerModule.cash, DataMoney.from_major(0.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(ledgers={f"private:{s.alias}": ledger}, strategy_configs={s: StrategyConfig(strategy=s)})
+    _set_cash(account, ledger, 0.0)
 
     sell = Order(instrument=p_sell, timestamp=pd.Timestamp("2024-01-01"), quantity=-10.0, intent_quantity=-10.0, strategy=s)
     buy = Order(instrument=p_buy, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s)
@@ -492,13 +502,13 @@ def test_cash_constraint_isolates_strategies():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
     p = _product()
     l1 = LedgerState(strategy=s1, base_currency="CNY", ledger_id="private:A")
-    l1.set(LedgerModule.cash, DataMoney.from_major(10.0, currency="CNY", use_minor_units=False))
     l2 = LedgerState(strategy=s2, base_currency="CNY", ledger_id="private:B")
-    l2.set(LedgerModule.cash, DataMoney.from_major(1000.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(
         ledgers={"private:A": l1, "private:B": l2},
         strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
     )
+    _set_cash(account, l1, 10.0)
+    _set_cash(account, l2, 1000.0)
 
     buy1 = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s1)
     buy2 = Order(instrument=p, timestamp=pd.Timestamp("2024-01-01"), quantity=10.0, intent_quantity=10.0, strategy=s2)
@@ -520,11 +530,11 @@ def test_cash_constraint_combines_buys_across_strategies_sharing_one_ledger():
     s1, s2 = Strategy(alias="A"), Strategy(alias="B")
     p = _product()
     ledger = LedgerState(strategy=s1, base_currency="CNY", ledger_id="shared-book")
-    ledger.set(LedgerModule.cash, DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
     account = BacktestRunState(
         ledgers={"shared-book": ledger},
         strategy_configs={s1: StrategyConfig(strategy=s1), s2: StrategyConfig(strategy=s2)},
     )
+    _set_cash(account, ledger, 100.0)
     strategy_book_store = strategy_book_store_for(account)
     strategy_book_store.register_strategy_ledgers(s1, ("shared-book",), default_ledger_id="shared-book")
     strategy_book_store.register_strategy_ledgers(s2, ("shared-book",), default_ledger_id="shared-book")
@@ -550,7 +560,7 @@ def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_upd
     config = StrategyConfig(strategy=s, field_values={EngineModule.engine_mode: "basic"})
     account = BacktestRunState(strategy_configs={s: config})
     ledger = account.ledger_for_strategy(s)
-    ledger.set(LedgerModule.cash, DataMoney.from_major(100.0, currency="CNY", use_minor_units=False))
+    _set_cash(account, ledger, 100.0)
     ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
     order = Order(
         instrument=p,
@@ -573,7 +583,7 @@ def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_upd
     _basic_cash_update(account, ctx)
 
     assert order.quantity == pytest.approx(0.5)
-    assert ledger.get(LedgerModule.cash).to_major() == pytest.approx(0.0)
+    assert _cash_major(account, ledger) == pytest.approx(0.0)
     assert ledger.get(LedgerModule.positions)[p].quantity == pytest.approx(0.5)
 
 
@@ -596,7 +606,7 @@ def test_order_flow_records_fee_slippage_ledger_and_final_status():
         FeeModule.fixed_fee_rate: 0.01,
     })
     account = _account_with_ledger(s, config)
-    account.ledger_for_strategy(s).set(LedgerModule.cash, DataMoney.from_major(10_000.0, currency="CNY", use_minor_units=False))
+    _set_cash(account, account.ledger_for_strategy(s), 10_000.0)
     draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-01 09:01"), s, order)
     ctx = FlowContext(
         timestamp=pd.Timestamp("2024-01-01 09:01"),

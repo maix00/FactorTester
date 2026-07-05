@@ -115,16 +115,17 @@ def _record_equity(state, ctx) -> None:
     buffer = _ensure_buffer(state)
     prices = ctx.get(MarketDataModule.current_prices, {})
     for strategy in ctx.active_strategies:
-        equity = ctx.get_for(LedgerModule.equity, strategy)
-        if equity is None:
-            continue
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
         record = _snapshot_strategy_state(state, strategy, prices, historical_fields) or {}
-        record["equity"] = equity
+        equity = ctx.get_for(LedgerModule.equity, strategy)
+        if equity is not None and _strategy_equity_curve_is_applicable(state, strategy):
+            record["equity"] = equity
+        if not record:
+            continue
         buffer.setdefault(strategy, []).append((ctx.timestamp, record))
         if state.config_for(strategy).get(EquityCurveModule.equity_compute_live, True):
             state.results.append(strategy, ctx.timestamp, **record)
@@ -145,7 +146,8 @@ def equity_curve_for(state, strategy) -> pd.Series:
         return pd.Series(dtype=float)
     index = [ts for ts, _ in history]
     values = [v.get("equity") for _, v in history]
-    return pd.Series(values, index=pd.Index(index))
+    series = pd.Series(values, index=pd.Index(index)).dropna()
+    return series.astype(float) if not series.empty else pd.Series(dtype=float)
 
 
 def returns_for(state, strategy) -> pd.Series:
@@ -167,3 +169,24 @@ def margin_curve_for(state, strategy) -> dict | None:
     if not any("margin" in v for _, v in history):
         return None
     return {ts.isoformat(): v.get("margin", {}) for ts, v in history}
+
+
+def _strategy_equity_curve_is_applicable(state, strategy) -> bool:
+    from tools.testers.backtest.modules.strategy_book import (
+        cash_pool_id_for_ledger,
+        strategy_book_store_for,
+    )
+
+    store = strategy_book_store_for(state)
+    ledgers = store.ledgers_for_strategy(state, strategy)
+    strategy_pools = {cash_pool_id_for_ledger(state, ledger) for ledger in ledgers}
+    for other in state.strategy_configs:
+        if other == strategy:
+            continue
+        other_pools = {
+            cash_pool_id_for_ledger(state, ledger)
+            for ledger in store.ledgers_for_strategy(state, other)
+        }
+        if strategy_pools & other_pools:
+            return False
+    return True
