@@ -1247,6 +1247,39 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
         assert result.exit_code == 0
         assert "LS A1/A2" in result.output
 
+        result = runner.invoke(cli, [
+            "backtest", "strategy-book", "ledger",
+            "--strategy", "A1",
+            "--ledger", "shared-main",
+            "--cash-pool", "pool-main",
+            "--default",
+        ])
+        assert result.exit_code == 0
+        assert "StrategyBook" in result.output
+        assert "A1" in result.output
+        assert "shared-main" in result.output
+
+        result = runner.invoke(cli, [
+            "backtest", "strategy-book", "cash-pool",
+            "--cash-pool", "pool-main",
+            "--initial-capital-major", "100000000",
+            "--base-currency", "CNY",
+        ])
+        assert result.exit_code == 0
+        assert "pool-main" in result.output
+
+        result = runner.invoke(cli, [
+            "backtest", "ledger-config",
+            "--ledger", "shared-main",
+            "--fee-mode", "auto",
+            "--margin-mode", "auto",
+            "--daily-mark-to-market-enabled", "true",
+            "--cash-reserve-ratio", "0.1",
+        ])
+        assert result.exit_code == 0
+        assert "已更新 ledger config: shared-main" in result.output
+        assert "daily_mark_to_market_enabled=True" in result.output
+
         result = runner.invoke(cli, ["backtest", "group", "--group-names", "A1", "A2", "--run"])
         assert result.exit_code == 0
         assert "开始运行回测: groups=2, long-short=1" in result.output
@@ -1263,6 +1296,15 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     assert {group["factor_family_alias"] for group in payload["groups"]} == {"SgCCS"}
     assert all(group["allocation_mode"] == "equal_notional" for group in payload["groups"])
     assert payload["ls_configs"][0]["name"] == "LS A1/A2"
+    assert payload["strategy_book"]["strategies"]["A1"]["ledger_ids"] == ["shared-main"]
+    assert payload["strategy_book"]["strategies"]["A1"]["default_ledger_id"] == "shared-main"
+    assert payload["strategy_book"]["cash_pools"]["shared-main"] == "pool-main"
+    assert payload["strategy_book"]["cash_pool_configs"]["pool-main"]["initial_capital_major"] == 100000000.0
+    assert payload["strategy_book"]["cash_pool_configs"]["pool-main"]["base_currency"] == "CNY"
+    assert payload["ledger_configs"]["shared-main"]["fee_mode"] == "auto"
+    assert payload["ledger_configs"]["shared-main"]["margin_mode"] == "auto"
+    assert payload["ledger_configs"]["shared-main"]["daily_mark_to_market_enabled"] is True
+    assert payload["ledger_configs"]["shared-main"]["cash_reserve_ratio"] == 0.1
 
 
 def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, monkeypatch) -> None:

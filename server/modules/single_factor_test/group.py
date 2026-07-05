@@ -3226,7 +3226,21 @@ def run_group_test_stream():
 
             # 步骤 3：建 BacktestRunState，交给页面级 FactorTester 调度 "backtest" 任务
             account = BacktestRunState()
-            apply_strategy_configs(account, resolved_settings_by_alias)
+            strategy_book_payload = payload.get("strategy_book")
+            strategy_book = None
+            if isinstance(strategy_book_payload, dict) and strategy_book_payload:
+                from tools.testers.backtest.modules.strategy_book import StrategyBook
+
+                strategy_book = StrategyBook.from_dict(strategy_book_payload)
+            ledger_configs = payload.get("ledger_configs")
+            if ledger_configs is not None and not isinstance(ledger_configs, dict):
+                raise ValueError("ledger_configs 必须是对象")
+            apply_strategy_configs(
+                account,
+                resolved_settings_by_alias,
+                strategy_book=strategy_book,
+                ledger_configs=ledger_configs,
+            )
 
             all_products: list = []
             seen_products: set = set()

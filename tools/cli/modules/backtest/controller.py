@@ -83,6 +83,8 @@ def backtest(
       factortester backtest group --group-name A1 --derive --group-name A1a --product-path ...
       factortester backtest group --group-name A1 --copy --group-name A1-copy
       factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
+      factortester backtest strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main
+      factortester backtest ledger-config --ledger shared --fee-mode auto --margin-mode auto
       factortester backtest template --from-module-template single_factor_test load "2026-06-02 07:20:47"
       factortester backtest template save "CLI 草稿"
       factortester backtest clear
@@ -166,6 +168,66 @@ def local_settings(ctx: click.Context) -> None:
     print_backtest_welcome(state)
 
 
+@backtest.command("strategy-book", context_settings=SELECTOR_HELP_CONTEXT)
+@click.pass_context
+@friendly_errors
+def strategy_book(ctx: click.Context) -> None:
+    """配置 strategy -> ledger -> cash pool 拓扑。"""
+    state = load_state()
+    switch_backtest_space(state, BACKTEST_SPACE)
+    args = tuple(ctx.args)
+    if not args or args[0] in {"show", "list", "ls"}:
+        _print_strategy_book(state)
+        return
+    if args[0] in {"help", "--help", "-h"}:
+        _print_strategy_book_help()
+        return
+    if args[0] == "simple":
+        state.backtest_strategy_book.clear()
+        save_state(state)
+        click.echo("已切换为 StrategyBookSimple: 每个 strategy 一个私有 ledger / cash pool")
+        return
+    if args[0] == "ledger":
+        _apply_strategy_book_ledger(state, args[1:])
+        save_state(state)
+        _print_strategy_book(state)
+        return
+    if args[0] == "cash-pool":
+        _apply_strategy_book_cash_pool(state, args[1:])
+        save_state(state)
+        _print_strategy_book(state)
+        return
+    raise click.ClickException("strategy-book 支持: show, simple, ledger, cash-pool")
+
+
+@backtest.command("ledger-config", context_settings=SELECTOR_HELP_CONTEXT)
+@click.pass_context
+@friendly_errors
+def ledger_config(ctx: click.Context) -> None:
+    """配置 ledger-owned 字段，如费用、保证金、DMTM、现金保留。"""
+    state = load_state()
+    switch_backtest_space(state, BACKTEST_SPACE)
+    args = tuple(ctx.args)
+    if not args or args[0] in {"show", "list", "ls"}:
+        _print_ledger_configs(state)
+        return
+    if args[0] in {"help", "--help", "-h"}:
+        _print_ledger_config_help()
+        return
+    ledger = _arg_value(args, "--ledger")
+    if not ledger:
+        raise click.ClickException("ledger-config 必须传 --ledger LEDGER")
+    values = _parse_ledger_config_args(args)
+    if not values:
+        raise click.ClickException("ledger-config 缺少要设置的字段；用 --help 查看支持字段")
+    current = dict(state.backtest_ledger_configs.get(ledger) or {})
+    current.update(values)
+    state.backtest_ledger_configs[ledger] = current
+    save_state(state)
+    click.echo(f"已更新 ledger config: {ledger}")
+    _print_ledger_configs(state)
+
+
 @backtest.command("clear")
 @click.option("--page-settings", is_flag=True, help="同时清空 single_factor_test 页面级设置。")
 @friendly_errors
@@ -174,6 +236,8 @@ def clear(page_settings: bool) -> None:
     state = load_state()
     switch_backtest_space(state, BACKTEST_SPACE)
     state.backtest_local_settings.clear()
+    state.backtest_strategy_book.clear()
+    state.backtest_ledger_configs.clear()
     state.backtest_groups.clear()
     state.backtest_ls_configs.clear()
     state.backtest_last_result.clear()
@@ -1072,6 +1136,203 @@ def _print_long_short_list(state) -> None:
         )
 
 
+def _strategy_book_payload(state) -> dict[str, Any]:
+    payload = dict(state.backtest_strategy_book or {})
+    payload.setdefault("strategies", {})
+    payload.setdefault("cash_pools", {})
+    payload.setdefault("cash_pool_configs", {})
+    return payload
+
+
+def _apply_strategy_book_ledger(state, args: tuple[str, ...]) -> None:
+    strategy = _arg_value(args, "--strategy")
+    ledger = _arg_value(args, "--ledger")
+    if not strategy or not ledger:
+        raise click.ClickException("strategy-book ledger 必须传 --strategy STRATEGY --ledger LEDGER")
+    cash_pool = _arg_value(args, "--cash-pool") or ledger
+    make_default = "--default" in args
+    payload = _strategy_book_payload(state)
+    strategies = payload.setdefault("strategies", {})
+    raw_entry = strategies.get(strategy)
+    entry = dict(raw_entry) if isinstance(raw_entry, dict) else {}
+    ledgers = list(entry.get("ledger_ids") or entry.get("ledgers") or [])
+    if ledger not in ledgers:
+        ledgers.append(ledger)
+    entry["ledger_ids"] = ledgers
+    if make_default or not entry.get("default_ledger_id"):
+        entry["default_ledger_id"] = ledger
+    strategies[strategy] = entry
+    payload.setdefault("cash_pools", {})[ledger] = cash_pool
+    state.backtest_strategy_book = payload
+
+
+def _apply_strategy_book_cash_pool(state, args: tuple[str, ...]) -> None:
+    cash_pool = _arg_value(args, "--cash-pool")
+    if not cash_pool:
+        raise click.ClickException("strategy-book cash-pool 必须传 --cash-pool ID")
+    payload = _strategy_book_payload(state)
+    configs = payload.setdefault("cash_pool_configs", {})
+    config = dict(configs.get(cash_pool) or {})
+    _set_optional_float_arg(config, args, "--initial-capital-major", "initial_capital_major")
+    base_currency = _arg_value(args, "--base-currency")
+    if base_currency:
+        config["base_currency"] = base_currency
+    _set_optional_float_arg(config, args, "--currency-conversion-fee-rate", "currency_conversion_fee_rate")
+    configs[cash_pool] = config
+    state.backtest_strategy_book = payload
+
+
+def _print_strategy_book(state) -> None:
+    payload = _strategy_book_payload(state)
+    strategies = payload.get("strategies") or {}
+    cash_pools = payload.get("cash_pools") or {}
+    cash_pool_configs = payload.get("cash_pool_configs") or {}
+    click.echo("StrategyBook")
+    if not strategies:
+        click.echo("  模式: StrategyBookSimple · 每个 strategy 一个私有 ledger / cash pool")
+    else:
+        rows = []
+        for strategy, entry in strategies.items():
+            entry_map = entry if isinstance(entry, dict) else {"ledger_ids": [entry], "default_ledger_id": entry}
+            ledger_ids = list(entry_map.get("ledger_ids") or entry_map.get("ledgers") or [])
+            default = str(entry_map.get("default_ledger_id") or (ledger_ids[0] if ledger_ids else ""))
+            pools = ", ".join(f"{ledger}->{cash_pools.get(ledger, ledger)}" for ledger in ledger_ids)
+            rows.append((strategy, ", ".join(ledger_ids), default, pools))
+        for line in render_table(("strategy", "ledgers", "default", "cash pools"), rows, indent="  ", max_widths=(20, 28, 18, 42)):
+            click.echo(line)
+    if cash_pool_configs:
+        click.echo("Cash pools")
+        rows = [
+            (
+                pool_id,
+                config.get("initial_capital_major", ""),
+                config.get("base_currency", ""),
+                config.get("currency_conversion_fee_rate", ""),
+            )
+            for pool_id, config in cash_pool_configs.items()
+            if isinstance(config, dict)
+        ]
+        for line in render_table(("cash_pool", "initial", "currency", "fx_fee"), rows, indent="  ", max_widths=(24, 14, 10, 10)):
+            click.echo(line)
+
+
+def _print_strategy_book_help() -> None:
+    click.echo("backtest strategy-book 命令")
+    click.echo("  show                         查看当前 strategy/ledger/cash pool 拓扑")
+    click.echo("  simple                       恢复默认: 每个 strategy 一个私有 ledger/cash pool")
+    click.echo("  ledger --strategy A1 --ledger shared --cash-pool pool-main [--default]")
+    click.echo("                               让 strategy A1 可操作 ledger shared，并映射到 cash pool")
+    click.echo("  cash-pool --cash-pool pool-main --initial-capital-major 100000000 --base-currency CNY")
+    click.echo("                               设置 cash pool 的初始资金与币种")
+
+
+def _parse_ledger_config_args(args: tuple[str, ...]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    string_fields = {
+        "--fee-mode": "fee_mode",
+        "--margin-mode": "margin_mode",
+        "--margin-call-mode": "margin_call_mode",
+        "--accounting-mode": "accounting_mode",
+        "--cost-basis-method": "cost_basis_method",
+        "--tradability-policy": "tradability_policy",
+        "--clearing-rounding-policy": "clearing_rounding_policy",
+    }
+    float_fields = {
+        "--fixed-fee-rate": "fixed_fee_rate",
+        "--fixed-margin-ratio": "fixed_margin_ratio",
+        "--liquidation-target-buffer": "liquidation_target_buffer",
+        "--cash-reserve-ratio": "cash_reserve_ratio",
+        "--cash-reserve-major": "cash_reserve_major",
+    }
+    bool_fields = {
+        "--daily-mark-to-market-enabled": "daily_mark_to_market_enabled",
+        "--use-int-position": "use_int_position",
+    }
+    for flag, key in string_fields.items():
+        value = _arg_value(args, flag)
+        if value:
+            values[key] = value
+    for flag, key in float_fields.items():
+        value = _arg_value(args, flag)
+        if value:
+            values[key] = float(value)
+    for flag, key in bool_fields.items():
+        value = _arg_value(args, flag)
+        if value:
+            values[key] = _parse_bool(value, flag)
+    extra = _parse_raw_settings(tuple(_strip_known_ledger_config_args(args)))
+    values.update(extra)
+    return values
+
+
+def _strip_known_ledger_config_args(args: tuple[str, ...]) -> list[str]:
+    known_with_value = {
+        "--ledger",
+        "--fee-mode",
+        "--fixed-fee-rate",
+        "--margin-mode",
+        "--fixed-margin-ratio",
+        "--margin-call-mode",
+        "--liquidation-target-buffer",
+        "--accounting-mode",
+        "--daily-mark-to-market-enabled",
+        "--cost-basis-method",
+        "--use-int-position",
+        "--tradability-policy",
+        "--clearing-rounding-policy",
+        "--cash-reserve-ratio",
+        "--cash-reserve-major",
+    }
+    result: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] in known_with_value:
+            i += 2
+            continue
+        result.append(args[i])
+        i += 1
+    return result
+
+
+def _print_ledger_configs(state) -> None:
+    click.echo("Ledger configs")
+    if not state.backtest_ledger_configs:
+        click.echo("  （空；使用后端注册字段的默认/推断规则）")
+        return
+    rows = []
+    for ledger, config in state.backtest_ledger_configs.items():
+        summary = ", ".join(f"{key}={value}" for key, value in sorted(config.items()))
+        rows.append((ledger, summary))
+    for line in render_table(("ledger", "config"), rows, indent="  ", max_widths=(24, 90)):
+        click.echo(line)
+
+
+def _print_ledger_config_help() -> None:
+    click.echo("backtest ledger-config 命令")
+    click.echo("  show / list")
+    click.echo("  --ledger LEDGER --fee-mode auto --margin-mode auto --accounting-mode Auto")
+    click.echo("  --daily-mark-to-market-enabled true --cost-basis-method fifo")
+    click.echo("  --cash-reserve-ratio 0.1 --cash-reserve-major 1000000")
+    click.echo("说明:")
+    click.echo("  这些字段属于 ledger-owned 配置，会传给后端 LedgerConfig；不是普通 per-strategy 字段。")
+    click.echo("  其他字段可用 --field value 或 field=value 透传，但后端会按 LedgerConfig 校验/忽略未知 metadata。")
+
+
+def _set_optional_float_arg(target: dict[str, Any], args: tuple[str, ...], flag: str, key: str) -> None:
+    value = _arg_value(args, flag)
+    if value:
+        target[key] = float(value)
+
+
+def _parse_bool(value: str, flag: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise click.ClickException(f"{flag} 需要布尔值: {value}")
+
+
 def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": group.get("id"),
@@ -1103,6 +1364,10 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
     payload = _run_payload(state, groups=groups)
     click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
     _print_run_strategy_info(groups, state.backtest_ls_configs)
+    if state.backtest_strategy_book:
+        _print_strategy_book(state)
+    if state.backtest_ledger_configs:
+        _print_ledger_configs(state)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
     for event in client.run_group_test_stream(payload):
@@ -1121,12 +1386,20 @@ def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False)
 
 
 def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+    payload = {
         "page_uuid": state.page_uuid,
         "local_settings": dict(state.backtest_local_settings),
         "groups": [dict(group) for group in groups],
         "ls_configs": list(state.backtest_ls_configs),
     }
+    if state.backtest_strategy_book:
+        payload["strategy_book"] = _strategy_book_payload(state)
+    if state.backtest_ledger_configs:
+        payload["ledger_configs"] = {
+            str(ledger): dict(config)
+            for ledger, config in state.backtest_ledger_configs.items()
+        }
+    return payload
 
 
 def _print_results_help() -> None:

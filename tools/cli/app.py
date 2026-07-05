@@ -23,6 +23,8 @@ def cli() -> None:
       factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS
       factortester backtest
+      factortester backtest strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main
+      factortester backtest ledger-config --ledger shared --fee-mode auto --margin-mode auto
       factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
 
     factortester list 固定展示首页模块；查看下一层请使用 factortester <module> list 或 --help。

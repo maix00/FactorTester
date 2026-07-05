@@ -75,8 +75,21 @@ def print_backtest_welcome(state: CliState) -> None:
             )
     else:
         click.echo("  long-short: （空）")
+    strategy_book = getattr(state, "backtest_strategy_book", {}) or {}
+    if strategy_book:
+        strategies = strategy_book.get("strategies") if isinstance(strategy_book, dict) else {}
+        click.echo(f"  strategy-book: {len(strategies or {})} strategy 映射")
+    else:
+        click.echo("  strategy-book: StrategyBookSimple（每策略一个私有 ledger/cash pool）")
+    ledger_configs = getattr(state, "backtest_ledger_configs", {}) or {}
+    if ledger_configs:
+        click.echo(f"  ledger-configs: {len(ledger_configs)} ledger")
+    else:
+        click.echo("  ledger-configs: （空）")
     click.echo("参数示例:")
     click.echo("  factortester backtest local-settings allocation_mode=equal_notional")
+    click.echo("  factortester backtest strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main")
+    click.echo("  factortester backtest ledger-config --ledger shared --fee-mode auto --margin-mode auto")
     click.echo("  factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS")
     click.echo("  factortester backtest --run")
     click.echo("下一步: factortester backtest --help 查看回测命令。")
