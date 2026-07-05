@@ -22,7 +22,11 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(_root))
 
 from sources.LocalCNFutures import ROLLER_INFO_PATH, SOURCE_DATA_DIR
-from sources.LocalCNFutures.contract_files import portable_contract_filename, resolve_contract_parquet_path
+from sources.LocalCNFutures.contract_files import (
+    contract_uid_from_exchange_contract,
+    portable_contract_filename,
+    resolve_contract_parquet_path,
+)
 
 CONTRACT_MAPPING_PATH = os.path.join(SOURCE_DATA_DIR, 'wind_mapping.parquet')
 CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(SOURCE_DATA_DIR, 'wind_mapping_truncated.parquet')
@@ -35,8 +39,59 @@ MAIN_DAYK_FOLDER = os.path.join(SOURCE_DATA_DIR, 'main_dayk') + '/'
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
 BACKWARD_BASE_DATE_COL = 'BACKWARD_BASE_DATE'
+SETTLEMENT_FILL_COLUMNS = ('settlement_price', 'pre_settlement_price')
 
 _IS_WINDOWS = platform.system() == 'Windows'
+
+
+def _build_dayk_settlement_lookup(dayk_df: pd.DataFrame) -> pd.DataFrame:
+    """Build a compact ``(contract_uid, trading_day)`` lookup for settlement fields."""
+    required = {'contract_uid', 'trading_day'}
+    if dayk_df.empty or not required <= set(dayk_df.columns):
+        return pd.DataFrame(columns=['contract_uid', 'trading_day', *SETTLEMENT_FILL_COLUMNS])
+    columns = ['contract_uid', 'trading_day', *[col for col in SETTLEMENT_FILL_COLUMNS if col in dayk_df.columns]]
+    lookup = dayk_df[columns].copy()
+    lookup['trading_day'] = pd.to_datetime(lookup['trading_day']).dt.normalize()
+    lookup = lookup.drop_duplicates(['contract_uid', 'trading_day'], keep='last')
+    return lookup
+
+
+def fill_minute_settlement_from_dayk(minute_df: pd.DataFrame, dayk_lookup: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing/zero minute settlement fields from ``data_dayk``.
+
+    Local minute files currently contain settlement-related columns, but many
+    historical slices use ``0`` as a placeholder. Daily bars are the canonical
+    settlement source; main MinK should carry those values by contract/trading
+    day so daily mark-to-market never has to use close as a fake settlement.
+    """
+    if minute_df.empty or dayk_lookup.empty:
+        return minute_df
+    if not {'contract_uid', 'trading_day'} <= set(minute_df.columns):
+        return minute_df
+
+    filled = minute_df.copy()
+    filled['trading_day'] = pd.to_datetime(filled['trading_day']).dt.normalize()
+    lookup_cols = ['contract_uid', 'trading_day'] + [
+        col for col in SETTLEMENT_FILL_COLUMNS if col in dayk_lookup.columns
+    ]
+    if len(lookup_cols) <= 2:
+        return filled
+    lookup = dayk_lookup[lookup_cols].rename(
+        columns={col: f'__dayk_{col}' for col in SETTLEMENT_FILL_COLUMNS if col in dayk_lookup.columns}
+    )
+    filled = filled.merge(lookup, on=['contract_uid', 'trading_day'], how='left')
+    for col in SETTLEMENT_FILL_COLUMNS:
+        day_col = f'__dayk_{col}'
+        if day_col not in filled.columns:
+            continue
+        if col not in filled.columns:
+            filled[col] = np.nan
+        target = pd.to_numeric(filled[col], errors='coerce')
+        source = pd.to_numeric(filled[day_col], errors='coerce')
+        mask = (target.isna() | (target == 0)) & source.notna() & (source != 0)
+        filled.loc[mask, col] = source[mask]
+        filled.drop(columns=[day_col], inplace=True)
+    return filled
 
 
 def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_rebuild: bool = True):
@@ -300,15 +355,10 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             return row['CONTRACT'].replace(contract_digits, decade_str + contract_digits) if decade_str is not None else None
         else: return None  # 无法处理的格式
         
-    exchange_map = {'DCE': 'DCE', 'CZCE': 'CZC', 'INE': 'INE', 'SHFE': 'SHF', 'CFFEX': 'CFE', 'GFEX': 'GFE'}
-    reverse_map = {v: k for k, v in exchange_map.items()}
-
     def patched_to_uid(patched):
         if patched is None:
             return None
-        pm, exchange = patched.split('.')
-        first_digit_idx = next((i for i, c in enumerate(pm) if c.isdigit()), len(pm))
-        return f"{reverse_map.get(exchange, exchange)}|F|{pm[:first_digit_idx]}|{pm[first_digit_idx:]}"
+        return contract_uid_from_exchange_contract(patched)
 
     added_df['CONTRACT_PATCHED'] = added_df.apply(czc_patch_decade, axis=1)
     added_df['CONTRACT_UID'] = added_df['CONTRACT_PATCHED'].apply(patched_to_uid)
@@ -316,6 +366,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     # ========== 5. 截断已有合约数据，准备生成主力序列 ==========
     dayk_df = ((df := pd.read_parquet(dayk_path)).assign(trading_day=pd.to_datetime(df['trading_day']))
                .rename(columns={'unique_instrument_id': 'contract_uid'}))
+    dayk_settlement_lookup = _build_dayk_settlement_lookup(dayk_df)
     dayk_groups = {uid: group for uid, group in dayk_df.groupby('contract_uid')}
     
     def truncate_contract_data(row):
@@ -444,6 +495,8 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
                 .assign(unique_instrument_id=product)
                 .sort_values('trade_time')
             )
+            if name == 'MinK':
+                product_df = fill_minute_settlement_from_dayk(product_df, dayk_settlement_lookup)
             product_df.to_parquet(save_path, index=False)
     
     return info_df

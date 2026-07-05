@@ -3,6 +3,7 @@ import pytest
 
 from sources.LocalCNFutures.scripts.generate_main import (
     BACKWARD_BASE_DATE_COL,
+    fill_minute_settlement_from_dayk,
     generate_main_contract_series,
     preprocess_minute_data,
 )
@@ -58,6 +59,69 @@ def test_preprocess_minute_data_appends_changed_raw_files(tmp_path):
     updated = pd.read_parquet(out_path)
     assert len(updated) == 4
     assert pd.to_datetime(updated["trade_time"]).max() == pd.Timestamp("2026-01-06 09:02")
+
+
+def test_fill_minute_settlement_from_dayk_fills_zero_placeholders():
+    minute = pd.DataFrame({
+        "contract_uid": ["GFEX|F|LC|2605", "GFEX|F|LC|2605"],
+        "trading_day": [pd.Timestamp("2026-01-09"), pd.Timestamp("2026-01-09")],
+        "trade_time": [pd.Timestamp("2026-01-09 14:59"), pd.Timestamp("2026-01-09 15:00")],
+        "settlement_price": [0.0, 143000.0],
+        "pre_settlement_price": [0.0, 142000.0],
+    })
+    dayk = pd.DataFrame({
+        "contract_uid": ["GFEX|F|LC|2605"],
+        "trading_day": [pd.Timestamp("2026-01-09")],
+        "settlement_price": [143180.0],
+        "pre_settlement_price": [143400.0],
+    })
+
+    filled = fill_minute_settlement_from_dayk(minute, dayk)
+
+    assert filled["settlement_price"].to_list() == [143180.0, 143000.0]
+    assert filled["pre_settlement_price"].to_list() == [143400.0, 142000.0]
+
+
+def test_generate_main_fills_main_mink_settlement_from_dayk(tmp_path):
+    raw_dir = tmp_path / "raw_minute"
+    product_dir = tmp_path / "product_minute"
+    main_mink_dir = tmp_path / "main_mink"
+    main_dayk_dir = tmp_path / "main_dayk"
+    raw_dir.mkdir()
+
+    uid = _uid("A2401.DCE")
+    mapping_path = tmp_path / "wind_mapping.parquet"
+    dayk_path = tmp_path / "dayk.parquet"
+    roller_path = tmp_path / "roller_info.parquet"
+    _mapping([
+        ("A.DCE", "A2401.DCE", "2024-01-01", "2024-01-02"),
+    ]).to_parquet(mapping_path, index=False)
+
+    minute = pd.DataFrame([
+        {**_one_bar(uid, "2024-01-01", 95.0), "settlement_price": 0.0, "pre_settlement_price": 0.0},
+        {**_one_bar(uid, "2024-01-02", 100.0), "settlement_price": 0.0, "pre_settlement_price": 0.0},
+    ])
+    dayk = minute.copy()
+    dayk["settlement_price"] = [96.0, 101.0]
+    dayk["pre_settlement_price"] = [94.0, 96.0]
+    minute.drop(columns=["contract_uid"]).to_parquet(raw_dir / "minute.parquet", index=False)
+    dayk.drop(columns=["contract_uid"]).to_parquet(dayk_path, index=False)
+
+    generate_main_contract_series(
+        contract_start_end_path=str(mapping_path),
+        dayk_path=str(dayk_path),
+        minute_data_dir=str(raw_dir),
+        minute_data_preprocessed_dir=str(product_dir),
+        main_mink_folder_path=str(main_mink_dir) + "/",
+        main_dayk_folder_path=str(main_dayk_dir) + "/",
+        roller_info_path=str(roller_path),
+        rebuild_minute_product=True,
+        rebuild_roller_info=True,
+    )
+
+    main_mink = pd.read_parquet(main_mink_dir / "A.DCE.parquet")
+    assert main_mink["settlement_price"].to_list() == [96.0, 101.0]
+    assert main_mink["pre_settlement_price"].to_list() == [94.0, 96.0]
 
 
 def _mapping(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
