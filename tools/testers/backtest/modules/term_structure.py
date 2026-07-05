@@ -929,7 +929,37 @@ def _local_cnfutures_inferred_lifecycle(
         return None
     row.setdefault("lifecycle_source", result.get("source"))
     row.setdefault("lifecycle_inference", result)
+    _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)
+
+
+def _record_lifecycle_inference_fallback(
+    state: Any | None,
+    row: dict[str, Any],
+    timestamp: pd.Timestamp,
+    inference: dict[str, Any],
+) -> None:
+    if state is None:
+        return
+    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+
+    product = row.get("contract_object") or row.get("contract_product") or row.get("contract") or row.get("uid")
+    source = "authoritative_lifecycle"
+    fallback = str(inference.get("source") or "LocalCNFutures coverage inference")
+    record_runtime_fallback_interval(
+        state,
+        code="term_structure_lifecycle_inference_fallback",
+        type="期限结构",
+        status="已推断",
+        product=product,
+        timestamp=timestamp,
+        source=source,
+        fallback=fallback,
+        reason="未找到权威合约生命周期字段",
+        extra={
+            "contract": str(row.get("contract_product") or row.get("uid") or row.get("contract") or product),
+        },
+    )
 
 
 def _with_reference_timezone(ts: pd.Timestamp, reference_tz: str | None) -> pd.Timestamp:

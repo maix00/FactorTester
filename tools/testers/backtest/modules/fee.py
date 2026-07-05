@@ -134,7 +134,12 @@ def _resolve_fee_cost(state, ctx) -> None:
             fixed_rate = getattr(ledger_config, "fixed_fee_rate", None) or 0.0
             positions = ledger.get(LedgerModule.positions, {})
             price = order.get("effective_price", prices[order.instrument])
-            multiplier = contract_multiplier_from_fields(historical_fields, order.instrument)
+            multiplier = contract_multiplier_from_fields(
+                historical_fields,
+                order.instrument,
+                state=state,
+                timestamp=ctx.timestamp,
+            )
             fixed_fee = _resolve_fixed_fee_cost(
                 mode,
                 float(fixed_rate or 0.0),
@@ -178,8 +183,6 @@ def _resolve_fee_cost(state, ctx) -> None:
                 timestamp=ctx.timestamp,
                 details={"mode": mode},
             )
-    from tools.testers.backtest.modules.cash_rescale import constrain_order_batch_to_execution_cash
-    constrain_order_batch_to_execution_cash(state, ctx)
 
 
 def _market_fee_cost(

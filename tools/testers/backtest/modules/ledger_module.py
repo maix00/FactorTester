@@ -201,37 +201,50 @@ def _products_for_backtest_window(state, ctx, strategy) -> frozenset:
 
 def _basic_equity(state, ctx) -> None:
     prices = ctx.get(MarketDataModule.current_prices)
+    equity_by_ledger: dict[int, float] = {}
     for strategy in ctx.active_strategies:
         ledger = state.ledger_for_strategy(strategy)
-        cash = _required_cash_for_ledger(state, ledger)
-        positions = ledger.get(LedgerModule.positions, {})
-        historical_fields = ctx.get_for(
-            MarketDataModule.current_historical_fields,
-            strategy,
-            ctx.get(MarketDataModule.current_historical_fields, {}),
-        )
-        config = state.config_for(strategy)
-        ledger_config = state.ledger_config_for(ledger)
-        margin_occupied = sum(
-            entry.margin_reserved.to_major()
-            for entry in positions.values()
-            if entry.margin_reserved is not None and entry.margin_reserved.to_major() > 0
-        )
-        if margin_occupied > 0:
-            floating_pnl = mark_to_market(
-                ledger,
-                config,
-                prices,
-                historical_fields,
-                ledger_config=ledger_config,
-            ).to_major()
-            ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + margin_occupied + floating_pnl)
+        cache_key = id(ledger)
+        cached = equity_by_ledger.get(cache_key)
+        if cached is not None:
+            ctx.set_for(LedgerModule.equity, strategy, cached)
             continue
-        market_value = sum(
-            contract_notional(_required_current_price(prices, product, ctx.timestamp), entry.quantity, historical_fields, product)
-            for product, entry in positions.items()
-        )
-        ctx.set_for(LedgerModule.equity, strategy, cash.to_major() + market_value)
+        value = _ledger_equity(state, ctx, strategy, ledger, prices)
+        equity_by_ledger[cache_key] = value
+        ctx.set_for(LedgerModule.equity, strategy, value)
+
+
+def _ledger_equity(state, ctx, strategy, ledger, prices: dict) -> float:
+    cash = _required_cash_for_ledger(state, ledger)
+    positions = ledger.get(LedgerModule.positions, {})
+    historical_fields = ctx.get_for(
+        MarketDataModule.current_historical_fields,
+        strategy,
+        ctx.get(MarketDataModule.current_historical_fields, {}),
+    )
+    config = state.config_for(strategy)
+    ledger_config = state.ledger_config_for(ledger)
+    margin_occupied = sum(
+        entry.margin_reserved.to_major()
+        for entry in positions.values()
+        if entry.margin_reserved is not None and entry.margin_reserved.to_major() > 0
+    )
+    if margin_occupied > 0:
+        floating_pnl = mark_to_market(
+            ledger,
+            config,
+            prices,
+            historical_fields,
+            ledger_config=ledger_config,
+            state=state,
+            timestamp=ctx.timestamp,
+        ).to_major()
+        return cash.to_major() + margin_occupied + floating_pnl
+    market_value = sum(
+        contract_notional(_required_current_price(prices, product, ctx.timestamp), entry.quantity, historical_fields, product)
+        for product, entry in positions.items()
+    )
+    return cash.to_major() + market_value
 
 
 def _apply_order_fill(state, ctx) -> None:
@@ -290,6 +303,8 @@ def _apply_order_fill(state, ctx) -> None:
                     fee_cost=float(fee_cost or 0.0),
                     historical_fields=historical_fields,
                     ledger_config=ledger_config,
+                    state=state,
+                    timestamp=ctx.timestamp,
                 )
             else:
                 _apply_cash_accounting_position_fill(
@@ -300,9 +315,21 @@ def _apply_order_fill(state, ctx) -> None:
                     price=float(price),
                     historical_fields=historical_fields,
                     ledger_config=ledger_config,
+                    state=state,
+                    timestamp=ctx.timestamp,
                 )
                 trade_cost = DataMoney.from_major(
-                    contract_notional(price, order.quantity, historical_fields, order.instrument) + fee_cost,
+                    (
+                        float(order.quantity)
+                        * float(price)
+                        * contract_multiplier_from_fields(
+                            historical_fields,
+                            order.instrument,
+                            state=state,
+                            timestamp=ctx.timestamp,
+                        )
+                    )
+                    + fee_cost,
                     currency=cash.currency,
                     use_minor_units=cash.use_minor_units,
                 )
@@ -351,9 +378,11 @@ def _apply_margin_accounting_fill(
     fee_cost: float,
     historical_fields: dict,
     ledger_config=None,
+    state: Any | None = None,
+    timestamp: Any | None = None,
 ) -> DataMoney:
     fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(historical_fields, product)
+    multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=timestamp)
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     before_margin = _entry_margin_major(entry)
     prior_quantity = float(entry.quantity or 0.0)
@@ -434,9 +463,11 @@ def _apply_cash_accounting_position_fill(
     price: float,
     historical_fields: dict,
     ledger_config=None,
+    state: Any | None = None,
+    timestamp: Any | None = None,
 ) -> None:
     fields = historical_fields_for_product(historical_fields, product)
-    multiplier = contract_multiplier_from_fields(historical_fields, product)
+    multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=timestamp)
     entry = positions.setdefault(product, ProductPosition(quantity=0.0, average_cost=0.0))
     prior_quantity = float(entry.quantity or 0.0)
     new_quantity = prior_quantity + quantity

@@ -118,7 +118,7 @@ def _basic_size_order(state, ctx) -> None:
             if price is None:
                 _record_untradable_target_skip(state, strategy, product, ctx.timestamp)
                 continue
-            multiplier = contract_multiplier_from_fields(historical_fields, product)
+            multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=ctx.timestamp)
             target_quantity = target_weights.get(product, 0.0) * equity / (float(price) * multiplier)
             deltas[product] = target_quantity - getattr(positions.get(product), "quantity", 0.0)
         deltas = apply_order_sizing_policy(state, ctx, strategy, deltas)

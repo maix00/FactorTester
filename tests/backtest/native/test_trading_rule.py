@@ -126,6 +126,21 @@ def test_ledger_auto_daily_mark_to_market_infers_from_historical_fields_only():
     ) is True
 
 
+def test_ledger_auto_daily_mark_to_market_ignores_ui_default_false():
+    product = _product()
+    ledger_config = _ledger_config(
+        accounting_mode="Auto",
+        daily_mark_to_market_enabled=False,
+        cost_basis_method="WeightAverage",
+    )
+
+    assert _resolve_daily_mark_to_market_enabled_for_ledger(
+        product,
+        {"CostBasisMethod": "DailyMarkToMarket"},
+        ledger_config=ledger_config,
+    ) is True
+
+
 def test_ledger_custom_daily_mark_to_market_respects_explicit_switch():
     product = _product()
 
@@ -608,6 +623,95 @@ def test_daily_mark_to_market_ignores_zero_settlement_placeholder_and_uses_close
     assert cash_for_ledger(state, ledger).to_major() == pytest.approx(1040.0)
     assert position.settlement_price == pytest.approx(12.0)
     assert [(lot.quantity, lot.entry_price) for lot in position.lots] == [(2.0, 12.0)]
+
+
+def test_daily_mark_to_market_records_settlement_close_fallback_interval():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+    ledger.set(_positions_ref(), {
+        product: ProductPosition(
+            quantity=2.0,
+            lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+            settlement_price=10.0,
+        )
+    })
+    state = BacktestRunState(strategy_configs={strategy: config}, ledgers={ledger.ledger: ledger})
+    _set_cash(state, ledger, 1000.0)
+    state.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto")
+
+    for timestamp, close in (
+        (pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"), 12.0),
+        (pd.Timestamp("2026-03-11 15:00:00.000000001", tz="Asia/Shanghai"), 13.0),
+    ):
+        ctx = FlowContext(
+            timestamp=timestamp,
+            event_queue=EventQueue(),
+            active_ledgers=frozenset({ledger.ledger}),
+        )
+        ctx.set(MarketDataModule.current_market_snapshot, {
+            "settlement": {product: 0.0},
+            "close": {product: close},
+        })
+        ctx.set(MarketDataModule.current_historical_fields, {
+            product: {
+                "VolumeMultiple": 10.0,
+                "PreSettlementPrice": 10.0,
+                "SettlementPrice": 0.0,
+            }
+        })
+
+        _apply_daily_mark_to_market(state, ctx)
+
+    rows = [row for row in state.runtime_info_rows if row.get("code") == "daily_mark_to_market_price_fallback"]
+    assert len(rows) == 1
+    details = rows[0]["details"]
+    assert details["source"] == "settlement"
+    assert details["fallback"] == "close"
+    assert details["count"] == 2
+    assert details["start"].startswith("2026-03-10")
+    assert details["end"].startswith("2026-03-11")
+
+
+def test_daily_mark_to_market_missing_previous_basis_does_not_fallback_to_current_settlement():
+    product = _product()
+    strategy = Strategy(alias="S")
+    config = StrategyConfig(
+        strategy=strategy,
+        active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+        field_values={
+            EngineModule.engine_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+        },
+    )
+    ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+    ledger.set(_positions_ref(), {product: ProductPosition(quantity=2.0)})
+    state = BacktestRunState(strategy_configs={strategy: config}, ledgers={ledger.ledger: ledger})
+    _set_cash(state, ledger, 1000.0)
+    state.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto")
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai"),
+        event_queue=EventQueue(),
+        active_ledgers=frozenset({ledger.ledger}),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 12.0},
+        "close": {product: 12.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {"VolumeMultiple": 10.0, "SettlementPrice": 12.0}
+    })
+
+    with pytest.raises(KeyError, match="previous settlement price or position basis"):
+        _apply_daily_mark_to_market(state, ctx)
 
 
 def test_daily_mark_to_market_short_position_updates_cash_margin_and_settlement_basis():

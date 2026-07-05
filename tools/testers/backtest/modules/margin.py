@@ -465,7 +465,12 @@ def _required_margin_for_position(state: Any, ctx: Any, ledger_config: Any, prod
     historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
     fields = historical_fields_for_product(historical_fields, product)
     price = _margin_requirement_price(ctx, product)
-    multiplier = contract_multiplier_from_fields(historical_fields, product)
+    multiplier = contract_multiplier_from_fields(
+        historical_fields,
+        product,
+        state=state,
+        timestamp=ctx.timestamp,
+    )
     market_ratio = _market_margin_ratio(fields, quantity, price, multiplier)
     ratio = _resolve_margin_ratio_from_ledger_config(market_ratio, ledger_config)
     return abs(quantity) * price * multiplier * ratio

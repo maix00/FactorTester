@@ -222,9 +222,6 @@ def _resolve_daily_mark_to_market_enabled_for_ledger(
         if enabled:
             _validate_daily_mark_to_market_ledger_config(product, ledger_config=ledger_config)
         return enabled
-    explicit = getattr(ledger_config, "daily_mark_to_market_enabled", None)
-    if explicit is not None:
-        return bool(explicit)
     explicit_field = fields.get("DailyMarkToMarketEnabled")
     if explicit_field not in (None, ""):
         return _bool_field(explicit_field)
@@ -424,6 +421,8 @@ def mark_to_market(
     historical_fields: dict[object, dict[str, object]] | None = None,
     *,
     ledger_config=None,
+    state: Any | None = None,
+    timestamp: Any | None = None,
 ) -> "DataMoney":
     from .ledger_module import LedgerModule
     from .market_data import contract_multiplier_from_fields, historical_fields_for_product
@@ -442,7 +441,12 @@ def mark_to_market(
                 f"current price missing for held product {product}; "
                 "mark_to_market expects MarketDataModule.current_prices to be causal-ffilled"
             )
-        multiplier = contract_multiplier_from_fields(historical_fields or {}, product)
+        multiplier = contract_multiplier_from_fields(
+            historical_fields or {},
+            product,
+            state=state,
+            timestamp=timestamp,
+        )
         if _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
             basis = _previous_settlement_for_product(
                 product,
@@ -514,7 +518,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 
     snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
-    settlement_prices = snapshot.get("settlement") or snapshot.get("close") or {}
+    settlement_prices = snapshot.get("settlement") or {}
     close_prices = snapshot.get("close", {})
     for ledger in _ledger_targets(state, ctx):
         ledger_config = state.ledger_config_for(ledger)
@@ -530,13 +534,23 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
             fields = historical_fields_for_product(historical_fields, product)
             if not _resolve_daily_mark_to_market_enabled_for_ledger(product, fields, ledger_config=ledger_config):
                 continue
-            settlement = _settlement_price_for_product(
+            settlement, settlement_source = _settlement_price_for_product(
                 product,
                 fields,
                 settlement_prices,
                 close_prices,
                 require_exact=_ledger_requires_exact(ledger_config),
             )
+            if settlement_source == "close":
+                _record_daily_mark_to_market_fallback(
+                    state,
+                    product=product,
+                    ledger=ledger,
+                    timestamp=ctx.timestamp,
+                    source="settlement",
+                    fallback="close",
+                    reason="结算价不可用",
+                )
             previous_settlement = _previous_settlement_for_product(
                 product,
                 entry,
@@ -544,7 +558,12 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
                 settlement,
                 require_exact=_ledger_requires_exact(ledger_config),
             )
-            multiplier = contract_multiplier_from_fields(historical_fields, product)
+            multiplier = contract_multiplier_from_fields(
+                historical_fields,
+                product,
+                state=state,
+                timestamp=ctx.timestamp,
+            )
             pnl = _mark_to_market_money_difference(
                 settlement,
                 previous_settlement,
@@ -649,20 +668,47 @@ def _settlement_price_for_product(
     close_prices: Mapping[Any, float],
     *,
     require_exact: bool,
-) -> float:
+) -> tuple[float, str]:
     value = _positive_number_or_none(_lookup_product_value(settlement_prices, product))
     if value is not None:
-        return value
+        return value, "settlement"
     for field_name in ("SettlementPrice", "LastSettlementPrice"):
         field_value = _positive_number_or_none(fields.get(field_name))
         if field_value is not None:
-            return field_value
+            return field_value, field_name
     if require_exact:
         raise KeyError(f"exact daily mark-to-market requires settlement price for {product}")
     fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
     if fallback is not None:
-        return fallback
+        return fallback, "close"
     raise KeyError(f"daily mark-to-market requires price for {product}")
+
+
+def _record_daily_mark_to_market_fallback(
+    state: Any,
+    *,
+    product: Any,
+    ledger: Any,
+    timestamp: Any,
+    source: str,
+    fallback: str,
+    reason: str,
+) -> None:
+    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+
+    ledger_id = str(getattr(ledger, "ledger_id", getattr(getattr(ledger, "ledger", None), "name", ledger)))
+    record_runtime_fallback_interval(
+        state,
+        code="daily_mark_to_market_price_fallback",
+        type="记账规则",
+        status="已降级",
+        product=product,
+        timestamp=timestamp,
+        source=source,
+        fallback=fallback,
+        reason=reason,
+        extra={"ledger_id": ledger_id},
+    )
 
 
 def _previous_settlement_for_product(
@@ -684,7 +730,10 @@ def _previous_settlement_for_product(
             return field_value
     if require_exact:
         raise KeyError(f"exact daily mark-to-market requires previous settlement price for {product}")
-    return current_settlement
+    average_cost = _positive_number_or_none(getattr(entry, "average_cost", None))
+    if average_cost is not None:
+        return average_cost
+    raise KeyError(f"daily mark-to-market requires previous settlement price or position basis for {product}")
 
 
 def _daily_mark_to_market_basis(entry: Any, fallback: float) -> float:

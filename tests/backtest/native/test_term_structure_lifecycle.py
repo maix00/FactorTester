@@ -275,6 +275,14 @@ def test_auto_mode_uses_local_cnfutures_coverage_inference_for_ended_contracts(m
     assert captured[0].timestamp == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
     assert captured[0].payload["contract_object"] == _Contract("P2601.DCE")
     assert captured[0].payload["lifecycle_source"] == "LocalCNFutures coverage inference"
+    rows = [
+        row for row in account.runtime_info_rows
+        if row.get("code") == "term_structure_lifecycle_inference_fallback"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["contract"] == "P2601.DCE"
+    assert rows[0]["details"]["source"] == "authoritative_lifecycle"
+    assert rows[0]["details"]["fallback"] == "LocalCNFutures coverage inference"
 
 
 def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(monkeypatch):
@@ -311,6 +319,12 @@ def test_exact_mode_also_uses_local_cnfutures_coverage_inference_as_last_resort(
 
     assert ts == pd.Timestamp("2026-01-31 15:00", tz="Asia/Shanghai")
     assert ended_row["lifecycle_source"] == "LocalCNFutures coverage inference"
+    rows = [
+        row for row in account.runtime_info_rows
+        if row.get("code") == "term_structure_lifecycle_inference_fallback"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["contract"] == "P2601.DCE"
 
 
 def test_exact_mode_uses_akshare_authoritative_lifecycle_when_available(monkeypatch):
