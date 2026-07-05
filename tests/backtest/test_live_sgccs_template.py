@@ -4,12 +4,21 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Iterable
+from typing import Any
+
 import pytest
 import pandas as pd
 
 from server import create_app
 from server.services.factor_registry import page_factors
+from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.engines.factors.incremental import compile_streaming_factor
+from tools.testers.backtest.modules.equity_curve import equity_curve_for, margin_curve_for
+from tools.testers.backtest.modules.group_membership import target_trace_for
+from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 
 pytestmark = pytest.mark.skipif(
@@ -403,6 +412,77 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
     assert notional["total_equity"][-1] != risk["total_equity"][-1]
 
 
+def test_live_sgccs_template_afternoon_window_flow_accounting_is_stable() -> None:
+    state, strategies = _run_live_sgccs_native_window(
+        aliases=("A1", "A1a"),
+        start_date="2026-01-30",
+        start_time="14:30",
+        end_date="2026-01-30",
+        end_time="15:00",
+        local_overrides={
+            "engine_mode": "auto",
+            "accounting_mode": "Auto",
+            "margin_mode": "auto",
+            "margin_call_mode": "warn",
+            "fee_mode": "zero",
+            "liquidity_mode": "infinite",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+        },
+    )
+
+    for alias, strategy in strategies.items():
+        equity = equity_curve_for(state, strategy)
+        assert not equity.empty, alias
+        assert equity.index.min() >= pd.Timestamp("2026-01-30 14:30", tz="Asia/Shanghai")
+        assert equity.index.max() <= pd.Timestamp("2026-01-30 15:00:00.000000001", tz="Asia/Shanghai")
+        pct_moves = equity.pct_change().dropna().abs()
+        assert pct_moves[pct_moves > 0.02].empty, {
+            "alias": alias,
+            "moves": pct_moves[pct_moves > 0.02].tail(10).to_dict(),
+            "tail": equity.tail(10).to_dict(),
+        }
+
+        margins = margin_curve_for(state, strategy)
+        assert margins, alias
+        positioned_points = [
+            (timestamp, payload)
+            for timestamp, payload in state.results.history(strategy)
+            if payload.get("positions")
+        ]
+        assert positioned_points, alias
+        for timestamp, payload in positioned_points:
+            margin = payload.get("margin") or {}
+            assert margin, (alias, timestamp, payload)
+            assert sum(float(value) for value in margin.values()) > 0, (alias, timestamp, margin)
+
+        trace = target_trace_for(state, strategy)
+        assert trace, alias
+        assert any(weights for weights in trace.values()), alias
+
+        records = state.order_flow_store.records_for_strategy(strategy)
+        steps = {record.get("step") for record in records}
+        assert {"construct_order", "resolve_execution_price", "ledger_update", "order_terminal"} <= steps
+        _assert_order_flow_terminal_steps_are_ordered(records)
+        for record in records:
+            if record.get("step") != "ledger_update":
+                continue
+            details = record.get("details") or {}
+            assert float(details["price"]) > 0, record
+            assert float(details["fee_cost"]) >= 0, record
+            assert pd.notna(float(details["cash_before"])), record
+            assert pd.notna(float(details["cash_after"])), record
+
+    final_prefix = pd.Timestamp("2026-01-30 15:00", tz="Asia/Shanghai").isoformat()
+    for alias, strategy in strategies.items():
+        final_records = [
+            record for record in state.order_flow_store.records_for_strategy(strategy)
+            if str(record.get("timestamp") or "").startswith(final_prefix)
+        ]
+        assert any(record.get("step") == "construct_order" for record in final_records), alias
+        assert not any(record.get("step") == "ledger_update" for record in final_records), alias
+
+
 def _resolve_groups(groups: list[dict], tester_ids: dict[str, str]) -> list[dict]:
     by_id = {group["id"]: group for group in groups}
     result = []
@@ -465,3 +545,151 @@ def _runtime_ls_config(long_group: dict, short_group: dict, source: dict | None 
         "long": [{"group_id": long_group["id"], "weight": 1.0}],
         "short": [{"group_id": short_group["id"], "weight": 1.0}],
     }
+
+
+def _run_live_sgccs_native_window(
+    *,
+    aliases: Iterable[str],
+    start_date: str,
+    start_time: str,
+    end_date: str,
+    end_time: str,
+    local_overrides: dict[str, Any],
+) -> tuple[BacktestRunState, dict[str, Any]]:
+    from server.modules.single_factor_test import group as group_module
+
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = USERNAME
+        session["_sid"] = f"live-sgccs-window-{uuid.uuid4().hex}"
+
+    page = client.get(f"/single_factor_test?factor={FACTOR_FAMILY}&type=public")
+    assert page.status_code == 200
+    match = re.search(rb'window\._pageUuid\s*=\s*["\']([^"\']+)', page.data)
+    assert match, "single-factor page did not expose page_uuid"
+    page_uuid = match.group(1).decode()
+
+    template_response = client.get(
+        f"/api/single_factor_setting_templates/{FACTOR_FAMILY}/{TEMPLATE_ID}"
+    )
+    assert template_response.status_code == 200
+    snapshot = template_response.get_json()["template"]["snapshot"]
+    for params_row in _template_factor_params(snapshot):
+        resp = client.post("/add_factor_by_params", json={
+            "factor_family_alias": FACTOR_FAMILY,
+            "params": params_row,
+            "page_uuid": page_uuid,
+        })
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["success"]
+
+    alias_set = set(aliases)
+    groups = [
+        group for group in _resolve_groups(snapshot["group_settings"]["groups"], {})
+        if str(group.get("shortAlias") or "") in alias_set
+    ]
+    assert {str(group.get("shortAlias") or "") for group in groups} == alias_set
+
+    local_values = {
+        **snapshot["local_settings"],
+        "start_date": start_date,
+        "start_time": start_time,
+        "end_date": end_date,
+        "end_time": end_time,
+        "time_precision": "exact",
+        "timezone": "Asia/Shanghai",
+        "engine": "native",
+        **local_overrides,
+    }
+    payload = {
+        "groups": groups,
+        "ls_configs": [],
+        "page_uuid": page_uuid,
+        "factor_family_alias": FACTOR_FAMILY,
+        "local_settings": local_values,
+        "_runtime_window": {
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "time_precision": "exact",
+            "timezone": "Asia/Shanghai",
+        },
+        "auto_group_calendar_freq": True,
+        "group_calendar_freq": None,
+        "_group_owner_username": USERNAME,
+    }
+    flat_groups = group_module._groups_with_parent_fallback(groups)
+    resolved_backtest_settings = group_module._resolve_flat_backtest_settings(payload, flat_groups, [])
+    registry = group_module._get_group_test_registry()
+    local_by_module = registry.collect_local_only_settings(resolved_backtest_settings)
+    market_rule_fallback = local_by_module.get(
+        "market_rules", {}
+    ).get("market_rule_fallback", "latest_available")
+    start_dt, end_dt = group_module._resolve_run_datetimes(local_values, resolved_backtest_settings)
+    fallback_group_settings = resolved_backtest_settings.get(str(flat_groups[0]["id"]), {})
+    page_factors_dict = page_factors.get(page_uuid, {})
+    selection_cache: dict[str, Any] = {}
+    resolved_settings_by_alias = {}
+    for group in flat_groups:
+        resolved_settings_by_alias[str(group["id"])] = group_module._resolve_group_strategy_settings(
+            group,
+            resolved_backtest_settings=resolved_backtest_settings,
+            fallback_group_settings=fallback_group_settings,
+            page_uuid=page_uuid,
+            data=payload,
+            page_factors_dict=page_factors_dict,
+            selection_cache=selection_cache,
+        )
+    state = BacktestRunState()
+    apply_strategy_configs(state, resolved_settings_by_alias)
+    products = []
+    seen_products = set()
+    for selection in selection_cache.values():
+        for product in selection.products:
+            if product in seen_products:
+                continue
+            seen_products.add(product)
+            products.append(product)
+    state.market_data_request = {
+        "products": products,
+        "start_dt": start_dt,
+        "end_dt": end_dt,
+        "policy": market_rule_fallback,
+    }
+    run(state, EventQueue(), _live_registry_without_risk_metrics().resolve())
+    strategies = {
+        alias: strategy
+        for strategy in state.strategy_configs
+        for alias in alias_set
+        if strategy.alias == next(group["id"] for group in flat_groups if group.get("shortAlias") == alias)
+    }
+    assert set(strategies) == alias_set
+    return state, strategies
+
+
+def _live_registry_without_risk_metrics() -> FlowRegistry:
+    registry = FlowRegistry()
+    for cls in _ALL_MODULE_CLASSES:
+        for flow in getattr(cls, "flows", ()):
+            if getattr(flow, "name", "") == "compute_risk_metrics":
+                continue
+            registry.register_flow(flow)
+    return registry
+
+
+def _assert_order_flow_terminal_steps_are_ordered(records: list[dict[str, Any]]) -> None:
+    order_steps: dict[str, list[str]] = {}
+    for record in records:
+        order_id = str(record.get("order_id") or "")
+        if not order_id:
+            continue
+        order_steps.setdefault(order_id, []).append(str(record.get("step") or ""))
+    for order_id, steps in order_steps.items():
+        if "ledger_update" in steps:
+            assert "order_terminal" in steps, (order_id, steps)
+            assert steps.index("ledger_update") < steps.index("order_terminal"), (order_id, steps)
+        if "resolve_execution_price" in steps and "ledger_update" in steps:
+            assert steps.index("resolve_execution_price") < steps.index("ledger_update"), (order_id, steps)

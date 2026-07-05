@@ -519,6 +519,8 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     for ledger in _ledger_targets(state, ctx):
         ledger_config = state.ledger_config_for(ledger)
         cash = cash_for_ledger(state, ledger)
+        if cash is None:
+            raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for daily mark-to-market")
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
         historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
         for product, entry in positions.items():
@@ -648,16 +650,16 @@ def _settlement_price_for_product(
     *,
     require_exact: bool,
 ) -> float:
-    value = _lookup_product_value(settlement_prices, product)
+    value = _positive_number_or_none(_lookup_product_value(settlement_prices, product))
     if value is not None:
         return value
     for field_name in ("SettlementPrice", "LastSettlementPrice"):
-        field_value = _number_or_none(fields.get(field_name))
+        field_value = _positive_number_or_none(fields.get(field_name))
         if field_value is not None:
             return field_value
     if require_exact:
         raise KeyError(f"exact daily mark-to-market requires settlement price for {product}")
-    fallback = _lookup_product_value(close_prices, product)
+    fallback = _positive_number_or_none(_lookup_product_value(close_prices, product))
     if fallback is not None:
         return fallback
     raise KeyError(f"daily mark-to-market requires price for {product}")
@@ -677,7 +679,7 @@ def _previous_settlement_for_product(
     if entry.settlement_price is not None:
         return basis
     for field_name in ("PreSettlementPrice", "LastSettlementPrice"):
-        field_value = _number_or_none(fields.get(field_name))
+        field_value = _positive_number_or_none(fields.get(field_name))
         if field_value is not None:
             return field_value
     if require_exact:
@@ -857,6 +859,13 @@ def _number_or_none(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return None if number != number else number
+
+
+def _positive_number_or_none(value: object) -> float | None:
+    number = _number_or_none(value)
+    if number is None or number <= 0:
+        return None
+    return number
 
 
 def _position_sign(value: float | int) -> float:
