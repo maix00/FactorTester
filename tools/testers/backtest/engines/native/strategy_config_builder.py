@@ -101,6 +101,8 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
     excluded = _FACTOR_MODE_FLOWS - {chosen}
     if chosen != "signal_live":
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
+    if chosen != "signal_precomputed" or not _has_strategy_intent_precompute_policy(resolved_settings):
+        excluded.add("precompute_strategy_intents")
     if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
         excluded |= _TERM_STRUCTURE_FLOWS
     uses_dmtm = _uses_daily_mark_to_market_flow(resolved_settings)
@@ -142,6 +144,13 @@ def _uses_margin_notice_flow(resolved_settings: Mapping[str, Any]) -> bool:
         return False
     margin_call_mode = str(resolved_settings.get("margin_call_mode", "auto") or "auto").lower()
     return margin_call_mode != "off"
+
+
+def _has_strategy_intent_precompute_policy(resolved_settings: Mapping[str, Any]) -> bool:
+    from tools.testers.backtest.modules.target import strategy_intent_policy_for
+
+    strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
+    return strategy_intent_policy_for(strategy_kind) is not None
 
 
 def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:

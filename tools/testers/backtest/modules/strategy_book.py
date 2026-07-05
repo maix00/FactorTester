@@ -23,7 +23,6 @@ from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.config import StrategyConfig
 
-
 StrategyBookMode = Literal["per_strategy_one_ledger"]
 
 OrderRoutingPolicy = Callable[[object, object], str | Ledger]
@@ -32,6 +31,20 @@ OrderSizingPolicy = Callable[[object, object, object, dict[Any, float]], dict[An
 PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
 TradeDecisionMergePolicy = Callable[[object, object], object]
 HierarchyConstraintPolicy = Callable[[object, object], object]
+StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], object], None]
+
+
+class StrategyIntentPolicy:
+    """Base hook for a concrete signal-to-intent policy.
+
+    Group membership, long-short composition, and future technical-rule
+    strategies can all produce trade intents, but their precompute semantics
+    differ. The owning policy implements those semantics; executable modules
+    only schedule the lifecycle flow that calls the policy.
+    """
+
+    def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
+        return None
 
 
 class StrategyBookModule(ExecutableModule):
@@ -42,7 +55,6 @@ class StrategyBookModule(ExecutableModule):
     strategy_book_mode: ClassVar[FieldRef[StrategyBookMode]] = FieldRef("strategy_book_mode")
     cash_reserve_ratio: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio")
     cash_reserve_major: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major")
-
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "strategy_book_mode": FieldDefinition(
             public=True,
@@ -108,6 +120,7 @@ class StrategyBookPolicies:
     pending_order_conflict: PendingOrderConflictPolicy | None = None
     trade_decision_merge: TradeDecisionMergePolicy | None = None
     hierarchy_constraints: HierarchyConstraintPolicy | None = None
+    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = None
 
 
 @dataclass
@@ -420,6 +433,19 @@ def apply_pending_order_conflict_policy(
     default_pending_order_conflict_policy(state, strategy, order, signal_timestamp)
 
 
+def apply_strategy_intent_precompute_policy(
+    state: object,
+    ctx: object,
+    strategies: Sequence[object],
+    default_policy: StrategyIntentPolicy,
+) -> None:
+    policy = strategy_book_store_for(state).policies.strategy_intent_precompute
+    if policy is not None:
+        policy(state, ctx, strategies, default_policy)
+        return
+    default_policy.precompute_strategy_intents(state, ctx, strategies)
+
+
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
 
@@ -442,6 +468,7 @@ def _policies_from_strategy_book(strategy_book: object, book: object) -> Strateg
     return StrategyBookPolicies(
         trade_decision_merge=getattr(book, "merge_trade_decisions", None),
         hierarchy_constraints=getattr(book, "apply_hierarchy_constraints", None),
+        strategy_intent_precompute=getattr(book, "precompute_strategy_intents", None),
     )
 
 

@@ -44,6 +44,7 @@ from .bar_events import BarEventModule
 from .minor_unit import MinorUnitModule
 from .factor import FactorModule
 from .factor_signal import FactorSignalModule
+from .target import TargetStrategyModule
 from .group_membership import GroupMembershipModule
 from .long_short import LongShortCompositionModule
 from .order_flow import OrderFlowModule
@@ -70,6 +71,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     MinorUnitModule,
     FactorModule,
     FactorSignalModule,
+    TargetStrategyModule,
     GroupMembershipModule,
     LongShortCompositionModule,
     FeeModule,
