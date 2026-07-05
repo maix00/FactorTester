@@ -17,6 +17,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowCont
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
+from tools.testers.backtest.modules import cash_rescale as cash_rescale_impl
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash, constrain_order_batch_to_execution_cash
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule, _resolve_fee_cost, _resolve_fee_mode
@@ -56,7 +57,9 @@ def _set_cash(account: BacktestRunState, ledger: LedgerState, amount: float) -> 
 
 
 def _cash_major(account: BacktestRunState, ledger: LedgerState) -> float:
-    return cash_for_ledger(account, ledger).to_major()
+    cash = cash_for_ledger(account, ledger)
+    assert cash is not None
+    return cash.to_major()
 
 
 def test_fee_mode_zero_means_no_fee():
@@ -577,6 +580,48 @@ def test_execution_cash_constraint_uses_actual_execution_price_before_ledger_upd
     assert order.quantity == pytest.approx(0.5)
     assert _cash_major(account, ledger) == pytest.approx(0.0)
     assert ledger.get(LedgerModule.positions)[p].quantity == pytest.approx(0.5)
+
+
+def test_execution_cash_constraint_fast_path_skips_margin_simulation_when_bound_fits(monkeypatch):
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        EngineModule.engine_mode: "custom",
+    })
+    account = _account_with_ledger(s, config)
+    ledger = account.ledger_for_strategy(s)
+    account.ledger_configs[ledger_identity(f"private:{s.alias}")] = LedgerConfig(
+        margin_mode="fixed",
+        fixed_margin_ratio=0.1,
+    )
+    _set_cash(account, ledger, 1_000.0)
+    ledger.set(LedgerModule.positions, {p: ProductPosition(quantity=0.0)})
+    order = Order(
+        instrument=p,
+        timestamp=pd.Timestamp("2024-01-02"),
+        quantity=1.0,
+        intent_quantity=1.0,
+        strategy=s,
+    )
+    order.set("effective_price", 100.0)
+    draft = EventDraft(EventKind.ORDER, pd.Timestamp("2024-01-02"), s, order)
+    ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-02"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [draft]},
+    )
+    ctx.set(MarketDataModule.current_prices, {p: 100.0})
+
+    def fail_clone(_positions):
+        raise AssertionError("exact simulation should be skipped when conservative cash bound fits")
+
+    monkeypatch.setattr(cash_rescale_impl, "_clone_positions_for_cash_check", fail_clone)
+
+    constrain_order_batch_to_execution_cash(account, ctx)
+
+    assert order.quantity == pytest.approx(1.0)
+    assert order.get("reject_reason") is None
 
 
 def test_order_flow_records_fee_slippage_ledger_and_final_status():

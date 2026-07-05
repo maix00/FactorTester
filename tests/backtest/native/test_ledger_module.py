@@ -17,6 +17,7 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules import ledger_module as ledger_module_impl
 from tools.testers.backtest.modules.ledger_module import LedgerModule, _apply_order_fill, _basic_equity, _initialize_ledgers
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
@@ -32,7 +33,9 @@ def _product() -> Product:
 
 
 def _cash(account: BacktestRunState, strategy: Strategy) -> DataMoney:
-    return cash_for_ledger(account, account.ledger_for_strategy(strategy))
+    cash = cash_for_ledger(account, account.ledger_for_strategy(strategy))
+    assert cash is not None
+    return cash
 
 
 def _cash_major(account: BacktestRunState, strategy: Strategy) -> float:
@@ -146,7 +149,9 @@ def test_initialize_ledgers_funds_empty_ledger_created_before_initialization():
 
     ledger = account.ledger_for_strategy(s)
     assert ledger is empty
-    assert cash_for_ledger(account, ledger).to_major() == pytest.approx(1_000_000.0)
+    cash = cash_for_ledger(account, ledger)
+    assert cash is not None
+    assert cash.to_major() == pytest.approx(1_000_000.0)
     assert p in ledger.get(LedgerModule.positions)
 
 
@@ -271,7 +276,9 @@ def test_apply_order_fill_skips_rejected_order_without_ledger_effect():
     _apply_order_fill(account, order_ctx)
 
     ledger = account.ledger_for_strategy(s)
-    assert cash_for_ledger(account, ledger).to_major() == pytest.approx(1_000_000.0)
+    cash = cash_for_ledger(account, ledger)
+    assert cash is not None
+    assert cash.to_major() == pytest.approx(1_000_000.0)
     assert ledger.get(LedgerModule.positions)[p].quantity == 0.0
     assert order.status == OrderStatus.REJECTED
     assert order.reject_reason == "触及涨停，买入方向不可成交"
@@ -483,7 +490,9 @@ def test_auto_margin_mode_cash_accounts_products_without_margin_rules():
     entry = ledger.get(LedgerModule.positions)[p]
     assert entry.quantity == pytest.approx(10.0)
     assert entry.margin_reserved is None
-    assert cash_for_ledger(account, ledger).to_major() == pytest.approx(999_000.0)
+    cash = cash_for_ledger(account, ledger)
+    assert cash is not None
+    assert cash.to_major() == pytest.approx(999_000.0)
 
 
 def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():
@@ -653,6 +662,52 @@ def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
     assert [ledger.name for ledger in account.ledgers] == ["shared-book"]
     assert account.ledger_for_strategy(s1) is account.ledger_for_strategy(s2)
     assert account.ledger_for_strategy(s2).get(LedgerModule.positions)[p].quantity == pytest.approx(2.0)
+
+
+def test_equity_on_shared_ledger_is_computed_once_per_event(monkeypatch):
+    s1 = Strategy(alias="S1")
+    s2 = Strategy(alias="S2")
+    p = _product()
+    configs = {
+        s1: _strategy_config(s1, engine_mode="custom", margin_mode="none"),
+        s2: _strategy_config(s2, engine_mode="custom", margin_mode="none"),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {
+            s1.alias: "shared-book",
+            s2.alias: "shared-book",
+        },
+    }), {s1.alias: s1, s2.alias: s2})
+    account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(margin_mode="none")
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s1, frozenset({p}))
+    ctx.set_for(ProductSelectionModule.products, s2, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+    account.ledger_for_strategy(s1).set(LedgerModule.positions, {p: ProductPosition(quantity=2.0)})
+
+    calls = 0
+    real_ledger_equity = ledger_module_impl._ledger_equity
+
+    def _counting_ledger_equity(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_ledger_equity(*args, **kwargs)
+
+    monkeypatch.setattr(ledger_module_impl, "_ledger_equity", _counting_ledger_equity)
+    equity_ctx = FlowContext(
+        timestamp=pd.Timestamp("2024-01-01"),
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+    )
+    equity_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    equity_ctx.set(MarketDataModule.current_historical_fields, {})
+
+    _basic_equity(account, equity_ctx)
+
+    assert calls == 1
+    assert equity_ctx.get_for(LedgerModule.equity, s1) == pytest.approx(1_000_020.0)
+    assert equity_ctx.get_for(LedgerModule.equity, s2) == pytest.approx(1_000_020.0)
 
 
 def test_strategy_book_declares_cash_pool_across_distinct_ledgers():
