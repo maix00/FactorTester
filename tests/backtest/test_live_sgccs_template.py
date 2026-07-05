@@ -5,6 +5,7 @@ import os
 import re
 import uuid
 import pytest
+import pandas as pd
 
 from server import create_app
 from server.services.factor_registry import page_factors
@@ -254,7 +255,26 @@ def test_live_sgccs_template_restores_and_runs_all_seven_groups() -> None:
         "positions_contracts", "positions_products",
         "targets_contracts", "targets_products",
     ]
-    assert snapshot_body["event_type"] in {"FILL", "REJECT"}
+    assert snapshot_body["event_type"] in {"TARGET", "FILL", "REJECT"}
+    order_flow_response = client.post("/get_group_order_flow", json={
+        "group_id": first_group["group_id"],
+        "page_uuid": page_uuid,
+    })
+    assert order_flow_response.status_code == 200, order_flow_response.get_json()
+    order_flow_body = order_flow_response.get_json()
+    assert order_flow_body.get("success"), order_flow_body
+    records = order_flow_body["groups"][0]["records"]
+    final_timestamp = pd.Timestamp(first_group["timestamps"][-1], unit="ms", tz="UTC").tz_convert("Asia/Shanghai")
+    final_prefix = final_timestamp.isoformat()
+    final_records = [
+        record for record in records
+        if str(record.get("timestamp") or "").startswith(final_prefix)
+    ]
+    assert any(record.get("step") == "construct_order" for record in final_records)
+    assert not any(
+        record.get("step") in {"resolve_execution_price", "ledger_update", "order_terminal"}
+        for record in final_records
+    )
 
 
 def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data() -> None:

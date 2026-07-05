@@ -70,6 +70,7 @@ class ResolvedFlow:
     description: str = ""
     strategy_scoped: bool = False
     definition_name: str = ""
+    input_materialization: bool = False
 
     @property
     def effective_description(self) -> str:
@@ -115,6 +116,7 @@ class FlowRegistry:
                 phase=base.phase, event_kind=base.event_kind, order=base.order,
                 after=base.after, before=base.before, compute=compute,
                 description=base.effective_description, strategy_scoped=_flow_strategy_scoped(base),
+                input_materialization=_flow_input_materialization(base),
             ))
         return resolved
 
@@ -133,6 +135,12 @@ def _flow_strategy_scoped(flow: Flow | FlowBinding) -> bool:
     if isinstance(flow, FlowBinding):
         return flow.effective_strategy_scoped
     return flow.strategy_scoped
+
+
+def _flow_input_materialization(flow: Flow | FlowBinding) -> bool:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_input_materialization
+    return flow.input_materialization
 
 
 # ── sort_and_validate ─────────────────────────────────────────────
@@ -203,8 +211,10 @@ class FlowContext:
         drafts_by_ledger: dict["Ledger", list[EventDraft]] | None = None,
         audit_contract: bool = False,
         enforce_contract: bool = False,
+        event_kind: EventKind | None = None,
     ) -> None:
         self.timestamp = timestamp
+        self.event_kind = event_kind
         self.active_strategies = active_strategies
         self.active_ledgers = active_ledgers
         # A strategy can have multiple simultaneous drafts in one dispatch
@@ -449,6 +459,8 @@ class _ProgressTracker:
     ) -> None:
         if self._activity_sink is None:
             return
+        if flow.input_materialization:
+            return
         activity_phase = phase or _activity_phase_for_flow(flow)
         ts_text = timestamp.isoformat() if timestamp is not None else ""
         active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
@@ -559,6 +571,7 @@ def make_dispatcher(
         # persist across the whole batch.
         ctx = FlowContext(
             timestamp=timestamp, event_queue=event_queue,
+            event_kind=batch[0].kind,
             active_strategies=all_active, active_ledgers=all_active_ledgers,
             drafts_by_strategy=drafts_by_strategy,
             drafts_by_ledger=drafts_by_ledger,
@@ -878,6 +891,7 @@ def _dedupe_manifest_flows(flows: list[ResolvedFlow]) -> list[ResolvedFlow]:
 
 
 def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) -> dict[str, Any]:
+    visible_flows = [flow for flow in flows if not flow.input_materialization]
     return {
         "key": key,
         "label": _PHASE_LABELS.get(key, key),
@@ -890,6 +904,6 @@ def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) 
                 "display_order": idx,
                 "event_kind": flow.event_kind.name if flow.event_kind is not None else "",
             }
-            for idx, flow in enumerate(flows, start=1)
+            for idx, flow in enumerate(visible_flows, start=1)
         ],
     }

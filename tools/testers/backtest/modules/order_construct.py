@@ -66,7 +66,7 @@ class OrderConstructModule(ExecutableModule):
     round_order_quantity: ClassVar[Flow] = Flow(
         "round_order_quantity",
         inputs=(raw_deltas, MarketDataModule.lot_sizes, quantity_rounding_policy),
-        outputs=(sized_deltas,),
+        outputs=(sized_deltas, deltas),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=22,
@@ -148,6 +148,7 @@ def _round_to_lot_sizes(state, ctx) -> None:
             for product, quantity in deltas.items()
         }
         ctx.set_for(OrderConstructModule.sized_deltas, strategy, rounded)
+        ctx.set_for(OrderConstructModule.deltas, strategy, rounded)
         if rounded != deltas:
             store.record_strategy_step(
                 strategy,

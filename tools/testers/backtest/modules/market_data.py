@@ -74,6 +74,8 @@ class MarketDataStore:
     historical_field_policy: str | None = None
     historical_field_names: tuple[Any, ...] = ()
     historical_field_frames: Any = None
+    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(default_factory=dict)
+    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
@@ -85,6 +87,8 @@ class MarketDataStore:
         self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         self.historical_field_names = tuple(raw.get("historical_field_names", ()))
         self.volume_table = raw.get("volume")
+        self.market_snapshot_cache.clear()
+        self.historical_fields_cache.clear()
 
 
 class MarketDataModule(ExecutableModule):
@@ -253,6 +257,7 @@ class MarketDataModule(ExecutableModule):
         inputs=(),
         outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints, volume),
         description="读取市场快照",
+        input_materialization=True,
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
     lookup_current_prices_on_signal: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
@@ -285,6 +290,7 @@ class MarketDataModule(ExecutableModule):
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
         description="读取交易规则字段",
+        input_materialization=True,
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
     lookup_historical_fields_on_signal: ClassVar[FlowBinding] = lookup_historical_fields.bind(
@@ -996,6 +1002,7 @@ def _load_historical_fields(state, ctx) -> None:
     store.historical_field_policy = policy
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
     store.historical_field_names = field_names
+    store.historical_fields_cache.clear()
     if raw_prices is None or raw_prices.empty or resolver is None:
         store.historical_field_frames = None
         return
@@ -1284,17 +1291,27 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
-    market_data_store_for(state).current_prices_table = raw_prices.ffill()
+    store = market_data_store_for(state)
+    store.current_prices_table = raw_prices.ffill()
+    store.market_snapshot_cache.clear()
 
 
 def _set_current_market_snapshot(state, ctx) -> None:
     snapshot = current_market_snapshot_at(state, ctx.timestamp)
-    close_prices = snapshot.get("close", {})
+    prices = _current_prices_for_event(snapshot, ctx)
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
-    ctx.set(MarketDataModule.current_prices, close_prices)
+    ctx.set(MarketDataModule.current_prices, prices)
     ctx.set(MarketDataModule.volume, snapshot.get("volume", {}))
     ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
     ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
+
+
+def _current_prices_for_event(snapshot: dict[str, dict[Any, float]], ctx) -> dict[Any, float]:
+    if getattr(ctx, "event_kind", None) is EventKind.ORDER:
+        open_prices = snapshot.get("open")
+        if open_prices:
+            return open_prices
+    return snapshot.get("close", {})
 
 
 def _set_current_historical_fields(state, ctx) -> None:
@@ -1381,6 +1398,11 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
     source exposes them; daily settlement flows are responsible for only using
     them on ledger-notice timestamps registered after a trading day's final bar.
     """
+    store = market_data_store_for(state)
+    cache_key = _event_lookup_cache_key(timestamp)
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
     snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
     for basis, table in market_price_tables_for(state).items():
         if basis == "close" or not isinstance(table, pd.DataFrame) or table.empty:
@@ -1391,6 +1413,7 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
     volume = current_volume_at(state, timestamp)
     if volume:
         snapshot["volume"] = volume
+    store.market_snapshot_cache[cache_key] = snapshot
     return snapshot
 
 
@@ -1448,6 +1471,10 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     由 provider 直接抛出 MissingHistoricalField 或 MissingTradingDay。
     """
     store = market_data_store_for(state)
+    cache_key = _event_lookup_cache_key(timestamp)
+    cached = store.historical_fields_cache.get(cache_key)
+    if cached is not None:
+        return cached
     provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
     if provider is None:
         return {}
@@ -1470,7 +1497,9 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     frames = store.historical_field_frames
     if isinstance(frames, dict):
         frame_result = _historical_fields_at_from_frames(frames, instruments, timestamp)
-        return _apply_exchange_rule_defaults(frame_result, instruments, field_names)
+        resolved = _apply_exchange_rule_defaults(frame_result, instruments, field_names)
+        store.historical_fields_cache[cache_key] = resolved
+        return resolved
     resolved_result: dict[Any, dict[str, object]] = {}
     for instrument in instruments:
         try:
@@ -1485,7 +1514,14 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
         except HistoricalFieldLookupError:
             raise
         resolved_result[instrument] = values
-    return _apply_exchange_rule_defaults(resolved_result, instruments, field_names)
+    resolved = _apply_exchange_rule_defaults(resolved_result, instruments, field_names)
+    store.historical_fields_cache[cache_key] = resolved
+    return resolved
+
+
+def _event_lookup_cache_key(timestamp: pd.Timestamp) -> Any:
+    ts = pd.Timestamp(timestamp)
+    return (ts.value, str(ts.tz))
 
 
 def historical_field_frames_for_market_data(

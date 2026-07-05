@@ -417,7 +417,7 @@ def _trailing_volatility(table, product, timestamp, lookback: int) -> float | No
     return float(std) if pd.notna(std) else None
 
 
-def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp]:
+def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     if ctx.timestamp is None:
         raise ValueError("execution scheduling requires an event timestamp")
     current_ts = cast(pd.Timestamp, ctx.timestamp)
@@ -435,7 +435,9 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
     index = signal_timestamps(table)
     pos = index.get_indexer(pd.Index([current_ts]), method="bfill")[0]
     delay = max(int(delay or 1), 1)
-    price_pos = min(pos + delay, len(index) - 1)
+    price_pos = pos + delay
+    if price_pos >= len(index):
+        return None
     price_ts = cast(pd.Timestamp, index[price_pos])
     open_boundary_pos = max(0, min(price_pos - 1, len(index) - 1))
     event_ts = cast(
@@ -446,7 +448,10 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
 
 
 def _resolve_execution_timestamp(state, ctx, strategy) -> pd.Timestamp:
-    event_ts, _price_ts = _resolve_execution_schedule(state, ctx, strategy)
+    schedule = _resolve_execution_schedule(state, ctx, strategy)
+    if schedule is None:
+        raise ValueError("next-bar order execution has no future bar to target")
+    event_ts, _price_ts = schedule
     return event_ts
 
 
@@ -457,7 +462,10 @@ def _schedule_order_execution(state, ctx) -> None:
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
-        execution_ts, price_ts = _resolve_execution_schedule(state, ctx, strategy)
+        schedule = _resolve_execution_schedule(state, ctx, strategy)
+        if schedule is None:
+            continue
+        execution_ts, price_ts = schedule
         for order in orders:
             key = (strategy, order.instrument)
             apply_pending_order_conflict_policy(state, strategy, order, ctx.timestamp)

@@ -9,17 +9,20 @@ import pytest
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import LedgerConfig
 from tools.testers.backtest.engines.native.config import StrategyConfig
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+import tools.testers.backtest.modules.market_data as market_data_module
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
-    _resolve_market_data_request, current_market_snapshot_at, current_prices_at,
-    historical_fields_for_product, order_constraints_from_snapshot,
+    _resolve_market_data_request, _set_current_market_snapshot,
+    current_market_snapshot_at, current_prices_at, historical_fields_for_product,
+    order_constraints_from_snapshot,
 )
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
@@ -82,6 +85,74 @@ def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints
     assert snapshot["upper_limit"][product] == 10.0
     assert constraints[product].can_buy is False
     assert constraints[product].can_sell is True
+
+
+def test_current_market_snapshot_is_cached_per_event_timestamp(monkeypatch):
+    account = BacktestRunState()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    calls = {"prices": 0}
+    product = object()
+
+    def _prices(_state, _timestamp):
+        calls["prices"] += 1
+        return {product: 10.0}
+
+    monkeypatch.setattr(market_data_module, "current_prices_at", _prices)
+    monkeypatch.setattr(market_data_module, "market_price_tables_for", lambda _state: {})
+    monkeypatch.setattr(market_data_module, "current_volume_at", lambda _state, _timestamp: {})
+
+    first = market_data_module.current_market_snapshot_at(account, timestamp)
+    second = market_data_module.current_market_snapshot_at(account, timestamp)
+
+    assert first is second
+    assert calls["prices"] == 1
+
+
+def test_current_historical_fields_is_cached_per_event_timestamp(monkeypatch):
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.historical_field_names = ("VolumeMultiple",)
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    account.market_data_store.historical_field_frames = {"VolumeMultiple": pd.DataFrame()}
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [10.0]}, index=[timestamp])
+    calls = {"frames": 0}
+
+    def _from_frames(_frames, instruments, _timestamp):
+        calls["frames"] += 1
+        return {instrument: {"VolumeMultiple": 1.0} for instrument in instruments}
+
+    monkeypatch.setattr(market_data_module, "_historical_fields_at_from_frames", _from_frames)
+
+    first = market_data_module.current_historical_fields_at(account, timestamp)
+    second = market_data_module.current_historical_fields_at(account, timestamp)
+
+    assert first is second
+    assert first[product]["VolumeMultiple"] == 1.0
+    assert calls["frames"] == 1
+
+
+def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0]},
+        index=[timestamp],
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+    }
+
+    order_ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.ORDER)
+    _set_current_market_snapshot(account, order_ctx)
+    signal_ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.SIGNAL)
+    _set_current_market_snapshot(account, signal_ctx)
+
+    assert order_ctx.get(MarketDataModule.current_prices)[product] == 10.0
+    assert signal_ctx.get(MarketDataModule.current_prices)[product] == 11.0
 
 
 def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):

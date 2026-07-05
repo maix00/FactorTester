@@ -10,7 +10,7 @@ from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.market_data import MarketDataModule
-from tools.testers.backtest.modules.order_construct import OrderConstructModule, _round_to_lot_sizes
+from tools.testers.backtest.modules.order_construct import OrderConstructModule, _construct_orders, _round_to_lot_sizes
 
 
 def _product() -> Product:
@@ -65,6 +65,24 @@ def test_rounding_uses_existing_deltas_without_recomputing_size_order():
 
     _round_to_lot_sizes(account, ctx)
     assert ctx.get_for(OrderConstructModule.sized_deltas, s)[p] == 20.0
+    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == 20.0
+
+
+def test_construct_orders_consumes_rounded_deltas_after_sizing_pipeline():
+    s = Strategy(alias="S")
+    p = _product()
+    account = _account(s)
+
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
+    ctx.set_for(OrderConstructModule.raw_deltas, s, {p: 23.0})
+    ctx.set(MarketDataModule.lot_sizes, {p: 10.0})
+
+    _round_to_lot_sizes(account, ctx)
+    _construct_orders(account, ctx)
+
+    orders = ctx.get_for(OrderConstructModule.orders, s)
+    assert len(orders) == 1
+    assert orders[0].quantity == 20.0
 
 
 def test_missing_lot_size_defaults_to_no_rounding():

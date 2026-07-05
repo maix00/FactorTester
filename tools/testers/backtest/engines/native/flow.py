@@ -33,6 +33,10 @@ class FlowDefinition:
                       # not just buried anonymously inside a `flows` tuple literal
     description: str = ""  # human-readable label for progress/UI display
     strategy_scoped: bool = False
+    # Infrastructure boundary: materializes event-time inputs into
+    # FlowContext. It is still scheduler-visible for dependency ordering
+    # and no-lookahead guarantees; UIs may group or hide it.
+    input_materialization: bool = False
 
     @property
     def qualified_name(self) -> str:
@@ -53,6 +57,7 @@ class FlowDefinition:
         name: str | None = None,
         description: str | None = None,
         strategy_scoped: bool | None = None,
+        input_materialization: bool | None = None,
     ) -> "FlowBinding":
         return FlowBinding(
             definition=self,
@@ -64,6 +69,7 @@ class FlowDefinition:
             name=name,
             description=description,
             strategy_scoped=strategy_scoped,
+            input_materialization=input_materialization,
         )
 
     def __repr__(self) -> str:
@@ -81,6 +87,7 @@ class FlowBinding:
     name: str | None = None
     description: str | None = None
     strategy_scoped: bool | None = None
+    input_materialization: bool | None = None
 
     @property
     def definition_name(self) -> str:
@@ -120,6 +127,12 @@ class FlowBinding:
             return self.strategy_scoped
         return self.definition.strategy_scoped
 
+    @property
+    def effective_input_materialization(self) -> bool:
+        if self.input_materialization is not None:
+            return self.input_materialization
+        return self.definition.input_materialization
+
     def __repr__(self) -> str:
         return self.qualified_name
 
@@ -147,6 +160,9 @@ class Flow:
         # PRE/POST flows with strategy_scoped=True run only when at least one
         # StrategyConfig activates the flow name. Generic setup/teardown flows
         # keep the default and run once for the whole run state.
+    # Same meaning as FlowDefinition.input_materialization for legacy
+    # single-binding Flow declarations.
+    input_materialization: bool = False
 
     @property
     def definition_name(self) -> str:
@@ -180,6 +196,7 @@ class Flow:
             owner=self.owner,
             description=self.description,
             strategy_scoped=self.strategy_scoped,
+            input_materialization=self.input_materialization,
         )
         return definition.bind(
             phase=phase or self.phase,

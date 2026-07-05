@@ -301,7 +301,9 @@ def test_resolve_execution_schedule_next_bar_open_uses_next_row_price_and_open_b
     account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1, 2, 3]}, index=idx)
     ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue())
 
-    open_event_ts, open_price_ts = _resolve_execution_schedule(account, ctx, s_open)
+    schedule = _resolve_execution_schedule(account, ctx, s_open)
+    assert schedule is not None
+    open_event_ts, open_price_ts = schedule
 
     assert open_event_ts == idx[0] + pd.Timedelta(nanoseconds=1)
     assert open_price_ts == idx[1]
@@ -323,7 +325,7 @@ def test_resolve_execution_schedule_rejects_non_open_price_basis():
         _resolve_execution_schedule(account, ctx, s)
 
 
-def test_resolve_execution_timestamp_clips_to_last_available_bar():
+def test_resolve_execution_schedule_returns_none_without_future_bar():
     s = Strategy(alias="S")
     config = StrategyConfig(strategy=s, field_values={
         GroupMembershipModule.execution_timing: "next_bar",
@@ -334,9 +336,32 @@ def test_resolve_execution_timestamp_clips_to_last_available_bar():
         {"P1": [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
     t = pd.Timestamp("2024-01-01")
     ctx = FlowContext(timestamp=t, event_queue=EventQueue())
-    event_ts, price_ts = _resolve_execution_schedule(account, ctx, s)
-    assert event_ts == pd.Timestamp("2024-01-01") + pd.Timedelta(nanoseconds=1)
-    assert price_ts == pd.Timestamp("2024-01-02")
+    assert _resolve_execution_schedule(account, ctx, s) is None
+
+
+def test_schedule_order_execution_skips_orders_without_future_bar():
+    s = Strategy(alias="S")
+    p = _product()
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    last = pd.Timestamp("2024-01-02")
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {p: [1, 2]}, index=pd.date_range("2024-01-01", periods=2))
+    queue = EventQueue()
+    order = Order(instrument=p, timestamp=last, quantity=10.0, intent_quantity=10.0, strategy=s)
+    ctx = FlowContext(timestamp=last, event_queue=queue, active_strategies=frozenset({s}))
+    ctx.set_for(OrderConstructModule.orders, s, [order])
+
+    _schedule_order_execution(account, ctx)
+
+    assert order.status == OrderStatus.DRAFT
+    seen = []
+    queue.set_dispatcher(EventKind.ORDER, lambda batch: seen.extend(batch))
+    queue.run_until_drained()
+    assert seen == []
 
 
 def test_schedule_order_execution_sets_scheduled_and_pushes_event():
