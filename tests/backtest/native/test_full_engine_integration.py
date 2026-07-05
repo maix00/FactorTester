@@ -16,7 +16,7 @@ import pytest
 from tools.data.types import DataColumn, DataFreq
 from tools.factors.FactorExpr import ColumnRef
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.modules.equity_curve import equity_curve_for, position_curve_for
@@ -52,8 +52,6 @@ def _build_registry() -> FlowRegistry:
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     return registry
 
 

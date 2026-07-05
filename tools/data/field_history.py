@@ -230,7 +230,10 @@ class FieldHistoryProvider:
             self.frame = self.frame.sort_values(
                 ["instrument", "field_name", "effective_trading_day", "effective_timestamp"]
             ).reset_index(drop=True)
+            self.frame["_scope_codes"] = _series(self.frame, "contract_codes").map(_decode_contract_codes)
+            self.frame["_product_level"] = _series(self.frame, "_scope_codes").map(lambda codes: len(codes) == 0)
         self._subset_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
+        self._subset_index = self._build_subset_index()
 
     @classmethod
     def from_records(cls, records: Iterable[Mapping[str, Any]]) -> "FieldHistoryProvider":
@@ -500,6 +503,11 @@ class FieldHistoryProvider:
             return cached
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
+        if instrument_type:
+            subset = self._subset_index.get((instrument, field_name, instrument_type or ""))
+            if subset is not None and not subset.empty:
+                self._subset_cache[cache_key] = subset
+                return subset
         instrument_matches = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == instrument])
         if instrument_matches.empty:
             raise MissingHistoricalField(f"no historical field rows for instrument={instrument}")
@@ -516,11 +524,17 @@ class FieldHistoryProvider:
         subset = cast(pd.DataFrame, type_matches[_series(type_matches, "field_name") == field_name])
         if subset.empty:
             raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}")
-        subset = subset.copy()
-        subset["_scope_codes"] = _series(subset, "contract_codes").map(_decode_contract_codes)
-        subset["_product_level"] = _series(subset, "_scope_codes").map(lambda codes: len(codes) == 0)
         self._subset_cache[cache_key] = subset
         return subset
+
+    def _build_subset_index(self) -> dict[tuple[str, str, str], pd.DataFrame]:
+        if self.frame.empty:
+            return {}
+        result: dict[tuple[str, str, str], pd.DataFrame] = {}
+        for key, group in self.frame.groupby(["instrument", "field_name", "instrument_type"], sort=False):
+            instrument, field_name, instrument_type = cast(tuple[Any, Any, Any], key)
+            result[(str(instrument), str(field_name), str(instrument_type or ""))] = cast(pd.DataFrame, group)
+        return result
 
 
 def save_historical_field_records(
@@ -1533,7 +1547,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import importlib.util
     from pathlib import Path
 
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
     from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 
     repo_root = Path(__file__).resolve().parents[2]

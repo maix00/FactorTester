@@ -17,12 +17,29 @@ from tools.traderules import (
     register_exchange_clearing_rule,
     register_exchange_trading_rule,
 )
+from tools.traderules.exchange_rules import _product_exchange_candidates
 
 
 @dataclass(frozen=True)
 class _ProductLike:
     name: str
     exchange_id: str | None = None
+
+
+def test_product_exchange_candidates_are_cached_per_product_identity() -> None:
+    class _PlainProduct:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __str__(self) -> str:
+            return self.name
+
+    first = _PlainProduct("A.CZC")
+    second = _PlainProduct("A.SHF")
+
+    assert _product_exchange_candidates(first) == ("CZCE",)
+    assert _product_exchange_candidates(first) == ("CZCE",)
+    assert _product_exchange_candidates(second) == ("SHFE",)
 
 
 def test_exchange_rule_defaults_can_be_registered_by_data_source() -> None:

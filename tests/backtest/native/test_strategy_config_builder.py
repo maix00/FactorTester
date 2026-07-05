@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import (
     apply_strategy_configs, build_strategy_configs,
 )
+from tools.testers.backtest.modules.cash_pool import cash_pool_store_for
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.backtest.modules.engine import EngineModule
+from tools.testers.backtest.modules.strategy_book import StrategyBook
 
 # GroupMembershipModule's core Flows are unconditionally active for every
 # strategy this round (no second SignalToOrderModule exists yet to opt out
@@ -61,12 +63,14 @@ def test_factor_mode_incremental_activates_signal_live_not_precomputed():
     assert config.uses_flow("signal_live")
     assert config.uses_flow("schedule_bar_events")
     assert not config.uses_flow("signal_precomputed")
+    assert not config.uses_flow("precompute_strategy_intents")
 
 
 def test_factor_mode_precomputed_activates_signal_precomputed_not_live():
     configs = build_strategy_configs({"A1": {"factor_mode": "precomputed", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
+    assert config.uses_flow("precompute_strategy_intents")
     assert not config.uses_flow("signal_live")
     assert not config.uses_flow("schedule_bar_events")
 
@@ -75,6 +79,7 @@ def test_factor_mode_auto_defaults_to_signal_precomputed():
     configs = build_strategy_configs({"A1": {"factor_mode": "auto", **_GROUP_FIELDS}})
     config = next(iter(configs.values()))
     assert config.uses_flow("signal_precomputed")
+    assert config.uses_flow("precompute_strategy_intents")
     assert not config.uses_flow("signal_live")
     assert not config.uses_flow("schedule_bar_events")
 
@@ -150,6 +155,7 @@ def test_long_short_strategy_does_not_require_group_membership_fields():
     config = next(iter(configs.values()))
     assert config.uses_flow("compose_long_short_target")
     assert not config.uses_flow("group_quantile_membership")
+    assert not config.uses_flow("precompute_strategy_intents")
 
 
 def test_daily_mark_to_market_flow_gating_by_engine_and_custom_field():
@@ -190,6 +196,31 @@ def test_apply_strategy_configs_sets_account_attribute():
     strategy = next(iter(account.strategy_configs))
     assert account.strategy_configs[strategy].get(FeeModule.fixed_fee_rate) is None
     assert account.ledger_config_for(f"private:{strategy.alias}").fixed_fee_rate == 0.001
+
+
+def test_apply_strategy_configs_uses_strategy_book_cash_pool_config():
+    account = BacktestRunState()
+    book = StrategyBook.from_dict({
+        "strategies": {"A1": "book-a"},
+        "cash_pools": {"book-a": "pool-main"},
+        "cash_pool_configs": {
+            "pool-main": {
+                "initial_capital_major": 2_500_000.0,
+                "base_currency": "USD",
+                "currency_conversion_fee_rate": 0.0002,
+            },
+        },
+    })
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", "margin_mode": "none", **_GROUP_FIELDS}},
+        strategy_book=book,
+    )
+
+    config = cash_pool_store_for(account).config_by_pool["pool-main"]
+    assert config.initial_capital_major == 2_500_000.0
+    assert config.base_currency == "USD"
+    assert config.currency_conversion_fee_rate == 0.0002
 
 
 def test_auto_daily_mark_to_market_is_not_materialized_as_ledger_default():

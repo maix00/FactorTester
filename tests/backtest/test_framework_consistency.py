@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
@@ -108,7 +108,7 @@ def _scenario(
     run_state.raw_market_data = {
         "raw_prices": raw_prices,
         "price_tables": {"open": raw_prices, "close": raw_prices},
-        # whole-contract trading on both sides: native PositionSizingModule
+        # whole-contract trading on both sides: native OrderConstructModule
         # floors to this lot; the translator carries the same values into the
         # worker payload's lot_sizes matrix (workers cannot express fractional
         # contracts — their target_quantities always floors to lot).
@@ -123,8 +123,6 @@ def _native_curves(products=None) -> tuple[dict[str, float], dict[str, dict[str,
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     run(run_state, EventQueue(), registry.resolve())
     strategy = next(iter(run_state.strategy_configs))
     equity = {

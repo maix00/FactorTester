@@ -14,16 +14,37 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.config import CashPoolConfig
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import StrategyConfig
-
+    from tools.testers.backtest.engines.native.config import StrategyConfig
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
+
+OrderRoutingPolicy = Callable[[object, object], str | Ledger]
+CashAvailabilityPolicy = Callable[[object, object, float, str], float]
+OrderSizingPolicy = Callable[[object, object, object, dict[Any, float]], dict[Any, float]]
+PendingOrderConflictPolicy = Callable[[object, object, object, object], None]
+TradeDecisionMergePolicy = Callable[[object, object], object]
+HierarchyConstraintPolicy = Callable[[object, object], object]
+StrategyIntentPrecomputePolicy = Callable[[object, object, Sequence[object], object], None]
+
+
+class StrategyIntentPolicy:
+    """Base hook for a concrete signal-to-intent policy.
+
+    Group membership, long-short composition, and future technical-rule
+    strategies can all produce trade intents, but their precompute semantics
+    differ. The owning policy implements those semantics; executable modules
+    only schedule the lifecycle flow that calls the policy.
+    """
+
+    def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
+        return None
 
 
 class StrategyBookModule(ExecutableModule):
@@ -32,7 +53,8 @@ class StrategyBookModule(ExecutableModule):
     order: ClassVar[int] = 155
 
     strategy_book_mode: ClassVar[FieldRef[StrategyBookMode]] = FieldRef("strategy_book_mode")
-
+    cash_reserve_ratio: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio")
+    cash_reserve_major: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major")
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "strategy_book_mode": FieldDefinition(
             public=True,
@@ -53,16 +75,60 @@ class StrategyBookModule(ExecutableModule):
             tab_order=155,
             help_text="默认模式：每个 strategy 使用一个私有 ledger。共享账本或一策略多账本由 StrategyBook.from_dict 或子类提供。",
         ),
+        "cash_reserve_ratio": FieldDefinition(
+            public=True,
+            label="现金保留比例",
+            default=0.0,
+            control_template="number",
+            tab="strategy_book",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+            chip_template="现金保留比例: {value}",
+            tab_label="策略簿",
+            tab_order=155,
+            help_text="ledger 级风控缓冲；交易和保证金追缴只能使用扣除该比例后的可动用现金。",
+        ),
+        "cash_reserve_major": FieldDefinition(
+            public=True,
+            label="现金保留金额",
+            default=0.0,
+            control_template="number",
+            tab="strategy_book",
+            minimum=0.0,
+            step=1.0,
+            chip_template="现金保留金额: {value}",
+            tab_label="策略簿",
+            tab_order=155,
+            help_text="ledger 级固定现金缓冲；与现金保留比例同时生效。",
+        ),
     }
+
+
+@dataclass
+class StrategyBookPolicies:
+    """StrategyBook extension points.
+
+    Policy slots describe user-overridable decisions that cross strategy,
+    ledger, or pending-order boundaries. Default business behavior belongs to
+    the owning module helper; StrategyBook only hosts the override slot.
+    """
+
+    order_routing: OrderRoutingPolicy | None = None
+    cash_availability: CashAvailabilityPolicy | None = None
+    order_sizing: OrderSizingPolicy | None = None
+    pending_order_conflict: PendingOrderConflictPolicy | None = None
+    trade_decision_merge: TradeDecisionMergePolicy | None = None
+    hierarchy_constraints: HierarchyConstraintPolicy | None = None
+    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = None
 
 
 @dataclass
 class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
-    order_ledger_router: Callable[[object, object], str | Ledger] | None = None
-    merge_trade_decisions: Callable[[object, object], object] = lambda decisions, ctx: decisions
-    apply_hierarchy_constraints: Callable[[object, object], object] = lambda decision, ctx: decision
+    cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
+    policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
 
     def register_strategy_ledgers(
         self,
@@ -70,6 +136,7 @@ class StrategyBookStore:
         ledger_ids: Sequence[str],
         *,
         default_ledger_id: str,
+        cash_pool_ids_by_ledger: Mapping[str, str] | None = None,
     ) -> None:
         allowed = {ledger_identity(str(ledger_id)) for ledger_id in ledger_ids}
         if not allowed:
@@ -82,6 +149,9 @@ class StrategyBookStore:
             )
         self.ledgers_by_strategy[strategy] = allowed
         self._default_ledger_by_strategy[strategy] = default
+        pool_mapping = cash_pool_ids_by_ledger or {}
+        for ledger in allowed:
+            self.cash_pool_by_ledger.setdefault(ledger, str(pool_mapping.get(ledger.name) or ledger.name))
 
     def ledgers_for_strategy(self, state: object, strategy: object) -> set[Ledger]:
         return self.ledgers_by_strategy.get(strategy, {ledger_identity(f"private:{_strategy_alias(strategy)}")})
@@ -91,8 +161,8 @@ class StrategyBookStore:
 
     def ledger_for_order(self, state: object, order: object) -> Ledger:
         strategy = getattr(order, "strategy")
-        if self.order_ledger_router is not None:
-            ledger = ledger_identity(str(self.order_ledger_router(state, order)))
+        if self.policies.order_routing is not None:
+            ledger = ledger_identity(str(self.policies.order_routing(state, order)))
         else:
             order_ledger_id = getattr(order, "fields", {}).get("ledger_id")
             ledger = (
@@ -107,6 +177,18 @@ class StrategyBookStore:
             )
         return ledger
 
+    def cash_pool_for_ledger(self, ledger: str | Ledger) -> str:
+        ledger_key = ledger_identity(ledger)
+        return str(self.cash_pool_by_ledger.get(ledger_key) or ledger_key.name)
+
+    def ledgers_for_cash_pool(self, cash_pool_id: str) -> set[Ledger]:
+        target = str(cash_pool_id)
+        return {
+            ledger
+            for ledger, pool_id in self.cash_pool_by_ledger.items()
+            if str(pool_id) == target
+        }
+
 
 def strategy_book_store_for(state: object) -> StrategyBookStore:
     store = getattr(state, "strategy_book_store", None)
@@ -119,15 +201,22 @@ def strategy_book_store_for(state: object) -> StrategyBookStore:
 def materialize_strategy_book_store(state: object, strategy_book: object, strategies: Mapping[str, object]) -> StrategyBookStore:
     book = strategy_book if hasattr(strategy_book, "ledger_ids_for_strategy") else StrategyBookSimple()
     store = strategy_book_store_for(state)
-    store.order_ledger_router = getattr(strategy_book, "order_ledger_router", None)
-    store.merge_trade_decisions = getattr(book, "merge_trade_decisions", store.merge_trade_decisions)
-    store.apply_hierarchy_constraints = getattr(book, "apply_hierarchy_constraints", store.apply_hierarchy_constraints)
+    store.policies = _policies_from_strategy_book(strategy_book, book)
     for alias, strategy in strategies.items():
         ledger_ids = tuple(str(value) for value in _book_ledger_ids_for_alias(book, alias))
         if not ledger_ids:
             ledger_ids = (f"private:{alias}",)
         default = str(_book_default_ledger_id_for_alias(book, alias, ledger_ids[0]))
-        store.register_strategy_ledgers(strategy, ledger_ids, default_ledger_id=default)
+        cash_pool_ids = {
+            ledger_id: _book_cash_pool_id_for_ledger(book, ledger_id)
+            for ledger_id in ledger_ids
+        }
+        store.register_strategy_ledgers(
+            strategy,
+            ledger_ids,
+            default_ledger_id=default,
+            cash_pool_ids_by_ledger=cash_pool_ids,
+        )
     return store
 
 
@@ -144,6 +233,11 @@ def _book_default_ledger_id_for_alias(book: object, alias: str, fallback: str) -
     return str(mapping.get(str(alias), fallback))
 
 
+def _book_cash_pool_id_for_ledger(book: object, ledger_id: str) -> str:
+    mapping = getattr(book, "cash_pool_id_by_ledger", {})
+    return str(mapping.get(str(ledger_id), ledger_id))
+
+
 @dataclass(frozen=True)
 class StrategyBook:
     """Declarative strategy-to-ledger topology.
@@ -158,6 +252,8 @@ class StrategyBook:
 
     strategy_ledger_ids_by_alias: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     default_ledger_id_by_alias: Mapping[str, str] = field(default_factory=dict)
+    cash_pool_id_by_ledger: Mapping[str, str] = field(default_factory=dict)
+    cash_pool_configs_by_id: Mapping[str, CashPoolConfig] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "StrategyBook":
@@ -168,6 +264,14 @@ class StrategyBook:
             raise ValueError("StrategyBook.from_dict requires a mapping at 'strategies'")
         ledger_ids_by_alias: dict[str, tuple[str, ...]] = {}
         default_by_alias: dict[str, str] = {}
+        cash_pool_by_ledger = {
+            str(ledger_id): str(pool_id)
+            for ledger_id, pool_id in _cash_pool_mapping_from_payload(payload).items()
+        }
+        cash_pool_configs = {
+            str(pool_id): _cash_pool_config_from_payload(raw_config)
+            for pool_id, raw_config in _cash_pool_config_mapping_from_payload(payload).items()
+        }
         for alias, raw in strategies.items():
             alias_text = str(alias)
             ledger_ids: tuple[str, ...]
@@ -192,6 +296,8 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias=ledger_ids_by_alias,
             default_ledger_id_by_alias=default_by_alias,
+            cash_pool_id_by_ledger=cash_pool_by_ledger,
+            cash_pool_configs_by_id=cash_pool_configs,
         )
 
     @classmethod
@@ -210,6 +316,24 @@ class StrategyBook:
         return cls(
             strategy_ledger_ids_by_alias={alias: (ledger_id,) for alias, ledger_id in resolved.items()},
             default_ledger_id_by_alias=resolved,
+            cash_pool_id_by_ledger={ledger_id: ledger_id for ledger_id in resolved.values()},
+        )
+
+    def cash_pool_config_for_strategy_settings(
+        self,
+        state: object,
+        strategy: object,
+        ledger: str | Ledger,
+        resolved_settings: Mapping[str, Any],
+    ) -> CashPoolConfig:
+        pool_id = cash_pool_id_for_ledger(state, ledger)
+        explicit = self.cash_pool_configs_by_id.get(pool_id)
+        if explicit is not None:
+            return explicit
+        return CashPoolConfig(
+            initial_capital_major=_optional_float(resolved_settings.get("initial_capital_major")),
+            base_currency=_optional_str(resolved_settings.get("base_currency")),
+            currency_conversion_fee_rate=_optional_float(resolved_settings.get("currency_conversion_fee_rate")),
         )
 
     def ledger_ids_for_strategy(self, state: object, strategy: object) -> tuple[str, ...]:
@@ -271,11 +395,139 @@ def assign_ledger_for_strategy(
     store = strategy_book_store_for(state)
     if strategy not in store.ledgers_by_strategy:
         default = f"private:{_strategy_alias(strategy)}"
-        store.register_strategy_ledgers(strategy, (default,), default_ledger_id=default)
+        store.register_strategy_ledgers(
+            strategy,
+            (default,),
+            default_ledger_id=default,
+            cash_pool_ids_by_ledger={default: default},
+        )
     if order is None:
         return store.default_ledger_for_strategy(state, strategy)
     return store.ledger_for_order(state, order)
 
 
+def apply_order_sizing_policy(
+    state: object,
+    ctx: object,
+    strategy: object,
+    deltas: dict[Any, float],
+) -> dict[Any, float]:
+    policy = strategy_book_store_for(state).policies.order_sizing
+    if policy is None:
+        return deltas
+    return policy(state, ctx, strategy, deltas)
+
+
+def apply_pending_order_conflict_policy(
+    state: object,
+    strategy: object,
+    order: object,
+    signal_timestamp: object,
+) -> None:
+    policy = strategy_book_store_for(state).policies.pending_order_conflict
+    if policy is not None:
+        policy(state, strategy, order, signal_timestamp)
+        return
+    from tools.testers.backtest.modules.order_flow import default_pending_order_conflict_policy
+
+    default_pending_order_conflict_policy(state, strategy, order, signal_timestamp)
+
+
+def apply_strategy_intent_precompute_policy(
+    state: object,
+    ctx: object,
+    strategies: Sequence[object],
+    default_policy: StrategyIntentPolicy,
+) -> None:
+    policy = strategy_book_store_for(state).policies.strategy_intent_precompute
+    if policy is not None:
+        policy(state, ctx, strategies, default_policy)
+        return
+    default_policy.precompute_strategy_intents(state, ctx, strategies)
+
+
 def _strategy_alias(strategy: object) -> str:
     return str(getattr(strategy, "alias", strategy))
+
+
+def available_cash_for_ledger(state: object, ledger_state: object, cash_major: float, *, reason: str) -> float:
+    store = strategy_book_store_for(state)
+    if store.policies.cash_availability is not None:
+        return max(0.0, float(store.policies.cash_availability(state, ledger_state, cash_major, reason)))
+    ledger_config = state.ledger_config_for(ledger_state)  # type: ignore[attr-defined]
+    ratio = max(0.0, min(1.0, float(getattr(ledger_config, "cash_reserve_ratio", None) or 0.0)))
+    fixed = max(0.0, float(getattr(ledger_config, "cash_reserve_major", None) or 0.0))
+    reserve = cash_major * ratio + fixed
+    return max(0.0, cash_major - reserve)
+
+
+def _policies_from_strategy_book(strategy_book: object, book: object) -> StrategyBookPolicies:
+    explicit = getattr(strategy_book, "policies", None)
+    if isinstance(explicit, StrategyBookPolicies):
+        return explicit
+    return StrategyBookPolicies(
+        trade_decision_merge=getattr(book, "merge_trade_decisions", None),
+        hierarchy_constraints=getattr(book, "apply_hierarchy_constraints", None),
+        strategy_intent_precompute=getattr(book, "precompute_strategy_intents", None),
+    )
+
+
+def cash_pool_id_for_ledger(state: object, ledger: str | Ledger | object) -> str:
+    ledger_key = _ledger_identity_from_any(ledger)
+    return strategy_book_store_for(state).cash_pool_for_ledger(ledger_key)
+
+
+def ledgers_for_cash_pool(state: object, ledger: str | Ledger | object) -> set[Ledger]:
+    store = strategy_book_store_for(state)
+    pool_id = cash_pool_id_for_ledger(state, ledger)
+    ledgers = store.ledgers_for_cash_pool(pool_id)
+    if ledgers:
+        return ledgers
+    return {_ledger_identity_from_any(ledger)}
+
+
+def _ledger_identity_from_any(ledger: str | Ledger | object) -> Ledger:
+    value = getattr(ledger, "ledger", ledger)
+    return ledger_identity(cast(str | Ledger, value))
+
+
+def _cash_pool_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, str]:
+    raw = payload.get("cash_pools", payload.get("cash_pool_id_by_ledger", {}))
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pools must map ledger_id to cash_pool_id")
+    return {str(ledger_id): str(pool_id) for ledger_id, pool_id in raw.items()}
+
+
+def _cash_pool_config_mapping_from_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = payload.get("cash_pool_configs", {})
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pool_configs must map cash_pool_id to config mapping")
+    return raw
+
+
+def _cash_pool_config_from_payload(raw: Any) -> CashPoolConfig:
+    if isinstance(raw, CashPoolConfig):
+        return raw
+    if not isinstance(raw, Mapping):
+        raise ValueError("StrategyBook cash_pool_configs entries must be mappings")
+    return CashPoolConfig(
+        initial_capital_major=_optional_float(raw.get("initial_capital_major")),
+        base_currency=_optional_str(raw.get("base_currency")),
+        currency_conversion_fee_rate=_optional_float(raw.get("currency_conversion_fee_rate")),
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    return float(value)  # type: ignore[arg-type]

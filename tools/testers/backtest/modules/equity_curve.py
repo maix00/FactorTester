@@ -11,10 +11,9 @@ same per-event buffer.
 Recorded per (strategy, timestamp): `equity` (float), `positions` (dict
 str(Product) -> quantity, zero positions omitted), `notional` (dict
 str(Product) -> quantity*price), and `margin` (dict str(Product) ->
-equity_occupied, present only for products where TradingRuleModule has
-actually been tracking it -- omitted entirely for a strategy that never
-populates `equity_occupied`, matching the old "margin_curve is None unless
-margin is tracked" contract).
+    margin_reserved, present only for products where margin accounting has
+    actually reserved cash -- omitted entirely for a strategy that never
+    tracks margin.
 """
 
 from __future__ import annotations
@@ -34,6 +33,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, contrac
 @dataclass
 class EquityCurveStore:
     buffer: dict[Any, list[tuple[Any, dict[str, Any]]]] = field(default_factory=dict)
+    display_buffer: dict[Any, list[tuple[Any, float]]] = field(default_factory=dict)
 
 
 class EquityCurveModule(ExecutableModule):
@@ -102,8 +102,8 @@ def _snapshot_strategy_state(state, strategy, prices: dict, historical_fields: d
         price = prices.get(product)
         if price is not None:
             notional[name] = contract_notional(price, entry.quantity, historical_fields, product)
-        if entry.equity_occupied is not None:
-            margin[name] = entry.equity_occupied.to_major()
+        if entry.margin_reserved is not None:
+            margin[name] = entry.margin_reserved.to_major()
     if not positions and not notional and not margin:
         return None
     record: dict = {"positions": positions, "notional": notional}
@@ -116,16 +116,21 @@ def _record_equity(state, ctx) -> None:
     buffer = _ensure_buffer(state)
     prices = ctx.get(MarketDataModule.current_prices, {})
     for strategy in ctx.active_strategies:
-        equity = ctx.get_for(LedgerModule.equity, strategy)
-        if equity is None:
-            continue
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
         record = _snapshot_strategy_state(state, strategy, prices, historical_fields) or {}
-        record["equity"] = equity
+        equity = ctx.get_for(LedgerModule.equity, strategy)
+        if equity is not None and _strategy_equity_curve_is_applicable(state, strategy):
+            record["equity"] = equity
+            if ctx.event_kind is EventKind.SIGNAL:
+                state.equity_curve_store.display_buffer.setdefault(strategy, []).append(
+                    (ctx.timestamp, float(equity))
+                )
+        if not record:
+            continue
         buffer.setdefault(strategy, []).append((ctx.timestamp, record))
         if state.config_for(strategy).get(EquityCurveModule.equity_compute_live, True):
             state.results.append(strategy, ctx.timestamp, **record)
@@ -146,7 +151,25 @@ def equity_curve_for(state, strategy) -> pd.Series:
         return pd.Series(dtype=float)
     index = [ts for ts, _ in history]
     values = [v.get("equity") for _, v in history]
-    return pd.Series(values, index=pd.Index(index))
+    series = pd.Series(values, index=pd.Index(index)).dropna()
+    return series.astype(float) if not series.empty else pd.Series(dtype=float)
+
+
+def display_equity_curve_for(state, strategy) -> pd.Series:
+    """Main chart curve: strategy equity at signal/bar-close valuation points.
+
+    The full ResultStore history intentionally keeps ORDER and other intrabar
+    state changes for snapshots and execution traces. The primary equity chart
+    should not render those internal accounting/action points as if they were
+    regular bar-close observations.
+    """
+    points = state.equity_curve_store.display_buffer.get(strategy, [])
+    if not points:
+        return equity_curve_for(state, strategy)
+    index = [ts for ts, _ in points]
+    values = [value for _, value in points]
+    series = pd.Series(values, index=pd.Index(index)).dropna()
+    return series.astype(float) if not series.empty else pd.Series(dtype=float)
 
 
 def returns_for(state, strategy) -> pd.Series:
@@ -168,3 +191,24 @@ def margin_curve_for(state, strategy) -> dict | None:
     if not any("margin" in v for _, v in history):
         return None
     return {ts.isoformat(): v.get("margin", {}) for ts, v in history}
+
+
+def _strategy_equity_curve_is_applicable(state, strategy) -> bool:
+    from tools.testers.backtest.modules.strategy_book import (
+        cash_pool_id_for_ledger,
+        strategy_book_store_for,
+    )
+
+    store = strategy_book_store_for(state)
+    ledgers = store.ledgers_for_strategy(state, strategy)
+    strategy_pools = {cash_pool_id_for_ledger(state, ledger) for ledger in ledgers}
+    for other in state.strategy_configs:
+        if other == strategy:
+            continue
+        other_pools = {
+            cash_pool_id_for_ledger(state, ledger)
+            for ledger in store.ledgers_for_strategy(state, other)
+        }
+        if strategy_pools & other_pools:
+            return False
+    return True

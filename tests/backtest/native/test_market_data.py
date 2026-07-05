@@ -1,26 +1,31 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
-from tools.testers.backtest.engines.native.ledger import LedgerConfig
-from tools.testers.backtest.engines.native.ledger import StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import LedgerConfig
+from tools.testers.backtest.engines.native.config import StrategyConfig
+from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+import tools.testers.backtest.modules.market_data as market_data_module
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule, _causal_valuation, _check_market_data_coverage,
     _apply_exchange_rule_defaults, _desired_factor_frequencies,
     _historical_fields_at_from_frames, _load_raw_market_data,
-    _resolve_market_data_request, current_market_snapshot_at, current_prices_at,
-    historical_fields_for_product, order_constraints_from_snapshot,
+    _resolve_market_data_request, _set_current_market_snapshot,
+    contract_multiplier_from_fields,
+    current_market_snapshot_at, current_prices_at, historical_fields_for_product,
+    order_constraints_from_snapshot,
 )
+from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
 from tools.data.types.time_freq import DataFreq
@@ -82,6 +87,337 @@ def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints
     assert snapshot["upper_limit"][product] == 10.0
     assert constraints[product].can_buy is False
     assert constraints[product].can_sell is True
+
+
+def test_current_market_snapshot_is_cached_per_event_timestamp(monkeypatch):
+    account = BacktestRunState()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    calls = {"prices": 0}
+    product = object()
+
+    def _prices(_state, _timestamp):
+        calls["prices"] += 1
+        return {product: 10.0}
+
+    monkeypatch.setattr(market_data_module, "current_prices_at", _prices)
+    monkeypatch.setattr(market_data_module, "market_price_tables_for", lambda _state: {})
+    monkeypatch.setattr(market_data_module, "current_volume_at", lambda _state, _timestamp: {})
+
+    first = market_data_module.current_market_snapshot_at(account, timestamp)
+    second = market_data_module.current_market_snapshot_at(account, timestamp)
+
+    assert first is second
+    assert calls["prices"] == 1
+
+
+def test_current_historical_fields_is_cached_per_event_timestamp(monkeypatch):
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.historical_field_names = ("VolumeMultiple",)
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    account.market_data_store.historical_field_frames = {"VolumeMultiple": pd.DataFrame()}
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [10.0]}, index=[timestamp])
+    calls = {"frames": 0}
+
+    def _from_frames(_frames, instruments, _timestamp, **_kwargs):
+        calls["frames"] += 1
+        return {instrument: {"VolumeMultiple": 1.0} for instrument in instruments}
+
+    monkeypatch.setattr(market_data_module, "_historical_fields_at_from_frames", _from_frames)
+
+    first = market_data_module.current_historical_fields_at(account, timestamp)
+    second = market_data_module.current_historical_fields_at(account, timestamp)
+
+    assert first is second
+    assert first[product]["VolumeMultiple"] == 1.0
+    assert calls["frames"] == 1
+
+
+def test_current_historical_fields_reuses_cache_for_causal_epsilon(monkeypatch):
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01:00", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.historical_field_names = ("VolumeMultiple",)
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    account.market_data_store.historical_field_frames = {"VolumeMultiple": pd.DataFrame()}
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [10.0]}, index=[timestamp])
+    calls = {"frames": 0}
+
+    def _from_frames(_frames, instruments, _timestamp, **_kwargs):
+        calls["frames"] += 1
+        return {instrument: {"VolumeMultiple": 1.0} for instrument in instruments}
+
+    monkeypatch.setattr(market_data_module, "_historical_fields_at_from_frames", _from_frames)
+
+    first = market_data_module.current_historical_fields_at(account, timestamp)
+    second = market_data_module.current_historical_fields_at(account, timestamp + pd.Timedelta(1, "ns"))
+    third = market_data_module.current_historical_fields_at(account, timestamp + pd.Timedelta(2, "ns"))
+
+    assert first is second is third
+    assert calls["frames"] == 1
+
+
+def test_historical_fields_frame_row_cache_reuses_same_effective_rule_row():
+    product = object()
+    account = BacktestRunState()
+    account.market_data_store.historical_field_names = ("VolumeMultiple",)
+    account.market_data_store.historical_field_provider = object()
+    account.market_data_store.trading_day_resolver = object()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [10.0, 11.0, 12.0]},
+        index=pd.date_range("2024-01-01 09:01", periods=3, freq="1min", tz="Asia/Shanghai"),
+    )
+    account.market_data_store.historical_field_frames = {
+        "VolumeMultiple": pd.DataFrame(
+            {str(product): [1.0, 2.0]},
+            index=pd.DatetimeIndex(["2024-01-01 09:00", "2024-01-01 09:03"]),
+        )
+    }
+
+    first = market_data_module.current_historical_fields_at(
+        account,
+        pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai"),
+    )
+    second = market_data_module.current_historical_fields_at(
+        account,
+        pd.Timestamp("2024-01-01 09:02", tz="Asia/Shanghai"),
+    )
+    changed = market_data_module.current_historical_fields_at(
+        account,
+        pd.Timestamp("2024-01-01 09:03", tz="Asia/Shanghai"),
+    )
+
+    assert first is second
+    assert first[product]["VolumeMultiple"] == 1.0
+    assert changed is not first
+    assert changed[product]["VolumeMultiple"] == 2.0
+
+
+def test_order_event_current_prices_use_open_snapshot_not_close_snapshot():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0]},
+        index=[timestamp],
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+    }
+
+    order_ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.ORDER)
+    _set_current_market_snapshot(account, order_ctx)
+    signal_ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.SIGNAL)
+    _set_current_market_snapshot(account, signal_ctx)
+
+    assert order_ctx.get(MarketDataModule.current_prices)[product] == 10.0
+    assert signal_ctx.get(MarketDataModule.current_prices)[product] == 11.0
+
+
+def test_order_event_uses_order_price_timestamp_for_market_snapshot():
+    product = object()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    strategy = Strategy(alias="order")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0, 21.0]},
+        index=idx,
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
+        "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
+    }
+    class OrderLike:
+        def get(self, key: str, default: Any = None) -> Any:
+            return idx[1] if key == "price_timestamp" else default
+
+    order = OrderLike()
+    ctx = FlowContext(
+        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        event_kind=EventKind.ORDER,
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, idx[0] + pd.Timedelta(microseconds=1), strategy, order)]},
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert ctx.get(MarketDataModule.current_prices)[product] == 20.0
+    assert ctx.get(MarketDataModule.current_market_snapshot)["close"][product] == 21.0
+
+
+def test_order_event_minimal_snapshot_uses_policy_price_basis_and_limit_fields():
+    product = object()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    strategy = Strategy(alias="order")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            OrderExecutionModule.execution_price_basis: "vwap",
+        })
+    })
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [11.0, 21.0]}, index=idx)
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
+        "vwap": pd.DataFrame({product: [10.5, 20.5]}, index=idx),
+        "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
+        "upper_limit": pd.DataFrame({product: [12.0, 22.0]}, index=idx),
+        "lower_limit": pd.DataFrame({product: [9.0, 19.0]}, index=idx),
+        "settlement": pd.DataFrame({product: [99.0, 199.0]}, index=idx),
+    }
+
+    class OrderLike:
+        def get(self, key: str, default: Any = None) -> Any:
+            return idx[1] if key == "price_timestamp" else default
+
+    ctx = FlowContext(
+        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        event_kind=EventKind.ORDER,
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={strategy: [EventDraft(EventKind.ORDER, idx[0] + pd.Timedelta(microseconds=1), strategy, OrderLike())]},
+    )
+
+    _set_current_market_snapshot(account, ctx)
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot)
+
+    assert ctx.get(MarketDataModule.current_prices)[product] == 20.5
+    assert snapshot["vwap"][product] == 20.5
+    assert snapshot["close"][product] == 21.0
+    assert snapshot["upper_limit"][product] == 22.0
+    assert snapshot["lower_limit"][product] == 19.0
+    assert "settlement" not in snapshot
+
+
+def test_order_event_does_not_fallback_open_price_basis_to_close():
+    class _Product:
+        name = "P.TEST"
+        desc = "测试"
+
+    product = _Product()
+    idx = pd.date_range("2024-01-01 09:01", periods=1, freq="1min", tz="Asia/Shanghai")
+    strategy = Strategy(alias="order")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [11.0]}, index=idx)
+    account.market_data_store.market_price_tables = {
+        "close": pd.DataFrame({product: [11.0]}, index=idx),
+    }
+
+    class OrderLike:
+        instrument = product
+
+        def get(self, key: str, default: Any = None) -> Any:
+            return idx[0] if key == "price_timestamp" else default
+
+    ctx = FlowContext(
+        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        event_kind=EventKind.ORDER,
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [EventDraft(EventKind.ORDER, idx[0] + pd.Timedelta(microseconds=1), strategy, OrderLike())],
+        },
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert ctx.get(MarketDataModule.current_prices) == {}
+    assert not [row for row in account.runtime_info_rows if row.get("code") == "order_price_basis_fallback"]
+
+
+def test_signal_event_minimal_snapshot_matches_relevant_full_snapshot_fields():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [11.0]}, index=[timestamp])
+    account.market_data_store.volume_table = pd.DataFrame({product: [100.0]}, index=[timestamp])
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+        "upper_limit": pd.DataFrame({product: [12.0]}, index=[timestamp]),
+        "lower_limit": pd.DataFrame({product: [9.0]}, index=[timestamp]),
+        "settlement": pd.DataFrame({product: [99.0]}, index=[timestamp]),
+    }
+
+    full = current_market_snapshot_at(account, timestamp)
+    account.market_data_store.market_snapshot_cache.clear()
+    ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.SIGNAL)
+    _set_current_market_snapshot(account, ctx)
+    signal = ctx.get(MarketDataModule.current_market_snapshot)
+
+    for key in ("close", "volume", "upper_limit", "lower_limit"):
+        assert signal[key] == full[key]
+    assert "open" not in signal
+    assert "settlement" not in signal
+
+
+def test_ledger_event_minimal_snapshot_matches_settlement_and_close_only():
+    product = object()
+    timestamp = pd.Timestamp("2024-01-01 15:00", tz="Asia/Shanghai")
+    account = BacktestRunState()
+    account.market_data_store.current_prices_table = pd.DataFrame({product: [11.0]}, index=[timestamp])
+    account.market_data_store.volume_table = pd.DataFrame({product: [100.0]}, index=[timestamp])
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0]}, index=[timestamp]),
+        "close": pd.DataFrame({product: [11.0]}, index=[timestamp]),
+        "upper_limit": pd.DataFrame({product: [12.0]}, index=[timestamp]),
+        "lower_limit": pd.DataFrame({product: [9.0]}, index=[timestamp]),
+        "settlement": pd.DataFrame({product: [99.0]}, index=[timestamp]),
+    }
+
+    full = current_market_snapshot_at(account, timestamp)
+    account.market_data_store.market_snapshot_cache.clear()
+    ctx = FlowContext(timestamp=timestamp, event_queue=EventQueue(), event_kind=EventKind.LEDGER)
+    _set_current_market_snapshot(account, ctx)
+    ledger = ctx.get(MarketDataModule.current_market_snapshot)
+
+    assert ledger["close"] == full["close"]
+    assert ledger["settlement"] == full["settlement"]
+    assert ctx.get(MarketDataModule.current_prices) == full["close"]
+    assert ctx.get(MarketDataModule.current_tradable_status) == {}
+    assert ctx.get(MarketDataModule.current_order_constraints) == {}
+    assert "open" not in ledger
+    assert "volume" not in ledger
+    assert "upper_limit" not in ledger
+    assert "lower_limit" not in ledger
+
+
+def test_bar_open_event_uses_target_index_key_not_visible_timestamp():
+    product = object()
+    idx = pd.date_range("2024-01-01 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    strategy = Strategy(alias="live")
+    account = BacktestRunState(strategy_configs={strategy: StrategyConfig(strategy=strategy)})
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [11.0, 21.0]},
+        index=idx,
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({product: [10.0, 20.0]}, index=idx),
+        "close": pd.DataFrame({product: [11.0, 21.0]}, index=idx),
+    }
+    ctx = FlowContext(
+        timestamp=idx[0] + pd.Timedelta(microseconds=1),
+        event_queue=EventQueue(),
+        event_kind=EventKind.BAR,
+        active_strategies=frozenset((strategy,)),
+        drafts_by_strategy={
+            strategy: [EventDraft(
+                EventKind.BAR,
+                idx[0] + pd.Timedelta(microseconds=1),
+                strategy,
+                payload={"bar_basis": "open"},
+                index_key=idx[1],
+            )],
+        },
+    )
+
+    _set_current_market_snapshot(account, ctx)
+
+    assert ctx.get(MarketDataModule.current_prices)[product] == 20.0
+    assert ctx.get(MarketDataModule.current_market_snapshot)["close"][product] == 21.0
 
 
 def test_out_of_range_products_emit_one_runtime_info_row(monkeypatch):
@@ -653,6 +989,35 @@ def test_historical_fields_for_product_matches_product_and_string_keys():
     assert historical_fields_for_product({product: fields}, "RU.SHF") is fields
 
 
+def test_historical_fields_for_product_lookup_matches_legacy_scan_without_mutating_input():
+    class _Product:
+        name = "RU.SHF"
+        alias = "RU.SHF"
+        code = "RU"
+
+        def __str__(self) -> str:
+            return self.name
+
+    product = _Product()
+    fields = {"VolumeMultiple": 10.0}
+    historical_fields: dict[Any, dict[str, object]] = {
+        "AP.CZC": {"VolumeMultiple": 5.0},
+        product: fields,
+    }
+    original_keys = tuple(historical_fields.keys())
+
+    def _legacy_scan(target: Any) -> dict[str, object]:
+        target_keys = market_data_module._historical_field_product_keys(target)
+        for instrument, values in historical_fields.items():
+            if target_keys & market_data_module._historical_field_product_keys(instrument):
+                return values
+        return {}
+
+    assert historical_fields_for_product(historical_fields, "RU.SHF") is _legacy_scan("RU.SHF")
+    assert historical_fields_for_product(historical_fields, product) is _legacy_scan(product)
+    assert tuple(historical_fields.keys()) == original_keys
+
+
 def test_historical_fields_at_uses_asof_for_causal_order_timestamp():
     frame_ts = pd.Timestamp("2026-01-05 09:01:00")
     event_ts = cast(pd.Timestamp, pd.Timestamp("2026-01-05 09:01:00.000000001", tz="Asia/Shanghai"))
@@ -665,6 +1030,33 @@ def test_historical_fields_at_uses_asof_for_causal_order_timestamp():
 
     assert fields["EG.DCE"]["OpenRatioByMoney"] == 0.0001
     assert fields["EG.DCE"]["VolumeMultiple"] == 10
+
+
+def test_historical_fields_at_reuses_frame_column_cache():
+    class Product:
+        name = "EG.DCE"
+
+        def __str__(self):
+            return "EG.DCE"
+
+    product = Product()
+    frame_ts = pd.Timestamp("2026-01-05 09:01:00")
+    event_ts = cast(pd.Timestamp, pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai"))
+    frames = {
+        "OpenRatioByMoney": pd.DataFrame({"EG.DCE": [0.0001]}, index=pd.DatetimeIndex([frame_ts])),
+        "VolumeMultiple": pd.DataFrame({"EG.DCE": [10]}, index=pd.DatetimeIndex([frame_ts])),
+    }
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] = {}
+
+    first = _historical_fields_at_from_frames(frames, [product], event_ts, column_cache=column_cache)
+    second = _historical_fields_at_from_frames(frames, [product], event_ts, column_cache=column_cache)
+
+    assert first[product]["OpenRatioByMoney"] == second[product]["OpenRatioByMoney"] == 0.0001
+    assert first[product]["VolumeMultiple"] == second[product]["VolumeMultiple"] == 10
+    assert column_cache == {
+        ("OpenRatioByMoney", ("EG.DCE",)): "EG.DCE",
+        ("VolumeMultiple", ("EG.DCE",)): "EG.DCE",
+    }
 
 
 def test_historical_fields_at_does_not_look_ahead_before_first_row():
@@ -683,23 +1075,64 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
     from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 
     register_local_cnfutures_exchange_rules()
+    state = BacktestRunState()
+    timestamp = pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai")
 
     result = _apply_exchange_rule_defaults(
+        state,
         {
-            "AP.CZC": {},
+            "AP.CZC": {"CostBasisMethod": None, "MoneyCalculationPolicy": ""},
             "RU.SHF": {"MoneyCalculationPolicy": "per_contract_price_point"},
+            "SM.CZC": {"CostBasisMethod": np.nan},
         },
-        ["AP.CZC", "RU.SHF"],
+        ["AP.CZC", "RU.SHF", "SM.CZC"],
         ("CostBasisMethod", "MoneyCalculationPolicy"),
+        timestamp,
     )
 
     assert result["AP.CZC"]["CostBasisMethod"] == "DailyMarkToMarket"
     assert result["AP.CZC"]["MoneyCalculationPolicy"] == "aggregate"
+    assert result["RU.SHF"]["CostBasisMethod"] == "DailyMarkToMarket"
     assert result["RU.SHF"]["MoneyCalculationPolicy"] == "per_contract_price_point"
+    assert result["SM.CZC"]["CostBasisMethod"] == "DailyMarkToMarket"
+    rows = [row for row in state.runtime_info_rows if row.get("code") == "historical_field_default_fallback"]
+    assert rows == []
+
+
+def test_contract_multiplier_default_fallback_records_runtime_info_interval():
+    class _Product:
+        name = "P.MULT"
+        desc = "乘数测试"
+
+    product = _Product()
+    state = BacktestRunState()
+
+    first = contract_multiplier_from_fields(
+        {product: {"VolumeMultiple": None}},
+        product,
+        state=state,
+        timestamp=pd.Timestamp("2026-01-05 09:01:00", tz="Asia/Shanghai"),
+    )
+    second = contract_multiplier_from_fields(
+        {product: {"VolumeMultiple": np.nan}},
+        product,
+        state=state,
+        timestamp=pd.Timestamp("2026-01-05 09:02:00", tz="Asia/Shanghai"),
+    )
+
+    assert first == second == 1.0
+    rows = [row for row in state.runtime_info_rows if row.get("code") == "contract_multiplier_default_fallback"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["product"] == "P.MULT"
+    assert rows[0]["details"]["source"] == "VolumeMultiple"
+    assert rows[0]["details"]["fallback"] == "default:1"
+    assert rows[0]["details"]["count"] == 2
 
 
 def test_auto_accounting_subscribes_cost_basis_method_for_market_data():
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig, ledger_identity
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
     from tools.testers.backtest.modules.engine import EngineModule
     from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
 
@@ -714,6 +1147,74 @@ def test_auto_accounting_subscribes_cost_basis_method_for_market_data():
     assert "MoneyCalculationPolicy" in fields
 
 
+def test_fee_zero_does_not_subscribe_transaction_fee_fields_for_auto_accounting():
+    from tools.data.field_history import TRANSACTION_FEE_FIELD_NAMES
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+    from tools.testers.backtest.modules.engine import EngineModule
+    from tools.testers.backtest.modules.fee import FeeModule
+    from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
+    from tools.testers.backtest.modules.trading_rule import TradingRuleModule
+
+    strategy = Strategy(alias="zero-fee")
+    account = BacktestRunState(strategy_configs={
+        strategy: StrategyConfig(strategy=strategy, field_values={
+            EngineModule.engine_mode: "custom",
+            TradingRuleModule.accounting_mode: "Auto",
+        }),
+    })
+    ledger = account.ledger_for_strategy(strategy).ledger
+    account.ledger_configs[ledger] = LedgerConfig(fee_mode="zero", accounting_mode="Auto")
+
+    fields = set(_required_market_rule_field_names(account))
+
+    assert "CostBasisMethod" in fields
+    assert "MoneyCalculationPolicy" in fields
+    assert not (set(TRANSACTION_FEE_FIELD_NAMES) & fields)
+
+
+def test_historical_field_frames_for_market_data_reuses_identical_run_cache(monkeypatch):
+    import tools.testers.backtest.modules.market_data as market_data_module
+
+    class Product:
+        name = "AP.CZC"
+
+        def __str__(self):
+            return self.name
+
+    calls = {"frames": 0}
+    index = pd.date_range("2026-01-05 09:01", periods=2, freq="1min", tz="Asia/Shanghai")
+    expected = {"VolumeMultiple": pd.DataFrame({"AP.CZC": [10, 10]}, index=index)}
+
+    def _fake_frame_for_products(*args, **kwargs):
+        calls["frames"] += 1
+        return expected
+
+    monkeypatch.setattr(market_data_module, "historical_fields_frame_for_products", _fake_frame_for_products)
+    market_data_module._HISTORICAL_FIELDS_FRAME_CACHE.clear()
+    product = Product()
+
+    first = market_data_module.historical_field_frames_for_market_data(
+        [product],
+        index,
+        provider=cast(Any, object()),
+        trading_day_resolver=cast(Any, object()),
+        field_names=("VolumeMultiple",),
+        policy="latest_available",
+    )
+    second = market_data_module.historical_field_frames_for_market_data(
+        [product],
+        index,
+        provider=cast(Any, object()),
+        trading_day_resolver=cast(Any, object()),
+        field_names=("VolumeMultiple",),
+        policy="latest_available",
+    )
+
+    assert first is second is expected
+    assert calls["frames"] == 1
+
+
 def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_customizes():
     """Every consumer of current_historical_fields reads via
     ctx.get_for(ref, strategy, ctx.get(ref, {})) -- a strategy that doesn't
@@ -722,7 +1223,8 @@ def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_cus
     it should transparently fall through to the one shared base_fields
     object via that fallback. A strategy that genuinely customizes should
     still get its own distinct per-strategy entry."""
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import StrategyConfig
     from tools.testers.backtest.modules.custom_product import CustomProductModule
     from tools.testers.backtest.modules.engine import EngineModule
     from tools.testers.backtest.modules.fee import FeeModule

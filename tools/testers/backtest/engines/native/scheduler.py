@@ -1,5 +1,5 @@
-"""The scheduler — FlowRegistry (collects Flow/FlowOverride into decorator
-chains), sort_and_validate (per-(phase, event_kind) ordering + dependency
+"""The scheduler — FlowRegistry (collects Flow/FlowBinding definitions),
+sort_and_validate (per-(phase, event_kind) ordering + dependency
 checks), FlowContext (per-dispatch-batch scratch), EventQueue (priority
 queue, batches same (timestamp, kind)), and run() (wires it all together).
 
@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 import pandas as pd
 
 from .events import EventDraft, EventKind
-from .flow import Flow, FlowOverride, Phase
+from .flow import Flow, FlowBinding, Phase
 
 if TYPE_CHECKING:
-    from .ledger import BacktestRunState
     from .ledger import Ledger
+    from .state import BacktestRunState
     from .strategy import Strategy
     from tools.testers.backtest.modules.base import FieldRef
 
@@ -64,11 +64,13 @@ class ResolvedFlow:
     phase: Phase
     event_kind: EventKind | None
     order: int
-    after: tuple[Flow, ...]
-    before: tuple[Flow, ...]
+    after: tuple[Any, ...]
+    before: tuple[Any, ...]
     compute: Callable[..., None]
     description: str = ""
     strategy_scoped: bool = False
+    definition_name: str = ""
+    input_materialization: bool = False
 
     @property
     def effective_description(self) -> str:
@@ -84,12 +86,6 @@ def _flow_qualified_name(flow: ResolvedFlow) -> str:
     return f"{flow.owner}.{flow.name}" if getattr(flow, "owner", "") else f".{flow.name}"
 
 
-def _wrap(override_compute: Callable, base_compute: Callable) -> Callable:
-    def wrapped(state, ctx) -> None:
-        override_compute(state, ctx, base_compute)
-    return wrapped
-
-
 class FlowRegistry:
     """Keyed by (name, phase, event_kind), not name alone -- a logical
     Flow "name" can legitimately be registered twice under the SAME name
@@ -101,38 +97,50 @@ class FlowRegistry:
     that's a real conflict, not an intentional phase-split."""
 
     def __init__(self) -> None:
-        self._flows: dict[tuple[str, Phase, EventKind | None], Flow] = {}
-        self._overrides: dict[str, list[FlowOverride]] = defaultdict(list)
+        self._flows: dict[tuple[str, Phase, EventKind | None], Flow | FlowBinding] = {}
 
-    def register_flow(self, flow: Flow) -> None:
-        key = (flow.name, flow.phase, flow.event_kind)
+    def register_flow(self, flow: Flow | FlowBinding) -> None:
+        key = (_flow_name(flow), flow.phase, flow.event_kind)
         if key in self._flows:
             raise ValueError(f"duplicate flow registration: {key}")
         self._flows[key] = flow
-
-    def register_override(self, override: FlowOverride) -> None:
-        for name in override.flow_names:
-            self._overrides[name].append(override)
-
-    def overrides_for(self, flow_name: str) -> list[FlowOverride]:
-        return list(self._overrides.get(flow_name, ()))
 
     def resolve(self) -> list[ResolvedFlow]:
         resolved: list[ResolvedFlow] = []
         for (name, _phase, _event_kind), base in self._flows.items():
             compute = base.compute
             inputs = set(base.inputs)
-            for ov in self._overrides.get(name, ()):
-                inputs |= set(ov.extra_inputs)
-                if ov.compute is not None:
-                    compute = _wrap(ov.compute, compute)
             resolved.append(ResolvedFlow(
-                name=name, owner=base.owner, inputs=tuple(inputs), outputs=base.outputs,
+                name=name, definition_name=_flow_definition_name(base),
+                owner=base.owner, inputs=tuple(inputs), outputs=base.outputs,
                 phase=base.phase, event_kind=base.event_kind, order=base.order,
                 after=base.after, before=base.before, compute=compute,
-                description=base.description, strategy_scoped=base.strategy_scoped,
+                description=base.effective_description, strategy_scoped=_flow_strategy_scoped(base),
+                input_materialization=_flow_input_materialization(base),
             ))
         return resolved
+
+
+def _flow_name(flow: Flow | FlowBinding) -> str:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_name
+    return flow.name
+
+
+def _flow_definition_name(flow: Flow | FlowBinding) -> str:
+    return flow.definition_name
+
+
+def _flow_strategy_scoped(flow: Flow | FlowBinding) -> bool:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_strategy_scoped
+    return flow.strategy_scoped
+
+
+def _flow_input_materialization(flow: Flow | FlowBinding) -> bool:
+    if isinstance(flow, FlowBinding):
+        return flow.effective_input_materialization
+    return flow.input_materialization
 
 
 # ── sort_and_validate ─────────────────────────────────────────────
@@ -203,8 +211,10 @@ class FlowContext:
         drafts_by_ledger: dict["Ledger", list[EventDraft]] | None = None,
         audit_contract: bool = False,
         enforce_contract: bool = False,
+        event_kind: EventKind | None = None,
     ) -> None:
         self.timestamp = timestamp
+        self.event_kind = event_kind
         self.active_strategies = active_strategies
         self.active_ledgers = active_ledgers
         # A strategy can have multiple simultaneous drafts in one dispatch
@@ -212,6 +222,8 @@ class FlowContext:
         # the same timestamp) -- always a list, never collapsed to one.
         self._drafts_by_strategy: dict["Strategy", list[EventDraft]] = drafts_by_strategy or {}
         self._drafts_by_ledger: dict["Ledger", list[EventDraft]] = drafts_by_ledger or {}
+        self._payloads_by_strategy_cache: dict["Strategy", list[Any]] = {}
+        self._payloads_by_ledger_cache: dict["Ledger", list[Any]] = {}
         self._event_queue = event_queue
         self._values: dict["FieldRef", Any] = {}
         self._values_by_strategy: dict["FieldRef", dict["Strategy", Any]] = {}
@@ -311,7 +323,11 @@ class FlowContext:
         have several simultaneous ORDER events at one timestamp (one per
         product being rebalanced) -- all of them must be processed, not
         just the last one."""
-        return [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
+        cached = self._payloads_by_strategy_cache.get(strategy)
+        if cached is None:
+            cached = [draft.payload for draft in self._drafts_by_strategy.get(strategy, ())]
+            self._payloads_by_strategy_cache[strategy] = cached
+        return cached
 
     def payloads_for_ledger(self, ledger: "Ledger") -> list[Any]:
         """All payloads for this ledger in this dispatch batch.
@@ -322,7 +338,12 @@ class FlowContext:
         """
         from .ledger import ledger_identity
 
-        return [draft.payload for draft in self._drafts_by_ledger.get(ledger_identity(ledger), ())]
+        ledger_key = ledger_identity(ledger)
+        cached = self._payloads_by_ledger_cache.get(ledger_key)
+        if cached is None:
+            cached = [draft.payload for draft in self._drafts_by_ledger.get(ledger_key, ())]
+            self._payloads_by_ledger_cache[ledger_key] = cached
+        return cached
 
     def draft_for(self, strategy: "Strategy") -> EventDraft:
         drafts = self._drafts_by_strategy[strategy]
@@ -356,6 +377,10 @@ class EventQueue:
 
     def push_events(self, drafts: list[EventDraft]) -> None:
         if not drafts:
+            return
+        if len(drafts) < 64 or len(drafts) * 4 < len(self._heap):
+            for draft in drafts:
+                heapq.heappush(self._heap, (draft.timestamp, draft.kind, next(self._counter), draft))
             return
         self._heap.extend((draft.timestamp, draft.kind, next(self._counter), draft) for draft in drafts)
         heapq.heapify(self._heap)
@@ -449,6 +474,8 @@ class _ProgressTracker:
     ) -> None:
         if self._activity_sink is None:
             return
+        if flow.input_materialization:
+            return
         activity_phase = phase or _activity_phase_for_flow(flow)
         ts_text = timestamp.isoformat() if timestamp is not None else ""
         active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
@@ -530,6 +557,7 @@ def make_dispatcher(
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
 ) -> Callable[[list[EventDraft]], None]:
     applicable_by_flow = flow_strategies or _flow_strategy_sets(state, ordered_flows)
+    strategies_by_ledger = _ledger_strategy_sets(state)
 
     def handler(batch: list[EventDraft]) -> None:
         timestamp = batch[0].timestamp
@@ -544,7 +572,7 @@ def make_dispatcher(
                 drafts_by_strategy.setdefault(draft.strategy, []).append(draft)
             if draft.ledger is not None:
                 drafts_by_ledger.setdefault(draft.ledger, []).append(draft)
-                ledger_active_strategies.update(_strategies_for_ledger(state, draft.ledger))
+                ledger_active_strategies.update(strategies_by_ledger.get(_ledger_identity_for_scheduler(draft.ledger), frozenset()))
             if draft.strategy is None and draft.ledger is None:
                 raise SchedulerError(
                     f"{draft.kind.name} event at {draft.timestamp} has neither strategy nor ledger"
@@ -553,12 +581,13 @@ def make_dispatcher(
         all_active_ledgers = frozenset(drafts_by_ledger)
         # ONE ctx for the whole batch -- this is what lets one Flow's
         # ctx.set_for(...) be read by a later Flow in the same batch (e.g.
-        # LedgerModule.equity_on_signal -> OrderBookModule.size_order).
+        # LedgerModule.equity_on_signal -> OrderConstructModule.size_order).
         # active_strategies is narrowed per Flow call (different Flows can
         # apply to different subsets), but _values/_values_by_strategy
         # persist across the whole batch.
         ctx = FlowContext(
             timestamp=timestamp, event_queue=event_queue,
+            event_kind=batch[0].kind,
             active_strategies=all_active, active_ledgers=all_active_ledgers,
             drafts_by_strategy=drafts_by_strategy,
             drafts_by_ledger=drafts_by_ledger,
@@ -580,15 +609,21 @@ def make_dispatcher(
     return handler
 
 
-def _strategies_for_ledger(state: "BacktestRunState", ledger: Any) -> frozenset["Strategy"]:
+def _ledger_identity_for_scheduler(ledger: Any) -> Any:
     from .ledger import ledger_identity
 
-    target = ledger_identity(ledger)
-    strategies: set["Strategy"] = set()
+    return ledger_identity(ledger)
+
+
+def _ledger_strategy_sets(state: "BacktestRunState") -> dict[Any, frozenset["Strategy"]]:
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    store = strategy_book_store_for(state)
+    result: dict[Any, set["Strategy"]] = {}
     for strategy in state.strategy_configs:
-        if state.ledger_for_strategy(strategy).ledger == target:
-            strategies.add(strategy)
-    return frozenset(strategies)
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            result.setdefault(_ledger_identity_for_scheduler(ledger), set()).add(strategy)
+    return {ledger: frozenset(strategies) for ledger, strategies in result.items()}
 
 
 def _flow_strategy_sets(
@@ -876,6 +911,7 @@ def _dedupe_manifest_flows(flows: list[ResolvedFlow]) -> list[ResolvedFlow]:
 
 
 def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) -> dict[str, Any]:
+    visible_flows = [flow for flow in flows if not flow.input_materialization]
     return {
         "key": key,
         "label": _PHASE_LABELS.get(key, key),
@@ -888,6 +924,6 @@ def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) 
                 "display_order": idx,
                 "event_kind": flow.event_kind.name if flow.event_kind is not None else "",
             }
-            for idx, flow in enumerate(flows, start=1)
+            for idx, flow in enumerate(visible_flows, start=1)
         ],
     }

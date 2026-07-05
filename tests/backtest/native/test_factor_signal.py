@@ -7,7 +7,8 @@ import pandas as pd
 from tools.data.types import DataColumn
 from tools.factors.expr import ColumnRef
 from tools.data.types.time_freq import DataFreq
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
@@ -546,6 +547,41 @@ def test_signal_precomputed_uses_strategy_index_key_inside_same_timestamp_batch(
 
     assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 10.0}
     assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 20.0}
+
+
+def test_signal_precomputed_reuses_row_lookup_for_shared_table_and_index_key(monkeypatch):
+    import tools.testers.backtest.modules.factor_signal as factor_signal_module
+
+    s1, s2 = Strategy(alias="A"), Strategy(alias="B")
+    timestamp = pd.Timestamp("2026-03-09 21:00")
+    table = pd.DataFrame({"P1": [10.0]}, index=[timestamp])
+    key = ("shared",)
+    account = BacktestRunState(strategy_configs={
+        s1: StrategyConfig(strategy=s1, active_flow_names=frozenset({"signal_precomputed"})),
+        s2: StrategyConfig(strategy=s2, active_flow_names=frozenset({"signal_precomputed"})),
+    })
+    account.factor_signal_store.precomputed_tables = {key: table}
+    account.factor_signal_store.precomputed_table_keys = {s1: key, s2: key}
+    calls = 0
+    real_row_at = factor_signal_module.row_at
+
+    def _counting_row_at(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_row_at(*args, **kwargs)
+
+    monkeypatch.setattr(factor_signal_module, "row_at", _counting_row_at)
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s1, s2}),
+    )
+
+    _evaluate_signal_precomputed(account, ctx)
+
+    assert calls == 1
+    assert ctx.get_for(FactorSignalModule.signal_value, s1) == {"P1": 10.0}
+    assert ctx.get_for(FactorSignalModule.signal_value, s2) == {"P1": 10.0}
 
 
 def test_signal_precomputed_groups_by_adapter_cache_key():

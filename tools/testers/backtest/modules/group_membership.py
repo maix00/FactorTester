@@ -16,25 +16,41 @@ ThresholdSignalModule.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, ClassVar, cast
 
+import numpy as np
 import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.order import OrderStatus
-from tools.testers.backtest.modules.time_index_lookup import series_up_to, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import row_at, signal_event_times, signal_timestamps
 from tools.testers.backtest.modules.factor_signal import FactorSignalModule
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
+    current_historical_fields_at,
     current_prices_table_for,
+    current_prices_at,
     historical_fields_for_product,
     is_product_tradable,
+    resolved_bar_frequency_for_strategy,
+    _historical_fields_for_strategy,
 )
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
-from tools.testers.backtest.modules.order_book import OrderBookModule
-from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.order_construct import OrderConstructModule
+from tools.testers.backtest.modules.engine import bar_price_visibility_timestamp
+from tools.testers.backtest.modules.strategy_book import (
+    StrategyIntentPolicy,
+    strategy_book_store_for,
+)
+from tools.testers.backtest.modules.target import (
+    TargetStrategyModule,
+    register_strategy_intent_policy,
+    target_weight_intent,
+)
+from tools.testers.backtest.modules.time_index_lookup import row_at_index_key
 
 
 class GroupMembershipModule(TargetStrategyModule):
@@ -126,19 +142,22 @@ class GroupMembershipModule(TargetStrategyModule):
             FactorSignalModule.signal_value, split_count, group_index,
             MarketDataModule.current_historical_fields,
         ),
-        outputs=(target_weights,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
+        outputs=(target_weights, TargetStrategyModule.trade_intent),
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         description="计算分组隶属",
         order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
-        "schedule_order_execution", inputs=(OrderBookModule.orders,), outputs=(),
+        "schedule_order_execution", inputs=(OrderConstructModule.orders,), outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
-        after=(OrderBookModule.construct_orders,),
+        after=(OrderConstructModule.construct_orders,),
         description="登记订单执行事件",
         compute=lambda state, ctx: _schedule_order_execution(state, ctx),
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (group_quantile_membership, schedule_order_execution)
+    flows: ClassVar[tuple[Flow, ...]] = (
+        group_quantile_membership, schedule_order_execution,
+    )
 
 
 def _group_quantile_membership(state, ctx) -> None:
@@ -147,7 +166,7 @@ def _group_quantile_membership(state, ctx) -> None:
     exact same allocation (cached on the shared target strategy store)
     instead of recomputing from the current signal_value -- real holding
     behavior, not "rebalance every period but happen to get the same
-    answer." `OrderBookModule.size_order` naturally produces zero deltas
+    answer." `OrderConstructModule.size_order` naturally produces zero deltas
     once the position already matches that frozen target, so no further
     trading happens without needing a separate skip-flag anywhere else.
 
@@ -163,6 +182,10 @@ def _group_quantile_membership(state, ctx) -> None:
     trigger rejects those allocation policies outright rather than serve a
     silently stale allocation. "scheduled" is not implemented (see field
     docstring)."""
+    precomputed = _apply_precomputed_target_intents(state, ctx)
+    if precomputed:
+        return
+
     store = state.target_store
     established = store.strategy_established_target_weights
     last_membership = store.strategy_selection_cache
@@ -194,6 +217,8 @@ def _group_quantile_membership(state, ctx) -> None:
         policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
         if policy == "buy_and_hold" and strategy in established:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established[strategy])
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                established[strategy], reason="buy_and_hold_established_target"))
             continue
 
         trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
@@ -224,6 +249,8 @@ def _group_quantile_membership(state, ctx) -> None:
         group_index = config.get(GroupMembershipModule.group_index, 0)
         if not signal_value or n_groups <= 0:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, {})
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                {}, reason="empty_group_membership"))
             continue
         cache_key = frozenset(signal_value.items())
         ranked = ranked_cache.get(cache_key)
@@ -252,13 +279,362 @@ def _group_quantile_membership(state, ctx) -> None:
 
         if trigger == "membership_change" and last_membership.get(strategy) == members:
             ctx.set_for(GroupMembershipModule.target_weights, strategy, established.get(strategy, {}))
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                established.get(strategy, {}), reason="membership_unchanged"))
             continue
 
         weights = _allocate_weights(state, ctx, strategy, members)
         ctx.set_for(GroupMembershipModule.target_weights, strategy, weights)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+            weights, reason="group_membership"))
         last_membership[strategy] = members
         established[strategy] = weights
         _record_target_trace(state, strategy, ctx.timestamp, weights)
+
+
+def _apply_precomputed_target_intents(state, ctx) -> bool:
+    if ctx.timestamp is None:
+        return False
+    for strategy in ctx.active_strategies:
+        if state.target_store.precomputed_target_intents.get(strategy) is None:
+            return False
+    applied = False
+    for strategy in ctx.active_strategies:
+        table = state.target_store.precomputed_target_intents[strategy]
+        key = _target_intent_event_key(ctx, strategy)
+        intent = table.get(key)
+        if intent is None:
+            intent = table.get(pd.Timestamp(ctx.timestamp))
+        if intent is None:
+            ctx.set_for(GroupMembershipModule.target_weights, strategy, {})
+            ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+                {}, reason="precomputed_target_missing"))
+            applied = True
+            continue
+        ctx.set_for(GroupMembershipModule.target_weights, strategy, intent.weights)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, intent)
+        _record_target_trace(state, strategy, ctx.timestamp, intent.weights)
+        applied = True
+    return applied
+
+
+def _target_intent_event_key(ctx, strategy) -> Any:
+    try:
+        draft = ctx.draft_for(strategy)
+    except Exception:
+        return pd.Timestamp(ctx.timestamp)
+    return draft.index_key if draft.index_key is not None else pd.Timestamp(ctx.timestamp)
+
+
+class _TargetPrecomputeContext:
+    def __init__(self, *, timestamp: pd.Timestamp, prices: dict, historical_fields: dict, strategy_fields: dict[Any, dict]) -> None:
+        self.timestamp = timestamp
+        self._values = {
+            MarketDataModule.current_prices: prices,
+            MarketDataModule.current_historical_fields: historical_fields,
+        }
+        self._strategy_fields = strategy_fields
+
+    def get(self, ref, default=None):
+        return self._values.get(ref, default)
+
+    def get_for(self, ref, strategy, default=None):
+        if ref is MarketDataModule.current_historical_fields:
+            return self._strategy_fields.get(strategy, default)
+        return default
+
+
+class GroupMembershipIntentPolicy(StrategyIntentPolicy):
+    def precompute_strategy_intents(self, state: object, ctx: object, strategies: Sequence[object]) -> None:
+        _precompute_group_membership_target_intents(state, ctx, strategies)
+
+
+def _precompute_group_membership_target_intents(state, ctx, strategies) -> None:
+    store = state.target_store
+    signal_store = state.factor_signal_store
+    fallback_strategies: list[Any] = []
+    by_event: dict[Any, list[tuple[Any, Any, dict]]] = {}
+    strategies_by_table: dict[int, tuple[pd.DataFrame, list[Any]]] = {}
+    for strategy in strategies:
+        table = signal_store.precomputed_table_for(strategy)
+        if table is None:
+            continue
+        if not _can_vectorize_group_precompute(state, strategy):
+            fallback_strategies.append(strategy)
+            continue
+        key = id(table)
+        if key not in strategies_by_table:
+            strategies_by_table[key] = (table, [])
+        strategies_by_table[key][1].append(strategy)
+        store.precomputed_target_intents.setdefault(strategy, {})
+
+    for table, table_strategies in strategies_by_table.values():
+        if _precompute_group_membership_target_intents_vectorized(state, table, table_strategies):
+            continue
+        for strategy in table_strategies:
+            fallback_strategies.append(strategy)
+
+    for strategy in fallback_strategies:
+        table = signal_store.precomputed_table_for(strategy)
+        if table is None:
+            continue
+        store.precomputed_target_intents.setdefault(strategy, {})
+        for event_time in signal_event_times(table):
+            by_event.setdefault(event_time.index_key, []).append(
+                (strategy, event_time, _signal_values_from_table(table, event_time.index_key))
+            )
+
+    established: dict[Any, dict[Any, float]] = {}
+    last_membership: dict[Any, frozenset | None] = {}
+    ordered_events = sorted(
+        by_event.items(),
+        key=lambda item: cast(pd.Timestamp, item[1][0][1].timestamp),
+    )
+    for _event_key, items in ordered_events:
+        timestamp = cast(pd.Timestamp, items[0][1].timestamp)
+        prices = current_prices_at(state, timestamp)
+        needs_historical_fields = any(
+            state.config_for(strategy).get(GroupMembershipModule.allocation_policy, "equal_notional") == "equal_margin"
+            for strategy, _event_time, _signal_value in items
+        )
+        base_fields = current_historical_fields_at(state, timestamp) if needs_historical_fields else {}
+        strategy_fields_cache: dict[Any, dict] = {}
+        ranked_cache: dict[frozenset, list[tuple[Any, float]]] = {}
+        bucket_cache: dict[tuple[frozenset, int, int], frozenset] = {}
+        for strategy, event_time, signal_value in items:
+            config = state.config_for(strategy)
+            if needs_historical_fields:
+                ledger = state.ledger_for_strategy(strategy)
+                strategy_fields = strategy_fields_cache.get(strategy)
+                if strategy_fields is None:
+                    strategy_fields = _historical_fields_for_strategy(
+                        base_fields,
+                        config,
+                        timestamp,
+                        ledger_config=state.ledger_config_for(ledger),
+                    )
+                    strategy_fields_cache[strategy] = strategy_fields
+            else:
+                strategy_fields = {}
+            pre_ctx = _TargetPrecomputeContext(
+                timestamp=timestamp,
+                prices=prices,
+                historical_fields=base_fields,
+                strategy_fields={strategy: strategy_fields},
+            )
+            weights, members, reason = _compute_group_target_weights(
+                state,
+                pre_ctx,
+                strategy,
+                signal_value,
+                established=established.get(strategy),
+                last_membership=last_membership.get(strategy),
+                ranked_cache=ranked_cache,
+                bucket_cache=bucket_cache,
+            )
+            if reason not in {"buy_and_hold_established_target", "membership_unchanged"}:
+                established[strategy] = weights
+                last_membership[strategy] = members
+            intent = target_weight_intent(weights, reason=f"precomputed_{reason}")
+            store.precomputed_target_intents[strategy][event_time.index_key] = intent
+            store.precomputed_target_intents[strategy][timestamp] = intent
+
+
+register_strategy_intent_policy("group", GroupMembershipIntentPolicy())
+
+
+def _can_vectorize_group_precompute(state, strategy) -> bool:
+    config = state.config_for(strategy)
+    if config.get(GroupMembershipModule.position_policy, "rebalance_to_target") != "rebalance_to_target":
+        return False
+    if config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal") != "on_factor_signal":
+        return False
+    return config.get(GroupMembershipModule.allocation_policy, "equal_notional") in {
+        "equal_notional",
+        "inverse_volatility",
+    }
+
+
+def _precompute_group_membership_target_intents_vectorized(state, signal_table: pd.DataFrame, strategies: list[Any]) -> bool:
+    if signal_table.empty or not strategies:
+        return True
+    if not isinstance(signal_table.index, pd.DatetimeIndex):
+        return False
+    price_table = current_prices_table_for(state)
+    if not isinstance(price_table, pd.DataFrame) or price_table.empty:
+        return False
+    products = sorted(list(signal_table.columns), key=_product_name)
+    if not products:
+        return True
+    try:
+        signal = signal_table.loc[:, products]
+        prices = price_table.reindex(signal.index, method="ffill").reindex(columns=products)
+    except Exception:
+        return False
+    signal_index = cast(pd.DatetimeIndex, signal.index)
+    rankable = signal.where(prices.notna() & (prices > 0))
+    ranks = rankable.rank(axis=1, method="first", ascending=False, na_option="bottom")
+    valid_counts = rankable.notna().sum(axis=1)
+    event_times = list(signal_event_times(signal_table))
+    if len(event_times) != len(signal_table.index):
+        return False
+
+    allocation_tables: dict[tuple[str, int], pd.DataFrame] = {}
+    for strategy in strategies:
+        config = state.config_for(strategy)
+        n_groups = int(config.get(GroupMembershipModule.split_count, 1) or 1)
+        group_index = int(config.get(GroupMembershipModule.group_index, 0) or 0)
+        if n_groups <= 0:
+            weights = pd.DataFrame(0.0, index=signal.index, columns=products)
+        else:
+            starts = (valid_counts * group_index / n_groups).round()
+            ends = (valid_counts * (group_index + 1) / n_groups).round()
+            membership = ranks.gt(starts, axis=0) & ranks.le(ends, axis=0) & rankable.notna()
+            product_mask_names = config.get(GroupMembershipModule.product_mask_names)
+            if product_mask_names:
+                allowed = {str(name) for name in product_mask_names}
+                membership = membership.loc[:, [product for product in membership.columns if _product_name(product) in allowed]]
+            weights = _vectorized_group_weights(state, signal_index, membership, strategy, allocation_tables)
+        _store_vectorized_target_intents(state, strategy, event_times, weights)
+    return True
+
+
+def _vectorized_group_weights(
+    state,
+    index: pd.DatetimeIndex,
+    membership: pd.DataFrame,
+    strategy,
+    allocation_tables: dict[tuple[str, int], pd.DataFrame],
+) -> pd.DataFrame:
+    if membership.empty:
+        return pd.DataFrame(0.0, index=index, columns=[])
+    config = state.config_for(strategy)
+    policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+    counts = membership.sum(axis=1).replace(0, pd.NA)
+    if policy != "inverse_volatility":
+        return membership.astype(float).div(counts, axis=0).fillna(0.0)
+
+    lookback = int(config.get(GroupMembershipModule.volatility_lookback, 20) or 20)
+    cache_key = ("inverse_volatility", lookback)
+    inv_vol = allocation_tables.get(cache_key)
+    if inv_vol is None:
+        table = current_prices_table_for(state)
+        vol_table = _rolling_volatility_table(state, table, lookback)
+        vol = vol_table.reindex(index, method="ffill").reindex(columns=membership.columns)
+        inv_vol = (1.0 / vol).where(vol > 0)
+        allocation_tables[cache_key] = inv_vol
+    else:
+        inv_vol = inv_vol.reindex(columns=membership.columns)
+    raw = inv_vol.where(membership)
+    warmup_membership = membership & raw.isna()
+    warmup_counts = warmup_membership.sum(axis=1)
+    member_counts = membership.sum(axis=1).replace(0, pd.NA)
+    fallback_share = (warmup_counts / member_counts).fillna(0.0)
+    weights = pd.DataFrame(0.0, index=index, columns=membership.columns)
+    if warmup_membership.any().any():
+        weights = weights.add(
+            warmup_membership.astype(float).div(warmup_counts.replace(0, pd.NA), axis=0).mul(fallback_share, axis=0),
+            fill_value=0.0,
+        )
+    raw = raw.fillna(0.0)
+    raw_sum = raw.sum(axis=1).replace(0, pd.NA)
+    weights = weights.add(raw.div(raw_sum, axis=0).mul(1.0 - fallback_share, axis=0), fill_value=0.0)
+    return weights.fillna(0.0)
+
+
+def _store_vectorized_target_intents(state, strategy, event_times: list[Any], weights: pd.DataFrame) -> None:
+    table = state.target_store.precomputed_target_intents.setdefault(strategy, {})
+    columns = list(weights.columns)
+    values = weights.reindex(columns=columns).fillna(0.0).to_numpy(dtype=float, copy=False)
+    row_count = len(weights.index)
+    for pos, event_time in enumerate(event_times):
+        if pos >= row_count:
+            payload = {}
+        else:
+            row_values = values[pos]
+            nonzero = np.flatnonzero(row_values)
+            payload = {columns[int(col)]: float(row_values[int(col)]) for col in nonzero}
+        intent = target_weight_intent(payload, reason="precomputed_group_membership")
+        table[event_time.index_key] = intent
+        table[event_time.timestamp] = intent
+
+
+def _signal_values_from_table(table: pd.DataFrame, index_key: Any) -> dict:
+    try:
+        row = row_at_index_key(table, index_key) if index_key is not None else table.iloc[-1]
+    except KeyError:
+        return {}
+    return {product: float(cast(Any, row[product])) for product in table.columns}
+
+
+def _compute_group_target_weights(
+    state,
+    ctx,
+    strategy,
+    signal_value: dict,
+    *,
+    established: dict[Any, float] | None = None,
+    last_membership: frozenset | None = None,
+    ranked_cache: dict[frozenset, list[tuple[Any, float]]] | None = None,
+    bucket_cache: dict[tuple[frozenset, int, int], frozenset] | None = None,
+) -> tuple[dict, frozenset | None, str]:
+    config = state.config_for(strategy)
+    policy = config.get(GroupMembershipModule.position_policy, "rebalance_to_target")
+    if policy == "buy_and_hold" and established is not None:
+        return established, last_membership, "buy_and_hold_established_target"
+
+    trigger = config.get(GroupMembershipModule.rebalance_trigger, "on_factor_signal")
+    if trigger == "scheduled":
+        raise NotImplementedError(
+            'rebalance_trigger="scheduled" requires a calendar-driven SIGNAL '
+            "schedule independent of factor timing, not implemented this round")
+    if trigger == "membership_change":
+        allocation_policy = config.get(GroupMembershipModule.allocation_policy, "equal_notional")
+        if allocation_policy != "equal_notional":
+            raise ValueError(
+                'rebalance_trigger="membership_change" only reduces turnover correctly '
+                'under allocation_policy="equal_notional" -- weight there is a pure '
+                "function of membership size, so \"same membership\" really does mean "
+                f'"same weights". allocation_policy={allocation_policy!r} computes weights '
+                "from time-varying inputs (trailing volatility / current margin ratios) that "
+                "drift even when membership does not, so reusing the previous weights here "
+                'would silently serve a stale, no-longer-risk-balanced allocation. Use '
+                'rebalance_trigger="on_factor_signal" with this allocation_policy instead.'
+            )
+
+    signal_value = _tradable_signal_values(
+        signal_value,
+        ctx.get(MarketDataModule.current_prices),
+        ctx.get(MarketDataModule.current_tradable_status, None),
+    )
+    n_groups = config.get(GroupMembershipModule.split_count, 1)
+    group_index = config.get(GroupMembershipModule.group_index, 0)
+    if not signal_value or n_groups <= 0:
+        return {}, None, "empty_group_membership"
+    cache_key = frozenset(signal_value.items())
+    ranked = ranked_cache.get(cache_key) if ranked_cache is not None else None
+    if ranked is None:
+        ranked = sorted(signal_value.items(), key=lambda kv: (-kv[1], _product_name(kv[0])))
+        if ranked_cache is not None:
+            ranked_cache[cache_key] = ranked
+    bucket_key = (cache_key, n_groups, group_index)
+    members = bucket_cache.get(bucket_key) if bucket_cache is not None else None
+    if members is None:
+        bucket_size = len(ranked) / n_groups
+        start = round(group_index * bucket_size)
+        end = round((group_index + 1) * bucket_size)
+        members = frozenset(product for product, _ in ranked[start:end])
+        if bucket_cache is not None:
+            bucket_cache[bucket_key] = members
+    product_mask_names = config.get(GroupMembershipModule.product_mask_names)
+    if product_mask_names:
+        allowed = {str(name) for name in product_mask_names}
+        members = frozenset(product for product in members if _product_name(product) in allowed)
+
+    if trigger == "membership_change" and last_membership == members:
+        return established or {}, members, "membership_unchanged"
+
+    return _allocate_weights(state, ctx, strategy, members), members, "group_membership"
 
 
 def _tradable_signal_values(
@@ -333,7 +709,7 @@ def _allocate_weights(state, ctx, strategy, members: frozenset) -> dict:
     inv_vol: dict = {}
     fallback_equal: list = []
     for product in members:
-        vol = _trailing_volatility(table, product, ctx.timestamp, lookback)
+        vol = _trailing_volatility(state, table, product, ctx.timestamp, lookback)
         if vol is None or vol <= 0:
             if warmup == "error":
                 raise ValueError(
@@ -392,22 +768,39 @@ def _margin_ratio_for_product(fields: dict, product) -> float | None:
     return None
 
 
-def _trailing_volatility(table, product, timestamp, lookback: int) -> float | None:
+def _trailing_volatility(state, table, product, timestamp, lookback: int) -> float | None:
     if table is None or product not in table.columns:
         return None
-    prices = table[product]
-    prices = series_up_to(prices, timestamp)
-    if len(prices) < lookback + 1:
+    vol_table = _rolling_volatility_table(state, table, lookback)
+    try:
+        row = row_at(vol_table, timestamp, asof=True)
+    except KeyError:
         return None
-    window = prices.iloc[-(lookback + 1):]
-    returns = window.pct_change().dropna()
-    if returns.empty:
-        return None
-    std = returns.std()
+    std = row.get(product)
     return float(std) if pd.notna(std) else None
 
 
-def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp]:
+def _rolling_volatility_table(state, table: pd.DataFrame, lookback: int) -> pd.DataFrame:
+    """Return causal trailing return volatility for every product.
+
+    The previous implementation sliced each product series on every signal
+    event.  For the default inverse-volatility allocator that means
+    timestamp × strategy × product repeated pct_change/std work.  The price
+    table is fixed after PRE_REPLAY, so compute the rolling table once per
+    lookback and reuse it causally by timestamp.
+    """
+    key = (id(table), int(lookback))
+    cache = state.target_store.rolling_volatility_tables
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    returns = table.pct_change(fill_method=None)
+    vol_table = returns.rolling(window=int(lookback), min_periods=int(lookback)).std()
+    cache[key] = vol_table
+    return vol_table
+
+
+def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     if ctx.timestamp is None:
         raise ValueError("execution scheduling requires an event timestamp")
     current_ts = cast(pd.Timestamp, ctx.timestamp)
@@ -422,48 +815,57 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
     table = current_prices_table_for(state)
     if table is None:
         return current_ts, current_ts
+    bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
+    freq_key = getattr(bar_freq, "name", str(bar_freq)) if bar_freq is not None else None
+    cache_key = (pd.Timestamp(current_ts).value, str(current_ts.tz), int(delay or 1), basis, freq_key, id(table))
+    if cache_key in state.target_store.execution_schedule_cache:
+        return state.target_store.execution_schedule_cache[cache_key]
     index = signal_timestamps(table)
-    pos = index.get_indexer([current_ts], method="bfill")[0]
+    pos = index.get_indexer(pd.Index([current_ts]), method="bfill")[0]
     delay = max(int(delay or 1), 1)
-    price_pos = min(pos + delay, len(index) - 1)
+    price_pos = pos + delay
+    if price_pos >= len(index):
+        state.target_store.execution_schedule_cache[cache_key] = None
+        return None
     price_ts = cast(pd.Timestamp, index[price_pos])
-    open_boundary_pos = max(0, min(price_pos - 1, len(index) - 1))
-    event_ts = cast(
-        pd.Timestamp,
-        cast(pd.Timestamp, index[open_boundary_pos]) + pd.Timedelta(nanoseconds=1),
-    )
-    return event_ts, price_ts
+    event_ts = bar_price_visibility_timestamp(index, price_pos=price_pos, basis=basis, config=config, bar_freq=bar_freq)
+    schedule = (event_ts, price_ts)
+    state.target_store.execution_schedule_cache[cache_key] = schedule
+    return schedule
 
 
 def _resolve_execution_timestamp(state, ctx, strategy) -> pd.Timestamp:
-    event_ts, _price_ts = _resolve_execution_schedule(state, ctx, strategy)
+    schedule = _resolve_execution_schedule(state, ctx, strategy)
+    if schedule is None:
+        raise ValueError("next-bar order execution has no future bar to target")
+    event_ts, _price_ts = schedule
     return event_ts
 
 
 def _schedule_order_execution(state, ctx) -> None:
-    """Cancellation of a still-pending order for the same (strategy,
-    product) is done by mutating the queued Order object in place (the
-    EventQueue holds the same object reference) -- not by emitting a new
-    event kind.
-
-    Only cancels a stale order whose own scheduled timestamp is STRICTLY
-    AFTER this SIGNAL's timestamp. An order scheduled for this exact timestamp
-    is already due at this signal boundary; keep it intact rather than treating
-    it as still-cancellable future work."""
+    """Schedule orders and apply StrategyBook's pending-order conflict policy."""
     pending = state.order_store.pending_orders
+    pending_conflict_policy = strategy_book_store_for(state).policies.pending_order_conflict
 
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
-        orders = ctx.get_for(OrderBookModule.orders, strategy, [])
-        execution_ts, price_ts = _resolve_execution_schedule(state, ctx, strategy)
+        orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
+        schedule = _resolve_execution_schedule(state, ctx, strategy)
+        if schedule is None:
+            continue
+        execution_ts, price_ts = schedule
         for order in orders:
             key = (strategy, order.instrument)
-            stale = pending.get(key)
-            if (
-                stale is not None and stale.status == OrderStatus.SCHEDULED
-                and stale.get("price_timestamp", stale.timestamp) > ctx.timestamp
-            ):
-                stale.status = OrderStatus.CANCELLED
+            if pending_conflict_policy is not None:
+                pending_conflict_policy(state, strategy, order, ctx.timestamp)
+            else:
+                stale = pending.get(key)
+                if (
+                    stale is not None
+                    and stale.status == OrderStatus.SCHEDULED
+                    and stale.get("price_timestamp", stale.timestamp) > ctx.timestamp
+                ):
+                    stale.status = OrderStatus.CANCELLED
             order.status = OrderStatus.SCHEDULED
             order.timestamp = execution_ts
             order.set("price_timestamp", price_ts)

@@ -16,6 +16,7 @@ discarded right after, while BacktestRunState-owned stores live for the whole ru
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, cast
@@ -26,14 +27,14 @@ from tools.data.types import DataColumn
 from tools.data.types.time_freq import DataFreq
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
-from tools.testers.backtest.engines.native.flow import Flow, Phase
+from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition, Phase
 from tools.testers.backtest.modules.custom_product import CustomProductModule, apply_custom_product_fields
 from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 from tools.testers.backtest.modules.term_structure import TermStructureExpandModule
-from tools.testers.backtest.modules.time_index_lookup import row_at, signal_timestamps
+from tools.testers.backtest.modules.time_index_lookup import row_at, row_at_index_key, signal_timestamps
 from tools.data.types.time_index import DataIndex
 from tools.data.field_history import (
     HistoricalFieldLookupError,
@@ -74,6 +75,14 @@ class MarketDataStore:
     historical_field_policy: str | None = None
     historical_field_names: tuple[Any, ...] = ()
     historical_field_frames: Any = None
+    market_snapshot_cache: dict[Any, dict[str, dict[Any, float]]] = field(default_factory=dict)
+    table_values_cache: dict[Any, dict[Any, float]] = field(default_factory=dict)
+    historical_fields_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
+    historical_field_frame_column_cache: dict[tuple[str, tuple[str, ...]], object | None] = field(default_factory=dict)
+    historical_field_frame_column_map_cache: dict[Any, list[tuple[Any, int]]] = field(default_factory=dict)
+    historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
+    historical_field_frame_index_cache: dict[int, tuple[pd.Index, Any]] = field(default_factory=dict)
+    historical_field_frame_values_cache: dict[int, tuple[pd.DataFrame, Any]] = field(default_factory=dict)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
@@ -85,6 +94,14 @@ class MarketDataStore:
         self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
         self.historical_field_names = tuple(raw.get("historical_field_names", ()))
         self.volume_table = raw.get("volume")
+        self.market_snapshot_cache.clear()
+        self.table_values_cache.clear()
+        self.historical_fields_cache.clear()
+        self.historical_field_frame_column_cache.clear()
+        self.historical_field_frame_column_map_cache.clear()
+        self.historical_field_frame_row_cache.clear()
+        self.historical_field_frame_index_cache.clear()
+        self.historical_field_frame_values_cache.clear()
 
 
 class MarketDataModule(ExecutableModule):
@@ -248,68 +265,76 @@ class MarketDataModule(ExecutableModule):
         compute=lambda state, ctx: _causal_valuation(state, ctx),
     )
 
-    lookup_current_prices_on_signal: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_signal", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
-        description="读取信号时点价格",
+    lookup_market_snapshot: ClassVar[FlowDefinition] = FlowDefinition(
+        "lookup_market_snapshot",
+        inputs=(),
+        outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints, volume),
+        description="读取市场快照",
+        input_materialization=True,
         compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
     )
-    lookup_current_prices_on_bar: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_bar", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_signal: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_signal",
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
+        description="读取信号时点市场快照",
+    )
+    lookup_current_prices_on_bar: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_bar",
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=1,
-        description="读取行情时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取行情时点市场快照",
     )
-    lookup_current_prices_on_order: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_order", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
+    lookup_current_prices_on_order: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=1,
-        description="读取订单时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+        description="读取订单时点市场快照",
     )
-    lookup_current_prices_on_ledger_notice: ClassVar[Flow] = Flow(
-        "lookup_current_prices_on_ledger_notice", inputs=(), outputs=(current_prices, current_market_snapshot, current_tradable_status, current_order_constraints),
-        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=1,
-        description="读取账本通知时点价格",
-        compute=lambda state, ctx: _set_current_market_snapshot(state, ctx),
+    lookup_current_prices_on_trade_intent: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_trade_intent",
+        phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=1,
+        description="读取交易意图时点市场快照",
     )
-    lookup_volume_on_signal: ClassVar[Flow] = Flow(
-        "lookup_volume_on_signal", inputs=(), outputs=(volume,),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=1,
-        description="读取成交量",
-        compute=lambda state, ctx: ctx.set(MarketDataModule.volume, current_volume_at(state, ctx.timestamp)),
+    lookup_current_prices_on_ledger: ClassVar[FlowBinding] = lookup_market_snapshot.bind(
+        name="lookup_current_prices_on_ledger",
+        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER, order=1,
+        description="读取账本事件时点市场快照",
     )
-    lookup_historical_fields_on_signal: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_signal",
+    lookup_historical_fields: ClassVar[FlowDefinition] = FlowDefinition(
+        "lookup_historical_fields",
         inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
         outputs=(current_historical_fields,),
-        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
         description="读取交易规则字段",
+        input_materialization=True,
         compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
-    lookup_historical_fields_on_order: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_order",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
-        outputs=(current_historical_fields,),
+    lookup_historical_fields_on_signal: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_signal",
+        phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=2,
+        description="读取信号交易规则字段",
+    )
+    lookup_historical_fields_on_order: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_order",
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=2,
         description="读取订单交易规则字段",
-        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
     )
-    lookup_historical_fields_on_ledger_notice: ClassVar[Flow] = Flow(
-        "lookup_historical_fields_on_ledger_notice",
-        inputs=(_fee_mode_ref, _margin_mode_ref, _accounting_mode_ref, CustomProductModule.custom_product_fields),
-        outputs=(current_historical_fields,),
-        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER_NOTICE, order=2,
-        description="读取账本通知交易规则字段",
-        compute=lambda state, ctx: _set_current_historical_fields(state, ctx),
+    lookup_historical_fields_on_trade_intent: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_trade_intent",
+        phase=Phase.PER_EVENT, event_kind=EventKind.TRADE_INTENT, order=2,
+        description="读取交易意图交易规则字段",
+    )
+    lookup_historical_fields_on_ledger: ClassVar[FlowBinding] = lookup_historical_fields.bind(
+        name="lookup_historical_fields_on_ledger",
+        phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER, order=2,
+        description="读取账本事件交易规则字段",
     )
 
-    flows: ClassVar[tuple[Flow, ...]] = (
+    flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
-        lookup_current_prices_on_order, lookup_current_prices_on_ledger_notice, lookup_volume_on_signal,
+        lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
+        lookup_current_prices_on_ledger,
         lookup_historical_fields_on_signal, lookup_historical_fields_on_order,
-        lookup_historical_fields_on_ledger_notice,
+        lookup_historical_fields_on_trade_intent, lookup_historical_fields_on_ledger,
     )
 
 
@@ -379,6 +404,26 @@ def _resolve_market_data_request(state, ctx) -> None:
     unique_sources = {source for source in sources_by_strategy.values()}
     if len(unique_sources) == 1:
         ctx.set(MarketDataModule.required_data_source, next(iter(unique_sources), ()))
+
+
+def resolved_bar_frequency_for_strategy(state, strategy: Any | None = None) -> DataFreq | None:
+    """Return the PRE_REPLAY-resolved bar frequency for scheduling.
+
+    MarketDataModule owns data-frequency resolution. Event scheduling should
+    consume that result rather than re-inferring frequency from the index on
+    every BAR/SIGNAL.  ``None`` is returned for raw/legacy paths that have not
+    run ``resolve_market_data_request``; callers can then use their local
+    fallback.
+    """
+    frequencies = market_data_store_for(state).required_frequency_by_strategy
+    if strategy is not None:
+        frequency = frequencies.get(strategy)
+        if frequency is not None:
+            return frequency
+    unique = {frequency.name: frequency for frequency in frequencies.values()}
+    if len(unique) == 1:
+        return next(iter(unique.values()))
+    return None
 
 
 def _required_data_source_for_strategy(config) -> tuple[str, ...]:
@@ -835,10 +880,15 @@ def _load_raw_market_data(state, ctx) -> None:
 
     for plan_item in store.load_plan:
         product, freq, source = _unpack_market_data_load_plan_item(plan_item)
+        requested_columns = (
+            [column for _basis, column in price_columns]
+            + [column for _basis, column in optional_price_columns]
+            + [DataColumn.VOLUME.name]
+        )
         try:
             data_view = getattr(product, freq.name)
             df = data_view.get_and_adjust_cols(
-                [column for _basis, column in price_columns] + [DataColumn.VOLUME.name],
+                requested_columns,
                 copy=False,
                 start_dt=start_dt,
                 end_dt=end_dt,
@@ -879,8 +929,6 @@ def _load_raw_market_data(state, ctx) -> None:
         for basis, column in optional_price_columns:
             if column in df.columns:
                 price_series_by_basis.setdefault(basis, {})[product] = df[column]
-            else:
-                _load_optional_price_column(data_view, column, basis, product, price_series_by_basis, start_dt, end_dt, warmup_window, source)
         if DataColumn.VOLUME.name in df.columns:
             volume_series_by_product[product] = df[DataColumn.VOLUME.name]
     if missing_products:
@@ -913,32 +961,6 @@ def _unpack_market_data_load_plan_item(plan_item: Any) -> tuple[Any, Any, Any | 
         return plan_item
     product, freq = plan_item
     return product, freq, None
-
-
-def _load_optional_price_column(
-    data_view: Any,
-    column: str,
-    basis: str,
-    product: Any,
-    price_series_by_basis: dict[str, dict[Any, pd.Series]],
-    start_dt: Any,
-    end_dt: Any,
-    warmup_window: pd.Timedelta | None,
-    source: Any,
-) -> None:
-    try:
-        frame = data_view.get_and_adjust_cols(
-            [column],
-            copy=False,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            warmup_window=warmup_window,
-            source=source,
-        )
-    except (ValueError, KeyError):
-        return
-    if column in frame.columns:
-        price_series_by_basis.setdefault(basis, {})[product] = frame[column]
 
 
 def _live_market_data_load_warmup_window(state) -> pd.Timedelta | None:
@@ -990,6 +1012,10 @@ def _load_historical_fields(state, ctx) -> None:
     store.historical_field_policy = policy
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
     store.historical_field_names = field_names
+    store.historical_fields_cache.clear()
+    store.historical_field_frame_column_cache.clear()
+    store.historical_field_frame_row_cache.clear()
+    store.historical_field_frame_index_cache.clear()
     if raw_prices is None or raw_prices.empty or resolver is None:
         store.historical_field_frames = None
         return
@@ -1263,7 +1289,8 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
             fields.append("CostBasisMethod")
         accounting_mode = _effective_accounting_mode(config, ledger_config)
         if accounting_mode == "Auto":
-            fields.extend(TRANSACTION_FEE_FIELD_NAMES)
+            if fee_mode != "zero":
+                fields.extend(TRANSACTION_FEE_FIELD_NAMES)
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         if engine_mode_for(config) == "exact":
             fields.extend(("CostBasisMethod", "SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
@@ -1278,16 +1305,184 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
-    market_data_store_for(state).current_prices_table = raw_prices.ffill()
+    store = market_data_store_for(state)
+    store.current_prices_table = raw_prices.ffill()
+    store.market_snapshot_cache.clear()
+    store.table_values_cache.clear()
 
 
 def _set_current_market_snapshot(state, ctx) -> None:
-    snapshot = current_market_snapshot_at(state, ctx.timestamp)
-    close_prices = snapshot.get("close", {})
+    snapshot = _market_snapshot_for_event(state, ctx)
+    prices = _current_prices_for_event(state, snapshot, ctx)
     ctx.set(MarketDataModule.current_market_snapshot, snapshot)
-    ctx.set(MarketDataModule.current_prices, close_prices)
-    ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
-    ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
+    ctx.set(MarketDataModule.current_prices, prices)
+    ctx.set(MarketDataModule.volume, snapshot.get("volume", {}))
+    if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
+        ctx.set(MarketDataModule.current_tradable_status, {})
+        ctx.set(MarketDataModule.current_order_constraints, {})
+    else:
+        ctx.set(MarketDataModule.current_tradable_status, tradable_status_from_snapshot(snapshot))
+        ctx.set(MarketDataModule.current_order_constraints, order_constraints_from_snapshot(snapshot))
+
+
+def _current_prices_for_event(state, snapshot: dict[str, dict[Any, float]], ctx) -> dict[Any, float]:
+    if getattr(ctx, "event_kind", None) is EventKind.BAR:
+        basis = _bar_event_basis(ctx)
+        if basis and basis != "close":
+            basis_prices = snapshot.get(basis)
+            if basis_prices:
+                return basis_prices
+    if getattr(ctx, "event_kind", None) is EventKind.ORDER:
+        requested_bases = _order_event_price_bases(state, ctx)
+        for basis in requested_bases:
+            prices = snapshot.get(basis)
+            if prices:
+                return prices
+        return {}
+    return snapshot.get("close", {})
+
+
+def _bar_event_basis(ctx) -> str | None:
+    strategies = list(getattr(ctx, "active_strategies", ()) or ())
+    if not strategies:
+        return None
+    try:
+        draft = ctx.draft_for(strategies[0])
+    except Exception:
+        return None
+    payload = getattr(draft, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    basis = payload.get("bar_basis")
+    return str(basis).lower() if basis else None
+
+
+def _market_snapshot_for_event(state, ctx) -> dict[str, dict[Any, float]]:
+    if getattr(ctx, "event_kind", None) is EventKind.BAR:
+        strategies = list(getattr(ctx, "active_strategies", ()) or ())
+        if strategies:
+            try:
+                draft = ctx.draft_for(strategies[0])
+            except Exception:
+                draft = None
+            if draft is not None and draft.index_key is not None:
+                return market_snapshot_for_index_key(state, draft.index_key)
+    if getattr(ctx, "event_kind", None) is EventKind.ORDER:
+        price_timestamp = _order_event_price_timestamp(ctx)
+        if price_timestamp is not None:
+            return order_market_snapshot_at(state, price_timestamp, bases=_order_event_price_bases(state, ctx))
+    if getattr(ctx, "event_kind", None) is EventKind.SIGNAL:
+        return signal_market_snapshot_at(state, ctx.timestamp)
+    if getattr(ctx, "event_kind", None) is EventKind.LEDGER:
+        return ledger_market_snapshot_at(state, ctx.timestamp)
+    return current_market_snapshot_at(state, ctx.timestamp)
+
+
+def _order_event_price_timestamp(ctx) -> pd.Timestamp | None:
+    for strategy in getattr(ctx, "active_strategies", ()) or ():
+        for order in ctx.payloads_for(strategy):
+            raw = order.get("price_timestamp", None) if hasattr(order, "get") else None
+            if raw is not None:
+                return pd.Timestamp(raw)
+    return None
+
+
+def _order_event_price_bases(state, ctx) -> tuple[str, ...]:
+    bases: list[str] = []
+    from tools.testers.backtest.modules.order_execution import OrderExecutionModule
+
+    for strategy in getattr(ctx, "active_strategies", ()) or ():
+        try:
+            config = state.config_for(strategy)
+        except Exception:
+            continue
+        basis = str(config.get(OrderExecutionModule.execution_price_basis, "open") or "open").lower()
+        if basis not in bases:
+            bases.append(basis)
+    return tuple(bases or ("open",))
+
+
+def order_market_snapshot_at(
+    state,
+    timestamp: pd.Timestamp,
+    *,
+    bases: tuple[str, ...] = ("open",),
+) -> dict[str, dict[Any, float]]:
+    """Minimal ORDER snapshot.
+
+    ORDER handling consumes the execution price basis selected by policy plus
+    close/limit fields for exchange trading constraints. Building the full
+    market snapshot for every ORDER event scans settlement/etc. tables that do
+    not affect the current order policy.
+    """
+    store = market_data_store_for(state)
+    normalized_bases = tuple(dict.fromkeys(str(basis).lower() for basis in bases if basis))
+    cache_key = ("order", normalized_bases, _event_lookup_cache_key(timestamp))
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
+    tables = market_price_tables_for(state)
+    for basis in (*normalized_bases, "upper_limit", "lower_limit"):
+        if basis == "close":
+            continue
+        table = tables.get(basis) if isinstance(tables, dict) else None
+        if isinstance(table, pd.DataFrame) and not table.empty:
+            values = _table_values_at_cached(state, table, timestamp, asof=True)
+            if values:
+                snapshot[basis] = values
+    store.market_snapshot_cache[cache_key] = snapshot
+    return snapshot
+
+
+def signal_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
+    """Minimal SIGNAL snapshot.
+
+    Signal-time flows consume the causal close view for valuation/membership,
+    volume for liquidity caps, and limit fields for tradable status. Other
+    price bases are only needed by BAR/ORDER/LEDGER policies.
+    """
+    store = market_data_store_for(state)
+    cache_key = ("signal", _event_lookup_cache_key(timestamp))
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
+    tables = market_price_tables_for(state)
+    for basis in ("upper_limit", "lower_limit"):
+        table = tables.get(basis) if isinstance(tables, dict) else None
+        if isinstance(table, pd.DataFrame) and not table.empty:
+            values = _table_values_at_cached(state, table, timestamp, asof=True)
+            if values:
+                snapshot[basis] = values
+    volume = current_volume_at(state, timestamp)
+    if volume:
+        snapshot["volume"] = volume
+    store.market_snapshot_cache[cache_key] = snapshot
+    return snapshot
+
+
+def ledger_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
+    """Minimal LEDGER snapshot.
+
+    Ledger lifecycle flows consume close for valuation and settlement when
+    available for daily mark-to-market/margin checks. Tradability, volume and
+    execution bases are irrelevant here and are intentionally not loaded.
+    """
+    store = market_data_store_for(state)
+    cache_key = ("ledger", _event_lookup_cache_key(timestamp))
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
+    tables = market_price_tables_for(state)
+    settlement = tables.get("settlement") if isinstance(tables, dict) else None
+    if isinstance(settlement, pd.DataFrame) and not settlement.empty:
+        values = _table_values_at_cached(state, settlement, timestamp, asof=True)
+        if values:
+            snapshot["settlement"] = values
+    store.market_snapshot_cache[cache_key] = snapshot
+    return snapshot
 
 
 def _set_current_historical_fields(state, ctx) -> None:
@@ -1354,14 +1549,7 @@ def current_prices_at(state, timestamp: pd.Timestamp) -> dict:
     `timestamp`) rather than requiring an exact hit.
     """
     table = current_prices_table_for(state)
-    row = row_at(table, timestamp, asof=True)
-    prices: dict[Any, float] = {}
-    for product in table.columns:
-        value = row[product]
-        if pd.isna(value):
-            continue
-        prices[product] = float(cast(Any, value))
-    return prices
+    return _table_values_at_cached(state, table, timestamp, asof=True)
 
 
 def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
@@ -1374,16 +1562,48 @@ def current_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict
     source exposes them; daily settlement flows are responsible for only using
     them on ledger-notice timestamps registered after a trading day's final bar.
     """
+    store = market_data_store_for(state)
+    cache_key = _event_lookup_cache_key(timestamp)
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
     snapshot: dict[str, dict[Any, float]] = {"close": current_prices_at(state, timestamp)}
     for basis, table in market_price_tables_for(state).items():
         if basis == "close" or not isinstance(table, pd.DataFrame) or table.empty:
             continue
-        values = _table_values_at(table, timestamp, asof=True)
+        values = _table_values_at_cached(state, table, timestamp, asof=True)
         if values:
             snapshot[basis] = values
     volume = current_volume_at(state, timestamp)
     if volume:
         snapshot["volume"] = volume
+    store.market_snapshot_cache[cache_key] = snapshot
+    return snapshot
+
+
+def market_snapshot_for_index_key(state, index_key: object) -> dict[str, dict[Any, float]]:
+    """Return a market snapshot for an exact original market-data row key."""
+    store = market_data_store_for(state)
+    cache_key = ("index_key", repr(index_key))
+    cached = store.market_snapshot_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    close_table = current_prices_table_for(state)
+    if close_table is None:
+        return {}
+    snapshot: dict[str, dict[Any, float]] = {"close": _table_values_at_index_key(close_table, index_key)}
+    for basis, table in market_price_tables_for(state).items():
+        if basis == "close" or not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        values = _table_values_at_index_key(table, index_key)
+        if values:
+            snapshot[basis] = values
+    volume_table = volume_table_for(state)
+    if isinstance(volume_table, pd.DataFrame) and not volume_table.empty:
+        values = _table_values_at_index_key(volume_table, index_key)
+        if values:
+            snapshot["volume"] = values
+    store.market_snapshot_cache[cache_key] = snapshot
     return snapshot
 
 
@@ -1410,9 +1630,34 @@ def _usable_price(value: object) -> bool:
         return False
 
 
+def _table_values_at_cached(state, table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:
+    store = market_data_store_for(state)
+    cache_key = (id(table), bool(asof), _event_lookup_cache_key(timestamp))
+    cached = store.table_values_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    values = _table_values_at(table, timestamp, asof=asof)
+    store.table_values_cache[cache_key] = values
+    return values
+
+
 def _table_values_at(table: pd.DataFrame, timestamp: pd.Timestamp, *, asof: bool) -> dict[Any, float]:
     try:
         row = row_at(table, timestamp, asof=asof)
+    except KeyError:
+        return {}
+    values: dict[Any, float] = {}
+    for product in table.columns:
+        value = row[product]
+        if pd.isna(value):
+            continue
+        values[product] = float(cast(Any, value))
+    return values
+
+
+def _table_values_at_index_key(table: pd.DataFrame, index_key: object) -> dict[Any, float]:
+    try:
+        row = row_at_index_key(table, index_key)
     except KeyError:
         return {}
     values: dict[Any, float] = {}
@@ -1430,7 +1675,7 @@ def current_volume_at(state, timestamp: pd.Timestamp) -> dict:
     table = volume_table_for(state)
     if table is None:
         return {}
-    return _table_values_at(table, timestamp, asof=False)
+    return _table_values_at_cached(state, table, timestamp, asof=False)
 
 
 def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, dict[str, object]]:
@@ -1441,6 +1686,10 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     由 provider 直接抛出 MissingHistoricalField 或 MissingTradingDay。
     """
     store = market_data_store_for(state)
+    cache_key = _event_lookup_cache_key(timestamp)
+    cached = store.historical_fields_cache.get(cache_key)
+    if cached is not None:
+        return cached
     provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
     if provider is None:
         return {}
@@ -1462,8 +1711,19 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     instruments = list(table.columns) if table is not None else []
     frames = store.historical_field_frames
     if isinstance(frames, dict):
-        frame_result = _historical_fields_at_from_frames(frames, instruments, timestamp)
-        return _apply_exchange_rule_defaults(frame_result, instruments, field_names)
+        frame_result = _historical_fields_at_from_frames(
+            frames,
+            instruments,
+            timestamp,
+            column_cache=store.historical_field_frame_column_cache,
+            column_map_cache=store.historical_field_frame_column_map_cache,
+            row_cache=store.historical_field_frame_row_cache,
+            index_cache=store.historical_field_frame_index_cache,
+            values_cache=store.historical_field_frame_values_cache,
+        )
+        resolved = _apply_exchange_rule_defaults(state, frame_result, instruments, field_names, timestamp)
+        store.historical_fields_cache[cache_key] = resolved
+        return resolved
     resolved_result: dict[Any, dict[str, object]] = {}
     for instrument in instruments:
         try:
@@ -1478,7 +1738,18 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
         except HistoricalFieldLookupError:
             raise
         resolved_result[instrument] = values
-    return _apply_exchange_rule_defaults(resolved_result, instruments, field_names)
+    resolved = _apply_exchange_rule_defaults(state, resolved_result, instruments, field_names, timestamp)
+    store.historical_fields_cache[cache_key] = resolved
+    return resolved
+
+
+def _event_lookup_cache_key(timestamp: pd.Timestamp) -> Any:
+    # Native event ordering uses nanosecond epsilons to keep SIGNAL/ORDER/LEDGER
+    # causally ordered on the same bar. Market snapshots and historical rule
+    # fields are bar/effective-time states, so those epsilon variants should hit
+    # the same lookup cache entry instead of repeating expensive table joins.
+    ts = pd.Timestamp(timestamp)
+    return ((ts.value // 1_000) * 1_000, str(ts.tz))
 
 
 def historical_field_frames_for_market_data(
@@ -1491,7 +1762,12 @@ def historical_field_frames_for_market_data(
     policy: str,
 ) -> dict[str, pd.DataFrame]:
     runtime_provider = _runtime_field_history_provider()
-    return historical_fields_frame_for_products(
+    cache_key = _historical_fields_frame_cache_key(products, index, field_names, policy)
+    cached = _HISTORICAL_FIELDS_FRAME_CACHE.get(cache_key)
+    if cached is not None:
+        _HISTORICAL_FIELDS_FRAME_CACHE.move_to_end(cache_key)
+        return cached
+    frames = historical_fields_frame_for_products(
         products,
         index,
         provider=runtime_provider,
@@ -1499,6 +1775,39 @@ def historical_field_frames_for_market_data(
         field_names=field_names,
         fallback=policy,
     )
+    return _store_historical_fields_frame_cache(cache_key, frames)
+
+
+_HISTORICAL_FIELDS_FRAME_CACHE_MAX = 8
+_HISTORICAL_FIELDS_FRAME_CACHE: OrderedDict[Any, dict[str, pd.DataFrame]] = OrderedDict()
+
+
+def _historical_fields_frame_cache_key(
+    products: list[Any],
+    index: pd.Index,
+    field_names: tuple[object, ...],
+    policy: str,
+) -> tuple[Any, ...]:
+    timestamps = signal_timestamps(pd.DataFrame(index=index))
+    timestamp_ns = tuple(int(pd.Timestamp(value).value) for value in timestamps)
+    product_names = tuple(str(getattr(product, "name", product)) for product in products)
+    return (
+        tuple(product_names),
+        len(timestamp_ns),
+        timestamp_ns[0] if timestamp_ns else None,
+        timestamp_ns[-1] if timestamp_ns else None,
+        hash(timestamp_ns),
+        tuple(str(field_name) for field_name in field_names),
+        str(policy),
+    )
+
+
+def _store_historical_fields_frame_cache(key: Any, value: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    _HISTORICAL_FIELDS_FRAME_CACHE[key] = value
+    _HISTORICAL_FIELDS_FRAME_CACHE.move_to_end(key)
+    while len(_HISTORICAL_FIELDS_FRAME_CACHE) > _HISTORICAL_FIELDS_FRAME_CACHE_MAX:
+        _HISTORICAL_FIELDS_FRAME_CACHE.popitem(last=False)
+    return value
 
 
 @lru_cache(maxsize=1)
@@ -1512,7 +1821,24 @@ def _historical_fields_at_from_frames(
     frames: dict[str, pd.DataFrame],
     instruments: list[Any],
     timestamp: pd.Timestamp,
+    *,
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None = None,
+    column_map_cache: dict[Any, list[tuple[Any, int]]] | None = None,
+    row_cache: dict[Any, dict[Any, dict[str, object]]] | None = None,
+    index_cache: dict[int, tuple[pd.Index, Any]] | None = None,
+    values_cache: dict[int, tuple[pd.DataFrame, Any]] | None = None,
 ) -> dict[Any, dict[str, object]]:
+    row_positions = _historical_field_frame_row_positions(
+        frames,
+        timestamp,
+        index_cache=index_cache,
+    )
+    product_names = tuple(str(getattr(instrument, "name", instrument)) for instrument in instruments)
+    cache_key = (product_names, tuple(row_positions.items()))
+    if row_cache is not None:
+        cached = row_cache.get(cache_key)
+        if cached is not None:
+            return cached
     result: dict[Any, dict[str, object]] = {instrument: {} for instrument in instruments}
     for field_name, frame in frames.items():
         # FieldHistoryProvider stores its frames tz-naive (it normalises
@@ -1520,42 +1846,194 @@ def _historical_fields_at_from_frames(
         # here are tz-aware, so align via DataIndex before indexing. These
         # fields are effective-time states, so an ORDER event shifted by a
         # causal epsilon should read the latest rule row at or before it.
-        lookup_timestamp = DataIndex(frame.index).tz_align(timestamp)
-        row_pos = _historical_field_frame_asof_position(frame.index, lookup_timestamp)
+        row_pos = row_positions.get(str(field_name))
         if row_pos is None:
             continue
-        row = frame.iloc[row_pos]
-        for instrument in instruments:
-            column = _historical_field_frame_column_for(frame, instrument)
-            if column is not None:
-                result[instrument][str(field_name)] = row[cast(Any, column)]
+        values = _historical_field_frame_values(frame, values_cache=values_cache)
+        row_values = values[row_pos]
+        for instrument, column_pos in _historical_field_frame_column_positions(
+            frame,
+            instruments,
+            field_name=str(field_name),
+            column_cache=column_cache,
+            column_map_cache=column_map_cache,
+        ):
+            result[instrument][str(field_name)] = row_values[column_pos]
+    if row_cache is not None:
+        row_cache[cache_key] = result
     return result
 
 
+def _historical_field_frame_column_positions(
+    frame: pd.DataFrame,
+    instruments: list[Any],
+    *,
+    field_name: str,
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None = None,
+    column_map_cache: dict[Any, list[tuple[Any, int]]] | None = None,
+) -> list[tuple[Any, int]]:
+    cache_key = (field_name, id(frame), tuple(id(instrument) for instrument in instruments))
+    if column_map_cache is not None:
+        cached = column_map_cache.get(cache_key)
+        if cached is not None:
+            return cached
+    positions: list[tuple[Any, int]] = []
+    columns = frame.columns
+    for instrument in instruments:
+        column = _historical_field_frame_column_for(
+            frame,
+            instrument,
+            field_name=field_name,
+            column_cache=column_cache,
+        )
+        if column is None:
+            continue
+        column_pos = columns.get_loc(cast(Any, column))
+        if isinstance(column_pos, slice):
+            column_pos = column_pos.start
+        if isinstance(column_pos, (list, tuple)):
+            column_pos = column_pos[0]
+        if hasattr(column_pos, "nonzero"):
+            nonzero = column_pos.nonzero()[0]
+            if len(nonzero) == 0:
+                continue
+            column_pos = int(nonzero[0])
+        positions.append((instrument, int(column_pos)))
+    if column_map_cache is not None:
+        column_map_cache[cache_key] = positions
+    return positions
+
+
+def _historical_field_frame_values(
+    frame: pd.DataFrame,
+    *,
+    values_cache: dict[int, tuple[pd.DataFrame, Any]] | None = None,
+) -> Any:
+    cache_key = id(frame)
+    if values_cache is not None:
+        cached = values_cache.get(cache_key)
+        if cached is not None and cached[0] is frame:
+            return cached[1]
+    values = frame.to_numpy(copy=False)
+    if values_cache is not None:
+        values_cache[cache_key] = (frame, values)
+    return values
+
+
+def _historical_field_frame_row_positions(
+    frames: dict[str, pd.DataFrame],
+    timestamp: pd.Timestamp,
+    *,
+    index_cache: dict[int, tuple[pd.Index, Any]] | None = None,
+) -> dict[str, int | None]:
+    if not frames:
+        return {}
+    items = list(frames.items())
+    first_index = items[0][1].index
+    if all(frame.index is first_index or frame.index.equals(first_index) for _field, frame in items):
+        lookup_timestamp = _historical_field_frame_lookup_timestamp(first_index, timestamp)
+        row_pos = _historical_field_frame_asof_position(
+            first_index,
+            lookup_timestamp,
+            index_cache=index_cache,
+        )
+        return {str(field_name): row_pos for field_name, _frame in items}
+    row_positions: dict[str, int | None] = {}
+    for field_name, frame in items:
+        lookup_timestamp = _historical_field_frame_lookup_timestamp(frame.index, timestamp)
+        row_positions[str(field_name)] = _historical_field_frame_asof_position(
+            frame.index,
+            lookup_timestamp,
+            index_cache=index_cache,
+        )
+    return row_positions
+
+
+def _historical_field_frame_lookup_timestamp(index: pd.Index, timestamp: pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(timestamp)
+    try:
+        idx_tz = pd.DatetimeIndex(index).tz
+    except (TypeError, ValueError):
+        return DataIndex(index).tz_align(ts)
+    if idx_tz is None:
+        return ts.tz_localize(None) if ts.tzinfo is not None else ts
+    if ts.tzinfo is None:
+        return ts.tz_localize(idx_tz)
+    return ts.tz_convert(idx_tz)
+
+
 def _apply_exchange_rule_defaults(
+    state: Any,
     result: dict[Any, dict[str, object]],
     instruments: list[Any],
     field_names: tuple[object, ...],
+    timestamp: pd.Timestamp,
 ) -> dict[Any, dict[str, object]]:
     for instrument in instruments:
         values = result.setdefault(instrument, {})
         defaults = exchange_rule_defaults_for_product(instrument, field_names)
         for field_name, value in defaults.items():
-            values.setdefault(str(field_name), value)
+            key = str(field_name)
+            if key not in values or _is_missing_exchange_rule_value(values.get(key)):
+                values[key] = value
     return result
 
 
-def _historical_field_frame_asof_position(index: pd.Index, timestamp: pd.Timestamp) -> int | None:
+def _is_missing_exchange_rule_value(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    try:
+        isna = cast(Any, pd.isna)
+        return bool(isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _historical_field_frame_asof_position(
+    index: pd.Index,
+    timestamp: pd.Timestamp,
+    *,
+    index_cache: dict[int, tuple[pd.Index, Any]] | None = None,
+) -> int | None:
     if len(index) == 0:
         return None
-    index_ns = cast(Any, pd.DatetimeIndex(pd.DatetimeIndex(index).astype("datetime64[ns]"))).asi8
+    index_ns = _historical_field_frame_index_ns(index, index_cache=index_cache)
     pos = int(index_ns.searchsorted(timestamp.value, side="right") - 1)
     if pos < 0:
         return None
     return pos
 
 
-def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> object | None:
+def _historical_field_frame_index_ns(
+    index: pd.Index,
+    *,
+    index_cache: dict[int, tuple[pd.Index, Any]] | None = None,
+) -> Any:
+    cache_key = id(index)
+    if index_cache is not None:
+        cached = index_cache.get(cache_key)
+        if cached is not None and cached[0] is index:
+            return cached[1]
+    index_ns = cast(Any, pd.DatetimeIndex(pd.DatetimeIndex(index).astype("datetime64[ns]"))).asi8
+    if index_cache is not None:
+        index_cache[cache_key] = (index, index_ns)
+    return index_ns
+
+
+def _historical_field_frame_column_for(
+    frame: pd.DataFrame,
+    instrument: Any,
+    *,
+    field_name: str | None = None,
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None = None,
+) -> object | None:
+    cache_key: tuple[str, tuple[str, ...]] | None = None
+    if column_cache is not None and field_name is not None:
+        cache_key = (field_name, tuple(sorted(_historical_field_product_keys(instrument))))
+        if cache_key in column_cache:
+            return column_cache[cache_key]
     candidates: list[object] = [instrument, str(instrument)]
     for attr_name in ("name", "symbol", "code"):
         attr = getattr(instrument, attr_name, None)
@@ -1563,8 +2041,19 @@ def _historical_field_frame_column_for(frame: pd.DataFrame, instrument: Any) -> 
             candidates.append(str(attr))
     for candidate in dict.fromkeys(candidates):
         if candidate in frame.columns:
+            _store_historical_field_column_cache(column_cache, cache_key, candidate)
             return candidate
+    _store_historical_field_column_cache(column_cache, cache_key, None)
     return None
+
+
+def _store_historical_field_column_cache(
+    column_cache: dict[tuple[str, tuple[str, ...]], object | None] | None,
+    cache_key: tuple[str, tuple[str, ...]] | None,
+    value: object | None,
+) -> None:
+    if column_cache is not None and cache_key is not None:
+        column_cache[cache_key] = value
 
 
 def historical_fields_for_product(
@@ -1583,18 +2072,29 @@ def historical_fields_for_product(
     if isinstance(values, dict):
         return values
     product_keys = _historical_field_product_keys(product)
-    for instrument, values in historical_fields.items():
-        if not isinstance(values, dict):
-            continue
-        if product_keys & _historical_field_product_keys(instrument):
+    lookup = _historical_fields_lookup_index(historical_fields)
+    for key in product_keys:
+        values = lookup.get(key)
+        if isinstance(values, dict):
             return values
     return {}
 
 
-def _historical_field_product_keys(product: Any) -> set[str]:
-    keys: set[str] = set()
+_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE_MAX = 4096
+_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE: OrderedDict[int, tuple[Any, tuple[str, ...]]] = OrderedDict()
+_HISTORICAL_FIELDS_LOOKUP_CACHE_MAX = 2048
+_HISTORICAL_FIELDS_LOOKUP_CACHE: OrderedDict[int, tuple[dict[Any, dict[str, object]], dict[str, dict[str, object]]]] = OrderedDict()
+
+
+def _historical_field_product_keys(product: Any) -> frozenset[str]:
     if product is None:
-        return keys
+        return frozenset()
+    cache_key = id(product)
+    cached = _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.get(cache_key)
+    if cached is not None and cached[0] is product:
+        _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.move_to_end(cache_key)
+        return frozenset(cached[1])
+    keys: set[str] = set()
     for value in (
         str(product),
         getattr(product, "name", None),
@@ -1604,7 +2104,33 @@ def _historical_field_product_keys(product: Any) -> set[str]:
     ):
         if value is not None and str(value).strip():
             keys.add(str(value).strip())
-    return keys
+    result = tuple(sorted(keys))
+    _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE[cache_key] = (product, result)
+    _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.move_to_end(cache_key)
+    while len(_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE) > _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE_MAX:
+        _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.popitem(last=False)
+    return frozenset(result)
+
+
+def _historical_fields_lookup_index(
+    historical_fields: dict[Any, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    cache_key = id(historical_fields)
+    cached = _HISTORICAL_FIELDS_LOOKUP_CACHE.get(cache_key)
+    if cached is not None and cached[0] is historical_fields:
+        _HISTORICAL_FIELDS_LOOKUP_CACHE.move_to_end(cache_key)
+        return cached[1]
+    lookup: dict[str, dict[str, object]] = {}
+    for instrument, values in historical_fields.items():
+        if not isinstance(values, dict):
+            continue
+        for key in _historical_field_product_keys(instrument):
+            lookup.setdefault(key, values)
+    _HISTORICAL_FIELDS_LOOKUP_CACHE[cache_key] = (historical_fields, lookup)
+    _HISTORICAL_FIELDS_LOOKUP_CACHE.move_to_end(cache_key)
+    while len(_HISTORICAL_FIELDS_LOOKUP_CACHE) > _HISTORICAL_FIELDS_LOOKUP_CACHE_MAX:
+        _HISTORICAL_FIELDS_LOOKUP_CACHE.popitem(last=False)
+    return lookup
 
 
 def contract_multiplier_from_fields(
@@ -1612,16 +2138,47 @@ def contract_multiplier_from_fields(
     product: Any,
     *,
     default: float = 1.0,
+    state: Any | None = None,
+    timestamp: Any | None = None,
 ) -> float:
     fields = historical_fields_for_product(historical_fields, product)
     value = fields.get("VolumeMultiple", default)
     if value in (None, ""):
+        _record_contract_multiplier_fallback(state, product, timestamp, default, "字段为空")
         return default
     try:
         number = float(cast(Any, value))
     except (TypeError, ValueError):
+        _record_contract_multiplier_fallback(state, product, timestamp, default, "字段无法转换为数字")
         return default
-    return default if number != number else number
+    if number != number:
+        _record_contract_multiplier_fallback(state, product, timestamp, default, "字段为NaN")
+        return default
+    return number
+
+
+def _record_contract_multiplier_fallback(
+    state: Any | None,
+    product: Any,
+    timestamp: Any | None,
+    default: float,
+    reason: str,
+) -> None:
+    if state is None or timestamp is None:
+        return
+    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+
+    record_runtime_fallback_interval(
+        state,
+        code="contract_multiplier_default_fallback",
+        type="历史交易字段",
+        status="已降级",
+        product=product,
+        timestamp=timestamp,
+        source="VolumeMultiple",
+        fallback=f"default:{default:g}",
+        reason=reason,
+    )
 
 
 def contract_notional(

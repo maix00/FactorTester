@@ -8,7 +8,7 @@ import pandas as pd
 from tools.analytics import compute_result_metrics, result_metric_manifest
 from tools.testers.backtest.engines.native.fields import ExecutableModule
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.equity_curve import equity_curve_for, returns_for
+from tools.testers.backtest.modules.equity_curve import display_equity_curve_for
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -32,8 +32,8 @@ class RiskMetricsModule(ExecutableModule):
 
 def _compute_risk_metrics(state, ctx) -> None:
     for strategy in state.strategy_configs:
-        equity = cast(pd.Series, equity_curve_for(state, strategy))
-        returns = cast(pd.Series, returns_for(state, strategy))
+        equity = cast(pd.Series, display_equity_curve_for(state, strategy))
+        returns = equity.pct_change().dropna()
         split_raw = state.config_for(strategy).get(RunWindowModule.evaluation_split)
 
         in_sample_metrics = compute_metrics(equity, returns)

@@ -91,15 +91,18 @@ def _execution_price_at(state: Any, order: Any, basis: str) -> float:
 def _resolve_execution_price(state: Any, ctx: Any) -> None:
     resolved: dict[Any, dict[Any, float]] = {}
     constraints = ctx.get(MarketDataModule.current_order_constraints, {})
+    current_prices = ctx.get(MarketDataModule.current_prices, {}) or {}
     store = order_flow_store_for(state)
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         basis = _normalise_price_basis(config.get(OrderExecutionModule.execution_price_basis, "open"))
         prices: dict[Any, float] = {}
         for order in ctx.payloads_for(strategy):
-            price = _execution_price_at(state, order, basis)
+            price = current_prices.get(order.instrument)
+            if price is None:
+                price = _execution_price_at(state, order, basis)
             order.set("execution_price_basis", basis)
-            order.set("effective_price", price)
+            order.set("effective_price", float(price))
             reject_reason = _reject_reason_for_order(order, constraints)
             if reject_reason:
                 order.set("reject_reason", reject_reason)
@@ -118,7 +121,7 @@ def _resolve_execution_price(state: Any, ctx: Any) -> None:
                     timestamp=ctx.timestamp,
                     details={"basis": basis, "price": float(price)},
                 )
-            prices[order.instrument] = price
+            prices[order.instrument] = float(price)
         ctx.set_for(OrderExecutionModule.execution_prices, strategy, prices)
         resolved[strategy] = prices
     ctx.set(OrderExecutionModule.execution_prices, resolved)

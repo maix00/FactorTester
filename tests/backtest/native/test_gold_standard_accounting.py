@@ -54,9 +54,10 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
+from tools.testers.backtest.modules.cash_pool import cash_for_ledger
 from tools.testers.backtest.modules.equity_curve import equity_curve_for
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
@@ -89,8 +90,6 @@ def _build_registry() -> FlowRegistry:
     for cls in _ALL_MODULE_CLASSES:
         for flow in getattr(cls, "flows", ()):
             registry.register_flow(flow)
-        for override in getattr(cls, "overrides", ()):
-            registry.register_override(override)
     return registry
 
 
@@ -181,7 +180,7 @@ def test_final_cash_reflects_per_method_realized_pnl(method: str):
     lot-accounting contract -- weighted-average realized P&L under a FIFO
     setting is wrong even though total equity hides the difference."""
     account, strategy = _run_gold_standard(method)
-    cash = account.ledger_for_strategy(strategy).get(LedgerModule.cash).to_major()
+    cash = cash_for_ledger(account, account.ledger_for_strategy(strategy)).to_major()
     assert cash == pytest.approx(_EXPECTED_FINAL_CASH[method], abs=1.0)
 
 

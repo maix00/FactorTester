@@ -8,6 +8,7 @@ field value.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Mapping, cast
 
@@ -52,6 +53,8 @@ class OrderTradeConstraint:
 
 _EXCHANGE_RULES: dict[str, ExchangeClearingRule] = {}
 _EXCHANGE_TRADING_RULES: dict[str, ExchangeTradingRule] = {}
+_PRODUCT_EXCHANGE_CANDIDATES_CACHE_MAX = 4096
+_PRODUCT_EXCHANGE_CANDIDATES_CACHE: OrderedDict[int, tuple[Any, tuple[str, ...]]] = OrderedDict()
 _KNOWN_TRADABILITY_POLICIES = frozenset({
     "always",
     "valid_close_price",
@@ -220,6 +223,13 @@ def exchange_trading_rule_manifest_for_product(product: Any) -> dict[str, object
 
 
 def _product_exchange_candidates(product: Any) -> tuple[str, ...]:
+    if product is None:
+        return ()
+    cache_key = id(product)
+    cached = _PRODUCT_EXCHANGE_CANDIDATES_CACHE.get(cache_key)
+    if cached is not None and cached[0] is product:
+        _PRODUCT_EXCHANGE_CANDIDATES_CACHE.move_to_end(cache_key)
+        return cached[1]
     candidates: list[str] = []
     for attr_name in ("exchange_id", "exchange", "exchange_code", "market"):
         value = getattr(product, attr_name, None)
@@ -236,7 +246,12 @@ def _product_exchange_candidates(product: Any) -> tuple[str, ...]:
         suffix = _exchange_suffix(str(text))
         if suffix:
             candidates.append(suffix)
-    return tuple(dict.fromkeys(_normalise_exchange_id(item) for item in candidates if item))
+    result = tuple(dict.fromkeys(_normalise_exchange_id(item) for item in candidates if item))
+    _PRODUCT_EXCHANGE_CANDIDATES_CACHE[cache_key] = (product, result)
+    _PRODUCT_EXCHANGE_CANDIDATES_CACHE.move_to_end(cache_key)
+    while len(_PRODUCT_EXCHANGE_CANDIDATES_CACHE) > _PRODUCT_EXCHANGE_CANDIDATES_CACHE_MAX:
+        _PRODUCT_EXCHANGE_CANDIDATES_CACHE.popitem(last=False)
+    return result
 
 
 def _exchange_suffix(value: str) -> str:

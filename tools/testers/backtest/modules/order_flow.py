@@ -13,9 +13,15 @@ from typing import Any, ClassVar, TYPE_CHECKING
 import pandas as pd
 
 from tools.testers.backtest.engines.native.fields import ExecutableModule
+from tools.testers.backtest.engines.native.order import OrderStatus
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.order import Order
+
+
+@dataclass
+class OrderStore:
+    pending_orders: dict[Any, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -103,8 +109,62 @@ class OrderFlowModule(ExecutableModule):
     flows: ClassVar[tuple[Any, ...]] = ()
 
 
+def default_pending_order_conflict_policy(
+    state: Any,
+    strategy: Any,
+    order: Any,
+    signal_timestamp: Any,
+) -> None:
+    """Default pending-order policy: latest signal replaces future work.
+
+    It only cancels an existing order for the same strategy/product when that
+    order's own scheduled execution timestamp is still in the future. An order
+    due at the current signal boundary is already actionable and is left alone.
+    """
+    pending = state.order_store.pending_orders
+    key = (strategy, order.instrument)
+    stale = pending.get(key)
+    if (
+        stale is not None
+        and stale.status == OrderStatus.SCHEDULED
+        and stale.get("price_timestamp", stale.timestamp) > signal_timestamp
+    ):
+        stale.status = OrderStatus.CANCELLED
+
+
 def order_flow_store_for(state: Any) -> OrderFlowStore:
     return state.order_flow_store
+
+
+def record_order_terminal_state(state: Any, ctx: Any) -> None:
+    """Record terminal order state after settlement/cancellation.
+
+    This is deliberately a helper, not a standalone flow: FILLED/REJECTED are
+    produced by the ledger settlement flow, while CANCELLED is produced by the
+    scheduling/cancellation path. A separate lifecycle flow would split the
+    order's status fact from the business action that created it.
+    """
+    store = order_flow_store_for(state)
+    for strategy in ctx.active_strategies:
+        for order in ctx.payloads_for(strategy):
+            if order.status == OrderStatus.CANCELLED:
+                store.record(order, step="order_terminal", label="订单已取消", timestamp=ctx.timestamp)
+                continue
+            if order.status == OrderStatus.REJECTED:
+                store.record(
+                    order,
+                    step="order_terminal",
+                    label="订单拒绝",
+                    timestamp=ctx.timestamp,
+                    details={"reject_reason": str(order.reject_reason or order.get("reject_reason") or "")},
+                )
+                continue
+            if order.status == OrderStatus.FILLED:
+                store.record(order, step="order_terminal", label="订单成交", timestamp=ctx.timestamp)
+                continue
+            raise RuntimeError(
+                f"ORDER event for {order.instrument} finished without terminal status: {order.status}"
+            )
 
 
 def _timestamp_key(value: Any) -> str:

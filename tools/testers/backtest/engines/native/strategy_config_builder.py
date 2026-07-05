@@ -17,15 +17,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
-from tools.testers.backtest.engines.native.ledger import (
+from tools.testers.backtest.engines.native.config import (
     LedgerConfig,
-    Ledger,
     StrategyConfig,
     ledger_config_field_values,
     ledger_config_from_mapping,
-    ledger_identity,
     merge_ledger_configs,
 )
+from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 from tools.testers.backtest.modules.strategy_book import StrategyBookSimple, materialize_strategy_book_store
@@ -36,7 +35,7 @@ from tools.testers.settings.counterparty import (
 )
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
 
 _FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
 _LIVE_FACTOR_SUPPORT_FLOWS = {"schedule_bar_events"}
@@ -53,12 +52,17 @@ _LONG_SHORT_STRATEGY_FLOWS = {"compose_long_short_target"}
 _DAILY_MARK_TO_MARKET_FLOWS = {
     "register_daily_mark_to_market_notices",
     "apply_daily_mark_to_market",
-    "lookup_current_prices_on_ledger_notice",
-    "lookup_historical_fields_on_ledger_notice",
+}
+_MARGIN_NOTICE_FLOWS = {
+    "register_margin_check_notices",
+    "apply_margin_requirement_change",
+    "handle_margin_liquidation_notice",
+}
+_LEDGER_LOOKUP_FLOWS = {
+    "lookup_current_prices_on_ledger",
+    "lookup_historical_fields_on_ledger",
 }
 _LEDGER_OWNED_SETTING_NAMES = {
-    "initial_capital_major",
-    "base_currency",
     "fee_mode",
     "fixed_fee_rate",
     "margin_mode",
@@ -69,6 +73,10 @@ _LEDGER_OWNED_SETTING_NAMES = {
     "use_int_position",
     "tradability_policy",
     "clearing_rounding_policy",
+    "cash_reserve_ratio",
+    "cash_reserve_major",
+    "margin_call_mode",
+    "liquidation_target_buffer",
 }
 _LEDGER_INFERRED_SETTING_NAMES = {
     # In Auto/Exact accounting, this is inferred from historical trading-rule
@@ -93,10 +101,18 @@ def _resolve_active_flow_names(resolved_settings: Mapping[str, Any]) -> frozense
     excluded = _FACTOR_MODE_FLOWS - {chosen}
     if chosen != "signal_live":
         excluded |= _LIVE_FACTOR_SUPPORT_FLOWS
+    if chosen != "signal_precomputed" or not _has_strategy_intent_precompute_policy(resolved_settings):
+        excluded.add("precompute_strategy_intents")
     if str(resolved_settings.get("engine_mode", "auto") or "auto").lower() == "basic":
         excluded |= _TERM_STRUCTURE_FLOWS
-    if not _uses_daily_mark_to_market_flow(resolved_settings):
+    uses_dmtm = _uses_daily_mark_to_market_flow(resolved_settings)
+    uses_margin_notice = _uses_margin_notice_flow(resolved_settings)
+    if not uses_dmtm:
         excluded |= _DAILY_MARK_TO_MARKET_FLOWS
+    if not uses_margin_notice:
+        excluded |= _MARGIN_NOTICE_FLOWS
+    if not (uses_dmtm or uses_margin_notice):
+        excluded |= _LEDGER_LOOKUP_FLOWS
     strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
     if strategy_kind == "long_short":
         excluded |= _GROUP_STRATEGY_FLOWS
@@ -117,6 +133,24 @@ def _uses_daily_mark_to_market_flow(resolved_settings: Mapping[str, Any]) -> boo
     if accounting_mode == "Custom":
         return bool(resolved_settings.get("daily_mark_to_market_enabled", False))
     return True
+
+
+def _uses_margin_notice_flow(resolved_settings: Mapping[str, Any]) -> bool:
+    engine_mode = str(resolved_settings.get("engine_mode", "auto") or "auto").lower()
+    if engine_mode == "basic":
+        return False
+    margin_mode = str(resolved_settings.get("margin_mode", "auto") or "auto").lower()
+    if margin_mode in {"none", "zero"}:
+        return False
+    margin_call_mode = str(resolved_settings.get("margin_call_mode", "auto") or "auto").lower()
+    return margin_call_mode != "off"
+
+
+def _has_strategy_intent_precompute_policy(resolved_settings: Mapping[str, Any]) -> bool:
+    from tools.testers.backtest.modules.target import strategy_intent_policy_for
+
+    strategy_kind = str(resolved_settings.get("strategy_kind") or "group")
+    return strategy_intent_policy_for(strategy_kind) is not None
 
 
 def _select_factor_flow(resolved_settings: Mapping[str, Any]) -> str:
@@ -277,6 +311,7 @@ def apply_strategy_configs(
     resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
     strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
     materialize_strategy_book_store(state, book, strategy_objects)
+    _resolve_cash_pool_configs(resolved, state=state, strategies_by_alias=strategy_objects, strategy_book=book)
     state.ledger_configs = _resolve_ledger_configs(
         resolved,
         state=state,
@@ -292,6 +327,35 @@ def apply_strategy_configs(
         flow_settings_by_alias=flow_settings,
         strategies_by_alias=strategy_objects,
     )
+
+
+def _resolve_cash_pool_configs(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    state: "BacktestRunState",
+    strategies_by_alias: Mapping[str, Strategy],
+    strategy_book: object,
+) -> None:
+    from tools.testers.backtest.modules.cash_pool import register_cash_pool_config
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    store = strategy_book_store_for(state)
+    config_resolver = getattr(strategy_book, "cash_pool_config_for_strategy_settings")
+    for alias, settings in resolved_settings_by_alias.items():
+        strategy = strategies_by_alias[str(alias)]
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            config = config_resolver(
+                state,
+                strategy,
+                ledger,
+                settings,
+            )
+            register_cash_pool_config(
+                state,
+                store.cash_pool_for_ledger(ledger),
+                config,
+                source=f"strategy {alias!r}",
+            )
 
 
 def _resolve_ledger_configs(

@@ -16,7 +16,7 @@ from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule, run_window_envelope_for_state
-from tools.testers.backtest.modules.target import TargetStrategyModule
+from tools.testers.backtest.modules.target import TargetStrategyModule, target_weight_intent
 
 
 _POSITIONS_REF = FieldRef("positions", owner="LedgerModule")
@@ -108,7 +108,7 @@ class TermStructureExpandModule(ExecutableModule):
     resolve_tradable_target_weights: ClassVar[Flow] = Flow(
         "resolve_tradable_target_weights",
         inputs=(contract_metadata, _TARGET_WEIGHTS_REF),
-        outputs=(_TARGET_WEIGHTS_REF,),
+        outputs=(_TARGET_WEIGHTS_REF, TargetStrategyModule.trade_intent),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.SIGNAL,
         order=15,
@@ -159,7 +159,7 @@ class DeliveryForceCloseModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(forced_close_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.ORDER_NOTICE,
+        event_kind=EventKind.TRADE_INTENT,
         order=15,
         description="处理交割强平通知",
         compute=lambda state, ctx: _handle_delivery_force_close_notice(state, ctx),
@@ -225,7 +225,7 @@ class RolloverModule(ExecutableModule):
         inputs=(_POSITIONS_REF,),
         outputs=(rollover_orders,),
         phase=Phase.PER_EVENT,
-        event_kind=EventKind.ORDER_NOTICE,
+        event_kind=EventKind.TRADE_INTENT,
         order=10,
         description="处理换月通知",
         compute=lambda state, ctx: _handle_rollover_notice(state, ctx),
@@ -354,6 +354,8 @@ def _resolve_tradable_target_weights(state, ctx) -> None:
             mapped[target] = mapped.get(target, 0.0) + weight
             mapping_trace[str(product)] = str(getattr(target, "name", target))
         ctx.set_for(_TARGET_WEIGHTS_REF, strategy, mapped)
+        ctx.set_for(TargetStrategyModule.trade_intent, strategy, target_weight_intent(
+            mapped, reason="term_structure_resolved_target"))
         if mapping_trace:
             state.term_structure_store.record_target_mapping(strategy, ctx.timestamp, mapping_trace)
 
@@ -821,7 +823,7 @@ def _lifecycle_event_drafts(
             "notice_type": notice_type,
             "notice_reason": notice_reason,
         }
-        drafts.append(EventDraft(EventKind.ORDER_NOTICE, ts, strategy, payload=payload))
+        drafts.append(EventDraft(EventKind.TRADE_INTENT, ts, strategy, payload=payload))
     return drafts
 
 
@@ -927,7 +929,37 @@ def _local_cnfutures_inferred_lifecycle(
         return None
     row.setdefault("lifecycle_source", result.get("source"))
     row.setdefault("lifecycle_inference", result)
+    _record_lifecycle_inference_fallback(state, row, ts, result)
     return cast(pd.Timestamp, ts)
+
+
+def _record_lifecycle_inference_fallback(
+    state: Any | None,
+    row: dict[str, Any],
+    timestamp: pd.Timestamp,
+    inference: dict[str, Any],
+) -> None:
+    if state is None:
+        return
+    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+
+    product = row.get("contract_object") or row.get("contract_product") or row.get("contract") or row.get("uid")
+    source = "authoritative_lifecycle"
+    fallback = str(inference.get("source") or "LocalCNFutures coverage inference")
+    record_runtime_fallback_interval(
+        state,
+        code="term_structure_lifecycle_inference_fallback",
+        type="期限结构",
+        status="已推断",
+        product=product,
+        timestamp=timestamp,
+        source=source,
+        fallback=fallback,
+        reason="未找到权威合约生命周期字段",
+        extra={
+            "contract": str(row.get("contract_product") or row.get("uid") or row.get("contract") or product),
+        },
+    )
 
 
 def _with_reference_timezone(ts: pd.Timestamp, reference_tz: str | None) -> pd.Timestamp:

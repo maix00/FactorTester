@@ -810,7 +810,7 @@ def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
     assert resolved["group-1"]["initial_capital_major"] == 100_000_000.0
     assert resolved["group-1"]["_setting_fallbacks"] == [{
         "setting_key": "initial_capital_major",
-        "module": "portfolio_capital",
+        "module": "cash_pool",
         "engine": "native",
         "requested_value": "",
         "applied_value": 100_000_000.0,

@@ -94,9 +94,8 @@ class ExecutableModule:
     """Base for all executable modules in the new Event/Order/Flow engine.
 
     A module contributes some combination of: FieldRef-typed fields (via
-    `fields: ClassVar[dict[str, FieldDefinition]]`), Flow registrations (via
-    `flows: ClassVar[tuple[Flow, ...]]`), and/or FlowOverride registrations
-    (via `overrides: ClassVar[tuple[FlowOverride, ...]]`). It has no
+    `fields: ClassVar[dict[str, FieldDefinition]]`) and Flow registrations (via
+    `flows: ClassVar[tuple[Flow | FlowBinding, ...]]`). It has no
     independent page/URL — see `as_module_node()` for the CLI-navigation
     adapter that wraps one of these as a `Module` node without making it a
     `Module` subclass.
@@ -109,7 +108,7 @@ class ExecutableModule:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        from tools.testers.backtest.engines.native.flow import Flow  # local import:
+        from tools.testers.backtest.engines.native.flow import Flow, FlowBinding, FlowDefinition  # local import:
             # flow.py imports FieldRef from this module; importing Flow at
             # module level here would be circular.
         for value in vars(cls).values():
@@ -117,6 +116,10 @@ class ExecutableModule:
                 object.__setattr__(value, "owner", cls.__name__)
             elif isinstance(value, Flow) and not value.owner:
                 object.__setattr__(value, "owner", cls.__name__)
+            elif isinstance(value, FlowDefinition) and not value.owner:
+                object.__setattr__(value, "owner", cls.__name__)
+            elif isinstance(value, FlowBinding) and not value.owner:
+                object.__setattr__(value.definition, "owner", cls.__name__)
 
 
 def as_module_node(cls: type[ExecutableModule], *, order: int = 0) -> "Module":

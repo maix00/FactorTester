@@ -7,7 +7,11 @@ from tools.data.types import DataColumn
 from sources.LocalCNFutures import SOURCE_DATA_DIR
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
-from sources.LocalCNFutures.contract_files import contract_alias_from_path, resolve_contract_parquet_path
+from sources.LocalCNFutures.contract_files import (
+    contract_alias_from_path,
+    contract_uid_from_exchange_contract,
+    resolve_contract_parquet_path,
+)
 
 _data = load_product_catalog(sync=False)
 data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
@@ -133,10 +137,10 @@ def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
 def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
     if not isinstance(contract, str) or '.' not in contract:
         return None
-    product_month, exchange = contract.split('.')
-    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
-    reverse_exchange = {v: k for k, v in exchange_map.items()}
-    return f"{reverse_exchange.get(exchange, exchange)}|F|{product_month[:first_digit]}|{product_month[first_digit:]}"
+    try:
+        return contract_uid_from_exchange_contract(contract)
+    except ValueError:
+        return None
 
 
 def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str], Dict[str, List[str]]]:

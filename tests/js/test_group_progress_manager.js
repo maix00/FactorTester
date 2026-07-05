@@ -39,7 +39,7 @@ manager.registerActivityManifest([
     label: '事件回放',
     flows: [
       { flow_key: 'signal.flow', flow_label: '读取信号', event_kind: 'SIGNAL', display_order: 1 },
-      { flow_key: 'notice.flow', flow_label: '处理通知', event_kind: 'ORDER_NOTICE', display_order: 2 },
+      { flow_key: 'notice.flow', flow_label: '处理通知', event_kind: 'TRADE_INTENT', display_order: 2 },
       { flow_key: 'order.flow', flow_label: '处理订单', event_kind: 'ORDER', display_order: 3 },
     ],
   },
