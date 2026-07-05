@@ -18,7 +18,8 @@ from tools.testers.backtest.modules.engine import EngineModule, engine_mode_for
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.testers.backtest.engines.native.ledger import LedgerState, StrategyConfig
+    from tools.testers.backtest.engines.native.config import StrategyConfig
+    from tools.testers.backtest.engines.native.ledger import LedgerState
 
 AccountingMode = Literal["Basic", "Custom", "Auto"]
 CostBasisMethod = Literal["WeightAverage", "FIFO", "LIFO", "HIFO"]
@@ -325,7 +326,7 @@ def open_position(
 ) -> None:
     from .ledger_module import LedgerModule
     from .margin import _resolve_margin_ratio
-    from tools.testers.backtest.engines.native.ledger import Lot, apply_quantity_delta
+    from tools.testers.backtest.engines.native.position import Lot, apply_quantity_delta
 
     positions = ledger.get(LedgerModule.positions, {})
     entry = positions[product]
@@ -361,7 +362,7 @@ def close_position(
 ) -> "DataMoney":
     from .ledger_module import LedgerModule
     from .margin import _resolve_margin_ratio
-    from tools.testers.backtest.engines.native.ledger import apply_quantity_delta
+    from tools.testers.backtest.engines.native.position import apply_quantity_delta
 
     positions = ledger.get(LedgerModule.positions, {})
     entry = positions[product]
@@ -711,7 +712,7 @@ def _reset_lots_to_daily_settlement(
     *,
     track_today: bool,
 ) -> None:
-    from tools.testers.backtest.engines.native.ledger import Lot
+    from tools.testers.backtest.engines.native.position import Lot
 
     quantity = float(entry.quantity or 0.0)
     if abs(quantity) <= 1e-12:

@@ -22,8 +22,8 @@ from .events import EventDraft, EventKind
 from .flow import Flow, FlowOverride, Phase
 
 if TYPE_CHECKING:
-    from .ledger import BacktestRunState
     from .ledger import Ledger
+    from .state import BacktestRunState
     from .strategy import Strategy
     from tools.testers.backtest.modules.base import FieldRef
 

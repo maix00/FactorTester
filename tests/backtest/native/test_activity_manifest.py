@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.scheduler import (
     FlowRegistry,
     activity_manifest_from_groups,

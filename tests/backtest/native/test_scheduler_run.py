@@ -4,7 +4,8 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, run
 from tools.testers.backtest.engines.native.strategy import Strategy

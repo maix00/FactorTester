@@ -10,7 +10,8 @@ import pandas as pd
 import pytest
 
 from tools.testers.backtest.engines.adapters.frameworks import UnsupportedFrameworkPlan
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.engines.workers import bridge as bridge_module
 from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
@@ -60,7 +61,6 @@ def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
 
 def _ledger_config(**values: Any) -> LedgerConfig:
     return LedgerConfig(
-        initial_capital_major=values.get("initial_capital_major"),
         fee_mode=values.get("fee_mode"),
         fixed_fee_rate=values.get("fixed_fee_rate"),
         margin_mode=values.get("margin_mode"),

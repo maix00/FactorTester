@@ -3120,7 +3120,7 @@ def run_group_test_stream():
     from server.services import backtest_runs
     from server.services.factor_registry import page_factors
     from tools.testers.backtest.engines.cancellation import BacktestCancelled
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
     from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
     data = request.get_json(silent=True) or {}

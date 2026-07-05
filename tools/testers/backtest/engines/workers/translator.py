@@ -37,7 +37,8 @@ from tools.testers.backtest.modules.term_structure import (
 )
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
 
 
 # FieldRefs whose value passes through unchanged under the same key. The
@@ -87,7 +88,7 @@ def translate_strategy_config(
         if key in raw_settings:
             out[key] = raw_settings[key]
 
-    capital = getattr(ledger_config, "initial_capital_major", None)
+    capital = config.get(LedgerModule.initial_capital_major, None)
     if capital is not None:
         out["initial_capital"] = float(capital)
 

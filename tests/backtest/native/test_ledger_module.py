@@ -9,14 +9,10 @@ from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
-from tools.testers.backtest.engines.native.ledger import (
-    BacktestRunState,
-    LedgerConfig,
-    Lot,
-    ProductPosition,
-    StrategyConfig,
-    ledger_identity,
-)
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.position import Lot, ProductPosition
+from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.order import Order, OrderStatus
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -65,8 +61,6 @@ def _state_with_ledger_configs(configs: dict[Strategy, StrategyConfig]) -> Backt
     state = BacktestRunState(strategy_configs=configs)
     for strategy, config in configs.items():
         state.ledger_configs[ledger_identity(f"private:{strategy.alias}")] = LedgerConfig(
-            initial_capital_major=config.get(LedgerModule.initial_capital_major),
-            base_currency=config.get(LedgerModule.base_currency),
             fee_mode=config.get(FeeModule.fee_mode),
             fixed_fee_rate=config.get(FeeModule.fixed_fee_rate),
             margin_mode=config.get(MarginModule.margin_mode),
@@ -680,13 +674,9 @@ def test_strategy_book_declares_cash_pool_across_distinct_ledgers():
     })
     materialize_strategy_book_store(account, book, {s1.alias: s1, s2.alias: s2})
     account.ledger_configs[ledger_identity("book-a")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="CNY",
         margin_mode="none",
     )
     account.ledger_configs[ledger_identity("book-b")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="CNY",
         margin_mode="none",
     )
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
@@ -736,13 +726,9 @@ def test_strategy_book_cash_pool_rejects_mixed_currencies_without_fx_event():
     })
     materialize_strategy_book_store(account, book, {s1.alias: s1, s2.alias: s2})
     account.ledger_configs[ledger_identity("book-a")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="CNY",
         margin_mode="none",
     )
     account.ledger_configs[ledger_identity("book-b")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="USD",
         margin_mode="none",
     )
 
@@ -764,8 +750,6 @@ def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
     account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="CNY",
         margin_mode="none",
     )
     materialize_strategy_book_store(account, StrategyBook.from_dict({
@@ -775,13 +759,7 @@ def test_shared_ledger_rejects_mismatched_initial_capital_instead_of_last_writer
         },
     }), {s1.alias: s1, s2.alias: s2})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
-    _initialize_ledgers(account, ctx)
     with pytest.raises(ValueError, match="initial_capital_major"):
-        account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(
-            initial_capital_major=2_000_000.0,
-            base_currency="CNY",
-            margin_mode="none",
-        )
         _initialize_ledgers(account, ctx)
 
 
@@ -799,8 +777,6 @@ def test_shared_ledger_rejects_mismatched_base_currency_instead_of_silently_swap
     })
     account = BacktestRunState(strategy_configs={s1: config1, s2: config2})
     account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(
-        initial_capital_major=1_000_000.0,
-        base_currency="CNY",
         margin_mode="none",
     )
     materialize_strategy_book_store(account, StrategyBook.from_dict({
@@ -810,13 +786,7 @@ def test_shared_ledger_rejects_mismatched_base_currency_instead_of_silently_swap
         },
     }), {s1.alias: s1, s2.alias: s2})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
-    _initialize_ledgers(account, ctx)
     with pytest.raises(ValueError, match="base_currency"):
-        account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(
-            initial_capital_major=1_000_000.0,
-            base_currency="USD",
-            margin_mode="none",
-        )
         _initialize_ledgers(account, ctx)
 
 

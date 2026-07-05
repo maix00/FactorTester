@@ -20,7 +20,7 @@ from .base import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import StrategyConfig
+    from tools.testers.backtest.engines.native.config import StrategyConfig
 
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]

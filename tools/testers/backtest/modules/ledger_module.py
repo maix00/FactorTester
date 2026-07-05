@@ -13,7 +13,7 @@ from tools.data.types.data_money import DataMoney
 from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.engines.native.ledger import ProductPosition, apply_quantity_delta
+from tools.testers.backtest.engines.native.position import ProductPosition, apply_quantity_delta
 from tools.testers.backtest.modules.market_data import MarketDataModule, contract_notional
 from tools.testers.backtest.modules.market_data import (
     contract_multiplier_from_fields,
@@ -28,7 +28,12 @@ from tools.testers.backtest.modules.strategy_book import (
     assign_ledger_for_strategy,
     cash_pool_id_for_ledger,
 )
-from tools.testers.backtest.modules.cash_pool import CashPoolModule, cash_for_ledger, set_cash_for_ledger_pool
+from tools.testers.backtest.modules.cash_pool import (
+    CashPoolModule,
+    cash_for_ledger,
+    ensure_cash_pool_config_for_strategy_ledger,
+    set_cash_for_ledger_pool,
+)
 from tools.testers.backtest.modules.trading_rule import (
     TradingRuleModule, _consume_lots, _consume_lots_hifo, _resolve_method,
     _resolve_use_int_position, mark_to_market, _resolve_daily_mark_to_market_enabled_for_ledger,
@@ -90,8 +95,14 @@ def _initialize_ledgers(state, ctx) -> None:
         ledger_key = assign_ledger_for_strategy(state, strategy, strategy_config)
         ledger_id = ledger_key.name
         ledger_config = state.ledger_config_for(ledger_key)
-        initial_capital = float(ledger_config.initial_capital_major or 0.0)
-        base_currency = ledger_config.base_currency or "CNY"
+        cash_pool_config = ensure_cash_pool_config_for_strategy_ledger(
+            state,
+            strategy_config,
+            ledger_key,
+            source=f"strategy {getattr(strategy, 'alias', strategy)!r}",
+        )
+        initial_capital = float(cash_pool_config.initial_capital_major or 0.0)
+        base_currency = cash_pool_config.base_currency or "CNY"
         # MinorUnitModule.use_minor_units default_when locks this to False
         # for engine_mode="basic" and True otherwise (auto/custom/exact) --
         # read the resolved field, don't re-decide the policy here.
@@ -461,7 +472,7 @@ def _apply_lot_fill(
     existing lots per the method's order and realize P&L against each
     consumed lot's own entry price; a fill larger than the position flips
     it, opening the remainder as a fresh lot at the fill price."""
-    from tools.testers.backtest.engines.native.ledger import Lot
+    from tools.testers.backtest.engines.native.position import Lot
 
     if entry.lots is None:
         entry.lots = deque()

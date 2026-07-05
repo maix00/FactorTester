@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
-from tools.testers.backtest.engines.native.ledger import LedgerConfig
-from tools.testers.backtest.engines.native.ledger import StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import LedgerConfig
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.ledger import ledger_identity
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
@@ -699,7 +699,9 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
 
 
 def test_auto_accounting_subscribes_cost_basis_method_for_market_data():
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, LedgerConfig, StrategyConfig, ledger_identity
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
     from tools.testers.backtest.modules.engine import EngineModule
     from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
 
@@ -722,7 +724,8 @@ def test_set_current_historical_fields_skips_per_strategy_write_when_nothing_cus
     it should transparently fall through to the one shared base_fields
     object via that fallback. A strategy that genuinely customizes should
     still get its own distinct per-strategy entry."""
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+    from tools.testers.backtest.engines.native.state import BacktestRunState
+    from tools.testers.backtest.engines.native.config import StrategyConfig
     from tools.testers.backtest.modules.custom_product import CustomProductModule
     from tools.testers.backtest.modules.engine import EngineModule
     from tools.testers.backtest.modules.fee import FeeModule

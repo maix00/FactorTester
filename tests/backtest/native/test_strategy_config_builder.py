@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import (
     apply_strategy_configs, build_strategy_configs,
 )

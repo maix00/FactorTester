@@ -15,7 +15,7 @@ import pytest
 from tools.factors.factor_tester_state import FactorTesterState
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.backtester import run_backtest_task
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 
 

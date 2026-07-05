@@ -7,7 +7,8 @@ import pandas as pd
 from tools.data.types import DataColumn
 from tools.factors.expr import ColumnRef
 from tools.data.types.time_freq import DataFreq
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, StrategyConfig
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import FieldRef
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext

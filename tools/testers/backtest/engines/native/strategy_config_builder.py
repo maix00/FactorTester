@@ -17,15 +17,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
-from tools.testers.backtest.engines.native.ledger import (
+from tools.testers.backtest.engines.native.config import (
+    CashPoolConfig,
     LedgerConfig,
-    Ledger,
     StrategyConfig,
     ledger_config_field_values,
     ledger_config_from_mapping,
-    ledger_identity,
     merge_ledger_configs,
 )
+from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 from tools.testers.backtest.modules.strategy_book import StrategyBookSimple, materialize_strategy_book_store
@@ -36,7 +36,7 @@ from tools.testers.settings.counterparty import (
 )
 
 if TYPE_CHECKING:
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
 
 _FACTOR_MODE_FLOWS = {"signal_live", "signal_precomputed"}
 _LIVE_FACTOR_SUPPORT_FLOWS = {"schedule_bar_events"}
@@ -63,9 +63,12 @@ _LEDGER_LOOKUP_FLOWS = {
     "lookup_current_prices_on_ledger",
     "lookup_historical_fields_on_ledger",
 }
-_LEDGER_OWNED_SETTING_NAMES = {
+_CASH_POOL_SETTING_NAMES = {
     "initial_capital_major",
     "base_currency",
+    "currency_conversion_fee_rate",
+}
+_LEDGER_OWNED_SETTING_NAMES = {
     "fee_mode",
     "fixed_fee_rate",
     "margin_mode",
@@ -305,6 +308,7 @@ def apply_strategy_configs(
     resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
     strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
     materialize_strategy_book_store(state, book, strategy_objects)
+    _resolve_cash_pool_configs(resolved, state=state, strategies_by_alias=strategy_objects)
     state.ledger_configs = _resolve_ledger_configs(
         resolved,
         state=state,
@@ -320,6 +324,32 @@ def apply_strategy_configs(
         flow_settings_by_alias=flow_settings,
         strategies_by_alias=strategy_objects,
     )
+
+
+def _resolve_cash_pool_configs(
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]],
+    *,
+    state: "BacktestRunState",
+    strategies_by_alias: Mapping[str, Strategy],
+) -> None:
+    from tools.testers.backtest.modules.cash_pool import register_cash_pool_config
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    store = strategy_book_store_for(state)
+    for alias, settings in resolved_settings_by_alias.items():
+        strategy = strategies_by_alias[str(alias)]
+        config = CashPoolConfig(
+            initial_capital_major=_optional_float(settings.get("initial_capital_major")),
+            base_currency=_optional_str(settings.get("base_currency")),
+            currency_conversion_fee_rate=_optional_float(settings.get("currency_conversion_fee_rate")),
+        )
+        for ledger in store.ledgers_for_strategy(state, strategy):
+            register_cash_pool_config(
+                state,
+                store.cash_pool_for_ledger(ledger),
+                config,
+                source=f"strategy {alias!r}",
+            )
 
 
 def _resolve_ledger_configs(
@@ -452,6 +482,18 @@ def _raise_on_conflicting_ledger_config(left: LedgerConfig, right: LedgerConfig,
         raise ValueError(
             f"ledger {ledger_id!r} receives conflicting {key}: {left_value!r} vs {right_value!r} from {source}"
         )
+
+
+def _optional_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    return float(value)  # type: ignore[arg-type]
 
 
 def _ledger_config_from_counterparty_profile(profile_id: str | None) -> LedgerConfig:

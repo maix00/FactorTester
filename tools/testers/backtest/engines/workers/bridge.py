@@ -41,7 +41,7 @@ from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
 if TYPE_CHECKING:
     from tools.factors.factor_tester_state import FactorTesterState
-    from tools.testers.backtest.engines.native.ledger import BacktestRunState
+    from tools.testers.backtest.engines.native.state import BacktestRunState
 
 
 _SUPPORTED_ENGINES = ("backtrader", "qlib", "zipline", "rqalpha")

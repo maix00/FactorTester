@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
-from tools.testers.backtest.engines.native.ledger import BacktestRunState, ProductPosition
+from tools.testers.backtest.engines.native.state import BacktestRunState
+from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule

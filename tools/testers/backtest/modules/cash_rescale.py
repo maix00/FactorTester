@@ -234,7 +234,7 @@ def _estimated_execution_cash_delta(
 
 
 def _clone_positions_for_cash_check(positions: dict) -> dict:
-    from tools.testers.backtest.engines.native.ledger import Lot, ProductPosition
+    from tools.testers.backtest.engines.native.position import Lot, ProductPosition
 
     cloned = {}
     for product, entry in positions.items():

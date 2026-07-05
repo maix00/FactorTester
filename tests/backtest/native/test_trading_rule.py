@@ -9,9 +9,9 @@ import pytest
 from tools.data.types.data_money import DataMoney
 from tools.products.Product import Product
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.ledger import (
-    LedgerConfig, LedgerState, Lot, ProductPosition, StrategyConfig, ledger_identity,
-)
+from tools.testers.backtest.engines.native.config import LedgerConfig, StrategyConfig
+from tools.testers.backtest.engines.native.position import Lot, ProductPosition
+from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_identity
 from tools.testers.backtest.engines.native.scheduler import (
     EventQueue,
     FlowContext,
@@ -19,7 +19,7 @@ from tools.testers.backtest.engines.native.scheduler import (
     make_dispatcher,
     sort_and_validate,
 )
-from tools.testers.backtest.engines.native.ledger import BacktestRunState
+from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
