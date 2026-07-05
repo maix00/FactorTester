@@ -1096,13 +1096,7 @@ def test_exchange_rule_defaults_fill_missing_historical_fields_without_overwrite
     assert result["RU.SHF"]["MoneyCalculationPolicy"] == "per_contract_price_point"
     assert result["SM.CZC"]["CostBasisMethod"] == "DailyMarkToMarket"
     rows = [row for row in state.runtime_info_rows if row.get("code") == "historical_field_default_fallback"]
-    assert {(row["details"]["product"], row["details"]["source"]) for row in rows} == {
-        ("AP.CZC", "CostBasisMethod"),
-        ("AP.CZC", "MoneyCalculationPolicy"),
-        ("RU.SHF", "CostBasisMethod"),
-        ("SM.CZC", "CostBasisMethod"),
-        ("SM.CZC", "MoneyCalculationPolicy"),
-    }
+    assert rows == []
 
 
 def test_contract_multiplier_default_fallback_records_runtime_info_interval():

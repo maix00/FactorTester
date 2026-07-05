@@ -70,11 +70,14 @@ def record_runtime_fallback_interval(
     """Record a fallback over a time interval, grouped by product/source."""
 
     product_info = product_display(product)
-    start, end, count = _existing_interval(state, code, _fallback_key(product_info["name"], source, fallback, extra))
     ts_text = str(timestamp)
+    aggregation_key = _fallback_key(product_info["name"], source, fallback, extra)
+    start, end, count, seen_timestamps = _existing_interval(state, code, aggregation_key)
     start = min(start, ts_text) if start else ts_text
     end = max(end, ts_text) if end else ts_text
-    count = count + 1
+    if ts_text not in seen_timestamps:
+        seen_timestamps.add(ts_text)
+        count = count + 1
     details = {
         "product": product_info["name"],
         "product_desc": product_info["desc"],
@@ -84,6 +87,7 @@ def record_runtime_fallback_interval(
         "start": start,
         "end": end,
         "count": count,
+        "_seen_timestamps": sorted(seen_timestamps),
     }
     if extra:
         details.update(extra)
@@ -99,7 +103,7 @@ def record_runtime_fallback_interval(
         detail=detail,
         level=level,
         details=details,
-        aggregation_key=_fallback_key(product_info["name"], source, fallback, extra),
+        aggregation_key=aggregation_key,
     )
 
 
@@ -169,18 +173,26 @@ def _remember_runtime_info_row(state: Any, rows: list[dict[str, Any]], row: dict
         pass
 
 
-def _existing_interval(state: Any, code: str, aggregation_key: str) -> tuple[str | None, str | None, int]:
+def _existing_interval(state: Any, code: str, aggregation_key: str) -> tuple[str | None, str | None, int, set[str]]:
     rows = getattr(state, "runtime_info_rows", None)
     if not isinstance(rows, list):
-        return None, None, 0
+        return None, None, 0, set()
     row = _find_existing_row(state, rows, code, aggregation_key)
     if row is None:
-        return None, None, 0
+        return None, None, 0, set()
     details = row.get("details") if isinstance(row.get("details"), dict) else {}
+    seen_raw = details.get("_seen_timestamps")
+    if isinstance(seen_raw, (list, tuple, set)):
+        seen = {str(value) for value in seen_raw}
+    else:
+        seen = set()
+        if details.get("start"):
+            seen.add(str(details["start"]))
     return (
         str(details.get("start")) if details.get("start") else None,
         str(details.get("end")) if details.get("end") else None,
         int(details.get("count") or 0),
+        seen,
     )
 
 

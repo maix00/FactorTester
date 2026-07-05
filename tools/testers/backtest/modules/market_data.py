@@ -1478,7 +1478,7 @@ def ledger_market_snapshot_at(state, timestamp: pd.Timestamp) -> dict[str, dict[
     tables = market_price_tables_for(state)
     settlement = tables.get("settlement") if isinstance(tables, dict) else None
     if isinstance(settlement, pd.DataFrame) and not settlement.empty:
-        values = _table_values_at(settlement, timestamp, asof=True)
+        values = _table_values_at_cached(state, settlement, timestamp, asof=True)
         if values:
             snapshot["settlement"] = values
     store.market_snapshot_cache[cache_key] = snapshot
@@ -1976,24 +1976,7 @@ def _apply_exchange_rule_defaults(
             key = str(field_name)
             if key not in values or _is_missing_exchange_rule_value(values.get(key)):
                 values[key] = value
-                _record_historical_field_default_fallback(state, instrument, key, timestamp)
     return result
-
-
-def _record_historical_field_default_fallback(state: Any, product: Any, field_name: str, timestamp: pd.Timestamp) -> None:
-    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
-
-    record_runtime_fallback_interval(
-        state,
-        code="historical_field_default_fallback",
-        type="历史交易字段",
-        status="已降级",
-        product=product,
-        timestamp=timestamp,
-        source=field_name,
-        fallback="exchange_rule_default",
-        reason="历史字段缺失",
-    )
 
 
 def _is_missing_exchange_rule_value(value: object) -> bool:

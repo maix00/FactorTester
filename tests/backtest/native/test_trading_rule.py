@@ -681,6 +681,61 @@ def test_daily_mark_to_market_records_settlement_close_fallback_interval():
     assert details["end"].startswith("2026-03-11")
 
 
+def test_daily_mark_to_market_fallback_interval_dedupes_multiple_ledgers_same_timestamp():
+    product = _product()
+    strategies = [Strategy(alias="S1"), Strategy(alias="S2")]
+    configs = {
+        strategy: StrategyConfig(
+            strategy=strategy,
+            active_flow_names=frozenset({"apply_daily_mark_to_market"}),
+            field_values={
+                EngineModule.engine_mode: "auto",
+                TradingRuleModule.accounting_mode: "Auto",
+            },
+        )
+        for strategy in strategies
+    }
+    ledgers = {}
+    for strategy in strategies:
+        ledger = LedgerState(strategy=strategy, base_currency="CNY", ledger_id=f"private:{strategy.alias}")
+        ledger.set(_positions_ref(), {
+            product: ProductPosition(
+                quantity=2.0,
+                lots=deque([Lot(quantity=2.0, entry_price=10.0, multiplier=10.0, is_today=False)]),
+                settlement_price=10.0,
+            )
+        })
+        ledgers[ledger.ledger] = ledger
+    state = BacktestRunState(strategy_configs=configs, ledgers=ledgers)
+    for ledger in ledgers.values():
+        _set_cash(state, ledger, 1000.0)
+        state.ledger_configs[ledger.ledger] = _ledger_config(accounting_mode="Auto")
+
+    timestamp = pd.Timestamp("2026-03-10 15:00:00.000000001", tz="Asia/Shanghai")
+    ctx = FlowContext(
+        timestamp=timestamp,
+        event_queue=EventQueue(),
+        active_ledgers=frozenset(ledgers),
+    )
+    ctx.set(MarketDataModule.current_market_snapshot, {
+        "settlement": {product: 0.0},
+        "close": {product: 12.0},
+    })
+    ctx.set(MarketDataModule.current_historical_fields, {
+        product: {
+            "VolumeMultiple": 10.0,
+            "PreSettlementPrice": 10.0,
+            "SettlementPrice": 0.0,
+        }
+    })
+
+    _apply_daily_mark_to_market(state, ctx)
+
+    rows = [row for row in state.runtime_info_rows if row.get("code") == "daily_mark_to_market_price_fallback"]
+    assert len(rows) == 1
+    assert rows[0]["details"]["count"] == 1
+
+
 def test_daily_mark_to_market_missing_previous_basis_does_not_fallback_to_current_settlement():
     product = _product()
     strategy = Strategy(alias="S")

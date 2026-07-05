@@ -3,6 +3,7 @@ import pytest
 
 from sources.LocalCNFutures.scripts.generate_main import (
     BACKWARD_BASE_DATE_COL,
+    _build_dayk_settlement_lookup,
     fill_minute_settlement_from_dayk,
     generate_main_contract_series,
     preprocess_minute_data,
@@ -80,6 +81,55 @@ def test_fill_minute_settlement_from_dayk_fills_zero_placeholders():
 
     assert filled["settlement_price"].to_list() == [143180.0, 143000.0]
     assert filled["pre_settlement_price"].to_list() == [143400.0, 142000.0]
+
+
+def test_dayk_settlement_lookup_accepts_raw_unique_instrument_id():
+    dayk = pd.DataFrame({
+        "unique_instrument_id": ["GFEX|F|LC|2605"],
+        "trading_day": [pd.Timestamp("2026-01-09")],
+        "settlement_price": [143180.0],
+        "pre_settlement_price": [143400.0],
+    })
+
+    lookup = _build_dayk_settlement_lookup(dayk)
+
+    assert lookup["contract_uid"].to_list() == ["GFEX|F|LC|2605"]
+    assert lookup["settlement_price"].to_list() == [143180.0]
+
+
+def test_preprocess_minute_data_writes_contract_settlement_from_dayk(tmp_path):
+    raw_dir = tmp_path / "raw"
+    product_dir = tmp_path / "product"
+    raw_dir.mkdir()
+    uid = "GFEX|F|LC|2605"
+    minute = pd.DataFrame({
+        "unique_instrument_id": [uid],
+        "trading_day": [pd.Timestamp("2026-01-09")],
+        "trade_time": [pd.Timestamp("2026-01-09 15:00")],
+        "trade_timestamp": [int(pd.Timestamp("2026-01-09 15:00").timestamp() * 1000)],
+        "close_price": [143000.0],
+        "settlement_price": [0.0],
+        "pre_settlement_price": [0.0],
+    })
+    minute.to_parquet(raw_dir / "minute.parquet", index=False)
+    lookup = _build_dayk_settlement_lookup(pd.DataFrame({
+        "unique_instrument_id": [uid],
+        "trading_day": [pd.Timestamp("2026-01-09")],
+        "settlement_price": [143180.0],
+        "pre_settlement_price": [143400.0],
+    }))
+
+    preprocess_minute_data(
+        str(raw_dir),
+        str(product_dir),
+        force_rebuild=True,
+        dayk_settlement_lookup=lookup,
+    )
+
+    product_file = resolve_contract_parquet_path(product_dir, uid)
+    written = pd.read_parquet(product_file)
+    assert written["settlement_price"].to_list() == [143180.0]
+    assert written["pre_settlement_price"].to_list() == [143400.0]
 
 
 def test_generate_main_fills_main_mink_settlement_from_dayk(tmp_path):

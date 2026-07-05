@@ -696,7 +696,6 @@ def _record_daily_mark_to_market_fallback(
 ) -> None:
     from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
 
-    ledger_id = str(getattr(ledger, "ledger_id", getattr(getattr(ledger, "ledger", None), "name", ledger)))
     record_runtime_fallback_interval(
         state,
         code="daily_mark_to_market_price_fallback",
@@ -707,7 +706,6 @@ def _record_daily_mark_to_market_fallback(
         source=source,
         fallback=fallback,
         reason=reason,
-        extra={"ledger_id": ledger_id},
     )
 
 

@@ -55,6 +55,22 @@ def test_runtime_fallback_interval_reuses_index_and_respects_external_appends():
     assert state.runtime_info_rows[0]["details"]["count"] == 2
     assert len(state.runtime_info_sink.events) == 2
 
+    record_runtime_fallback_interval(
+        state,
+        code="price_fallback",
+        type="行情",
+        status="回退",
+        product=product,
+        timestamp="2026-01-05 09:02:00",
+        source="settlement",
+        fallback="close",
+        reason="缺少结算价",
+    )
+
+    assert len(state.runtime_info_rows) == 1
+    assert state.runtime_info_rows[0]["details"]["count"] == 2
+    assert len(state.runtime_info_sink.events) == 3
+
     state.runtime_info_rows.append(
         {
             "code": "price_fallback",
@@ -79,4 +95,4 @@ def test_runtime_fallback_interval_reuses_index_and_respects_external_appends():
     assert len(state.runtime_info_rows) == 2
     assert state.runtime_info_rows[1]["details"]["count"] == 2
     assert state.runtime_info_rows[1]["details"]["end"] == "2026-01-05 09:04:00"
-    assert len(state.runtime_info_sink.events) == 3
+    assert len(state.runtime_info_sink.events) == 4
