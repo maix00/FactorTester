@@ -204,7 +204,8 @@ def _load_template_into_state(state, selector: str) -> None:
     factor_text = f" · 已注册因子: {registered}" if registered else ""
     click.echo(
         f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
-        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}{factor_text}"
+        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']} "
+        f"· strategy-book: {applied['strategy_book']} · ledger-configs: {applied['ledger_configs']}{factor_text}"
     )
 
 
@@ -232,6 +233,11 @@ def _snapshot_from_state(state) -> dict[str, Any]:
         "group_settings": {
             "groups": [dict(group) for group in state.backtest_groups],
             "lsConfigs": [dict(config) for config in state.backtest_ls_configs],
+        },
+        "strategy_book": dict(state.backtest_strategy_book),
+        "ledger_configs": {
+            str(key): dict(value)
+            for key, value in state.backtest_ledger_configs.items()
         },
     }
 
@@ -261,11 +267,23 @@ def _apply_snapshot_to_state(state, snapshot: dict[str, Any], *, template_name: 
     ls_configs = [_normalize_ls_snapshot(item) for item in (group_settings.get("lsConfigs") or []) if isinstance(item, dict)]
     state.backtest_groups = groups
     state.backtest_ls_configs = ls_configs
+
+    strategy_book = snapshot.get("strategy_book")
+    state.backtest_strategy_book = dict(strategy_book) if isinstance(strategy_book, dict) else {}
+    ledger_configs = snapshot.get("ledger_configs")
+    ledger_config_items = ledger_configs.items() if isinstance(ledger_configs, dict) else ()
+    state.backtest_ledger_configs = {
+        str(key): dict(value)
+        for key, value in ledger_config_items
+        if isinstance(value, dict)
+    }
     return {
         "page_settings": len(factors) + 1,
         "local_settings": len(state.backtest_local_settings),
         "groups": len(groups),
         "ls_configs": len(ls_configs),
+        "strategy_book": len(state.backtest_strategy_book.get("strategies") or {}) if state.backtest_strategy_book else 0,
+        "ledger_configs": len(state.backtest_ledger_configs),
     }
 
 

@@ -7,7 +7,7 @@ from typing import Any
 import click
 
 from tools.cli.modules.keys import public_module_key
-from tools.cli.state import CliState
+from tools.cli.state import BACKTEST_SPACE, SINGLE_FACTOR_BACKTEST_SPACE, CliState
 
 
 def module_lines(modules: list[dict[str, Any]]) -> list[str]:
@@ -39,6 +39,7 @@ def print_single_factor_family_welcome(state: CliState) -> None:
 
 def print_backtest_welcome(state: CliState) -> None:
     click.echo("回测")
+    click.echo(f"草稿空间: {_backtest_scope_label(state)}")
     click.echo("设置草稿:")
     if state.backtest_local_settings:
         click.echo("  local-settings:")
@@ -86,12 +87,13 @@ def print_backtest_welcome(state: CliState) -> None:
         click.echo(f"  ledger-configs: {len(ledger_configs)} ledger")
     else:
         click.echo("  ledger-configs: （空）")
+    command_prefix = "factortester backtest" if state.active_backtest_space == BACKTEST_SPACE else "factortester"
     click.echo("参数示例:")
-    click.echo("  factortester backtest local-settings allocation_mode=equal_notional")
-    click.echo("  factortester backtest strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main")
-    click.echo("  factortester backtest ledger-config --ledger shared --fee-mode auto --margin-mode auto")
-    click.echo("  factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS")
-    click.echo("  factortester backtest --run")
+    click.echo(f"  {command_prefix} local-settings allocation_mode=equal_notional")
+    click.echo(f"  {command_prefix} strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main")
+    click.echo(f"  {command_prefix} ledger-config --ledger shared --fee-mode auto --margin-mode auto")
+    click.echo(f"  {command_prefix} group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS")
+    click.echo("  factortester backtest --run" if state.active_backtest_space == BACKTEST_SPACE else "  factortester group --run")
     click.echo("下一步: factortester backtest --help 查看回测命令。")
 
 
@@ -125,3 +127,10 @@ def _product_path_label(value: Any) -> str:
     if isinstance(value, dict):
         return str(value.get("product_group") or value.get("label") or value.get("name") or value.get("product_path_selection_id") or "")
     return str(value or "")
+
+
+def _backtest_scope_label(state: CliState) -> str:
+    if state.active_backtest_space == SINGLE_FACTOR_BACKTEST_SPACE:
+        family = f" · {state.factor_family}" if state.factor_family else ""
+        return f"single_factor_test/backtest{family}"
+    return "backtest"

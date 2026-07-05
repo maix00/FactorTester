@@ -1620,6 +1620,20 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
                 "shortGroupId": "g5",
             }],
         },
+        "strategy_book": {
+            "strategies": {
+                "A1": {"ledger_ids": ["shared-main"], "default_ledger_id": "shared-main"},
+            },
+            "cash_pools": {"shared-main": "pool-main"},
+            "cash_pool_configs": {"pool-main": {"initial_capital_major": 100000000, "base_currency": "CNY"}},
+        },
+        "ledger_configs": {
+            "shared-main": {
+                "fee_mode": "auto",
+                "margin_mode": "auto",
+                "daily_mark_to_market_enabled": True,
+            }
+        },
     }
 
     @app.get("/api/testers/modules")
@@ -1690,6 +1704,8 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert result.exit_code == 0
         assert "已加载模板: 2026-06-02 07:20:47" in result.output
         assert "groups: 1" in result.output
+        assert "strategy-book: 1" in result.output
+        assert "ledger-configs: 1" in result.output
         assert "已注册因子: 1" in result.output
         assert registered_factors == [{
             "factor_family_alias": "SgCCS",
@@ -1701,8 +1717,17 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert result.exit_code == 0
         assert "（空）" in result.output
 
+        result = runner.invoke(cli, ["backtest", "strategy-book", "show"])
+        assert result.exit_code == 0
+        assert "StrategyBookSimple" in result.output
+
+        result = runner.invoke(cli, ["backtest", "ledger-config", "show"])
+        assert result.exit_code == 0
+        assert "（空；使用后端注册字段的默认/推断规则）" in result.output
+
         result = runner.invoke(cli, ["single_factor_test", "--factor-family", "SgCCS", "backtest"])
         assert result.exit_code == 0
+        assert "草稿空间: single_factor_test/backtest · SgCCS" in result.output
         result = runner.invoke(cli, ["group", "list"])
         assert result.exit_code == 0
         assert "A1 · 分组数=5 · 分组序号=1" in result.output
@@ -1714,9 +1739,21 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert "LS A1/A5" in result.output
         assert "多头=g1" in result.output
 
+        result = runner.invoke(cli, ["strategy-book", "show"])
+        assert result.exit_code == 0
+        assert "shared-main" in result.output
+        assert "pool-main" in result.output
+
+        result = runner.invoke(cli, ["ledger-config", "show"])
+        assert result.exit_code == 0
+        assert "shared-main" in result.output
+        assert "fee_mode=auto" in result.output
+
         result = runner.invoke(cli, ["backtest", "template", "--from-module-template", "single_factor_test", "load", "2026-06-02 07:20:47"])
         assert result.exit_code == 0
         assert "来自 single_factor_test 模板" in result.output
+        assert "strategy-book: 1" in result.output
+        assert "ledger-configs: 1" in result.output
 
         result = runner.invoke(cli, ["backtest", "template", "save", "CLI 草稿"])
         assert result.exit_code == 0
@@ -1724,6 +1761,8 @@ def test_single_factor_template_load_restores_backtest_state_and_clear_resets_dr
         assert saved_templates[-1]["name"] == "CLI 草稿"
         assert saved_templates[-1]["ff_alias"] == "SgCCS"
         assert (saved_templates[-1]["snapshot"])["group_settings"]["groups"][0]["name"] == "A1"
+        assert (saved_templates[-1]["snapshot"])["strategy_book"]["strategies"]["A1"]["default_ledger_id"] == "shared-main"
+        assert (saved_templates[-1]["snapshot"])["ledger_configs"]["shared-main"]["fee_mode"] == "auto"
 
         result = runner.invoke(cli, ["backtest", "template", "help"])
         assert result.exit_code == 0

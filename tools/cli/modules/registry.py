@@ -12,7 +12,7 @@ from typing import Iterable
 
 import click
 
-from tools.cli.modules.backtest import backtest, group, local_settings, long_short
+from tools.cli.modules.backtest import backtest, group, ledger_config, local_settings, long_short, strategy_book
 from tools.cli.modules.custom_factors import custom_factors
 from tools.cli.modules.factor_evaluation import factor_evaluation
 from tools.cli.modules.factor_type_analysis import factor_type_analysis
@@ -39,7 +39,7 @@ class ControllerRegistry:
             ControllerAdapter(
                 public_key="backtest",
                 backend_key="group_test",
-                commands=(backtest, group, local_settings, long_short),
+                commands=(backtest, group, local_settings, long_short, strategy_book, ledger_config),
             ),
             ControllerAdapter(
                 public_key="ic_test",

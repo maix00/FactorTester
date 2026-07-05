@@ -152,8 +152,7 @@ def template(ctx: click.Context) -> None:
 def local_settings(ctx: click.Context) -> None:
     """配置回测 local-settings。"""
     state = load_state()
-    if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
-        enter_backtest_state(state, scope=BACKTEST_SPACE)
+    _ensure_active_backtest_scope(state)
     args = tuple(ctx.args)
     show_help = _has_context_help(args)
     setting_args = _strip_context_help(args)
@@ -174,7 +173,7 @@ def local_settings(ctx: click.Context) -> None:
 def strategy_book(ctx: click.Context) -> None:
     """配置 strategy -> ledger -> cash pool 拓扑。"""
     state = load_state()
-    switch_backtest_space(state, BACKTEST_SPACE)
+    _ensure_active_backtest_scope(state)
     args = tuple(ctx.args)
     if not args or args[0] in {"show", "list", "ls"}:
         _print_strategy_book(state)
@@ -206,7 +205,7 @@ def strategy_book(ctx: click.Context) -> None:
 def ledger_config(ctx: click.Context) -> None:
     """配置 ledger-owned 字段，如费用、保证金、DMTM、现金保留。"""
     state = load_state()
-    switch_backtest_space(state, BACKTEST_SPACE)
+    _ensure_active_backtest_scope(state)
     args = tuple(ctx.args)
     if not args or args[0] in {"show", "list", "ls"}:
         _print_ledger_configs(state)
@@ -324,7 +323,8 @@ def _load_backtest_template_into_state(state, selector: str, *, source_module: s
     factor_text = f" · 已注册因子: {registered}" if registered else ""
     click.echo(
         f"页面字段: {applied['page_settings']} · local-settings: {applied['local_settings']} "
-        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']}{factor_text}"
+        f"· groups: {applied['groups']} · long-short: {applied['ls_configs']} "
+        f"· strategy-book: {applied['strategy_book']} · ledger-configs: {applied['ledger_configs']}{factor_text}"
     )
 
 
@@ -344,6 +344,11 @@ def _resolve_template_id(selector: str, templates: list[dict[str, Any]]) -> str:
         if selector in keys:
             return str(template.get("id") or "")
     raise click.ClickException(f"找不到模板: {selector}")
+
+
+def _ensure_active_backtest_scope(state) -> None:
+    if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
+        enter_backtest_state(state, scope=BACKTEST_SPACE)
 
 
 def _apply_snapshot_to_backtest_state(state, snapshot: dict[str, Any], *, template_name: str) -> dict[str, int]:
@@ -369,11 +374,22 @@ def _apply_snapshot_to_backtest_state(state, snapshot: dict[str, Any], *, templa
         for item in (group_settings.get("lsConfigs") or [])
         if isinstance(item, dict)
     ]
+    strategy_book = snapshot.get("strategy_book")
+    state.backtest_strategy_book = dict(strategy_book) if isinstance(strategy_book, dict) else {}
+    ledger_configs = snapshot.get("ledger_configs")
+    ledger_config_items = ledger_configs.items() if isinstance(ledger_configs, dict) else ()
+    state.backtest_ledger_configs = {
+        str(key): dict(value)
+        for key, value in ledger_config_items
+        if isinstance(value, dict)
+    }
     return {
         "page_settings": len(factors) + 1,
         "local_settings": len(state.backtest_local_settings),
         "groups": len(state.backtest_groups),
         "ls_configs": len(state.backtest_ls_configs),
+        "strategy_book": len(state.backtest_strategy_book.get("strategies") or {}) if state.backtest_strategy_book else 0,
+        "ledger_configs": len(state.backtest_ledger_configs),
     }
 
 
@@ -388,6 +404,11 @@ def _snapshot_from_backtest_state(state) -> dict[str, Any]:
         "group_settings": {
             "groups": [dict(group) for group in state.backtest_groups],
             "lsConfigs": [dict(config) for config in state.backtest_ls_configs],
+        },
+        "strategy_book": dict(state.backtest_strategy_book),
+        "ledger_configs": {
+            str(key): dict(value)
+            for key, value in state.backtest_ledger_configs.items()
         },
     }
 
