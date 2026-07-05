@@ -38,9 +38,10 @@ def record_runtime_info(
 
     runtime_rows = getattr(state, "runtime_info_rows", None)
     if isinstance(runtime_rows, list):
-        existing = _find_existing_row(runtime_rows, code, aggregation_key)
+        existing = _find_existing_row(state, runtime_rows, code, aggregation_key)
         if existing is None:
             runtime_rows.append(row)
+            _remember_runtime_info_row(state, runtime_rows, row)
         else:
             existing.update(row)
             row = existing
@@ -119,20 +120,60 @@ def product_display_text(item: dict[str, str]) -> str:
     return f"{name}({desc})" if desc and desc != name else name
 
 
-def _find_existing_row(rows: list[dict[str, Any]], code: str, aggregation_key: str | None) -> dict[str, Any] | None:
+def _find_existing_row(
+    state: Any,
+    rows: list[dict[str, Any]],
+    code: str,
+    aggregation_key: str | None,
+) -> dict[str, Any] | None:
     if not aggregation_key:
         return None
-    for row in reversed(rows):
-        if row.get("code") == code and row.get("aggregation_key") == aggregation_key:
-            return row
-    return None
+    return _runtime_info_row_index(state, rows).get((code, aggregation_key))
+
+
+def _runtime_info_row_index(state: Any, rows: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    cache = getattr(state, "_runtime_info_row_index_cache", None)
+    if (
+        isinstance(cache, tuple)
+        and len(cache) == 3
+        and cache[0] == id(rows)
+        and cache[1] == len(rows)
+        and isinstance(cache[2], dict)
+    ):
+        return cache[2]
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = row.get("code")
+        aggregation_key = row.get("aggregation_key")
+        if code and aggregation_key:
+            index[(str(code), str(aggregation_key))] = row
+    try:
+        setattr(state, "_runtime_info_row_index_cache", (id(rows), len(rows), index))
+    except Exception:
+        pass
+    return index
+
+
+def _remember_runtime_info_row(state: Any, rows: list[dict[str, Any]], row: dict[str, Any]) -> None:
+    code = row.get("code")
+    aggregation_key = row.get("aggregation_key")
+    if not code or not aggregation_key:
+        return
+    index = _runtime_info_row_index(state, rows)
+    index[(str(code), str(aggregation_key))] = row
+    try:
+        setattr(state, "_runtime_info_row_index_cache", (id(rows), len(rows), index))
+    except Exception:
+        pass
 
 
 def _existing_interval(state: Any, code: str, aggregation_key: str) -> tuple[str | None, str | None, int]:
     rows = getattr(state, "runtime_info_rows", None)
     if not isinstance(rows, list):
         return None, None, 0
-    row = _find_existing_row(rows, code, aggregation_key)
+    row = _find_existing_row(state, rows, code, aggregation_key)
     if row is None:
         return None, None, 0
     details = row.get("details") if isinstance(row.get("details"), dict) else {}
