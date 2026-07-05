@@ -2025,18 +2025,29 @@ def historical_fields_for_product(
     if isinstance(values, dict):
         return values
     product_keys = _historical_field_product_keys(product)
-    for instrument, values in historical_fields.items():
-        if not isinstance(values, dict):
-            continue
-        if product_keys & _historical_field_product_keys(instrument):
+    lookup = _historical_fields_lookup_index(historical_fields)
+    for key in product_keys:
+        values = lookup.get(key)
+        if isinstance(values, dict):
             return values
     return {}
 
 
-def _historical_field_product_keys(product: Any) -> set[str]:
-    keys: set[str] = set()
+_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE_MAX = 4096
+_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE: OrderedDict[int, tuple[Any, tuple[str, ...]]] = OrderedDict()
+_HISTORICAL_FIELDS_LOOKUP_CACHE_MAX = 2048
+_HISTORICAL_FIELDS_LOOKUP_CACHE: OrderedDict[int, tuple[dict[Any, dict[str, object]], dict[str, dict[str, object]]]] = OrderedDict()
+
+
+def _historical_field_product_keys(product: Any) -> frozenset[str]:
     if product is None:
-        return keys
+        return frozenset()
+    cache_key = id(product)
+    cached = _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.get(cache_key)
+    if cached is not None and cached[0] is product:
+        _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.move_to_end(cache_key)
+        return frozenset(cached[1])
+    keys: set[str] = set()
     for value in (
         str(product),
         getattr(product, "name", None),
@@ -2046,7 +2057,33 @@ def _historical_field_product_keys(product: Any) -> set[str]:
     ):
         if value is not None and str(value).strip():
             keys.add(str(value).strip())
-    return keys
+    result = tuple(sorted(keys))
+    _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE[cache_key] = (product, result)
+    _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.move_to_end(cache_key)
+    while len(_HISTORICAL_FIELD_PRODUCT_KEYS_CACHE) > _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE_MAX:
+        _HISTORICAL_FIELD_PRODUCT_KEYS_CACHE.popitem(last=False)
+    return frozenset(result)
+
+
+def _historical_fields_lookup_index(
+    historical_fields: dict[Any, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    cache_key = id(historical_fields)
+    cached = _HISTORICAL_FIELDS_LOOKUP_CACHE.get(cache_key)
+    if cached is not None and cached[0] is historical_fields:
+        _HISTORICAL_FIELDS_LOOKUP_CACHE.move_to_end(cache_key)
+        return cached[1]
+    lookup: dict[str, dict[str, object]] = {}
+    for instrument, values in historical_fields.items():
+        if not isinstance(values, dict):
+            continue
+        for key in _historical_field_product_keys(instrument):
+            lookup.setdefault(key, values)
+    _HISTORICAL_FIELDS_LOOKUP_CACHE[cache_key] = (historical_fields, lookup)
+    _HISTORICAL_FIELDS_LOOKUP_CACHE.move_to_end(cache_key)
+    while len(_HISTORICAL_FIELDS_LOOKUP_CACHE) > _HISTORICAL_FIELDS_LOOKUP_CACHE_MAX:
+        _HISTORICAL_FIELDS_LOOKUP_CACHE.popitem(last=False)
+    return lookup
 
 
 def contract_multiplier_from_fields(

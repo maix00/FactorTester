@@ -989,6 +989,35 @@ def test_historical_fields_for_product_matches_product_and_string_keys():
     assert historical_fields_for_product({product: fields}, "RU.SHF") is fields
 
 
+def test_historical_fields_for_product_lookup_matches_legacy_scan_without_mutating_input():
+    class _Product:
+        name = "RU.SHF"
+        alias = "RU.SHF"
+        code = "RU"
+
+        def __str__(self) -> str:
+            return self.name
+
+    product = _Product()
+    fields = {"VolumeMultiple": 10.0}
+    historical_fields: dict[Any, dict[str, object]] = {
+        "AP.CZC": {"VolumeMultiple": 5.0},
+        product: fields,
+    }
+    original_keys = tuple(historical_fields.keys())
+
+    def _legacy_scan(target: Any) -> dict[str, object]:
+        target_keys = market_data_module._historical_field_product_keys(target)
+        for instrument, values in historical_fields.items():
+            if target_keys & market_data_module._historical_field_product_keys(instrument):
+                return values
+        return {}
+
+    assert historical_fields_for_product(historical_fields, "RU.SHF") is _legacy_scan("RU.SHF")
+    assert historical_fields_for_product(historical_fields, product) is _legacy_scan(product)
+    assert tuple(historical_fields.keys()) == original_keys
+
+
 def test_historical_fields_at_uses_asof_for_causal_order_timestamp():
     frame_ts = pd.Timestamp("2026-01-05 09:01:00")
     event_ts = cast(pd.Timestamp, pd.Timestamp("2026-01-05 09:01:00.000000001", tz="Asia/Shanghai"))
