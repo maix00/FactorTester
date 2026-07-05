@@ -7,8 +7,10 @@ from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
+from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.modules.equity_curve import (
-    EquityCurveModule, _flush_equity_post_replay, _record_equity, equity_curve_for,
+    EquityCurveModule, _flush_equity_post_replay, _record_equity,
+    display_equity_curve_for, equity_curve_for,
 )
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 
@@ -64,3 +66,36 @@ def test_post_mode_does_not_stream_until_flush():
     ctx.set_for(LedgerModule.equity, s, 500.0)
     _record_equity(account, ctx)
     assert account.results.history(s) == []  # not yet flushed
+
+
+def test_display_equity_curve_keeps_only_signal_valuation_points():
+    s = Strategy(alias="S")
+    account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s)})
+    signal_ts = pd.Timestamp("2026-01-02 09:00:00", tz="Asia/Shanghai")
+    order_ts = signal_ts + pd.Timedelta(microseconds=1)
+
+    signal_ctx = FlowContext(
+        timestamp=signal_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.SIGNAL,
+    )
+    signal_ctx.set_for(LedgerModule.equity, s, 1000.0)
+    _record_equity(account, signal_ctx)
+
+    order_ctx = FlowContext(
+        timestamp=order_ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        event_kind=EventKind.ORDER,
+    )
+    order_ctx.set_for(LedgerModule.equity, s, 990.0)
+    _record_equity(account, order_ctx)
+
+    full = equity_curve_for(account, s)
+    display = display_equity_curve_for(account, s)
+
+    assert list(full.index) == [signal_ts, order_ts]
+    assert list(full.to_numpy()) == [1000.0, 990.0]
+    assert list(display.index) == [signal_ts]
+    assert list(display.to_numpy()) == [1000.0]

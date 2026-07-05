@@ -16,7 +16,11 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegi
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.engines.factors.incremental import compile_streaming_factor
-from tools.testers.backtest.modules.equity_curve import equity_curve_for, margin_curve_for
+from tools.testers.backtest.modules.equity_curve import (
+    display_equity_curve_for,
+    equity_curve_for,
+    margin_curve_for,
+)
 from tools.testers.backtest.modules.group_membership import target_trace_for
 from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
@@ -693,3 +697,71 @@ def _assert_order_flow_terminal_steps_are_ordered(records: list[dict[str, Any]])
             assert steps.index("ledger_update") < steps.index("order_terminal"), (order_id, steps)
         if "resolve_execution_price" in steps and "ledger_update" in steps:
             assert steps.index("resolve_execution_price") < steps.index("ledger_update"), (order_id, steps)
+
+
+def test_live_sgccs_display_curve_excludes_intrabar_order_points_at_month_end() -> None:
+    state, strategies = _run_live_sgccs_native_window(
+        aliases=("A1", "A1a", "A4"),
+        start_date="2026-01-01",
+        start_time="09:00",
+        end_date="2026-01-31",
+        end_time="15:00",
+        local_overrides={
+            "engine_mode": "auto",
+            "fee_mode": "auto",
+            "margin_mode": "auto",
+            "liquidity_mode": "infinite",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+        },
+    )
+    start = pd.Timestamp("2026-01-30 14:55:00", tz="Asia/Shanghai")
+    end = pd.Timestamp("2026-01-30 15:00:00", tz="Asia/Shanghai")
+
+    for alias, strategy in strategies.items():
+        full = equity_curve_for(state, strategy).loc[start:end + pd.Timedelta(microseconds=10)]
+        display = display_equity_curve_for(state, strategy).loc[start:end]
+        assert not full.empty, alias
+        assert not display.empty, alias
+        assert any(ts.microsecond or ts.nanosecond for ts in full.index), alias
+        assert not any(ts.microsecond or ts.nanosecond for ts in display.index), alias
+
+        before = float(display.loc[pd.Timestamp("2026-01-30 14:59:00", tz="Asia/Shanghai")])
+        after = float(display.loc[end])
+        assert abs(after / before - 1.0) < 0.02, (alias, before, after)
+
+
+def test_live_sgccs_a4_display_curve_excludes_weekend_rebalance_order_point() -> None:
+    state, strategies = _run_live_sgccs_native_window(
+        aliases=("A4",),
+        start_date="2026-01-01",
+        start_time="09:00",
+        end_date="2026-01-12",
+        end_time="09:30",
+        local_overrides={
+            "engine_mode": "auto",
+            "fee_mode": "auto",
+            "margin_mode": "auto",
+            "liquidity_mode": "infinite",
+            "factor_mode": "precomputed",
+            "rebalance_trigger": "on_factor_signal",
+        },
+    )
+    strategy = strategies["A4"]
+    full = equity_curve_for(state, strategy)
+    display = display_equity_curve_for(state, strategy)
+
+    friday_close = pd.Timestamp("2026-01-09 15:00:00", tz="Asia/Shanghai")
+    monday_order = pd.Timestamp("2026-01-12 09:00:00.000001", tz="Asia/Shanghai")
+    monday_first_close = pd.Timestamp("2026-01-12 09:01:00", tz="Asia/Shanghai")
+
+    assert friday_close in display.index
+    assert monday_order in full.index
+    assert monday_order not in display.index
+    assert monday_first_close in display.index
+    assert not any(ts.microsecond or ts.nanosecond for ts in display.index)
+
+    friday_tail = display.loc[
+        pd.Timestamp("2026-01-09 14:55:00", tz="Asia/Shanghai"):friday_close
+    ]
+    assert friday_tail.max() / friday_tail.min() - 1.0 < 0.01

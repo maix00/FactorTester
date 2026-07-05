@@ -16,6 +16,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegistry, ProgressSink, run
 from tools.testers.backtest.modules.equity_curve import (
+    display_equity_curve_for,
     equity_curve_for,
     margin_curve_for,
     notional_curve_for,
@@ -77,8 +78,13 @@ def run_backtest_task(
     target_trace: dict[str, Any] = {}
     for group_id, strategy in by_alias.items():
         curve = equity_curve_for(run_state, strategy)
+        display_curve = display_equity_curve_for(run_state, strategy)
         portfolios[group_id] = {
             "equity_curve": {pd.Timestamp(cast(Any, ts)).isoformat(): float(value) for ts, value in curve.items()},
+            "display_equity_curve": {
+                pd.Timestamp(cast(Any, ts)).isoformat(): float(value)
+                for ts, value in display_curve.items()
+            },
             "position_curve": position_curve_for(run_state, strategy),
             "notional_curve": notional_curve_for(run_state, strategy),
             "margin_curve": margin_curve_for(run_state, strategy),

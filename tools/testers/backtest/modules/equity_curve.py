@@ -33,6 +33,7 @@ from tools.testers.backtest.modules.market_data import MarketDataModule, contrac
 @dataclass
 class EquityCurveStore:
     buffer: dict[Any, list[tuple[Any, dict[str, Any]]]] = field(default_factory=dict)
+    display_buffer: dict[Any, list[tuple[Any, float]]] = field(default_factory=dict)
 
 
 class EquityCurveModule(ExecutableModule):
@@ -124,6 +125,10 @@ def _record_equity(state, ctx) -> None:
         equity = ctx.get_for(LedgerModule.equity, strategy)
         if equity is not None and _strategy_equity_curve_is_applicable(state, strategy):
             record["equity"] = equity
+            if ctx.event_kind is EventKind.SIGNAL:
+                state.equity_curve_store.display_buffer.setdefault(strategy, []).append(
+                    (ctx.timestamp, float(equity))
+                )
         if not record:
             continue
         buffer.setdefault(strategy, []).append((ctx.timestamp, record))
@@ -146,6 +151,23 @@ def equity_curve_for(state, strategy) -> pd.Series:
         return pd.Series(dtype=float)
     index = [ts for ts, _ in history]
     values = [v.get("equity") for _, v in history]
+    series = pd.Series(values, index=pd.Index(index)).dropna()
+    return series.astype(float) if not series.empty else pd.Series(dtype=float)
+
+
+def display_equity_curve_for(state, strategy) -> pd.Series:
+    """Main chart curve: strategy equity at signal/bar-close valuation points.
+
+    The full ResultStore history intentionally keeps ORDER and other intrabar
+    state changes for snapshots and execution traces. The primary equity chart
+    should not render those internal accounting/action points as if they were
+    regular bar-close observations.
+    """
+    points = state.equity_curve_store.display_buffer.get(strategy, [])
+    if not points:
+        return equity_curve_for(state, strategy)
+    index = [ts for ts, _ in points]
+    values = [value for _, value in points]
     series = pd.Series(values, index=pd.Index(index)).dropna()
     return series.astype(float) if not series.empty else pd.Series(dtype=float)
 

@@ -1760,7 +1760,7 @@ def _serialize_event_execution(
                 f"available={sorted(portfolios)}"
             )
         portfolio = portfolios[strategy_id]
-        curve = portfolio.get("equity_curve") or {}
+        curve = portfolio.get("display_equity_curve") or portfolio.get("equity_curve") or {}
         index = pd.DatetimeIndex([pd.Timestamp(value) for value in curve])
         equity = np.asarray([float(value) for value in curve.values()], dtype=float)
         if len(index) != len(equity) or not len(index):
@@ -2952,7 +2952,8 @@ def _event_group_ranking_detail(execution: dict, product_path_selection_id: str)
     series = []
     for owner in owners:
         strategy_id = str(owner.get("group_id") or "")
-        curve = (portfolios.get(strategy_id) or {}).get("equity_curve") or {}
+        portfolio = portfolios.get(strategy_id) or {}
+        curve = portfolio.get("display_equity_curve") or portfolio.get("equity_curve") or {}
         if not curve:
             raise ValueError(f"分组 {strategy_id} 没有返回净值曲线")
         equity = pd.Series(
