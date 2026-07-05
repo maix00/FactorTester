@@ -1748,8 +1748,8 @@ def _event_lookup_cache_key(timestamp: pd.Timestamp) -> Any:
     # causally ordered on the same bar. Market snapshots and historical rule
     # fields are bar/effective-time states, so those epsilon variants should hit
     # the same lookup cache entry instead of repeating expensive table joins.
-    ts = pd.Timestamp(timestamp).floor("us")
-    return (ts.value, str(ts.tz))
+    ts = pd.Timestamp(timestamp)
+    return ((ts.value // 1_000) * 1_000, str(ts.tz))
 
 
 def historical_field_frames_for_market_data(
