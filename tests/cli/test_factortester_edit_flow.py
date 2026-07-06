@@ -861,6 +861,34 @@ def test_backtest_config_local_settings_is_sibling_action(tmp_path, monkeypatch)
                 "control_template": "select",
                 "options": [{"value": "equal_risk"}, {"value": "equal_notional"}],
             },
+            "liquidity_mode": {
+                "value": "infinite",
+                "label": "流动性模式",
+                "tab_key": "execution",
+                "control_template": "select",
+                "options": [{"value": "infinite"}, {"value": "volume_participation"}],
+            },
+            "participation_rate": {
+                "value": 1.0,
+                "label": "参与率",
+                "tab_key": "execution",
+                "control_template": "number",
+                "visible_when": {"liquidity_mode": ["volume_participation"]},
+            },
+            "slippage_mode": {
+                "value": "none",
+                "label": "滑点模式",
+                "tab_key": "execution",
+                "control_template": "select",
+                "options": [{"value": "none"}, {"value": "fixed_bps"}],
+            },
+            "slippage_bps": {
+                "value": 0.0,
+                "label": "滑点bps",
+                "tab_key": "execution",
+                "control_template": "number",
+                "visible_when": {"slippage_mode": ["fixed_bps"]},
+            },
             "product_path_candidates": {"value": [], "serialization": {"shared_page_field": "product_path_candidates"}},
             "product_path_selection": {"value": None, "serialization": {"shared_page_field": "product_path_selection"}},
             "factor_candidates": {"value": [], "serialization": {"shared_page_field": "factor_candidates"}},
@@ -1233,10 +1261,24 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
 
         result = runner.invoke(cli, [
             "backtest",
+            "local-settings",
+            "--liquidity-mode", "infinite",
+            "--slippage-mode", "none",
+        ])
+        assert result.exit_code == 0
+        assert "liquidity_mode: infinite" in result.output
+        assert "slippage_mode: none" in result.output
+
+        result = runner.invoke(cli, [
+            "backtest",
             "group",
             "--group-names", "A1", "A2",
             "--edit",
             "--allocation-mode", "equal_notional",
+            "--liquidity-mode", "volume_participation",
+            "--participation-rate", "0.25",
+            "--slippage-mode", "fixed_bps",
+            "--slippage-bps", "3",
         ])
         assert result.exit_code == 0
         assert "已修改分组: 2" in result.output
@@ -1295,6 +1337,12 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     assert [group["name"] for group in payload["groups"]] == ["A1", "A2"]
     assert {group["factor_family_alias"] for group in payload["groups"]} == {"SgCCS"}
     assert all(group["allocation_mode"] == "equal_notional" for group in payload["groups"])
+    assert payload["local_settings"]["liquidity_mode"] == "infinite"
+    assert payload["local_settings"]["slippage_mode"] == "none"
+    assert all(group["liquidity_mode"] == "volume_participation" for group in payload["groups"])
+    assert all(group["participation_rate"] == "0.25" for group in payload["groups"])
+    assert all(group["slippage_mode"] == "fixed_bps" for group in payload["groups"])
+    assert all(group["slippage_bps"] == "3" for group in payload["groups"])
     assert payload["ls_configs"][0]["name"] == "LS A1/A2"
     assert payload["strategy_book"]["strategies"]["A1"]["ledger_ids"] == ["shared-main"]
     assert payload["strategy_book"]["strategies"]["A1"]["default_ledger_id"] == "shared-main"
