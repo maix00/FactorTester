@@ -871,8 +871,8 @@ def _encode_contract_codes(value: Any) -> str:
     return json.dumps(list(value), ensure_ascii=False)
 
 
-_PIPE_CONTRACT_PATTERN = re.compile(r"^(?P<exchange>[A-Z]+)\|F\|(?P<product>[A-Za-z]+)\|(?P<contract>\d{3,4})$")
-_DOTTED_CONTRACT_PATTERN = re.compile(r"^(?P<product>[A-Za-z]+)(?P<contract>\d{3,4})\.(?P<exchange>[A-Za-z]+)$")
+_PIPE_CONTRACT_PATTERN = re.compile(r"^(?P<exchange>[A-Z]+)\|F\|(?P<product>[A-Za-z]+)\|(?P<contract>\d{3,4}[A-Z]*)$")
+_DOTTED_CONTRACT_PATTERN = re.compile(r"^(?P<product>[A-Za-z]+)(?P<contract>\d{3,4}[A-Z]*)\.(?P<exchange>[A-Za-z]+)$")
 _DOTTED_PRODUCT_PATTERN = re.compile(r"^(?P<product>[A-Za-z]+)\.(?P<exchange>[A-Za-z]+)(?:@.+)?$")
 
 
@@ -898,9 +898,10 @@ def _resolve_field_instrument_identity(
             product_obj = None
     if product_obj is not None:
         product_name = _instrument_name(product_obj)
+        parsed_product = _product_code_from_contract_name(raw_name)
         return FieldInstrumentIdentity(
             raw_instrument=raw_name,
-            product_code=_product_code_from_product_name(product_name),
+            product_code=parsed_product or _product_code_from_product_name(product_name),
             instrument_type=resolved_type,
             contract_code=contract_code,
         )
@@ -972,10 +973,10 @@ def _product_code_from_product_name(name: str) -> str:
     text = str(name or "").strip()
     pipe_match = _PIPE_CONTRACT_PATTERN.match(text)
     if pipe_match:
-        return pipe_match.group("product").upper()
+        return _field_history_product_code(pipe_match.group("product"), pipe_match.group("contract"))
     contract_match = _DOTTED_CONTRACT_PATTERN.match(text)
     if contract_match:
-        return contract_match.group("product").upper()
+        return _field_history_product_code(contract_match.group("product"), contract_match.group("contract"))
     product_match = _DOTTED_PRODUCT_PATTERN.match(text)
     if product_match:
         return product_match.group("product").upper()
@@ -989,11 +990,19 @@ def _product_code_from_product_name(name: str) -> str:
 def _product_code_from_contract_name(name: str) -> str | None:
     pipe_match = _PIPE_CONTRACT_PATTERN.match(name)
     if pipe_match:
-        return pipe_match.group("product").upper()
+        return _field_history_product_code(pipe_match.group("product"), pipe_match.group("contract"))
     contract_match = _DOTTED_CONTRACT_PATTERN.match(name)
     if contract_match:
-        return contract_match.group("product").upper()
+        return _field_history_product_code(contract_match.group("product"), contract_match.group("contract"))
     return None
+
+
+def _field_history_product_code(product: str, contract_code: str | None = None) -> str:
+    product_code = str(product or "").strip().upper()
+    contract = str(contract_code or "").strip().upper()
+    if contract.endswith("F") and product_code and not product_code.endswith("_F"):
+        return f"{product_code}_F"
+    return product_code
 
 
 def _contract_code_from_instrument_name(name: str) -> str | None:
@@ -1011,9 +1020,9 @@ def _contract_month_from_instrument_id(instrument_id: str, product_id: str) -> s
     product = str(product_id or "").strip().upper()
     if product and text.startswith(product):
         suffix = text[len(product):]
-        if suffix.isdigit():
+        if re.fullmatch(r"\d{3,4}[A-Z]*", suffix or ""):
             return suffix
-    match = re.search(r"(\d{3,4})$", text)
+    match = re.search(r"(\d{3,4}[A-Z]*)$", text)
     return match.group(1) if match else None
 
 
