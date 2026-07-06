@@ -79,6 +79,8 @@ def backtest(
     \b
     常用草稿命令:
       factortester backtest local-settings --allocation-mode equal_notional
+      factortester backtest local-settings --liquidity-mode infinite
+      factortester backtest local-settings --liquidity-mode volume_participation --participation-rate 0.02
       factortester backtest group --add --group-name A1 --split-count 5 --group-index 1 --factor-family SgCCS
       factortester backtest group --add --factor-family SgCCS --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
       factortester backtest group --add --factor-family SgCCS --factor add --param N=2m --param '$Rev=1'
@@ -88,6 +90,8 @@ def backtest(
       factortester backtest long-short --add --ls-name LS-A1-A5 --long-group A1 --short-group A5
       factortester backtest strategy-book ledger --strategy A1 --ledger shared --cash-pool pool-main
       factortester backtest ledger-config --ledger shared --fee-mode auto --margin-mode auto
+      factortester backtest ledger-config --ledger private:A1 --margin-mode none
+      factortester backtest compare volume-capacity-margin --volume-rate 0.02
       factortester backtest template --from-module-template single_factor_test load "2026-06-02 07:20:47"
       factortester backtest template save "CLI 草稿"
       factortester backtest clear
@@ -157,6 +161,9 @@ def local_settings(ctx: click.Context) -> None:
     state = load_state()
     _ensure_active_backtest_scope(state)
     args = tuple(ctx.args)
+    if not args or args[0] in {"show", "list", "ls"}:
+        _print_backtest_local_settings(state)
+        return
     show_help = _has_context_help(args)
     setting_args = _strip_context_help(args)
     if setting_args:
@@ -167,7 +174,44 @@ def local_settings(ctx: click.Context) -> None:
         return
     save_state(state)
     click.echo("已更新 local-settings")
-    print_backtest_welcome(state)
+    _print_backtest_local_settings(state, validate=False)
+
+
+@backtest.command("compare", context_settings=SELECTOR_HELP_CONTEXT)
+@click.option("--volume-rate", type=float, default=0.02, show_default=True, help="成交量容量限制场景的参与率。")
+@click.option("--verbose", is_flag=True, help="运行时打印完整 SSE 进度事件摘要。")
+@click.pass_context
+@friendly_errors
+def compare(ctx: click.Context, volume_rate: float, verbose: bool) -> None:
+    """在一次 backend run 中克隆当前草稿，批量对比关键执行/保证金场景。"""
+    state = load_state()
+    _ensure_active_backtest_scope(state)
+    args = tuple(ctx.args)
+    if not args or args[0] in {"help", "--help", "-h"}:
+        _print_backtest_compare_help()
+        return
+    preset = args[0]
+    if preset != "volume-capacity-margin":
+        raise click.ClickException("compare 暂只支持 preset: volume-capacity-margin")
+    if volume_rate <= 0:
+        raise click.ClickException("--volume-rate 必须大于 0")
+    payload, groups, ls_configs, scenarios = _volume_capacity_margin_compare_payload(
+        state,
+        volume_rate=volume_rate,
+    )
+    click.echo("批量对比场景:")
+    for scenario in scenarios:
+        click.echo(f"  {scenario['label']}: {scenario['description']}")
+    _run_backtest(
+        state,
+        groups=groups,
+        ls_configs=ls_configs,
+        payload=payload,
+        verbose=verbose,
+        title="批量对比回测",
+        show_topology=False,
+    )
+    _print_compare_result_summary(state, scenarios)
 
 
 @backtest.command("strategy-book", context_settings=SELECTOR_HELP_CONTEXT)
@@ -853,6 +897,40 @@ def _print_backtest_settings_help(state, *, values: dict[str, Any] | None = None
         click.echo(line)
 
 
+def _print_backtest_local_settings(state, *, validate: bool = True) -> None:
+    if validate:
+        _validate_registered_local_settings(state)
+    _, store = _stores_for_backtest(state)
+    click.echo("Backtest local-settings")
+    if state.backtest_local_settings:
+        for key in sorted(state.backtest_local_settings):
+            click.echo(f"  {key}: {state.backtest_local_settings[key]}")
+        rows = []
+        for key in sorted(state.backtest_local_settings):
+            meta = store.field(key)
+            rows.append((
+                field_flag(key),
+                str(meta.get("label") or key),
+                repr(state.backtest_local_settings.get(key)),
+                repr(store.effective(key)),
+            ))
+        for line in render_table(("字段", "名称", "显式值", "有效值"), rows, indent="  ", max_widths=(30, 18, 28, 34)):
+            click.echo(line)
+    else:
+        click.echo("  （无显式 local-settings；使用页面/后端注册默认值）")
+    focus = ("engine_mode", "liquidity_mode", "participation_rate", "margin_mode", "allocation_policy")
+    rows = []
+    for key in focus:
+        meta = store.field(key)
+        if meta:
+            rows.append((field_flag(key), str(meta.get("label") or key), repr(meta.get("value")), repr(store.effective(key))))
+    if rows:
+        click.echo("")
+        click.echo("关键有效字段")
+        for line in render_table(("字段", "名称", "默认值", "有效值"), rows, indent="  ", max_widths=(30, 18, 24, 34)):
+            click.echo(line)
+
+
 def _print_group_field_help(state, option: str, *, batch: bool = False) -> None:
     if option == "--add":
         _print_group_add_help()
@@ -1232,6 +1310,10 @@ def _apply_strategy_book_cash_pool(state, args: tuple[str, ...]) -> None:
 
 def _print_strategy_book(state) -> None:
     payload = _strategy_book_payload(state)
+    _print_strategy_book_payload(payload)
+
+
+def _print_strategy_book_payload(payload: dict[str, Any]) -> None:
     strategies = payload.get("strategies") or {}
     cash_pools = payload.get("cash_pools") or {}
     cash_pool_configs = payload.get("cash_pool_configs") or {}
@@ -1344,12 +1426,17 @@ def _strip_known_ledger_config_args(args: tuple[str, ...]) -> list[str]:
 
 def _print_ledger_configs(state) -> None:
     click.echo("Ledger configs")
-    if not state.backtest_ledger_configs:
+    _print_ledger_config_payload(state.backtest_ledger_configs)
+
+
+def _print_ledger_config_payload(configs: dict[str, Any]) -> None:
+    if not configs:
         click.echo("  （空；使用后端注册字段的默认/推断规则）")
         return
     rows = []
-    for ledger, config in state.backtest_ledger_configs.items():
-        summary = ", ".join(f"{key}={value}" for key, value in sorted(config.items()))
+    for ledger, config in configs.items():
+        config_map = config if isinstance(config, dict) else {}
+        summary = ", ".join(f"{key}={value}" for key, value in sorted(config_map.items()))
         rows.append((ledger, summary))
     for line in render_table(("ledger", "config"), rows, indent="  ", max_widths=(24, 90)):
         click.echo(line)
@@ -1404,21 +1491,231 @@ def _print_group(group: dict[str, Any]) -> None:
     click.echo(f"因子: {factor}")
 
 
-def _run_backtest(state, *, groups: list[dict[str, Any]], verbose: bool = False) -> None:
+def _print_backtest_compare_help() -> None:
+    click.echo("backtest compare 命令")
+    click.echo("  volume-capacity-margin [--volume-rate 0.02]")
+    click.echo("    在一次后端 run 中复制当前草稿为三套场景:")
+    click.echo("      1. 成交量容量=无限 / 保证金=关闭")
+    click.echo("      2. 成交量容量=成交量参与率 / 保证金=关闭")
+    click.echo("      3. 成交量容量=无限 / 保证金=auto")
+    click.echo("")
+    click.echo("示例:")
+    click.echo("  factortester backtest compare volume-capacity-margin --volume-rate 0.02")
+
+
+def _volume_capacity_margin_compare_payload(
+    state,
+    *,
+    volume_rate: float,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
+    if not state.backtest_groups:
+        raise click.ClickException("没有可对比的分组；请先加载模板或新增分组")
+    scenarios: list[dict[str, str]] = [
+        {
+            "key": "cap_inf_margin_none",
+            "label": "无限容量/无保证金",
+            "description": "liquidity_mode=infinite, margin_mode=none",
+        },
+        {
+            "key": "cap_limited_margin_none",
+            "label": f"容量{volume_rate:g}/无保证金",
+            "description": f"liquidity_mode=volume_participation, participation_rate={volume_rate:g}, margin_mode=none",
+        },
+        {
+            "key": "cap_inf_margin_auto",
+            "label": "无限容量/保证金auto",
+            "description": "liquidity_mode=infinite, margin_mode=auto",
+        },
+    ]
+    groups: list[dict[str, Any]] = []
+    ls_configs: list[dict[str, Any]] = []
+    ledger_configs: dict[str, dict[str, Any]] = {}
+    strategy_book: dict[str, Any] = {"strategies": {}, "cash_pools": {}}
+    for scenario in scenarios:
+        id_map = {
+            _draft_group_id(group): _scenario_strategy_id(scenario["key"], _draft_group_id(group))
+            for group in state.backtest_groups
+        }
+        for group in state.backtest_groups:
+            old_id = _draft_group_id(group)
+            new_id = id_map[old_id]
+            cloned = dict(group)
+            cloned["id"] = new_id
+            cloned["group_id"] = new_id
+            cloned["strategy_id"] = new_id
+            old_short = str(group.get("shortAlias") or group.get("short_alias") or group.get("name") or old_id)
+            cloned["shortAlias"] = f"{scenario['label']} · {old_short}"
+            cloned["name"] = f"{scenario['label']} · {group.get('name') or old_short}"
+            for parent_key in ("parentId", "parent_id"):
+                parent = str(cloned.get(parent_key) or "")
+                if parent in id_map:
+                    cloned[parent_key] = id_map[parent]
+            _apply_compare_scenario_settings(cloned, scenario["key"], volume_rate=volume_rate)
+            groups.append(cloned)
+            _register_compare_ledger(strategy_book, ledger_configs, new_id, scenario["key"])
+        for index, config in enumerate(state.backtest_ls_configs):
+            old_id = str(config.get("strategy_id") or config.get("id") or f"ls-{index}")
+            new_id = _scenario_strategy_id(scenario["key"], old_id)
+            cloned_ls = dict(config)
+            cloned_ls["id"] = new_id
+            cloned_ls["strategy_id"] = new_id
+            old_short = str(config.get("shortAlias") or config.get("name") or old_id)
+            cloned_ls["shortAlias"] = f"{scenario['label']} · {old_short}"
+            cloned_ls["name"] = f"{scenario['label']} · {config.get('name') or old_short}"
+            _remap_long_short_leg_ids(cloned_ls, id_map)
+            _apply_compare_scenario_settings(cloned_ls, scenario["key"], volume_rate=volume_rate)
+            ls_configs.append(cloned_ls)
+            _register_compare_ledger(strategy_book, ledger_configs, new_id, scenario["key"])
+    local_settings = dict(state.backtest_local_settings)
+    for key in ("liquidity_mode", "participation_rate", "margin_mode"):
+        local_settings.pop(key, None)
+    payload = {
+        "page_uuid": state.page_uuid,
+        "local_settings": local_settings,
+        "groups": groups,
+        "ls_configs": ls_configs,
+        "strategy_book": strategy_book,
+        "ledger_configs": ledger_configs,
+    }
+    return payload, groups, ls_configs, scenarios
+
+
+def _apply_compare_scenario_settings(target: dict[str, Any], scenario_key: str, *, volume_rate: float) -> None:
+    if scenario_key == "cap_limited_margin_none":
+        target["liquidity_mode"] = "volume_participation"
+        target["participation_rate"] = volume_rate
+        target["margin_mode"] = "none"
+    elif scenario_key == "cap_inf_margin_auto":
+        target["liquidity_mode"] = "infinite"
+        target.pop("participation_rate", None)
+        target["margin_mode"] = "auto"
+    else:
+        target["liquidity_mode"] = "infinite"
+        target.pop("participation_rate", None)
+        target["margin_mode"] = "none"
+    target["compare_scenario"] = scenario_key
+
+
+def _register_compare_ledger(
+    strategy_book: dict[str, Any],
+    ledger_configs: dict[str, dict[str, Any]],
+    strategy_id: str,
+    scenario_key: str,
+) -> None:
+    ledger_id = f"private:{strategy_id}"
+    strategy_book.setdefault("strategies", {})[strategy_id] = {
+        "ledger_ids": [ledger_id],
+        "default_ledger_id": ledger_id,
+    }
+    strategy_book.setdefault("cash_pools", {})[ledger_id] = ledger_id
+    ledger_configs[ledger_id] = {
+        "margin_mode": "auto" if scenario_key == "cap_inf_margin_auto" else "none",
+    }
+
+
+def _scenario_strategy_id(scenario_key: str, raw_id: str) -> str:
+    clean = str(raw_id).replace(":", "_").replace("/", "_").replace(" ", "_")
+    return f"cmp_{scenario_key}__{clean}"
+
+
+def _draft_group_id(group: dict[str, Any]) -> str:
+    group_id = str(group.get("id") or group.get("group_id") or group.get("strategy_id") or "").strip()
+    if not group_id:
+        raise click.ClickException(f"分组缺少 id: {group.get('name') or group}")
+    return group_id
+
+
+def _remap_long_short_leg_ids(config: dict[str, Any], id_map: dict[str, str]) -> None:
+    for key in ("longGroupId", "long_group_id", "shortGroupId", "short_group_id"):
+        value = str(config.get(key) or "")
+        if value in id_map:
+            config[key] = id_map[value]
+    for key in ("long", "short"):
+        legs = config.get(key)
+        if not isinstance(legs, list):
+            continue
+        remapped = []
+        for leg in legs:
+            if isinstance(leg, dict):
+                item = dict(leg)
+                for leg_key in ("group_id", "strategy_id", "id"):
+                    value = str(item.get(leg_key) or "")
+                    if value in id_map:
+                        item[leg_key] = id_map[value]
+                remapped.append(item)
+            else:
+                value = str(leg)
+                remapped.append(id_map.get(value, value))
+        config[key] = remapped
+
+
+def _print_compare_result_summary(state, scenarios: list[dict[str, str]]) -> None:
+    data = _require_last_result(state)
+    groups = [group for group in (data.get("groups") or []) if isinstance(group, dict)]
+    scenario_labels = [scenario["label"] for scenario in scenarios]
+    rows = []
+    for group in groups:
+        name = str(group.get("name") or group.get("group_id") or group.get("id") or "")
+        scenario_label = next((label for label in scenario_labels if name.startswith(f"{label} · ")), "")
+        if not scenario_label:
+            continue
+        base_name = name[len(scenario_label) + 3:]
+        curve = _group_equity_curve(group)
+        initial = curve[0] if curve else 0.0
+        final = curve[-1] if curve else 0.0
+        rows.append((
+            scenario_label,
+            base_name,
+            f"{final:,.2f}" if curve else "",
+            _pct(final / initial - 1.0) if initial else "",
+            len(curve),
+        ))
+    if not rows:
+        return
+    click.echo("")
+    click.echo("批量对比摘要")
+    for line in render_table(
+        ("场景", "策略", "最终权益", "收益率", "点数"),
+        rows,
+        indent="  ",
+        aligns=("left", "left", "right", "right", "right"),
+        max_widths=(22, 24, 16, 10, 8),
+    ):
+        click.echo(line)
+
+
+def _run_backtest(
+    state,
+    *,
+    groups: list[dict[str, Any]],
+    verbose: bool = False,
+    ls_configs: list[dict[str, Any]] | None = None,
+    payload: dict[str, Any] | None = None,
+    title: str = "回测",
+    show_topology: bool = True,
+) -> None:
     if not state.page_uuid:
         raise click.ClickException("缺少 page_uuid；请先运行 factortester login 以创建页面上下文")
     if not groups:
         raise click.ClickException("没有可运行的分组；请先用 factortester group --add 新增分组")
-    payload = _run_payload(state, groups=groups)
-    click.echo(f"开始运行回测: groups={len(groups)}, long-short={len(state.backtest_ls_configs)}")
-    _print_run_strategy_info(groups, state.backtest_ls_configs)
-    if state.backtest_strategy_book:
-        _print_strategy_book(state)
-    if state.backtest_ledger_configs:
-        _print_ledger_configs(state)
+    display_ls_configs = ls_configs if ls_configs is not None else state.backtest_ls_configs
+    run_payload = payload or _run_payload(state, groups=groups)
+    click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
+    _print_run_strategy_info(groups, display_ls_configs)
+    payload_strategy_book = run_payload.get("strategy_book")
+    payload_ledger_configs = run_payload.get("ledger_configs")
+    if show_topology:
+        if state.backtest_strategy_book and payload is None:
+            _print_strategy_book(state)
+        elif isinstance(payload_strategy_book, dict) and payload_strategy_book:
+            _print_strategy_book_payload(payload_strategy_book)
+        if state.backtest_ledger_configs and payload is None:
+            _print_ledger_configs(state)
+        elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
+            _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
-    for event in client.run_group_test_stream(payload):
+    for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
         if event_name == "error":

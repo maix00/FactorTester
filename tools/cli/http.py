@@ -16,6 +16,8 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 DEFAULT_HOME = Path.home() / ".factortester"
 CONFIG_ENV = "FACTORTESTER_CONFIG"
 HOME_ENV = "FACTORTESTER_HOME"
+STREAM_TIMEOUT_ENV = "FACTORTESTER_STREAM_TIMEOUT"
+DEFAULT_STREAM_TIMEOUT = 600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +121,7 @@ class HttpSession:
             method="POST",
         )
         try:
-            with self._opener.open(request, timeout=self.timeout) as response:
+            with self._opener.open(request, timeout=self._stream_timeout()) as response:
                 event_name = "message"
                 data_lines: list[str] = []
                 for raw_line in response:
@@ -203,6 +205,15 @@ class HttpSession:
         cookie_file = Path(self.cookie_jar.filename)
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
+
+    def _stream_timeout(self) -> float:
+        raw = os.environ.get(STREAM_TIMEOUT_ENV)
+        if raw:
+            try:
+                return max(float(raw), self.timeout)
+            except ValueError:
+                return DEFAULT_STREAM_TIMEOUT
+        return max(DEFAULT_STREAM_TIMEOUT, self.timeout)
 
 
 def _looks_like_html(raw: str) -> bool:
