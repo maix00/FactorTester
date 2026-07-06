@@ -304,6 +304,67 @@ def test_field_history_contract_specific_rule_overrides_product_level_rule() -> 
     assert contract_value.contract_code == "2606"
 
 
+def test_field_history_pipe_contract_with_alpha_suffix_uses_product_baseline() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "L_F",
+            "instrument_type": "future",
+            "field_name": "VolumeMultiple",
+            "effective_trading_day": "1900-01-01",
+            "value": 5,
+            "contract_codes": [],
+        },
+    ])
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 09:01:00"): pd.Timestamp("2026-01-05"),
+    })
+
+    resolved = provider.resolve_at(
+        "DCE|F|L|2605F",
+        "VolumeMultiple",
+        pd.Timestamp("2026-01-05 09:01:00"),
+        trading_day_resolver=resolver,
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert resolved.value == 5
+    assert resolved.instrument == "L_F"
+    assert resolved.contract_code == "2605F"
+
+
+def test_field_history_pipe_contract_with_alpha_suffix_prefers_exact_contract_rule() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "L_F",
+            "instrument_type": "future",
+            "field_name": "VolumeMultiple",
+            "effective_trading_day": "1900-01-01",
+            "value": 5,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/rules",
+            "instrument": "L_F",
+            "instrument_type": "future",
+            "field_name": "VolumeMultiple",
+            "effective_trading_day": "2026-01-01",
+            "value": 50,
+            "contract_codes": ["2605F"],
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("DCE|F|L|2605F", "VolumeMultiple", "2026-01-05")
+
+    assert resolved.value == 50
+    assert resolved.instrument == "L_F"
+    assert resolved.contract_code == "2605F"
+
+
 def test_field_history_open_ended_baseline_applies_before_source_snapshot() -> None:
     provider = FieldHistoryProvider.from_records([
         {
