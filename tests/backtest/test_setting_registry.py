@@ -93,8 +93,10 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "margin_mode": ["fixed", "auto", "exact", "custom"],
     }
     assert index["defaults"]["margin_mode"]["value"] == "auto"
+    assert index["defaults"]["margin_mode"]["label"] == "保证金模式"
+    assert index["defaults"]["margin_mode"]["chip_template"] == "保证金模式: {value}"
     assert index["defaults"]["margin_mode"]["editable_when"] == {
-        "engine_mode": ["custom"],
+        "engine_mode": ["auto", "custom"],
     }
     assert index["defaults"]["margin_mode"]["default_when"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
@@ -174,7 +176,9 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "product_mask",
     }
     assert [setting["key"] for setting in engine_tab["settings"]] == [
-        "engine", "engine_mode", "counterparty_profile", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
+        "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
+        "custom_product_fields",
     ]
     executable_public_fields = {
         key
@@ -398,7 +402,9 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     assert "settings" not in index.get_json()
     assert tab.status_code == 200
     assert [setting["key"] for setting in tab.get_json()["settings"]] == [
-        "engine", "engine_mode", "counterparty_profile", "historical_field_policy", "equity_compute_live", "custom_product_fields",
+        "engine", "engine_mode", "counterparty_profile", "bar_open_visibility_delay",
+        "bar_end_visibility_delay", "historical_field_policy", "equity_compute_live",
+        "custom_product_fields",
     ]
     assert missing.status_code == 404
 

@@ -98,8 +98,8 @@ def run_target_weights(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"engine": "qlib", "portfolios": portfolios}
 
 
-def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
-    """Event-driven group replay through Qlib's Position/Order lifecycle.
+def run_strategy_intents(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    """Event-driven strategy-intent replay through Qlib's Position/Order lifecycle.
 
     Per bar: mark held stocks to market on the Qlib Position, execute due
     targets as Qlib Orders applied via ``position.update_order`` (see
@@ -266,6 +266,10 @@ def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, A
         "event_count": len(request.timestamps),
         "signal_kind": payload.get("signal_kind"),
     }
+
+
+def run_group_strategy(payload: Mapping[str, Any], progress=None) -> dict[str, Any]:
+    return run_strategy_intents(payload, progress=progress)
 
 
 def _rebalance(

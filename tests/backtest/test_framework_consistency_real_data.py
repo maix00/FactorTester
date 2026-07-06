@@ -12,6 +12,7 @@ hermetic unit, test).
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import pandas as pd
 import pytest
@@ -22,6 +23,7 @@ from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowRegi
 from tools.testers.backtest.engines.native.strategy_config_builder import apply_strategy_configs
 from tools.testers.backtest.engines.workers.bridge import run_framework_backtest_task
 from tools.testers.backtest.engines.workers.contracts import WorkerResponse
+from tools.testers.backtest.engines.workers.dispatcher import EngineWorkerDispatcher
 from tools.testers.backtest.engines.workers.runners.reference import (
     run_group_strategy as reference_run_group_strategy,
 )
@@ -153,7 +155,7 @@ def _native_curves(products):
     return equity, position_curve_for(run_state, strategy)
 
 
-def _bridge_curves(products, engine="backtrader"):
+def _bridge_curves(products, engine="backtrader", dispatcher=None):
     run_state, settings = _real_scenario(engine, products)
     execution = run_framework_backtest_task(
         _State(),
@@ -162,7 +164,8 @@ def _bridge_curves(products, engine="backtrader"):
         group_owner=[{"group_id": "G1"}],
         settings_by_strategy=settings,
         run_id="real-data-consistency",
-        dispatcher=_InProcessReferenceDispatcher(),
+        dispatcher=dispatcher or _InProcessReferenceDispatcher(),
+        timeout_seconds=120.0,
     )
     portfolio = execution["engine_result"]["portfolios"]["G1"]
     return dict(portfolio["equity_curve"]), dict(portfolio["position_curve"])
@@ -222,3 +225,68 @@ def test_native_and_worker_agree_on_real_price_positions():
         f"{len(boundary_mismatches)}/{len(shared)} points diverged by >1 lot: "
         f"{boundary_mismatches[:5]}"
     )
+
+
+def test_native_and_external_framework_workers_agree_on_real_price_bridge(record_property):
+    """Production bridge + real framework subprocesses on real daily bars.
+
+    The earlier tests isolate either native-vs-reference semantics or direct
+    worker payload parity. This one keeps the production bridge in the loop and
+    dispatches to each framework worker process, while recording wall-clock
+    timings so native/reference/framework speed can be compared over time.
+    """
+    products = _shared_products()
+    timings: dict[str, float] = {}
+
+    started = time.perf_counter()
+    native_equity, native_positions = _native_curves(products)
+    timings["native"] = time.perf_counter() - started
+
+    dispatcher = EngineWorkerDispatcher()
+    framework_results = {}
+    for engine in ("backtrader", "qlib", "zipline"):
+        started = time.perf_counter()
+        framework_results[engine] = _bridge_curves(products, engine=engine, dispatcher=dispatcher)
+        timings[engine] = time.perf_counter() - started
+
+    record_property("real_bridge_framework_timings_seconds", {
+        engine: round(elapsed, 6) for engine, elapsed in timings.items()
+    })
+
+    assert native_equity and native_positions
+    for engine, (framework_equity, framework_positions) in framework_results.items():
+        shared_equity = sorted(set(native_equity) & set(framework_equity))
+        assert len(shared_equity) >= 10, f"{engine}: too few shared timestamps"
+        diffs = {ts: abs(native_equity[ts] - framework_equity[ts]) for ts in shared_equity}
+        max_ts, max_diff = max(diffs.items(), key=lambda kv: kv[1])
+        assert max_diff / native_equity[max_ts] < 0.01, (
+            f"{engine}: equity diverges at {max_ts}: "
+            f"native={native_equity[max_ts]} framework={framework_equity[max_ts]}"
+        )
+
+        shared_positions = sorted(set(native_positions) & set(framework_positions))
+        assert len(shared_positions) >= 10, f"{engine}: too few position timestamps"
+        boundary_mismatches = []
+        for ts in shared_positions:
+            native_row = {
+                str(k): float(v)
+                for k, v in native_positions[ts].items()
+                if abs(float(v)) > 1e-9
+            }
+            framework_row = {
+                str(k): float(v)
+                for k, v in framework_positions[ts].items()
+                if abs(float(v)) > 1e-9
+            }
+            if native_row.keys() != framework_row.keys():
+                boundary_mismatches.append((ts, native_row, framework_row))
+                continue
+            for instrument, native_qty in native_row.items():
+                if abs(native_qty - framework_row[instrument]) > 1.0 + 1e-6:
+                    boundary_mismatches.append((ts, native_row, framework_row))
+                    break
+        assert len(boundary_mismatches) <= 2, (
+            f"{engine}: more than isolated lot-boundary differences: "
+            f"{len(boundary_mismatches)}/{len(shared_positions)}; "
+            f"{boundary_mismatches[:5]}"
+        )

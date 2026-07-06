@@ -7,6 +7,7 @@ from tools.testers.backtest.engines.native.strategy_config_builder import (
 )
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule
+from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.settings.counterparty import (
@@ -55,6 +56,32 @@ def test_counterparty_profile_resolves_to_ledger_config_not_strategy_config():
     assert config.get(FeeModule.fee_mode, None) is None
     assert config.get(MarginModule.margin_mode, None) is None
     assert config.get(TradingRuleModule.accounting_mode, None) is None
+
+
+def test_explicit_margin_close_keeps_chip_value_and_skips_margin_flows():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "auto", "margin_mode": "none", **_GROUP_FIELDS}},
+        counterparty="exchange_base",
+    )
+
+    ledger_id = next(iter(account.ledger_configs))
+    ledger_config = account.ledger_config_for(ledger_id)
+    assert ledger_config.margin_mode == "none"
+    assert ledger_config.cost_basis_method is None
+
+    config = next(iter(account.strategy_configs.values()))
+    assert not config.uses_flow("register_margin_check_notices")
+    assert not config.uses_flow("apply_margin_requirement_change")
+    assert not config.uses_flow("handle_margin_liquidation_notice")
+    fields = set(_required_market_rule_field_names(account))
+    assert not {
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
+    } & fields
 
 
 def test_build_strategy_configs_does_not_materialize_ledger_owned_fields():

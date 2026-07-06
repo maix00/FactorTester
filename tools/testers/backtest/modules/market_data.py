@@ -1298,7 +1298,7 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
             fields.extend(("SettlementPrice", "PreSettlementPrice", "LastSettlementPrice", "MoneyCalculationPolicy"))
         margin_mode = _resolve_margin_mode(config, ledger_config)
         allocation = str(config.get(allocation_ref, "") or "")
-        if margin_mode not in {"none", "zero"} or allocation == "equal_margin":
+        if margin_mode not in {"none", "zero"}:
             fields.extend(_MARGIN_FIELD_NAMES)
     return tuple(dict.fromkeys(fields))
 
