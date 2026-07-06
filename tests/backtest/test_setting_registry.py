@@ -460,7 +460,7 @@ def test_local_settings_supplies_run_defaults_without_flat_frontend_values() -> 
     assert settings["start_time"] == "09:00"
     assert settings["end_time"] == "15:00"
     assert settings["initial_capital_major"] == 100_000_000.0
-    assert settings["allocation_policy"] == "inverse_volatility"
+    assert settings["allocation_policy"] == "equal_notional"
 
 
 def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> None:
@@ -481,8 +481,8 @@ def test_sparse_run_reports_silent_strategy_defaults_for_frontend_notice() -> No
     defaults = _silent_default_settings_for_run(payload, groups, [], resolved)
 
     by_key = {item["setting_key"]: item for item in defaults}
-    assert by_key["allocation_policy"]["value"] == "inverse_volatility"
-    assert by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
+    assert by_key["allocation_policy"]["value"] == "equal_notional"
+    assert by_key["allocation_policy"]["value_label"] == "等市值"
     assert "execution_timing" not in by_key
     assert "execution_price_basis" not in by_key
 

@@ -42,7 +42,7 @@ global.fetch = () => Promise.resolve({
       time_precision: { key: 'time_precision', value: 'exact', tab_key: 'time', scope_policy: 'overridable' },
       calendar_frequency: { key: 'calendar_frequency', value: 'auto', tab_key: 'calendar', scope_policy: 'local_only' },
       initial_capital: { key: 'initial_capital', value: 100000000, tab_key: 'capital', scope_policy: 'overridable' },
-      allocation_policy: { key: 'allocation_policy', value: 'inverse_volatility', tab_key: 'target_allocation', scope_policy: 'overridable' },
+      allocation_policy: { key: 'allocation_policy', value: 'equal_notional', tab_key: 'target_allocation', scope_policy: 'overridable' },
       fee_mode: {
         key: 'fee_mode',
         value: 'auto',

@@ -387,8 +387,8 @@ def test_live_sgccs_template_equal_notional_and_equal_risk_diverge_on_real_data(
         item["setting_key"]: item
         for item in default_body.get("silent_default_settings") or []
     }
-    assert defaults_by_key["allocation_policy"]["value"] == "inverse_volatility"
-    assert defaults_by_key["allocation_policy"]["value_label"] == "等风险（波动率倒数）"
+    assert defaults_by_key["allocation_policy"]["value"] == "equal_notional"
+    assert defaults_by_key["allocation_policy"]["value_label"] == "等市值"
 
     body_by_profile = {}
     for name, overrides in profiles.items():
