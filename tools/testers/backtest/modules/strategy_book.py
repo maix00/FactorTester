@@ -413,9 +413,11 @@ def apply_order_sizing_policy(
     deltas: dict[Any, float],
 ) -> dict[Any, float]:
     policy = strategy_book_store_for(state).policies.order_sizing
-    if policy is None:
-        return deltas
-    return policy(state, ctx, strategy, deltas)
+    if policy is not None:
+        return policy(state, ctx, strategy, deltas)
+    from tools.testers.backtest.modules.volume_capacity import apply_volume_capacity_policy
+
+    return apply_volume_capacity_policy(state, ctx, strategy, deltas)
 
 
 def apply_pending_order_conflict_policy(

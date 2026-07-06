@@ -25,6 +25,7 @@ from tools.testers.backtest.modules.market_data import (
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
 from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
@@ -57,6 +58,9 @@ class OrderConstructModule(ExecutableModule):
         inputs=(TargetStrategyModule.trade_intent, _TARGET_WEIGHTS_REF, LedgerModule.equity,
                  MarketDataModule.current_prices, MarketDataModule.current_historical_fields,
                  MarketDataModule.current_tradable_status,
+                 MarketDataModule.volume,
+                 VolumeCapacityMode.liquidity_mode,
+                 VolumeCapacityMode.participation_rate,
                  LedgerModule.positions),
         outputs=(raw_deltas,), phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL,
         order=20, after=(LedgerModule.equity_on_signal,),

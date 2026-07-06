@@ -19,7 +19,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation", "rebalance_trigger",
-        "position_policy", "group_strategy", "cost", "order", "liquidity", "strategy_book", "margin",
+        "position_policy", "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["default_mounted_tabs"] == {
@@ -30,7 +30,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
         "engine", "factor", "product_path_selection", "data_source", "frequency",
         "delivery_force_close", "time", "rollover", "capital", "target_allocation",
         "rebalance_trigger", "position_policy",
-        "group_strategy", "cost", "order", "liquidity", "strategy_book", "margin",
+        "group_strategy", "cost", "order", "volume_capacity", "strategy_book", "margin",
         "accounting", "calendar",
     ]
     assert index["defaults"]["engine"]["value"] == "native"
