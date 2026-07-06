@@ -188,7 +188,7 @@ const indexManifest = {
       options: [],
     },
     allocation_policy: {
-      value: 'inverse_volatility',
+      value: 'equal_notional',
       tab_key: 'target_allocation',
       scope_policy: 'overridable',
       chip_template: '分配: {value}',

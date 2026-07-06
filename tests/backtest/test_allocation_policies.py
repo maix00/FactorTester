@@ -11,7 +11,7 @@ from tools.testers.backtest.engines.strategies.allocation import (
 )
 
 
-def test_inverse_volatility_is_default_equal_risk_semantics_not_margin_weighting() -> None:
+def test_inverse_volatility_is_equal_risk_semantics_not_margin_weighting() -> None:
     inputs = AllocationInput(
         instruments=("A", "B"),
         selected=np.array([True, True]),

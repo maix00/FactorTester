@@ -118,7 +118,7 @@ class GroupMembershipModule(TargetStrategyModule):
             chip_template="调仓: {value}", tab_label="调仓触发", tab_order=70,
         ),
         "allocation_policy": FieldDefinition(
-            public=True, label="分配", default="inverse_volatility", control_template="select", tab="target_allocation",
+            public=True, label="分配", default="equal_notional", control_template="select", tab="target_allocation",
             options=(("equal_notional", "等市值"), ("inverse_volatility", "等风险（波动率倒数）"), ("equal_margin", "等保证金（对照）")),
             chip_template="分配: {value}", tab_label="目标分配", tab_order=60,
         ),
