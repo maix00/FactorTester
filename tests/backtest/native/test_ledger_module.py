@@ -709,6 +709,7 @@ def test_ledger_session_policy_auto_split_routes_products_to_session_ledgers():
         "strategies": {s.alias: "shared-book"},
         "cash_pools": {"shared-book": "main-cash"},
     }), {s.alias: s})
+    strategy_book_store_for(account).policies.cash_availability = lambda _state, _ledger, cash, _reason: cash
     account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(margin_mode="none")
     ctx = FlowContext(timestamp=None, event_queue=EventQueue())
     ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
@@ -731,6 +732,32 @@ def test_ledger_session_policy_auto_split_routes_products_to_session_ledgers():
     assert account.ledger_for(night_order).ledger.name == "shared-book@session:night"
     assert account.ledger_config_for("shared-book@session:day").margin_mode == "none"
     assert account.runtime_info_rows[-1]["code"] == "ledger_session_auto_split"
+
+
+def test_ledger_session_policy_auto_split_requires_custom_shared_cash_policy():
+    s = Strategy(alias="S")
+    p_day = _product()
+    p_night = _product()
+    p_day.trading_session_signature = "day"
+    p_night.trading_session_signature = "night"
+    configs = {
+        s: _strategy_config(
+            s,
+            engine_mode="custom",
+            margin_mode="none",
+            ledger_session_policy="auto_split",
+        ),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {s.alias: "shared-book"},
+        "cash_pools": {"shared-book": "main-cash"},
+    }), {s.alias: s})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
+
+    with pytest.raises(ValueError, match="no default inactive-ledger cash allocation policy"):
+        _apply_ledger_session_policy(account, ctx)
 
 
 def test_ledger_session_policy_auto_split_requires_single_source_ledger():

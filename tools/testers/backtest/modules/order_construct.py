@@ -23,7 +23,11 @@ from tools.testers.backtest.modules.market_data import (
     market_data_store_for,
 )
 from tools.testers.backtest.modules.order_flow import order_flow_store_for
-from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy
+from tools.testers.backtest.modules.strategy_book import (
+    apply_order_sizing_policy,
+    ledger_for_strategy_product,
+    positions_for_strategy_ledgers,
+)
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 
@@ -98,14 +102,13 @@ def _basic_size_order(state, ctx) -> None:
             continue
         prices = ctx.get(MarketDataModule.current_prices)
         tradable_status = ctx.get(MarketDataModule.current_tradable_status, None)
-        ledger = state.ledger_for_strategy(strategy)
         equity = ctx.get_for(LedgerModule.equity, strategy)
         historical_fields = ctx.get_for(
             MarketDataModule.current_historical_fields,
             strategy,
             ctx.get(MarketDataModule.current_historical_fields, {}),
         )
-        positions = ledger.get(LedgerModule.positions, {})
+        positions = positions_for_strategy_ledgers(state, strategy)
         target_weights = dict(intent.weights)
         # Must cover every currently-held product, not just target_weights'
         # keys -- a product that dropped out of the target (e.g. fell out
@@ -122,9 +125,11 @@ def _basic_size_order(state, ctx) -> None:
             if price is None:
                 _record_untradable_target_skip(state, strategy, product, ctx.timestamp)
                 continue
+            ledger = ledger_for_strategy_product(state, strategy, product)
+            ledger_positions = ledger.get(LedgerModule.positions, {})
             multiplier = contract_multiplier_from_fields(historical_fields, product, state=state, timestamp=ctx.timestamp)
             target_quantity = target_weights.get(product, 0.0) * equity / (float(price) * multiplier)
-            deltas[product] = target_quantity - getattr(positions.get(product), "quantity", 0.0)
+            deltas[product] = target_quantity - getattr(ledger_positions.get(product), "quantity", 0.0)
         deltas = apply_order_sizing_policy(state, ctx, strategy, deltas)
         ctx.set_for(OrderConstructModule.raw_deltas, strategy, deltas)
 

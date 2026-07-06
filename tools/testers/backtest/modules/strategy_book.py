@@ -446,6 +446,44 @@ def assign_ledger_for_strategy(
     return store.ledger_for_order(state, order)
 
 
+def ledger_for_strategy_product(state: object, strategy: object, product: object) -> object:
+    store = strategy_book_store_for(state)
+    ledger_key = store.product_ledger_by_strategy.get(
+        (strategy, product),
+        store.default_ledger_for_strategy(state, strategy),
+    )
+    ledgers = getattr(state, "ledgers", None)
+    if isinstance(ledgers, dict):
+        ledger_state = ledgers.get(ledger_key)
+        if ledger_state is None:
+            ledger_state = ledgers.get(strategy)
+        if ledger_state is None:
+            empty_factory = getattr(state, "_empty_ledger_for", None)
+            if not callable(empty_factory):
+                return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+            ledger_state = empty_factory(strategy, ledger_key)
+            ledgers[ledger_key] = ledger_state
+        return ledger_state
+    return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+
+
+def positions_for_strategy_ledgers(state: object, strategy: object) -> dict[Any, Any]:
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    store = strategy_book_store_for(state)
+    positions: dict[Any, Any] = {}
+    ledgers = getattr(state, "ledgers", {})
+    for ledger_key in store.ledgers_for_strategy(state, strategy):
+        ledger_state = ledgers.get(ledger_key) if isinstance(ledgers, dict) else None
+        if ledger_state is None:
+            continue
+        positions.update(ledger_state.get(LedgerModule.positions, {}) or {})
+    if not positions:
+        ledger_state = state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+        positions.update(ledger_state.get(LedgerModule.positions, {}) or {})
+    return positions
+
+
 def _apply_ledger_session_policy(state: object, ctx: object) -> None:
     store = strategy_book_store_for(state)
     for strategy in getattr(state, "strategy_configs", {}):
@@ -459,6 +497,7 @@ def _apply_ledger_session_policy(state: object, ctx: object) -> None:
             raise ValueError(_mixed_ledger_session_message(strategy, store.default_ledger_for_strategy(state, strategy), groups))
         if mode == "auto_split":
             _auto_split_strategy_ledger_by_session(state, store, strategy, groups)
+            _validate_shared_cash_pool_requires_custom_policy(state, store, strategy)
             continue
         if mode == "custom":
             raise ValueError(
@@ -466,6 +505,9 @@ def _apply_ledger_session_policy(state: object, ctx: object) -> None:
                 "none is registered"
             )
         raise ValueError(f"unsupported ledger_session_policy: {mode!r}")
+
+    for strategy in getattr(state, "strategy_configs", {}):
+        _validate_shared_cash_pool_requires_custom_policy(state, store, strategy)
 
 
 def _products_by_session_signature(products: Sequence[Any]) -> dict[str, list[Any]]:
@@ -527,6 +569,30 @@ def _auto_split_strategy_ledger_by_session(
     store.ledgers_by_strategy[strategy] = children
     store._default_ledger_by_strategy[strategy] = next(iter(sorted(children, key=lambda ledger: ledger.name)))
     _record_ledger_auto_split_runtime_info(state, strategy, original, pool_id, groups, children)
+
+
+def _validate_shared_cash_pool_requires_custom_policy(
+    state: object,
+    store: StrategyBookStore,
+    strategy: object,
+) -> None:
+    ledgers = store.ledgers_for_strategy(state, strategy)
+    if len(ledgers) <= 1:
+        return
+    pool_counts: dict[str, int] = {}
+    for ledger in ledgers:
+        pool_id = store.cash_pool_for_ledger(ledger)
+        pool_counts[pool_id] = pool_counts.get(pool_id, 0) + 1
+    shared_pools = sorted(pool_id for pool_id, count in pool_counts.items() if count > 1)
+    if not shared_pools:
+        return
+    if store.policies.cash_availability is not None or store.policies.order_sizing is not None:
+        return
+    raise ValueError(
+        f"strategy {_strategy_alias(strategy)!r} routes multiple ledgers through shared cash pool(s) "
+        f"{shared_pools}. Native has no default inactive-ledger cash allocation policy; "
+        "register a custom StrategyBook cash_availability/order_sizing policy or use separate cash pools."
+    )
 
 
 def _copy_ledger_config(state: object, source: Ledger, target: Ledger) -> None:

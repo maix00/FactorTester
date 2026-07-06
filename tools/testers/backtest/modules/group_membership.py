@@ -35,6 +35,7 @@ from tools.testers.backtest.modules.market_data import (
     current_prices_at,
     historical_fields_for_product,
     is_product_tradable,
+    market_price_tables_for,
     resolved_bar_frequency_for_strategy,
     _historical_fields_for_strategy,
 )
@@ -800,7 +801,7 @@ def _rolling_volatility_table(state, table: pd.DataFrame, lookback: int) -> pd.D
     return vol_table
 
 
-def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+def _resolve_execution_schedule(state, ctx, strategy, product: Any | None = None) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     if ctx.timestamp is None:
         raise ValueError("execution scheduling requires an event timestamp")
     current_ts = cast(pd.Timestamp, ctx.timestamp)
@@ -812,16 +813,23 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
     if basis != "open":
         raise ValueError("order execution is fixed to next-bar open")
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
-    table = current_prices_table_for(state)
+    table = _execution_schedule_table(state, basis)
     if table is None:
         return current_ts, current_ts
     bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
     freq_key = getattr(bar_freq, "name", str(bar_freq)) if bar_freq is not None else None
-    cache_key = (pd.Timestamp(current_ts).value, str(current_ts.tz), int(delay or 1), basis, freq_key, id(table))
+    product_key = str(getattr(product, "name", product)) if product is not None else None
+    cache_key = (pd.Timestamp(current_ts).value, str(current_ts.tz), int(delay or 1), basis, freq_key, id(table), product_key)
     if cache_key in state.target_store.execution_schedule_cache:
         return state.target_store.execution_schedule_cache[cache_key]
-    index = signal_timestamps(table)
+    index = _execution_schedule_index(table, product)
+    if len(index) == 0:
+        state.target_store.execution_schedule_cache[cache_key] = None
+        return None
     pos = index.get_indexer(pd.Index([current_ts]), method="bfill")[0]
+    if pos < 0:
+        state.target_store.execution_schedule_cache[cache_key] = None
+        return None
     delay = max(int(delay or 1), 1)
     price_pos = pos + delay
     if price_pos >= len(index):
@@ -832,6 +840,23 @@ def _resolve_execution_schedule(state, ctx, strategy) -> tuple[pd.Timestamp, pd.
     schedule = (event_ts, price_ts)
     state.target_store.execution_schedule_cache[cache_key] = schedule
     return schedule
+
+
+def _execution_schedule_table(state, basis: str):
+    tables = market_price_tables_for(state)
+    table = tables.get(basis) if isinstance(tables, dict) else None
+    if isinstance(table, pd.DataFrame) and not table.empty:
+        return table
+    return current_prices_table_for(state)
+
+
+def _execution_schedule_index(table: pd.DataFrame, product: Any | None) -> pd.DatetimeIndex:
+    if product is None or product not in table.columns:
+        return signal_timestamps(table)
+    series = table[product].dropna()
+    if series.empty:
+        return pd.DatetimeIndex([])
+    return signal_timestamps(series)
 
 
 def _resolve_execution_timestamp(state, ctx, strategy) -> pd.Timestamp:
@@ -850,11 +875,11 @@ def _schedule_order_execution(state, ctx) -> None:
     drafts: list[EventDraft] = []
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
-        schedule = _resolve_execution_schedule(state, ctx, strategy)
-        if schedule is None:
-            continue
-        execution_ts, price_ts = schedule
         for order in orders:
+            schedule = _resolve_execution_schedule(state, ctx, strategy, order.instrument)
+            if schedule is None:
+                continue
+            execution_ts, price_ts = schedule
             key = (strategy, order.instrument)
             if pending_conflict_policy is not None:
                 pending_conflict_policy(state, strategy, order, ctx.timestamp)
