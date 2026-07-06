@@ -7,7 +7,10 @@ adapter maps that public command to the backend group-test application.
 
 from __future__ import annotations
 
+import contextlib
+import io
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import click
@@ -263,35 +266,47 @@ def results(ctx: click.Context) -> None:
       factortester backtest results ranking
       factortester backtest results snapshot --index 1
       factortester backtest results order-flow --group-name A1
+
+    所有 results 子命令都支持:
+      --output PATH     同时写入文件
+      --no-terminal    只写文件，不打印到终端
+      --append         追加写入文件
     """
     state = load_state()
-    args = tuple(ctx.args)
+    output_options, args = _parse_result_output_options(tuple(ctx.args))
     if not args or args[0] in {"help", "--help", "-h"}:
         _print_results_help()
         return
     action = args[0]
-    if action == "summary":
-        _print_stored_result_summary(state)
-        return
-    if action == "equity":
-        _print_stored_equity_chart(state)
-        return
-    if action in {"attribution", "attr"}:
-        _print_attribution_result(state, args[1:])
-        return
-    if action == "detail":
-        _print_group_detail_result(state, args[1:])
-        return
-    if action in {"ranking", "rank"}:
-        _print_group_ranking_result(state, args[1:])
-        return
-    if action == "snapshot":
-        _print_snapshot_result(state, args[1:])
-        return
-    if action in {"order-flow", "orders"}:
-        _print_order_flow_result(state, args[1:])
-        return
-    raise click.ClickException("results 支持: summary, equity, attribution, detail, ranking, snapshot, order-flow")
+
+    def dispatch() -> None:
+        if action == "summary":
+            _print_stored_result_summary(state)
+            return
+        if action == "equity":
+            _print_stored_equity_chart(state)
+            return
+        if action in {"attribution", "attr"}:
+            _print_attribution_result(state, args[1:])
+            return
+        if action in {"ledgers", "ledger", "cash-pools", "cash-pool"}:
+            _print_ledger_replay_result(state, args[1:])
+            return
+        if action == "detail":
+            _print_group_detail_result(state, args[1:])
+            return
+        if action in {"ranking", "rank"}:
+            _print_group_ranking_result(state, args[1:])
+            return
+        if action == "snapshot":
+            _print_snapshot_result(state, args[1:])
+            return
+        if action in {"order-flow", "orders"}:
+            _print_order_flow_result(state, args[1:])
+            return
+        raise click.ClickException("results 支持: summary, equity, attribution, ledgers, detail, ranking, snapshot, order-flow")
+
+    _emit_result_output(output_options, dispatch)
 
 
 def _print_backtest_template_help(state) -> None:
@@ -1440,8 +1455,9 @@ def _print_results_help() -> None:
     click.echo("  summary                         最近一次运行的统计表格")
     click.echo("  equity                          最近一次运行的多策略净值图")
     click.echo("  attribution [--group-name NAME]  归因摘要: gross / fee / net / final")
-    click.echo("    --by product                  按产品/合约聚合手续费")
+    click.echo("    --by product|ledger|cash-pool 按产品/账本/资金池聚合手续费")
     click.echo("    --top N                       聚合表显示前 N 行(默认10)")
+    click.echo("  ledgers [--group-name NAME]      按 ledger/cash pool 汇总成交落账回放")
     click.echo("  detail --group-name NAME         查看 web 组内 overlay 的贡献/费率摘要")
     click.echo("    --level product|contract      产品或合约层级(默认product)")
     click.echo("  ranking                          查看分组排序能力摘要")
@@ -1449,9 +1465,75 @@ def _print_results_help() -> None:
     click.echo("  snapshot --timestamp-ms MS      查看指定 epoch 毫秒附近的快照")
     click.echo("  order-flow [--group-name NAME]  查看订单流明细(时间/品种/数量/成交价/状态)")
     click.echo("    --show fee                    显示 fee_cost / cash / margin 诊断列")
+    click.echo("    --ledger ID                   只显示指定账本的记录")
+    click.echo("    --cash-pool ID                只显示指定资金池的记录")
     click.echo("    --order-id ID                 只看某笔订单的完整生命周期")
     click.echo("    --limit N                     每个策略最多显示的记录数(默认20, 0=全部)")
     click.echo("    --counts-only                 只显示记录条数，不展开明细")
+    click.echo("")
+    click.echo("输出选项（所有 results 子命令通用）:")
+    click.echo("  --output PATH                   写入文件")
+    click.echo("  --no-terminal                   不打印到终端，仅写文件")
+    click.echo("  --append                        追加写入文件而不是覆盖")
+
+
+def _parse_result_output_options(args: tuple[str, ...]) -> tuple[dict[str, Any], tuple[str, ...]]:
+    options: dict[str, Any] = {
+        "output": "",
+        "terminal": True,
+        "append": False,
+    }
+    cleaned: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in {"--output", "-o"}:
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                raise click.ClickException(f"{token} 缺少文件路径")
+            options["output"] = args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--output="):
+            options["output"] = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--no-terminal":
+            options["terminal"] = False
+            i += 1
+            continue
+        if token == "--append":
+            options["append"] = True
+            i += 1
+            continue
+        cleaned.append(token)
+        i += 1
+    if not options["terminal"] and not options["output"]:
+        raise click.ClickException("--no-terminal 必须搭配 --output PATH")
+    return options, tuple(cleaned)
+
+
+def _emit_result_output(options: dict[str, Any], callback) -> None:
+    output_path = str(options.get("output") or "")
+    terminal = bool(options.get("terminal", True))
+    append = bool(options.get("append", False))
+    if terminal and not output_path:
+        callback()
+        return
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        callback()
+    text = buffer.getvalue()
+    if output_path:
+        path = Path(output_path).expanduser()
+        if path.parent and str(path.parent) not in {"", "."}:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if append else "w"
+        with path.open(mode, encoding="utf-8") as fh:
+            fh.write(text)
+            if text and not text.endswith("\n"):
+                fh.write("\n")
+    if terminal and text:
+        click.echo(text, nl=False)
 
 
 def _require_last_result(state) -> dict[str, Any]:
@@ -1491,7 +1573,7 @@ def _print_attribution_result(state, args: tuple[str, ...]) -> None:
     top_raw = _arg_value(args, "--top")
     top_n = int(top_raw) if top_raw else 10
     rows = []
-    product_fee: dict[str, float] = {}
+    bucket_fee: dict[str, float] = {}
     for group in groups:
         name = str(group.get("name") or group.get("group_id") or group.get("id") or "")
         curve = _group_equity_curve(group)
@@ -1502,9 +1584,9 @@ def _print_attribution_result(state, args: tuple[str, ...]) -> None:
         for record in flow:
             fee = _float(record.get("fee_cost") or record.get("fee") or 0.0)
             fee_sum += fee
-            product = str(record.get("product") or record.get("instrument") or "")
-            if product:
-                product_fee[product] = product_fee.get(product, 0.0) + fee
+            bucket = _attribution_bucket(record, by)
+            if bucket:
+                bucket_fee[bucket] = bucket_fee.get(bucket, 0.0) + fee
         net_return = final / initial - 1.0 if initial else 0.0
         fee_return = fee_sum / initial if initial else 0.0
         gross_return = net_return + fee_return
@@ -1526,20 +1608,74 @@ def _print_attribution_result(state, args: tuple[str, ...]) -> None:
         max_widths=(28, 10, 10, 10, 16, 16, 8),
     ):
         click.echo(line)
-    if by in {"product", "products", "contract", "contracts"}:
-        table = sorted(product_fee.items(), key=lambda item: abs(item[1]), reverse=True)
+    if by in {"product", "products", "contract", "contracts", "ledger", "ledgers", "cash-pool", "cash_pool", "cashpool"}:
+        table = sorted(bucket_fee.items(), key=lambda item: abs(item[1]), reverse=True)
         if top_n > 0:
             table = table[:top_n]
         click.echo("")
-        click.echo("费用按产品/合约聚合")
+        click.echo(_attribution_table_title(by))
         for line in render_table(
-            ("产品/合约", "费用"),
-            [(product, f"{fee:,.2f}") for product, fee in table],
+            (_attribution_table_header(by), "费用"),
+            [(bucket, f"{fee:,.2f}") for bucket, fee in table],
             indent="  ",
             aligns=("left", "right"),
             max_widths=(32, 16),
         ):
             click.echo(line)
+
+
+def _print_ledger_replay_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    groups = _selected_result_groups(data, _arg_value(args, "--group-name"))
+    if not groups:
+        raise click.ClickException("最近一次结果中找不到可汇总的策略")
+    rows_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for group in groups:
+        name = str(group.get("name") or group.get("group_id") or group.get("id") or "")
+        for record in _fetch_order_flow_for_group(state, data, name):
+            ledger_id = _record_ledger_id(record)
+            cash_pool_id = _record_cash_pool_id(record)
+            if not ledger_id and not cash_pool_id:
+                continue
+            key = (name, ledger_id or "(未记录账本)", cash_pool_id or "(未记录资金池)")
+            row = rows_by_key.setdefault(key, {
+                "records": 0,
+                "fee": 0.0,
+                "last_cash": "",
+                "last_margin": "",
+            })
+            row["records"] += 1
+            row["fee"] += _float(record.get("fee_cost") or record.get("fee") or 0.0)
+            cash_after = _fmt_detail_number(record, "cash_after")
+            if cash_after:
+                row["last_cash"] = cash_after
+            margin_after = _fmt_detail_number(record, "margin_after")
+            if margin_after:
+                row["last_margin"] = margin_after
+    click.echo("Ledger 回放摘要")
+    if not rows_by_key:
+        click.echo("  最近一次 order-flow 没有记录 ledger/cash pool 信息；请重新运行回测以生成新的成交落账 trace。")
+        return
+    rows = [
+        (
+            strategy,
+            ledger_id,
+            cash_pool_id,
+            values["records"],
+            f"{values['fee']:,.2f}",
+            values["last_cash"],
+            values["last_margin"],
+        )
+        for (strategy, ledger_id, cash_pool_id), values in sorted(rows_by_key.items())
+    ]
+    for line in render_table(
+        ("策略", "账本", "资金池", "记录数", "费用", "最后现金", "最后保证金"),
+        rows,
+        indent="  ",
+        aligns=("left", "left", "left", "right", "right", "right", "right"),
+        max_widths=(20, 22, 22, 8, 14, 16, 16),
+    ):
+        click.echo(line)
 
 
 def _print_group_detail_result(state, args: tuple[str, ...]) -> None:
@@ -1670,11 +1806,37 @@ def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
         payload["order_id"] = order_id
     result = client_from_config().group_order_flow(payload)
     groups = result.get("groups") if isinstance(result.get("groups"), list) else []
-    click.echo(f"订单流: records={result.get('record_count', 0)}")
 
     counts_only = "--counts-only" in args
     limit_raw = _arg_value(args, "--limit")
     limit = int(limit_raw) if limit_raw else 20
+    ledger_filter = _arg_value(args, "--ledger")
+    cash_pool_filter = _arg_value(args, "--cash-pool") or _arg_value(args, "--cash_pool")
+
+    filtered_groups = []
+    total_records = 0
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        records = list(group.get("records") or [])
+        if ledger_filter:
+            records = [record for record in records if _record_ledger_id(record) == ledger_filter]
+        if cash_pool_filter:
+            records = [record for record in records if _record_cash_pool_id(record) == cash_pool_filter]
+        group_copy = dict(group)
+        group_copy["records"] = records
+        filtered_groups.append(group_copy)
+        total_records += len(records)
+    groups = filtered_groups
+    if ledger_filter or cash_pool_filter:
+        filters = []
+        if ledger_filter:
+            filters.append(f"ledger={ledger_filter}")
+        if cash_pool_filter:
+            filters.append(f"cash_pool={cash_pool_filter}")
+        click.echo(f"订单流: records={total_records} ({', '.join(filters)})")
+    else:
+        click.echo(f"订单流: records={result.get('record_count', 0)}")
 
     rows = []
     for group in groups:
@@ -1703,15 +1865,17 @@ def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
                     f"{_float(r.get('quantity')):.4g}",
                     "" if r.get("effective_price") is None else f"{_float(r.get('effective_price')):.6g}",
                     f"{_float(r.get('fee_cost')):,.2f}",
+                    _record_ledger_id(r),
+                    _record_cash_pool_id(r),
                     _fmt_detail_number(r, "cash_after"),
                     _fmt_detail_number(r, "margin_after"),
                     str(r.get("status") or ""),
                 )
                 for r in shown
             ]
-            headers = ("时间", "品种", "步骤", "数量", "成交价", "费用", "现金", "保证金", "状态")
-            widths = (24, 16, 14, 10, 10, 12, 14, 14, 10)
-            aligns = ("left", "left", "left", "right", "right", "right", "right", "right", "left")
+            headers = ("时间", "品种", "步骤", "数量", "成交价", "费用", "账本", "资金池", "现金", "保证金", "状态")
+            widths = (24, 16, 14, 10, 10, 12, 16, 16, 14, 14, 10)
+            aligns = ("left", "left", "left", "right", "right", "right", "left", "left", "right", "right", "left")
         else:
             detail_rows = [
                 (
@@ -1794,6 +1958,52 @@ def _fetch_order_flow_for_group(state, data: dict[str, Any], group_name: str) ->
     if not groups:
         return []
     return list(groups[0].get("records") or [])
+
+
+def _attribution_bucket(record: dict[str, Any], by: str) -> str:
+    if by in {"ledger", "ledgers"}:
+        return _record_ledger_id(record) or "(未记录账本)"
+    if by in {"cash-pool", "cash_pool", "cashpool"}:
+        return _record_cash_pool_id(record) or "(未记录资金池)"
+    if by in {"product", "products", "contract", "contracts"}:
+        return str(record.get("product") or record.get("instrument") or "")
+    return ""
+
+
+def _attribution_table_title(by: str) -> str:
+    if by in {"ledger", "ledgers"}:
+        return "费用按账本聚合"
+    if by in {"cash-pool", "cash_pool", "cashpool"}:
+        return "费用按资金池聚合"
+    return "费用按产品/合约聚合"
+
+
+def _attribution_table_header(by: str) -> str:
+    if by in {"ledger", "ledgers"}:
+        return "账本"
+    if by in {"cash-pool", "cash_pool", "cashpool"}:
+        return "资金池"
+    return "产品/合约"
+
+
+def _record_ledger_id(record: dict[str, Any]) -> str:
+    return _record_detail_value(record, "ledger_id")
+
+
+def _record_cash_pool_id(record: dict[str, Any]) -> str:
+    return _record_detail_value(record, "cash_pool_id")
+
+
+def _record_detail_value(record: dict[str, Any], key: str) -> str:
+    value = record.get(key)
+    if value not in (None, ""):
+        return str(value)
+    details = record.get("details")
+    if isinstance(details, dict):
+        value = details.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
 
 
 def _group_detail_payload(state, data: dict[str, Any], group: dict[str, Any]) -> dict[str, Any]:

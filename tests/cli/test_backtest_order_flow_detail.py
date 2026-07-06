@@ -8,6 +8,7 @@ run against expectations."""
 from __future__ import annotations
 
 import click
+import pytest
 
 import tools.cli.modules.backtest.controller as controller
 
@@ -124,7 +125,12 @@ def test_order_flow_show_fee_prints_fee_cash_and_margin(monkeypatch, capsys):
                 "quantity": 12.0,
                 "effective_price": 8000.0,
                 "fee_cost": 34.5,
-                "details": {"cash_after": 99_000_000.0, "margin_after": 1_000_000.0},
+                "details": {
+                    "ledger_id": "ledger-a1",
+                    "cash_pool_id": "pool-a1",
+                    "cash_after": 99_000_000.0,
+                    "margin_after": 1_000_000.0,
+                },
                 "status": "scheduled",
             }],
         }],
@@ -136,8 +142,35 @@ def test_order_flow_show_fee_prints_fee_cash_and_margin(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "费用" in out
     assert "34.50" in out
+    assert "ledger-a1" in out
+    assert "pool-a1" in out
     assert "99,000,000.00" in out
     assert "1,000,000.00" in out
+
+
+def test_order_flow_can_filter_by_ledger_and_cash_pool(monkeypatch, capsys):
+    response = {
+        "success": True,
+        "record_count": 2,
+        "groups": [{
+            "group_id": "g-a1",
+            "group_name": "A1",
+            "records": [
+                {"timestamp": "t1", "product": "AP.CZC", "details": {"ledger_id": "ledger-a", "cash_pool_id": "pool-a"}},
+                {"timestamp": "t2", "product": "CJ.CZC", "details": {"ledger_id": "ledger-b", "cash_pool_id": "pool-b"}},
+            ],
+        }],
+    }
+    monkeypatch.setattr(controller, "client_from_config", lambda: _FakeClient(response))
+
+    controller._print_order_flow_result(_fake_state(), ("--group-name", "A1", "--ledger", "ledger-a", "--cash-pool", "pool-a", "--limit", "0"))
+
+    out = capsys.readouterr().out
+    assert "records=1" in out
+    assert "ledger=ledger-a" in out
+    assert "cash_pool=pool-a" in out
+    assert "AP.CZC" in out
+    assert "CJ.CZC" not in out
 
 
 def test_attribution_summarizes_fee_drag_and_product_fee(monkeypatch, capsys):
@@ -163,6 +196,73 @@ def test_attribution_summarizes_fee_drag_and_product_fee(monkeypatch, capsys):
     assert "fee" in out
     assert "AP.CZC" in out
     assert "100.00" in out
+
+
+def test_attribution_can_group_fee_by_ledger(monkeypatch, capsys):
+    response = {
+        "success": True,
+        "record_count": 3,
+        "groups": [{
+            "group_id": "g-a1",
+            "group_name": "A1",
+            "records": [
+                {"fee_cost": 100.0, "details": {"ledger_id": "ledger-a"}},
+                {"fee_cost": 50.0, "details": {"ledger_id": "ledger-a"}},
+                {"fee_cost": 20.0, "details": {"ledger_id": "ledger-b"}},
+            ],
+        }],
+    }
+    monkeypatch.setattr(controller, "client_from_config", lambda: _FakeClient(response))
+
+    controller._print_attribution_result(_fake_state(), ("--group-name", "A1", "--by", "ledger"))
+
+    out = capsys.readouterr().out
+    assert "费用按账本聚合" in out
+    assert "ledger-a" in out
+    assert "150.00" in out
+    assert "ledger-b" in out
+
+
+def test_ledger_replay_summarizes_records_fee_and_cash(monkeypatch, capsys):
+    response = {
+        "success": True,
+        "record_count": 2,
+        "groups": [{
+            "group_id": "g-a1",
+            "group_name": "A1",
+            "records": [
+                {
+                    "fee_cost": 100.0,
+                    "details": {
+                        "ledger_id": "ledger-a",
+                        "cash_pool_id": "pool-a",
+                        "cash_after": 99_000_000.0,
+                        "margin_after": 1_000_000.0,
+                    },
+                },
+                {
+                    "fee_cost": 50.0,
+                    "details": {
+                        "ledger_id": "ledger-a",
+                        "cash_pool_id": "pool-a",
+                        "cash_after": 98_900_000.0,
+                        "margin_after": 1_100_000.0,
+                    },
+                },
+            ],
+        }],
+    }
+    monkeypatch.setattr(controller, "client_from_config", lambda: _FakeClient(response))
+
+    controller._print_ledger_replay_result(_fake_state(), ("--group-name", "A1"))
+
+    out = capsys.readouterr().out
+    assert "Ledger 回放摘要" in out
+    assert "ledger-a" in out
+    assert "pool-a" in out
+    assert "150.00" in out
+    assert "98,900,000.00" in out
+    assert "1,100,000.00" in out
 
 
 def test_group_detail_prints_product_overlay_summary(monkeypatch, capsys):
@@ -218,3 +318,40 @@ def test_group_ranking_prints_scalar_summary(monkeypatch, capsys):
     assert "分组排序能力摘要" in out
     assert "monotonic_score" in out
     assert "0.42" in out
+
+
+def test_result_output_options_write_file_and_can_suppress_terminal(tmp_path, capsys):
+    output = tmp_path / "replay" / "attribution.txt"
+    options, cleaned = controller._parse_result_output_options((
+        "attribution",
+        "--group-name",
+        "A1",
+        "--output",
+        str(output),
+        "--no-terminal",
+    ))
+
+    assert cleaned == ("attribution", "--group-name", "A1")
+    controller._emit_result_output(options, lambda: click.echo("归因摘要\nA1 100"))
+
+    assert output.read_text(encoding="utf-8") == "归因摘要\nA1 100\n"
+    assert capsys.readouterr().out == ""
+
+
+def test_result_output_options_append_and_keep_terminal(tmp_path, capsys):
+    output = tmp_path / "order-flow.txt"
+    first, _ = controller._parse_result_output_options(("summary", "--output", str(output)))
+    second, _ = controller._parse_result_output_options(("summary", "--output", str(output), "--append"))
+
+    controller._emit_result_output(first, lambda: click.echo("first"))
+    controller._emit_result_output(second, lambda: click.echo("second"))
+
+    assert output.read_text(encoding="utf-8") == "first\nsecond\n"
+    out = capsys.readouterr().out
+    assert "first" in out
+    assert "second" in out
+
+
+def test_no_terminal_requires_output_path():
+    with pytest.raises(click.ClickException, match="--no-terminal"):
+        controller._parse_result_output_options(("summary", "--no-terminal"))
