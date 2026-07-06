@@ -258,6 +258,9 @@ def results(ctx: click.Context) -> None:
     常用命令:
       factortester backtest results summary
       factortester backtest results equity
+      factortester backtest results attribution --group-name A1:1 --by product
+      factortester backtest results detail --group-name A1
+      factortester backtest results ranking
       factortester backtest results snapshot --index 1
       factortester backtest results order-flow --group-name A1
     """
@@ -273,13 +276,22 @@ def results(ctx: click.Context) -> None:
     if action == "equity":
         _print_stored_equity_chart(state)
         return
+    if action in {"attribution", "attr"}:
+        _print_attribution_result(state, args[1:])
+        return
+    if action == "detail":
+        _print_group_detail_result(state, args[1:])
+        return
+    if action in {"ranking", "rank"}:
+        _print_group_ranking_result(state, args[1:])
+        return
     if action == "snapshot":
         _print_snapshot_result(state, args[1:])
         return
     if action in {"order-flow", "orders"}:
         _print_order_flow_result(state, args[1:])
         return
-    raise click.ClickException("results 支持: summary, equity, snapshot, order-flow")
+    raise click.ClickException("results 支持: summary, equity, attribution, detail, ranking, snapshot, order-flow")
 
 
 def _print_backtest_template_help(state) -> None:
@@ -1427,9 +1439,16 @@ def _print_results_help() -> None:
     click.echo("backtest results 命令")
     click.echo("  summary                         最近一次运行的统计表格")
     click.echo("  equity                          最近一次运行的多策略净值图")
+    click.echo("  attribution [--group-name NAME]  归因摘要: gross / fee / net / final")
+    click.echo("    --by product                  按产品/合约聚合手续费")
+    click.echo("    --top N                       聚合表显示前 N 行(默认10)")
+    click.echo("  detail --group-name NAME         查看 web 组内 overlay 的贡献/费率摘要")
+    click.echo("    --level product|contract      产品或合约层级(默认product)")
+    click.echo("  ranking                          查看分组排序能力摘要")
     click.echo("  snapshot --index N              查看第 N 个时间点的持仓/资金快照")
     click.echo("  snapshot --timestamp-ms MS      查看指定 epoch 毫秒附近的快照")
     click.echo("  order-flow [--group-name NAME]  查看订单流明细(时间/品种/数量/成交价/状态)")
+    click.echo("    --show fee                    显示 fee_cost / cash / margin 诊断列")
     click.echo("    --order-id ID                 只看某笔订单的完整生命周期")
     click.echo("    --limit N                     每个策略最多显示的记录数(默认20, 0=全部)")
     click.echo("    --counts-only                 只显示记录条数，不展开明细")
@@ -1461,6 +1480,140 @@ def _print_stored_equity_chart(state) -> None:
         raise click.ClickException("最近一次结果没有可画的净值曲线")
     for line in ["净值曲线:", *_multi_series_chart(series, width=_chart_body_width())]:
         click.echo(line)
+
+
+def _print_attribution_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    groups = _selected_result_groups(data, _arg_value(args, "--group-name"))
+    if not groups:
+        raise click.ClickException("最近一次结果中找不到可归因的策略")
+    by = (_arg_value(args, "--by") or "").strip().lower()
+    top_raw = _arg_value(args, "--top")
+    top_n = int(top_raw) if top_raw else 10
+    rows = []
+    product_fee: dict[str, float] = {}
+    for group in groups:
+        name = str(group.get("name") or group.get("group_id") or group.get("id") or "")
+        curve = _group_equity_curve(group)
+        initial = curve[0] if curve else 0.0
+        final = curve[-1] if curve else 0.0
+        flow = _fetch_order_flow_for_group(state, data, name)
+        fee_sum = 0.0
+        for record in flow:
+            fee = _float(record.get("fee_cost") or record.get("fee") or 0.0)
+            fee_sum += fee
+            product = str(record.get("product") or record.get("instrument") or "")
+            if product:
+                product_fee[product] = product_fee.get(product, 0.0) + fee
+        net_return = final / initial - 1.0 if initial else 0.0
+        fee_return = fee_sum / initial if initial else 0.0
+        gross_return = net_return + fee_return
+        rows.append((
+            name,
+            _pct(gross_return),
+            _pct(-fee_return),
+            _pct(net_return),
+            f"{final:,.2f}",
+            f"{fee_sum:,.2f}",
+            len(flow),
+        ))
+    click.echo("归因摘要")
+    for line in render_table(
+        ("策略", "gross", "fee", "net", "最终权益", "费用", "订单流"),
+        rows,
+        indent="  ",
+        aligns=("left", "right", "right", "right", "right", "right", "right"),
+        max_widths=(28, 10, 10, 10, 16, 16, 8),
+    ):
+        click.echo(line)
+    if by in {"product", "products", "contract", "contracts"}:
+        table = sorted(product_fee.items(), key=lambda item: abs(item[1]), reverse=True)
+        if top_n > 0:
+            table = table[:top_n]
+        click.echo("")
+        click.echo("费用按产品/合约聚合")
+        for line in render_table(
+            ("产品/合约", "费用"),
+            [(product, f"{fee:,.2f}") for product, fee in table],
+            indent="  ",
+            aligns=("left", "right"),
+            max_widths=(32, 16),
+        ):
+            click.echo(line)
+
+
+def _print_group_detail_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    group_name = _arg_value(args, "--group-name")
+    if not group_name:
+        raise click.ClickException("detail 需要 --group-name NAME")
+    group = _result_group_for_name(data, group_name)
+    if not group:
+        raise click.ClickException(f"最近一次结果中找不到策略: {group_name}")
+    payload = _group_detail_payload(state, data, group)
+    detail = client_from_config().group_detail(payload).get("detail") or {}
+    product_analysis = detail.get("product_analysis") or {}
+    level = (_arg_value(args, "--level") or product_analysis.get("default_level") or "products").lower()
+    if level in {"product", "products"}:
+        analysis = (product_analysis.get("by_level") or {}).get("products") or product_analysis
+        title = "产品层级贡献"
+    elif level in {"contract", "contracts"}:
+        analysis = (product_analysis.get("by_level") or {}).get("contracts") or product_analysis
+        title = "合约层级贡献"
+    else:
+        raise click.ClickException("--level 只能是 product 或 contract")
+    rows = []
+    for row in list(analysis.get("rows") or [])[:20]:
+        product = row.get("product") or {}
+        product_label = _product_display(product)
+        fee = product.get("fee") or {}
+        market_rule = row.get("market_rule") or {}
+        rows.append((
+            product_label,
+            _pct(_float(row.get("gross_contribution"))),
+            str(row.get("active_period_count") or ""),
+            _fmt_optional(fee.get("open")),
+            _fmt_optional(fee.get("close_today")),
+            _fmt_optional(market_rule.get("multiplier")),
+            _fmt_optional(market_rule.get("margin_ratio")),
+        ))
+    click.echo(f"{group_name} · {title}")
+    for line in render_table(
+        ("产品", "gross贡献", "活跃期", "开仓费", "平今费", "乘数", "保证金率"),
+        rows,
+        indent="  ",
+        aligns=("left", "right", "right", "right", "right", "right", "right"),
+        max_widths=(32, 12, 8, 10, 10, 8, 10),
+    ):
+        click.echo(line)
+    concentration = []
+    if analysis.get("top1_positive_contribution_ratio") is not None:
+        concentration.append(f"top1正贡献占比={_pct(_float(analysis.get('top1_positive_contribution_ratio')))}")
+    if analysis.get("top3_positive_contribution_ratio") is not None:
+        concentration.append(f"top3正贡献占比={_pct(_float(analysis.get('top3_positive_contribution_ratio')))}")
+    if concentration:
+        click.echo("  " + " · ".join(concentration))
+
+
+def _print_group_ranking_result(state, args: tuple[str, ...]) -> None:
+    data = _require_last_result(state)
+    product_path_selection_id = str(data.get("product_path_selection_id") or "")
+    if not product_path_selection_id:
+        raise click.ClickException("最近一次结果没有 product_path_selection_id，无法请求排序分析")
+    detail = client_from_config().group_ranking_detail({
+        "page_uuid": state.page_uuid,
+        "product_path_selection_id": product_path_selection_id,
+    }).get("detail") or {}
+    rows = []
+    for key, value in sorted(detail.items()):
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            rows.append((key, _fmt_optional(value)))
+    click.echo("分组排序能力摘要")
+    if rows:
+        for line in render_table(("字段", "值"), rows, indent="  ", max_widths=(32, 48)):
+            click.echo(line)
+    else:
+        click.echo("  后端返回了排序分析对象；当前 CLI 只显示标量摘要，可用 web overlay 查看完整图表。")
 
 
 def _print_snapshot_result(state, args: tuple[str, ...]) -> None:
@@ -1540,24 +1693,43 @@ def _print_order_flow_result(state, args: tuple[str, ...]) -> None:
         name = group.get("group_name") or group.get("group_id") or ""
         shown = records if limit <= 0 else records[:limit]
         click.echo(f"\n{name} 订单流明细 (显示 {len(shown)}/{len(records)} 条):")
-        detail_rows = [
-            (
-                str(r.get("timestamp") or ""),
-                str(r.get("product") or ""),
-                str(r.get("step") or ""),
-                str(r.get("label") or ""),
-                f"{r.get('quantity') or 0.0:.4g}",
-                "" if r.get("effective_price") is None else f"{r.get('effective_price'):.6g}",
-                str(r.get("status") or ""),
-                str(r.get("reject_reason") or ""),
-            )
-            for r in shown
-        ]
-        for line in render_table(
-            ("时间", "品种", "步骤", "说明", "数量", "成交价", "状态", "拒绝原因"),
-            detail_rows, indent="  ", aligns=("left", "left", "left", "left", "right", "right", "left", "left"),
-            max_widths=(24, 14, 14, 16, 10, 10, 10, 20),
-        ):
+        show_fee = (_arg_value(args, "--show") == "fee") or ("--show-fee" in args)
+        if show_fee:
+            detail_rows = [
+                (
+                    str(r.get("timestamp") or ""),
+                    str(r.get("product") or ""),
+                    str(r.get("step") or ""),
+                    f"{_float(r.get('quantity')):.4g}",
+                    "" if r.get("effective_price") is None else f"{_float(r.get('effective_price')):.6g}",
+                    f"{_float(r.get('fee_cost')):,.2f}",
+                    _fmt_detail_number(r, "cash_after"),
+                    _fmt_detail_number(r, "margin_after"),
+                    str(r.get("status") or ""),
+                )
+                for r in shown
+            ]
+            headers = ("时间", "品种", "步骤", "数量", "成交价", "费用", "现金", "保证金", "状态")
+            widths = (24, 16, 14, 10, 10, 12, 14, 14, 10)
+            aligns = ("left", "left", "left", "right", "right", "right", "right", "right", "left")
+        else:
+            detail_rows = [
+                (
+                    str(r.get("timestamp") or ""),
+                    str(r.get("product") or ""),
+                    str(r.get("step") or ""),
+                    str(r.get("label") or ""),
+                    f"{_float(r.get('quantity')):.4g}",
+                    "" if r.get("effective_price") is None else f"{_float(r.get('effective_price')):.6g}",
+                    str(r.get("status") or ""),
+                    str(r.get("reject_reason") or ""),
+                )
+                for r in shown
+            ]
+            headers = ("时间", "品种", "步骤", "说明", "数量", "成交价", "状态", "拒绝原因")
+            widths = (24, 14, 14, 16, 10, 10, 10, 20)
+            aligns = ("left", "left", "left", "left", "right", "right", "left", "left")
+        for line in render_table(headers, detail_rows, indent="  ", aligns=aligns, max_widths=widths):
             click.echo(line)
         if limit > 0 and len(records) > limit:
             click.echo(f"  ... 还有 {len(records) - limit} 条，用 --limit 0 查看全部")
@@ -1579,6 +1751,105 @@ def _result_timestamp_ms(data: dict[str, Any], args: tuple[str, ...]) -> int:
             index = max(0, min(index, len(timestamps) - 1))
             return _timestamp_value_to_ms(timestamps[index])
     raise click.ClickException("最近一次结果没有时间索引，无法请求快照")
+
+
+def _selected_result_groups(data: dict[str, Any], group_name: str = "") -> list[dict[str, Any]]:
+    groups = [group for group in (data.get("groups") or []) if isinstance(group, dict)]
+    if not group_name:
+        return groups
+    group = _result_group_for_name(data, group_name)
+    return [group] if group else []
+
+
+def _result_group_for_name(data: dict[str, Any], name: str) -> dict[str, Any] | None:
+    for group in data.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        keys = {
+            str(group.get("name") or ""),
+            str(group.get("id") or ""),
+            str(group.get("group_id") or ""),
+        }
+        if name in keys:
+            return group
+    return None
+
+
+def _group_equity_curve(group: dict[str, Any]) -> list[float]:
+    values = group.get("total_equity") or group.get("equity_curve") or []
+    if isinstance(values, dict):
+        values = list(values.values())
+    return [_float(value) for value in values]
+
+
+def _fetch_order_flow_for_group(state, data: dict[str, Any], group_name: str) -> list[dict[str, Any]]:
+    group_id = _group_id_for_name(data, group_name)
+    if not group_id:
+        return []
+    result = client_from_config().group_order_flow({
+        "page_uuid": state.page_uuid,
+        "group_id": group_id,
+    })
+    groups = result.get("groups") if isinstance(result.get("groups"), list) else []
+    if not groups:
+        return []
+    return list(groups[0].get("records") or [])
+
+
+def _group_detail_payload(state, data: dict[str, Any], group: dict[str, Any]) -> dict[str, Any]:
+    product_path_selection_id = str(
+        group.get("product_path_selection_id")
+        or data.get("product_path_selection_id")
+        or ""
+    )
+    if not product_path_selection_id:
+        raise click.ClickException("最近一次结果没有 product_path_selection_id，无法请求组内详情")
+    return {
+        "page_uuid": state.page_uuid,
+        "product_path_selection_id": product_path_selection_id,
+        "group_index": group.get("group_index", group.get("groupIndex", 1)),
+        "group_id": group.get("group_id") or group.get("id"),
+    }
+
+
+def _product_display(product: Any) -> str:
+    if not isinstance(product, dict):
+        return str(product or "")
+    name = str(product.get("name") or product.get("product") or product.get("display_ref") or "")
+    desc = str(product.get("desc") or product.get("description") or "")
+    if desc and desc not in name:
+        return f"{name}({desc})"
+    return name
+
+
+def _float(value: Any) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _pct(value: float) -> str:
+    return f"{value * 100:.2f}%"
+
+
+def _fmt_optional(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def _fmt_detail_number(record: dict[str, Any], key: str) -> str:
+    value = record.get(key)
+    if value is None and isinstance(record.get("details"), dict):
+        value = record["details"].get(key)
+    if value is None:
+        return ""
+    return f"{_float(value):,.2f}"
 
 
 def _timestamp_value_to_ms(value: Any) -> int:
@@ -1619,8 +1890,11 @@ def _print_backtest_result_hints() -> None:
     click.echo("结果查看:")
     click.echo("  factortester backtest results summary")
     click.echo("  factortester backtest results equity")
+    click.echo("  factortester backtest results attribution --group-name <策略名> --by product")
+    click.echo("  factortester backtest results detail --group-name <策略名>")
+    click.echo("  factortester backtest results ranking")
     click.echo("  factortester backtest results snapshot --index 1")
-    click.echo("  factortester backtest results order-flow --group-name <策略名>")
+    click.echo("  factortester backtest results order-flow --group-name <策略名> --show fee")
 
 
 def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]]) -> None:
