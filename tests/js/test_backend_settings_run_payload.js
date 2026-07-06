@@ -2,6 +2,7 @@ const { assert, MockElement, resetGroupTest, load } = require('./group_test_harn
 
 const GT = resetGroupTest();
 require('../../static/js/modules/shared/backend_settings_panel.js');
+require('../../static/js/modules/shared/chip_renderer.js');
 
 function domElement(id) {
   const element = new MockElement(id);
@@ -83,11 +84,17 @@ global.fetch = () => Promise.resolve({
       },
       margin_mode: {
         key: 'margin_mode',
+        label: '保证金模式',
         value: 'auto',
         tab_key: 'margin',
         scope_policy: 'overridable',
-        editable_when: { engine_mode: ['custom'] },
+        chip_template: '保证金模式: {value}',
+        editable_when: { engine_mode: ['auto', 'custom'] },
         default_when: { engine_mode: { basic: 'none', auto: 'auto', exact: 'exact' } },
+        options: [
+          { value: 'auto', label: '按市场规则自动' },
+          { value: 'none', label: '关闭' },
+        ],
       },
       volatility_lookback: {
         key: 'volatility_lookback',
@@ -200,6 +207,17 @@ return GT.backendSettings.init().then(() => {
   assert.equal(staleMarginPayload.margin_mode, undefined);
   assert.equal(staleMarginPayload.accounting_mode, undefined);
   assert.equal(staleMarginPayload.engine_mode, 'basic');
+
+  GT.backendSettings._state.localValues.engine_mode = 'auto';
+  GT.backendSettings._state.localValues.margin_mode = 'none';
+  const closedMarginPayload = GT.backendSettings.runPayload();
+  assert.equal(closedMarginPayload.local_settings.margin_mode, 'none');
+  const closedMarginChip = GT.backendSettings.configChipForGroupKey(
+    { id: 'g-margin-closed', name: 'Margin Closed', margin_mode: 'none' },
+    'margin_mode',
+  );
+  assert.ok(closedMarginChip.html.includes('保证金模式'));
+  assert.ok(closedMarginChip.html.includes('关闭'));
 
   const inheritedGroup = {
     id: 'g-inherit',

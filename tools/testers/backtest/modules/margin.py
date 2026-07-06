@@ -73,7 +73,7 @@ class MarginModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "margin_mode": FieldDefinition(
-            public=True, label="保证金", default="auto", control_template="select", tab="margin",
+            public=True, label="保证金模式", default="auto", control_template="select", tab="margin",
             options=(
                 ("auto", "按市场规则自动"),
                 ("exact", "严格历史规则"),
@@ -81,9 +81,9 @@ class MarginModule(ExecutableModule):
                 ("fixed", "固定比例"),
                 ("none", "关闭"),
             ),
-            editable_when={"engine_mode": ("custom",)},
+            editable_when={"engine_mode": ("auto", "custom")},
             default_when={"engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"}},
-            chip_template="保证金: {value}", tab_label="保证金", tab_order=160,
+            chip_template="保证金模式: {value}", tab_label="保证金", tab_order=160,
         ),
         "fixed_margin_ratio": FieldDefinition(
             public=True, label="保证金率", default=1.0, control_template="number", tab="margin",
@@ -174,7 +174,7 @@ def _resolve_margin_mode(strategy_config, ledger_config=None) -> str:
     if engine_mode == "basic":
         return "none"
     if engine_mode == "auto":
-        return "auto"
+        return str(getattr(ledger_config, "margin_mode", None) or "auto")
     if engine_mode == "exact":
         return "exact"
     return str(getattr(ledger_config, "margin_mode", None) or "auto")

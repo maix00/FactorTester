@@ -84,6 +84,10 @@ _LEDGER_INFERRED_SETTING_NAMES = {
     # would short-circuit that inference and make every auto ledger behave as
     # explicitly enabled/disabled.
     "daily_mark_to_market_enabled",
+    # The UI default is only a display fallback. Auto accounting must still be
+    # able to infer FIFO when fee/DMTM fields require lot-level accounting,
+    # including the case where margin_mode is explicitly closed.
+    "cost_basis_method",
 }
 
 
