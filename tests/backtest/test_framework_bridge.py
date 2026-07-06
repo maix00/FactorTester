@@ -25,7 +25,7 @@ from tools.testers.backtest.engines.workers.translator import (
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.liquidity import LiquidityModule
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.slippage import SlippageModule
@@ -46,8 +46,8 @@ def _config(alias: str, **field_values: Any) -> tuple[Strategy, StrategyConfig]:
         "fixed_fee_rate": FeeModule.fixed_fee_rate,
         "margin_mode": MarginModule.margin_mode,
         "fixed_margin_ratio": MarginModule.fixed_margin_ratio,
-        "liquidity_mode": LiquidityModule.liquidity_mode,
-        "participation_rate": LiquidityModule.participation_rate,
+        "liquidity_mode": VolumeCapacityMode.liquidity_mode,
+        "participation_rate": VolumeCapacityMode.participation_rate,
         "slippage_mode": SlippageModule.slippage_mode,
         "slippage_bps": SlippageModule.slippage_bps,
         "initial_capital_major": LedgerModule.initial_capital_major,

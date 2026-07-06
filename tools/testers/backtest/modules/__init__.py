@@ -16,7 +16,7 @@ from tools.data.modules.registry import ModuleRegistry
 from .base import ExecutableModule
 from .fee import FeeModule
 from .slippage import SlippageModule
-from .liquidity import LiquidityModule
+from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
 from .order_construct import OrderConstructModule
 from .cash_rescale import LedgerCashConstraintModule
@@ -30,7 +30,7 @@ __all__ = [
     "ExecutableModule",
     "FeeModule",
     "SlippageModule",
-    "LiquidityModule",
+    "VolumeCapacityMode",
     "MarginModule",
     "OrderConstructModule",
     "LedgerCashConstraintModule",

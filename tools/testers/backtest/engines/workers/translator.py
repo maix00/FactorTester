@@ -23,7 +23,7 @@ from tools.testers.backtest.modules.engine import engine_mode_for
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.liquidity import LiquidityModule
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.minor_unit import MinorUnitModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
@@ -54,8 +54,8 @@ _PASSTHROUGH_REFS = (
     GroupMembershipModule.volatility_warmup,
     GroupMembershipModule.execution_timing,
     GroupMembershipModule.execution_delay_bars,
-    LiquidityModule.liquidity_mode,
-    LiquidityModule.participation_rate,
+    VolumeCapacityMode.liquidity_mode,
+    VolumeCapacityMode.participation_rate,
     SlippageModule.slippage_mode,
     SlippageModule.slippage_bps,
     OrderExecutionModule.execution_price_basis,
@@ -131,8 +131,8 @@ def _worker_execution_policy_selectors(
     """Worker execution policy selectors from the real module fields.
 
     ``min_lot_policy`` comes from ``OrderConstructModule.
-    quantity_rounding_policy`` and ``fill_cap_policy`` from ``LiquidityModule.
-    liquidity_mode`` -- these are the only two selectors any runner actually
+    quantity_rounding_policy`` and ``fill_cap_policy`` from
+    ``VolumeCapacityMode.liquidity_mode`` -- these are the only two selectors any runner actually
     checks (see ADR-032; this is deliberately not a general broker/account
     policy object). Runners re-validate on their side
     (require_worker_execution_policies).
@@ -146,7 +146,7 @@ def _worker_execution_policy_selectors(
             f"strategy {alias!r}: quantity_rounding_policy={rounding!r} is not "
             f"expressible in {framework} workers (min_lot_policy supports floor_to_lot only)"
         )
-    liquidity = str(config.get(LiquidityModule.liquidity_mode, "infinite") or "infinite")
+    liquidity = str(config.get(VolumeCapacityMode.liquidity_mode, "infinite") or "infinite")
     selectors["fill_cap_policy"] = (
         "volume_participation" if liquidity == "volume_participation" else "no_cap"
     )

@@ -9,7 +9,6 @@ from tools.testers.backtest.engines.native.events import EventKind
 from tools.testers.backtest.engines.native.flow import Phase
 from tools.testers.backtest.engines.native.scheduler import FlowRegistry, sort_and_validate
 from tools.testers.backtest.modules.ledger_module import LedgerModule
-from tools.testers.backtest.modules.liquidity import LiquidityModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.order_execution import OrderExecutionModule
@@ -24,7 +23,7 @@ from tools.testers.backtest.modules.term_structure import (
 def _register_all():
     registry = FlowRegistry()
     for module in (ProductSelectionModule, TermStructureExpandModule, DeliveryForceCloseModule, RolloverModule, LedgerModule,
-                    MarketDataModule, OrderConstructModule, LiquidityModule,
+                    MarketDataModule, OrderConstructModule,
                     OrderExecutionModule):
         for flow in module.flows:
             registry.register_flow(flow)
@@ -49,8 +48,8 @@ def test_signal_group_orders_equity_before_size_order_before_construct_orders():
     assert ordered_names.index("equity_on_signal") < ordered_names.index("size_order")
     assert ordered_names.index("resolve_tradable_target_weights") < ordered_names.index("size_order")
     assert ordered_names.index("size_order") < ordered_names.index("round_order_quantity")
-    assert ordered_names.index("round_order_quantity") < ordered_names.index("cap_order_liquidity")
-    assert ordered_names.index("cap_order_liquidity") < ordered_names.index("construct_orders")
+    assert "cap_order_liquidity" not in ordered_names
+    assert ordered_names.index("round_order_quantity") < ordered_names.index("construct_orders")
     assert ordered_names.index("size_order") < ordered_names.index("construct_orders")
 
 

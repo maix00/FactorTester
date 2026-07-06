@@ -66,7 +66,7 @@ def register_group_test_settings(app: Any) -> None:
         SettingModule("order_execution", "订单类型", "execution", 120),
         SettingModule("order_sizing", "数量取整", "execution", 140),
         SettingModule(
-            "liquidity", "流动性", "execution", 150,
+            "volume_capacity", "成交量容量", "execution", 150,
             execution_stage="order_sizing",
             sharing_scope="batch_market_state",
             trace_policy="execution_trace",

@@ -15,7 +15,7 @@ from tools.testers.backtest.engines.native.ledger import LedgerState, ledger_ide
 from tools.testers.backtest.engines.native.order import Order
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
-from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+from tools.testers.backtest.modules.strategy_book import apply_order_sizing_policy, strategy_book_store_for
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 from tools.testers.backtest.modules import cash_rescale as cash_rescale_impl
 from tools.testers.backtest.modules.cash_rescale import _constrain_to_ledger_cash, constrain_order_batch_to_execution_cash
@@ -24,11 +24,11 @@ from tools.testers.backtest.modules.fee import FeeModule, _resolve_fee_cost, _re
 from tools.testers.backtest.modules.custom_product import CustomProductModule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.ledger_module import _apply_order_fill
-from tools.testers.backtest.modules.liquidity import LiquidityModule, _cap_to_liquidity
 from tools.testers.backtest.modules.market_data import MarketDataModule, _historical_fields_for_strategy
 from tools.testers.backtest.modules.order_construct import OrderConstructModule
 from tools.testers.backtest.modules.slippage import SlippageModule, _apply_slippage
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
+from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
 from tools.data.types.data_money import DataMoney
 
 
@@ -379,65 +379,58 @@ def test_slippage_worsens_buy_and_sell_price_in_opposite_directions():
     assert sell.get("effective_price") == pytest.approx(9.9)   # worse (lower) for sells
 
 
-def test_liquidity_uncapped_when_mode_infinite():
+def test_volume_capacity_uncapped_when_mode_infinite():
     s = Strategy(alias="S")
     p = _product()
-    config = StrategyConfig(strategy=s, field_values={LiquidityModule.liquidity_mode: "infinite"})
+    config = StrategyConfig(strategy=s, field_values={VolumeCapacityMode.liquidity_mode: "infinite"})
     account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 99999.0})
-
-    _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == 99999.0
+    capped = apply_order_sizing_policy(account, ctx, s, {p: 99999.0})
+    assert capped[p] == 99999.0
 
 
-def test_liquidity_caps_to_participation_rate_times_volume():
+def test_order_sizing_volume_capacity_caps_to_participation_rate_times_volume():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
-        LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
+        VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
     })
     account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 50.0})
-
-    _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == pytest.approx(10.0)  # capped, 0.1*100
+    capped = apply_order_sizing_policy(account, ctx, s, {p: 50.0})
+    assert capped[p] == pytest.approx(10.0)  # capped, 0.1*100
 
 
-def test_liquidity_requires_volume_for_each_product():
+def test_order_sizing_volume_capacity_requires_volume_for_each_product():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
-        LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
+        VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
     })
     account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01"), event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {})
 
     with pytest.raises(KeyError, match="requires MarketDataModule volume"):
-        ctx.set_for(OrderConstructModule.sized_deltas, s, {p: 50.0})
-        _cap_to_liquidity(account, ctx)
+        apply_order_sizing_policy(account, ctx, s, {p: 50.0})
 
 
-def test_liquidity_does_not_defer_excess_to_next_bar():
+def test_order_sizing_volume_capacity_does_not_defer_excess_to_next_bar():
     s = Strategy(alias="S")
     p = _product()
     config = StrategyConfig(strategy=s, field_values={
-        LiquidityModule.liquidity_mode: "volume_participation", LiquidityModule.participation_rate: 0.1,
+        VolumeCapacityMode.liquidity_mode: "volume_participation", VolumeCapacityMode.participation_rate: 0.1,
     })
     account = BacktestRunState(strategy_configs={s: config})
     ctx = FlowContext(timestamp=None, event_queue=EventQueue(), active_strategies=frozenset({s}))
     ctx.set(MarketDataModule.volume, {p: 100.0})
 
-    ctx.set_for(OrderConstructModule.sized_deltas, s, {p: -50.0})
-
-    _cap_to_liquidity(account, ctx)
-    assert ctx.get_for(OrderConstructModule.deltas, s)[p] == pytest.approx(-10.0)
+    capped = apply_order_sizing_policy(account, ctx, s, {p: -50.0})
+    assert capped[p] == pytest.approx(-10.0)
 
 
 def test_cash_constraint_haircuts_buy_orders_proportionally():

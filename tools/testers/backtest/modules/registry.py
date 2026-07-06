@@ -25,7 +25,7 @@ from .cash_pool import CashPoolModule
 from .run_window import RunWindowModule
 from .fee import FeeModule
 from .slippage import SlippageModule
-from .liquidity import LiquidityModule
+from .volume_capacity import VolumeCapacityMode
 from .margin import MarginModule
 from .order_execution import OrderExecutionModule
 from .custom_product import CustomProductModule, refresh_custom_product_field_definitions
@@ -76,7 +76,7 @@ _ALL_MODULE_CLASSES: tuple[type[ExecutableModule], ...] = (
     LongShortCompositionModule,
     FeeModule,
     SlippageModule,
-    LiquidityModule,
+    VolumeCapacityMode,
     MarginModule,
     OrderExecutionModule,
     CustomProductModule,
@@ -348,7 +348,7 @@ class GroupTestModuleRegistry(BacktestModuleRegistry):
         return (
             "transaction_cost",
             "slippage",
-            "liquidity",
+            "volume_capacity",
             "margin",
             "order_sizing",
             "cash_rescale",
@@ -461,7 +461,7 @@ class LongShortModuleRegistry(BacktestModuleRegistry):
         return (
             "transaction_cost",
             "slippage",
-            "liquidity",
+            "volume_capacity",
             "margin",
             "order_sizing",
             "cash_rescale",
