@@ -19,28 +19,44 @@
       "exchange": "CFFEX",
       "label": "中证500股指期货",
       "unit": "money",
-      "value": "0.0023%"
+      "value": "0.0023%",
+      "leg_values": {
+        "close_today": "0.023%"
+      },
+      "source_note": "CFFEX official fee table: 股指期货交易手续费成交金额万分之零点二三，其中平今仓手续费为成交金额万分之二点三。"
     },
     {
       "instrument": "IF",
       "exchange": "CFFEX",
       "label": "沪深300股指期货",
       "unit": "money",
-      "value": "0.0023%"
+      "value": "0.0023%",
+      "leg_values": {
+        "close_today": "0.023%"
+      },
+      "source_note": "CFFEX official fee table: 股指期货交易手续费成交金额万分之零点二三，其中平今仓手续费为成交金额万分之二点三。"
     },
     {
       "instrument": "IH",
       "exchange": "CFFEX",
       "label": "上证50股指期货",
       "unit": "money",
-      "value": "0.0023%"
+      "value": "0.0023%",
+      "leg_values": {
+        "close_today": "0.023%"
+      },
+      "source_note": "CFFEX official fee table: 股指期货交易手续费成交金额万分之零点二三，其中平今仓手续费为成交金额万分之二点三。"
     },
     {
       "instrument": "IM",
       "exchange": "CFFEX",
       "label": "中证1000股指期货",
       "unit": "money",
-      "value": "0.0023%"
+      "value": "0.0023%",
+      "leg_values": {
+        "close_today": "0.023%"
+      },
+      "source_note": "CFFEX official fee table: 股指期货交易手续费成交金额万分之零点二三，其中平今仓手续费为成交金额万分之二点三。"
     },
     {
       "instrument": "TF",

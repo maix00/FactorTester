@@ -72,6 +72,16 @@ def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monke
     assert [row for row in audit if row["leg"] == "平今"][0]["active_source"] == "table-openctp-mismatch"
 
 
+def test_baseline_map_uses_cffex_close_today_index_future_fee() -> None:
+    mapping = builder._load_mapping(builder.DEFAULT_MAP)
+    by_instrument = {row["instrument"]: row for row in mapping["products"]}
+
+    for instrument in ("IC", "IF", "IH", "IM"):
+        row = by_instrument[instrument]
+        assert row["value"] == "0.0023%"
+        assert row["leg_values"]["close_today"] == "0.023%"
+
+
 def test_baseline_map_classifies_czce_propylene_as_money_fee() -> None:
     mapping = builder._load_mapping(builder.DEFAULT_MAP)
     propylene = next(row for row in mapping["products"] if row["instrument"] == "PL")
