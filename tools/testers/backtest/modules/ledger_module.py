@@ -287,6 +287,36 @@ def _apply_order_fill(state, ctx) -> None:
             ledger_config = state.ledger_config_for(ledger)
             positions = ledger.get(LedgerModule.positions, {})
             cash = _required_cash_for_ledger(state, ledger)
+            before_quantity = float(order.quantity)
+            normalized_quantity = _normalise_fill_quantity(
+                state,
+                strategy,
+                order.instrument,
+                before_quantity,
+            )
+            if normalized_quantity != before_quantity:
+                order.quantity = normalized_quantity
+                store.record(
+                    order,
+                    step="fill_quantity_rounding",
+                    label="成交数量取整",
+                    timestamp=ctx.timestamp,
+                    details={
+                        "before_quantity": before_quantity,
+                        "after_quantity": float(normalized_quantity),
+                    },
+                )
+            if abs(float(order.quantity or 0.0)) <= 1e-12:
+                order.status = OrderStatus.REJECTED
+                order.reject_reason = "订单数量取整为 0"
+                store.record(
+                    order,
+                    step="apply_order_fill",
+                    label="订单拒绝",
+                    timestamp=ctx.timestamp,
+                    details={"reject_reason": order.reject_reason},
+                )
+                continue
             price = order.get("effective_price")
             if price is None:
                 price = prices[order.instrument]
@@ -353,6 +383,35 @@ def _apply_order_fill(state, ctx) -> None:
             _sync_ledger_margin_reserved(ledger, positions)
             order.status = OrderStatus.FILLED
     record_order_terminal_state(state, ctx)
+
+
+def _normalise_fill_quantity(state, strategy, product, quantity: float) -> float:
+    """Final accounting guard for integer ledgers.
+
+    Order construction and cash rescaling normally round quantities before an
+    ORDER event is scheduled. This guard protects direct orders from
+    StrategyBook hooks, roll/liquidation intents, and future adapters from
+    writing fractional lots into ledgers that declared integer positions.
+    """
+    from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
+
+    ledger = ledger_for_strategy_product(state, strategy, product)
+    ledger_config = state.ledger_config_for(ledger)
+    if not _resolve_use_int_position(state.config_for(strategy), ledger_config):
+        return quantity
+    from tools.testers.backtest.modules.order_construct import (
+        OrderConstructModule,
+        default_round_order_quantity,
+    )
+    from tools.testers.backtest.modules.market_data import market_data_store_for
+
+    lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
+    lot_size = lot_sizes.get(product) or 1.0
+    policy = state.config_for(strategy).get(
+        OrderConstructModule.quantity_rounding_policy,
+        "floor_to_lot",
+    )
+    return default_round_order_quantity(quantity, lot_size, policy)
 
 
 def _required_cash_for_ledger(state, ledger) -> DataMoney:

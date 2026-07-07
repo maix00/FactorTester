@@ -108,7 +108,10 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
             for o in orders:
                 if o.quantity > 0:
                     before = float(o.quantity)
-                    o.quantity *= scale
+                    scaled = _round_execution_scaled_quantity(state, _strategy, o, float(o.quantity) * scale)
+                    o.quantity = scaled
+                    if abs(o.quantity) <= 1e-12:
+                        o.set("reject_reason", "现金不足，订单数量缩减为 0")
                     store.record(
                         o,
                         step="cash_rescale",
@@ -116,6 +119,7 @@ def _constrain_to_ledger_cash(state, ctx) -> None:
                         timestamp=ctx.timestamp,
                         details={
                             "before_quantity": before,
+                            "after_quantity": float(o.quantity),
                             "scale": float(scale),
                             "available_cash": float(available),
                             "same_batch_sell_proceeds": float(sell_proceeds),
@@ -419,10 +423,17 @@ def _clone_positions_for_cash_check(positions: dict) -> dict:
 def _round_execution_scaled_quantity(state, strategy, order, quantity: float) -> float:
     from tools.testers.backtest.modules.order_construct import OrderConstructModule, default_round_order_quantity
     from tools.testers.backtest.modules.market_data import market_data_store_for
+    from tools.testers.backtest.modules.strategy_book import ledger_for_strategy_product
+    from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
 
     lot_sizes = market_data_store_for(state).raw_input.get("lot_sizes") or {}
     policy = state.config_for(strategy).get(OrderConstructModule.quantity_rounding_policy, "floor_to_lot")
-    return default_round_order_quantity(quantity, lot_sizes.get(order.instrument), policy)
+    lot_size = lot_sizes.get(order.instrument)
+    if not lot_size:
+        ledger = ledger_for_strategy_product(state, strategy, order.instrument)
+        if _resolve_use_int_position(state.config_for(strategy), state.ledger_config_for(ledger)):
+            lot_size = 1.0
+    return default_round_order_quantity(quantity, lot_size, policy)
 
 
 def _scale_linear_fee_fields(order, scale: float) -> None:

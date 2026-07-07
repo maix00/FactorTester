@@ -533,6 +533,42 @@ def test_auto_daily_mark_to_market_fill_marks_new_lot_as_today():
     assert [(lot.quantity, lot.entry_price, lot.is_today) for lot in entry.lots] == [(2.0, 10.0, True)]
 
 
+def test_auto_integer_dmtm_rejects_fractional_fill_before_ledger_mutation():
+    s = Strategy(alias="S")
+    p = _product()
+    config = _strategy_config(s, engine_mode="auto")
+    account = _state_with_ledger_configs({s: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p}))
+    _initialize_ledgers(account, ctx)
+
+    ts = pd.Timestamp("2024-01-01")
+    order = Order(instrument=p, timestamp=ts, quantity=0.4, intent_quantity=0.4, strategy=s)
+    order_ctx = FlowContext(
+        timestamp=ts,
+        event_queue=EventQueue(),
+        active_strategies=frozenset({s}),
+        drafts_by_strategy={s: [EventDraft(EventKind.ORDER, ts, s, order)]},
+    )
+    order_ctx.set(MarketDataModule.current_prices, {p: 10.0})
+    order_ctx.set(MarketDataModule.current_historical_fields, {
+        p: {
+            "VolumeMultiple": 1.0,
+            "SettlementPrice": 10.0,
+            "CostBasisMethod": "DailyMarkToMarket",
+            "LongMarginRatioByMoney": 0.1,
+        }
+    })
+
+    _apply_order_fill(account, order_ctx)
+
+    entry = account.ledger_for_strategy(s).get(LedgerModule.positions)[p]
+    assert order.status is OrderStatus.REJECTED
+    assert "取整为 0" in order.reject_reason
+    assert entry.quantity == 0
+    assert list(entry.lots or []) == []
+
+
 def test_daily_mark_to_market_fill_uses_ledger_config_not_strategy_field():
     s = Strategy(alias="S")
     p = _product()

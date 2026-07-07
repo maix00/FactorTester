@@ -878,6 +878,8 @@ def _schedule_order_execution(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         orders = ctx.get_for(OrderConstructModule.orders, strategy, [])
         for order in orders:
+            if abs(float(getattr(order, "quantity", 0.0) or 0.0)) <= 1e-12 or order.get("reject_reason"):
+                continue
             schedule = _resolve_execution_schedule(state, ctx, strategy, order.instrument)
             if schedule is None:
                 continue

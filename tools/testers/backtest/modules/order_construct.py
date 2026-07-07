@@ -30,6 +30,7 @@ from tools.testers.backtest.modules.strategy_book import (
 )
 from tools.testers.backtest.modules.target import OrderDeltaIntent, TargetStrategyModule, TargetWeightIntent
 from tools.testers.backtest.modules.volume_capacity import VolumeCapacityMode
+from tools.testers.backtest.modules.trading_rule import _resolve_use_int_position
 
 _TARGET_WEIGHTS_REF: FieldRef[Any] = TargetStrategyModule.target_weights
 
@@ -153,7 +154,11 @@ def _round_to_lot_sizes(state, ctx) -> None:
         policy = state.config_for(strategy).get(OrderConstructModule.quantity_rounding_policy, "floor_to_lot")
         deltas = ctx.get_for(OrderConstructModule.raw_deltas, strategy, {})
         rounded = {
-            product: default_round_order_quantity(quantity, lot_sizes.get(product), policy)
+            product: default_round_order_quantity(
+                quantity,
+                _effective_lot_size(state, strategy, product, lot_sizes),
+                policy,
+            )
             for product, quantity in deltas.items()
         }
         ctx.set_for(OrderConstructModule.sized_deltas, strategy, rounded)
@@ -177,6 +182,17 @@ def default_round_order_quantity(quantity: float, lot_size: float | None, policy
     rounded_lots = math.floor(lots) if policy == "floor_to_lot" else round(lots)
     sign = 1.0 if quantity > 0 else (-1.0 if quantity < 0 else 0.0)
     return sign * rounded_lots * lot_size
+
+
+def _effective_lot_size(state, strategy, product, lot_sizes: dict) -> float | None:
+    lot_size = lot_sizes.get(product)
+    if lot_size:
+        return float(lot_size)
+    config = state.config_for(strategy)
+    ledger = ledger_for_strategy_product(state, strategy, product)
+    if _resolve_use_int_position(config, state.ledger_config_for(ledger)):
+        return 1.0
+    return None
 
 
 def _construct_orders(state, ctx) -> None:
