@@ -33,6 +33,7 @@ from tools.testers.backtest.modules.market_data import (
     current_historical_fields_at,
     current_prices_table_for,
     current_prices_at,
+    market_price_tables_for,
     historical_fields_for_product,
     is_product_tradable,
     market_price_tables_for,
@@ -813,7 +814,7 @@ def _resolve_execution_schedule(state, ctx, strategy, product: Any | None = None
     if basis != "open":
         raise ValueError("order execution is fixed to next-bar open")
     delay = config.get(GroupMembershipModule.execution_delay_bars, 1)
-    table = _execution_schedule_table(state, basis)
+    table = _execution_schedule_price_table(state, basis)
     if table is None:
         return current_ts, current_ts
     bar_freq = resolved_bar_frequency_for_strategy(state, strategy)
@@ -842,12 +843,13 @@ def _resolve_execution_schedule(state, ctx, strategy, product: Any | None = None
     return schedule
 
 
-def _execution_schedule_table(state, basis: str):
+def _execution_schedule_price_table(state, basis: str) -> pd.DataFrame | None:
     tables = market_price_tables_for(state)
     table = tables.get(basis) if isinstance(tables, dict) else None
     if isinstance(table, pd.DataFrame) and not table.empty:
         return table
-    return current_prices_table_for(state)
+    fallback = current_prices_table_for(state)
+    return fallback if isinstance(fallback, pd.DataFrame) and not fallback.empty else None
 
 
 def _execution_schedule_index(table: pd.DataFrame, product: Any | None) -> pd.DatetimeIndex:

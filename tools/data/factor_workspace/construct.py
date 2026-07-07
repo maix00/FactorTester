@@ -33,6 +33,10 @@ def _workspace_tools_dir(root: str) -> str:
     return os.path.join(root, "tools")
 
 
+def _workspace_policies_dir(root: str) -> str:
+    return os.path.join(root, "policies")
+
+
 def _source_tools_dir() -> str:
     return str(Path(__file__).resolve().parents[2] / "tools")
 
@@ -42,6 +46,7 @@ def _ensure_workspace_layout(root: str) -> None:
     Path(_workspace_public_dir(root)).mkdir(parents=True, exist_ok=True)
     Path(_workspace_custom_dir(root)).mkdir(parents=True, exist_ok=True)
     Path(_workspace_tools_dir(root)).mkdir(parents=True, exist_ok=True)
+    Path(_workspace_policies_dir(root)).mkdir(parents=True, exist_ok=True)
     Path(os.path.join(root, ".factor_workspace")).mkdir(parents=True, exist_ok=True)
     Path(os.path.join(root, ".vscode")).mkdir(parents=True, exist_ok=True)
     _write_text_if_changed(
@@ -520,6 +525,7 @@ def _sync_tools_sdk(root: str) -> bool:
     touched |= _sync_vscode_settings(root)
     touched |= _sync_pyright_config(root)
     touched |= _sync_workspace_guide(root)
+    touched |= _sync_policy_workspace(root)
     return touched
 
 
@@ -527,7 +533,7 @@ def _sync_pyright_config(root: str) -> bool:
     return _write_json(
         os.path.join(root, "pyrightconfig.json"),
         {
-            "include": ["custom_factors", "public_factors", "tools", "pandas"],
+            "include": ["custom_factors", "public_factors", "policies", "tools", "pandas"],
             "extraPaths": ["."],
             "reportMissingModuleSource": "none",
         },
@@ -547,9 +553,57 @@ def _sync_workspace_guide(root: str) -> bool:
         "no local GTHT conda environment is required.\n\n"
         "Edit files under `custom_factors/`. Factor execution and data access happen on "
         "the FactorTester server after synchronization. Generated SDK files under `tools/` "
-        "and `pandas/` should not be edited.\n",
+        "and `pandas/` should not be edited.\n\n"
+        "Use `policies/` for local StrategyBook policy experiments and research notes. "
+        "Policy files are versioned with the workspace Git repository, but they are not "
+        "executed by the server unless a reviewed runtime adapter explicitly wires them in.\n",
     )
     return extensions_changed or guide_changed
+
+
+def _sync_policy_workspace(root: str) -> bool:
+    policies_dir = _workspace_policies_dir(root)
+    Path(policies_dir).mkdir(parents=True, exist_ok=True)
+    readme_changed = _write_text_if_changed(
+        os.path.join(policies_dir, "README.md"),
+        "# StrategyBook Policies\n\n"
+        "This directory is for local policy research that travels with the private factor "
+        "workspace Git history. Keep these files small, reviewable, and explicit.\n\n"
+        "Supported policy surfaces are declared by the backend StrategyBook registry. "
+        "Typical examples include order sizing, cash availability, order routing, pending "
+        "order conflict handling, and strategy-intent precomputation.\n\n"
+        "Current runtime note: these files are authoring artifacts. The server will not "
+        "import or execute arbitrary workspace policy code unless a reviewed adapter maps "
+        "a named policy to a registered StrategyBook field.\n\n"
+        "Research loop:\n\n"
+        "1. Define or edit factors in `custom_factors/` and parameter candidates through "
+        "the CLI factor-library commands.\n"
+        "2. Draft policy ideas in `policies/`.\n"
+        "3. Use `factortester custom_factors workspace git status|diff|commit` to keep "
+        "the experiment reproducible.\n"
+        "4. Run CLI backtests against selected product groups and compare results.\n",
+    )
+    example_changed = _write_text_if_changed(
+        os.path.join(policies_dir, "strategy_book_policy_example.py"),
+        '"""Example StrategyBook policy helpers for local research.\n\n'
+        "These functions document the shape of policy hooks. They are not imported by the "
+        "server automatically; wire them through an explicit backend/CLI adapter before "
+        "using them in production backtests.\n"
+        '"""\n\n'
+        "from __future__ import annotations\n\n"
+        "from typing import Any\n\n\n"
+        "def order_sizing_identity(state: Any, ctx: Any, strategy: Any, deltas: dict[Any, float]) -> dict[Any, float]:\n"
+        "    \"\"\"Return target deltas unchanged.\n\n"
+        "    Use this as the smallest possible starting point when comparing a custom "
+        "    sizing idea against the backend default sizing policy.\n"
+        "    \"\"\"\n"
+        "    return dict(deltas)\n\n\n"
+        "def reserve_cash_ratio(state: Any, ledger: Any, cash_available: float, currency: str, *, reserve: float = 0.10) -> float:\n"
+        "    \"\"\"Keep a fraction of cash unavailable for new orders.\"\"\"\n"
+        "    reserve = min(max(float(reserve), 0.0), 1.0)\n"
+        "    return float(cash_available) * (1.0 - reserve)\n",
+    )
+    return readme_changed or example_changed
 
 
 def _sync_vscode_settings(root: str) -> bool:

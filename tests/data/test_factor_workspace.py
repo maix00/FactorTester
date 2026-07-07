@@ -92,7 +92,8 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert "as_intermediate" not in expr_pkg_stub
     assert (workspace_root / "tools" / "__init__.pyi").exists()
     assert (workspace_root / "tools" / "factors" / "__init__.pyi").exists()
-    assert not (workspace_root / "tools" / "backtest").exists()
+    assert (workspace_root / "tools" / "testers" / "backtest" / "modules" / "strategy_book.pyi").exists()
+    assert (workspace_root / "tools" / "testers" / "backtest" / "modules" / "volume_capacity.pyi").exists()
     assert not (workspace_root / "tools" / "factors" / "FactorTester.pyi").exists()
     assert not (workspace_root / "tools" / "factors" / "tests").exists()
     assert result["git"]["git_enabled"] is True
@@ -103,13 +104,16 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     assert settings["python.analysis.autoSearchPaths"] is True
     assert settings["python.analysis.diagnosticSeverityOverrides"]["reportMissingModuleSource"] == "none"
     pyright_config = json.loads((workspace_root / "pyrightconfig.json").read_text(encoding="utf-8"))
-    assert pyright_config["include"] == ["custom_factors", "public_factors", "tools", "pandas"]
+    assert pyright_config["include"] == ["custom_factors", "public_factors", "policies", "tools", "pandas"]
     assert pyright_config["reportMissingModuleSource"] == "none"
     assert "venv" not in pyright_config
     assert "venvPath" not in pyright_config
     assert "python.defaultInterpreterPath" not in settings
     assert (workspace_root / "pandas" / "__init__.pyi").exists()
     assert (workspace_root / "FACTOR_WORKSPACE.md").exists()
+    assert (workspace_root / "policies" / "README.md").exists()
+    assert (workspace_root / "policies" / "strategy_book_policy_example.py").exists()
+    assert "StrategyBook" in (workspace_root / "policies" / "README.md").read_text(encoding="utf-8")
     extensions = json.loads((workspace_root / ".vscode" / "extensions.json").read_text(encoding="utf-8"))
     assert extensions["recommendations"] == ["ms-python.vscode-pylance"]
     assert not (workspace_root / "tools" / "factors" / "FactorExpr.py").exists()

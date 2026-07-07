@@ -740,6 +740,21 @@ def test_resolve_execution_schedule_returns_none_without_future_bar():
     assert _resolve_execution_schedule(account, ctx, s) is None
 
 
+def test_resolve_execution_schedule_returns_none_when_signal_is_after_price_index():
+    s = Strategy(alias="S")
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        GroupMembershipModule.execution_delay_bars: 1,
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    index = pd.date_range("2024-01-01 09:01", periods=2, freq="1min")
+    account.market_data_store.current_prices_table = pd.DataFrame({"P1": [1, 2]}, index=index)
+    ctx = FlowContext(timestamp=pd.Timestamp("2024-01-01 09:05"), event_queue=EventQueue())
+
+    assert _resolve_execution_schedule(account, ctx, s) is None
+
+
 def test_schedule_order_execution_skips_orders_without_future_bar():
     s = Strategy(alias="S")
     p = _product()
@@ -789,6 +804,48 @@ def test_schedule_order_execution_sets_scheduled_and_pushes_event():
     queue.run_until_drained()
     assert len(seen) == 1
     assert seen[0].payload is order
+
+
+def test_schedule_order_execution_uses_each_products_next_available_open_bar():
+    s = Strategy(alias="S")
+    day_product, night_product = _product(), _product()
+    config = StrategyConfig(strategy=s, field_values={
+        GroupMembershipModule.execution_timing: "next_bar",
+        OrderExecutionModule.execution_price_basis: "open",
+    })
+    account = BacktestRunState(strategy_configs={s: config})
+    index = pd.DatetimeIndex([
+        pd.Timestamp("2026-01-05 15:00"),
+        pd.Timestamp("2026-01-05 21:00"),
+        pd.Timestamp("2026-01-06 09:01"),
+    ])
+    account.market_data_store.current_prices_table = pd.DataFrame(
+        {
+            day_product: [10.0, 10.0, 11.0],
+            night_product: [20.0, 21.0, 22.0],
+        },
+        index=index,
+    )
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame(
+            {
+                day_product: [10.0, float("nan"), 11.0],
+                night_product: [20.0, 21.0, 22.0],
+            },
+            index=index,
+        )
+    }
+    queue = EventQueue()
+    t = pd.Timestamp("2026-01-05 15:00")
+    day_order = Order(instrument=day_product, timestamp=t, quantity=1.0, intent_quantity=1.0, strategy=s)
+    night_order = Order(instrument=night_product, timestamp=t, quantity=1.0, intent_quantity=1.0, strategy=s)
+    ctx = FlowContext(timestamp=t, event_queue=queue, active_strategies=frozenset({s}))
+    ctx.set_for(OrderConstructModule.orders, s, [day_order, night_order])
+
+    _schedule_order_execution(account, ctx)
+
+    assert night_order.get("price_timestamp") == pd.Timestamp("2026-01-05 21:00")
+    assert day_order.get("price_timestamp") == pd.Timestamp("2026-01-06 09:01")
 
 
 def test_schedule_order_execution_cancels_pending_order_still_genuinely_in_the_future():
