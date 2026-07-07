@@ -23,10 +23,12 @@ options fee changes.
 
 ## Source Authority
 
-- Store exchange TransactionFee events only from official exchange pages/notices
-  or exact mirrored exchange notices with the original notice id.
-- Secondary pages, broker pages, and fee aggregators are audit evidence only; do
-  not use them as the source row for an exchange rule.
+- Prefer official exchange pages/notices for exchange TransactionFee events. If
+  the original site is blocked, removed, or hidden behind WAF, an exact mirror
+  may be used only when it preserves the exchange notice id, publication date,
+  exchange author, and the source sentence/table without broker markups.
+- Ordinary broker fee pages, Sina-style snapshots, and fee aggregators are audit
+  evidence only; do not use them as the source row for an exchange rule.
 - If a secondary source disagrees with the exchange view, record it in
   `field_history_transaction_fee_external_audit` and then find the official
   notice before appending field-change events.

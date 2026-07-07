@@ -162,10 +162,12 @@ WHERE instrument = :instrument
   reverse, store both fields at that effective point: the active unit field gets
   the exchange value and the inactive unit field gets `0`. Never leave an old
   inactive unit nonzero.
-- Exchange TransactionFee events may only be created from official exchange
-  pages/notices or directly mirrored exchange notices that preserve the notice
-  id. Secondary pages such as Sina, broker sites, and fee aggregators can be
-  used only for audit/cross-check tables, not as the source of an exchange rule.
+- Exchange TransactionFee events should use official exchange pages/notices as
+  the preferred source. If the original site is blocked, removed, or hidden
+  behind WAF, an exact mirror may be used only when it preserves the exchange
+  notice id, publication date, exchange author, and the source sentence/table
+  without broker markups. Ordinary broker fee pages, Sina-style snapshots, and
+  fee aggregators remain audit/cross-check evidence only.
 - Night session belongs to the next trading day. Example:
   `自2026年3月10日交易时（即3月9日夜盘交易小节时）起` means
   `effective_trading_day = 2026-03-10` and

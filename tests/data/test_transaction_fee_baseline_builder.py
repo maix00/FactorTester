@@ -37,7 +37,7 @@ def test_build_exchange_baseline_forces_complementary_fee_unit_to_zero(monkeypat
     assert audit[0]["inactive_openctp_nonzero"] is True
 
 
-def test_build_exchange_baseline_uses_stripped_openctp_close_today_when_leg_differs(monkeypatch) -> None:
+def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -66,6 +66,15 @@ def test_build_exchange_baseline_uses_stripped_openctp_close_today_when_leg_diff
 
     assert by_field["OpenRatioByMoney"] == 0.000023
     assert by_field["CloseRatioByMoney"] == 0.000023
-    assert by_field["CloseTodayRatioByMoney"] == 0.00023
+    assert by_field["CloseTodayRatioByMoney"] == 0.000023
     assert by_field["CloseTodayRatioByVolume"] == 0.0
-    assert [row for row in audit if row["leg"] == "平今"][0]["active_source"] == "openctp-stripped"
+    assert [row for row in audit if row["leg"] == "平今"][0]["active_source"] == "table-openctp-mismatch"
+
+
+def test_baseline_map_classifies_czce_propylene_as_money_fee() -> None:
+    mapping = builder._load_mapping(builder.DEFAULT_MAP)
+    propylene = next(row for row in mapping["products"] if row["instrument"] == "PL")
+
+    assert propylene["exchange"] == "CZCE"
+    assert propylene["unit"] == "money"
+    assert propylene["value"] == "0.01%"

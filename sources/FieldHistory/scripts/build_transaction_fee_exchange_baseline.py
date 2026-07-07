@@ -185,19 +185,11 @@ def _parse_fee_value(value: Any, *, unit: str) -> float:
 
 
 def _baseline_for_leg(*, unit: str, table_value: float, openctp_value: float | None, leg_label: str) -> tuple[float, str]:
+    if openctp_value is not None and abs(openctp_value - table_value) > BROKER_ADDON_BY_UNIT[unit] + 1e-12:
+        return table_value, "table-openctp-mismatch"
     if openctp_value is None:
         return table_value, "table"
-    addon = BROKER_ADDON_BY_UNIT[unit]
-    if abs(openctp_value - table_value) <= addon + 1e-12:
-        return table_value, "table"
-    if openctp_value == 0:
-        return 0.0, "openctp-stripped"
-    stripped = openctp_value - addon
-    if stripped < 0:
-        return openctp_value, "openctp"
-    if abs(stripped) < 1e-12:
-        return 0.0, "openctp-stripped"
-    return stripped, "openctp-stripped"
+    return table_value, "table"
 
 
 def _event(
