@@ -100,6 +100,8 @@ def _load_and_calc_factor(
     factor_family_alias: str,
     factor_alias: str,
     page_uuid: str,
+    *,
+    allow_default_factor: bool = False,
 ) -> Any:
     """
     加载因子族 → 获取因子定义 → 在 tester 上计算因子。
@@ -119,6 +121,13 @@ def _load_and_calc_factor(
     ]
     factor_family.factors = factors
     factor = _find_factor(factors, factor_alias, factor_alias)
+    if factor is None and allow_default_factor:
+        try:
+            factor_family.get_factors(page_uuid=page_uuid)
+            factors = list(getattr(factor_family, "factors", []) or [])
+            factor = _find_factor(factors, factor_alias, factor_alias)
+        except Exception:
+            factor = None
     if factor is None:
         raise LookupError(f"因子 {factor_alias} 未找到，请先在配置中提交")
 
@@ -271,6 +280,7 @@ class FactorTypeAnalysisRun:
                     ref_def.factor_family_alias or self.factor_family_alias,
                     ref_def.factor_alias,
                     self.page_uuid,
+                    allow_default_factor=getattr(ref_def, "reference_source", "") == "public_factor",
                 )
                 ref_series = _product_series_from_tester(tester, ref_factor)
                 if ref_series:

@@ -41,6 +41,7 @@ from tools.factors.tester_calc.single_factor_test.factor_type_analysis.registry 
 from tools.factors.tester_calc.single_factor_test.factor_type_analysis.server_facade import (
     FactorTypeAnalysisRun,
     _infer_asset_classes,
+    _load_and_calc_factor,
     _reference_skip_reason,
     _run_window_datetimes,
 )
@@ -158,6 +159,7 @@ class TestReferenceFactorRegistry:
             assert "category" in entry
             assert "category_label" in entry
             assert "factor_alias" in entry
+            assert "reference_source" in entry
 
     def test_default_registry_has_core_and_extended_styles(self):
         assert default_registry.count() >= 10
@@ -173,6 +175,17 @@ class TestReferenceFactorRegistry:
         assert any(item.category == FactorCategory.QUALITY for item in disabled)
         for item in disabled:
             assert item.help_text
+
+    def test_default_reference_factors_point_to_public_factor_families(self):
+        """风格桶描述分析语义；可计算参照来自明确的公共因子家族。"""
+        enabled_public_refs = [
+            item for item in default_registry.list()
+            if item.enabled_by_default and item.reference_source == "public_factor"
+        ]
+        assert enabled_public_refs
+        for item in enabled_public_refs:
+            assert item.factor_family_alias
+            assert item.factor_family_alias == item.factor_alias
 
 
 # =========================================================
@@ -562,6 +575,49 @@ class TestApiSimulation:
         assert run.method == "spearman"
         assert run.selection.selected_paths == ["Product/Futures/CNFutures/日夜盘/日盘"]
 
+    def test_reference_loader_constructs_public_default_factor_when_page_missing(self, monkeypatch):
+        class FakeFactor:
+            def __init__(self, alias: str):
+                self.alias = alias
+                self.name = alias
+
+        class FakeFamily:
+            alias = "MmTrend"
+
+            def __init__(self):
+                self.factors = []
+                self.constructed_with_page_uuid = None
+
+            def get_factors(self, *, page_uuid=None, **kwargs):
+                self.constructed_with_page_uuid = page_uuid
+                self.factors = [FakeFactor("MmTrend")]
+                return self.factors
+
+        class FakeTester:
+            def __init__(self):
+                self.results = {}
+                self.calculated = []
+
+            def calc_factor(self, factor, parallel=False):
+                self.calculated.append((factor.alias, parallel))
+
+        family = FakeFamily()
+        monkeypatch.setattr(server_facade, "get_factor_family_instance", lambda *args, **kwargs: family)
+        monkeypatch.setattr(server_facade, "page_factors", {"page-1": {}})
+
+        tester = FakeTester()
+        factor = _load_and_calc_factor(
+            tester,
+            "MmTrend",
+            "MmTrend",
+            "page-1",
+            allow_default_factor=True,
+        )
+
+        assert factor.alias == "MmTrend"
+        assert family.constructed_with_page_uuid == "page-1"
+        assert tester.calculated == [("MmTrend", False)]
+
     def test_run_simulates_frontend_request(self, monkeypatch):
         """模拟前端提交到后端对象并完成一次完整类型分析。"""
 
@@ -597,7 +653,7 @@ class TestApiSimulation:
         def fake_current_user_obj():
             return None
 
-        def fake_load_and_calc_factor(tester, factor_family_alias, factor_alias, page_uuid):
+        def fake_load_and_calc_factor(tester, factor_family_alias, factor_alias, page_uuid, **kwargs):
             factor = FakeFactor(factor_alias)
             tester._factors.append(factor)
             if factor_alias == "TargetFactor":

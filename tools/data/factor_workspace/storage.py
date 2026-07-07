@@ -109,15 +109,13 @@ def delete_factor_source(username: str, factor_id: str) -> bool:
 
 
 def load_public_factor_source(factor_id: str) -> str | None:
-    source = load_factor_source_row("public", "", factor_id)
-    if source:
-        return source
     path = public_factor_path(factor_id)
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as file:
-        source = file.read()
-    if source:
-        source = normalize_factor_source_code(source)
-        upsert_factor_source_row("public", "", factor_id, factor_id, source)
-    return source
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as file:
+            source = normalize_factor_source_code(file.read())
+        if source:
+            stored = load_factor_source_row("public", "", factor_id)
+            if stored != source:
+                upsert_factor_source_row("public", "", factor_id, factor_id, source)
+            return source
+    return load_factor_source_row("public", "", factor_id)

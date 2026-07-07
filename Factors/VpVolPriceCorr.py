@@ -23,7 +23,7 @@ class VpVolPriceCorr(FactorFamily):
 
         ret = P.delta(RF)
         vol = DataColumnParam('V', default_value='V')
-        return vol.corr(ret, N)
+        return vol.rolling_corr(ret, N)
 
     desc = '量价相关性'
     description = """
