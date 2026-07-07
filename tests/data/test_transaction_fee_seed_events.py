@@ -140,3 +140,29 @@ def test_shfe_2024_asphalt_close_today_fee_is_zero() -> None:
     assert {row["source_url"] for row in rows} == {
         "https://www.shfe.com.cn/publicnotice/notice/202404/t20240423_801626.html"
     }
+
+
+def test_shfe_new_product_fee_baselines_and_later_adjustment_are_stored() -> None:
+    rows = [
+        row
+        for row in _events()
+        if row["instrument"] in {"AD", "OP"}
+        and row["source_notice_id"] in {"上期发〔2025〕157号", "上期发〔2025〕234号", "上期发〔2025〕317号"}
+    ]
+    by_key = {
+        (row["source_notice_id"], row["instrument"], row["field_name"]): row["value"]
+        for row in rows
+    }
+
+    for notice_id, instrument in [("上期发〔2025〕157号", "AD"), ("上期发〔2025〕234号", "OP")]:
+        assert by_key[(notice_id, instrument, "OpenRatioByMoney")] == 0.0001
+        assert by_key[(notice_id, instrument, "CloseRatioByMoney")] == 0.0001
+        assert by_key[(notice_id, instrument, "CloseTodayRatioByMoney")] == 0.0001
+        assert by_key[(notice_id, instrument, "OpenRatioByVolume")] == 0.0
+        assert by_key[(notice_id, instrument, "CloseRatioByVolume")] == 0.0
+        assert by_key[(notice_id, instrument, "CloseTodayRatioByVolume")] == 0.0
+
+    for instrument in ["AD", "OP"]:
+        assert by_key[("上期发〔2025〕317号", instrument, "OpenRatioByMoney")] == 0.00005
+        assert by_key[("上期发〔2025〕317号", instrument, "CloseRatioByMoney")] == 0.00005
+        assert by_key[("上期发〔2025〕317号", instrument, "CloseTodayRatioByMoney")] == 0.0
