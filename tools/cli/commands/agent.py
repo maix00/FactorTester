@@ -63,7 +63,7 @@ def _factor_plan_options(func):
     func = click.option("--n", "n_values", multiple=True, help="N 参数候选，可重复。")(func)
     func = click.option("--product-group", "product_groups", multiple=True, help="产品路径候选，可重复。")(func)
     func = click.option("--template", default="", help="可选：先从 single_factor_test 模板加载，例如 '2026-06-02 07:20:47'。")(func)
-    func = click.option("--factor-family", default="SgCCS", show_default=True, help="因子家族名。")(func)
+    func = click.option("--factor-family", required=True, help="因子家族名，例如 SgCCS。")(func)
     return func
 
 
@@ -185,6 +185,16 @@ def _factor_research_plan(
             "title": "选择因子家族上下文",
             "command": "factortester single_factor_test --factor-family " + shlex.quote(factor_family),
         },
+        {
+            "phase": "setup",
+            "title": "查看 FactorExpr 可用算子",
+            "command": "factortester custom_factors operators",
+        },
+        {
+            "phase": "setup",
+            "title": "准备并同步因子工作区",
+            "command": "factortester custom_factors workspace build && factortester custom_factors workspace sync",
+        },
     ]
     if template:
         commands.append(
@@ -280,4 +290,3 @@ def _validation_checklist() -> list[dict[str, str]]:
         {"gate": "容量", "requirement": "成交量容量限制与不限制至少做一次对照。"},
         {"gate": "结果核查", "requirement": "保存统计、净值、订单流、snapshot；异常跳变要定位到 flow 或数据。"},
     ]
-

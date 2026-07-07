@@ -12,7 +12,9 @@
 
 ### Plan-first factor research
 
-Simulates an agent creating an SgCCS research plan before execution.
+Simulates an agent creating a research plan for an arbitrary factor family before
+execution. The concrete subprocess smoke test uses SgCCS only as an example
+factor-family value.
 
 Verified:
 
@@ -39,7 +41,8 @@ improvement.
 
 Verified:
 
-- Research plans include factor source inspection before diagnostics.
+- Research plans include FactorExpr operator inspection and factor source
+  inspection before diagnostics.
 - Research plans include the source-owner platform gap loop.
 - `client_only` users cannot restart managed server worktrees.
 - `source_owner` persists the 7998 admin port used for service restart.
@@ -51,7 +54,7 @@ Verified:
 Run:
 
 ```bash
-cd factortester/agent-harness
+cd tools/cli/agent-harness
 python -m pytest cli_anything/factortester_research/tests -v --tb=no
 ```
 

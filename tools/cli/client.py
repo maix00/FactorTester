@@ -34,6 +34,7 @@ class FactorTesterClient:
             return [
                 {"key": "custom_factors/factor-library", "label": "因子库", "kind": "module", "has_children": False},
                 {"key": "custom_factors/workspace", "label": "本地 factor workspace", "kind": "module", "has_children": False},
+                {"key": "custom_factors/operators", "label": "FactorExpr 算子", "kind": "module", "has_children": False},
             ]
         query = {"parent": parent} if parent else None
         data = self._expect_success(self.session.get("/api/testers/modules", query=query))
@@ -112,6 +113,9 @@ class FactorTesterClient:
                 },
             )
         )
+
+    def factor_expr_operators(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get("/custom-factors/api/visual-operators"))
 
     def create_product_group(self, *, name: str, paths: list[str]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/product-groups", {"name": name, "paths": paths}))

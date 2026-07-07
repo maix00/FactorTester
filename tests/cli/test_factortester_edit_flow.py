@@ -289,12 +289,15 @@ def test_agent_facing_doctor_and_factor_plan(tmp_path, monkeypatch) -> None:
         plan = json.loads(result.output)
         commands = [item["command"] for item in plan["steps"]]
         assert commands[0] == "factortester single_factor_test --factor-family SgCCS"
-        assert "single_factor_test --factor-family SgCCS template load" in commands[1]
-        assert "template --from-module-template single_factor_test load" in commands[2]
-        assert "factortester ic_test grid --factor-family SgCCS" in commands[3]
-        assert "factortester factor_type_analysis grid --factor-family SgCCS" in commands[4]
-        assert "factortester backtest compare factor-grid --factor-family SgCCS" in commands[5]
-        assert "--volume-capacity-mode infinite" in commands[5]
+        assert "factortester custom_factors operators" in commands
+        assert any("single_factor_test --factor-family SgCCS template load" in command for command in commands)
+        assert any("template --from-module-template single_factor_test load" in command for command in commands)
+        ic_index = next(index for index, command in enumerate(commands) if "factortester ic_test grid --factor-family SgCCS" in command)
+        type_index = next(index for index, command in enumerate(commands) if "factortester factor_type_analysis grid --factor-family SgCCS" in command)
+        backtest_index = next(index for index, command in enumerate(commands) if "factortester backtest compare factor-grid --factor-family SgCCS" in command)
+        assert ic_index < backtest_index
+        assert type_index < backtest_index
+        assert "--volume-capacity-mode infinite" in commands[backtest_index]
 
 
 def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkeypatch) -> None:

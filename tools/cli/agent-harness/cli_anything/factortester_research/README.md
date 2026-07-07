@@ -5,7 +5,7 @@ Agent-native harness for FactorTester factor research.
 ## Install
 
 ```bash
-cd factortester/agent-harness
+cd tools/cli/agent-harness
 python -m pip install -e .
 ```
 
@@ -19,6 +19,9 @@ cli-anything-factortester-research doctor
 ```
 
 ## Research Flow
+
+`SgCCS` below is only an example factor-family value. The harness is designed
+for any server-registered or workspace-defined factor family.
 
 ```bash
 cli-anything-factortester-research plan \
@@ -35,11 +38,16 @@ cli-anything-factortester-research run-step -- backtest compare factor-grid --fa
 If a command exposes a missing backend/CLI feature, the harness records a gap and
 sets the session status to `code_improvement_required`.
 
-Before testing a family, prepare and inspect the factor workspace so the agent
-knows what the factor computes. If the workspace has not been built locally,
+Before testing a family, inspect the backend FactorExpr operator registry. If
+the desired factor idea needs operators that are missing, record the missing
+operator semantics, input/output signature, no-look-ahead constraints, and tests,
+then fix the platform in the owning worktree before continuing. After the
+operator gate passes, prepare and inspect the factor workspace so the agent knows
+what the factor computes. If the workspace has not been built locally,
 `prepare --build --sync` is the first step:
 
 ```bash
+factortester custom_factors operators
 cli-anything-factortester-research workspace prepare --build --sync
 cli-anything-factortester-research workspace inspect --factor-family SgCCS
 ```
@@ -54,8 +62,9 @@ factortester custom_factors workspace git diff
 factortester custom_factors workspace push
 ```
 
-If the gap is platform/server code rather than factor source, distinguish the
-operator mode:
+If the gap is platform/server code rather than factor source, including missing
+FactorExpr operators, wrong operator semantics, or incorrect factor/backtest
+calculation, distinguish the operator mode:
 
 ```bash
 # Client-only users have no server source code and cannot restart the service.
@@ -69,9 +78,10 @@ cli-anything-factortester-research service restart --target-port 8123
 
 Source owners still must obey the repository `AGENTS.md` workflow: identify the
 owning issue/task and make server-code changes in that issue's branch/worktree.
-The CLI worktree should only receive those platform changes through an explicit
-merge after the owning task has tests and commits. CLI-only harness changes stay
-in the CLI worktree.
+Those fixes need enough tests to prove the operator semantics or calculation
+path is correct before research resumes. The CLI worktree should only receive
+those platform changes through an explicit merge after the owning task has tests
+and commits. CLI-only harness changes stay in the CLI worktree.
 
 ## JSON
 

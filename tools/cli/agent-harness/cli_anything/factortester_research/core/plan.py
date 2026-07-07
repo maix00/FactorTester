@@ -35,6 +35,20 @@ def build_factor_research_plan(
             "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)}",
         },
         {
+            "phase": "inspect_factor_expr_dsl",
+            "skill_basis": ["longbridge-quant:factor-research"],
+            "purpose": "在阅读或改写因子源码前，先从后端注册表查看 FactorExpr 支持的数据列、时序、截面、期限结构等算子，并判断当前研究需要的算子是否覆盖完整。",
+            "command": "factortester custom_factors operators",
+            "required_outputs": ["operator_groups", "operator_keys", "operator_descriptions"],
+        },
+        {
+            "phase": "operator_coverage_gate",
+            "skill_basis": ["longbridge-quant:factor-research", "cli-anything:refine"],
+            "purpose": "如果因子研究需要的算子不全，必须先记录缺失算子的语义、输入输出签名、无未来函数约束、预期测试，再进入所属平台 worktree 补全算子。",
+            "command": "若缺算子: cli-anything-factortester-research gap add 'missing FactorExpr operator' '<semantic/signature/tests>'",
+            "required_outputs": ["missing_operator_semantics", "expected_signature", "validation_tests"],
+        },
+        {
             "phase": "prepare_factor_workspace",
             "skill_basis": ["longbridge-quant:factor-research"],
             "purpose": "研究开始前先搭建/同步因子工作区；没有本地因子工作区时必须先 build，再从数据库 sync。",
@@ -94,8 +108,8 @@ def build_factor_research_plan(
             {
                 "phase": "platform_gap_loop",
                 "skill_basis": ["cli-anything:refine"],
-                "purpose": "若是 FactorTester 平台代码缺口，先确认所属 issue/task 范围；source_owner 必须在该任务 branch/worktree 修复、测试、提交，再 merge 到 CLI worktree，随后经 7998 管理端口重启；client_only 只能记录 gap 并交给维护者。",
-                "command": "在所属 issue worktree 修复并测试 -> merge 到 CLI worktree -> cli-anything-factortester-research service restart --target-port 8123",
+                "purpose": "若发现 FactorTester 平台缺口，包括因子算子缺失、算子语义错误、因子计算错误、测试/回测 API 缺口，先确认所属 issue/task 范围；source_owner 必须在该任务 branch/worktree 修复、充分测试、提交，再 merge 到 CLI worktree，随后经 7998 管理端口重启；client_only 只能记录 gap 并交给维护者。",
+                "command": "记录 gap -> 在所属 issue worktree 修复因子算子/语义/计算/API 并充分验证 -> commit -> merge 到 CLI worktree -> cli-anything-factortester-research service restart --target-port 8123",
             },
             {
                 "phase": "backtest",
@@ -118,10 +132,12 @@ def validation_checklist() -> list[str]:
     return [
         "IC/IR/t-stat/sample_count 已报告，且不是只看单次收益曲线。",
         "参数网格记录 hypotheses_tested，解释多重检验风险。",
+        "开始改写因子前，必须先查看后端 FactorExpr 算子表；若算子不全，先补全算子和测试，再继续研究。",
         "开始任何 IC/类型/回测前，必须先 workspace prepare --build --sync，并 inspect 因子源码。",
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",
+        "发现因子算子缺失、算子语义错误或计算结果错误时，必须进入平台代码修复流程，不能把错误结果当作因子结论。",
         "只有 source_owner 可以修 FactorTester 服务代码；client_only 用户只能提交 gap 证据，不能假装能修改服务器源码。",
         "source_owner 修平台代码前必须确认所属 issue/task 范围，并在对应 branch/worktree 修改；CLI worktree 只能接收 merge 后的平台改动。",
         "平台代码修复后必须通过 7998 管理端口重启目标服务，再重新运行失败步骤。",

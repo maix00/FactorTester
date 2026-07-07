@@ -9,6 +9,7 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import module_lines
 from tools.cli.core.errors import friendly_errors
+from tools.cli.table import render_table
 
 
 @click.group("custom_factors", invoke_without_command=True)
@@ -24,6 +25,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push")
         click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
+        click.echo("  factortester custom_factors operators")
 
 
 @custom_factors.command("list")
@@ -33,6 +35,50 @@ def list_custom_factor_children() -> None:
     click.echo("当前位置: custom_factors")
     for line in module_lines(client_from_config().list_modules(parent="custom_factors")):
         click.echo(line)
+
+
+@custom_factors.command("operators")
+@click.option("--group", "group_filter", default="", help="只显示某个算子组 key。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
+@friendly_errors
+def factor_expr_operators(group_filter: str, as_json: bool) -> None:
+    """列出后端注册的 FactorExpr 算子，供因子工作区编写源码时参考。"""
+    import json
+
+    payload = client_from_config().factor_expr_operators()
+    groups = payload.get("groups") or []
+    if group_filter:
+        groups = [group for group in groups if str(group.get("key") or "") == group_filter]
+    if as_json:
+        click.echo(json.dumps({"groups": groups}, ensure_ascii=False, indent=2))
+        return
+    if not groups:
+        click.echo("暂无 FactorExpr 算子")
+        return
+    for group in groups:
+        key = str(group.get("key") or "")
+        label = str(group.get("label") or key)
+        operators = list(group.get("operators") or [])
+        more = list(group.get("more_operators") or [])
+        click.echo(f"{label} ({key})")
+        rows = []
+        for operator in [*operators, *more]:
+            rows.append(
+                (
+                    operator.get("key") or "",
+                    operator.get("label") or "",
+                    operator.get("symbol") or "",
+                    operator.get("arity") if operator.get("arity") is not None else "",
+                    operator.get("desc") or "",
+                )
+            )
+        for line in render_table(
+            ("key", "名称", "符号", "入参", "说明"),
+            rows,
+            indent="  ",
+            max_widths=(22, 14, 10, 6, 58),
+        ):
+            click.echo(line)
 
 
 @custom_factors.group("factor-library", invoke_without_command=True)

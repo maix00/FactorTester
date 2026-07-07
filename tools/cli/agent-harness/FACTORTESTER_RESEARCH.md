@@ -18,13 +18,20 @@ The harness adapts two research skill systems:
 
 1. Define the factor family, factor alias or parameter grid, product groups,
    time range, and cost/capacity settings.
-2. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
+2. Inspect backend FactorExpr operators. If the research idea needs operators
+   that are not covered, record the missing operator semantics/signature/tests
+   and fix the platform before testing the factor.
+3. Prepare/sync the factor workspace and read the factor family source before
+   testing it.
+4. Run cheap diagnostics first: factor sequence sanity, IC/IR, IC decay, factor
    type analysis, product-group coverage, and transaction-cost feasibility.
-3. Run group/backtest grids only after diagnostics pass.
-4. Audit order flow, snapshots, ledger results, volume-capacity constraints,
+5. Run group/backtest grids only after diagnostics pass.
+6. Audit order flow, snapshots, ledger results, volume-capacity constraints,
    margin mode, fee mode, and runtime summaries.
-5. If a CLI/backend feature is missing or results reveal a platform bug, stop
-   research, record a gap, fix the codebase in the owning branch, validate, then
+7. If a CLI/backend feature is missing, a FactorExpr operator is missing, an
+   operator semantic is wrong, or calculations are incorrect, stop research,
+   record a gap, fix the codebase in the owning branch/worktree, validate
+   thoroughly, merge only through the approved workflow, restart the service, and
    resume the same session.
 
 ## Backend Contract
@@ -38,8 +45,14 @@ ignored.
 
 - IC uses rank correlation by default and reports IC mean, IR, hit rate, t-stat,
   decay, and sample count.
+- Factor source changes are made only after checking the backend FactorExpr
+  operator registry and inspecting the workspace source.
+- Missing operators are not worked around in factor code; they are recorded with
+  semantics, signature, and tests, then implemented in the owning platform branch.
 - Backtests include fees, capacity, and explicit margin mode.
 - Signal timestamps and execution timestamps obey no-look-ahead rules.
+- Operator semantics and factor calculations are verified before being used as
+  research evidence.
 - Product groups are point-in-time enough for the requested research question.
 - Parameter grids record how many hypotheses were tried.
 - Final claims are out-of-sample or explicitly marked exploratory.

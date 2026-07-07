@@ -14,21 +14,35 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
         f_values=["1m"],
     )
     phases = [item["phase"] for item in plan]
+    assert phases.index("inspect_factor_expr_dsl") < phases.index("operator_coverage_gate")
+    assert phases.index("operator_coverage_gate") < phases.index("prepare_factor_workspace")
+    assert phases.index("inspect_factor_expr_dsl") < phases.index("prepare_factor_workspace")
     assert phases.index("prepare_factor_workspace") < phases.index("understand_factor_source")
     assert phases.index("understand_factor_source") < phases.index("diagnose_ic")
     assert phases.index("diagnose_ic") < phases.index("backtest")
     assert phases.index("diagnose_type") < phases.index("backtest")
     assert phases.index("cost_capacity_screen") < phases.index("backtest")
     assert any("ic_test grid" in item["command"] for item in plan)
+    assert any("custom_factors operators" in item["command"] for item in plan)
+    assert any(item["phase"] == "operator_coverage_gate" for item in plan)
     assert any("workspace prepare --build --sync" in item["command"] for item in plan)
     assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
     assert any(item["phase"] == "platform_gap_loop" for item in plan)
+
+
+def test_plan_treats_factor_family_as_value_not_sgccs_default() -> None:
+    plan = build_factor_research_plan(factor_family="MyCustomFamily", n_values=["3m"])
+    commands = "\n".join(str(item["command"]) for item in plan)
+    assert "--factor-family MyCustomFamily" in commands
+    assert "SgCCS" not in commands
 
 
 def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     text = "\n".join(validation_checklist())
     assert "费用" in text
     assert "多重检验" in text
+    assert "FactorExpr 算子表" in text
+    assert "算子不全" in text
     assert "workspace prepare --build --sync" in text
     assert "未来函数" in text
     assert "gap" in text
