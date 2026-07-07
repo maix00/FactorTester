@@ -117,6 +117,13 @@ class FactorTesterClient:
     def factor_expr_operators(self) -> dict[str, Any]:
         return self._expect_success(self.session.get("/custom-factors/api/visual-operators"))
 
+    def custom_factor_catalog(self, *, include_subordinates: bool = False) -> dict[str, Any]:
+        query = {"include_subordinates": "1"} if include_subordinates else None
+        return self._expect_success(self.session.get("/custom-factors/api/list", query=query))
+
+    def validate_factor_expr(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post("/custom-factors/api/validate", payload))
+
     def create_product_group(self, *, name: str, paths: list[str]) -> dict[str, Any]:
         return self._expect_success(self.session.post("/api/product-groups", {"name": name, "paths": paths}))
 

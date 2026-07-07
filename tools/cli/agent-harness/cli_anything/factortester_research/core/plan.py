@@ -60,7 +60,7 @@ def build_factor_research_plan(
             "skill_basis": ["longbridge-quant:factor-research"],
             "purpose": "测试前必须阅读因子工作区源码，确认因子在计算什么、是否存在明显未来函数或过拟合参数。",
             "command": f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(factor_family)}",
-            "required_outputs": ["source_files", "factor_formula_or_expression", "rolling_shift_windows", "data_columns"],
+            "required_outputs": ["source_files", "tree_repr", "source_checks", "rolling_shift_windows", "data_columns"],
         },
     ]
     if template:

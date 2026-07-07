@@ -2383,6 +2383,46 @@ def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkey
     ]
 
 
+def test_custom_factor_describe_cross_checks_source_and_operator_tree(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/custom-factors/api/list")
+    def factor_list():
+        return jsonify(
+            success=True,
+            public_factors=[],
+            custom_factors=[
+                {
+                    "id": "MyAlpha",
+                    "name": "MyAlpha",
+                    "source_code": "class MyAlpha(FactorFamily):\n    def factor_expr():\n        return CLOSE.rolling_mean(N)\n",
+                    "owner_username": "18717974771",
+                }
+            ],
+        )
+
+    @app.post("/custom-factors/api/validate")
+    def validate():
+        return jsonify(
+            success=True,
+            valid=True,
+            tree_repr="RollingOp rolling_mean(ColumnRef CLOSE, ParamRef N)",
+            params=[{"alias": "N", "type": "DataFreq", "default_value": "2m"}],
+        )
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+        result = runner.invoke(cli, ["custom_factors", "describe", "MyAlpha", "--json", "--source-code"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["source_checks"]["ok"] is True
+        assert payload["operator_keys"] == ["rolling_mean"]
+        assert "rolling_mean" in payload["tree_repr"]
+
+
 def test_backtest_context_help_errors_on_unregistered_field(tmp_path, monkeypatch) -> None:
     app = Flask(__name__)
     register_home_modules(app)

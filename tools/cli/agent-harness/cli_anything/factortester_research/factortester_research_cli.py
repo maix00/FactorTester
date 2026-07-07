@@ -348,11 +348,40 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
         save_session(session, session_path)
         raise click.ClickException("无法解析 factor workspace root")
     report = inspect_factor_source(workspace_root, factor_family)
+    describe_result = run_factortester(
+        ["custom_factors", "describe", factor_family, "--source-code", "--json"],
+        timeout=120,
+    )
+    if describe_result.returncode != 0:
+        record_gap(session, "Factor operator tree unavailable", describe_result.stderr or describe_result.stdout, command=describe_result.argv)
+        save_session(session, session_path)
+        raise click.ClickException(describe_result.stderr or describe_result.stdout)
+    try:
+        import json
+
+        factor_tree = json.loads(describe_result.stdout or "{}")
+    except Exception as exc:
+        record_gap(session, "Factor operator tree invalid", f"{type(exc).__name__}: {exc}", command=describe_result.argv)
+        save_session(session, session_path)
+        raise click.ClickException("无法解析因子算子树 JSON") from exc
+    source_checks = factor_tree.get("source_checks") or {}
+    report["tree_repr"] = factor_tree.get("tree_repr") or ""
+    report["operator_keys"] = factor_tree.get("operator_keys") or []
+    report["source_checks"] = source_checks
     session.factor_family = factor_family
     session.factor_source = report
     record_event(session, "factor_source_inspected", factor_family=factor_family, file_count=report["file_count"])
     if report["file_count"] == 0:
         record_gap(session, "Factor source not found in workspace", f"factor_family={factor_family}, root={workspace_root}")
+    if source_checks and not source_checks.get("ok"):
+        record_gap(
+            session,
+            "Factor source and operator tree mismatch",
+            f"missing_in_tree={source_checks.get('missing_in_tree')}, factor_family={factor_family}",
+            command=describe_result.argv,
+        )
+        save_session(session, session_path)
+        raise click.ClickException("因子源码与后端解析算子树不一致，请先修复因子源码或 FactorExpr 算子语义")
     save_session(session, session_path)
     if as_json:
         _echo_json({"factor_source": report, "session": session.to_dict()})
@@ -366,6 +395,8 @@ def workspace_inspect(ctx: click.Context, factor_family: str, root: str, sync: b
         click.echo(f"- {item['relative_path']}")
         for line in item["summary"][:16]:
             click.echo(f"    {line}")
+    if report.get("operator_keys"):
+        click.echo("算子: " + ", ".join(str(key) for key in report["operator_keys"]))
 
 
 @cli.group("decision")
