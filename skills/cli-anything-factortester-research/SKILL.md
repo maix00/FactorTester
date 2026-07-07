@@ -49,3 +49,6 @@ cli-anything-factortester-research checklist
   owner.
 - `source_owner` users must run tests after code changes and restart the target
   service through the local 7998 manager before retrying failed research steps.
+- `source_owner` does not mean "edit platform code in the CLI worktree". First
+  identify the owning issue/task, fix and commit in that branch/worktree, then
+  merge those platform changes into the CLI worktree when the CLI needs them.

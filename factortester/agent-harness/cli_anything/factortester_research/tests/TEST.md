@@ -3,7 +3,7 @@
 ## Inventory
 
 - `test_core.py`: plan generation, validation checklist, session/gap state,
-  and service target selection.
+  service target selection, and source-owner worktree routing rules.
 - `test_full_e2e.py`: CLI subprocess behavior using `_resolve_cli()`, JSON output,
   dry-run command construction, gap recording against a fake factortester
   executable, operator mode persistence, and client-only service restart guards.
@@ -43,6 +43,8 @@ Verified:
 - Research plans include the source-owner platform gap loop.
 - `client_only` users cannot restart managed server worktrees.
 - `source_owner` persists the 7998 admin port used for service restart.
+- Source owners must fix platform code in the owning issue branch/worktree
+  before merging it into the CLI worktree.
 
 ## Results
 
@@ -56,8 +58,8 @@ python -m pytest cli_anything/factortester_research/tests -v --tb=no
 Validated in GTHT environment:
 
 ```text
-..........                                                               [100%]
-10 passed in 0.66s
+...........                                                              [100%]
+11 passed in 1.44s
 ```
 
 Installed-command validation:
@@ -68,8 +70,8 @@ CLI_ANYTHING_FORCE_INSTALLED=1 python -m pytest cli_anything/factortester_resear
 ```
 
 ```text
-..........                                                               [100%]
-10 passed in 0.87s
+...........                                                              [100%]
+11 passed in 1.40s
 ```
 
 Manual command smoke test:

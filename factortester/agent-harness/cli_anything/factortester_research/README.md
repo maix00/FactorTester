@@ -66,6 +66,12 @@ cli-anything-factortester-research service list
 cli-anything-factortester-research service restart --target-port 8123
 ```
 
+Source owners still must obey the repository `AGENTS.md` workflow: identify the
+owning issue/task and make server-code changes in that issue's branch/worktree.
+The CLI worktree should only receive those platform changes through an explicit
+merge after the owning task has tests and commits. CLI-only harness changes stay
+in the CLI worktree.
+
 ## JSON
 
 All commands intended for agents support `--json`.

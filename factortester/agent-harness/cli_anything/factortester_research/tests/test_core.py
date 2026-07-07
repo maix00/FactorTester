@@ -30,6 +30,16 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     assert "gap" in text
     assert "7998" in text
     assert "client_only" in text
+    assert "branch/worktree" in text
+
+
+def test_platform_gap_plan_requires_owner_worktree_before_cli_merge() -> None:
+    plan = build_factor_research_plan(factor_family="SgCCS")
+    platform = next(item for item in plan if item["phase"] == "platform_gap_loop")
+    text = platform["purpose"] + " " + platform["command"]
+    assert "issue/task" in text
+    assert "branch/worktree" in text
+    assert "merge 到 CLI worktree" in text
 
 
 def test_gap_state_machine_blocks_and_resumes_research() -> None:

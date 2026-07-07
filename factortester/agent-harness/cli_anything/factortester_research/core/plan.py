@@ -87,8 +87,8 @@ def build_factor_research_plan(
             {
                 "phase": "platform_gap_loop",
                 "skill_basis": ["cli-anything:refine"],
-                "purpose": "若是 FactorTester 平台代码缺口，先区分 operator_mode：有服务器源码者修代码、测试、经 7998 管理端口重启；纯客户端用户只能记录 gap 并交给维护者。",
-                "command": "cli-anything-factortester-research operator set --mode source_owner --admin-port 7998 && cli-anything-factortester-research service restart --target-port 8123",
+                "purpose": "若是 FactorTester 平台代码缺口，先确认所属 issue/task 范围；source_owner 必须在该任务 branch/worktree 修复、测试、提交，再 merge 到 CLI worktree，随后经 7998 管理端口重启；client_only 只能记录 gap 并交给维护者。",
+                "command": "在所属 issue worktree 修复并测试 -> merge 到 CLI worktree -> cli-anything-factortester-research service restart --target-port 8123",
             },
             {
                 "phase": "backtest",
@@ -115,6 +115,7 @@ def validation_checklist() -> list[str]:
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",
         "只有 source_owner 可以修 FactorTester 服务代码；client_only 用户只能提交 gap 证据，不能假装能修改服务器源码。",
+        "source_owner 修平台代码前必须确认所属 issue/task 范围，并在对应 branch/worktree 修改；CLI worktree 只能接收 merge 后的平台改动。",
         "平台代码修复后必须通过 7998 管理端口重启目标服务，再重新运行失败步骤。",
         "表现不好时先回到因子工作区理解并修改因子源码或参数，再重新跑 IC/类型/回测诊断。",
         "最终结论标注 exploratory / in-sample / out-of-sample。",

@@ -24,3 +24,10 @@ cli-anything-factortester-research service restart --target-port 8123 --dry-run 
 cli-anything-factortester-research gap list --json
 cli-anything-factortester-research status --json
 ```
+
+Server-code gap rule:
+
+- `client_only` users cannot modify FactorTester server source.
+- `source_owner` users must first identify the owning issue/task and edit the
+  corresponding branch/worktree. Merge those platform changes into the CLI
+  worktree only after tests/commits, then restart through port 7998.
