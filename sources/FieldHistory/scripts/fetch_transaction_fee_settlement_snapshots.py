@@ -24,6 +24,7 @@ SOURCE_LABEL = {
     "INE": "上海国际能源交易中心结算参数表",
     "CFFEX": "中国金融期货交易所结算业务参数表",
     "CZCE": "郑州商品交易所期货结算参数表",
+    "GFEX": "广州期货交易所期货结算参数表",
 }
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 REQUEST_TIMEOUT = 8.0
@@ -59,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     REQUEST_TIMEOUT = args.timeout
-    markets = args.market or ["SHFE", "INE", "CFFEX", "CZCE"]
+    markets = args.market or ["SHFE", "INE", "CFFEX", "CZCE", "GFEX"]
     dates = _requested_dates(
         args.date,
         start_date=args.start_date,
@@ -147,6 +148,8 @@ def _rows_for_market(market: str, date: str, *, source_accessed_at: str) -> list
         return _cffex_rows(date, source_accessed_at=source_accessed_at)
     if market == "CZCE":
         return _czce_rows(date, source_accessed_at=source_accessed_at)
+    if market == "GFEX":
+        return _gfex_rows(date, source_accessed_at=source_accessed_at)
     raise ValueError(f"unsupported market: {market}")
 
 
@@ -331,6 +334,68 @@ def _czce_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
                 source_accessed_at=source_accessed_at,
                 symbol=symbol,
                 label=_instrument(symbol),
+                leg=leg,
+                money=money,
+                volume=volume,
+            )
+    return rows
+
+
+def _gfex_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
+    url = "http://www.gfex.com.cn/u/interfacesWebTiFutAndOptSettle/loadList"
+    referer = "http://www.gfex.com.cn/gfex/rjscs/ywcs.shtml"
+    session = requests.Session()
+    response = session.post(
+        url,
+        data={"trade_date": date, "variety": ""},
+        headers={**HEADERS, "Referer": referer},
+        timeout=REQUEST_TIMEOUT,
+    )
+    if response.status_code == 567:
+        session.get(referer, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        response = session.post(
+            url,
+            data={"trade_date": date, "variety": ""},
+            headers={**HEADERS, "Referer": referer},
+            timeout=REQUEST_TIMEOUT,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get("code")) != "0":
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in payload.get("data") or []:
+        symbol = str(item.get("contractId") or "").strip()
+        if not symbol:
+            continue
+        style = str(item.get("style") or "").strip()
+        open_fee = _parse_number(item.get("openFee"))
+        close_fee = _parse_number(item.get("offsetFee"))
+        close_today_fee = _parse_number(item.get("shortOffsetFee"))
+        if style == "绝对值":
+            open_money, open_volume = 0.0, open_fee
+            close_money, close_volume = 0.0, close_fee
+            close_today_money, close_today_volume = 0.0, close_today_fee
+        elif style == "比例值":
+            open_money, open_volume = open_fee / 10000.0, 0.0
+            close_money, close_volume = close_fee / 10000.0, 0.0
+            close_today_money, close_today_volume = close_today_fee / 10000.0, 0.0
+        else:
+            continue
+        label = str(item.get("variety") or _instrument(symbol))
+        for leg, money, volume in (
+            ("open", open_money, open_volume),
+            ("close", close_money, close_volume),
+            ("close_today", close_today_money, close_today_volume),
+        ):
+            _add_leg(
+                rows,
+                market="GFEX",
+                date=date,
+                source_url=url,
+                source_accessed_at=source_accessed_at,
+                symbol=symbol,
+                label=label,
                 leg=leg,
                 money=money,
                 volume=volume,
