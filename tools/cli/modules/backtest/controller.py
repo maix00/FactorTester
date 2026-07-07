@@ -179,10 +179,38 @@ def local_settings(ctx: click.Context) -> None:
 
 @backtest.command("compare", context_settings=SELECTOR_HELP_CONTEXT)
 @click.option("--volume-rate", type=float, default=0.02, show_default=True, help="成交量容量限制场景的参与率。")
+@click.option("--factor-family", default="", help="因子家族名；factor-grid 未传时使用当前上下文。")
+@click.option("--n", "n_values", multiple=True, help="N 参数候选，可重复。默认: 1m,2m,3m,5m,10m")
+@click.option("--f", "f_values", multiple=True, help="$F 参数候选，可重复。默认: 1m")
+@click.option("--product-group", "product_groups", multiple=True, help="产品组候选名称，可重复。默认继承当前草稿。")
+@click.option("--rev/--no-rev", default=True, show_default=True, help="是否使用 $Rev 标志。")
+@click.option("--top", type=int, default=12, show_default=True, help="factor-grid 摘要显示前 N 个结果。")
+@click.option(
+    "--volume-capacity-mode",
+    "--liquidity-mode",
+    "liquidity_mode",
+    type=click.Choice(["inherit", "infinite", "volume_participation"]),
+    default="inherit",
+    show_default=True,
+    help="factor-grid 覆盖成交量容量模式；--liquidity-mode 是旧别名。",
+)
+@click.option("--participation-rate", type=float, default=None, help="factor-grid 成交量参与率；默认沿用 --volume-rate。")
 @click.option("--verbose", is_flag=True, help="运行时打印完整 SSE 进度事件摘要。")
 @click.pass_context
 @friendly_errors
-def compare(ctx: click.Context, volume_rate: float, verbose: bool) -> None:
+def compare(
+    ctx: click.Context,
+    volume_rate: float,
+    factor_family: str,
+    n_values: tuple[str, ...],
+    f_values: tuple[str, ...],
+    product_groups: tuple[str, ...],
+    rev: bool,
+    top: int,
+    liquidity_mode: str,
+    participation_rate: float | None,
+    verbose: bool,
+) -> None:
     """在一次 backend run 中克隆当前草稿，批量对比关键执行/保证金场景。"""
     state = load_state()
     _ensure_active_backtest_scope(state)
@@ -191,27 +219,53 @@ def compare(ctx: click.Context, volume_rate: float, verbose: bool) -> None:
         _print_backtest_compare_help()
         return
     preset = args[0]
-    if preset != "volume-capacity-margin":
-        raise click.ClickException("compare 暂只支持 preset: volume-capacity-margin")
-    if volume_rate <= 0:
-        raise click.ClickException("--volume-rate 必须大于 0")
-    payload, groups, ls_configs, scenarios = _volume_capacity_margin_compare_payload(
-        state,
-        volume_rate=volume_rate,
-    )
-    click.echo("批量对比场景:")
-    for scenario in scenarios:
-        click.echo(f"  {scenario['label']}: {scenario['description']}")
-    _run_backtest(
-        state,
-        groups=groups,
-        ls_configs=ls_configs,
-        payload=payload,
-        verbose=verbose,
-        title="批量对比回测",
-        show_topology=False,
-    )
-    _print_compare_result_summary(state, scenarios)
+    if preset == "volume-capacity-margin":
+        if volume_rate <= 0:
+            raise click.ClickException("--volume-rate 必须大于 0")
+        payload, groups, ls_configs, scenarios = _volume_capacity_margin_compare_payload(
+            state,
+            volume_rate=volume_rate,
+        )
+        click.echo("批量对比场景:")
+        for scenario in scenarios:
+            click.echo(f"  {scenario['label']}: {scenario['description']}")
+        _run_backtest(
+            state,
+            groups=groups,
+            ls_configs=ls_configs,
+            payload=payload,
+            verbose=verbose,
+            title="批量对比回测",
+            show_topology=False,
+        )
+        _print_compare_result_summary(state, scenarios)
+        return
+    if preset == "factor-grid":
+        payload, groups, ls_configs, scenarios = _factor_grid_payload(
+            state,
+            factor_family=factor_family,
+            n_values=n_values,
+            f_values=f_values,
+            product_groups=product_groups,
+            rev=rev,
+            liquidity_mode=liquidity_mode,
+            participation_rate=participation_rate if participation_rate is not None else volume_rate,
+        )
+        click.echo("因子参数/产品组批量研究:")
+        for scenario in scenarios:
+            click.echo(f"  {scenario['label']}: {scenario['description']}")
+        _run_backtest(
+            state,
+            groups=groups,
+            ls_configs=ls_configs,
+            payload=payload,
+            verbose=verbose,
+            title="因子参数网格回测",
+            show_topology=False,
+        )
+        _print_factor_grid_result_summary(state, scenarios, top=top)
+        return
+    raise click.ClickException("compare 支持 preset: volume-capacity-margin, factor-grid")
 
 
 @backtest.command("strategy-book", context_settings=SELECTOR_HELP_CONTEXT)
@@ -1498,9 +1552,13 @@ def _print_backtest_compare_help() -> None:
     click.echo("      1. 成交量容量=无限 / 保证金=关闭")
     click.echo("      2. 成交量容量=成交量参与率 / 保证金=关闭")
     click.echo("      3. 成交量容量=无限 / 保证金=auto")
+    click.echo("  factor-grid --factor-family NAME [--n 1m --n 2m] [--f 1m] [--product-group 中国期货日盘]")
+    click.echo("    继承当前草稿和已注册 policy/local-settings，批量替换因子参数和可选产品组。")
+    click.echo("    可加 --volume-capacity-mode infinite|volume_participation 覆盖模板内成交量容量设置。")
     click.echo("")
     click.echo("示例:")
     click.echo("  factortester backtest compare volume-capacity-margin --volume-rate 0.02")
+    click.echo("  factortester backtest compare factor-grid --factor-family SgCCS --product-group 中国期货夜盘 --product-group 中国期货日盘 --n 2m --f 1m --volume-capacity-mode infinite")
 
 
 def _volume_capacity_margin_compare_payload(
@@ -1578,6 +1636,219 @@ def _volume_capacity_margin_compare_payload(
         "ledger_configs": ledger_configs,
     }
     return payload, groups, ls_configs, scenarios
+
+
+def _factor_grid_payload(
+    state,
+    *,
+    factor_family: str,
+    n_values: tuple[str, ...],
+    f_values: tuple[str, ...],
+    product_groups: tuple[str, ...],
+    rev: bool,
+    liquidity_mode: str = "inherit",
+    participation_rate: float = 0.02,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
+    if not state.backtest_groups:
+        raise click.ClickException("没有可研究的分组；请先加载模板或新增分组")
+    factor_family = str(factor_family or state.factor_family or state.page_settings.get("factor_family") or "").strip()
+    if not factor_family:
+        raise click.ClickException("factor-grid 缺少因子家族；请传 --factor-family")
+    n_list = [str(item).strip() for item in (n_values or ("1m", "2m", "3m", "5m", "10m")) if str(item).strip()]
+    f_list = [str(item).strip() for item in (f_values or ("1m",)) if str(item).strip()]
+    if not n_list or not f_list:
+        raise click.ClickException("--n 和 --f 至少各有一个候选")
+    client = client_from_config()
+    product_group_selections = _factor_grid_product_group_selections(client, product_groups)
+    scenarios: list[dict[str, str]] = []
+    groups: list[dict[str, Any]] = []
+    ls_configs: list[dict[str, Any]] = []
+    ledger_configs: dict[str, dict[str, Any]] = {}
+    strategy_book: dict[str, Any] = {"strategies": {}, "cash_pools": {}}
+    for n_value in n_list:
+        for f_value in f_list:
+            alias = _factor_grid_alias(factor_family, n_value, f_value, rev=rev)
+            _register_factor_alias(state, client, alias, factor_family=factor_family)
+            product_items = product_group_selections or [None]
+            for product_group_selection_item in product_items:
+                product_label = (
+                    selection_label(product_group_selection_item)
+                    if product_group_selection_item is not None
+                    else "继承产品组"
+                )
+                scenario_key = _factor_grid_key(alias, product_label)
+                scenario_label = f"{alias} · {product_label}"
+                scenarios.append({
+                    "key": scenario_key,
+                    "label": scenario_label,
+                    "description": f"factor={alias}, product_group={product_label}",
+                })
+                scenario_source_groups = _factor_grid_source_groups(
+                    state.backtest_groups,
+                    overrides_product_group=product_group_selection_item is not None,
+                )
+                id_map = {
+                    _draft_group_id(group): _scenario_strategy_id(scenario_key, _draft_group_id(group))
+                    for group in scenario_source_groups
+                }
+                for group in scenario_source_groups:
+                    old_id = _draft_group_id(group)
+                    new_id = id_map[old_id]
+                    cloned = dict(group)
+                    cloned["id"] = new_id
+                    cloned["group_id"] = new_id
+                    cloned["strategy_id"] = new_id
+                    old_short = str(group.get("shortAlias") or group.get("short_alias") or group.get("name") or old_id)
+                    cloned["shortAlias"] = f"{scenario_label} · {old_short}"
+                    cloned["name"] = f"{scenario_label} · {group.get('name') or old_short}"
+                    cloned["factor"] = alias
+                    cloned["factorAlias"] = alias
+                    cloned["factor_family_alias"] = factor_family
+                    _apply_factor_grid_capacity_override(cloned, liquidity_mode=liquidity_mode, participation_rate=participation_rate)
+                    if product_group_selection_item is not None:
+                        cloned["product_path_selection"] = dict(product_group_selection_item)
+                    for parent_key in ("parentId", "parent_id"):
+                        parent = str(cloned.get(parent_key) or "")
+                        if parent in id_map:
+                            cloned[parent_key] = id_map[parent]
+                    cloned["compare_scenario"] = scenario_key
+                    groups.append(cloned)
+                    _register_factor_grid_ledger(strategy_book, ledger_configs, new_id, cloned)
+                for index, config in enumerate(state.backtest_ls_configs):
+                    old_id = str(config.get("strategy_id") or config.get("id") or f"ls-{index}")
+                    new_id = _scenario_strategy_id(scenario_key, old_id)
+                    cloned_ls = dict(config)
+                    cloned_ls["id"] = new_id
+                    cloned_ls["strategy_id"] = new_id
+                    old_short = str(config.get("shortAlias") or config.get("name") or old_id)
+                    cloned_ls["shortAlias"] = f"{scenario_label} · {old_short}"
+                    cloned_ls["name"] = f"{scenario_label} · {config.get('name') or old_short}"
+                    _apply_factor_grid_capacity_override(cloned_ls, liquidity_mode=liquidity_mode, participation_rate=participation_rate)
+                    _remap_long_short_leg_ids(cloned_ls, id_map)
+                    cloned_ls["compare_scenario"] = scenario_key
+                    ls_configs.append(cloned_ls)
+                    _register_factor_grid_ledger(strategy_book, ledger_configs, new_id, cloned_ls)
+    payload = {
+        "page_uuid": state.page_uuid,
+        "local_settings": dict(state.backtest_local_settings),
+        "groups": groups,
+        "ls_configs": ls_configs,
+        "strategy_book": strategy_book,
+        "ledger_configs": ledger_configs,
+    }
+    return payload, groups, ls_configs, scenarios
+
+
+def _factor_grid_alias(factor_family: str, n_value: str, f_value: str, *, rev: bool) -> str:
+    alias = f"{factor_family}|N:{n_value}|$F:{f_value}"
+    if rev:
+        alias += "|$Rev"
+    return alias
+
+
+def _factor_grid_key(alias: str, product_label: str) -> str:
+    raw = f"{alias}__{product_label}"
+    return "fg_" + "".join(ch if ch.isalnum() else "_" for ch in raw)[:96]
+
+
+def _factor_grid_source_groups(groups: list[dict[str, Any]], *, overrides_product_group: bool) -> list[dict[str, Any]]:
+    if not overrides_product_group:
+        return list(groups)
+    return [group for group in groups if not _group_has_product_mask(group)]
+
+
+def _group_has_product_mask(group: dict[str, Any]) -> bool:
+    for key in ("productMask", "product_mask", "product_mask_names"):
+        value = group.get(key)
+        if isinstance(value, dict) and any(bool(item) for item in value.values()):
+            return True
+        if isinstance(value, (list, tuple, set)) and bool(value):
+            return True
+    return False
+
+
+def _apply_factor_grid_capacity_override(target: dict[str, Any], *, liquidity_mode: str, participation_rate: float) -> None:
+    if liquidity_mode == "inherit":
+        return
+    target["liquidity_mode"] = liquidity_mode
+    if liquidity_mode == "volume_participation":
+        target["participation_rate"] = participation_rate
+
+
+def _register_factor_grid_ledger(
+    strategy_book: dict[str, Any],
+    ledger_configs: dict[str, dict[str, Any]],
+    strategy_id: str,
+    settings: dict[str, Any],
+) -> None:
+    ledger_id = f"private:{strategy_id}"
+    strategy_book.setdefault("strategies", {})[strategy_id] = {
+        "ledger_ids": [ledger_id],
+        "default_ledger_id": ledger_id,
+    }
+    strategy_book.setdefault("cash_pools", {})[ledger_id] = ledger_id
+    ledger_config_keys = {
+        "fee_mode",
+        "fixed_fee_rate",
+        "margin_mode",
+        "fixed_margin_ratio",
+        "accounting_mode",
+        "daily_mark_to_market_enabled",
+        "cost_basis_method",
+        "use_int_position",
+        "tradability_policy",
+        "clearing_rounding_policy",
+        "cash_reserve_ratio",
+        "cash_reserve_major",
+        "margin_call_mode",
+        "liquidation_target_buffer",
+    }
+    ledger_configs[ledger_id] = {
+        key: settings[key]
+        for key in ledger_config_keys
+        if key in settings
+    }
+
+
+def _factor_grid_product_group_selections(client, product_groups: tuple[str, ...]) -> list[dict[str, Any]]:
+    names = [str(item).strip() for item in product_groups if str(item).strip()]
+    if not names:
+        return []
+    candidates = client.list_candidates("product_path_candidates")
+    selections: list[dict[str, Any]] = []
+    for name in names:
+        match = next(
+            (
+                item for item in candidates
+                if name in {
+                    str(item.get("name") or ""),
+                    str(item.get("label") or ""),
+                    str(item.get("id") or ""),
+                    str(item.get("product_path_selection_id") or ""),
+                }
+            ),
+            None,
+        )
+        if match is None:
+            raise click.ClickException(f"未找到产品组候选: {name}")
+        selections.append(product_group_selection(match))
+    return selections
+
+
+def _register_factor_alias(state, client, alias: str, *, factor_family: str) -> None:
+    candidates = list(state.page_settings.get("factor_candidates") or [])
+    known = {str(item.get("factor_alias") or item.get("alias") or "") for item in candidates if isinstance(item, dict)}
+    if alias in known:
+        return
+    params = _params_from_factor_alias(alias, factor_family)
+    data = client.add_candidate("factor", {
+        "factor_family_alias": factor_family,
+        "params": params,
+        "page_uuid": state.page_uuid,
+    })
+    factor_alias = str(data.get("factor_alias") or alias)
+    candidates.append({"factor_alias": factor_alias, "params": params})
+    state.page_settings["factor_candidates"] = candidates
 
 
 def _apply_compare_scenario_settings(target: dict[str, Any], scenario_key: str, *, volume_rate: float) -> None:
@@ -1680,6 +1951,48 @@ def _print_compare_result_summary(state, scenarios: list[dict[str, str]]) -> Non
         indent="  ",
         aligns=("left", "left", "right", "right", "right"),
         max_widths=(22, 24, 16, 10, 8),
+    ):
+        click.echo(line)
+
+
+def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *, top: int) -> None:
+    data = _require_last_result(state)
+    groups = [group for group in (data.get("groups") or []) if isinstance(group, dict)]
+    scenario_by_key = {scenario["key"]: scenario for scenario in scenarios}
+    rows: list[tuple[float, str, str, float, int]] = []
+    for group in groups:
+        scenario_key = str(group.get("compare_scenario") or "")
+        scenario = scenario_by_key.get(scenario_key)
+        name = str(group.get("name") or group.get("group_id") or group.get("id") or "")
+        if scenario is None:
+            scenario = next((item for item in scenarios if name.startswith(f"{item['label']} · ")), None)
+        if scenario is None:
+            continue
+        prefix = f"{scenario['label']} · "
+        strategy_name = name[len(prefix):] if name.startswith(prefix) else name
+        curve = _group_equity_curve(group)
+        if not curve:
+            continue
+        initial = curve[0]
+        final = curve[-1]
+        ret = final / initial - 1.0 if initial else 0.0
+        rows.append((ret, scenario["label"], strategy_name, final, len(curve)))
+    rows.sort(key=lambda item: item[0], reverse=True)
+    if top > 0:
+        rows = rows[:top]
+    if not rows:
+        return
+    click.echo("")
+    click.echo("因子参数/产品组收益率排行")
+    for line in render_table(
+        ("排名", "收益率", "最终权益", "策略", "候选", "点数"),
+        [
+            (index, _pct(ret), f"{final:,.2f}", strategy, scenario_label, points)
+            for index, (ret, scenario_label, strategy, final, points) in enumerate(rows, start=1)
+        ],
+        indent="  ",
+        aligns=("right", "right", "right", "left", "left", "right"),
+        max_widths=(6, 10, 16, 24, 48, 8),
     ):
         click.echo(line)
 

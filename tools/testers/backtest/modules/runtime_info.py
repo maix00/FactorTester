@@ -37,6 +37,7 @@ def record_runtime_info(
         row["aggregation_key"] = aggregation_key
 
     runtime_rows = getattr(state, "runtime_info_rows", None)
+    should_emit = True
     if isinstance(runtime_rows, list):
         existing = _find_existing_row(state, runtime_rows, code, aggregation_key)
         if existing is None:
@@ -45,10 +46,11 @@ def record_runtime_info(
         else:
             existing.update(row)
             row = existing
+            should_emit = not aggregation_key
 
     sink = getattr(state, "runtime_info_sink", None)
     emit = getattr(sink, "emit_runtime_info", None)
-    if callable(emit):
+    if should_emit and callable(emit):
         emit(row["message"], level=row["level"], code=row["code"], details=row["details"], row=row)
     return row
 

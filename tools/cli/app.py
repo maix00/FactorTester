@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from tools.cli.commands.agent import doctor, factor_plan
 from tools.cli.commands.auth import configure, login
 from tools.cli.commands.navigation import list_modules
 from tools.cli.commands.settings import describe, edit
@@ -19,6 +20,9 @@ def cli() -> None:
     常用路径:
       factortester configure --host 127.0.0.1 --port 8114
       factortester login --username 18717974771
+      factortester doctor
+      factortester factor-plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --n 2m
+      # agent 因子研究：安装/使用 longbridge-quant、quantitative-research，并阅读 tools/cli/docs/factor-research-cli.md
       factortester list
       factortester single_factor_test list
       factortester single_factor_test --factor-family SgCCS
@@ -38,6 +42,8 @@ def cli() -> None:
 
 cli.add_command(configure)
 cli.add_command(login)
+cli.add_command(doctor)
+cli.add_command(factor_plan)
 cli.add_command(list_modules)
 cli.add_command(describe)
 cli.add_command(edit)

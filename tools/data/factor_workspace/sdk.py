@@ -36,6 +36,58 @@ AUTHOR_SDK_MODULES = (
         content=_HEADER.rstrip() + "\n",
     ),
     AuthorSdkModule("tools/data/__init__.pyi", content=_HEADER),
+    AuthorSdkModule("tools/testers/__init__.pyi", content=_HEADER),
+    AuthorSdkModule("tools/testers/backtest/__init__.pyi", content=_HEADER),
+    AuthorSdkModule("tools/testers/backtest/modules/__init__.pyi", content=_HEADER),
+    AuthorSdkModule(
+        "tools/testers/backtest/modules/strategy_book.pyi",
+        content=_HEADER
+        + "from dataclasses import dataclass, field\n"
+        + "from typing import Callable, Literal\n\n"
+        + "OrderRoutingPolicy = Callable[[Any, Any], str | Any]\n"
+        + "CashAvailabilityPolicy = Callable[[Any, Any, float, str], float]\n"
+        + "OrderSizingPolicy = Callable[[Any, Any, Any, dict[Any, float]], dict[Any, float]]\n"
+        + "PendingOrderConflictPolicy = Callable[[Any, Any, Any, Any], None]\n"
+        + "TradeDecisionMergePolicy = Callable[[Any, Any, list[Any]], Any]\n"
+        + "HierarchyConstraintPolicy = Callable[[Any, Any, Any], Any]\n"
+        + "StrategyIntentPrecomputePolicy = Callable[[Any, list[Any]], Any]\n\n"
+        + "@dataclass(frozen=True)\n"
+        + "class LedgerConfig:\n"
+        + "    ledger: Any\n"
+        + "    cash_pool: Any | None = ...\n"
+        + "    counterparty_profile_id: str | None = ...\n\n"
+        + "@dataclass(frozen=True)\n"
+        + "class StrategyBookPolicies:\n"
+        + "    order_routing: OrderRoutingPolicy | None = ...\n"
+        + "    cash_availability: CashAvailabilityPolicy | None = ...\n"
+        + "    order_sizing: OrderSizingPolicy | None = ...\n"
+        + "    pending_order_conflict: PendingOrderConflictPolicy | None = ...\n"
+        + "    trade_decision_merge: TradeDecisionMergePolicy | None = ...\n"
+        + "    hierarchy_constraints: HierarchyConstraintPolicy | None = ...\n"
+        + "    strategy_intent_precompute: StrategyIntentPrecomputePolicy | None = ...\n\n"
+        + "@dataclass\n"
+        + "class StrategyBook:\n"
+        + "    mode: str = ...\n"
+        + "    policies: StrategyBookPolicies = ...\n"
+        + "    ledger_configs: dict[Any, LedgerConfig] = ...\n"
+        + "    default_ledger_by_strategy: dict[Any, Any] = ...\n"
+        + "    ledgers_by_strategy: dict[Any, tuple[Any, ...]] = ...\n"
+        + "    @classmethod\n    def from_dict(cls, payload: dict[str, Any] | None) -> StrategyBook: ...\n"
+        + "    def ledger_id_for_order(self, state: Any, order: Any) -> Any: ...\n"
+        + "    def default_ledger_id_for_strategy(self, state: Any, strategy: Any) -> Any: ...\n"
+        + "    def ledger_ids_for_strategy(self, state: Any, strategy: Any) -> tuple[Any, ...]: ...\n",
+    ),
+    AuthorSdkModule(
+        "tools/testers/backtest/modules/volume_capacity.pyi",
+        content=_HEADER
+        + "from typing import Literal\n\n"
+        + "class VolumeCapacityMode:\n"
+        + "    mode: Literal['infinite', 'volume_participation', 'custom']\n"
+        + "    participation_rate: float\n"
+        + "    def __init__(self, mode: str = ..., participation_rate: float = ...) -> None: ...\n\n"
+        + "def volume_capacity_from_config(config: Any) -> VolumeCapacityMode: ...\n"
+        + "def apply_volume_capacity_policy(deltas: dict[Any, float], volumes: dict[Any, float], capacity: VolumeCapacityMode) -> dict[Any, float]: ...\n",
+    ),
     AuthorSdkModule(
         "tools/data/types/__init__.pyi",
         content=_HEADER

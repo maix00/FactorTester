@@ -166,3 +166,190 @@ def base_payload(
         "settings": dict(settings),
         "_summary": selection_summary(product_selection, factor),
     }
+
+
+def parse_factor_grid_options(args: tuple[str, ...], *, default_factor_family: str = "") -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "factor_family": default_factor_family,
+        "n": [],
+        "f": [],
+        "product_group": [],
+        "rev": [],
+        "top": 12,
+    }
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--factor-family":
+            options["factor_family"] = _required_grid_value(args, i, token)
+            i += 2
+            continue
+        if token == "--n":
+            options["n"].append(_required_grid_value(args, i, token))
+            i += 2
+            continue
+        if token == "--f":
+            options["f"].append(_required_grid_value(args, i, token))
+            i += 2
+            continue
+        if token == "--product-group":
+            options["product_group"].append(_required_grid_value(args, i, token))
+            i += 2
+            continue
+        if token == "--top":
+            options["top"] = int(_required_grid_value(args, i, token))
+            i += 2
+            continue
+        if token == "--no-rev":
+            if False not in options["rev"]:
+                options["rev"].append(False)
+            i += 1
+            continue
+        if token == "--rev":
+            if True not in options["rev"]:
+                options["rev"].append(True)
+            i += 1
+            continue
+        raise click.ClickException(f"无法识别 grid 参数: {token}")
+    if not options["n"]:
+        options["n"] = ["1m", "2m", "3m", "5m", "10m"]
+    if not options["f"]:
+        options["f"] = ["1m"]
+    if not options["rev"]:
+        options["rev"] = [True]
+    if not str(options.get("factor_family") or "").strip():
+        raise click.ClickException("grid 缺少因子家族；请传 --factor-family")
+    options["factor_family"] = str(options["factor_family"]).strip()
+    return options
+
+
+def factor_grid_items(state: Any, *, options: dict[str, Any], settings: dict[str, Any], client=None) -> list[dict[str, Any]]:
+    client = client or client_from_config()
+    factor_family = str(options.get("factor_family") or "").strip()
+    if not factor_family:
+        raise click.ClickException("grid 缺少因子家族；请传 --factor-family")
+    product_selections = grid_product_selections(state, client, list(options.get("product_group") or []))
+    time_settings = shared_time_settings(state)
+    items: list[dict[str, Any]] = []
+    for n_value in options["n"]:
+        for f_value in options["f"]:
+            for rev in options["rev"]:
+                alias = factor_alias(factor_family, str(n_value), str(f_value), rev=bool(rev))
+                register_grid_factor(state, client, alias, factor_family=factor_family)
+                for selection in product_selections:
+                    item_settings = dict(settings or {})
+                    item_settings.update(time_settings)
+                    items.append({
+                        "factor": alias,
+                        "product_group": selection_label(selection),
+                        "selection": selection,
+                        "settings": item_settings,
+                        "payload_base": grid_payload_base(state, factor_family=factor_family, alias=alias, selection=selection),
+                    })
+    return items
+
+
+def grid_payload_base(state: Any, *, factor_family: str, alias: str, selection: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "page_uuid": state.page_uuid,
+        "factor_family_alias": factor_family,
+        "factor_alias": alias,
+        "factor": alias,
+        "factor_name": alias,
+        "product_path_selection_id": selection.get("product_path_selection_id") or selection.get("id") or "",
+        "product_path_selection": selection,
+        "paths": list(selection.get("paths") or selection.get("selected_paths") or []),
+    }
+
+
+def shared_time_settings(state: Any) -> dict[str, Any]:
+    keys = ("start_date", "end_date", "start_time", "end_time", "time_precision", "timezone", "evaluation_split")
+    values: dict[str, Any] = {}
+    for source in (
+        getattr(state, "backtest_local_settings", {}),
+        getattr(state, "ic_test_local_settings", {}),
+        getattr(state, "factor_type_analysis_local_settings", {}),
+        getattr(state, "factor_evaluation_local_settings", {}),
+    ):
+        for key in keys:
+            if key in source and source[key] not in {None, ""}:
+                values[key] = source[key]
+    return values
+
+
+def grid_product_selections(state: Any, client: Any, names: list[str]) -> list[dict[str, Any]]:
+    candidates = client.list_candidates("product_path_candidates")
+    if names:
+        selections: list[dict[str, Any]] = []
+        for name in names:
+            match = next(
+                (
+                    item for item in candidates
+                    if name in {
+                        str(item.get("name") or ""),
+                        str(item.get("label") or ""),
+                        str(item.get("id") or ""),
+                        str(item.get("product_path_selection_id") or ""),
+                    }
+                ),
+                None,
+            )
+            if match is None:
+                raise click.ClickException(f"未找到产品组候选: {name}")
+            selections.append(product_group_selection(match))
+        return selections
+    for group in getattr(state, "backtest_groups", []):
+        selection = group.get("product_path_selection") if isinstance(group, dict) else None
+        if isinstance(selection, dict):
+            return [selection]
+    selection = getattr(state, "page_settings", {}).get("product_path_selection")
+    if isinstance(selection, dict):
+        return [selection]
+    raise click.ClickException("grid 缺少产品路径；请传 --product-group 或先加载含产品路径的模板")
+
+
+def register_grid_factor(state: Any, client: Any, alias: str, *, factor_family: str) -> None:
+    candidates = list(getattr(state, "page_settings", {}).get("factor_candidates") or [])
+    known = {str(item.get("factor_alias") or item.get("alias") or "") for item in candidates if isinstance(item, dict)}
+    data = client.add_candidate("factor", {
+        "factor_family_alias": factor_family,
+        "params": params_from_factor_alias(alias, factor_family),
+        "page_uuid": state.page_uuid,
+    })
+    factor_alias = str(data.get("factor_alias") or alias)
+    if factor_alias not in known:
+        candidates.append({"factor_alias": factor_alias, "params": params_from_factor_alias(alias, factor_family)})
+        state.page_settings["factor_candidates"] = candidates
+
+
+def factor_alias(factor_family: str, n_value: str, f_value: str, *, rev: bool) -> str:
+    alias = f"{factor_family}|N:{n_value}|$F:{f_value}"
+    if rev:
+        alias += "|$Rev"
+    return alias
+
+
+def params_from_factor_alias(alias: str, factor_family: str) -> dict[str, Any]:
+    prefix = f"{factor_family}|"
+    if alias == factor_family:
+        return {}
+    if not alias.startswith(prefix):
+        raise click.ClickException(f"因子 {alias} 不属于 {factor_family}")
+    params: dict[str, Any] = {}
+    for part in alias[len(prefix):].split("|"):
+        if not part:
+            continue
+        if ":" in part:
+            key, value = part.split(":", 1)
+            params[key] = value[1:-1] if value.startswith("[") and value.endswith("]") else value
+        elif part == "$Rev":
+            params[part] = "1"
+        else:
+            params[part] = True
+    return params
+
+
+def _required_grid_value(args: tuple[str, ...], index: int, option: str) -> str:
+    if index + 1 >= len(args) or args[index + 1].startswith("--"):
+        raise click.ClickException(f"{option} 缺少参数")
+    return str(args[index + 1])

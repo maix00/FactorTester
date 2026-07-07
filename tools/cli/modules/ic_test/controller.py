@@ -18,6 +18,7 @@ from tools.cli.modules.backtest.shared.selectors import (
     resolve_factor_family_selector,
     selection_label,
 )
+from tools.cli.modules.single_factor_analysis_shared import parse_factor_grid_options, factor_grid_items
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.run_output import _multi_series_chart
 from tools.cli.state import load_state, save_state
@@ -42,6 +43,7 @@ def ic_test(ctx: click.Context, run: bool, verbose: bool) -> None:
       factortester single_factor_test --factor-family SgCCS ic_test
       factortester ic_test local-settings --ic-correlation rank --ic-lag 0
       factortester ic_test config --add --name 日盘RankIC --factor-family SgCCS --product-group 中国期货日盘 --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'
+      factortester ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 1m --n 2m
       factortester ic_test config list
       factortester ic_test --run
     """
@@ -115,6 +117,64 @@ def config(ctx: click.Context) -> None:
     _print_config(state.ic_test_configs[-1])
 
 
+@ic_test.command("grid", context_settings=SELECTOR_CONTEXT)
+@click.option("--verbose", is_flag=True, help="打印流式进度事件。")
+@click.pass_context
+@friendly_errors
+def grid(ctx: click.Context, verbose: bool) -> None:
+    """批量运行 IC 测试。"""
+    state = load_state()
+    if state.current_parent != IC_TEST_KEY:
+        enter_ic_test_state(state)
+    if not state.page_uuid:
+        raise click.ClickException("缺少 page_uuid；请先运行 factortester login")
+    args = tuple(ctx.args)
+    if not args or args[0] in {"help", "--help", "-h"}:
+        _print_grid_help()
+        return
+    default_factor_family = str(state.factor_family or state.page_settings.get("factor_family") or "")
+    options = parse_factor_grid_options(tuple(arg for arg in args if arg != "--verbose"), default_factor_family=default_factor_family)
+    client = client_from_config()
+    rows = []
+    for item in factor_grid_items(state, options=options, settings=state.ic_test_local_settings, client=client):
+        settings = dict(item["settings"])
+        payload = {
+            **item["payload_base"],
+            "factors": [{"alias": item["factor"]}],
+            "settings": settings,
+            "ic_correlation": settings.get("ic_correlation", "rank"),
+            "ic_lag": settings.get("ic_lag", 0),
+            "ic_decay_lags": list(range(1, int(settings.get("ic_decay_lags") or 5) + 1)),
+            "rolling_window": settings.get("rolling_window"),
+        }
+        click.echo(f"IC grid: {item['factor']} · {item['product_group']}")
+        result = None
+        for event in client.run_ic_test_stream(payload):
+            event_name = str(event.get("event") or "message")
+            data = event.get("data")
+            if event_name == "error":
+                message = data.get("error") if isinstance(data, dict) else data
+                raise click.ClickException(f"IC 测试失败: {message}")
+            if event_name == "progress" and verbose and isinstance(data, dict):
+                click.echo(f"  进度: {data.get('phase')} {data.get('completed')}/{data.get('total')}")
+            if event_name == "result" and isinstance(data, dict):
+                result = data
+        summary = _ic_summary_values(result or {}, item["factor"])
+        rows.append((
+            item["factor"],
+            item["product_group"],
+            summary.get("mean"),
+            summary.get("std"),
+            summary.get("ir"),
+            summary.get("t_stat"),
+            summary.get("n"),
+            summary.get("ac1"),
+            summary.get("half_life"),
+        ))
+    save_state(state)
+    _print_grid_rows(rows, top=int(options.get("top") or 12))
+
+
 def enter_ic_test_state(state) -> None:
     if state.current_parent == "single_factor_family_test":
         ensure_child_available(state.current_parent, IC_TEST_KEY)
@@ -154,6 +214,13 @@ def _print_config_help() -> None:
     click.echo("")
     click.echo("示例:")
     click.echo("  factortester ic_test config --add --name 日盘RankIC --factor-family SgCCS --product-group 中国期货日盘 --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'")
+
+
+def _print_grid_help() -> None:
+    click.echo("ic_test grid 命令")
+    click.echo("  --factor-family NAME [--product-group NAME] [--n 1m --n 2m] [--f 1m] [--rev] [--no-rev] [--top 12]")
+    click.echo("")
+    click.echo("说明: grid = 因子参数 × 产品组 × 方向。产品组和方向可重复传入；方向不传默认使用 $Rev。")
 
 
 def _stores_for_ic(state, client=None) -> tuple[FieldStore, FieldStore]:
@@ -437,15 +504,9 @@ def _print_ic_result(result: dict[str, Any]) -> None:
         if not isinstance(row, dict):
             continue
         index = str(row.get("index") or "")
-        if index.lower() not in {"mean", "ir", "t_stat", "n", "ic_mean", "ic_ir"}:
-            continue
         for col in columns:
             value = row.get(col)
-            if isinstance(value, float):
-                display = f"{value:.6g}"
-            else:
-                display = str(value)
-            table_rows.append((index, col, display))
+            table_rows.append((_ic_metric_label(index), col, _format_number(value)))
     for line in render_table(("指标", "因子", "值"), table_rows, indent="    ", aligns=("left", "left", "right"), max_widths=(12, 42, 14)):
         click.echo(line)
 
@@ -500,6 +561,117 @@ def _print_ic_decay(decay: list[Any]) -> None:
             click.echo(line)
 
 
+def _ic_summary_values(result: dict[str, Any], alias: str) -> dict[str, Any]:
+    stats = result.get("ic_stats") if isinstance(result.get("ic_stats"), dict) else {}
+    rows = stats.get("rows") if isinstance(stats.get("rows"), list) else []
+    summary: dict[str, Any] = {
+        "mean": None,
+        "std": None,
+        "ir": None,
+        "t_stat": None,
+        "n": None,
+        "ac1": None,
+        "half_life": None,
+    }
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        index = str(row.get("index") or "").lower()
+        value = _first_numeric_stat(row, alias)
+        if index in {"mean", "ic_mean"}:
+            summary["mean"] = value
+        elif index in {"std", "ic_std"}:
+            summary["std"] = value
+        elif index in {"ir", "ic_ir"}:
+            summary["ir"] = value
+        elif index == "t_stat":
+            summary["t_stat"] = value
+        elif index == "n":
+            summary["n"] = value
+        elif index == "ac1":
+            summary["ac1"] = value
+        elif index == "half_life":
+            summary["half_life"] = value
+    factor = _first_factor_result(result, alias)
+    if factor:
+        primary_lag = result.get("primary_ic_lag")
+        decay_rows = [item for item in factor.get("ic_decay") or [] if isinstance(item, dict)]
+        decay_match = None
+        for item in decay_rows:
+            if not isinstance(item, dict):
+                continue
+            if primary_lag is not None and item.get("lag") != primary_lag and int(item.get("lag") or -1) != int(primary_lag):
+                continue
+            decay_match = item
+            break
+        decay_match = decay_match or (decay_rows[0] if decay_rows else None)
+        if decay_match:
+            summary["n"] = summary["n"] if summary["n"] is not None else decay_match.get("n")
+            summary["mean"] = summary["mean"] if summary["mean"] is not None else decay_match.get("mean")
+            summary["ir"] = summary["ir"] if summary["ir"] is not None else decay_match.get("ir")
+            summary["t_stat"] = summary["t_stat"] if summary["t_stat"] is not None else decay_match.get("t_stat")
+    return summary
+
+
+def _first_factor_result(result: dict[str, Any], alias: str) -> dict[str, Any] | None:
+    for item in result.get("factors") or []:
+        if not isinstance(item, dict):
+            continue
+        keys = {str(item.get("alias") or ""), str(item.get("factor_alias") or ""), str(item.get("name") or "")}
+        if alias in keys or not alias:
+            return item
+    return None
+
+
+def _first_numeric_stat(row: dict[str, Any], alias: str) -> float | None:
+    for key in (alias, "IC", "RankIC", "rank_ic", "ic"):
+        parsed = _float_or_none(row.get(key))
+        if parsed is not None:
+            return parsed
+    for key, value in row.items():
+        if key == "index":
+            continue
+        parsed = _float_or_none(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _print_grid_rows(rows: list[tuple[Any, ...]], *, top: int) -> None:
+    def score(row: tuple[Any, ...]) -> tuple[bool, float, float]:
+        ir = _float_or_none(row[4])
+        mean = _float_or_none(row[2])
+        return (ir is not None, abs(ir or 0.0), abs(mean or 0.0))
+
+    rows = sorted(rows, key=score, reverse=True)
+    if top > 0:
+        rows = rows[:top]
+    click.echo("")
+    click.echo("IC grid 摘要")
+    table_rows = [
+        (
+            factor,
+            product_group,
+            _format_number(mean),
+            _format_number(std),
+            _format_number(ir),
+            _format_number(t_stat),
+            _format_number(n),
+            _format_number(ac1),
+            _format_number(half_life),
+        )
+        for factor, product_group, mean, std, ir, t_stat, n, ac1, half_life in rows
+    ]
+    for line in render_table(
+        ("因子", "产品组", "mean", "std", "IR", "t", "n", "AC1", "half-life"),
+        table_rows,
+        indent="  ",
+        aligns=("left", "left", "right", "right", "right", "right", "right", "right", "right"),
+        max_widths=(36, 18, 10, 10, 10, 10, 8, 8, 10),
+    ):
+        click.echo(line)
+
+
 def _numeric_values(value: Any) -> list[float]:
     if not isinstance(value, list):
         return []
@@ -515,6 +687,33 @@ def _numeric_values(value: Any) -> list[float]:
 
 
 def _format_number(value: Any) -> str:
+    if value is None:
+        return "-"
     if isinstance(value, (int, float)):
         return f"{float(value):.6g}"
     return str(value)
+
+
+def _ic_metric_label(value: str) -> str:
+    labels = {
+        "mean": "IC Mean",
+        "std": "IC Std",
+        "IR": "IR",
+        "ir": "IR",
+        "t_stat": "t-stat",
+        "max": "IC Max",
+        "min": "IC Min",
+        "ac1": "IC AC1",
+        "half_life": "Half-Life",
+        "n": "n",
+    }
+    return labels.get(value, value)
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None

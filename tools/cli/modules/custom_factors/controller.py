@@ -23,6 +23,7 @@ def custom_factors(ctx: click.Context) -> None:
         click.echo("可用功能:")
         click.echo("  factortester custom_factors factor-library list|add")
         click.echo("  factortester custom_factors workspace show|root|build|sync|push")
+        click.echo("  factortester custom_factors workspace git status|diff|commit|branch|checkout")
 
 
 @custom_factors.command("list")
@@ -169,6 +170,59 @@ def workspace_git_settings(git_enabled: bool | None, repo_root: str) -> None:
     _print_workspace_git(client.save_factor_workspace_git_settings(git_enabled=enabled, git_repo_root=root))
 
 
+@workspace.group("git", invoke_without_command=True)
+@click.pass_context
+@friendly_errors
+def workspace_git(ctx: click.Context) -> None:
+    """Run local Git commands inside the factor workspace."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(workspace_git_status)
+
+
+@workspace_git.command("status")
+@friendly_errors
+def workspace_git_status() -> None:
+    """Show local Git status for the factor workspace."""
+    _print_workspace_git_action(client_from_config().factor_workspace_git_action("status"))
+
+
+@workspace_git.command("diff")
+@click.option("--stat", "show_stat", is_flag=True, help="只显示 diff stat。")
+@click.option("--cached", is_flag=True, help="查看 staged diff。")
+@friendly_errors
+def workspace_git_diff(show_stat: bool, cached: bool) -> None:
+    """Show local Git diff for the factor workspace."""
+    _print_workspace_git_action(
+        client_from_config().factor_workspace_git_action("diff", cached=cached, stat=show_stat)
+    )
+
+
+@workspace_git.command("commit")
+@click.option("-m", "--message", required=True, help="提交信息。")
+@friendly_errors
+def workspace_git_commit(message: str) -> None:
+    """Stage all workspace changes and commit them locally."""
+    _print_workspace_git_action(client_from_config().factor_workspace_git_action("commit", message=message))
+
+
+@workspace_git.command("branch")
+@friendly_errors
+def workspace_git_branch() -> None:
+    """List local Git branches for the factor workspace."""
+    _print_workspace_git_action(client_from_config().factor_workspace_git_action("branch"))
+
+
+@workspace_git.command("checkout")
+@click.argument("branch")
+@click.option("--create", is_flag=True, help="如果分支不存在则创建。")
+@friendly_errors
+def workspace_git_checkout(branch: str, create: bool) -> None:
+    """Switch workspace Git branch."""
+    _print_workspace_git_action(
+        client_from_config().factor_workspace_git_action("checkout", branch=branch, create=create)
+    )
+
+
 def current_user_params(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for user in payload.get("users") or []:
         if not user.get("editable"):
@@ -248,3 +302,14 @@ def parse_key_value(item: str) -> tuple[str, str]:
     if not key:
         raise click.ClickException("参数 KEY 不能为空")
     return key, value.strip()
+
+
+def _print_workspace_git_action(payload: dict[str, Any]) -> None:
+    stdout = str(payload.get("stdout") or "").rstrip()
+    stderr = str(payload.get("stderr") or "").rstrip()
+    if stdout:
+        click.echo(stdout)
+    if stderr:
+        click.echo(stderr, err=True)
+    if payload.get("commit_sha"):
+        click.echo(f"commit: {payload.get('commit_sha')}")

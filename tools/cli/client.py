@@ -242,6 +242,10 @@ class FactorTesterClient:
             )
         )
 
+    def factor_workspace_git_action(self, action: str, **payload: Any) -> dict[str, Any]:
+        data = {"action": action, **payload}
+        return self._expect_success(self.session.post("/custom-factors/api/workspace/git", data))
+
     def _expect_success(self, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("success") is False:
             raise RuntimeError(str(data.get("error") or data))

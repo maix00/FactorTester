@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import contextlib
 import io
@@ -237,6 +238,63 @@ def test_click_login_success_prints_welcome(tmp_path, monkeypatch) -> None:
         assert "页面上下文: page-1" in result.output
         assert "欢迎使用 FactorTester CLI" in result.output
         assert "factortester list" in result.output
+        assert "longbridge-quant、quantitative-research skill" in result.output
+        assert "tools/cli/docs/factor-research-cli.md" in result.output
+
+
+def test_agent_facing_doctor_and_factor_plan(tmp_path, monkeypatch) -> None:
+    app = Flask(__name__)
+    register_home_modules(app)
+
+    @app.get("/api/backtest/settings/<application>")
+    def settings(application: str):
+        return jsonify(
+            success=True,
+            application=application,
+            defaults={
+                "start_date": {"value": "2026-01-01", "label": "开始日期"},
+                "end_date": {"value": "2026-01-31", "label": "结束日期"},
+            },
+        )
+
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    with running_server(app) as url:
+        assert runner.invoke(cli, ["configure", "--base-url", url]).exit_code == 0
+
+        result = runner.invoke(cli, ["doctor", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["success"] is True
+        assert any(item["name"] == "server" for item in payload["checks"])
+        assert any(item["name"] == "manifest:ic_test" for item in payload["checks"])
+
+        result = runner.invoke(cli, [
+            "factor-plan",
+            "--factor-family",
+            "SgCCS",
+            "--template",
+            "2026-06-02 07:20:47",
+            "--product-group",
+            "中国期货日盘",
+            "--n",
+            "2m",
+            "--f",
+            "1m",
+            "--liquidity-mode",
+            "infinite",
+            "--json",
+        ])
+        assert result.exit_code == 0
+        plan = json.loads(result.output)
+        commands = [item["command"] for item in plan["steps"]]
+        assert commands[0] == "factortester single_factor_test --factor-family SgCCS"
+        assert "single_factor_test --factor-family SgCCS template load" in commands[1]
+        assert "template --from-module-template single_factor_test load" in commands[2]
+        assert "factortester ic_test grid --factor-family SgCCS" in commands[3]
+        assert "factortester factor_type_analysis grid --factor-family SgCCS" in commands[4]
+        assert "factortester backtest compare factor-grid --factor-family SgCCS" in commands[5]
+        assert "--volume-capacity-mode infinite" in commands[5]
 
 
 def test_single_factor_family_can_jump_directly_to_child_module(tmp_path, monkeypatch) -> None:
@@ -2243,6 +2301,19 @@ def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkey
         calls.append(("git-settings", payload))
         return jsonify(success=True, git_enabled=payload.get("git_enabled"), git_repo_root=payload.get("git_repo_root"), git_current_branch="factor-upload")
 
+    @app.post("/custom-factors/api/workspace/git")
+    def workspace_git():
+        payload = request.get_json() or {}
+        calls.append(("workspace-git", payload))
+        action = payload.get("action")
+        if action == "status":
+            return jsonify(success=True, action=action, stdout="## factor-upload\n M custom_factors/SgCCS.py\n")
+        if action == "diff":
+            return jsonify(success=True, action=action, stdout=" custom_factors/SgCCS.py | 2 +-\n")
+        if action == "commit":
+            return jsonify(success=True, action=action, stdout="[factor-upload abc123] research\n", commit_sha="abc123")
+        return jsonify(success=True, action=action, stdout="")
+
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     runner = CliRunner()
     with running_server(app) as url:
@@ -2285,12 +2356,27 @@ def test_custom_factor_workspace_cli_maps_web_workspace_actions(tmp_path, monkey
         assert result.exit_code == 0
         assert "启用: 否" in result.output
 
+        result = runner.invoke(cli, ["custom_factors", "workspace", "git", "status"])
+        assert result.exit_code == 0
+        assert "custom_factors/SgCCS.py" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "git", "diff", "--stat"])
+        assert result.exit_code == 0
+        assert "custom_factors/SgCCS.py | 2 +-" in result.output
+
+        result = runner.invoke(cli, ["custom_factors", "workspace", "git", "commit", "-m", "research"])
+        assert result.exit_code == 0
+        assert "commit: abc123" in result.output
+
     assert calls == [
         ("save-root", {"source_root": "/tmp/custom-root"}),
         ("build", {}),
         ("sync", {"branch_mode": "force"}),
         ("push", {"branch_mode": "auto"}),
         ("git-settings", {"git_enabled": False, "git_repo_root": "/tmp/no-git"}),
+        ("workspace-git", {"action": "status"}),
+        ("workspace-git", {"action": "diff", "cached": False, "stat": True}),
+        ("workspace-git", {"action": "commit", "message": "research"}),
     ]
 
 

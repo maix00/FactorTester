@@ -29,6 +29,9 @@ def print_home_welcome() -> None:
     click.echo("  factortester products                     进入产品管理")
     click.echo("  factortester custom_factors               进入因子管理")
     click.echo("  factortester <module> --help              查看模块命令")
+    click.echo("Agent 因子研究:")
+    click.echo("  安装/使用 longbridge-quant、quantitative-research skill")
+    click.echo("  阅读 tools/cli/docs/factor-research-cli.md 查看 CLI 接入流程")
 
 
 def print_single_factor_family_welcome(state: CliState) -> None:

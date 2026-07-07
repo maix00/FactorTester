@@ -44,6 +44,7 @@ class BacktestRunRenderer:
         self._event_activity_log_interval = 2.0
         self._activity_typewriter_delay = 0.006
         self.last_result: dict[str, Any] = {}
+        self._runtime_info_seen: set[tuple[str, str]] = set()
 
     def handle(self, event_name: str, data: Any) -> None:
         if self._done and event_name not in {"complete", "done"}:
@@ -133,6 +134,18 @@ class BacktestRunRenderer:
 
     def _print_runtime_info(self, data: Any) -> None:
         if isinstance(data, dict):
+            code = str(data.get("code") or "")
+            aggregation_key = str(data.get("aggregation_key") or "")
+            if not aggregation_key:
+                row = data.get("row")
+                if isinstance(row, dict):
+                    aggregation_key = str(row.get("aggregation_key") or "")
+                    code = code or str(row.get("code") or "")
+            if code and aggregation_key:
+                dedupe_key = (code, aggregation_key)
+                if dedupe_key in self._runtime_info_seen:
+                    return
+                self._runtime_info_seen.add(dedupe_key)
             row_type = data.get("type") or data.get("status") or "运行信息"
             detail = data.get("detail") or data.get("message") or data
             self._echo(f"[运行信息] {row_type}: {detail}")

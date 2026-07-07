@@ -22,6 +22,9 @@ packages = [
   "tools.cli.modules.backtest",
   "tools.cli.modules.backtest.shared",
   "tools.cli.modules.custom_factors",
+  "tools.cli.modules.factor_evaluation",
+  "tools.cli.modules.factor_type_analysis",
+  "tools.cli.modules.ic_test",
   "tools.cli.modules.products",
   "tools.cli.modules.single_factor_family_test",
 ]
