@@ -14,10 +14,13 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
         f_values=["1m"],
     )
     phases = [item["phase"] for item in plan]
+    assert phases.index("prepare_factor_workspace") < phases.index("understand_factor_source")
+    assert phases.index("understand_factor_source") < phases.index("diagnose_ic")
     assert phases.index("diagnose_ic") < phases.index("backtest")
     assert phases.index("diagnose_type") < phases.index("backtest")
     assert phases.index("cost_capacity_screen") < phases.index("backtest")
     assert any("ic_test grid" in item["command"] for item in plan)
+    assert any("workspace prepare --build --sync" in item["command"] for item in plan)
     assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
     assert any(item["phase"] == "platform_gap_loop" for item in plan)
 
@@ -26,6 +29,7 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     text = "\n".join(validation_checklist())
     assert "费用" in text
     assert "多重检验" in text
+    assert "workspace prepare --build --sync" in text
     assert "未来函数" in text
     assert "gap" in text
     assert "7998" in text

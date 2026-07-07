@@ -22,7 +22,7 @@ machine to have FactorTester server source code.
 ```bash
 cli-anything-factortester-research doctor --json
 cli-anything-factortester-research plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --n 2m --f 1m --rev --json
-cli-anything-factortester-research workspace prepare --sync --json
+cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
 cli-anything-factortester-research decision poor-result --reason 'IC/cost diagnostics failed'
@@ -38,6 +38,9 @@ cli-anything-factortester-research checklist
 ## Agent Rules
 
 - Do not jump straight to group backtest. Run IC/type diagnostics first.
+- Do not run IC/type/backtest before preparing and inspecting the factor
+  workspace. If no workspace exists, build it first with
+  `workspace prepare --build --sync`.
 - Treat missing CLI/backend features as codebase gaps, not research conclusions.
 - Track the number of hypotheses tested when sweeping factor/product grids.
 - Include transaction costs, capacity, and explicit margin mode before claiming a

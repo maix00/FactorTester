@@ -35,9 +35,16 @@ def build_factor_research_plan(
             "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)}",
         },
         {
+            "phase": "prepare_factor_workspace",
+            "skill_basis": ["longbridge-quant:factor-research"],
+            "purpose": "研究开始前先搭建/同步因子工作区；没有本地因子工作区时必须先 build，再从数据库 sync。",
+            "command": "cli-anything-factortester-research workspace prepare --build --sync",
+            "required_outputs": ["workspace_root", "git_status"],
+        },
+        {
             "phase": "understand_factor_source",
             "skill_basis": ["longbridge-quant:factor-research"],
-            "purpose": "测试前先同步并阅读因子工作区源码，确认因子在计算什么、是否存在明显未来函数或过拟合参数。",
+            "purpose": "测试前必须阅读因子工作区源码，确认因子在计算什么、是否存在明显未来函数或过拟合参数。",
             "command": f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(factor_family)}",
             "required_outputs": ["source_files", "factor_formula_or_expression", "rolling_shift_windows", "data_columns"],
         },
@@ -111,6 +118,7 @@ def validation_checklist() -> list[str]:
     return [
         "IC/IR/t-stat/sample_count 已报告，且不是只看单次收益曲线。",
         "参数网格记录 hypotheses_tested，解释多重检验风险。",
+        "开始任何 IC/类型/回测前，必须先 workspace prepare --build --sync，并 inspect 因子源码。",
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",

@@ -35,11 +35,12 @@ cli-anything-factortester-research run-step -- backtest compare factor-grid --fa
 If a command exposes a missing backend/CLI feature, the harness records a gap and
 sets the session status to `code_improvement_required`.
 
-Before testing a family, inspect the factor workspace so the agent knows what the
-factor computes:
+Before testing a family, prepare and inspect the factor workspace so the agent
+knows what the factor computes. If the workspace has not been built locally,
+`prepare --build --sync` is the first step:
 
 ```bash
-cli-anything-factortester-research workspace prepare --sync
+cli-anything-factortester-research workspace prepare --build --sync
 cli-anything-factortester-research workspace inspect --factor-family SgCCS
 ```
 

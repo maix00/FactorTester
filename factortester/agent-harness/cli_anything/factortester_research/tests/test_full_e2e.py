@@ -50,6 +50,7 @@ class TestCLISubprocess:
         data = json.loads(result.stdout)
         assert data["session"]["factor_family"] == "SgCCS"
         assert any(item["phase"] == "diagnose_ic" for item in data["session"]["plan"])
+        assert any(item["phase"] == "prepare_factor_workspace" for item in data["session"]["plan"])
         assert any(item["phase"] == "understand_factor_source" for item in data["session"]["plan"])
         assert any(item["phase"] == "platform_gap_loop" for item in data["session"]["plan"])
         assert session.exists()

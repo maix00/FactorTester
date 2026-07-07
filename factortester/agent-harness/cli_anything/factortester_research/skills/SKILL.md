@@ -17,6 +17,7 @@ Key commands:
 ```bash
 cli-anything-factortester-research doctor --json
 cli-anything-factortester-research plan --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
+cli-anything-factortester-research workspace prepare --build --sync --json
 cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m
 cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
@@ -31,3 +32,8 @@ Server-code gap rule:
 - `source_owner` users must first identify the owning issue/task and edit the
   corresponding branch/worktree. Merge those platform changes into the CLI
   worktree only after tests/commits, then restart through port 7998.
+
+Factor-source rule:
+
+- Before IC/type/backtest diagnostics, run `workspace prepare --build --sync` and
+  then `workspace inspect --factor-family <NAME>`.
