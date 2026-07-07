@@ -206,7 +206,6 @@ def build_fee_unit_classification_frame(
     frame["value_num"] = pd.to_numeric(frame["value"], errors="coerce").fillna(0.0)
     key_cols = [
         "instrument",
-        "instrument_label",
         "instrument_type",
         "effective_trading_day",
         "effective_timestamp",
@@ -220,6 +219,7 @@ def build_fee_unit_classification_frame(
     evidence = (
         frame.groupby(key_cols, dropna=False)
         .agg(
+            instrument_label=("instrument_label", "last"),
             source_notice_ids=("source_notice_ids", _json_union),
             source_urls=("source_urls", _json_union),
             providers=("providers", _json_union),
@@ -252,7 +252,6 @@ def _forward_fill_fee_snapshot_fields(frame: pd.DataFrame) -> pd.DataFrame:
         return result
     static_cols = [
         "instrument",
-        "instrument_label",
         "instrument_type",
         "contract_codes",
     ]

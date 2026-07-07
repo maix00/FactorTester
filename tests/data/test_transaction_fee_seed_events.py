@@ -126,3 +126,17 @@ def test_shfe_ine_2026_energy_fee_adjustments_are_stored_as_exchange_events() ->
     assert by_notice_instrument[("上能发〔2026〕29号", "SC", "CloseTodayRatioByVolume")]["value"] == 240.0
     assert by_notice_instrument[("上能发〔2026〕29号", "LU", "OpenRatioByMoney")]["value"] == 0.0001
     assert by_notice_instrument[("上能发〔2026〕29号", "LU", "CloseTodayRatioByMoney")]["value"] == 0.0003
+
+
+def test_shfe_2024_asphalt_close_today_fee_is_zero() -> None:
+    rows = [
+        row
+        for row in _events()
+        if row["source_notice_id"] == "上期发〔2024〕126号" and row["instrument"] == "BU"
+    ]
+
+    assert {row["field_name"] for row in rows} == {"CloseTodayRatioByMoney", "CloseTodayRatioByVolume"}
+    assert {row["value"] for row in rows} == {0.0}
+    assert {row["source_url"] for row in rows} == {
+        "https://www.shfe.com.cn/publicnotice/notice/202404/t20240423_801626.html"
+    }

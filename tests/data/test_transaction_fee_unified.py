@@ -115,6 +115,49 @@ def test_transaction_fee_classification_forwards_unchanged_fee_legs() -> None:
     assert latest["close_today_volume"] == 10.0
 
 
+def test_transaction_fee_classification_ignores_label_drift_for_same_instrument() -> None:
+    rows = []
+    for field_name, value in [
+        ("OpenRatioByMoney", 0.00005),
+        ("CloseRatioByMoney", 0.00005),
+        ("CloseTodayRatioByMoney", 0.00005),
+    ]:
+        rows.append({
+            **_base_row(field_name=field_name, value=value, effective_trading_day="1900-01-01"),
+            "provider": "Agent:SHFE",
+            "source_key": f"exchange/bu/baseline/{field_name}",
+            "instrument": "BU",
+            "instrument_label": "沥青",
+            "source_notice_id": "exchange-baseline-user-table-2026-07-07",
+        })
+    rows.append({
+        **_base_row(field_name="CloseTodayRatioByMoney", value=0.0, effective_trading_day="2024-04-26"),
+        "provider": "Agent:SHFE",
+        "source_key": "exchange/bu/20240426/close_today_money",
+        "instrument": "BU",
+        "instrument_label": "石油沥青",
+        "source_notice_id": "上期发〔2024〕126号",
+    })
+    rows.append({
+        **_base_row(field_name="CloseTodayRatioByVolume", value=0.0, effective_trading_day="2024-04-26"),
+        "provider": "Agent:SHFE",
+        "source_key": "exchange/bu/20240426/close_today_volume",
+        "instrument": "BU",
+        "instrument_label": "石油沥青",
+        "source_notice_id": "上期发〔2024〕126号",
+    })
+
+    classification = build_fee_unit_classification_frame(
+        build_unified_frame(pd.DataFrame(rows, columns=FIELD_HISTORY_COLUMNS), transaction_fee_source="exchange")
+    )
+    latest = classification.sort_values("effective_trading_day").iloc[-1]
+
+    assert latest["instrument_label"] == "石油沥青"
+    assert latest["open_money"] == 0.00005
+    assert latest["close_money"] == 0.00005
+    assert latest["close_today_unit"] == "zero"
+
+
 def test_transaction_fee_verification_accepts_openctp_broker_addon() -> None:
     exchange_rows = [
         {
