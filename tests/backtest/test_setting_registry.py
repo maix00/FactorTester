@@ -75,10 +75,18 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["fee_mode"]["default_when"] == {
         "engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"},
-        "counterparty_profile": {"exchange_base": "auto"},
+        "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
     assert {option["value"] for option in index["defaults"]["fee_mode"]["options"]} == {
         "auto", "exact", "custom", "close_yesterday", "close_today", "fixed", "zero",
+    }
+    assert index["defaults"]["transaction_fee_source"]["label"] == "交易费来源"
+    assert index["defaults"]["transaction_fee_source"]["chip_template"] == "交易费来源: {value}"
+    assert index["defaults"]["transaction_fee_source"]["default_when"] == {
+        "counterparty_profile": {"exchange_base": "exchange", "openctp_broker": "openctp"},
+    }
+    assert {option["value"] for option in index["defaults"]["transaction_fee_source"]["options"]} == {
+        "exchange", "openctp",
     }
     assert index["defaults"]["fixed_fee_rate"]["visible_when"] == {
         "fee_mode": ["fixed"],
@@ -100,7 +108,7 @@ def test_setting_manifest_loads_tabs_before_tab_controls() -> None:
     }
     assert index["defaults"]["margin_mode"]["default_when"] == {
         "engine_mode": {"basic": "none", "auto": "auto", "exact": "exact"},
-        "counterparty_profile": {"exchange_base": "auto"},
+        "counterparty_profile": {"exchange_base": "auto", "openctp_broker": "auto"},
     }
     assert index["defaults"]["accounting_mode"]["editable_when"] == {
         "engine_mode": ["custom"],

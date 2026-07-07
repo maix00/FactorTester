@@ -64,6 +64,13 @@ TRANSACTION_FEE_FIELD_NAMES = (
     "CloseTodayRatioByVolume",
 )
 
+TRANSACTION_FEE_SOURCE_EXCHANGE = "exchange"
+TRANSACTION_FEE_SOURCE_OPENCTP = "openctp"
+TRANSACTION_FEE_SOURCES = (
+    TRANSACTION_FEE_SOURCE_EXCHANGE,
+    TRANSACTION_FEE_SOURCE_OPENCTP,
+)
+
 FIELD_HISTORY_COLUMNS = [
     "provider",
     "source_key",
@@ -592,6 +599,7 @@ def load_market_rule_field_provider(
     *,
     store_key: str = "openctp",
     include_openctp_latest: bool = True,
+    transaction_fee_source: str = TRANSACTION_FEE_SOURCE_EXCHANGE,
 ) -> FieldHistoryProvider:
     """Load FieldHistory rows plus OpenCTP's latest contract specs.
 
@@ -604,13 +612,66 @@ def load_market_rule_field_provider(
     contract.
     """
     frame = load_historical_field_frame(store_key=store_key)
+    frame = _filter_transaction_fee_source_frame(
+        frame,
+        transaction_fee_source=transaction_fee_source,
+        is_openctp_latest=False,
+    )
     if not include_openctp_latest:
         return FieldHistoryProvider(frame)
     latest = load_openctp_latest_market_rule_frame(store_key=store_key)
+    latest = _filter_transaction_fee_source_frame(
+        latest,
+        transaction_fee_source=transaction_fee_source,
+        is_openctp_latest=True,
+    )
     if latest.empty:
         return FieldHistoryProvider(frame)
     combined = pd.concat([frame, latest], ignore_index=True) if not frame.empty else latest
     return FieldHistoryProvider(combined)
+
+
+def _filter_transaction_fee_source_frame(
+    frame: pd.DataFrame,
+    *,
+    transaction_fee_source: str,
+    is_openctp_latest: bool,
+) -> pd.DataFrame:
+    """Keep non-fee market-rule fields, and choose one fee source class.
+
+    Exchange fees are official FieldHistory events. Broker fees are OpenCTP's
+    account snapshot. Both still share non-fee fields such as VolumeMultiple
+    and margin ratios, so filtering applies only to TransactionFee fields.
+    """
+    source = _normalise_transaction_fee_source(transaction_fee_source)
+    if frame.empty or "field_name" not in frame.columns:
+        return frame
+    is_fee = cast(pd.Series, frame["field_name"]).isin(TRANSACTION_FEE_FIELD_NAMES)
+    provider_is_openctp = cast(pd.Series, frame["provider"]).astype(str) == OPENCTP_LATEST_FIELD_PROVIDER
+    is_openctp_source = provider_is_openctp | bool(is_openctp_latest)
+    if source == TRANSACTION_FEE_SOURCE_EXCHANGE:
+        mask = ~is_fee | ~is_openctp_source
+    elif source == TRANSACTION_FEE_SOURCE_OPENCTP:
+        mask = ~is_fee | is_openctp_source
+    else:  # pragma: no cover - _normalise_transaction_fee_source validates.
+        raise ValueError(f"unsupported transaction_fee_source: {source!r}")
+    return cast(pd.DataFrame, frame.loc[mask].copy())
+
+
+def _normalise_transaction_fee_source(value: object) -> str:
+    source = str(value or TRANSACTION_FEE_SOURCE_EXCHANGE).strip().lower()
+    aliases = {
+        "exchange_base": TRANSACTION_FEE_SOURCE_EXCHANGE,
+        "broker_openctp": TRANSACTION_FEE_SOURCE_OPENCTP,
+        "openctp_broker": TRANSACTION_FEE_SOURCE_OPENCTP,
+    }
+    source = aliases.get(source, source)
+    if source not in TRANSACTION_FEE_SOURCES:
+        raise ValueError(
+            f"unsupported transaction_fee_source: {value!r}; "
+            f"expected one of {', '.join(TRANSACTION_FEE_SOURCES)}"
+        )
+    return source
 
 
 def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.DataFrame:

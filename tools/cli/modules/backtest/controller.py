@@ -1414,6 +1414,7 @@ def _parse_ledger_config_args(args: tuple[str, ...]) -> dict[str, Any]:
     values: dict[str, Any] = {}
     string_fields = {
         "--fee-mode": "fee_mode",
+        "--transaction-fee-source": "transaction_fee_source",
         "--margin-mode": "margin_mode",
         "--margin-call-mode": "margin_call_mode",
         "--accounting-mode": "accounting_mode",
@@ -1453,6 +1454,7 @@ def _strip_known_ledger_config_args(args: tuple[str, ...]) -> list[str]:
     known_with_value = {
         "--ledger",
         "--fee-mode",
+        "--transaction-fee-source",
         "--fixed-fee-rate",
         "--margin-mode",
         "--fixed-margin-ratio",
@@ -1499,7 +1501,8 @@ def _print_ledger_config_payload(configs: dict[str, Any]) -> None:
 def _print_ledger_config_help() -> None:
     click.echo("backtest ledger-config 命令")
     click.echo("  show / list")
-    click.echo("  --ledger LEDGER --fee-mode auto --margin-mode auto --accounting-mode Auto")
+    click.echo("  --ledger LEDGER --fee-mode auto --transaction-fee-source exchange --margin-mode auto --accounting-mode Auto")
+    click.echo("  --transaction-fee-source 可选: exchange, openctp")
     click.echo("  --daily-mark-to-market-enabled true --cost-basis-method fifo")
     click.echo("  --cash-reserve-ratio 0.1 --cash-reserve-major 1000000")
     click.echo("说明:")

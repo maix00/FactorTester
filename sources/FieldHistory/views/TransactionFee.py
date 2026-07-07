@@ -16,9 +16,14 @@ import pandas as pd
 
 from tools.data.field_history import (
     FIELD_HISTORY_COLUMNS,
+    OPENCTP_LATEST_FIELD_PROVIDER,
+    TRANSACTION_FEE_SOURCE_EXCHANGE,
+    TRANSACTION_FEE_SOURCE_OPENCTP,
+    TRANSACTION_FEE_SOURCES,
     TRANSACTION_FEE_FIELD_NAMES,
     FieldHistoryProvider,
     _ensure_store_registered,
+    _normalise_transaction_fee_source,
     load_historical_field_frame,
     load_openctp_latest_market_rule_frame,
 )
@@ -27,6 +32,13 @@ from tools.data.hub import DataHub
 
 FIELDS = (*TRANSACTION_FEE_FIELD_NAMES, "VolumeMultiple")
 UNIFIED_TABLE = "field_history_transaction_fee_unified"
+EXCHANGE_UNIFIED_TABLE = "field_history_transaction_fee_exchange"
+BROKER_OPENCTP_UNIFIED_TABLE = "field_history_transaction_fee_broker_openctp"
+
+_TABLE_BY_SOURCE = {
+    TRANSACTION_FEE_SOURCE_EXCHANGE: EXCHANGE_UNIFIED_TABLE,
+    TRANSACTION_FEE_SOURCE_OPENCTP: BROKER_OPENCTP_UNIFIED_TABLE,
+}
 
 _GROUP_COLUMNS = [
     "instrument",
@@ -41,7 +53,11 @@ _GROUP_COLUMNS = [
 ]
 
 
-def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
+def load_source_frame(
+    *,
+    store_key: str = "openctp",
+    transaction_fee_source: str | None = None,
+) -> pd.DataFrame:
     historical = load_historical_field_frame(store_key=store_key)
     latest = load_openctp_latest_market_rule_frame(store_key=store_key)
     frames = [frame for frame in (historical, latest) if not frame.empty]
@@ -51,11 +67,24 @@ def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
     for column in FIELD_HISTORY_COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
-    return cast(pd.DataFrame, frame[frame["field_name"].isin(FIELDS)][FIELD_HISTORY_COLUMNS].copy())
+    frame = cast(pd.DataFrame, frame[frame["field_name"].isin(FIELDS)][FIELD_HISTORY_COLUMNS].copy())
+    if transaction_fee_source is None:
+        return frame
+    return _filter_source_frame(frame, transaction_fee_source=transaction_fee_source)
 
 
-def build_unified_frame(source_frame: pd.DataFrame | None = None, *, store_key: str = "openctp") -> pd.DataFrame:
-    frame = load_source_frame(store_key=store_key) if source_frame is None else source_frame.copy()
+def build_unified_frame(
+    source_frame: pd.DataFrame | None = None,
+    *,
+    store_key: str = "openctp",
+    transaction_fee_source: str | None = None,
+) -> pd.DataFrame:
+    frame = (
+        load_source_frame(store_key=store_key, transaction_fee_source=transaction_fee_source)
+        if source_frame is None else source_frame.copy()
+    )
+    if transaction_fee_source is not None:
+        frame = _filter_source_frame(frame, transaction_fee_source=transaction_fee_source)
     if frame.empty:
         return _empty_unified_frame()
     for column in FIELD_HISTORY_COLUMNS:
@@ -89,26 +118,47 @@ def save_unified_table(*, store_key: str = "openctp") -> str:
     frame = _serialise_unified_frame(build_unified_frame(store_key=store_key))
     with hub.connect_store(store_key) as conn:
         frame.to_sql(UNIFIED_TABLE, conn, if_exists="replace", index=False)
+        for source in TRANSACTION_FEE_SOURCES:
+            source_frame = _serialise_unified_frame(build_unified_frame(
+                store_key=store_key,
+                transaction_fee_source=source,
+            ))
+            source_frame.to_sql(_TABLE_BY_SOURCE[source], conn, if_exists="replace", index=False)
     return path
 
 
-def load_unified_frame(*, store_key: str = "openctp") -> pd.DataFrame:
+def load_unified_frame(
+    *,
+    store_key: str = "openctp",
+    transaction_fee_source: str | None = None,
+) -> pd.DataFrame:
     hub = DataHub.get_instance()
     _ensure_store_registered(hub, store_key)
     with hub.connect_store(store_key) as conn:
+        table_name = _TABLE_BY_SOURCE.get(
+            _normalise_transaction_fee_source(transaction_fee_source),
+            UNIFIED_TABLE,
+        ) if transaction_fee_source is not None else UNIFIED_TABLE
         exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
-            (UNIFIED_TABLE,),
+            (table_name,),
         ).fetchone()
         if not exists:
             raise RuntimeError(
-                f"{UNIFIED_TABLE} is not materialized; run save_unified_table() after ingesting FieldHistory events"
+                f"{table_name} is not materialized; run save_unified_table() after ingesting FieldHistory events"
             )
-        return pd.read_sql_query(f'SELECT * FROM "{UNIFIED_TABLE}"', conn)
+        return pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
 
 
-def load_unified_provider(*, store_key: str = "openctp") -> FieldHistoryProvider:
-    return build_unified_provider(load_unified_frame(store_key=store_key))
+def load_unified_provider(
+    *,
+    store_key: str = "openctp",
+    transaction_fee_source: str | None = None,
+) -> FieldHistoryProvider:
+    return build_unified_provider(load_unified_frame(
+        store_key=store_key,
+        transaction_fee_source=transaction_fee_source,
+    ))
 
 
 def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:
@@ -126,6 +176,19 @@ def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:
 
 def _empty_unified_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=_unified_columns())
+
+
+def _filter_source_frame(frame: pd.DataFrame, *, transaction_fee_source: str) -> pd.DataFrame:
+    source = _normalise_transaction_fee_source(transaction_fee_source)
+    provider = cast(pd.Series, frame["provider"]).astype(str)
+    is_openctp = provider == OPENCTP_LATEST_FIELD_PROVIDER
+    if source == TRANSACTION_FEE_SOURCE_EXCHANGE:
+        mask = ~is_openctp
+    elif source == TRANSACTION_FEE_SOURCE_OPENCTP:
+        mask = is_openctp
+    else:  # pragma: no cover - normalizer validates.
+        raise ValueError(f"unsupported transaction_fee_source: {source!r}")
+    return cast(pd.DataFrame, frame.loc[mask].copy())
 
 
 def _unified_columns() -> list[str]:

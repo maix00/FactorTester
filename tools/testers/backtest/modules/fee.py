@@ -49,6 +49,7 @@ class FeeModule(ExecutableModule):
     label: ClassVar[str] = "交易费用"
 
     fee_mode: ClassVar[FieldRef[str]] = FieldRef("fee_mode")
+    transaction_fee_source: ClassVar[FieldRef[str]] = FieldRef("transaction_fee_source")
     fixed_fee_rate: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
@@ -66,6 +67,27 @@ class FeeModule(ExecutableModule):
             editable_when={"engine_mode": ("custom",)},
             default_when={"engine_mode": {"basic": "zero", "auto": "auto", "exact": "exact"}},
             chip_template="费用: {value}", tab_label="费用", tab_order=100,
+        ),
+        "transaction_fee_source": FieldDefinition(
+            public=True,
+            label="交易费来源",
+            default="exchange",
+            control_template="select",
+            tab="cost",
+            options=(
+                ("exchange", "交易所"),
+                ("openctp", "OpenCTP经纪商"),
+            ),
+            editable_when={"engine_mode": ("custom",)},
+            default_when={
+                "counterparty_profile": {
+                    "exchange_base": "exchange",
+                    "openctp_broker": "openctp",
+                },
+            },
+            chip_template="交易费来源: {value}",
+            tab_label="费用",
+            tab_order=100,
         ),
         "fixed_fee_rate": FieldDefinition(
             public=True, label="固定费率", default=0.0, control_template="number", tab="cost",
