@@ -683,6 +683,7 @@ _MODE_FIELD_NAMES = {
     "data_sources",
     "margin_mode",
     "fee_mode",
+    "transaction_fee_source",
     "liquidity_mode",
     "slippage_mode",
     "allocation_mode",

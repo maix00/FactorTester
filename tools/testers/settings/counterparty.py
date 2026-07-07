@@ -216,6 +216,18 @@ def _register_default_counterparty_profiles() -> None:
         label="交易所基准（不加价）",
         field_defaults={
             FeeModule.fee_mode: "auto",
+            FeeModule.transaction_fee_source: "exchange",
+            MarginModule.margin_mode: "auto",
+            TradingRuleModule.accounting_mode: "Auto",
+            TradingRuleModule.use_int_position: True,
+        },
+    ))
+    register_counterparty_profile(CounterPartyProfile(
+        id="openctp_broker",
+        label="OpenCTP经纪商费率",
+        field_defaults={
+            FeeModule.fee_mode: "auto",
+            FeeModule.transaction_fee_source: "openctp",
             MarginModule.margin_mode: "auto",
             TradingRuleModule.accounting_mode: "Auto",
             TradingRuleModule.use_int_position: True,

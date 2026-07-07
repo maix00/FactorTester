@@ -6,10 +6,12 @@ import pandas as pd
 import pytest
 
 from tools.data.field_history import (
+    FIELD_HISTORY_COLUMNS,
     FieldHistoryProvider,
     HistoricalFieldFallbackPolicy,
     MissingHistoricalField,
     TimestampTradingDayResolver,
+    load_market_rule_field_provider,
     load_historical_field_provider,
     save_historical_field_records,
 )
@@ -72,6 +74,62 @@ def test_field_history_resolves_by_timestamp_and_trading_day() -> None:
     assert at_night_open.value == 100
     assert at_night_open.effective_trading_day == pd.Timestamp("2026-01-06")
     assert at_night_open.effective_timestamp == pd.Timestamp("2026-01-05 21:00:00")
+
+
+def test_market_rule_provider_separates_exchange_and_openctp_fee_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    exchange_row = {
+        "provider": "DCE",
+        "source_key": "exchange/a/open_fee",
+        "instrument": "A",
+        "instrument_label": "豆一",
+        "instrument_type": "future",
+        "field_name": "OpenRatioByVolume",
+        "effective_trading_day": "1900-01-01",
+        "effective_timestamp": "",
+        "value": 2.0,
+        "value_type": "",
+        "contract_codes": "[]",
+        "source_url": "exchange",
+        "source_date": "",
+        "source_notice_id": "exchange",
+        "raw_note": "exchange base fee",
+    }
+    broker_row = {
+        **exchange_row,
+        "provider": "OpenCTP:latest",
+        "source_key": "openctp/a/open_fee",
+        "value": 2.01,
+        "source_url": "OpenCTP latest",
+        "source_notice_id": "OpenCTP latest snapshot",
+        "raw_note": "broker effective fee",
+    }
+    monkeypatch.setattr(
+        "tools.data.field_history.load_historical_field_frame",
+        lambda **_: pd.DataFrame([exchange_row], columns=FIELD_HISTORY_COLUMNS),
+    )
+    monkeypatch.setattr(
+        "tools.data.field_history.load_openctp_latest_market_rule_frame",
+        lambda **_: pd.DataFrame([broker_row], columns=FIELD_HISTORY_COLUMNS),
+    )
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 09:00:00"): pd.Timestamp("2026-01-05"),
+    })
+
+    exchange = load_market_rule_field_provider(transaction_fee_source="exchange")
+    openctp = load_market_rule_field_provider(transaction_fee_source="openctp")
+
+    assert exchange.resolve_at(
+        "A",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    ).value == 2.0
+    assert openctp.resolve_at(
+        "A",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    ).value == 2.01
 
 
 def test_field_history_values_for_index_preserves_timestamp_index() -> None:

@@ -42,6 +42,8 @@ from tools.data.field_history import (
     FieldHistoryProvider,
     TradingDayResolver,
     TRANSACTION_FEE_FIELD_NAMES,
+    TRANSACTION_FEE_SOURCE_EXCHANGE,
+    _normalise_transaction_fee_source,
     build_trading_day_resolver_from_market_data,
     historical_fields_frame_for_products,
     load_market_rule_field_provider,
@@ -946,7 +948,9 @@ def _load_raw_market_data(state, ctx) -> None:
         "raw_prices": raw_prices,
         "price_tables": price_tables,
         "settlement_price": price_tables.get("settlement"),
-        "historical_field_provider": load_market_rule_field_provider(),
+        "historical_field_provider": load_market_rule_field_provider(
+            transaction_fee_source=_transaction_fee_source_for_state(state),
+        ),
         "historical_field_policy": request.get("policy", "latest_available"),
         "historical_field_names": _required_market_rule_field_names(state),
         "included_products": tuple(series_by_product.keys()),
@@ -1028,6 +1032,30 @@ def _load_historical_fields(state, ctx) -> None:
         policy=policy,
     )
 
+
+def _transaction_fee_source_for_state(state) -> str:
+    sources: list[str] = []
+    strategies = getattr(state, "strategy_configs", {})
+    if not strategies:
+        return TRANSACTION_FEE_SOURCE_EXCHANGE
+    for strategy in strategies:
+        ledger = state.ledger_for_strategy(strategy)
+        ledger_config = state.ledger_config_for(ledger)
+        source = _transaction_fee_source_for_ledger_config(ledger_config)
+        if source not in sources:
+            sources.append(source)
+    if len(sources) > 1:
+        raise ValueError(
+            "同一次 native 回测只能使用一个交易费来源；"
+            f"当前解析到 {', '.join(sources)}。请拆分回测或统一 CounterParty。"
+        )
+    return sources[0] if sources else TRANSACTION_FEE_SOURCE_EXCHANGE
+
+
+def _transaction_fee_source_for_ledger_config(ledger_config=None) -> str:
+    return _normalise_transaction_fee_source(
+        getattr(ledger_config, "transaction_fee_source", None) or TRANSACTION_FEE_SOURCE_EXCHANGE
+    )
 
 def _publish_raw_market_data(state, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.raw_prices, raw.get("raw_prices"))
@@ -1491,11 +1519,12 @@ def _set_current_historical_fields(state, ctx) -> None:
     for strategy in ctx.active_strategies:
         config = state.config_for(strategy)
         ledger = state.ledger_for_strategy(strategy)
+        ledger_config = state.ledger_config_for(ledger)
         fields = _historical_fields_for_strategy(
             base_fields,
             config,
             ctx.timestamp,
-            ledger_config=state.ledger_config_for(ledger),
+            ledger_config=ledger_config,
         )
         if fields is base_fields:
             # No customization applies to this strategy -- every consumer
@@ -1761,8 +1790,7 @@ def historical_field_frames_for_market_data(
     field_names: tuple[object, ...],
     policy: str,
 ) -> dict[str, pd.DataFrame]:
-    runtime_provider = _runtime_field_history_provider()
-    cache_key = _historical_fields_frame_cache_key(products, index, field_names, policy)
+    cache_key = _historical_fields_frame_cache_key(products, index, field_names, policy, provider)
     cached = _HISTORICAL_FIELDS_FRAME_CACHE.get(cache_key)
     if cached is not None:
         _HISTORICAL_FIELDS_FRAME_CACHE.move_to_end(cache_key)
@@ -1770,7 +1798,7 @@ def historical_field_frames_for_market_data(
     frames = historical_fields_frame_for_products(
         products,
         index,
-        provider=runtime_provider,
+        provider=provider,
         trading_day_resolver=trading_day_resolver,
         field_names=field_names,
         fallback=policy,
@@ -1787,6 +1815,7 @@ def _historical_fields_frame_cache_key(
     index: pd.Index,
     field_names: tuple[object, ...],
     policy: str,
+    provider: FieldHistoryProvider,
 ) -> tuple[Any, ...]:
     timestamps = signal_timestamps(pd.DataFrame(index=index))
     timestamp_ns = tuple(int(pd.Timestamp(value).value) for value in timestamps)
@@ -1799,6 +1828,7 @@ def _historical_fields_frame_cache_key(
         hash(timestamp_ns),
         tuple(str(field_name) for field_name in field_names),
         str(policy),
+        id(provider),
     )
 
 
