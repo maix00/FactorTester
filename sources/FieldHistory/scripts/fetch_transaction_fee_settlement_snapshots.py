@@ -20,6 +20,7 @@ SOURCE_LABEL = {
     "SHFE": "上海期货交易所结算参数表",
     "INE": "上海国际能源交易中心结算参数表",
     "CFFEX": "中国金融期货交易所结算业务参数表",
+    "CZCE": "郑州商品交易所期货结算参数表",
 }
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, help="Output JSONL path")
     args = parser.parse_args(argv)
 
-    markets = args.market or ["SHFE", "INE", "CFFEX"]
+    markets = args.market or ["SHFE", "INE", "CFFEX", "CZCE"]
     rows: list[dict[str, Any]] = []
     for date in args.date:
         date = _normalize_date(date)
@@ -47,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
                 rows.extend(_shfe_like_rows(market, date, source_accessed_at=args.source_accessed_at))
             elif market == "CFFEX":
                 rows.extend(_cffex_rows(date, source_accessed_at=args.source_accessed_at))
+            elif market == "CZCE":
+                rows.extend(_czce_rows(date, source_accessed_at=args.source_accessed_at))
 
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -158,6 +161,67 @@ def _cffex_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _czce_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
+    url = f"http://www.czce.com.cn/cn/DFSStaticFiles/Future/{date[:4]}/{date}/FutureDataClearParams.txt"
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    if response.status_code != 200:
+        return []
+    text = response.text
+    if text.lstrip().startswith("<"):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in _parse_czce_pipe_rows(text):
+        symbol = str(item.get("合约代码") or "").strip()
+        if not symbol or "小计" in symbol or "合计" in symbol:
+            continue
+        fee_type = str(item.get("手续费收取方式") or "").strip()
+        trade_fee = _parse_number(item.get("交易手续费"))
+        close_today_fee = _parse_number(item.get("日内平今仓交易手续费"))
+        if fee_type == "绝对值":
+            open_money, open_volume = 0.0, trade_fee
+            close_today_money, close_today_volume = 0.0, close_today_fee
+        elif fee_type == "比例值":
+            open_money, open_volume = trade_fee / 10000.0, 0.0
+            close_today_money, close_today_volume = close_today_fee / 10000.0, 0.0
+        else:
+            continue
+        for leg, money, volume in (
+            ("open", open_money, open_volume),
+            ("close", open_money, open_volume),
+            ("close_today", close_today_money, close_today_volume),
+        ):
+            _add_leg(
+                rows,
+                market="CZCE",
+                date=date,
+                source_url=url,
+                source_accessed_at=source_accessed_at,
+                symbol=symbol,
+                label=_instrument(symbol),
+                leg=leg,
+                money=money,
+                volume=volume,
+            )
+    return rows
+
+
+def _parse_czce_pipe_rows(text: str) -> list[dict[str, str]]:
+    lines = [line.strip("\ufeff\r\n") for line in text.splitlines() if line.strip()]
+    if len(lines) < 3:
+        return []
+    header_idx = next((idx for idx, line in enumerate(lines) if "合约代码|" in line), -1)
+    if header_idx < 0:
+        return []
+    columns = [col.strip() for col in lines[header_idx].split("|")]
+    rows: list[dict[str, str]] = []
+    for line in lines[header_idx + 1:]:
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < len(columns):
+            continue
+        rows.append(dict(zip(columns, parts[:len(columns)])))
+    return rows
+
+
 def _add_leg(
     rows: list[dict[str, Any]],
     *,
@@ -213,7 +277,7 @@ def _add_event(
     value: float,
 ) -> None:
     instrument = _instrument(symbol)
-    code = _contract_suffix(symbol)
+    code = _contract_suffix_for_market(symbol, market, date)
     evidence = f"{SOURCE_LABEL[market]} {date}: {symbol} {field_name}={value}."
     rows.append({
         "agent_name": "codex",
@@ -258,6 +322,14 @@ def _parse_cffex_fee(raw: str, *, base_money: float | None = None, base_volume: 
     return 0.0, 0.0
 
 
+def _parse_number(value: Any) -> float:
+    text = str(value or "").replace(",", "").strip()
+    if not text:
+        return 0.0
+    match = re.search(r"-?[0-9]+(?:\.[0-9]+)?", text)
+    return float(match.group(0)) if match else 0.0
+
+
 def _normalize_date(value: str) -> str:
     text = value.replace("-", "").strip()
     if not re.fullmatch(r"\d{8}", text):
@@ -273,6 +345,23 @@ def _instrument(symbol: str) -> str:
 def _contract_suffix(symbol: str) -> str:
     match = re.search(r"(\d+[A-Za-z]?)$", symbol.strip())
     return match.group(1).upper() if match else ""
+
+
+def _contract_suffix_for_market(symbol: str, market: str, date: str) -> str:
+    suffix = _contract_suffix(symbol)
+    if market != "CZCE" or not re.fullmatch(r"\d{3}", suffix):
+        return suffix
+    # CZCE settlement files use one-digit year + two-digit month, e.g. AP610
+    # is the AP contract expiring in 2026-10 when the queried trading day is in
+    # 2026. Resolve within the nearest decade around the snapshot date.
+    snapshot_year = int(date[:4])
+    decade = snapshot_year - (snapshot_year % 10)
+    candidate = decade + int(suffix[0])
+    if candidate < snapshot_year - 5:
+        candidate += 10
+    elif candidate > snapshot_year + 5:
+        candidate -= 10
+    return f"{candidate % 100:02d}{suffix[1:]}"
 
 
 def _sha1(*parts: Any) -> str:

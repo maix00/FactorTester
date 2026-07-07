@@ -211,3 +211,18 @@ def test_exchange_settlement_snapshots_store_contract_level_fee_legs() -> None:
     assert by_key[
         ("CFFEX-settlement-parameters-20260623", "T", ("2609",), "CloseTodayRatioByVolume")
     ]["value"] == 0.0
+    assert by_key[
+        ("CZCE-settlement-parameters-20260623", "AP", ("2610",), "CloseTodayRatioByVolume")
+    ]["value"] == 10.0
+    assert by_key[
+        ("CZCE-settlement-parameters-20260310", "SA", ("2606",), "OpenRatioByMoney")
+    ]["value"] == 0.0002
+    assert by_key[
+        ("CZCE-settlement-parameters-20260609", "SA", ("2606",), "OpenRatioByMoney")
+    ]["value"] == 0.0001
+    assert by_key[
+        ("CZCE-settlement-parameters-20260623", "PL", ("2607",), "OpenRatioByVolume")
+    ]["value"] == 3.0
+    assert by_key[
+        ("CZCE-settlement-parameters-20260623", "PL", ("2607",), "CloseTodayRatioByVolume")
+    ]["value"] == 0.0
