@@ -265,6 +265,7 @@ class FieldHistoryProvider:
         if eligible.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
                 scoped_fallback = _filter_contract_scope(subset, identity.contract_code)
+                scoped_fallback = _nearest_fallback_candidates(scoped_fallback, field_name)
                 eligible = _nearest_by_trading_day(scoped_fallback, day)
                 approximated = not eligible.empty
             if eligible.empty:
@@ -323,6 +324,7 @@ class FieldHistoryProvider:
         if candidates.empty:
             if policy == HistoricalFieldFallbackPolicy.LATEST_AVAILABLE and not subset.empty:
                 scoped_fallback = _filter_contract_scope(subset, identity.contract_code)
+                scoped_fallback = _nearest_fallback_candidates(scoped_fallback, field_name)
                 candidates = _nearest_by_timestamp(scoped_fallback, ts, trading_day)
                 approximated = not candidates.empty
             if candidates.empty:
@@ -1280,7 +1282,10 @@ def _vectorized_values_from_subset(
         for row_number in missing_rows:
             query = query_by_row.loc[row_number]
             fallback = _nearest_by_timestamp(
-                _filter_contract_scope(subset, str(query.get("contract_code") or "")),
+                _nearest_fallback_candidates(
+                    _filter_contract_scope(subset, str(query.get("contract_code") or "")),
+                    field_name,
+                ),
                 _normalise_timestamp_key(query["timestamp"]),
                 _normalise_trading_day(query["trading_day"]),
             )
@@ -1294,6 +1299,21 @@ def _vectorized_values_from_subset(
             f"no historical value for {raw_instrument}.{field_name} at {len(missing_rows)} timestamp(s)"
         )
     return result
+
+
+def _nearest_fallback_candidates(frame: pd.DataFrame, field_name: str) -> pd.DataFrame:
+    """Limit source-specific nearest fallback semantics.
+
+    Exchange transaction-fee events are dated official changes and must only
+    apply forward from their effective time. OpenCTP latest rows are brokerage
+    snapshots, so they may be used as a latest-available baseline for earlier
+    timestamps when explicitly selected as the transaction-fee source.
+    """
+    if frame.empty or field_name not in TRANSACTION_FEE_FIELD_NAMES or "provider" not in frame.columns:
+        return frame
+    provider = _series(frame, "provider").astype(str)
+    openctp = cast(pd.DataFrame, frame.loc[provider == OPENCTP_LATEST_FIELD_PROVIDER].copy())
+    return openctp
 
 
 def _constant_product_level_value(records: pd.DataFrame, queries: pd.DataFrame) -> object | None:

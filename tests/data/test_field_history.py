@@ -271,6 +271,52 @@ def test_values_for_index_latest_available_fallback_uses_nearest_row_per_timesta
     assert values.tolist() == [100]
 
 
+def test_exchange_transaction_fee_latest_available_does_not_backfill_future_event() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "Agent:DCE",
+            "source_key": "exchange/a/open_fee",
+            "instrument": "A",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-22",
+            "value": 2.0,
+        },
+    ])
+
+    with pytest.raises(MissingHistoricalField):
+        provider.resolve_by_trading_day(
+            "A",
+            "OpenRatioByVolume",
+            "2026-01-05",
+            fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+        )
+
+
+def test_openctp_transaction_fee_latest_available_backfills_latest_snapshot() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "OpenCTP:latest",
+            "source_key": "openctp/latest_snapshot/20260622/A/OpenRatioByVolume/product",
+            "instrument": "A",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-22",
+            "value": 2.01,
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day(
+        "A",
+        "OpenRatioByVolume",
+        "2026-01-05",
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert resolved.value == 2.01
+    assert resolved.approximated is True
+
+
 def test_field_history_store_roundtrip(tmp_path: Path) -> None:
     db_path = tmp_path / "field_history.sqlite"
     DataHub.get_instance().register_sqlite_store(SQLiteStore(
