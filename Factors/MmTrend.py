@@ -3,7 +3,7 @@
 # 趋势斜率因子
 #
 # FactorFamily 表达式驱动版本。
-# X_t = (P_t - P_{t-N+1}) / ((N-1) * MA(N, P_t))
+# X_t = (P_t - P_{t-N}) / MA(N, P_t)
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -19,7 +19,7 @@ class MmTrend(FactorFamily):
     def factor_expr():
         P = DataColumnParam('P', default_value='CA')
         N = WindowParam('N', default_value='20d')
-        return (P - P.shift(N - 1)) / ((N - 1) * P.rolling_mean(N) + 1e-10)
+        return (P - P.shift(N)) / (P.rolling_mean(N) + 1e-10)
 
     desc = '趋势斜率'
     description = """

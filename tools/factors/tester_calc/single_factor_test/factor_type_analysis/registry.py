@@ -58,6 +58,7 @@ class ReferenceFactorDef:
     category: FactorCategory
     factor_alias: str
     factor_family_alias: str = ""
+    reference_source: str = "public_factor"
     asset_classes: tuple[str, ...] = ("futures",)
     enabled_by_default: bool = True
     requires_data: tuple[str, ...] = ("price_volume",)
@@ -71,6 +72,7 @@ class ReferenceFactorDef:
             "category_label": self.category.label_cn,
             "factor_alias": self.factor_alias,
             "factor_family_alias": self.factor_family_alias,
+            "reference_source": self.reference_source,
             "asset_classes": list(self.asset_classes),
             "enabled_by_default": self.enabled_by_default,
             "requires_data": list(self.requires_data),
@@ -135,12 +137,14 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="trend_mm_trend", name="MmTrend",
         category=FactorCategory.TREND,
         factor_alias="MmTrend",
+        factor_family_alias="MmTrend",
         help_text="趋势跟踪基准—多空趋势判断",
     ),
     ReferenceFactorDef(
         key="trend_mm_mabreak", name="MmMABreak",
         category=FactorCategory.TREND,
         factor_alias="MmMABreak",
+        factor_family_alias="MmMABreak",
         help_text="趋势跟踪基准—均线突破",
     ),
     # --- 动量类 ---
@@ -148,12 +152,14 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="mom_mm_ret", name="MmRet",
         category=FactorCategory.MOMENTUM,
         factor_alias="MmRet",
+        factor_family_alias="MmRet",
         help_text="动量基准—N日收益率",
     ),
     ReferenceFactorDef(
         key="mom_mm_rsi", name="MmRSI",
         category=FactorCategory.MOMENTUM,
         factor_alias="MmRSI",
+        factor_family_alias="MmRSI",
         help_text="动量基准—RSI指标",
     ),
     # --- 波动率类 ---
@@ -161,18 +167,21 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="vol_vl_atr", name="VlATR",
         category=FactorCategory.VOLATILITY,
         factor_alias="VlATR",
+        factor_family_alias="VlATR",
         help_text="波动率基准—ATR",
     ),
     ReferenceFactorDef(
         key="vol_vl_gk", name="VlGK",
         category=FactorCategory.VOLATILITY,
         factor_alias="VlGK",
+        factor_family_alias="VlGK",
         help_text="波动率基准—GK波动率",
     ),
     ReferenceFactorDef(
         key="low_vol_inverse_realized", name="LowVolInv",
         category=FactorCategory.LOW_VOLATILITY,
         factor_alias="LowVolInv",
+        factor_family_alias="LowVolInv",
         help_text="低波/防御基准—实现波动率的反向暴露",
         enabled_by_default=False,
     ),
@@ -181,6 +190,7 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="value_ts_spread", name="TsSpreadValue",
         category=FactorCategory.VALUE,
         factor_alias="TsSpreadValue",
+        factor_family_alias="TsSpreadValue",
         help_text="价值基准—期限结构价差/相对便宜度；需要期限结构数据",
         enabled_by_default=False,
         requires_data=("term_structure",),
@@ -189,6 +199,7 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="carry_roll_yield", name="RollYieldCarry",
         category=FactorCategory.CARRY,
         factor_alias="RollYieldCarry",
+        factor_family_alias="RollYieldCarry",
         help_text="Carry基准—展期收益/期限结构斜率；需要期限结构数据",
         enabled_by_default=False,
         requires_data=("term_structure",),
@@ -198,12 +209,14 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="pos_oi_chg_rat", name="OiChgRat",
         category=FactorCategory.POSITION,
         factor_alias="OiChgRat",
+        factor_family_alias="OiChgRat",
         help_text="持仓量基准—持仓变化率",
     ),
     ReferenceFactorDef(
         key="pos_oi_net_build", name="OiNetBuild",
         category=FactorCategory.POSITION,
         factor_alias="OiNetBuild",
+        factor_family_alias="OiNetBuild",
         help_text="持仓量基准—净持仓变化",
     ),
     # --- 量价关系类 ---
@@ -211,18 +224,21 @@ _DEFAULT_REFERENCE_FACTORS = [
         key="pv_vp_amihud", name="VpAmihud",
         category=FactorCategory.PRICE_VOLUME,
         factor_alias="VpAmihud",
+        factor_family_alias="VpAmihud",
         help_text="量价基准—Amihud非流动性",
     ),
     ReferenceFactorDef(
         key="pv_vp_vol_price_corr", name="VpVolPriceCorr",
         category=FactorCategory.PRICE_VOLUME,
         factor_alias="VpVolPriceCorr",
+        factor_family_alias="VpVolPriceCorr",
         help_text="量价基准—量价相关性",
     ),
     ReferenceFactorDef(
         key="liq_amihud_inverse", name="LiquidityInv",
         category=FactorCategory.LIQUIDITY,
         factor_alias="LiquidityInv",
+        factor_family_alias="LiquidityInv",
         help_text="流动性基准—交易冲击/非流动性的反向暴露",
         enabled_by_default=False,
     ),
