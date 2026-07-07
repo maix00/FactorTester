@@ -185,7 +185,11 @@ def _rebuild_view(field_group: str, *, store_key: str) -> list[str]:
         from sources.FieldHistory.views.TransactionFee import save_unified_table
 
         save_unified_table(store_key=store_key)
-        rebuilt.append("field_history_transaction_fee_unified")
+        rebuilt.extend([
+            "field_history_transaction_fee_unified",
+            "field_history_transaction_fee_exchange",
+            "field_history_transaction_fee_broker_openctp",
+        ])
     return rebuilt
 
 
