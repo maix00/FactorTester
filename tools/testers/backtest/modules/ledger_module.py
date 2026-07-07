@@ -340,6 +340,8 @@ def _apply_order_fill(state, ctx) -> None:
                 label="成交落账",
                 timestamp=ctx.timestamp,
                 details={
+                    "ledger_id": ledger.ledger_id,
+                    "cash_pool_id": cash_pool_id_for_ledger(state, ledger),
                     "price": float(price),
                     "fee_cost": float(fee_cost or 0.0),
                     "cash_before": float(cash_before),
