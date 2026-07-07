@@ -88,3 +88,16 @@ def test_baseline_map_uses_official_shfe_fee_standard_values() -> None:
     assert by_instrument["AU"]["value"] == "20"
     assert by_instrument["FU"]["unit"] == "money"
     assert by_instrument["FU"]["value"] == "0.005%"
+
+
+def test_baseline_map_uses_official_czce_fee_standard_values() -> None:
+    mapping = builder._load_mapping(builder.DEFAULT_MAP)
+    by_instrument = {row["instrument"]: row for row in mapping["products"]}
+
+    assert by_instrument["SF"]["value"] == "3"
+    assert by_instrument["SM"]["value"] == "3"
+    assert by_instrument["PF"]["value"] == "2"
+    assert by_instrument["PL"]["label"] == "丙烯"
+    assert by_instrument["PL"]["value"] == "0.01%"
+    assert by_instrument["PR"]["label"] == "瓶片"
+    assert by_instrument["PR"]["value"] == "0.005%"

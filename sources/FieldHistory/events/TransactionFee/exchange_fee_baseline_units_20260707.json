@@ -110,14 +110,14 @@
       "exchange": "CZCE",
       "label": "硅铁",
       "unit": "volume",
-      "value": "12"
+      "value": "3"
     },
     {
       "instrument": "SM",
       "exchange": "CZCE",
       "label": "锰硅",
       "unit": "volume",
-      "value": "12"
+      "value": "3"
     },
     {
       "instrument": "ZC",
@@ -439,7 +439,7 @@
       "exchange": "CZCE",
       "label": "短纤",
       "unit": "volume",
-      "value": "3"
+      "value": "2"
     },
     {
       "instrument": "LH",
@@ -605,7 +605,7 @@
     {
       "instrument": "PL",
       "exchange": "CZCE",
-      "label": "瓶片",
+      "label": "丙烯",
       "unit": "money",
       "value": "0.01%",
       "source_note": "CZCE official fee standard and 郑商函〔2025〕537号: 丙烯期货交易手续费、日内平今仓手续费均为成交金额的万分之一。"
@@ -620,7 +620,7 @@
     {
       "instrument": "PR",
       "exchange": "CZCE",
-      "label": "丙烯",
+      "label": "瓶片",
       "unit": "money",
       "value": "0.005%"
     },
