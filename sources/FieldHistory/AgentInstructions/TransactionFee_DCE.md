@@ -12,6 +12,14 @@ options fee changes.
 - When Guosen shows a changed DCE fee baseline but no historical event is in
   FieldHistory, search DCE notices around the Guosen effective date and product.
 
+## Baseline Discovery
+
+- A product-level exchange baseline may come from the current fee table,
+  listing notice, contract specification, product technical manual, or
+  official settlement-parameter table. Use the most authoritative exchange
+  source available and note the source type in `parser_notes`. Later notices
+  should be stored as dated change events rather than overwriting the baseline.
+
 ## Extraction Rules
 
 - `开仓手续费` maps to open fee fields.

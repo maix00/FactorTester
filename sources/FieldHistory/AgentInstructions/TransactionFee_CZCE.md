@@ -10,6 +10,14 @@ options fee changes.
 - Record the original notice URL, notice id, publication date, access time, and
   the shortest source sentence/table row that supports the event.
 
+## Baseline Discovery
+
+- A product-level exchange baseline may come from the current fee table,
+  listing notice, contract specification, product technical manual, or
+  official settlement-parameter table. Use the most authoritative exchange
+  source available and note the source type in `parser_notes`. Later notices
+  should be stored as dated change events rather than overwriting the baseline.
+
 ## Extraction Rules
 
 - `开仓手续费` maps to open fee fields.

@@ -9,6 +9,14 @@ Use SHFE official notices as primary historical evidence for SHFE fee changes.
 - Include INE separately for INE products even when the notice is linked from a
   shared SHFE page.
 
+## Baseline Discovery
+
+- A product-level exchange baseline may come from the current fee table,
+  listing notice, contract specification, product technical manual, or
+  official settlement-parameter table. Use the most authoritative exchange
+  source available and note the source type in `parser_notes`. Later notices
+  should be stored as dated change events rather than overwriting the baseline.
+
 ## Extraction Rules
 
 - `开仓` -> open fee fields.

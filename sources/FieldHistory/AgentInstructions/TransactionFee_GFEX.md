@@ -9,6 +9,14 @@ Use GFEX official notices as primary historical evidence for GFEX fee changes.
 - GFEX has newer products; if a product is absent in older catalogs, do not
   synthesize historical rows before listing.
 
+## Baseline Discovery
+
+- A product-level exchange baseline may come from the current fee table,
+  listing notice, contract specification, product technical manual, or
+  official settlement-parameter table. Use the most authoritative exchange
+  source available and note the source type in `parser_notes`. Later notices
+  should be stored as dated change events rather than overwriting the baseline.
+
 ## Extraction Rules
 
 - `开仓` -> open fee fields.

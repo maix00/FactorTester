@@ -157,6 +157,12 @@ WHERE instrument = :instrument
   `contract_codes` empty. A special contract fee from an exchange notice must
   fill exactly one contract code per row, and it overrides the product-level
   baseline through FieldHistory contract-scope priority.
+- Transaction fee baselines do not have to come only from a current fee table.
+  They may also come from an official product listing notice, contract
+  specification, product technical manual, or exchange settlement-parameter
+  table when that source defines the initial fee unit/value. Record the exact
+  source type in `parser_notes`. Later fee notices are stored as dated field
+  change events that override that baseline.
 - For TransactionFee, the fee unit is itself historical state. If a product or
   contract changes from fixed fee per lot to traded-notional ratio, or the
   reverse, store both fields at that effective point: the active unit field gets

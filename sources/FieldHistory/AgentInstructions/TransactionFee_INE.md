@@ -9,6 +9,14 @@ Use INE official notices as primary historical evidence for INE fee changes.
 - Record the INE notice id and original INE URL when available, not only a
   mirrored broker or SHFE page.
 
+## Baseline Discovery
+
+- A product-level exchange baseline may come from the current fee table,
+  listing notice, contract specification, product technical manual, or
+  official settlement-parameter table. Use the most authoritative exchange
+  source available and note the source type in `parser_notes`. Later notices
+  should be stored as dated change events rather than overwriting the baseline.
+
 ## Extraction Rules
 
 Apply the same field mapping as `TransactionFee_SHFE.md`:
