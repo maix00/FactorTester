@@ -80,6 +80,41 @@ def test_transaction_fee_classification_tracks_unit_changes_by_effective_day() -
     ]
 
 
+def test_transaction_fee_classification_forwards_unchanged_fee_legs() -> None:
+    rows = []
+    for field_name, value in [
+        ("OpenRatioByVolume", 5.0),
+        ("CloseRatioByVolume", 5.0),
+        ("CloseTodayRatioByVolume", 20.0),
+    ]:
+        rows.append({
+            **_base_row(field_name=field_name, value=value, effective_trading_day="1900-01-01"),
+            "provider": "Agent:CZCE",
+            "source_key": f"exchange/ap/baseline/{field_name}",
+            "instrument": "AP",
+            "instrument_label": "苹果",
+            "source_notice_id": "郑商函〔2018〕209号",
+        })
+    rows.append({
+        **_base_row(field_name="CloseTodayRatioByVolume", value=10.0, effective_trading_day="2026-06-08"),
+        "provider": "Agent:CZCE",
+        "source_key": "exchange/ap/20260608/close_today",
+        "instrument": "AP",
+        "instrument_label": "苹果",
+        "source_notice_id": "郑商函〔2026〕477号",
+    })
+
+    classification = build_fee_unit_classification_frame(
+        build_unified_frame(pd.DataFrame(rows, columns=FIELD_HISTORY_COLUMNS), transaction_fee_source="exchange")
+    )
+    latest = classification.sort_values("effective_trading_day").iloc[-1]
+
+    assert latest["effective_trading_day"] == "2026-06-08"
+    assert latest["open_volume"] == 5.0
+    assert latest["close_volume"] == 5.0
+    assert latest["close_today_volume"] == 10.0
+
+
 def test_transaction_fee_verification_accepts_openctp_broker_addon() -> None:
     exchange_rows = [
         {

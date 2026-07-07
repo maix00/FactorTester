@@ -214,9 +214,9 @@ def build_fee_unit_classification_frame(
     ]
     pivot = (
         frame.pivot_table(index=key_cols, columns="field_name", values="value_num", aggfunc="max")
-        .fillna(0.0)
         .reset_index()
     )
+    pivot = _forward_fill_fee_snapshot_fields(pivot)
     evidence = (
         frame.groupby(key_cols, dropna=False)
         .agg(
@@ -241,6 +241,33 @@ def build_fee_unit_classification_frame(
         ["open_unit", "close_unit", "close_today_unit"]
     ].apply(lambda row: "conflict" if "conflict" in set(row) else "ok", axis=1)
     return cast(pd.DataFrame, result[_classification_columns()].copy())
+
+
+def _forward_fill_fee_snapshot_fields(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    result = frame.copy()
+    fee_fields = [field for field in TRANSACTION_FEE_FIELD_NAMES if field in result.columns]
+    if not fee_fields:
+        return result
+    static_cols = [
+        "instrument",
+        "instrument_label",
+        "instrument_type",
+        "contract_codes",
+    ]
+    sort_cols = [
+        *static_cols,
+        "effective_trading_day",
+        "effective_timestamp",
+    ]
+    result = result.sort_values(sort_cols).copy()
+    result[fee_fields] = (
+        result.groupby(static_cols, dropna=False, sort=False)[fee_fields]
+        .ffill()
+        .fillna(0.0)
+    )
+    return result
 
 
 def build_fee_verification_frame(
