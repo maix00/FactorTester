@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from sources.FieldHistory.scripts import build_transaction_fee_exchange_baseline as builder
 
@@ -101,3 +102,30 @@ def test_baseline_map_uses_official_czce_fee_standard_values() -> None:
     assert by_instrument["PL"]["value"] == "0.01%"
     assert by_instrument["PR"]["label"] == "瓶片"
     assert by_instrument["PR"]["value"] == "0.005%"
+
+
+def test_build_exchange_baseline_supports_leg_specific_money_fees(monkeypatch) -> None:
+    mapping = {
+        "source_accessed_at": "2026-07-07T00:00:00+08:00",
+        "baseline_effective_trading_day": "1900-01-02",
+        "official_source_urls": {"DCE": "https://www.dce.com.cn/"},
+        "products": [
+            {
+                "instrument": "J",
+                "exchange": "DCE",
+                "label": "焦炭",
+                "unit": "money",
+                "value": "0.01%",
+                "leg_values": {"open": "0.014%", "close": "0.01%", "close_today": "0.014%"},
+            },
+        ],
+    }
+    monkeypatch.setattr(builder, "load_openctp_latest_market_rule_frame", lambda **_: pd.DataFrame())
+
+    events, _audit = builder.build_events(mapping)
+    by_field = {event["field_name"]: event["value"] for event in events}
+
+    assert by_field["OpenRatioByMoney"] == pytest.approx(0.00014)
+    assert by_field["CloseRatioByMoney"] == 0.0001
+    assert by_field["CloseTodayRatioByMoney"] == pytest.approx(0.00014)
+    assert by_field["OpenRatioByVolume"] == 0.0

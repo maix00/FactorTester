@@ -96,10 +96,12 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
         unit = str(product["unit"]).lower()
         if unit not in {"money", "volume"}:
             raise ValueError(f"unsupported unit for {instrument}: {unit!r}")
-        baseline_value = _parse_fee_value(product["value"], unit=unit)
+        default_baseline_value = _parse_fee_value(product["value"], unit=unit)
+        leg_values = _parse_leg_values(product, unit=unit)
         openctp_values = _openctp_values_for_instrument(openctp, instrument)
         source_url = official_urls.get(exchange) or secondary_urls.get("Sina") or ""
         for money_field, volume_field, leg_label in FEE_LEGS:
+            baseline_value = leg_values.get(leg_label, default_baseline_value)
             active_field = money_field if unit == "money" else volume_field
             active_value, active_source = _baseline_for_leg(
                 unit=unit,
@@ -121,7 +123,7 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
                     effective_day=baseline_day,
                     raw_note=(
                         f"{instrument} exchange baseline transaction fee from user fee-unit table: "
-                        f"{product['value']} by {unit}; {leg_label} uses {field_name}; "
+                        f"{_display_leg_value(product, leg_label)} by {unit}; {leg_label} uses {field_name}; "
                         f"active leg source={active_source}."
                     ),
                     parser_notes=(
@@ -182,6 +184,42 @@ def _parse_fee_value(value: Any, *, unit: str) -> float:
     if unit != "volume":
         raise ValueError(f"fixed fee {value!r} must use volume unit")
     return float(text)
+
+
+def _parse_leg_values(product: Mapping[str, Any], *, unit: str) -> dict[str, float]:
+    raw = product.get("leg_values") or {}
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"leg_values for {product.get('instrument')} must be an object")
+    result: dict[str, float] = {}
+    aliases = {
+        "open": "开仓",
+        "close": "平昨",
+        "close_today": "平今",
+        "开仓": "开仓",
+        "平昨": "平昨",
+        "平今": "平今",
+    }
+    for key, value in raw.items():
+        label = aliases.get(str(key))
+        if label is None:
+            raise ValueError(f"unsupported leg_values key for {product.get('instrument')}: {key!r}")
+        result[label] = _parse_fee_value(value, unit=unit)
+    return result
+
+
+def _display_leg_value(product: Mapping[str, Any], leg_label: str) -> Any:
+    raw = product.get("leg_values") or {}
+    if not isinstance(raw, Mapping):
+        return product["value"]
+    reverse = {
+        "开仓": ("开仓", "open"),
+        "平昨": ("平昨", "close"),
+        "平今": ("平今", "close_today"),
+    }
+    for key in reverse[leg_label]:
+        if key in raw:
+            return raw[key]
+    return product["value"]
 
 
 def _baseline_for_leg(*, unit: str, table_value: float, openctp_value: float | None, leg_label: str) -> tuple[float, str]:

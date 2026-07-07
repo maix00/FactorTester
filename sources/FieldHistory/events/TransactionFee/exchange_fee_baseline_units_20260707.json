@@ -96,7 +96,13 @@
       "exchange": "DCE",
       "label": "焦炭",
       "unit": "money",
-      "value": "0.01%"
+      "value": "0.01%",
+      "leg_values": {
+        "open": "0.014%",
+        "close": "0.01%",
+        "close_today": "0.014%"
+      },
+      "source_note": "DCE product fee parameter page and multiple exchange-standard fee mirrors: 焦炭开仓/平今成交金额万分之1.4，平昨成交金额万分之1。"
     },
     {
       "instrument": "JM",
@@ -446,7 +452,13 @@
       "exchange": "DCE",
       "label": "生猪",
       "unit": "money",
-      "value": "0.01%"
+      "value": "0.01%",
+      "leg_values": {
+        "open": "0.02%",
+        "close": "0.01%",
+        "close_today": "0.02%"
+      },
+      "source_note": "DCE product listing notice and multiple exchange-standard fee mirrors: 生猪开仓/平今成交金额万分之2，平昨成交金额万分之1。"
     },
     {
       "instrument": "JR",
