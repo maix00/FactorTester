@@ -590,7 +590,7 @@ class TestApiSimulation:
 
             def get_factors(self, *, page_uuid=None, **kwargs):
                 self.constructed_with_page_uuid = page_uuid
-                self.factors = [FakeFactor("MmTrend")]
+                self.factors = [FakeFactor("MmTrend|N:20d|$F:1d")]
                 return self.factors
 
         class FakeTester:
@@ -614,9 +614,9 @@ class TestApiSimulation:
             allow_default_factor=True,
         )
 
-        assert factor.alias == "MmTrend"
+        assert factor.alias == "MmTrend|N:20d|$F:1d"
         assert family.constructed_with_page_uuid == "page-1"
-        assert tester.calculated == [("MmTrend", False)]
+        assert tester.calculated == [("MmTrend|N:20d|$F:1d", False)]
 
     def test_run_simulates_frontend_request(self, monkeypatch):
         """模拟前端提交到后端对象并完成一次完整类型分析。"""

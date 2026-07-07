@@ -123,9 +123,16 @@ def _load_and_calc_factor(
     factor = _find_factor(factors, factor_alias, factor_alias)
     if factor is None and allow_default_factor:
         try:
-            factor_family.get_factors(page_uuid=page_uuid)
+            generated = factor_family.get_factors(page_uuid=page_uuid)
             factors = list(getattr(factor_family, "factors", []) or [])
             factor = _find_factor(factors, factor_alias, factor_alias)
+            if factor is None and factor_alias == str(getattr(factor_family, "alias", factor_family_alias)):
+                if isinstance(generated, list) and generated:
+                    factor = generated[0]
+                elif generated is not None and not isinstance(generated, list):
+                    factor = generated
+                elif factors:
+                    factor = factors[0]
         except Exception:
             factor = None
     if factor is None:
