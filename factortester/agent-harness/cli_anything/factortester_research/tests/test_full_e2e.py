@@ -50,6 +50,8 @@ class TestCLISubprocess:
         data = json.loads(result.stdout)
         assert data["session"]["factor_family"] == "SgCCS"
         assert any(item["phase"] == "diagnose_ic" for item in data["session"]["plan"])
+        assert any(item["phase"] == "understand_factor_source" for item in data["session"]["plan"])
+        assert any(item["phase"] == "platform_gap_loop" for item in data["session"]["plan"])
         assert session.exists()
 
     def test_run_step_records_platform_gap_with_fake_factortester(self, tmp_path: Path) -> None:
@@ -82,3 +84,29 @@ class TestCLISubprocess:
         result = self._run(["--session", str(session), "status", "--json"])
         data = json.loads(result.stdout)
         assert data["status"] == "research_ready"
+
+    def test_operator_mode_blocks_client_only_service_restart(self, tmp_path: Path) -> None:
+        session = tmp_path / "session.json"
+        result = self._run(
+            ["--session", str(session), "service", "restart", "--target-port", "8123", "--dry-run"],
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "client_only" in result.stderr
+
+    def test_operator_source_owner_persists_admin_port(self, tmp_path: Path) -> None:
+        session = tmp_path / "session.json"
+        self._run([
+            "--session",
+            str(session),
+            "operator",
+            "set",
+            "--mode",
+            "source_owner",
+            "--admin-port",
+            "7998",
+        ])
+        result = self._run(["--session", str(session), "status", "--json"])
+        data = json.loads(result.stdout)
+        assert data["operator_mode"] == "source_owner"
+        assert data["admin_port"] == 7998

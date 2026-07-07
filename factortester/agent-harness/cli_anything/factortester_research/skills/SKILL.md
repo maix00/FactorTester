@@ -17,7 +17,10 @@ Key commands:
 ```bash
 cli-anything-factortester-research doctor --json
 cli-anything-factortester-research plan --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
+cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m
+cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
+cli-anything-factortester-research service restart --target-port 8123 --dry-run --json
 cli-anything-factortester-research gap list --json
 cli-anything-factortester-research status --json
 ```

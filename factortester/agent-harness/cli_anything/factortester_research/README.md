@@ -35,6 +35,37 @@ cli-anything-factortester-research run-step -- backtest compare factor-grid --fa
 If a command exposes a missing backend/CLI feature, the harness records a gap and
 sets the session status to `code_improvement_required`.
 
+Before testing a family, inspect the factor workspace so the agent knows what the
+factor computes:
+
+```bash
+cli-anything-factortester-research workspace prepare --sync
+cli-anything-factortester-research workspace inspect --factor-family SgCCS
+```
+
+If research results are poor but the factor workspace is writable, mark the
+factor-improvement loop and edit/push the factor source before re-running IC/type
+diagnostics:
+
+```bash
+cli-anything-factortester-research decision poor-result --reason "IC decay and cost screen failed"
+factortester custom_factors workspace git diff
+factortester custom_factors workspace push
+```
+
+If the gap is platform/server code rather than factor source, distinguish the
+operator mode:
+
+```bash
+# Client-only users have no server source code and cannot restart the service.
+cli-anything-factortester-research operator set --mode client_only
+
+# Source owners can fix code, run tests, then restart the managed worktree via 7998.
+cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
+cli-anything-factortester-research service list
+cli-anything-factortester-research service restart --target-port 8123
+```
+
 ## JSON
 
 All commands intended for agents support `--json`.

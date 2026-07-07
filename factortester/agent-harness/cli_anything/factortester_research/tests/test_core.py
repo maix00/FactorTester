@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from cli_anything.factortester_research.core.plan import build_factor_research_plan, validation_checklist
+from cli_anything.factortester_research.core.service import ManagedWorktree, select_worktree
 from cli_anything.factortester_research.core.session import ResearchSession, record_gap, resolve_gap
 
 
@@ -18,6 +19,7 @@ def test_plan_orders_diagnostics_before_backtest() -> None:
     assert phases.index("cost_capacity_screen") < phases.index("backtest")
     assert any("ic_test grid" in item["command"] for item in plan)
     assert any("--volume-capacity-mode volume_participation" in item["command"] for item in plan)
+    assert any(item["phase"] == "platform_gap_loop" for item in plan)
 
 
 def test_validation_checklist_encodes_quant_research_guardrails() -> None:
@@ -26,6 +28,8 @@ def test_validation_checklist_encodes_quant_research_guardrails() -> None:
     assert "多重检验" in text
     assert "未来函数" in text
     assert "gap" in text
+    assert "7998" in text
+    assert "client_only" in text
 
 
 def test_gap_state_machine_blocks_and_resumes_research() -> None:
@@ -35,3 +39,12 @@ def test_gap_state_machine_blocks_and_resumes_research() -> None:
     assert session.status == "code_improvement_required"
     resolve_gap(session, "gap-1", note="implemented")
     assert session.status == "research_ready"
+
+
+def test_service_target_selection_requires_unambiguous_worktree() -> None:
+    worktrees = [
+        ManagedWorktree("feat", "feat", "/repo", 7999, False, False),
+        ManagedWorktree("fix/issue-123-factortester-cli-http", "fix/issue-123-factortester-cli-http", "/repo/.workspace/fix/issue-123", 8123, True, True),
+    ]
+    target = select_worktree(worktrees, target_port=8123)
+    assert target.branch == "fix/issue-123-factortester-cli-http"

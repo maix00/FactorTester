@@ -33,7 +33,14 @@ def build_factor_research_plan(
             "skill_basis": ["longbridge-quant:factor-research", "quantitative-research:patterns"],
             "purpose": "绑定因子家族、模板和候选产品组。",
             "command": f"factortester single_factor_test --factor-family {shlex.quote(factor_family)}",
-        }
+        },
+        {
+            "phase": "understand_factor_source",
+            "skill_basis": ["longbridge-quant:factor-research"],
+            "purpose": "测试前先同步并阅读因子工作区源码，确认因子在计算什么、是否存在明显未来函数或过拟合参数。",
+            "command": f"cli-anything-factortester-research workspace inspect --factor-family {shlex.quote(factor_family)}",
+            "required_outputs": ["source_files", "factor_formula_or_expression", "rolling_shift_windows", "data_columns"],
+        },
     ]
     if template:
         plan.extend(
@@ -72,6 +79,18 @@ def build_factor_research_plan(
                 "command": f"factortester backtest compare factor-grid {grid} --volume-capacity-mode volume_participation",
             },
             {
+                "phase": "factor_improvement_loop",
+                "skill_basis": ["quantitative-research:validations"],
+                "purpose": "若 IC/类型/成本/回测表现不好，进入因子工作区修改源码或候选参数，commit、push 入库，然后回到诊断阶段。",
+                "command": "cli-anything-factortester-research decision poor-result --reason '<why>' && factortester custom_factors workspace git diff",
+            },
+            {
+                "phase": "platform_gap_loop",
+                "skill_basis": ["cli-anything:refine"],
+                "purpose": "若是 FactorTester 平台代码缺口，先区分 operator_mode：有服务器源码者修代码、测试、经 7998 管理端口重启；纯客户端用户只能记录 gap 并交给维护者。",
+                "command": "cli-anything-factortester-research operator set --mode source_owner --admin-port 7998 && cli-anything-factortester-research service restart --target-port 8123",
+            },
+            {
                 "phase": "backtest",
                 "skill_basis": ["quantitative-research:proper-backtest-framework"],
                 "purpose": "只在诊断通过后运行分组回测；必须带费用、容量、明确 margin mode 和足够订单样本。",
@@ -95,5 +114,8 @@ def validation_checklist() -> list[str]:
         "费用、成交量容量、margin mode、fee mode 显式写入配置。",
         "无未来函数：信号使用 close 时只能在下一可见 open 或更晚成交。",
         "发现 CLI/API/后端能力缺口时先记录 gap，修复代码并验证后再继续研究。",
+        "只有 source_owner 可以修 FactorTester 服务代码；client_only 用户只能提交 gap 证据，不能假装能修改服务器源码。",
+        "平台代码修复后必须通过 7998 管理端口重启目标服务，再重新运行失败步骤。",
+        "表现不好时先回到因子工作区理解并修改因子源码或参数，再重新跑 IC/类型/回测诊断。",
         "最终结论标注 exploratory / in-sample / out-of-sample。",
     ]

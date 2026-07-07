@@ -22,7 +22,13 @@ machine to have FactorTester server source code.
 ```bash
 cli-anything-factortester-research doctor --json
 cli-anything-factortester-research plan --factor-family SgCCS --template '2026-06-02 07:20:47' --product-group 中国期货日盘 --n 2m --f 1m --rev --json
+cli-anything-factortester-research workspace prepare --sync --json
+cli-anything-factortester-research workspace inspect --factor-family SgCCS --json
 cli-anything-factortester-research run-step -- ic_test grid --factor-family SgCCS --product-group 中国期货日盘 --n 2m --f 1m --rev
+cli-anything-factortester-research decision poor-result --reason 'IC/cost diagnostics failed'
+cli-anything-factortester-research operator set --mode client_only
+cli-anything-factortester-research operator set --mode source_owner --admin-port 7998
+cli-anything-factortester-research service restart --target-port 8123 --dry-run --json
 cli-anything-factortester-research gap list --json
 cli-anything-factortester-research gap resolve gap-1 --note 'implemented and tested'
 cli-anything-factortester-research status --json
@@ -38,3 +44,8 @@ cli-anything-factortester-research checklist
   factor is profitable.
 - If `status` is `code_improvement_required`, stop research and fix FactorTester
   before continuing.
+- `client_only` users cannot edit server code. They may edit writable factor
+  workspace source/parameters, but server-code gaps must be exported for a source
+  owner.
+- `source_owner` users must run tests after code changes and restart the target
+  service through the local 7998 manager before retrying failed research steps.

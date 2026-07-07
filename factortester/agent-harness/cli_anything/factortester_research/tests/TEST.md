@@ -2,10 +2,11 @@
 
 ## Inventory
 
-- `test_core.py`: plan generation, validation checklist, session/gap state.
+- `test_core.py`: plan generation, validation checklist, session/gap state,
+  and service target selection.
 - `test_full_e2e.py`: CLI subprocess behavior using `_resolve_cli()`, JSON output,
-  dry-run command construction, and gap recording against a fake factortester
-  executable.
+  dry-run command construction, gap recording against a fake factortester
+  executable, operator mode persistence, and client-only service restart guards.
 
 ## Workflows
 
@@ -31,6 +32,18 @@ Verified:
 - Session status becomes `code_improvement_required`.
 - Resolving the gap returns status to `research_ready`.
 
+### Factor workspace and source-owner loop
+
+Simulates an agent separating writable factor-source improvement from server-code
+improvement.
+
+Verified:
+
+- Research plans include factor source inspection before diagnostics.
+- Research plans include the source-owner platform gap loop.
+- `client_only` users cannot restart managed server worktrees.
+- `source_owner` persists the 7998 admin port used for service restart.
+
 ## Results
 
 Run:
@@ -43,8 +56,8 @@ python -m pytest cli_anything/factortester_research/tests -v --tb=no
 Validated in GTHT environment:
 
 ```text
-.......                                                                  [100%]
-7 passed in 0.55s
+..........                                                               [100%]
+10 passed in 0.66s
 ```
 
 Installed-command validation:
@@ -55,8 +68,8 @@ CLI_ANYTHING_FORCE_INSTALLED=1 python -m pytest cli_anything/factortester_resear
 ```
 
 ```text
-.......                                                                  [100%]
-7 passed in 0.99s
+..........                                                               [100%]
+10 passed in 0.87s
 ```
 
 Manual command smoke test:
@@ -71,3 +84,23 @@ cli-anything-factortester-research --session /tmp/ftr-session.json plan \
 
 Verified that `SgCCS` is passed as a factor-family value, not registered as a
 command, and that the plan orders IC/type diagnostics before group backtesting.
+
+Additional smoke tests:
+
+```bash
+cli-anything-factortester-research --session /tmp/ftr-harness-service.json \
+  operator set --mode source_owner --admin-port 7998 --json
+
+cli-anything-factortester-research --session /tmp/ftr-harness-service.json \
+  service restart --target-port 8123 --dry-run --json
+```
+
+Verified the dry-run resolved the issue-123 managed worktree on port 8123 and
+planned stop/start actions through the 7998 manager.
+
+```bash
+cli-anything-factortester-research --session /tmp/sgccs-harness.json \
+  workspace inspect --factor-family SgCCS --no-sync --json
+```
+
+Verified SgCCS source was found in the factor workspace before diagnostics.
