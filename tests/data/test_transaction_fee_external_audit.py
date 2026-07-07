@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sources.FieldHistory.scripts.audit_transaction_fee_external_sources import parse_sina_fee_html
+from sources.FieldHistory.scripts.audit_transaction_fee_external_sources import (
+    _audit_status,
+    parse_sina_fee_html,
+)
 
 
 def test_parse_sina_fee_html_extracts_contract_fee_units() -> None:
@@ -26,3 +29,31 @@ def test_parse_sina_fee_html_extracts_contract_fee_units() -> None:
         ("JD", "jd2603", "close", "money", 0.00015),
         ("JD", "jd2603", "close_today", "zero", 0.0),
     ]
+
+
+def test_official_settlement_snapshot_disagreement_is_not_exchange_mismatch() -> None:
+    assert _audit_status(
+        "volume",
+        240.0,
+        "volume",
+        20.0,
+        exchange_source_notice_ids='["INE-settlement-parameters-20260707"]',
+    ) == "secondary_disagrees_official_snapshot"
+    assert _audit_status(
+        "zero",
+        0.0,
+        "money",
+        0.000025,
+        exchange_source_notice_ids='["SHFE-settlement-parameters-20260707"]',
+    ) == "secondary_disagrees_official_snapshot"
+
+
+def test_secondary_contract_missing_from_latest_snapshot_is_not_exchange_mismatch() -> None:
+    assert _audit_status(
+        "volume",
+        20.01,
+        "volume",
+        40.0,
+        exchange_source_notice_ids='["上能发〔2026〕29号"]',
+        missing_from_latest_snapshot=True,
+    ) == "secondary_contract_not_in_latest_official_snapshot"

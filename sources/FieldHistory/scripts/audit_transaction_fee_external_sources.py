@@ -124,7 +124,7 @@ def parse_sina_fee_html(text: str, *, source_url: str = SINA_FEE_URL, source_nam
 
 
 def build_external_audit_frame(rows: list[ExternalFeeRow], *, store_key: str = "openctp") -> pd.DataFrame:
-    classification = _latest_classification(store_key=store_key)
+    classification, latest_snapshot_contracts = _latest_classification(store_key=store_key)
     records: list[dict[str, Any]] = []
     for row in rows:
         contract_suffix = _contract_suffix(row.contract_code)
@@ -132,8 +132,15 @@ def build_external_audit_frame(rows: list[ExternalFeeRow], *, store_key: str = "
             classification.get((row.instrument, contract_suffix, row.leg))
             or classification.get((row.instrument, "", row.leg))
         )
+        latest_snapshot_contract_set = latest_snapshot_contracts.get(row.instrument, set())
+        missing_from_latest_snapshot = bool(
+            contract_suffix
+            and latest_snapshot_contract_set
+            and contract_suffix not in latest_snapshot_contract_set
+        )
         exchange_unit = match["unit"] if match else ""
         exchange_value = match["value"] if match else None
+        exchange_source_notice_ids = match["source_notice_ids"] if match else ""
         delta = None if exchange_value is None else row.value - float(exchange_value)
         records.append({
             "source_name": row.source_name,
@@ -147,8 +154,16 @@ def build_external_audit_frame(rows: list[ExternalFeeRow], *, store_key: str = "
             "raw_value": row.raw_value,
             "exchange_unit": exchange_unit,
             "exchange_value": exchange_value,
+            "exchange_source_notice_ids": exchange_source_notice_ids,
             "delta": delta,
-            "audit_status": _audit_status(row.unit, row.value, exchange_unit, exchange_value),
+            "audit_status": _audit_status(
+                row.unit,
+                row.value,
+                exchange_unit,
+                exchange_value,
+                exchange_source_notice_ids=exchange_source_notice_ids,
+                missing_from_latest_snapshot=missing_from_latest_snapshot,
+            ),
         })
     return pd.DataFrame(records, columns=[
         "source_name",
@@ -162,12 +177,16 @@ def build_external_audit_frame(rows: list[ExternalFeeRow], *, store_key: str = "
         "raw_value",
         "exchange_unit",
         "exchange_value",
+        "exchange_source_notice_ids",
         "delta",
         "audit_status",
     ])
 
 
-def _latest_classification(*, store_key: str) -> dict[tuple[str, str, str], dict[str, Any]]:
+def _latest_classification(
+    *,
+    store_key: str,
+) -> tuple[dict[tuple[str, str, str], dict[str, Any]], dict[str, set[str]]]:
     hub = DataHub.get_instance()
     _ensure_store_registered(hub, store_key)
     with hub.connect_store(store_key) as conn:
@@ -176,13 +195,25 @@ def _latest_classification(*, store_key: str) -> dict[tuple[str, str, str], dict
             (FEE_UNIT_CLASSIFICATION_TABLE,),
         ).fetchone()
         if table_exists is None:
-            return {}
+            return {}, {}
         frame = pd.read_sql_query(f"SELECT * FROM {FEE_UNIT_CLASSIFICATION_TABLE}", conn)
     if frame.empty:
-        return {}
+        return {}, {}
     frame["effective_trading_day"] = frame["effective_trading_day"].astype(str)
     frame["contract_key"] = frame["contract_codes"].map(_contract_key_from_json)
     frame = frame.sort_values(["instrument", "contract_key", "effective_trading_day", "effective_timestamp"])
+    snapshot_frame = frame[
+        frame["source_notice_ids"].astype(str).str.contains("settlement-parameters-", regex=False)
+        & (frame["contract_key"] != "")
+    ].copy()
+    latest_snapshot_contracts: dict[str, set[str]] = {}
+    if not snapshot_frame.empty:
+        snapshot_latest_days = snapshot_frame.groupby("instrument")["effective_trading_day"].transform("max")
+        latest_snapshot_frame = snapshot_frame[snapshot_frame["effective_trading_day"] == snapshot_latest_days]
+        for item in latest_snapshot_frame.itertuples(index=False):
+            latest_snapshot_contracts.setdefault(str(item.instrument), set()).update(
+                part for part in str(item.contract_key).split(",") if part
+            )
     latest = frame.groupby(["instrument", "contract_key"], as_index=False, sort=False).tail(1)
     result: dict[tuple[str, str, str], dict[str, Any]] = {}
     for item in latest.itertuples(index=False):
@@ -190,8 +221,9 @@ def _latest_classification(*, store_key: str) -> dict[tuple[str, str, str], dict
             result[(str(item.instrument), str(item.contract_key), leg)] = {
                 "unit": getattr(item, f"{leg}_unit"),
                 "value": getattr(item, f"{leg}_{getattr(item, f'{leg}_unit')}") if getattr(item, f"{leg}_unit") in {"money", "volume"} else 0.0,
+                "source_notice_ids": getattr(item, "source_notice_ids", ""),
             }
-    return result
+    return result, latest_snapshot_contracts
 
 
 def _load_html(source: str) -> tuple[str, str]:
@@ -255,17 +287,29 @@ def _parse_fee_cell(raw: str) -> tuple[str, float] | None:
     return None
 
 
-def _audit_status(source_unit: str, source_value: float, exchange_unit: str, exchange_value: Any) -> str:
+def _audit_status(
+    source_unit: str,
+    source_value: float,
+    exchange_unit: str,
+    exchange_value: Any,
+    *,
+    exchange_source_notice_ids: str = "",
+    missing_from_latest_snapshot: bool = False,
+) -> str:
     if not exchange_unit:
         return "missing_exchange_baseline"
     if source_unit == "zero" and abs(float(exchange_value or 0.0)) <= 1e-15:
         return "matched"
     if exchange_unit == "zero" and abs(source_value) <= 1e-15:
         return "matched"
-    if source_unit != exchange_unit:
-        return "unit_mismatch"
     if exchange_value is None:
         return "missing_exchange_value"
+    if missing_from_latest_snapshot:
+        return "secondary_contract_not_in_latest_official_snapshot"
+    if "settlement-parameters-" in str(exchange_source_notice_ids):
+        return "secondary_disagrees_official_snapshot"
+    if source_unit != exchange_unit:
+        return "unit_mismatch"
     delta = source_value - float(exchange_value)
     if abs(delta) <= 1e-12:
         return "matched"

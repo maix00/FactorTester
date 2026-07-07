@@ -6,7 +6,7 @@ from pathlib import Path
 
 EVENTS_PATH = Path("sources/FieldHistory/events/TransactionFee/official_seed_events.jsonl")
 SETTLEMENT_SNAPSHOT_PATH = Path(
-    "sources/FieldHistory/events/TransactionFee/exchange_settlement_snapshots_20260309_20260623.jsonl"
+    "sources/FieldHistory/events/TransactionFee/exchange_settlement_snapshots_20260309_20260707.jsonl"
 )
 
 
@@ -226,3 +226,42 @@ def test_exchange_settlement_snapshots_store_contract_level_fee_legs() -> None:
     assert by_key[
         ("CZCE-settlement-parameters-20260623", "PL", ("2607",), "CloseTodayRatioByVolume")
     ]["value"] == 0.0
+
+
+def test_exchange_snapshot_change_events_keep_only_first_seen_and_value_changes() -> None:
+    from sources.FieldHistory.scripts.fetch_transaction_fee_settlement_snapshots import _change_events
+
+    rows = [
+        {
+            "event_id": "a",
+            "data_source": "SHFE",
+            "instrument": "CU",
+            "contract_codes": ["2601"],
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-02",
+            "effective_timestamp": "",
+            "value": 3.0,
+        },
+        {
+            "event_id": "b",
+            "data_source": "SHFE",
+            "instrument": "CU",
+            "contract_codes": ["2601"],
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-03",
+            "effective_timestamp": "",
+            "value": 3.0,
+        },
+        {
+            "event_id": "c",
+            "data_source": "SHFE",
+            "instrument": "CU",
+            "contract_codes": ["2601"],
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-04",
+            "effective_timestamp": "",
+            "value": 4.0,
+        },
+    ]
+
+    assert [row["event_id"] for row in _change_events(rows)] == ["a", "c"]

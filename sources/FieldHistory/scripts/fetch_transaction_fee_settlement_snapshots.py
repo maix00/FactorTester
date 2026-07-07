@@ -8,6 +8,9 @@ import hashlib
 import io
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date as Date
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +26,27 @@ SOURCE_LABEL = {
     "CZCE": "郑州商品交易所期货结算参数表",
 }
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+REQUEST_TIMEOUT = 8.0
 
 
 def main(argv: list[str] | None = None) -> int:
+    global REQUEST_TIMEOUT
+
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", action="append", required=True, help="Trading day, YYYYMMDD")
+    parser.add_argument("--date", action="append", default=[], help="Trading day, YYYYMMDD")
+    parser.add_argument("--start-date", default="", help="Inclusive start date for historical backfill, YYYYMMDD")
+    parser.add_argument("--end-date", default="", help="Inclusive end date for historical backfill, YYYYMMDD")
+    parser.add_argument(
+        "--mode",
+        choices=("snapshots", "changes"),
+        default="snapshots",
+        help="snapshots writes every official daily value; changes writes only first-seen/value-change events",
+    )
+    parser.add_argument("--strict", action="store_true", help="Raise on missing exchange/date instead of skipping it")
+    parser.add_argument("--timeout", type=float, default=REQUEST_TIMEOUT, help="HTTP timeout seconds")
+    parser.add_argument("--include-weekends", action="store_true", help="Include weekends when expanding date ranges")
+    parser.add_argument("--progress-every", type=int, default=100, help="Print progress after this many exchange/date attempts")
+    parser.add_argument("--workers", type=int, default=1, help="Bounded parallel HTTP workers")
     parser.add_argument(
         "--market",
         action="append",
@@ -39,17 +58,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, help="Output JSONL path")
     args = parser.parse_args(argv)
 
+    REQUEST_TIMEOUT = args.timeout
     markets = args.market or ["SHFE", "INE", "CFFEX", "CZCE"]
-    rows: list[dict[str, Any]] = []
-    for date in args.date:
-        date = _normalize_date(date)
-        for market in markets:
-            if market in {"SHFE", "INE"}:
-                rows.extend(_shfe_like_rows(market, date, source_accessed_at=args.source_accessed_at))
-            elif market == "CFFEX":
-                rows.extend(_cffex_rows(date, source_accessed_at=args.source_accessed_at))
-            elif market == "CZCE":
-                rows.extend(_czce_rows(date, source_accessed_at=args.source_accessed_at))
+    dates = _requested_dates(
+        args.date,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        include_weekends=args.include_weekends,
+    )
+    if not dates:
+        raise ValueError("provide --date or --start-date/--end-date")
+    tasks = [(market, date) for date in dates for market in markets]
+    rows = _fetch_rows(
+        tasks,
+        source_accessed_at=args.source_accessed_at,
+        strict=args.strict,
+        workers=max(1, args.workers),
+        progress_every=args.progress_every,
+    )
 
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -59,20 +85,127 @@ def main(argv: list[str] | None = None) -> int:
         seen.add(row["event_id"])
         deduped.append(row)
 
+    output_rows = _change_events(deduped) if args.mode == "changes" else deduped
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in deduped),
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in output_rows),
         encoding="utf-8",
     )
-    print(json.dumps({"output": str(output), "events": len(deduped)}, ensure_ascii=False, indent=2))
+    print(json.dumps({
+        "output": str(output),
+        "mode": args.mode,
+        "snapshots": len(deduped),
+        "events": len(output_rows),
+    }, ensure_ascii=False, indent=2))
     return 0
+
+
+def _fetch_rows(
+    tasks: list[tuple[str, str]],
+    *,
+    source_accessed_at: str,
+    strict: bool,
+    workers: int,
+    progress_every: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if workers <= 1:
+        for attempts, (market, date) in enumerate(tasks, start=1):
+            try:
+                rows.extend(_rows_for_market(market, date, source_accessed_at=source_accessed_at))
+            except (requests.RequestException, ValueError, json.JSONDecodeError) as exc:
+                if strict:
+                    raise
+                print(f"skip {market} {date}: {exc}", flush=True)
+            if progress_every and attempts % progress_every == 0:
+                print(f"progress attempts={attempts}/{len(tasks)} rows={len(rows)} latest={market}/{date}", flush=True)
+        return rows
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(_rows_for_market, market, date, source_accessed_at=source_accessed_at): (market, date)
+            for market, date in tasks
+        }
+        for attempts, future in enumerate(as_completed(future_map), start=1):
+            market, date = future_map[future]
+            try:
+                rows.extend(future.result())
+            except (requests.RequestException, ValueError, json.JSONDecodeError) as exc:
+                if strict:
+                    raise
+                print(f"skip {market} {date}: {exc}", flush=True)
+            if progress_every and attempts % progress_every == 0:
+                print(f"progress attempts={attempts}/{len(tasks)} rows={len(rows)} latest={market}/{date}", flush=True)
+    return rows
+
+
+def _rows_for_market(market: str, date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
+    if market in {"SHFE", "INE"}:
+        return _shfe_like_rows(market, date, source_accessed_at=source_accessed_at)
+    if market == "CFFEX":
+        return _cffex_rows(date, source_accessed_at=source_accessed_at)
+    if market == "CZCE":
+        return _czce_rows(date, source_accessed_at=source_accessed_at)
+    raise ValueError(f"unsupported market: {market}")
+
+
+def _requested_dates(
+    dates: list[str],
+    *,
+    start_date: str = "",
+    end_date: str = "",
+    include_weekends: bool = False,
+) -> list[str]:
+    requested = {_normalize_date(value) for value in dates}
+    if start_date or end_date:
+        if not start_date or not end_date:
+            raise ValueError("--start-date and --end-date must be provided together")
+        start = _date_from_yyyymmdd(_normalize_date(start_date))
+        end = _date_from_yyyymmdd(_normalize_date(end_date))
+        if end < start:
+            raise ValueError("--end-date must be >= --start-date")
+        current = start
+        while current <= end:
+            if include_weekends or current.weekday() < 5:
+                requested.add(current.strftime("%Y%m%d"))
+            current += timedelta(days=1)
+    return sorted(requested)
+
+
+def _change_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compress daily settlement snapshots into first-seen/value-change events."""
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("data_source") or ""),
+            str(row.get("instrument") or ""),
+            json.dumps(row.get("contract_codes") or [], ensure_ascii=False),
+            str(row.get("field_name") or ""),
+            str(row.get("effective_trading_day") or ""),
+            str(row.get("effective_timestamp") or ""),
+        ),
+    )
+    output: list[dict[str, Any]] = []
+    previous: dict[tuple[str, str, str, str], float] = {}
+    for row in sorted_rows:
+        key = (
+            str(row.get("data_source") or ""),
+            str(row.get("instrument") or ""),
+            json.dumps(row.get("contract_codes") or [], ensure_ascii=False),
+            str(row.get("field_name") or ""),
+        )
+        value = float(row.get("value") or 0.0)
+        if key not in previous or abs(previous[key] - value) > 1e-15:
+            output.append(row)
+            previous[key] = value
+    return sorted(output, key=lambda row: (str(row.get("effective_trading_day") or ""), str(row.get("event_id") or "")))
 
 
 def _shfe_like_rows(market: str, date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
     base = "www.ine.cn" if market == "INE" else "www.shfe.com.cn"
     url = f"https://{base}/data/tradedata/future/dailydata/js{date}.dat"
-    response = requests.get(url, headers=HEADERS, timeout=30)
+    response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     data = response.json().get("o_cursor", [])
     rows: list[dict[str, Any]] = []
@@ -116,7 +249,7 @@ def _shfe_like_rows(market: str, date: str, *, source_accessed_at: str) -> list[
 
 def _cffex_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
     url = f"http://www.cffex.com.cn/sj/jscs/{date[:4]}{date[4:6]}/{date[6:]}/{date}_1.csv"
-    response = requests.get(url, headers=HEADERS, timeout=30)
+    response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
     if response.status_code != 200:
         return []
     text = response.content.decode("gbk", errors="ignore")
@@ -163,7 +296,7 @@ def _cffex_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
 
 def _czce_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
     url = f"http://www.czce.com.cn/cn/DFSStaticFiles/Future/{date[:4]}/{date}/FutureDataClearParams.txt"
-    response = requests.get(url, headers=HEADERS, timeout=30)
+    response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
     if response.status_code != 200:
         return []
     text = response.text
@@ -335,6 +468,10 @@ def _normalize_date(value: str) -> str:
     if not re.fullmatch(r"\d{8}", text):
         raise ValueError(f"date must be YYYYMMDD or YYYY-MM-DD: {value!r}")
     return text
+
+
+def _date_from_yyyymmdd(value: str) -> Date:
+    return datetime.strptime(value, "%Y%m%d").date()
 
 
 def _instrument(symbol: str) -> str:
