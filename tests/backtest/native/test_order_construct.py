@@ -6,11 +6,13 @@ import pandas as pd
 import pytest
 
 from tools.products.Product import Product
+from tools.testers.backtest.engines.native.config import StrategyConfig
 from tools.testers.backtest.engines.native.state import BacktestRunState
 from tools.testers.backtest.engines.native.position import ProductPosition
 from tools.testers.backtest.engines.native.scheduler import EventQueue, FlowContext
 from tools.testers.backtest.engines.native.strategy import Strategy
 from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+from tools.testers.backtest.modules.group_membership import _resolve_execution_schedule
 from tools.testers.backtest.modules.ledger_module import LedgerModule
 from tools.testers.backtest.modules.market_data import MarketDataModule
 from tools.testers.backtest.modules.order_construct import OrderConstructModule, _basic_size_order, _construct_orders
@@ -137,6 +139,28 @@ def test_strategy_book_order_sizing_policy_can_override_default_deltas():
     _basic_size_order(account, ctx)
 
     assert ctx.get_for(OrderConstructModule.raw_deltas, s)[p] == pytest.approx(50.0)
+
+
+def test_execution_schedule_uses_each_products_next_open_bar():
+    s = Strategy(alias="S")
+    p_day, p_night = _product(), _product()
+    account = BacktestRunState(strategy_configs={s: StrategyConfig(strategy=s, field_values={})})
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2024-01-01 09:01", tz="Asia/Shanghai"),
+        pd.Timestamp("2024-01-01 09:02", tz="Asia/Shanghai"),
+        pd.Timestamp("2024-01-01 21:01", tz="Asia/Shanghai"),
+        pd.Timestamp("2024-01-01 21:02", tz="Asia/Shanghai"),
+    ])
+    account.market_data_store.market_price_tables = {
+        "open": pd.DataFrame({
+            p_day: [10.0, 11.0, float("nan"), float("nan")],
+            p_night: [float("nan"), float("nan"), 20.0, 21.0],
+        }, index=idx),
+    }
+    ctx = FlowContext(timestamp=idx[0], event_queue=EventQueue(), active_strategies=frozenset({s}))
+
+    assert _resolve_execution_schedule(account, ctx, s, p_day)[1] == idx[1]
+    assert _resolve_execution_schedule(account, ctx, s, p_night)[1] == idx[3]
 
 
 def test_basic_size_order_keeps_untradable_position_and_records_runtime_info():

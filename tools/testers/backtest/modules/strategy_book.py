@@ -18,12 +18,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from .base import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.config import CashPoolConfig
+from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.engines.native.ledger import Ledger, ledger_identity
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 
 if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.config import StrategyConfig
 
 StrategyBookMode = Literal["per_strategy_one_ledger"]
+LedgerSessionPolicyMode = Literal["error", "auto_split", "custom"]
 
 OrderRoutingPolicy = Callable[[object, object], str | Ledger]
 CashAvailabilityPolicy = Callable[[object, object, float, str], float]
@@ -53,6 +56,7 @@ class StrategyBookModule(ExecutableModule):
     order: ClassVar[int] = 155
 
     strategy_book_mode: ClassVar[FieldRef[StrategyBookMode]] = FieldRef("strategy_book_mode")
+    ledger_session_policy: ClassVar[FieldRef[LedgerSessionPolicyMode]] = FieldRef("ledger_session_policy")
     cash_reserve_ratio: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_ratio")
     cash_reserve_major: ClassVar[FieldRef[float]] = FieldRef("cash_reserve_major")
     fields: ClassVar[dict[str, FieldDefinition]] = {
@@ -74,6 +78,25 @@ class StrategyBookModule(ExecutableModule):
             tab_label="策略簿",
             tab_order=155,
             help_text="默认模式：每个 strategy 使用一个私有 ledger。共享账本或一策略多账本由 StrategyBook.from_dict 或子类提供。",
+        ),
+        "ledger_session_policy": FieldDefinition(
+            public=True,
+            label="账本交易时段策略",
+            default="error",
+            control_template="select",
+            tab="strategy_book",
+            options=(
+                ("error", "发现混合交易时段即报错"),
+                ("auto_split", "按交易时段自动拆账本"),
+                ("custom", "自定义账本时段策略"),
+            ),
+            chip_template="账本时段: {value}",
+            tab_label="策略簿",
+            tab_order=155,
+            help_text=(
+                "ledger 是现金、保证金、挂单和订单冲突的共同边界。默认不允许一个 ledger "
+                "混入不同交易时段产品；auto_split 仅支持原 ledger 属于单一 cash pool 的情形。"
+            ),
         ),
         "cash_reserve_ratio": FieldDefinition(
             public=True,
@@ -104,6 +127,19 @@ class StrategyBookModule(ExecutableModule):
         ),
     }
 
+    validate_ledger_sessions: ClassVar[Flow] = Flow(
+        "validate_ledger_sessions",
+        inputs=(ledger_session_policy, ProductSelectionModule.products),
+        outputs=(),
+        phase=Phase.PRE_REPLAY,
+        order=16,
+        after=(ProductSelectionModule.resolve_product_selection,),
+        description="校验账本交易时段",
+        compute=lambda state, ctx: _apply_ledger_session_policy(state, ctx),
+    )
+
+    flows: ClassVar[tuple[Flow, ...]] = (validate_ledger_sessions,)
+
 
 @dataclass
 class StrategyBookPolicies:
@@ -128,6 +164,7 @@ class StrategyBookStore:
     ledgers_by_strategy: dict[object, set[Ledger]] = field(default_factory=dict)
     _default_ledger_by_strategy: dict[object, Ledger] = field(default_factory=dict)
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
+    product_ledger_by_strategy: dict[tuple[object, object], Ledger] = field(default_factory=dict)
     policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
 
     def register_strategy_ledgers(
@@ -168,7 +205,10 @@ class StrategyBookStore:
             ledger = (
                 ledger_identity(str(order_ledger_id))
                 if order_ledger_id not in (None, "")
-                else self.default_ledger_for_strategy(state, strategy)
+                else self.product_ledger_by_strategy.get(
+                    (strategy, getattr(order, "instrument", None)),
+                    self.default_ledger_for_strategy(state, strategy),
+                )
             )
         allowed = self.ledgers_for_strategy(state, strategy)
         if ledger not in allowed:
@@ -404,6 +444,218 @@ def assign_ledger_for_strategy(
     if order is None:
         return store.default_ledger_for_strategy(state, strategy)
     return store.ledger_for_order(state, order)
+
+
+def ledger_for_strategy_product(state: object, strategy: object, product: object) -> object:
+    store = strategy_book_store_for(state)
+    ledger_key = store.product_ledger_by_strategy.get(
+        (strategy, product),
+        store.default_ledger_for_strategy(state, strategy),
+    )
+    ledgers = getattr(state, "ledgers", None)
+    if isinstance(ledgers, dict):
+        ledger_state = ledgers.get(ledger_key)
+        if ledger_state is None:
+            ledger_state = ledgers.get(strategy)
+        if ledger_state is None:
+            empty_factory = getattr(state, "_empty_ledger_for", None)
+            if not callable(empty_factory):
+                return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+            ledger_state = empty_factory(strategy, ledger_key)
+            ledgers[ledger_key] = ledger_state
+        return ledger_state
+    return state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+
+
+def positions_for_strategy_ledgers(state: object, strategy: object) -> dict[Any, Any]:
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+
+    store = strategy_book_store_for(state)
+    positions: dict[Any, Any] = {}
+    ledgers = getattr(state, "ledgers", {})
+    for ledger_key in store.ledgers_for_strategy(state, strategy):
+        ledger_state = ledgers.get(ledger_key) if isinstance(ledgers, dict) else None
+        if ledger_state is None:
+            continue
+        positions.update(ledger_state.get(LedgerModule.positions, {}) or {})
+    if not positions:
+        ledger_state = state.ledger_for_strategy(strategy)  # type: ignore[attr-defined]
+        positions.update(ledger_state.get(LedgerModule.positions, {}) or {})
+    return positions
+
+
+def _apply_ledger_session_policy(state: object, ctx: object) -> None:
+    store = strategy_book_store_for(state)
+    for strategy in getattr(state, "strategy_configs", {}):
+        products = tuple(ctx.get_for(ProductSelectionModule.products, strategy, frozenset()))
+        groups = _products_by_session_signature(products)
+        if len(groups) <= 1:
+            continue
+        config = state.config_for(strategy)  # type: ignore[attr-defined]
+        mode = str(config.get(StrategyBookModule.ledger_session_policy, "error") or "error").lower()
+        if mode == "error":
+            raise ValueError(_mixed_ledger_session_message(strategy, store.default_ledger_for_strategy(state, strategy), groups))
+        if mode == "auto_split":
+            _auto_split_strategy_ledger_by_session(state, store, strategy, groups)
+            _validate_shared_cash_pool_requires_custom_policy(state, store, strategy)
+            continue
+        if mode == "custom":
+            raise ValueError(
+                "ledger_session_policy='custom' requires an explicit StrategyBook ledger-session policy; "
+                "none is registered"
+            )
+        raise ValueError(f"unsupported ledger_session_policy: {mode!r}")
+
+    for strategy in getattr(state, "strategy_configs", {}):
+        _validate_shared_cash_pool_requires_custom_policy(state, store, strategy)
+
+
+def _products_by_session_signature(products: Sequence[Any]) -> dict[str, list[Any]]:
+    groups: dict[str, list[Any]] = {}
+    for product in products:
+        signature = _product_session_signature(product)
+        if not signature:
+            continue
+        groups.setdefault(signature, []).append(product)
+    return groups
+
+
+def _product_session_signature(product: Any) -> str | None:
+    for attr in ("trading_session_signature", "session_signature", "trading_session"):
+        value = getattr(product, attr, None)
+        if value not in (None, ""):
+            return str(value)
+    try:
+        from sources.LocalCNFutures.CNFutures import (
+            CNFUTURES_CATEGORY_DAYNIGHT,
+            CNFutures,
+            get_value_alias_for_day_night_time_category,
+        )
+    except Exception:
+        return None
+    if isinstance(product, CNFutures):
+        raw = CNFUTURES_CATEGORY_DAYNIGHT.get(product)
+        if raw in (None, "", "未知"):
+            return None
+        return get_value_alias_for_day_night_time_category(str(raw))
+    return None
+
+
+def _auto_split_strategy_ledger_by_session(
+    state: object,
+    store: StrategyBookStore,
+    strategy: object,
+    groups: Mapping[str, Sequence[Any]],
+) -> None:
+    original_ledgers = store.ledgers_for_strategy(state, strategy)
+    if len(original_ledgers) != 1:
+        raise ValueError(
+            f"ledger_session_policy='auto_split' only supports one source ledger per strategy; "
+            f"strategy {_strategy_alias(strategy)!r} declares {sorted(ledger.name for ledger in original_ledgers)}"
+        )
+    original = next(iter(original_ledgers))
+    pool_id = store.cash_pool_for_ledger(original)
+    if not pool_id:
+        raise ValueError(f"ledger {original.name!r} has no cash pool; auto_split cannot decide funding")
+    child_ledgers: dict[str, Ledger] = {}
+    for signature, products in sorted(groups.items(), key=lambda item: item[0]):
+        child = ledger_identity(f"{original.name}@session:{_safe_ledger_suffix(signature)}")
+        child_ledgers[signature] = child
+        store.cash_pool_by_ledger[child] = pool_id
+        _copy_ledger_config(state, original, child)
+        for product in products:
+            store.product_ledger_by_strategy[(strategy, product)] = child
+    children = set(child_ledgers.values())
+    store.ledgers_by_strategy[strategy] = children
+    store._default_ledger_by_strategy[strategy] = next(iter(sorted(children, key=lambda ledger: ledger.name)))
+    _record_ledger_auto_split_runtime_info(state, strategy, original, pool_id, groups, children)
+
+
+def _validate_shared_cash_pool_requires_custom_policy(
+    state: object,
+    store: StrategyBookStore,
+    strategy: object,
+) -> None:
+    ledgers = store.ledgers_for_strategy(state, strategy)
+    if len(ledgers) <= 1:
+        return
+    pool_counts: dict[str, int] = {}
+    for ledger in ledgers:
+        pool_id = store.cash_pool_for_ledger(ledger)
+        pool_counts[pool_id] = pool_counts.get(pool_id, 0) + 1
+    shared_pools = sorted(pool_id for pool_id, count in pool_counts.items() if count > 1)
+    if not shared_pools:
+        return
+    if store.policies.cash_availability is not None or store.policies.order_sizing is not None:
+        return
+    raise ValueError(
+        f"strategy {_strategy_alias(strategy)!r} routes multiple ledgers through shared cash pool(s) "
+        f"{shared_pools}. Native has no default inactive-ledger cash allocation policy; "
+        "register a custom StrategyBook cash_availability/order_sizing policy or use separate cash pools."
+    )
+
+
+def _copy_ledger_config(state: object, source: Ledger, target: Ledger) -> None:
+    configs = getattr(state, "ledger_configs", None)
+    if not isinstance(configs, dict):
+        return
+    if target in configs:
+        return
+    if source in configs:
+        configs[target] = configs[source]
+
+
+def _safe_ledger_suffix(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in value)[:40] or "unknown"
+
+
+def _mixed_ledger_session_message(strategy: object, ledger: Ledger, groups: Mapping[str, Sequence[Any]]) -> str:
+    parts = []
+    for signature, products in sorted(groups.items(), key=lambda item: item[0]):
+        sample = "、".join(_product_label(product) for product in list(products)[:5])
+        suffix = "…" if len(products) > 5 else ""
+        parts.append(f"{signature}: {sample}{suffix}")
+    return (
+        f"strategy {_strategy_alias(strategy)!r} routes products with multiple trading sessions into "
+        f"ledger {ledger.name!r}: {'; '.join(parts)}. "
+        "Set ledger_session_policy='auto_split' or define a custom StrategyBook routing policy."
+    )
+
+
+def _product_label(product: Any) -> str:
+    name = getattr(product, "name", product)
+    desc = getattr(product, "desc", "")
+    return f"{name}({desc})" if desc else str(name)
+
+
+def _record_ledger_auto_split_runtime_info(
+    state: object,
+    strategy: object,
+    source_ledger: Ledger,
+    pool_id: str,
+    groups: Mapping[str, Sequence[Any]],
+    child_ledgers: set[Ledger],
+) -> None:
+    rows = getattr(state, "runtime_info_rows", None)
+    if not isinstance(rows, list):
+        return
+    detail = "；".join(
+        f"{signature} -> {sorted(ledger.name for ledger in child_ledgers if f'@session:{_safe_ledger_suffix(signature)}' in ledger.name)}"
+        for signature in sorted(groups)
+    )
+    rows.append({
+        "type": "策略簿",
+        "status": "已拆分",
+        "level": "info",
+        "code": "ledger_session_auto_split",
+        "message": (
+            f"strategy {_strategy_alias(strategy)!r} 的 ledger {source_ledger.name!r} "
+            f"已按交易时段拆分，并继续共享 cash pool {pool_id!r}"
+        ),
+        "details": detail,
+        "strategy": _strategy_alias(strategy),
+        "aggregation_key": f"ledger_session_auto_split:{_strategy_alias(strategy)}:{source_ledger.name}",
+    })
 
 
 def apply_order_sizing_policy(

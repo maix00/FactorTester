@@ -24,7 +24,13 @@ from tools.testers.backtest.modules.product_selection import ProductSelectionMod
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
-from tools.testers.backtest.modules.strategy_book import StrategyBook, StrategyBookModule, materialize_strategy_book_store
+from tools.testers.backtest.modules.strategy_book import (
+    StrategyBook,
+    StrategyBookModule,
+    _apply_ledger_session_policy,
+    materialize_strategy_book_store,
+    strategy_book_store_for,
+)
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 
 
@@ -662,6 +668,130 @@ def test_strategy_book_shared_mode_can_share_one_ledger_across_strategies():
     assert [ledger.name for ledger in account.ledgers] == ["shared-book"]
     assert account.ledger_for_strategy(s1) is account.ledger_for_strategy(s2)
     assert account.ledger_for_strategy(s2).get(LedgerModule.positions)[p].quantity == pytest.approx(2.0)
+
+
+def test_ledger_session_policy_errors_on_mixed_sessions_in_one_ledger():
+    s = Strategy(alias="S")
+    p_day = _product()
+    p_night = _product()
+    p_day.trading_session_signature = "day"
+    p_night.trading_session_signature = "night"
+    configs = {
+        s: _strategy_config(s, engine_mode="custom", margin_mode="none"),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {s.alias: "shared-book"},
+    }), {s.alias: s})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
+
+    with pytest.raises(ValueError, match="multiple trading sessions"):
+        _apply_ledger_session_policy(account, ctx)
+
+
+def test_ledger_session_policy_auto_split_routes_products_to_session_ledgers():
+    s = Strategy(alias="S")
+    p_day = _product()
+    p_night = _product()
+    p_day.trading_session_signature = "day"
+    p_night.trading_session_signature = "night"
+    configs = {
+        s: _strategy_config(
+            s,
+            engine_mode="custom",
+            margin_mode="none",
+            ledger_session_policy="auto_split",
+        ),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {s.alias: "shared-book"},
+        "cash_pools": {"shared-book": "main-cash"},
+    }), {s.alias: s})
+    strategy_book_store_for(account).policies.cash_availability = lambda _state, _ledger, cash, _reason: cash
+    account.ledger_configs[ledger_identity("shared-book")] = LedgerConfig(margin_mode="none")
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
+
+    _apply_ledger_session_policy(account, ctx)
+
+    store = strategy_book_store_for(account)
+    ledgers = store.ledgers_for_strategy(account, s)
+    assert sorted(ledger.name for ledger in ledgers) == [
+        "shared-book@session:day",
+        "shared-book@session:night",
+    ]
+    assert {
+        store.cash_pool_for_ledger(ledger)
+        for ledger in ledgers
+    } == {"main-cash"}
+    day_order = Order(instrument=p_day, timestamp=pd.Timestamp("2024-01-01"), quantity=1.0, intent_quantity=1.0, strategy=s)
+    night_order = Order(instrument=p_night, timestamp=pd.Timestamp("2024-01-01"), quantity=1.0, intent_quantity=1.0, strategy=s)
+    assert account.ledger_for(day_order).ledger.name == "shared-book@session:day"
+    assert account.ledger_for(night_order).ledger.name == "shared-book@session:night"
+    assert account.ledger_config_for("shared-book@session:day").margin_mode == "none"
+    assert account.runtime_info_rows[-1]["code"] == "ledger_session_auto_split"
+
+
+def test_ledger_session_policy_auto_split_requires_custom_shared_cash_policy():
+    s = Strategy(alias="S")
+    p_day = _product()
+    p_night = _product()
+    p_day.trading_session_signature = "day"
+    p_night.trading_session_signature = "night"
+    configs = {
+        s: _strategy_config(
+            s,
+            engine_mode="custom",
+            margin_mode="none",
+            ledger_session_policy="auto_split",
+        ),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {s.alias: "shared-book"},
+        "cash_pools": {"shared-book": "main-cash"},
+    }), {s.alias: s})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
+
+    with pytest.raises(ValueError, match="no default inactive-ledger cash allocation policy"):
+        _apply_ledger_session_policy(account, ctx)
+
+
+def test_ledger_session_policy_auto_split_requires_single_source_ledger():
+    s = Strategy(alias="S")
+    p_day = _product()
+    p_night = _product()
+    p_day.trading_session_signature = "day"
+    p_night.trading_session_signature = "night"
+    configs = {
+        s: _strategy_config(
+            s,
+            engine_mode="custom",
+            margin_mode="none",
+            ledger_session_policy="auto_split",
+        ),
+    }
+    account = _state_with_ledger_configs(configs)
+    materialize_strategy_book_store(account, StrategyBook.from_dict({
+        "strategies": {
+            s.alias: {
+                "ledger_ids": ["book-a", "book-b"],
+                "default_ledger_id": "book-a",
+            },
+        },
+        "cash_pools": {
+            "book-a": "main-cash",
+            "book-b": "main-cash",
+        },
+    }), {s.alias: s})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, s, frozenset({p_day, p_night}))
+
+    with pytest.raises(ValueError, match="only supports one source ledger"):
+        _apply_ledger_session_policy(account, ctx)
 
 
 def test_equity_on_shared_ledger_is_computed_once_per_event(monkeypatch):
