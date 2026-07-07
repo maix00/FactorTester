@@ -158,6 +158,51 @@ def test_transaction_fee_classification_ignores_label_drift_for_same_instrument(
     assert latest["close_today_unit"] == "zero"
 
 
+def test_contract_specific_fee_event_inherits_product_baseline_for_unchanged_legs() -> None:
+    rows = []
+    for field_name, value in [
+        ("OpenRatioByMoney", 0.00005),
+        ("OpenRatioByVolume", 0.0),
+        ("CloseRatioByMoney", 0.00005),
+        ("CloseRatioByVolume", 0.0),
+        ("CloseTodayRatioByMoney", 0.00005),
+        ("CloseTodayRatioByVolume", 0.0),
+    ]:
+        rows.append({
+            **_base_row(field_name=field_name, value=value, effective_trading_day="1900-01-01"),
+            "provider": "Agent:SHFE",
+            "source_key": f"exchange/ag/baseline/{field_name}",
+            "instrument": "AG",
+            "instrument_label": "白银",
+            "source_notice_id": "exchange-baseline-user-table-2026-07-07",
+        })
+    for field_name, value in [
+        ("CloseTodayRatioByMoney", 0.00025),
+        ("CloseTodayRatioByVolume", 0.0),
+    ]:
+        rows.append({
+            **_base_row(field_name=field_name, value=value, effective_trading_day="2026-01-09"),
+            "provider": "Agent:SHFE",
+            "source_key": f"exchange/ag2604/20260109/{field_name}",
+            "instrument": "AG",
+            "instrument_label": "白银",
+            "contract_codes": "[\"2604\"]",
+            "source_notice_id": "上期发〔2026〕3号",
+        })
+
+    classification = build_fee_unit_classification_frame(
+        build_unified_frame(pd.DataFrame(rows, columns=FIELD_HISTORY_COLUMNS), transaction_fee_source="exchange")
+    )
+    contract_row = classification[classification["contract_codes"] == "[\"2604\"]"].iloc[0]
+
+    assert contract_row["open_unit"] == "money"
+    assert contract_row["open_money"] == 0.00005
+    assert contract_row["close_unit"] == "money"
+    assert contract_row["close_money"] == 0.00005
+    assert contract_row["close_today_unit"] == "money"
+    assert contract_row["close_today_money"] == 0.00025
+
+
 def test_transaction_fee_verification_accepts_openctp_broker_addon() -> None:
     exchange_rows = [
         {

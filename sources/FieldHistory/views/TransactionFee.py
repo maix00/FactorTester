@@ -261,11 +261,55 @@ def _forward_fill_fee_snapshot_fields(frame: pd.DataFrame) -> pd.DataFrame:
         "effective_timestamp",
     ]
     result = result.sort_values(sort_cols).copy()
+    result = _inherit_product_fee_fields_for_contract_events(result, fee_fields)
     result[fee_fields] = (
         result.groupby(static_cols, dropna=False, sort=False)[fee_fields]
         .ffill()
         .fillna(0.0)
     )
+    return result
+
+
+def _inherit_product_fee_fields_for_contract_events(
+    frame: pd.DataFrame,
+    fee_fields: list[str],
+) -> pd.DataFrame:
+    if not fee_fields:
+        return frame
+    result = frame.copy()
+    product_rows = result[result["contract_codes"] == "[]"].copy()
+    if product_rows.empty:
+        return result
+    product_rows = product_rows.sort_values([
+        "instrument",
+        "instrument_type",
+        "effective_trading_day",
+        "effective_timestamp",
+    ])
+    product_by_key = {
+        key: group.reset_index(drop=True)
+        for key, group in product_rows.groupby(["instrument", "instrument_type"], dropna=False, sort=False)
+    }
+    for idx, row in result[result["contract_codes"] != "[]"].iterrows():
+        key = (row["instrument"], row["instrument_type"])
+        product_history = product_by_key.get(key)
+        if product_history is None or product_history.empty:
+            continue
+        effective_day = str(row["effective_trading_day"])
+        effective_ts = str(row["effective_timestamp"])
+        candidates = product_history[
+            (product_history["effective_trading_day"].astype(str) < effective_day)
+            | (
+                (product_history["effective_trading_day"].astype(str) == effective_day)
+                & (product_history["effective_timestamp"].astype(str) <= effective_ts)
+            )
+        ]
+        if candidates.empty:
+            continue
+        product_snapshot = candidates.iloc[-1]
+        for field in fee_fields:
+            if pd.isna(result.at[idx, field]):
+                result.at[idx, field] = product_snapshot[field]
     return result
 
 

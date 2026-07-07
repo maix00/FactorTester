@@ -5,10 +5,17 @@ from pathlib import Path
 
 
 EVENTS_PATH = Path("sources/FieldHistory/events/TransactionFee/official_seed_events.jsonl")
+SETTLEMENT_SNAPSHOT_PATH = Path(
+    "sources/FieldHistory/events/TransactionFee/exchange_settlement_snapshots_20260309_20260623.jsonl"
+)
 
 
 def _events() -> list[dict[str, object]]:
     return [json.loads(line) for line in EVENTS_PATH.read_text(encoding="utf-8").splitlines()]
+
+
+def _settlement_snapshot_events() -> list[dict[str, object]]:
+    return [json.loads(line) for line in SETTLEMENT_SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines()]
 
 
 def test_ao_2025_fee_notice_uses_official_rate_and_url() -> None:
@@ -166,3 +173,41 @@ def test_shfe_new_product_fee_baselines_and_later_adjustment_are_stored() -> Non
         assert by_key[("上期发〔2025〕317号", instrument, "OpenRatioByMoney")] == 0.00005
         assert by_key[("上期发〔2025〕317号", instrument, "CloseRatioByMoney")] == 0.00005
         assert by_key[("上期发〔2025〕317号", instrument, "CloseTodayRatioByMoney")] == 0.0
+
+
+def test_exchange_settlement_snapshots_store_contract_level_fee_legs() -> None:
+    rows = _settlement_snapshot_events()
+    by_key = {
+        (
+            row["source_notice_id"],
+            row["instrument"],
+            tuple(row["contract_codes"]),
+            row["field_name"],
+        ): row
+        for row in rows
+    }
+
+    assert by_key[
+        ("SHFE-settlement-parameters-20260309", "CU", ("2603",), "CloseTodayRatioByMoney")
+    ]["value"] == 0.000025
+    assert by_key[
+        ("SHFE-settlement-parameters-20260309", "RB", ("2606",), "OpenRatioByMoney")
+    ]["value"] == 0.00002
+    assert by_key[
+        ("SHFE-settlement-parameters-20260309", "RB", ("2606",), "CloseTodayRatioByMoney")
+    ]["value"] == 0.00001
+    assert by_key[
+        ("SHFE-settlement-parameters-20260623", "SS", ("2607",), "OpenRatioByVolume")
+    ]["value"] == 2.0
+    assert by_key[
+        ("SHFE-settlement-parameters-20260623", "SS", ("2607",), "CloseTodayRatioByVolume")
+    ]["value"] == 1.0
+    assert by_key[
+        ("INE-settlement-parameters-20260623", "EC", ("2607",), "CloseTodayRatioByMoney")
+    ]["value"] == 0.0003
+    assert by_key[
+        ("CFFEX-settlement-parameters-20260623", "IC", ("2607",), "CloseTodayRatioByMoney")
+    ]["value"] == 0.00023
+    assert by_key[
+        ("CFFEX-settlement-parameters-20260623", "T", ("2609",), "CloseTodayRatioByVolume")
+    ]["value"] == 0.0
