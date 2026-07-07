@@ -78,3 +78,13 @@ def test_baseline_map_classifies_czce_propylene_as_money_fee() -> None:
     assert propylene["exchange"] == "CZCE"
     assert propylene["unit"] == "money"
     assert propylene["value"] == "0.01%"
+
+
+def test_baseline_map_uses_official_shfe_fee_standard_values() -> None:
+    mapping = builder._load_mapping(builder.DEFAULT_MAP)
+    by_instrument = {row["instrument"]: row for row in mapping["products"]}
+
+    assert by_instrument["AU"]["unit"] == "volume"
+    assert by_instrument["AU"]["value"] == "20"
+    assert by_instrument["FU"]["unit"] == "money"
+    assert by_instrument["FU"]["value"] == "0.005%"

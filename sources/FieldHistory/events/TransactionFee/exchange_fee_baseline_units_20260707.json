@@ -271,7 +271,7 @@
       "exchange": "SHFE",
       "label": "燃油",
       "unit": "money",
-      "value": "0.001%"
+      "value": "0.005%"
     },
     {
       "instrument": "WR",
@@ -495,7 +495,7 @@
       "exchange": "SHFE",
       "label": "黄金",
       "unit": "volume",
-      "value": "10"
+      "value": "20"
     },
     {
       "instrument": "CU",

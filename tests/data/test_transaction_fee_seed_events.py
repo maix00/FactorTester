@@ -71,3 +71,24 @@ def test_czce_2026_fee_adjustments_are_stored_as_exchange_events() -> None:
     assert by_notice_instrument[("郑商函〔2026〕477号", "PL", "CloseRatioByVolume")]["value"] == 3.0
     assert by_notice_instrument[("郑商函〔2026〕477号", "PL", "CloseTodayRatioByVolume")]["value"] == 0.0
     assert by_notice_instrument[("郑商函〔2026〕477号", "AP", "CloseTodayRatioByVolume")]["value"] == 10.0
+
+
+def test_shfe_ine_2026_energy_fee_adjustments_are_stored_as_exchange_events() -> None:
+    rows = _events()
+    by_notice_instrument = {
+        (row["source_notice_id"], row["instrument"], row["field_name"]): row
+        for row in rows
+        if row["source_notice_id"] in {"上期发〔2026〕95号", "上能发〔2026〕24号", "上能发〔2026〕29号"}
+    }
+
+    assert by_notice_instrument[("上期发〔2026〕95号", "FU", "OpenRatioByMoney")]["value"] == 0.0001
+    assert by_notice_instrument[("上期发〔2026〕95号", "FU", "CloseRatioByMoney")]["value"] == 0.0001
+    assert by_notice_instrument[("上期发〔2026〕95号", "FU", "CloseTodayRatioByMoney")]["value"] == 0.0003
+
+    assert by_notice_instrument[("上能发〔2026〕24号", "SC", "CloseTodayRatioByVolume")]["value"] == 60.0
+    assert by_notice_instrument[("上能发〔2026〕24号", "LU", "CloseTodayRatioByMoney")]["value"] == 0.00003
+
+    assert by_notice_instrument[("上能发〔2026〕29号", "SC", "OpenRatioByVolume")]["value"] == 40.0
+    assert by_notice_instrument[("上能发〔2026〕29号", "SC", "CloseTodayRatioByVolume")]["value"] == 240.0
+    assert by_notice_instrument[("上能发〔2026〕29号", "LU", "OpenRatioByMoney")]["value"] == 0.0001
+    assert by_notice_instrument[("上能发〔2026〕29号", "LU", "CloseTodayRatioByMoney")]["value"] == 0.0003
