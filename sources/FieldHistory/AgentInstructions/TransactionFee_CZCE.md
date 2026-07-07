@@ -21,3 +21,14 @@ options fee changes.
   `contract_codes = ["609"]`; do not store multiple contracts in one row.
 - If the source applies to the full product, leave `contract_codes` empty.
 
+## Source Authority
+
+- Store exchange TransactionFee events only from official exchange pages/notices
+  or exact mirrored exchange notices with the original notice id.
+- Secondary pages, broker pages, and fee aggregators are audit evidence only; do
+  not use them as the source row for an exchange rule.
+- If a secondary source disagrees with the exchange view, record it in
+  `field_history_transaction_fee_external_audit` and then find the official
+  notice before appending field-change events.
+- Contract-specific fee rules must be stored as one event per contract code;
+  product-level baselines leave `contract_codes` empty.

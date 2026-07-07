@@ -34,6 +34,8 @@ FIELDS = (*TRANSACTION_FEE_FIELD_NAMES, "VolumeMultiple")
 UNIFIED_TABLE = "field_history_transaction_fee_unified"
 EXCHANGE_UNIFIED_TABLE = "field_history_transaction_fee_exchange"
 BROKER_OPENCTP_UNIFIED_TABLE = "field_history_transaction_fee_broker_openctp"
+FEE_UNIT_CLASSIFICATION_TABLE = "field_history_transaction_fee_unit_classification"
+FEE_VERIFICATION_TABLE = "field_history_transaction_fee_verification"
 
 _TABLE_BY_SOURCE = {
     TRANSACTION_FEE_SOURCE_EXCHANGE: EXCHANGE_UNIFIED_TABLE,
@@ -124,6 +126,18 @@ def save_unified_table(*, store_key: str = "openctp") -> str:
                 transaction_fee_source=source,
             ))
             source_frame.to_sql(_TABLE_BY_SOURCE[source], conn, if_exists="replace", index=False)
+        build_fee_unit_classification_frame(store_key=store_key).to_sql(
+            FEE_UNIT_CLASSIFICATION_TABLE,
+            conn,
+            if_exists="replace",
+            index=False,
+        )
+        build_fee_verification_frame(store_key=store_key).to_sql(
+            FEE_VERIFICATION_TABLE,
+            conn,
+            if_exists="replace",
+            index=False,
+        )
     return path
 
 
@@ -174,8 +188,217 @@ def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:
     return FieldHistoryProvider(cast(pd.DataFrame, provider_frame[FIELD_HISTORY_COLUMNS].copy()))
 
 
+def build_fee_unit_classification_frame(
+    exchange_frame: pd.DataFrame | None = None,
+    *,
+    store_key: str = "openctp",
+) -> pd.DataFrame:
+    frame = (
+        build_unified_frame(store_key=store_key, transaction_fee_source=TRANSACTION_FEE_SOURCE_EXCHANGE)
+        if exchange_frame is None else exchange_frame.copy()
+    )
+    if frame.empty:
+        return pd.DataFrame(columns=_classification_columns())
+    fee_fields = set(TRANSACTION_FEE_FIELD_NAMES)
+    frame = frame[frame["field_name"].isin(fee_fields)].copy()
+    if frame.empty:
+        return pd.DataFrame(columns=_classification_columns())
+    frame["value_num"] = pd.to_numeric(frame["value"], errors="coerce").fillna(0.0)
+    key_cols = [
+        "instrument",
+        "instrument_label",
+        "instrument_type",
+        "effective_trading_day",
+        "effective_timestamp",
+        "contract_codes",
+    ]
+    pivot = (
+        frame.pivot_table(index=key_cols, columns="field_name", values="value_num", aggfunc="max")
+        .fillna(0.0)
+        .reset_index()
+    )
+    evidence = (
+        frame.groupby(key_cols, dropna=False)
+        .agg(
+            source_notice_ids=("source_notice_ids", _json_union),
+            source_urls=("source_urls", _json_union),
+            providers=("providers", _json_union),
+            raw_notes=("raw_notes", _json_union),
+        )
+        .reset_index()
+    )
+    result = pivot.merge(evidence, on=key_cols, how="left")
+    for leg_name, money_field, volume_field in _fee_leg_fields():
+        money = _numeric_column(result, money_field)
+        volume = _numeric_column(result, volume_field)
+        result[f"{leg_name}_unit"] = [
+            _classify_fee_unit(money_value, volume_value)
+            for money_value, volume_value in zip(money, volume)
+        ]
+        result[f"{leg_name}_money"] = money
+        result[f"{leg_name}_volume"] = volume
+    result["classification_status"] = result[
+        ["open_unit", "close_unit", "close_today_unit"]
+    ].apply(lambda row: "conflict" if "conflict" in set(row) else "ok", axis=1)
+    return cast(pd.DataFrame, result[_classification_columns()].copy())
+
+
+def build_fee_verification_frame(
+    exchange_frame: pd.DataFrame | None = None,
+    openctp_frame: pd.DataFrame | None = None,
+    *,
+    store_key: str = "openctp",
+) -> pd.DataFrame:
+    classification = build_fee_unit_classification_frame(exchange_frame, store_key=store_key)
+    if classification.empty:
+        return pd.DataFrame(columns=_verification_columns())
+    openctp = (
+        build_unified_frame(store_key=store_key, transaction_fee_source=TRANSACTION_FEE_SOURCE_OPENCTP)
+        if openctp_frame is None else openctp_frame.copy()
+    )
+    openctp_values = _openctp_product_fee_values(openctp)
+    rows: list[dict[str, Any]] = []
+    for item in classification.itertuples(index=False):
+        source_urls = str(getattr(item, "source_urls"))
+        source_notice_ids = str(getattr(item, "source_notice_ids"))
+        for leg_name, money_field, volume_field in _fee_leg_fields():
+            unit = str(getattr(item, f"{leg_name}_unit"))
+            money_value = float(getattr(item, f"{leg_name}_money"))
+            volume_value = float(getattr(item, f"{leg_name}_volume"))
+            active_field = money_field if unit == "money" else volume_field if unit == "volume" else ""
+            exchange_value = money_value if unit == "money" else volume_value if unit == "volume" else 0.0
+            openctp_money = openctp_values.get((item.instrument, money_field))
+            openctp_volume = openctp_values.get((item.instrument, volume_field))
+            openctp_active = openctp_values.get((item.instrument, active_field)) if active_field else None
+            rows.append({
+                "instrument": item.instrument,
+                "instrument_label": item.instrument_label,
+                "instrument_type": item.instrument_type,
+                "effective_trading_day": item.effective_trading_day,
+                "effective_timestamp": item.effective_timestamp,
+                "contract_codes": item.contract_codes,
+                "leg": leg_name,
+                "unit": unit,
+                "exchange_value": exchange_value,
+                "openctp_money": openctp_money,
+                "openctp_volume": openctp_volume,
+                "openctp_active_value": openctp_active,
+                "openctp_delta": None if openctp_active is None else float(openctp_active - exchange_value),
+                "verification_status": _verification_status(
+                    unit=unit,
+                    exchange_value=exchange_value,
+                    openctp_active=openctp_active,
+                    source_urls=source_urls,
+                    source_notice_ids=source_notice_ids,
+                ),
+                "source_notice_ids": source_notice_ids,
+                "source_urls": source_urls,
+                "providers": getattr(item, "providers"),
+            })
+    return pd.DataFrame(rows, columns=_verification_columns())
+
+
 def _empty_unified_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=_unified_columns())
+
+
+def _fee_leg_fields() -> tuple[tuple[str, str, str], ...]:
+    return (
+        ("open", "OpenRatioByMoney", "OpenRatioByVolume"),
+        ("close", "CloseRatioByMoney", "CloseRatioByVolume"),
+        ("close_today", "CloseTodayRatioByMoney", "CloseTodayRatioByVolume"),
+    )
+
+
+def _classify_fee_unit(money_value: float, volume_value: float) -> str:
+    money_nonzero = abs(float(money_value or 0.0)) > 1e-15
+    volume_nonzero = abs(float(volume_value or 0.0)) > 1e-15
+    if money_nonzero and not volume_nonzero:
+        return "money"
+    if volume_nonzero and not money_nonzero:
+        return "volume"
+    if not money_nonzero and not volume_nonzero:
+        return "zero"
+    return "conflict"
+
+
+def _numeric_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series([0.0] * len(frame), index=frame.index, dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+
+
+def _json_union(values: Iterable[Any]) -> str:
+    items: list[Any] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = [text]
+        if not isinstance(parsed, list):
+            parsed = [parsed]
+        items.extend(parsed)
+    return _json_unique(items)
+
+
+def _openctp_product_fee_values(openctp_frame: pd.DataFrame) -> dict[tuple[str, str], float]:
+    if openctp_frame.empty:
+        return {}
+    frame = openctp_frame.copy()
+    frame = frame[frame["field_name"].isin(TRANSACTION_FEE_FIELD_NAMES)].copy()
+    if frame.empty:
+        return {}
+    frame["contract_codes_norm"] = frame["contract_codes"].map(_normalise_contract_codes_json)
+    frame = frame[frame["contract_codes_norm"] == "[]"].copy()
+    frame["value_num"] = pd.to_numeric(frame["value"], errors="coerce")
+    result: dict[tuple[str, str], float] = {}
+    for (instrument, field_name), group in frame.groupby(["instrument", "field_name"], sort=False):
+        values = group["value_num"].dropna()
+        if not values.empty:
+            result[(str(instrument), str(field_name))] = float(values.iloc[-1])
+    return result
+
+
+def _verification_status(
+    *,
+    unit: str,
+    exchange_value: float,
+    openctp_active: float | None,
+    source_urls: str,
+    source_notice_ids: str,
+) -> str:
+    if unit == "conflict":
+        return "conflict_exchange_units"
+    if unit == "zero":
+        return "zero_fee"
+    is_baseline = "exchange-baseline-user-table" in source_notice_ids
+    if not is_baseline:
+        if _has_exchange_official_url(source_urls):
+            return "official_notice"
+        if source_notice_ids.strip() not in {"", "[]"}:
+            return "historical_notice_secondary"
+        return "needs_source_notice"
+    if openctp_active is None:
+        return "needs_cross_check"
+    addon = 0.0000008 if unit == "money" else 0.01
+    delta = float(openctp_active - exchange_value)
+    if abs(delta) <= 1e-12 or abs(delta - addon) <= 1e-9:
+        return "cross_checked_openctp"
+    return "conflict_openctp"
+
+
+def _has_exchange_official_url(source_urls: str) -> bool:
+    return any(domain in source_urls for domain in (
+        "cffex.com.cn",
+        "czce.com.cn",
+        "dce.com.cn",
+        "gfex.com.cn",
+        "ine.cn",
+        "shfe.com.cn",
+    ))
 
 
 def _filter_source_frame(frame: pd.DataFrame, *, transaction_fee_source: str) -> pd.DataFrame:
@@ -202,6 +425,53 @@ def _unified_columns() -> list[str]:
         "source_count",
         "evidence_count",
         "raw_notes",
+    ]
+
+
+def _classification_columns() -> list[str]:
+    return [
+        "instrument",
+        "instrument_label",
+        "instrument_type",
+        "effective_trading_day",
+        "effective_timestamp",
+        "contract_codes",
+        "open_unit",
+        "open_money",
+        "open_volume",
+        "close_unit",
+        "close_money",
+        "close_volume",
+        "close_today_unit",
+        "close_today_money",
+        "close_today_volume",
+        "classification_status",
+        "source_notice_ids",
+        "source_urls",
+        "providers",
+        "raw_notes",
+    ]
+
+
+def _verification_columns() -> list[str]:
+    return [
+        "instrument",
+        "instrument_label",
+        "instrument_type",
+        "effective_trading_day",
+        "effective_timestamp",
+        "contract_codes",
+        "leg",
+        "unit",
+        "exchange_value",
+        "openctp_money",
+        "openctp_volume",
+        "openctp_active_value",
+        "openctp_delta",
+        "verification_status",
+        "source_notice_ids",
+        "source_urls",
+        "providers",
     ]
 
 

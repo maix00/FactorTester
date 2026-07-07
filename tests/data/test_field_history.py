@@ -132,6 +132,49 @@ def test_market_rule_provider_separates_exchange_and_openctp_fee_sources(monkeyp
     ).value == 2.01
 
 
+def test_contract_specific_fee_overrides_product_fee_baseline() -> None:
+    rows = []
+    for contract_codes, value in [("[]", 2.0), ('["2605"]', 6.0)]:
+        rows.append({
+            "provider": "DCE",
+            "source_key": f"exchange/a/{contract_codes}",
+            "instrument": "A",
+            "instrument_label": "豆一",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "1900-01-01",
+            "effective_timestamp": "",
+            "value": value,
+            "value_type": "",
+            "contract_codes": contract_codes,
+            "source_url": "https://www.dce.com.cn/",
+            "source_date": "",
+            "source_notice_id": "exchange",
+            "raw_note": "exchange fee",
+        })
+    provider = FieldHistoryProvider.from_records(rows)
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 09:00:00"): pd.Timestamp("2026-01-05"),
+    })
+
+    product = provider.resolve_at(
+        "A",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    )
+    contract = provider.resolve_at(
+        "A2605.DCE",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    )
+
+    assert product.value == 2.0
+    assert contract.value == 6.0
+    assert contract.contract_code == "2605"
+
+
 def test_field_history_values_for_index_preserves_timestamp_index() -> None:
     provider = FieldHistoryProvider.from_records(_records())
     index = pd.DatetimeIndex([

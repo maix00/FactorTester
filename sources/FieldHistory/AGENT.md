@@ -152,6 +152,20 @@ WHERE instrument = :instrument
   containing multiple contract codes. Not every product has a term structure,
   and consumers may query a directly traded contract, so each contract-specific
   field-change event must be atomic.
+- Transaction fee rows must distinguish product-level baseline rules from
+  contract-specific special rules. A product-level baseline leaves
+  `contract_codes` empty. A special contract fee from an exchange notice must
+  fill exactly one contract code per row, and it overrides the product-level
+  baseline through FieldHistory contract-scope priority.
+- For TransactionFee, the fee unit is itself historical state. If a product or
+  contract changes from fixed fee per lot to traded-notional ratio, or the
+  reverse, store both fields at that effective point: the active unit field gets
+  the exchange value and the inactive unit field gets `0`. Never leave an old
+  inactive unit nonzero.
+- Exchange TransactionFee events may only be created from official exchange
+  pages/notices or directly mirrored exchange notices that preserve the notice
+  id. Secondary pages such as Sina, broker sites, and fee aggregators can be
+  used only for audit/cross-check tables, not as the source of an exchange rule.
 - Night session belongs to the next trading day. Example:
   `自2026年3月10日交易时（即3月9日夜盘交易小节时）起` means
   `effective_trading_day = 2026-03-10` and
