@@ -73,6 +73,40 @@ def test_czce_2026_fee_adjustments_are_stored_as_exchange_events() -> None:
     assert by_notice_instrument[("郑商函〔2026〕477号", "AP", "CloseTodayRatioByVolume")]["value"] == 10.0
 
 
+def test_czce_2024_close_today_zero_and_cotton_yarn_fee_events() -> None:
+    rows = _events()
+
+    close_today_zero = [
+        row
+        for row in rows
+        if row["source_notice_id"] == "郑商函〔2024〕19号"
+        and row["field_name"] in {"CloseTodayRatioByMoney", "CloseTodayRatioByVolume"}
+    ]
+    assert {row["instrument"] for row in close_today_zero} == {"CF", "CY", "SR", "TA", "SM", "SF"}
+    assert {row["value"] for row in close_today_zero} == {0.0}
+
+    cy_product = {
+        row["field_name"]: row
+        for row in rows
+        if row["source_notice_id"] == "郑商函〔2024〕587号"
+        and row["instrument"] == "CY"
+        and row["contract_codes"] == []
+    }
+    assert cy_product["OpenRatioByVolume"]["value"] == 1.0
+    assert cy_product["CloseRatioByVolume"]["value"] == 1.0
+
+    cy_exception_codes = {
+        tuple(row["contract_codes"])[0]
+        for row in rows
+        if row["source_notice_id"] == "郑商函〔2024〕587号"
+        and row["instrument"] == "CY"
+        and row["field_name"] == "OpenRatioByVolume"
+        and row["contract_codes"]
+        and row["value"] == 4.0
+    }
+    assert cy_exception_codes == {"2409", "2410", "2411", "2412", "2501", "2502"}
+
+
 def test_shfe_ine_2026_energy_fee_adjustments_are_stored_as_exchange_events() -> None:
     rows = _events()
     by_notice_instrument = {
