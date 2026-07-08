@@ -254,12 +254,74 @@ def _is_zero_unit_companion_aligned(
     except (TypeError, ValueError):
         return False
     if abs(companion_value) <= 1e-15:
-        return False
+        return _active_fee_unit_field_before(event, notices) == companion
     return _find_notice(companion_event, notices, allow_prior=False) is not None or _find_notice(
         companion_event,
         notices,
         allow_prior=True,
     ) is not None
+
+
+def _active_fee_unit_field_before(
+    snapshot: dict[str, Any],
+    notices: list[dict[str, Any]],
+) -> str:
+    """Return the latest known active fee-unit field before the snapshot day.
+
+    When an exchange waives a fee, settlement snapshots often show both
+    `*ByMoney = 0` and `*ByVolume = 0`.  Only the active unit needs an explicit
+    waiver notice.  The inactive unit remains an accounting companion zero if a
+    prior baseline or notice established the companion field as the latest active
+    unit.  Fee units are historical state, so an older product-level fixed-fee
+    baseline must be superseded by a later notional-ratio notice, and vice versa.
+    """
+    snapshot_day = str(snapshot.get("effective_trading_day") or "")
+    leg_fields = _fee_unit_pair_for_field(str(snapshot.get("field_name") or ""))
+    if not leg_fields:
+        return ""
+    candidates: list[dict[str, Any]] = []
+    for notice in notices:
+        if str(notice.get("data_source") or "") != str(snapshot.get("data_source") or ""):
+            continue
+        if str(notice.get("instrument") or "") != str(snapshot.get("instrument") or ""):
+            continue
+        if str(notice.get("field_name") or "") not in leg_fields:
+            continue
+        if str(notice.get("effective_trading_day") or "") > snapshot_day:
+            continue
+        if not _contract_scope_covers(notice, snapshot):
+            continue
+        try:
+            if abs(float(notice.get("value") or 0.0)) <= 1e-15:
+                continue
+        except (TypeError, ValueError):
+            continue
+        candidates.append(notice)
+    if not candidates:
+        return ""
+    latest = sorted(
+        candidates,
+        key=lambda item: (
+            str(item.get("effective_trading_day") or ""),
+            str(item.get("effective_timestamp") or ""),
+            1 if str(item.get("contract_scope_type") or "").lower() == "explicit" else 0,
+            str(item.get("source_notice_id") or ""),
+        ),
+        reverse=True,
+    )[0]
+    return str(latest.get("field_name") or "")
+
+
+def _fee_unit_pair_for_field(field_name: str) -> set[str]:
+    pairs = [
+        {"OpenRatioByMoney", "OpenRatioByVolume"},
+        {"CloseRatioByMoney", "CloseRatioByVolume"},
+        {"CloseTodayRatioByMoney", "CloseTodayRatioByVolume"},
+    ]
+    for pair in pairs:
+        if field_name in pair:
+            return pair
+    return set()
 
 
 def _companion_fee_unit_field(field_name: str) -> str:

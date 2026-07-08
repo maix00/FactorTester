@@ -164,11 +164,19 @@ WHERE instrument = :instrument
   source type in `parser_notes`. Later fee notices are stored as dated field
   change events that override that baseline.
 - Official daily settlement-parameter snapshots may be stored as contract-level
-  dated events when product-level baselines cannot express close-today
+  dated audit events when product-level baselines cannot express close-today
   discounts, temporary special contracts, or contract-specific fee units. Use
-  the exchange endpoint itself as `source_url` and write all six transaction
-  fee fields for the affected contract. Do not label broker/OpenCTP snapshots
-  as exchange settlement-parameter events.
+  the exchange endpoint itself as `source_url`. Store only the fee field for
+  the active fee unit (`*ByMoney` for notional-ratio fees, `*ByVolume` for
+  per-lot fixed fees). Do not write the inactive unit as a zero exchange event
+  unless the exchange notice explicitly changes the product or contract from
+  one fee unit to the other. Do not label broker/OpenCTP snapshots as exchange
+  settlement-parameter events.
+- The active-unit-only rule above is for exchange-source events. Broker or
+  OpenCTP counterparty fee snapshots may legitimately contain both `*ByMoney`
+  and `*ByVolume` at the same time, because they can combine exchange fees with
+  broker add-ons in different units. Preserve broker fields as observed and keep
+  them in the broker/OpenCTP transaction-fee source.
 - For TransactionFee, the fee unit is itself historical state. If a product or
   contract changes from fixed fee per lot to traded-notional ratio, or the
   reverse, store both fields at that effective point: the active unit field gets

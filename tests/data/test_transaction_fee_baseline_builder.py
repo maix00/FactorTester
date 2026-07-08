@@ -6,7 +6,7 @@ import pytest
 from sources.FieldHistory.scripts import build_transaction_fee_exchange_baseline as builder
 
 
-def test_build_exchange_baseline_forces_complementary_fee_unit_to_zero(monkeypatch) -> None:
+def test_build_exchange_baseline_stores_only_active_fee_unit(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -33,8 +33,8 @@ def test_build_exchange_baseline_forces_complementary_fee_unit_to_zero(monkeypat
     events, audit = builder.build_events(mapping)
     by_field = {event["field_name"]: event["value"] for event in events}
 
-    assert by_field["OpenRatioByMoney"] == 0.0
     assert by_field["OpenRatioByVolume"] == 2.0
+    assert "OpenRatioByMoney" not in by_field
     assert "CloseTodayRatioByMoney" not in by_field
     assert "CloseTodayRatioByVolume" not in by_field
     assert audit[0]["inactive_openctp_nonzero"] is True
@@ -55,9 +55,7 @@ def test_build_exchange_baseline_does_not_infer_close_today_from_generic_fee(mon
     by_field = {event["field_name"]: event["value"] for event in events}
 
     assert by_field == {
-        "OpenRatioByMoney": 0.0,
         "OpenRatioByVolume": 4.0,
-        "CloseRatioByMoney": 0.0,
         "CloseRatioByVolume": 4.0,
     }
     assert {row["leg"] for row in audit} == {"开仓", "平昨"}
@@ -100,7 +98,7 @@ def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monke
     assert by_field["OpenRatioByMoney"] == 0.000023
     assert by_field["CloseRatioByMoney"] == 0.000023
     assert by_field["CloseTodayRatioByMoney"] == 0.000023
-    assert by_field["CloseTodayRatioByVolume"] == 0.0
+    assert "CloseTodayRatioByVolume" not in by_field
     assert [row for row in audit if row["leg"] == "平今"][0]["active_source"] == "table-openctp-mismatch"
 
 
@@ -170,4 +168,4 @@ def test_build_exchange_baseline_supports_leg_specific_money_fees(monkeypatch) -
     assert by_field["OpenRatioByMoney"] == pytest.approx(0.00014)
     assert by_field["CloseRatioByMoney"] == 0.0001
     assert by_field["CloseTodayRatioByMoney"] == pytest.approx(0.00014)
-    assert by_field["OpenRatioByVolume"] == 0.0
+    assert "OpenRatioByVolume" not in by_field

@@ -8,7 +8,9 @@ The user-facing fee table classifies each product as either:
 OpenCTP latest snapshots may contain broker add-ons in the complementary unit
 column. This builder therefore treats OpenCTP as cross-check evidence only: it
 never copies both units into exchange baseline rows. The non-applicable unit is
-always written as zero.
+not written as an exchange event; zero in the inactive unit is a derived view
+state, not an exchange rule, unless a later exchange notice explicitly switches
+the fee unit.
 """
 
 from __future__ import annotations
@@ -111,36 +113,35 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
                 openctp_value=openctp_values.get(active_field),
                 leg_label=leg_label,
             )
-            money_value = active_value if unit == "money" else 0.0
-            volume_value = active_value if unit == "volume" else 0.0
-            for field_name, value in ((money_field, money_value), (volume_field, volume_value)):
-                events.append(_event(
-                    exchange=exchange,
-                    instrument=instrument,
-                    label=str(product.get("label") or ""),
-                    field_name=field_name,
-                    value=value,
-                    source_url=source_url,
-                    accessed_at=accessed_at,
-                    effective_day=baseline_day,
-                    raw_note=(
-                        f"{instrument} exchange baseline transaction fee from user fee-unit table: "
-                        f"{_display_leg_value(product, leg_label)} by {unit}; {leg_label} uses {field_name}; "
-                        f"active leg source={active_source}."
-                    ),
-                    parser_notes=(
-                        "Baseline unit chosen from user-supplied table and cross-checked against OpenCTP latest; "
-                        "complementary unit is forced to zero so broker add-ons do not enter exchange source."
-                    ),
-                ))
+            active_field = money_field if unit == "money" else volume_field
+            events.append(_event(
+                exchange=exchange,
+                instrument=instrument,
+                label=str(product.get("label") or ""),
+                field_name=active_field,
+                value=active_value,
+                source_url=source_url,
+                accessed_at=accessed_at,
+                effective_day=baseline_day,
+                raw_note=(
+                    f"{instrument} exchange baseline transaction fee from user fee-unit table: "
+                    f"{_display_leg_value(product, leg_label)} by {unit}; {leg_label} uses {active_field}; "
+                    f"active leg source={active_source}."
+                ),
+                parser_notes=(
+                    "Baseline unit chosen from user-supplied table and cross-checked against OpenCTP latest; "
+                    "only the active exchange fee unit is stored. The complementary unit must not be "
+                    "stored as an exchange zero unless an exchange notice explicitly switches units."
+                ),
+            ))
             audit.append(_audit_row(
                 instrument=instrument,
                 exchange=exchange,
                 unit=unit,
                 leg=leg_label,
                 active_source=active_source,
-                baseline_money=money_value,
-                baseline_volume=volume_value,
+                baseline_money=active_value if unit == "money" else None,
+                baseline_volume=active_value if unit == "volume" else None,
                 openctp_money=openctp_values.get(money_field),
                 openctp_volume=openctp_values.get(volume_field),
             ))
@@ -249,7 +250,9 @@ def _event(
     event_id = "transaction_fee_baseline_" + hashlib.sha1(event_key.encode("utf-8")).hexdigest()[:24]
     return {
         "agent_name": "codex",
+        "change_type": "baseline",
         "contract_codes": [],
+        "contract_scope_type": "all",
         "data_source": exchange,
         "effective_timestamp": "",
         "effective_trading_day": effective_day,
@@ -276,15 +279,15 @@ def _audit_row(
     unit: str,
     leg: str,
     active_source: str,
-    baseline_money: float,
-    baseline_volume: float,
+    baseline_money: float | None,
+    baseline_volume: float | None,
     openctp_money: float | None,
     openctp_volume: float | None,
 ) -> dict[str, Any]:
     active_baseline = baseline_money if unit == "money" else baseline_volume
     active_openctp = openctp_money if unit == "money" else openctp_volume
     inactive_openctp = openctp_volume if unit == "money" else openctp_money
-    delta = None if active_openctp is None else float(active_openctp - active_baseline)
+    delta = None if active_openctp is None or active_baseline is None else float(active_openctp - active_baseline)
     return {
         "instrument": instrument,
         "exchange": exchange,
