@@ -1,11 +1,11 @@
 """Build CZCE dynamic TransactionFee notice events.
 
 Some CZCE fee notices do not name a fixed product-level or explicit contract
-list.  For example Zhengshanghan [2020] 481 applies to non-1/5/9 contracts
-from the first trading day five months before the delivery month.  This script
-materializes those notice rules into explicit contract events by using official
-settlement-parameter snapshots only to discover listed contract codes and the
-nearest available trading day calendar.
+list.  For example Zhengshanghan [2020] 481 applied to non-1/5/9 contracts
+from the first trading day five months before the delivery month, but
+Zhengshanghan [2021] 1063 later paused the measure and explicitly listed the
+contracts whose adjusted fees remained unchanged.  This script materializes
+those notice rules into explicit contract events.
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ class DynamicFeeRule:
     effective_trading_day: str
     effective_timestamp: str
     instruments: dict[str, tuple[str, float, float]]
+    allowed_contracts: dict[str, tuple[str, ...]]
     excluded_delivery_months: frozenset[int]
     months_before_delivery: int
     evidence_text: str
@@ -60,7 +61,7 @@ class DynamicFeeRule:
 
 RULE_2020_481 = DynamicFeeRule(
     notice_id="郑商函〔2020〕481号",
-    source_url="https://www.gtjaqh.com/pc/a/b457cca6f911e42a9ca50b08e2587fe4",
+    source_url="https://www.nanhua.net/news/2021/12/61c8c5e3-c004-46d4-a725-a1ce4d43a753.html",
     source_accessed_at="2026-07-08T00:00:00+08:00",
     # The notice says "2021-01-18 night session"; for CZCE night trading this
     # belongs to the next trading day.
@@ -70,24 +71,28 @@ RULE_2020_481 = DynamicFeeRule(
         "CF": ("棉花", 2.0, 0.0),
         "SR": ("白糖", 1.5, 0.0),
         "OI": ("菜籽油", 1.0, 0.0),
-        "RM": ("菜籽粕", 1.0, 0.0),
         "TA": ("PTA", 1.5, 0.0),
-        "ZC": ("动力煤", 2.0, 0.0),
-        "MA": ("甲醇", 2.0, 2.0),
-        "FG": ("玻璃", 1.5, 1.5),
-        "SM": ("锰硅", 1.5, 0.0),
         "SF": ("硅铁", 1.5, 0.0),
+    },
+    allowed_contracts={
+        "CF": ("2203",),
+        "OI": ("2203",),
+        "SR": ("2203",),
+        "TA": ("2202", "2203", "2204"),
+        "SF": ("2202", "2203", "2204"),
     },
     excluded_delivery_months=frozenset({1, 5, 9}),
     months_before_delivery=5,
     evidence_text=(
-        "郑商函〔2020〕481号：2021年1月18日夜盘交易时起，对棉花等10个期货品种的"
-        "非1、5、9合约，从进入交割月前5个月的第一个交易日起，手续费标准调整；"
-        "表格列示交易手续费和平今仓手续费。"
+        "郑商函〔2021〕1063号：自2022年1月1日起暂停实施郑商函〔2020〕481号中的相关措施；"
+        "已根据481号实施相关措施的棉花2203、菜籽油2203、白糖2203、PTA2202/2203/2204、"
+        "硅铁2202/2203/2204合约手续费标准保持不变，表格列示交易手续费和日内平今仓交易手续费。"
     ),
     parser_notes=(
-        "Dynamic CZCE notice rule. Settlement snapshots are used only to discover contract codes "
-        "and available trading days; the fee values and scope semantics come from the notice text."
+        "Dynamic CZCE notice rule. Zhengshanghan [2021] 1063 pauses the broader [2020] 481 rule "
+        "and explicitly lists the contracts whose adjusted fees remain unchanged. Settlement "
+        "snapshots are used only as an optional trading-day calendar; fee values and contract "
+        "scope come from the notice text."
     ),
 )
 
@@ -144,7 +149,11 @@ def _load_czce_fee_snapshots(path: Path) -> list[dict[str, Any]]:
 
 
 def _matching_contracts(snapshots: list[dict[str, Any]], rule: DynamicFeeRule) -> list[tuple[str, str]]:
-    pairs: set[tuple[str, str]] = set()
+    pairs: set[tuple[str, str]] = {
+        (instrument, contract_code)
+        for instrument, contract_codes in rule.allowed_contracts.items()
+        for contract_code in contract_codes
+    }
     for row in snapshots:
         instrument = str(row.get("instrument") or "").upper()
         if instrument not in rule.instruments:
@@ -155,6 +164,8 @@ def _matching_contracts(snapshots: list[dict[str, Any]], rule: DynamicFeeRule) -
                 continue
             month = _contract_month(code)
             if month is None or month in rule.excluded_delivery_months:
+                continue
+            if rule.allowed_contracts and code not in set(rule.allowed_contracts.get(instrument, ())):
                 continue
             pairs.add((instrument, code))
     return sorted(pairs, key=lambda item: (item[0], _contract_sort_key(item[1])))
