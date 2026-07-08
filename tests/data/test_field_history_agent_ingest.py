@@ -71,40 +71,62 @@ def test_agent_field_change_ingest_hashes_requester_key_and_materializes(tmp_pat
     assert value.source_key == f"agent/DCE/{event_ids[0]}"
 
 
-def test_agent_field_change_ingest_rejects_multi_contract_event(tmp_path) -> None:
-    db_path = tmp_path / "agent_ingest_reject.sqlite"
-    store_key = "agent_ingest_reject_test"
+def test_agent_field_change_ingest_accepts_explicit_multi_contract_scope(tmp_path) -> None:
+    db_path = tmp_path / "agent_ingest_multi_contract.sqlite"
+    store_key = "agent_ingest_multi_contract_test"
     DataHub.get_instance().register_sqlite_store(SQLiteStore(
         key=store_key,
-        label="agent-ingest-reject-test",
+        label="agent-ingest-multi-contract-test",
         path_getter=lambda: str(db_path),
     ))
 
-    try:
-        append_agent_field_change_events(
-            [
-                {
-                    "data_source": "DCE",
-                    "field_group": "LimitOrderVolume",
-                    "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
-                    "source_accessed_at": "2026-06-29T12:00:00+08:00",
-                    "agent_name": "codex-test",
-                    "requester_key": "human-secret-key",
-                    "instrument": "BZ",
-                    "instrument_label": "纯苯",
-                    "instrument_type": "future",
-                    "field_name": "MinLimitOrderVolume",
-                    "effective_trading_day": "2026-03-10",
-                    "effective_timestamp": "2026-03-09 21:00:00",
-                    "value": 4,
-                    "contract_codes": ["2604", "2605", "2606"],
-                    "source_notice_id": "大商所发〔2026〕74号",
-                    "raw_note": "纯苯期货BZ2604、BZ2605、BZ2606合约交易指令每次最小开仓下单数量调整为4手",
-                }
-            ],
-            store_key=store_key,
+    append_agent_field_change_events(
+        [
+            {
+                "data_source": "DCE",
+                "field_group": "LimitOrderVolume",
+                "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
+                "source_accessed_at": "2026-06-29T12:00:00+08:00",
+                "agent_name": "codex-test",
+                "requester_key": "human-secret-key",
+                "instrument": "BZ",
+                "instrument_label": "纯苯",
+                "instrument_type": "future",
+                "field_name": "MinLimitOrderVolume",
+                "effective_trading_day": "2026-03-10",
+                "effective_timestamp": "2026-03-09 21:00:00",
+                "value": 4,
+                "contract_codes": ["2604", "2605", "2606"],
+                "contract_scope_type": "explicit",
+                "source_notice_id": "大商所发〔2026〕74号",
+                "raw_note": "纯苯期货BZ2604、BZ2605、BZ2606合约交易指令每次最小开仓下单数量调整为4手",
+            }
+        ],
+        store_key=store_key,
+    )
+    assert materialize_agent_events_to_history(store_key=store_key) == 1
+
+    history = load_historical_field_frame(store_key=store_key)
+    provider = FieldHistoryProvider(history)
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-03-10 09:01:00"): pd.Timestamp("2026-03-10"),
+    })
+    for contract in ["BZ2604.DCE", "BZ2605.DCE", "BZ2606.DCE"]:
+        value = provider.resolve_at(
+            contract,
+            "MinLimitOrderVolume",
+            pd.Timestamp("2026-03-10 09:01:00"),
+            trading_day_resolver=resolver,
         )
-    except ValueError as exc:
-        assert "one event per contract" in str(exc)
+        assert value.value == 4
+    try:
+        provider.resolve_at(
+            "BZ2607.DCE",
+            "MinLimitOrderVolume",
+            pd.Timestamp("2026-03-10 09:01:00"),
+            trading_day_resolver=resolver,
+        )
+    except Exception as exc:
+        assert "no historical value" in str(exc)
     else:
-        raise AssertionError("multi-contract agent event should be rejected")
+        raise AssertionError("explicit multi-contract scope should not match unlisted contracts")

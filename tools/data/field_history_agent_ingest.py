@@ -44,6 +44,10 @@ class AgentFieldChangeEvent:
     effective_trading_day: str
     value: Any
     contract_codes: tuple[str, ...] = ()
+    contract_scope_type: str = ""
+    contract_code_start: str = ""
+    contract_code_end: str = ""
+    change_type: str = "change"
     effective_timestamp: str = ""
     source_notice_id: str = ""
     raw_note: str = ""
@@ -87,9 +91,10 @@ def append_agent_field_change_events(
             (event_id, data_source, field_group, source_url, source_accessed_at,
              agent_name, requester_key_hash, instrument, instrument_label,
              instrument_type, field_name, effective_trading_day, effective_timestamp,
-             value_json, contract_codes_json, source_notice_id, raw_note,
+             value_json, contract_codes_json, contract_scope_type, contract_code_start,
+             contract_code_end, change_type, source_notice_id, raw_note,
              evidence_text, parser_notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [_event_row(event) for event in normalised],
         )
@@ -147,6 +152,10 @@ def ensure_agent_event_schema(conn: sqlite3.Connection) -> None:
             effective_timestamp TEXT,
             value_json TEXT NOT NULL,
             contract_codes_json TEXT NOT NULL,
+            contract_scope_type TEXT NOT NULL DEFAULT 'all',
+            contract_code_start TEXT,
+            contract_code_end TEXT,
+            change_type TEXT NOT NULL DEFAULT 'change',
             source_notice_id TEXT,
             raw_note TEXT,
             evidence_text TEXT,
@@ -155,15 +164,41 @@ def ensure_agent_event_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    existing_columns = {
+        row["name"]
+        for row in conn.execute(f'PRAGMA table_info("{AGENT_EVENT_TABLE}")').fetchall()
+    }
+    if "contract_scope_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{AGENT_EVENT_TABLE}" ADD COLUMN contract_scope_type TEXT NOT NULL DEFAULT "all"')
+    if "contract_code_start" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{AGENT_EVENT_TABLE}" ADD COLUMN contract_code_start TEXT')
+    if "contract_code_end" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{AGENT_EVENT_TABLE}" ADD COLUMN contract_code_end TEXT')
+    if "change_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{AGENT_EVENT_TABLE}" ADD COLUMN change_type TEXT NOT NULL DEFAULT "change"')
+    conn.execute(
+        f"""
+        UPDATE {AGENT_EVENT_TABLE}
+        SET contract_scope_type = 'explicit'
+        WHERE COALESCE(contract_scope_type, '') IN ('', 'all')
+          AND COALESCE(contract_codes_json, '') NOT IN ('', '[]')
+        """
+    )
+    conn.execute(
+        f"""
+        UPDATE {AGENT_EVENT_TABLE}
+        SET contract_scope_type = CASE
+            WHEN COALESCE(contract_code_end, '') != '' THEN 'range'
+            ELSE 'from_contract'
+        END
+        WHERE COALESCE(contract_scope_type, '') IN ('', 'all')
+          AND COALESCE(contract_code_start, '') != ''
+        """
+    )
 
 
 def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> AgentFieldChangeEvent:
     if isinstance(event, AgentFieldChangeEvent):
-        if len(event.contract_codes) > 1:
-            raise ValueError(
-                "agent field-change event must contain at most one contract code; "
-                "split multi-contract notices into one event per contract"
-            )
         return event
     requester_hash = str(event.get("requester_key_hash") or "")
     requester_key = str(event.get("requester_key") or "")
@@ -172,11 +207,6 @@ def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> 
             raise ValueError("agent event requires requester_key_hash or requester_key")
         requester_hash = requester_key_fingerprint(requester_key)
     contract_codes = tuple(str(code) for code in event.get("contract_codes", ()))
-    if len(contract_codes) > 1:
-        raise ValueError(
-            "agent field-change event must contain at most one contract code; "
-            "split multi-contract notices into one event per contract"
-        )
     return AgentFieldChangeEvent(
         event_id=str(event.get("event_id") or uuid.uuid4().hex),
         data_source=str(event["data_source"]),
@@ -193,6 +223,10 @@ def _normalise_agent_event(event: AgentFieldChangeEvent | Mapping[str, Any]) -> 
         effective_timestamp=str(event.get("effective_timestamp") or ""),
         value=event["value"],
         contract_codes=contract_codes,
+        contract_scope_type=str(event.get("contract_scope_type") or ""),
+        contract_code_start=str(event.get("contract_code_start") or ""),
+        contract_code_end=str(event.get("contract_code_end") or ""),
+        change_type=str(event.get("change_type") or "change"),
         source_notice_id=str(event.get("source_notice_id") or ""),
         raw_note=str(event.get("raw_note") or ""),
         evidence_text=str(event.get("evidence_text") or ""),
@@ -217,6 +251,10 @@ def _event_row(event: AgentFieldChangeEvent) -> tuple[Any, ...]:
         event.effective_timestamp,
         json.dumps(event.value, ensure_ascii=False),
         json.dumps(list(event.contract_codes), ensure_ascii=False),
+        event.contract_scope_type,
+        event.contract_code_start,
+        event.contract_code_end,
+        event.change_type,
         event.source_notice_id,
         event.raw_note,
         event.evidence_text,
@@ -237,6 +275,10 @@ def _history_record_from_agent_row(row: sqlite3.Row) -> dict[str, Any]:
         "effective_timestamp": row["effective_timestamp"],
         "value": json.loads(row["value_json"]),
         "contract_codes": json.loads(row["contract_codes_json"]),
+        "contract_scope_type": row["contract_scope_type"],
+        "contract_code_start": row["contract_code_start"],
+        "contract_code_end": row["contract_code_end"],
+        "change_type": row["change_type"],
         "source_url": row["source_url"],
         "source_date": row["source_accessed_at"],
         "source_notice_id": row["source_notice_id"],

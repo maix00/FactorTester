@@ -83,6 +83,10 @@ FIELD_HISTORY_COLUMNS = [
     "value",
     "value_type",
     "contract_codes",
+    "contract_scope_type",
+    "contract_code_start",
+    "contract_code_end",
+    "change_type",
     "source_url",
     "source_date",
     "source_notice_id",
@@ -98,6 +102,9 @@ FIELD_HISTORY_PRIMARY_KEY = [
     "effective_trading_day",
     "effective_timestamp",
     "contract_codes",
+    "contract_scope_type",
+    "contract_code_start",
+    "contract_code_end",
 ]
 
 
@@ -238,7 +245,8 @@ class FieldHistoryProvider:
                 ["instrument", "field_name", "effective_trading_day", "effective_timestamp"]
             ).reset_index(drop=True)
             self.frame["_scope_codes"] = _series(self.frame, "contract_codes").map(_decode_contract_codes)
-            self.frame["_product_level"] = _series(self.frame, "_scope_codes").map(lambda codes: len(codes) == 0)
+            self.frame["_scope_type"] = _series(self.frame, "contract_scope_type").map(_normalise_contract_scope_type)
+            self.frame["_product_level"] = _series(self.frame, "_scope_type").map(lambda value: value == "all")
         self._subset_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
         self._subset_index = self._build_subset_index()
 
@@ -781,6 +789,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         storage_df.to_sql(HISTORICAL_FIELD_TABLE, conn, if_exists="append", index=False)
         return
     _create_schema(conn)
+    if existing is not None:
+        _migrate_contract_scope_values(conn)
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:
@@ -798,11 +808,15 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL,
             value_type TEXT NOT NULL,
             contract_codes TEXT NOT NULL,
+            contract_scope_type TEXT NOT NULL DEFAULT 'all',
+            contract_code_start TEXT,
+            contract_code_end TEXT,
+            change_type TEXT NOT NULL DEFAULT 'change',
             source_url TEXT,
             source_date TEXT,
             source_notice_id TEXT,
             raw_note TEXT,
-            PRIMARY KEY (provider, source_key, instrument, instrument_type, field_name, effective_trading_day, effective_timestamp, contract_codes)
+            PRIMARY KEY (provider, source_key, instrument, instrument_type, field_name, effective_trading_day, effective_timestamp, contract_codes, contract_scope_type, contract_code_start, contract_code_end)
         )
         """
     )
@@ -814,12 +828,34 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN effective_timestamp TEXT')
     if "source_notice_id" not in existing_columns:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN source_notice_id TEXT')
+    if "contract_scope_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN contract_scope_type TEXT NOT NULL DEFAULT "all"')
+    if "contract_code_start" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN contract_code_start TEXT')
+    if "contract_code_end" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN contract_code_end TEXT')
+    if "change_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN change_type TEXT NOT NULL DEFAULT "change"')
     conn.execute(
         f"""
         CREATE INDEX IF NOT EXISTS idx_{HISTORICAL_FIELD_TABLE}_lookup
         ON {HISTORICAL_FIELD_TABLE} (instrument, field_name, effective_trading_day, effective_timestamp)
         """
     )
+
+
+def _migrate_contract_scope_values(conn: sqlite3.Connection) -> None:
+    existing_df = pd.read_sql_query(f'SELECT * FROM "{HISTORICAL_FIELD_TABLE}"', conn)
+    if existing_df.empty:
+        return
+    normalised = _serialise_history_frame(_normalise_history_frame(existing_df))
+    comparable_columns = [column for column in FIELD_HISTORY_COLUMNS if column in existing_df.columns]
+    old = existing_df[comparable_columns].fillna("").astype(str).reset_index(drop=True)
+    new = normalised[comparable_columns].fillna("").astype(str).reset_index(drop=True)
+    if len(old) == len(new) and old.equals(new):
+        return
+    conn.execute(f'DELETE FROM "{HISTORICAL_FIELD_TABLE}"')
+    normalised.to_sql(HISTORICAL_FIELD_TABLE, conn, if_exists="append", index=False)
 
 
 def _upsert_history_frame(conn: sqlite3.Connection, frame: pd.DataFrame) -> None:
@@ -879,6 +915,18 @@ def _normalise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
     df["value"] = value_pairs.map(lambda item: item[0])
     df["value_type"] = _series(df, "value_type").fillna(value_pairs.map(lambda item: item[1]))
     df["contract_codes"] = _series(df, "contract_codes").map(_encode_contract_codes)
+    df["contract_scope_type"] = [
+        _normalise_contract_scope_type(scope_type, contract_codes=contract_codes, start=start, end=end)
+        for scope_type, contract_codes, start, end in zip(
+            _series(df, "contract_scope_type"),
+            _series(df, "contract_codes"),
+            _series(df, "contract_code_start"),
+            _series(df, "contract_code_end"),
+        )
+    ]
+    df["contract_code_start"] = _series(df, "contract_code_start").map(lambda value: _clean_optional_text(value).upper())
+    df["contract_code_end"] = _series(df, "contract_code_end").map(lambda value: _clean_optional_text(value).upper())
+    df["change_type"] = _series(df, "change_type").map(_normalise_change_type)
     df = df.drop_duplicates(subset=FIELD_HISTORY_PRIMARY_KEY, keep="last")
     return df
 
@@ -1107,26 +1155,134 @@ def _decode_contract_codes(value: Any) -> list[str]:
     return [str(parsed).strip()] if str(parsed).strip() else []
 
 
+def _normalise_contract_scope_type(
+    value: Any,
+    *,
+    contract_codes: Any = None,
+    start: Any = None,
+    end: Any = None,
+) -> str:
+    text = _clean_optional_text(value).lower()
+    if _clean_optional_text(start):
+        return "range" if _clean_optional_text(end) else "from_contract"
+    if _decode_contract_codes(contract_codes):
+        return "explicit"
+    if text in {"all", "explicit", "from_contract", "range"}:
+        return text
+    return "all"
+
+
+def _normalise_change_type(value: Any) -> str:
+    text = _clean_optional_text(value).lower()
+    if text in {"change", "baseline", "reaffirmation", "exception_unchanged"}:
+        return text
+    return "change"
+
+
+def _clean_optional_text(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in {"nan", "nat", "none"} else text
+
+
+def _contract_scope_matches(
+    *,
+    scope_type: Any,
+    scope_codes: list[str],
+    contract_code: str | None,
+    start: Any = "",
+    end: Any = "",
+) -> bool:
+    scope = _normalise_contract_scope_type(scope_type, contract_codes=scope_codes, start=start, end=end)
+    contract = str(contract_code or "").strip().upper()
+    if scope == "all":
+        return True
+    if not contract:
+        return False
+    if scope == "explicit":
+        return contract in {str(code).strip().upper() for code in scope_codes}
+    start_text = str(start or "").strip().upper()
+    end_text = str(end or "").strip().upper()
+    if scope in {"from_contract", "range"} and start_text:
+        if _compare_contract_code(contract, start_text) < 0:
+            return False
+        if scope == "range" and end_text and _compare_contract_code(contract, end_text) > 0:
+            return False
+        return True
+    return False
+
+
+def _contract_scope_priority(
+    *,
+    scope_type: Any,
+    scope_codes: list[str],
+    contract_code: str | None,
+    start: Any = "",
+    end: Any = "",
+) -> int:
+    if not _contract_scope_matches(
+        scope_type=scope_type,
+        scope_codes=scope_codes,
+        contract_code=contract_code,
+        start=start,
+        end=end,
+    ):
+        return -1
+    scope = _normalise_contract_scope_type(scope_type, contract_codes=scope_codes, start=start, end=end)
+    return {
+        "all": 0,
+        "from_contract": 1,
+        "range": 2,
+        "explicit": 3,
+    }.get(scope, 0)
+
+
+def _compare_contract_code(left: str, right: str) -> int:
+    left_key = _contract_code_sort_key(left)
+    right_key = _contract_code_sort_key(right)
+    return (left_key > right_key) - (left_key < right_key)
+
+
+def _contract_code_sort_key(value: Any) -> tuple[int, str]:
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(r"(\d{3,4})([A-Z]*)", text)
+    if not match:
+        return (-1, text)
+    number = match.group(1)
+    if len(number) == 3:
+        number = f"2{number}"
+    return (int(number), match.group(2))
+
+
 def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd.DataFrame:
     if frame.empty:
         return frame
     df = frame.copy()
     scopes = _series(df, "contract_codes").map(_decode_contract_codes)
-    product_level = scopes.map(lambda codes: len(codes) == 0)
+    scope_types = _series(df, "contract_scope_type").map(_normalise_contract_scope_type)
+    starts = _series(df, "contract_code_start")
+    ends = _series(df, "contract_code_end")
     if contract_code:
-        contract_level = scopes.map(lambda codes: contract_code in codes)
-        scoped = cast(pd.DataFrame, df[contract_level | product_level].copy())
+        priorities = pd.Series([
+            _contract_scope_priority(
+                scope_type=scope_type,
+                scope_codes=codes,
+                contract_code=contract_code,
+                start=start,
+                end=end,
+            )
+            for scope_type, codes, start, end in zip(scope_types, scopes, starts, ends)
+        ], index=df.index)
+        scoped = cast(pd.DataFrame, df[priorities >= 0].copy())
         if scoped.empty:
             return scoped
-        scoped["_contract_scope_priority"] = [
-            1 if contract_code in codes else 0
-            for codes in scopes.loc[scoped.index]
-        ]
+        scoped["_contract_scope_priority"] = priorities.loc[scoped.index]
         scoped = scoped.sort_values(
             by=["effective_trading_day", "effective_timestamp", "_contract_scope_priority"],
         )
         return scoped
-    return cast(pd.DataFrame, df[product_level].copy())
+    return cast(pd.DataFrame, df[scope_types == "all"].copy())
 
 
 def _field_provider_priority(provider: Any) -> int:
@@ -1208,7 +1364,8 @@ def _vectorized_values_from_subset(
     if "_scope_codes" not in records.columns or "_product_level" not in records.columns:
         records = records.copy()
         records["_scope_codes"] = _series(records, "contract_codes").map(_decode_contract_codes)
-        records["_product_level"] = _series(records, "_scope_codes").map(lambda codes: len(codes) == 0)
+        records["_scope_type"] = _series(records, "contract_scope_type").map(_normalise_contract_scope_type)
+        records["_product_level"] = _series(records, "_scope_type").map(lambda value: value == "all")
     constant = _constant_product_level_value(records, queries)
     if constant is not None:
         return pd.Series([constant] * len(queries), index=_series(queries, "_row"), dtype=object)
@@ -1216,16 +1373,23 @@ def _vectorized_values_from_subset(
     for contract_code, group in queries.groupby("contract_code", sort=False):
         contract = str(cast(Any, contract_code) or "")
         if contract:
-            scoped = cast(
-                pd.DataFrame,
-                records[
-                    _series(records, "_product_level")
-                    | _series(records, "_scope_codes").map(lambda codes: contract in codes)
-                ].copy(),
-            )
-            scoped["_scope_priority"] = _series(scoped, "_scope_codes").map(
-                lambda codes: 1 if contract in codes else 0
-            )
+            priorities = pd.Series([
+                _contract_scope_priority(
+                    scope_type=scope_type,
+                    scope_codes=codes,
+                    contract_code=contract,
+                    start=start,
+                    end=end,
+                )
+                for scope_type, codes, start, end in zip(
+                    _series(records, "contract_scope_type"),
+                    _series(records, "_scope_codes"),
+                    _series(records, "contract_code_start"),
+                    _series(records, "contract_code_end"),
+                )
+            ], index=records.index)
+            scoped = cast(pd.DataFrame, records[priorities >= 0].copy())
+            scoped["_scope_priority"] = priorities.loc[scoped.index]
         else:
             scoped = cast(pd.DataFrame, records[_series(records, "_product_level")].copy())
             scoped["_scope_priority"] = 0

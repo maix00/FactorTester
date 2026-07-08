@@ -573,3 +573,80 @@ def test_field_history_product_object_uses_main_contract_for_contract_specific_r
     )
 
     assert values.iloc[0] == 4
+
+
+def test_field_history_from_contract_scope_applies_to_later_contracts_only() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/baseline",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-01",
+            "value": 4,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/from-2607",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 2,
+            "contract_scope_type": "from_contract",
+            "contract_code_start": "2607",
+        },
+        {
+            "provider": "test",
+            "source_key": "test/old-2605-unchanged",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 4,
+            "contract_codes": ["2605"],
+            "change_type": "exception_unchanged",
+        },
+    ])
+
+    assert provider.resolve_by_trading_day("PK2605.CZC", "OpenRatioByVolume", "2026-06-25").value == 4
+    assert provider.resolve_by_trading_day("PK2607.CZC", "OpenRatioByVolume", "2026-06-25").value == 2
+    assert provider.resolve_by_trading_day("PK2701.CZC", "OpenRatioByVolume", "2026-06-25").value == 2
+
+
+def test_field_history_vectorized_from_contract_scope_matches_single_lookup() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/baseline",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-01",
+            "value": 4,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/from-2607",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 2,
+            "contract_scope_type": "from_contract",
+            "contract_code_start": "2607",
+        },
+    ])
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-06-25 09:01:00"): pd.Timestamp("2026-06-25"),
+    })
+    index = pd.DatetimeIndex([pd.Timestamp("2026-06-25 09:01:00")])
+
+    old_values = provider.values_for_index("PK2605.CZC", "OpenRatioByVolume", index, trading_day_resolver=resolver)
+    new_values = provider.values_for_index("PK2701.CZC", "OpenRatioByVolume", index, trading_day_resolver=resolver)
+
+    assert old_values.iloc[0] == 4
+    assert new_values.iloc[0] == 2

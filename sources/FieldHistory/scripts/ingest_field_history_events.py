@@ -14,7 +14,11 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from tools.data.field_history import HISTORICAL_FIELD_TABLE, _ensure_store_registered
+from tools.data.field_history import (
+    HISTORICAL_FIELD_TABLE,
+    _ensure_store_registered,
+    _normalise_contract_scope_type,
+)
 from tools.data.field_history_agent_ingest import (
     AGENT_EVENT_TABLE,
     append_agent_field_change_events,
@@ -113,8 +117,16 @@ def _validate_event(event: Mapping[str, Any], *, source: str) -> None:
         return
     if not isinstance(contract_codes, list):
         raise ValueError(f"{source}: contract_codes must be a list")
-    if len(contract_codes) > 1:
-        raise ValueError(f"{source}: split contract-specific events into one contract per row")
+    scope_type = str(event.get("contract_scope_type") or "").strip().lower()
+    if scope_type and scope_type not in {"all", "explicit", "from_contract", "range"}:
+        raise ValueError(f"{source}: unsupported contract_scope_type={scope_type!r}")
+    if scope_type in {"from_contract", "range"} and not str(event.get("contract_code_start") or "").strip():
+        raise ValueError(f"{source}: {scope_type} requires contract_code_start")
+    if scope_type == "range" and not str(event.get("contract_code_end") or "").strip():
+        raise ValueError(f"{source}: range requires contract_code_end")
+    change_type = str(event.get("change_type") or "change").strip().lower()
+    if change_type not in {"change", "baseline", "reaffirmation", "exception_unchanged"}:
+        raise ValueError(f"{source}: unsupported change_type={change_type!r}")
 
 
 def _dedupe_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -144,7 +156,28 @@ def _event_exists(conn: sqlite3.Connection, event: Mapping[str, Any]) -> bool:
     ).fetchone():
         return True
     contract_codes_json = json.dumps(event.get("contract_codes") or [], ensure_ascii=False)
+    contract_code_start = str(event.get("contract_code_start") or "")
+    contract_code_end = str(event.get("contract_code_end") or "")
+    contract_scope_type = _normalise_contract_scope_type(
+        event.get("contract_scope_type"),
+        contract_codes=contract_codes_json,
+        start=contract_code_start,
+        end=contract_code_end,
+    )
     value_json = json.dumps(event["value"], ensure_ascii=False)
+    history_columns = {
+        row["name"]
+        for row in conn.execute(f'PRAGMA table_info("{HISTORICAL_FIELD_TABLE}")').fetchall()
+    }
+    scope_filters = ""
+    scope_params: tuple[str, ...] = ()
+    if {"contract_scope_type", "contract_code_start", "contract_code_end"}.issubset(history_columns):
+        scope_filters = """
+          AND COALESCE(contract_scope_type, '') = COALESCE(?, '')
+          AND COALESCE(contract_code_start, '') = COALESCE(?, '')
+          AND COALESCE(contract_code_end, '') = COALESCE(?, '')
+        """
+        scope_params = (contract_scope_type, contract_code_start, contract_code_end)
     existing = conn.execute(
         f"""
         SELECT 1
@@ -155,6 +188,7 @@ def _event_exists(conn: sqlite3.Connection, event: Mapping[str, Any]) -> bool:
           AND effective_trading_day = ?
           AND COALESCE(effective_timestamp, '') = COALESCE(?, '')
           AND contract_codes = ?
+          {scope_filters}
           AND value = ?
         LIMIT 1
         """,
@@ -165,6 +199,7 @@ def _event_exists(conn: sqlite3.Connection, event: Mapping[str, Any]) -> bool:
             event["effective_trading_day"],
             str(event.get("effective_timestamp") or ""),
             contract_codes_json,
+            *scope_params,
             value_json,
         ),
     ).fetchone()

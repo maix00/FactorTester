@@ -139,7 +139,7 @@ def _find_notice(
             continue
         if abs(float(notice.get("value") or 0.0) - float(snapshot.get("value") or 0.0)) > 1e-15:
             continue
-        if not _contract_scope_covers(notice.get("contract_codes") or [], snapshot.get("contract_codes") or []):
+        if not _contract_scope_covers(notice, snapshot):
             continue
         notice_day = str(notice.get("effective_trading_day") or "")
         snapshot_day = str(snapshot.get("effective_trading_day") or "")
@@ -162,12 +162,47 @@ def _find_notice(
     )[0]
 
 
-def _contract_scope_covers(notice_codes: list[Any], snapshot_codes: list[Any]) -> bool:
-    notice = {str(item).strip() for item in notice_codes if str(item).strip()}
-    snapshot = {str(item).strip() for item in snapshot_codes if str(item).strip()}
-    if not notice:
+def _contract_scope_covers(notice: dict[str, Any], snapshot_event: dict[str, Any]) -> bool:
+    notice_codes = {str(item).strip().upper() for item in notice.get("contract_codes") or [] if str(item).strip()}
+    snapshot = {str(item).strip().upper() for item in snapshot_event.get("contract_codes") or [] if str(item).strip()}
+    scope_type = str(notice.get("contract_scope_type") or "").strip().lower()
+    if not scope_type:
+        scope_type = "explicit" if notice_codes else "all"
+    if scope_type == "all":
         return True
-    return bool(snapshot) and snapshot.issubset(notice)
+    if not snapshot:
+        return False
+    if scope_type == "explicit":
+        return snapshot.issubset(notice_codes)
+    start = str(notice.get("contract_code_start") or "").strip().upper()
+    end = str(notice.get("contract_code_end") or "").strip().upper()
+    if scope_type in {"from_contract", "range"} and start:
+        for code in snapshot:
+            if _compare_contract_code(code, start) < 0:
+                return False
+            if scope_type == "range" and end and _compare_contract_code(code, end) > 0:
+                return False
+        return True
+    return False
+
+
+def _compare_contract_code(left: str, right: str) -> int:
+    left_key = _contract_code_sort_key(left)
+    right_key = _contract_code_sort_key(right)
+    return (left_key > right_key) - (left_key < right_key)
+
+
+def _contract_code_sort_key(value: Any) -> tuple[int, str]:
+    import re
+
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(r"(\d{3,4})([A-Z]*)", text)
+    if not match:
+        return (-1, text)
+    number = match.group(1)
+    if len(number) == 3:
+        number = f"2{number}"
+    return (int(number), match.group(2))
 
 
 def _snapshot_index(snapshots: list[dict[str, Any]]) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
