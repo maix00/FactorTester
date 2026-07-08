@@ -8,6 +8,7 @@ EVENTS_PATH = Path("sources/FieldHistory/events/TransactionFee/official_seed_eve
 SETTLEMENT_SNAPSHOT_PATH = Path(
     "sources/FieldHistory/events/TransactionFee/exchange_settlement_snapshots_20260309_20260707.jsonl"
 )
+TRANSACTION_FEE_EVENTS_DIR = Path("sources/FieldHistory/events/TransactionFee")
 
 
 def _events() -> list[dict[str, object]]:
@@ -16,6 +17,28 @@ def _events() -> list[dict[str, object]]:
 
 def _settlement_snapshot_events() -> list[dict[str, object]]:
     return [json.loads(line) for line in SETTLEMENT_SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines()]
+
+
+def test_transaction_fee_events_explicitly_store_scope_and_change_type() -> None:
+    missing: list[tuple[str, int, str | None, str | None]] = []
+    for path in sorted(TRANSACTION_FEE_EVENTS_DIR.glob("*.jsonl")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("field_group") != "TransactionFee":
+                continue
+            if not row.get("contract_scope_type") or not row.get("change_type"):
+                missing.append(
+                    (
+                        str(path),
+                        lineno,
+                        row.get("source_notice_id"),
+                        row.get("field_name"),
+                    )
+                )
+
+    assert missing == []
 
 
 def test_ao_2025_fee_notice_uses_official_rate_and_url() -> None:
