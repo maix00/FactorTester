@@ -101,6 +101,8 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
         openctp_values = _openctp_values_for_instrument(openctp, instrument)
         source_url = official_urls.get(exchange) or secondary_urls.get("Sina") or ""
         for money_field, volume_field, leg_label in FEE_LEGS:
+            if leg_label == "平今" and leg_label not in leg_values:
+                continue
             baseline_value = leg_values.get(leg_label, default_baseline_value)
             active_field = money_field if unit == "money" else volume_field
             active_value, active_source = _baseline_for_leg(

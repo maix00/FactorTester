@@ -35,7 +35,32 @@ def test_build_exchange_baseline_forces_complementary_fee_unit_to_zero(monkeypat
 
     assert by_field["OpenRatioByMoney"] == 0.0
     assert by_field["OpenRatioByVolume"] == 2.0
+    assert "CloseTodayRatioByMoney" not in by_field
+    assert "CloseTodayRatioByVolume" not in by_field
     assert audit[0]["inactive_openctp_nonzero"] is True
+
+
+def test_build_exchange_baseline_does_not_infer_close_today_from_generic_fee(monkeypatch) -> None:
+    mapping = {
+        "source_accessed_at": "2026-07-07T00:00:00+08:00",
+        "baseline_effective_trading_day": "1900-01-02",
+        "official_source_urls": {"CZCE": "https://www.czce.com.cn/"},
+        "products": [
+            {"instrument": "CY", "exchange": "CZCE", "label": "棉纱", "unit": "volume", "value": "4"},
+        ],
+    }
+    monkeypatch.setattr(builder, "load_openctp_latest_market_rule_frame", lambda **_: pd.DataFrame())
+
+    events, audit = builder.build_events(mapping)
+    by_field = {event["field_name"]: event["value"] for event in events}
+
+    assert by_field == {
+        "OpenRatioByMoney": 0.0,
+        "OpenRatioByVolume": 4.0,
+        "CloseRatioByMoney": 0.0,
+        "CloseRatioByVolume": 4.0,
+    }
+    assert {row["leg"] for row in audit} == {"开仓", "平昨"}
 
 
 def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monkeypatch) -> None:
@@ -44,7 +69,14 @@ def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monke
         "baseline_effective_trading_day": "1900-01-02",
         "official_source_urls": {"CFFEX": "https://www.cffex.com.cn/"},
         "products": [
-            {"instrument": "IF", "exchange": "CFFEX", "label": "沪深300股指期货", "unit": "money", "value": "0.0023%"},
+            {
+                "instrument": "IF",
+                "exchange": "CFFEX",
+                "label": "沪深300股指期货",
+                "unit": "money",
+                "value": "0.0023%",
+                "leg_values": {"close_today": "0.0023%"},
+            },
         ],
     }
     monkeypatch.setattr(builder, "load_openctp_latest_market_rule_frame", lambda **_: pd.DataFrame([
