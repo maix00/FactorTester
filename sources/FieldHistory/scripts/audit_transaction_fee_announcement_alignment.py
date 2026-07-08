@@ -41,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     snapshots = [event for event in events if _is_snapshot_event(event)]
     notices = [event for event in events if _is_notice_event(event)]
 
-    rows = [_audit_snapshot(event, notices) for event in snapshots]
+    snapshot_index = _snapshot_index(snapshots)
+    rows = [_audit_snapshot(event, notices, snapshot_index=snapshot_index) for event in snapshots]
     output = Path(args.output_csv).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", newline="") as handle:
@@ -85,7 +86,12 @@ def _is_notice_event(event: dict[str, Any]) -> bool:
     return bool(event.get("source_notice_id")) and not _is_snapshot_event(event)
 
 
-def _audit_snapshot(event: dict[str, Any], notices: list[dict[str, Any]]) -> dict[str, Any]:
+def _audit_snapshot(
+    event: dict[str, Any],
+    notices: list[dict[str, Any]],
+    *,
+    snapshot_index: dict[tuple[str, str, str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
     exact = _find_notice(event, notices, allow_prior=False)
     if exact is not None:
         status = "aligned_exact_notice"
@@ -95,6 +101,9 @@ def _audit_snapshot(event: dict[str, Any], notices: list[dict[str, Any]]) -> dic
         if prior is not None:
             status = "aligned_prior_notice"
             match = prior
+        elif _is_zero_unit_companion_aligned(event, notices, snapshot_index=snapshot_index):
+            status = "aligned_unit_companion"
+            match = None
         else:
             status = "needs_announcement"
             match = None
@@ -159,6 +168,75 @@ def _contract_scope_covers(notice_codes: list[Any], snapshot_codes: list[Any]) -
     if not notice:
         return True
     return bool(snapshot) and snapshot.issubset(notice)
+
+
+def _snapshot_index(snapshots: list[dict[str, Any]]) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
+    return {
+        _snapshot_key(event, str(event.get("field_name") or "")): event
+        for event in snapshots
+    }
+
+
+def _snapshot_key(event: dict[str, Any], field_name: str) -> tuple[str, str, str, str, str]:
+    return (
+        str(event.get("data_source") or ""),
+        str(event.get("instrument") or ""),
+        json.dumps(event.get("contract_codes") or [], ensure_ascii=False),
+        str(event.get("effective_trading_day") or ""),
+        field_name,
+    )
+
+
+def _is_zero_unit_companion_aligned(
+    event: dict[str, Any],
+    notices: list[dict[str, Any]],
+    *,
+    snapshot_index: dict[tuple[str, str, str, str, str], dict[str, Any]],
+) -> bool:
+    """Treat the unused fee-unit leg as aligned when the active unit leg is supported.
+
+    Settlement parameter feeds store each fee leg as both a money-ratio field
+    and a fixed-yuan-per-lot field.  In normal exchange fee schedules exactly
+    one of the pair is active, so the inactive zero field should not require a
+    separate announcement.  A zero close-today fee is different: if both unit
+    fields are zero, it still needs an explicit notice or prior baseline.
+    """
+    try:
+        value = float(event.get("value") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if abs(value) > 1e-15:
+        return False
+    field_name = str(event.get("field_name") or "")
+    companion = _companion_fee_unit_field(field_name)
+    if not companion:
+        return False
+    companion_event = snapshot_index.get(_snapshot_key(event, companion))
+    if companion_event is None:
+        return False
+    try:
+        companion_value = float(companion_event.get("value") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if abs(companion_value) <= 1e-15:
+        return False
+    return _find_notice(companion_event, notices, allow_prior=False) is not None or _find_notice(
+        companion_event,
+        notices,
+        allow_prior=True,
+    ) is not None
+
+
+def _companion_fee_unit_field(field_name: str) -> str:
+    pairs = {
+        "OpenRatioByMoney": "OpenRatioByVolume",
+        "OpenRatioByVolume": "OpenRatioByMoney",
+        "CloseRatioByMoney": "CloseRatioByVolume",
+        "CloseRatioByVolume": "CloseRatioByMoney",
+        "CloseTodayRatioByMoney": "CloseTodayRatioByVolume",
+        "CloseTodayRatioByVolume": "CloseTodayRatioByMoney",
+    }
+    return pairs.get(field_name, "")
 
 
 def _columns() -> list[str]:
