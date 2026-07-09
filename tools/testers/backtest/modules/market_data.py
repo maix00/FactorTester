@@ -85,6 +85,7 @@ class MarketDataStore:
     historical_field_frame_row_cache: dict[Any, dict[Any, dict[str, object]]] = field(default_factory=dict)
     historical_field_frame_index_cache: dict[int, tuple[pd.Index, Any]] = field(default_factory=dict)
     historical_field_frame_values_cache: dict[int, tuple[pd.DataFrame, Any]] = field(default_factory=dict)
+    historical_field_latest_available_warning_keys: set[tuple[str, str, Any]] = field(default_factory=set)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
@@ -104,6 +105,7 @@ class MarketDataStore:
         self.historical_field_frame_row_cache.clear()
         self.historical_field_frame_index_cache.clear()
         self.historical_field_frame_values_cache.clear()
+        self.historical_field_latest_available_warning_keys.clear()
 
 
 class MarketDataModule(ExecutableModule):
@@ -1751,6 +1753,15 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
             values_cache=store.historical_field_frame_values_cache,
         )
         resolved = _apply_exchange_rule_defaults(state, frame_result, instruments, field_names, timestamp)
+        _record_latest_available_historical_field_warnings(
+            state,
+            instruments,
+            field_names,
+            timestamp,
+            provider=provider,
+            resolver=resolver,
+            policy=policy,
+        )
         store.historical_fields_cache[cache_key] = resolved
         return resolved
     resolved_result: dict[Any, dict[str, object]] = {}
@@ -1768,8 +1779,95 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
             raise
         resolved_result[instrument] = values
     resolved = _apply_exchange_rule_defaults(state, resolved_result, instruments, field_names, timestamp)
+    _record_latest_available_historical_field_warnings(
+        state,
+        instruments,
+        field_names,
+        timestamp,
+        provider=provider,
+        resolver=resolver,
+        policy=policy,
+    )
     store.historical_fields_cache[cache_key] = resolved
     return resolved
+
+
+def _record_latest_available_historical_field_warnings(
+    state,
+    instruments: list[Any],
+    field_names: tuple[object, ...],
+    timestamp: pd.Timestamp,
+    *,
+    provider: FieldHistoryProvider,
+    resolver: TradingDayResolver,
+    policy: str,
+) -> None:
+    if str(policy) != HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value:
+        return
+    store = market_data_store_for(state)
+    for instrument in instruments:
+        instrument_name = str(getattr(instrument, "name", instrument) or "")
+        for raw_field in field_names:
+            field = str(raw_field)
+            cache_key = (instrument_name, field, _event_lookup_cache_key(pd.Timestamp(timestamp)))
+            if cache_key in store.historical_field_latest_available_warning_keys:
+                continue
+            store.historical_field_latest_available_warning_keys.add(cache_key)
+            try:
+                provider.resolve_at(
+                    instrument,
+                    field,
+                    timestamp,
+                    trading_day_resolver=resolver,
+                    fallback=HistoricalFieldFallbackPolicy.STRICT_HISTORICAL,
+                )
+                continue
+            except HistoricalFieldLookupError:
+                pass
+            try:
+                resolved = provider.resolve_at(
+                    instrument,
+                    field,
+                    timestamp,
+                    trading_day_resolver=resolver,
+                    fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+                )
+            except HistoricalFieldLookupError:
+                continue
+            if not resolved.approximated:
+                continue
+            _record_latest_available_historical_field_warning(state, instrument, timestamp, field, resolved)
+
+
+def _record_latest_available_historical_field_warning(
+    state,
+    product: Any,
+    timestamp: pd.Timestamp,
+    field_name: str,
+    resolved: Any,
+) -> None:
+    from tools.testers.backtest.modules.runtime_info import record_runtime_fallback_interval
+
+    effective = getattr(resolved, "effective_timestamp", None) or getattr(resolved, "effective_trading_day", None)
+    value = getattr(resolved, "value", None)
+    notice = getattr(resolved, "source_notice_id", "") or getattr(resolved, "source_key", "")
+    record_runtime_fallback_interval(
+        state,
+        code="historical_field_latest_available_backfill",
+        type="历史交易字段",
+        status="已向前回填",
+        product=product,
+        timestamp=timestamp,
+        source=field_name,
+        fallback=f"latest_available:{effective}:{value}",
+        reason="查询时间早于该字段首条权威历史记录，auto 模式使用最近可得规则",
+        extra={
+            "field_name": field_name,
+            "effective": str(effective),
+            "value": value,
+            "source_notice_id": str(notice),
+        },
+    )
 
 
 def _event_lookup_cache_key(timestamp: pd.Timestamp) -> Any:

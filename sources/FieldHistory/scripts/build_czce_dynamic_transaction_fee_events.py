@@ -42,6 +42,7 @@ DEFAULT_OUTPUT_FILE = (
     / "TransactionFee"
     / "czce_dynamic_notice_events.jsonl"
 )
+DEFAULT_EVENTS_DIR = Path("sources") / "FieldHistory" / "events" / "TransactionFee"
 
 
 @dataclass(frozen=True)
@@ -100,12 +101,14 @@ RULE_2020_481 = DynamicFeeRule(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot-file", default=str(DEFAULT_SNAPSHOT_FILE))
+    parser.add_argument("--events-dir", default=str(DEFAULT_EVENTS_DIR))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_FILE))
     args = parser.parse_args(argv)
 
     snapshots = _load_czce_fee_snapshots(Path(args.snapshot_file))
-    events = build_events(snapshots, rules=[RULE_2020_481])
     output = Path(args.output)
+    prior_events = _load_prior_fee_events(Path(args.events_dir), exclude_paths={output.resolve()})
+    events = build_events(snapshots, rules=[RULE_2020_481], prior_events=prior_events)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as handle:
         for event in events:
@@ -114,14 +117,29 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def build_events(snapshots: list[dict[str, Any]], *, rules: list[DynamicFeeRule]) -> list[dict[str, Any]]:
+def build_events(
+    snapshots: list[dict[str, Any]],
+    *,
+    rules: list[DynamicFeeRule],
+    prior_events: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     events: dict[str, dict[str, Any]] = {}
     trading_days = sorted({str(row["effective_trading_day"]) for row in snapshots})
+    prior_rows = prior_events or []
     for rule in rules:
         for instrument, contract_code in _matching_contracts(snapshots, rule):
             scheduled_day = _scheduled_effective_day(contract_code, rule=rule, trading_days=trading_days)
             label, open_close_fee, close_today_fee = rule.instruments[instrument]
             for field_name, value in _fee_field_values(open_close_fee, close_today_fee).items():
+                previous = _latest_prior_value(
+                    prior_rows,
+                    instrument=instrument,
+                    field_name=field_name,
+                    contract_code=contract_code,
+                    before_trading_day=scheduled_day,
+                )
+                if previous is not None and previous == value:
+                    continue
                 event = _event(
                     rule=rule,
                     instrument=instrument,
@@ -146,6 +164,73 @@ def _load_czce_fee_snapshots(path: Path) -> list[dict[str, Any]]:
             if row.get("data_source") == "CZCE" and row.get("field_name") in FEE_FIELDS:
                 rows.append(row)
     return rows
+
+
+def _load_prior_fee_events(events_dir: Path, *, exclude_paths: set[Path]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in sorted(events_dir.glob("*.jsonl")):
+        if path.resolve() in exclude_paths:
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                row = json.loads(text)
+                if row.get("field_group") == "TransactionFee" and row.get("field_name") in FEE_FIELDS:
+                    rows.append(row)
+    return rows
+
+
+def _latest_prior_value(
+    rows: list[dict[str, Any]],
+    *,
+    instrument: str,
+    field_name: str,
+    contract_code: str,
+    before_trading_day: str,
+) -> float | None:
+    candidates: list[tuple[str, str, int, float]] = []
+    for row in rows:
+        if str(row.get("instrument") or "").upper() != instrument:
+            continue
+        if row.get("field_name") != field_name:
+            continue
+        day = str(row.get("effective_trading_day") or "")
+        if not day or day >= before_trading_day:
+            continue
+        scope_rank = _scope_rank_for_contract(row, contract_code)
+        if scope_rank < 0:
+            continue
+        value = _float_value(row.get("value"))
+        if value is None:
+            continue
+        candidates.append((day, str(row.get("effective_timestamp") or ""), scope_rank, value))
+    if not candidates:
+        return None
+    # Later effective date wins; at the same date, contract-specific rows beat product-level rows.
+    return sorted(candidates, key=lambda item: (item[0], item[1], item[2]))[-1][3]
+
+
+def _scope_rank_for_contract(row: dict[str, Any], contract_code: str) -> int:
+    scope_type = str(row.get("contract_scope_type") or "all")
+    if scope_type == "all":
+        return 0
+    codes = {str(code).strip().upper() for code in (row.get("contract_codes") or [])}
+    if contract_code in codes:
+        return 2
+    start = str(row.get("contract_code_start") or "").strip().upper()
+    end = str(row.get("contract_code_end") or "").strip().upper()
+    if start and end and start <= contract_code <= end:
+        return 1
+    return -1
+
+
+def _float_value(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _matching_contracts(snapshots: list[dict[str, Any]], rule: DynamicFeeRule) -> list[tuple[str, str]]:
@@ -184,11 +269,8 @@ def _scheduled_effective_day(contract_code: str, *, rule: DynamicFeeRule, tradin
 
 def _fee_field_values(open_close_fee: float, close_today_fee: float) -> dict[str, float]:
     return {
-        "OpenRatioByMoney": 0.0,
         "OpenRatioByVolume": open_close_fee,
-        "CloseRatioByMoney": 0.0,
         "CloseRatioByVolume": open_close_fee,
-        "CloseTodayRatioByMoney": 0.0,
         "CloseTodayRatioByVolume": close_today_fee,
     }
 

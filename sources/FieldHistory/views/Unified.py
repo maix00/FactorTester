@@ -21,7 +21,6 @@ from tools.data.field_history import (
     _normalise_change_type,
     _normalise_contract_scope_type,
     load_historical_field_frame,
-    load_openctp_latest_market_rule_frame,
 )
 from tools.data.hub import DataHub
 
@@ -32,6 +31,8 @@ _GROUP_COLUMNS = [
     "instrument",
     "instrument_label",
     "instrument_type",
+    "scope_type",
+    "exchange",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",
@@ -47,8 +48,7 @@ _GROUP_COLUMNS = [
 
 def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
     historical = load_historical_field_frame(store_key=store_key)
-    latest = load_openctp_latest_market_rule_frame(store_key=store_key)
-    frames = [frame for frame in (historical, latest) if not frame.empty]
+    frames = [frame for frame in (historical,) if not frame.empty]
     if not frames:
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
     frame = cast(pd.DataFrame, pd.concat(frames, ignore_index=True, sort=False))

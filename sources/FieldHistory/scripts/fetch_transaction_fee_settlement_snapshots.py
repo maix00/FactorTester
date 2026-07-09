@@ -20,6 +20,7 @@ import requests
 CFFEX_FUTURES = {"IC", "IF", "IH", "IM", "T", "TF", "TL", "TS"}
 INE_INSTRUMENTS = {"SC", "LU", "NR", "BC", "EC"}
 SOURCE_LABEL = {
+    "DCE": "大连商品交易所结算参数表",
     "SHFE": "上海期货交易所结算参数表",
     "INE": "上海国际能源交易中心结算参数表",
     "CFFEX": "中国金融期货交易所结算业务参数表",
@@ -55,12 +56,22 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Exchange market. Defaults to SHFE, INE, and CFFEX.",
     )
+    parser.add_argument(
+        "--dce-csv",
+        action="append",
+        default=[],
+        help=(
+            "Manually downloaded DCE settlement-parameter CSV. May be repeated. "
+            "Used as audit snapshot input only; DCE's site currently requires real UI interaction."
+        ),
+    )
     parser.add_argument("--source-accessed-at", required=True, help="ISO timestamp for source access")
     parser.add_argument("--output", required=True, help="Output JSONL path")
     args = parser.parse_args(argv)
 
     REQUEST_TIMEOUT = args.timeout
     markets = args.market or ["SHFE", "INE", "CFFEX", "CZCE", "GFEX"]
+    dce_csv_by_date = _dce_csv_by_date(args.dce_csv)
     dates = _requested_dates(
         args.date,
         start_date=args.start_date,
@@ -76,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         strict=args.strict,
         workers=max(1, args.workers),
         progress_every=args.progress_every,
+        dce_csv_by_date=dce_csv_by_date,
     )
 
     deduped: list[dict[str, Any]] = []
@@ -109,12 +121,20 @@ def _fetch_rows(
     strict: bool,
     workers: int,
     progress_every: int,
+    dce_csv_by_date: dict[str, Path],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if workers <= 1:
         for attempts, (market, date) in enumerate(tasks, start=1):
             try:
-                rows.extend(_rows_for_market(market, date, source_accessed_at=source_accessed_at))
+                rows.extend(
+                    _rows_for_market(
+                        market,
+                        date,
+                        source_accessed_at=source_accessed_at,
+                        dce_csv_by_date=dce_csv_by_date,
+                    )
+                )
             except (requests.RequestException, ValueError, json.JSONDecodeError) as exc:
                 if strict:
                     raise
@@ -125,7 +145,13 @@ def _fetch_rows(
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_map = {
-            executor.submit(_rows_for_market, market, date, source_accessed_at=source_accessed_at): (market, date)
+            executor.submit(
+                _rows_for_market,
+                market,
+                date,
+                source_accessed_at=source_accessed_at,
+                dce_csv_by_date=dce_csv_by_date,
+            ): (market, date)
             for market, date in tasks
         }
         for attempts, future in enumerate(as_completed(future_map), start=1):
@@ -141,7 +167,18 @@ def _fetch_rows(
     return rows
 
 
-def _rows_for_market(market: str, date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
+def _rows_for_market(
+    market: str,
+    date: str,
+    *,
+    source_accessed_at: str,
+    dce_csv_by_date: dict[str, Path],
+) -> list[dict[str, Any]]:
+    if market == "DCE":
+        path = dce_csv_by_date.get(date)
+        if path is None:
+            raise ValueError(f"DCE settlement CSV not provided for {date}; pass --dce-csv")
+        return _dce_rows(date, path=path, source_accessed_at=source_accessed_at)
     if market in {"SHFE", "INE"}:
         return _shfe_like_rows(market, date, source_accessed_at=source_accessed_at)
     if market == "CFFEX":
@@ -151,6 +188,26 @@ def _rows_for_market(market: str, date: str, *, source_accessed_at: str) -> list
     if market == "GFEX":
         return _gfex_rows(date, source_accessed_at=source_accessed_at)
     raise ValueError(f"unsupported market: {market}")
+
+
+def _dce_csv_by_date(paths: list[str]) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for raw_path in paths:
+        path = Path(raw_path).expanduser().resolve()
+        date = _dce_csv_date(path)
+        if date in result and result[date] != path:
+            raise ValueError(f"multiple DCE CSV files provided for {date}: {result[date]} and {path}")
+        result[date] = path
+    return result
+
+
+def _dce_csv_date(path: Path) -> str:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        first = handle.readline().strip()
+    match = re.search(r"(20[0-9]{6})", first)
+    if not match:
+        raise ValueError(f"cannot parse DCE CSV snapshot date from first line: {path}")
+    return match.group(1)
 
 
 def _requested_dates(
@@ -223,17 +280,15 @@ def _shfe_like_rows(market: str, date: str, *, source_accessed_at: str) -> list[
             continue
         trade_unit = float(item.get("TRADEFEEUNIT") or 0.0)
         trade_ratio = float(item.get("TRADEFEERATIO") or 0.0)
-        close_today_unit = float(item.get("TTRADEFEEUNIT") or 0.0)
-        close_today_ratio = float(item.get("TTRADEFEERATIO") or 0.0)
         open_money, open_volume = (0.0, trade_unit) if trade_unit else (trade_ratio / 1000.0, 0.0)
-        close_today_money, close_today_volume = (
-            (0.0, close_today_unit) if close_today_unit else (close_today_ratio / 1000.0, 0.0)
-        )
+        # SHFE/INE TTRADEFEERATIO/TTRADEFEEUNIT match hedge transaction-fee
+        # values from official fee-change attachments, not normal close-today
+        # values. ISUNITODAY is a feed flag, not a fee amount. Close-today rows
+        # must come from explicit close-today notices or fields.
         label = str(item.get("PRODUCTNAME") or "")
         for leg, money, volume in (
             ("open", open_money, open_volume),
             ("close", open_money, open_volume),
-            ("close_today", close_today_money, close_today_volume),
         ):
             _add_leg(
                 rows,
@@ -403,6 +458,54 @@ def _gfex_rows(date: str, *, source_accessed_at: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _dce_rows(date: str, *, path: Path, source_accessed_at: str) -> list[dict[str, Any]]:
+    if _dce_csv_date(path) != date:
+        raise ValueError(f"DCE CSV {path} does not match requested date {date}")
+    rows: list[dict[str, Any]] = []
+    source_url = f"file://{path}"
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        title = handle.readline().strip()
+        reader = csv.DictReader(handle)
+        for item in reader:
+            symbol = str(item.get("合约") or "").strip()
+            if not symbol:
+                continue
+            style = str(item.get("手续费收取方式") or "").strip()
+            open_fee = _parse_number(item.get("手续费投机非日内开仓"))
+            close_fee = _parse_number(item.get("手续费投机非日内平仓"))
+            close_today_fee = _parse_number(item.get("手续费投机日内平仓"))
+            if style == "绝对值":
+                open_money, open_volume = 0.0, open_fee
+                close_money, close_volume = 0.0, close_fee
+                close_today_money, close_today_volume = 0.0, close_today_fee
+            elif style == "比例值":
+                open_money, open_volume = open_fee / 10000.0, 0.0
+                close_money, close_volume = close_fee / 10000.0, 0.0
+                close_today_money, close_today_volume = close_today_fee / 10000.0, 0.0
+            else:
+                continue
+            label = str(item.get("品种名称") or _instrument(symbol))
+            for leg, money, volume in (
+                ("open", open_money, open_volume),
+                ("close", close_money, close_volume),
+                ("close_today", close_today_money, close_today_volume),
+            ):
+                _add_leg(
+                    rows,
+                    market="DCE",
+                    date=date,
+                    source_url=source_url,
+                    source_accessed_at=source_accessed_at,
+                    symbol=symbol,
+                    label=label,
+                    leg=leg,
+                    money=money,
+                    volume=volume,
+                )
+            rows[-1]["parser_notes"] += f" Source CSV title: {title}."
+    return rows
+
+
 def _parse_czce_pipe_rows(text: str) -> list[dict[str, str]]:
     lines = [line.strip("\ufeff\r\n") for line in text.splitlines() if line.strip()]
     if len(lines) < 3:
@@ -481,7 +584,7 @@ def _add_event(
         "agent_name": "codex",
         "contract_codes": [code] if code else [],
         "data_source": market,
-        "effective_timestamp": "",
+        "effective_timestamp": _snapshot_effective_timestamp(market, date),
         "effective_trading_day": f"{date[:4]}-{date[4:6]}-{date[6:]}",
         "event_id": "transaction_fee_settle_" + _sha1(market, date, symbol, field_name, value),
         "evidence_text": evidence,
@@ -500,6 +603,11 @@ def _add_event(
         "source_url": source_url,
         "value": float(value),
     })
+
+
+def _snapshot_effective_timestamp(market: str, date: str) -> str:
+    open_time = "09:30:00" if market == "CFFEX" else "09:00:00"
+    return f"{date[:4]}-{date[4:6]}-{date[6:]} {open_time}"
 
 
 def _parse_cffex_fee(raw: str, *, base_money: float | None = None, base_volume: float | None = None) -> tuple[float, float]:

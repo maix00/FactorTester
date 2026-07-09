@@ -1,9 +1,8 @@
 """Unified transaction-fee historical-field view.
 
-Historical exchange notices and provider baselines are appended to
-``historical_field_values``. This view deduplicates those rows and includes
-OpenCTP's latest contract snapshot as a current baseline so MarketDataModule can
-read one provider for both historical events and today's listed contracts.
+Historical exchange notices are appended to ``historical_field_values``. This
+view deduplicates those rows and can also expose OpenCTP's latest contract
+snapshot as a broker/current snapshot for the explicit ``openctp`` source.
 """
 
 from __future__ import annotations
@@ -49,6 +48,8 @@ _GROUP_COLUMNS = [
     "instrument",
     "instrument_label",
     "instrument_type",
+    "scope_type",
+    "exchange",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",

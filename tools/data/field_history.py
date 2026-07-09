@@ -71,17 +71,31 @@ TRANSACTION_FEE_SOURCES = (
     TRANSACTION_FEE_SOURCE_OPENCTP,
 )
 
+FIELD_HISTORY_VALUE_CHANGE_TYPES = {
+    "change",
+    "baseline",
+    "reaffirmation",
+    "exception_unchanged",
+    "asof_confirmed",
+    "rule",
+}
+
 FIELD_HISTORY_COLUMNS = [
     "provider",
     "source_key",
     "instrument",
     "instrument_label",
     "instrument_type",
+    "scope_type",
+    "exchange",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",
     "value",
     "value_type",
+    "previous_value",
+    "previous_value_type",
+    "previous_value_note",
     "contract_codes",
     "contract_scope_type",
     "contract_code_start",
@@ -125,6 +139,10 @@ class MissingHistoricalField(HistoricalFieldLookupError):
     pass
 
 
+class HistoricalFieldIntegrityError(HistoricalFieldLookupError):
+    pass
+
+
 class TradingDayResolver(Protocol):
     def resolve_trading_day(self, timestamp: Any, instrument: str | None = None) -> pd.Timestamp: ...
 
@@ -135,6 +153,7 @@ class FieldInstrumentIdentity:
     product_code: str
     instrument_type: str = "future"
     contract_code: str | None = None
+    exchange: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,13 +260,17 @@ class FieldHistoryProvider:
     def __init__(self, frame: pd.DataFrame) -> None:
         self.frame = _normalise_history_frame(frame)
         if not self.frame.empty:
+            self.frame = cast(
+                pd.DataFrame,
+                self.frame[_series(self.frame, "change_type").isin(FIELD_HISTORY_VALUE_CHANGE_TYPES)].copy(),
+            )
             self.frame = self.frame.sort_values(
                 ["instrument", "field_name", "effective_trading_day", "effective_timestamp"]
             ).reset_index(drop=True)
             self.frame["_scope_codes"] = _series(self.frame, "contract_codes").map(_decode_contract_codes)
             self.frame["_scope_type"] = _series(self.frame, "contract_scope_type").map(_normalise_contract_scope_type)
             self.frame["_product_level"] = _series(self.frame, "_scope_type").map(lambda value: value == "all")
-        self._subset_cache: dict[tuple[str, str, str], pd.DataFrame] = {}
+        self._subset_cache: dict[tuple[str, str, str, str], pd.DataFrame] = {}
         self._subset_index = self._build_subset_index()
 
     @classmethod
@@ -266,7 +289,7 @@ class FieldHistoryProvider:
         policy = HistoricalFieldFallbackPolicy(fallback)
         day = _normalise_trading_day(trading_day)
         identity = _resolve_field_instrument_identity(instrument, day, instrument_type=instrument_type)
-        subset = self._subset(identity.product_code, field_name, identity.instrument_type)
+        subset = self._subset(identity.product_code, field_name, identity.instrument_type, exchange=identity.exchange)
         eligible = cast(pd.DataFrame, subset[_series(subset, "effective_trading_day") <= day])
         eligible = _filter_contract_scope(eligible, identity.contract_code)
         approximated = False
@@ -291,6 +314,13 @@ class FieldHistoryProvider:
                 ],
             )
         row = _sort_history_candidates(eligible, effective_key="effective_trading_day").iloc[-1]
+        self._assert_previous_value_integrity(
+            row,
+            subset,
+            contract_code=identity.contract_code,
+            raw_instrument=identity.raw_instrument,
+            field_name=field_name,
+        )
         return HistoricalFieldValue(
             instrument=identity.product_code,
             field_name=field_name,
@@ -321,7 +351,7 @@ class FieldHistoryProvider:
         trading_day = trading_day_resolver.resolve_trading_day(ts, _instrument_name(instrument))
         identity = _resolve_field_instrument_identity(instrument, trading_day, instrument_type=instrument_type)
         policy = HistoricalFieldFallbackPolicy(fallback)
-        subset = self._subset(identity.product_code, field_name, identity.instrument_type)
+        subset = self._subset(identity.product_code, field_name, identity.instrument_type, exchange=identity.exchange)
         effective_timestamp = _series(subset, "effective_timestamp")
         effective_trading_day = _series(subset, "effective_trading_day")
         timestamp_mask = effective_timestamp.notna() & (effective_timestamp <= ts)
@@ -352,6 +382,13 @@ class FieldHistoryProvider:
                 ],
             )
         row = _sort_history_candidates(candidates, effective_key="_effective_sort_key").iloc[-1]
+        self._assert_previous_value_integrity(
+            row,
+            subset,
+            contract_code=identity.contract_code,
+            raw_instrument=identity.raw_instrument,
+            field_name=field_name,
+        )
         return HistoricalFieldValue(
             instrument=identity.product_code,
             field_name=field_name,
@@ -399,7 +436,9 @@ class FieldHistoryProvider:
     ) -> pd.DataFrame:
         timestamps = [_normalise_timestamp_key(timestamp) for timestamp in index]
         if not timestamps:
-            return pd.DataFrame(columns=["_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code"])
+            return pd.DataFrame(columns=[
+                "_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code", "exchange"
+            ])
         trading_days = [
             trading_day_resolver.resolve_trading_day(timestamp, _instrument_name(instrument))
             for timestamp in timestamps
@@ -415,6 +454,7 @@ class FieldHistoryProvider:
             "product_code": [identity.product_code for identity in identities],
             "instrument_type": [identity.instrument_type for identity in identities],
             "contract_code": [identity.contract_code or "" for identity in identities],
+            "exchange": [identity.exchange or "" for identity in identities],
         })
         return query_frame
 
@@ -431,7 +471,9 @@ class FieldHistoryProvider:
         if len(normalized_timestamps) != len(normalized_days):
             raise ValueError("timestamps and trading_days must have the same length")
         if not normalized_timestamps:
-            return pd.DataFrame(columns=["_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code"])
+            return pd.DataFrame(columns=[
+                "_row", "timestamp", "trading_day", "product_code", "instrument_type", "contract_code", "exchange"
+            ])
         identities_by_day = {
             day: _resolve_field_instrument_identity(instrument, day, instrument_type=instrument_type)
             for day in dict.fromkeys(normalized_days)
@@ -444,6 +486,7 @@ class FieldHistoryProvider:
             "product_code": [identity.product_code for identity in identities],
             "instrument_type": [identity.instrument_type for identity in identities],
             "contract_code": [identity.contract_code or "" for identity in identities],
+            "exchange": [identity.exchange or "" for identity in identities],
         })
 
     def values_for_query_frame(
@@ -459,10 +502,15 @@ class FieldHistoryProvider:
             return pd.Series([], index=pd.DatetimeIndex([]), name=field_name, dtype=object)
         timestamps = list(_series(query_frame, "timestamp"))
         row_values: list[pd.Series] = []
-        for key, group in query_frame.groupby(["product_code", "instrument_type"], sort=False):
-            product_code, resolved_type = cast(tuple[Any, Any], key)
+        for key, group in query_frame.groupby(["product_code", "instrument_type", "exchange"], sort=False):
+            product_code, resolved_type, exchange = cast(tuple[Any, Any, Any], key)
             try:
-                subset = self._subset(str(product_code), field_name, str(resolved_type))
+                subset = self._subset(
+                    str(product_code),
+                    field_name,
+                    str(resolved_type),
+                    exchange=str(exchange or "") or None,
+                )
             except MissingHistoricalField:
                 if policy == HistoricalFieldFallbackPolicy.STRICT_HISTORICAL:
                     raise
@@ -513,36 +561,103 @@ class FieldHistoryProvider:
         }
         return pd.DataFrame(columns)
 
-    def _subset(self, instrument: str, field_name: str, instrument_type: str | None) -> pd.DataFrame:
-        cache_key = (instrument, field_name, instrument_type or "")
+    def _assert_previous_value_integrity(
+        self,
+        row: pd.Series,
+        subset: pd.DataFrame,
+        *,
+        contract_code: str | None,
+        raw_instrument: str,
+        field_name: str,
+    ) -> None:
+        previous_value = _decode_optional_value(row.get("previous_value"), row.get("previous_value_type"))
+        if previous_value is None:
+            return
+        prior = _prior_history_row_for_previous_value(subset, row, contract_code=contract_code)
+        if prior is None:
+            raise HistoricalFieldIntegrityError(
+                _previous_value_integrity_message(
+                    row,
+                    raw_instrument=raw_instrument,
+                    field_name=field_name,
+                    reason="no prior historical value",
+                    prior=None,
+                    expected=previous_value,
+                )
+            )
+        actual = _decode_value(prior.get("value"), prior.get("value_type"))
+        if not _same_decoded_value(actual, previous_value):
+            raise HistoricalFieldIntegrityError(
+                _previous_value_integrity_message(
+                    row,
+                    raw_instrument=raw_instrument,
+                    field_name=field_name,
+                    reason=f"previous_value mismatch: expected {previous_value!r}, found {actual!r}",
+                    prior=prior,
+                    expected=previous_value,
+                )
+            )
+
+    def _subset(
+        self,
+        instrument: str,
+        field_name: str,
+        instrument_type: str | None,
+        *,
+        exchange: str | None = None,
+    ) -> pd.DataFrame:
+        normalized_exchange = str(exchange or "").upper()
+        cache_key = (instrument, field_name, instrument_type or "", normalized_exchange)
         cached = self._subset_cache.get(cache_key)
         if cached is not None:
             return cached
         if self.frame.empty:
             raise MissingHistoricalField("historical field table is empty")
+        parts: list[pd.DataFrame] = []
         if instrument_type:
             subset = self._subset_index.get((instrument, field_name, instrument_type or ""))
             if subset is not None and not subset.empty:
-                self._subset_cache[cache_key] = subset
-                return subset
-        instrument_matches = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == instrument])
-        if instrument_matches.empty:
-            raise MissingHistoricalField(f"no historical field rows for instrument={instrument}")
-        type_matches = instrument_matches
-        if instrument_type:
-            type_matches = cast(
-                pd.DataFrame,
-                instrument_matches[_series(instrument_matches, "instrument_type") == instrument_type],
-            )
-            if type_matches.empty:
-                raise MissingHistoricalField(
-                    f"no historical field rows for instrument={instrument}, instrument_type={instrument_type}"
-                )
-        subset = cast(pd.DataFrame, type_matches[_series(type_matches, "field_name") == field_name])
-        if subset.empty:
-            raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}")
+                parts.append(subset)
+        if not parts:
+            instrument_matches = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == instrument])
+            if not instrument_matches.empty:
+                type_matches = instrument_matches
+                if instrument_type:
+                    type_matches = cast(
+                        pd.DataFrame,
+                        instrument_matches[_series(instrument_matches, "instrument_type") == instrument_type],
+                    )
+                subset = cast(pd.DataFrame, type_matches[_series(type_matches, "field_name") == field_name])
+                if not subset.empty:
+                    parts.append(subset)
+        if normalized_exchange:
+            exchange_default = self._exchange_default_subset(normalized_exchange, field_name, instrument_type)
+            if exchange_default is not None and not exchange_default.empty:
+                parts.append(exchange_default)
+        if not parts:
+            suffix = f", exchange={normalized_exchange}" if normalized_exchange else ""
+            raise MissingHistoricalField(f"no historical field rows for {instrument}.{field_name}{suffix}")
+        subset = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
         self._subset_cache[cache_key] = subset
         return subset
+
+    def _exchange_default_subset(
+        self,
+        exchange: str,
+        field_name: str,
+        instrument_type: str | None,
+    ) -> pd.DataFrame | None:
+        indexed = self._subset_index.get(("*", field_name, instrument_type or "")) if instrument_type else None
+        if indexed is None:
+            indexed = cast(pd.DataFrame, self.frame[_series(self.frame, "instrument") == "*"])
+            indexed = cast(pd.DataFrame, indexed[_series(indexed, "field_name") == field_name])
+            if instrument_type:
+                indexed = cast(pd.DataFrame, indexed[_series(indexed, "instrument_type") == instrument_type])
+        if indexed.empty:
+            return None
+        scope = _series(indexed, "scope_type").astype(str).str.lower()
+        exchanges = _series(indexed, "exchange").astype(str).str.upper()
+        return cast(pd.DataFrame, indexed[(scope == "exchange_default") & (exchanges == exchange)])
 
     def _build_subset_index(self) -> dict[tuple[str, str, str], pd.DataFrame]:
         if self.frame.empty:
@@ -699,6 +814,7 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
 
     source_date = str(specs.attrs.get("fee_source_date") or "")
+    effective_trading_day = _source_date_to_trading_day(source_date)
     source_key_suffix = source_date or "latest"
     rows: list[dict[str, Any]] = []
     for _, spec in specs.iterrows():
@@ -724,7 +840,7 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
                 "instrument_label": instrument_label,
                 "instrument_type": "future",
                 "field_name": field_name,
-                "effective_trading_day": "1900-01-01",
+                "effective_trading_day": effective_trading_day,
                 "effective_timestamp": "",
                 "value": value,
                 "value_type": "",
@@ -740,6 +856,7 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
         product_specs = pd.DataFrame()
     if not product_specs.empty:
         product_source_date = str(product_specs.attrs.get("fee_source_date") or source_date or "")
+        product_effective_trading_day = _source_date_to_trading_day(product_source_date)
         product_source_key_suffix = product_source_date or source_key_suffix
         for _, spec in product_specs.iterrows():
             product_id = str(spec.get("ProductID") or "").strip().upper()
@@ -759,7 +876,7 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
                     "instrument_label": instrument_label,
                     "instrument_type": "future",
                     "field_name": field_name,
-                    "effective_trading_day": "1900-01-01",
+                    "effective_trading_day": product_effective_trading_day,
                     "effective_timestamp": "",
                     "value": value,
                     "value_type": "",
@@ -770,6 +887,15 @@ def load_openctp_latest_market_rule_frame(*, store_key: str = "openctp") -> pd.D
                     "raw_note": "Latest OpenCTP product-level market-rule baseline used when no contract-specific historical event is available.",
                 })
     return _normalise_history_frame(pd.DataFrame(rows))
+
+
+def _source_date_to_trading_day(source_date: str) -> str:
+    timestamp = pd.to_datetime(str(source_date or "").strip(), format="%Y%m%d", errors="coerce")
+    if pd.isna(timestamp):
+        timestamp = pd.to_datetime(str(source_date or "").strip(), errors="coerce")
+    if pd.isna(timestamp):
+        raise ValueError("OpenCTP latest market-rule snapshot is missing source_date; refusing to create a baseline")
+    return pd.Timestamp(timestamp).strftime("%Y-%m-%d")
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -802,11 +928,16 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             instrument TEXT NOT NULL,
             instrument_label TEXT,
             instrument_type TEXT NOT NULL,
+            scope_type TEXT NOT NULL DEFAULT 'product',
+            exchange TEXT,
             field_name TEXT NOT NULL,
             effective_trading_day TEXT NOT NULL,
             effective_timestamp TEXT,
             value TEXT NOT NULL,
             value_type TEXT NOT NULL,
+            previous_value TEXT,
+            previous_value_type TEXT,
+            previous_value_note TEXT,
             contract_codes TEXT NOT NULL,
             contract_scope_type TEXT NOT NULL DEFAULT 'all',
             contract_code_start TEXT,
@@ -828,6 +959,16 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN effective_timestamp TEXT')
     if "source_notice_id" not in existing_columns:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN source_notice_id TEXT')
+    if "previous_value" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN previous_value TEXT')
+    if "previous_value_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN previous_value_type TEXT')
+    if "previous_value_note" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN previous_value_note TEXT')
+    if "scope_type" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN scope_type TEXT NOT NULL DEFAULT "product"')
+    if "exchange" not in existing_columns:
+        conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN exchange TEXT')
     if "contract_scope_type" not in existing_columns:
         conn.execute(f'ALTER TABLE "{HISTORICAL_FIELD_TABLE}" ADD COLUMN contract_scope_type TEXT NOT NULL DEFAULT "all"')
     if "contract_code_start" not in existing_columns:
@@ -893,13 +1034,16 @@ def _normalise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
     df = frame.copy()
     for column in FIELD_HISTORY_COLUMNS:
         if column not in df.columns:
-            df[column] = "" if column not in {"value", "effective_trading_day"} else None
+            df[column] = "" if column not in {"value", "previous_value", "effective_trading_day"} else None
     df = cast(pd.DataFrame, df[FIELD_HISTORY_COLUMNS].copy())
     df["instrument"] = _series(df, "instrument").astype(str).str.strip()
     df["field_name"] = _series(df, "field_name").astype(str).str.strip()
     df["provider"] = _series(df, "provider").astype(str).str.strip()
     df["source_key"] = _series(df, "source_key").astype(str).str.strip()
     df["instrument_type"] = _series(df, "instrument_type").replace("", "unknown").fillna("unknown")
+    df["scope_type"] = _series(df, "scope_type").replace("", "product").fillna("product")
+    df["scope_type"] = _series(df, "scope_type").astype(str).str.strip().str.lower()
+    df["exchange"] = _series(df, "exchange").fillna("").astype(str).str.strip().str.upper()
     df["effective_trading_day"] = cast(
         pd.Series,
         pd.to_datetime(_series(df, "effective_trading_day"), errors="coerce"),
@@ -914,6 +1058,12 @@ def _normalise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
     value_pairs = _series(df, "value").map(_encode_value)
     df["value"] = value_pairs.map(lambda item: item[0])
     df["value_type"] = _series(df, "value_type").fillna(value_pairs.map(lambda item: item[1]))
+    previous_pairs = _series(df, "previous_value").map(_encode_optional_value)
+    df["previous_value"] = previous_pairs.map(lambda item: item[0])
+    df["previous_value_type"] = _series(df, "previous_value_type").replace("", None).fillna(
+        previous_pairs.map(lambda item: item[1])
+    ).fillna("")
+    df["previous_value_note"] = _series(df, "previous_value_note").map(_clean_optional_text)
     df["contract_codes"] = _series(df, "contract_codes").map(_encode_contract_codes)
     df["contract_scope_type"] = [
         _normalise_contract_scope_type(scope_type, contract_codes=contract_codes, start=start, end=end)
@@ -938,6 +1088,16 @@ def _serialise_history_frame(frame: pd.DataFrame) -> pd.DataFrame:
         lambda value: "" if pd.isna(value) else pd.Timestamp(value).isoformat()
     )
     return df
+
+
+def _encode_optional_value(value: Any) -> tuple[str, str]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "", ""
+    text = str(value).strip() if isinstance(value, str) else None
+    if text is not None and text == "":
+        return "", ""
+    encoded, value_type = _encode_value(value)
+    return encoded, value_type
 
 
 def _normalise_timestamp_key(value: Any) -> pd.Timestamp:
@@ -1015,6 +1175,7 @@ def _resolve_field_instrument_identity(
             product_code=parsed_product or _product_code_from_product_name(product_name),
             instrument_type=resolved_type,
             contract_code=contract_code,
+            exchange=_exchange_from_instrument_name(raw_name) or _exchange_from_instrument_name(product_name),
         )
 
     if trading_day is not None and hasattr(instrument, "get_contract_id_from_trading_day"):
@@ -1038,6 +1199,7 @@ def _resolve_field_instrument_identity(
         product_code=product_code,
         instrument_type=resolved_type,
         contract_code=contract_code,
+        exchange=_exchange_from_instrument_name(raw_name),
     )
 
 
@@ -1126,6 +1288,28 @@ def _contract_code_from_instrument_name(name: str) -> str | None:
     return None
 
 
+def _exchange_from_instrument_name(name: str) -> str | None:
+    text = str(name or "").strip()
+    pipe_match = _PIPE_CONTRACT_PATTERN.match(text)
+    if pipe_match:
+        exchange = pipe_match.group("exchange").upper()
+        return {
+            "CZCE": "CZC",
+            "SHFE": "SHF",
+            "CFFEX": "CFE",
+            "GFEX": "GFE",
+            "INE": "INE",
+            "DCE": "DCE",
+        }.get(exchange, exchange)
+    contract_match = _DOTTED_CONTRACT_PATTERN.match(text)
+    if contract_match:
+        return contract_match.group("exchange").upper()
+    product_match = _DOTTED_PRODUCT_PATTERN.match(text)
+    if product_match:
+        return product_match.group("exchange").upper()
+    return None
+
+
 def _contract_month_from_instrument_id(instrument_id: str, product_id: str) -> str | None:
     text = str(instrument_id or "").strip().upper()
     product = str(product_id or "").strip().upper()
@@ -1174,7 +1358,7 @@ def _normalise_contract_scope_type(
 
 def _normalise_change_type(value: Any) -> str:
     text = _clean_optional_text(value).lower()
-    if text in {"change", "baseline", "reaffirmation", "exception_unchanged"}:
+    if text in FIELD_HISTORY_VALUE_CHANGE_TYPES or text == "rule":
         return text
     return "change"
 
@@ -1261,6 +1445,7 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
     df = frame.copy()
     scopes = _series(df, "contract_codes").map(_decode_contract_codes)
     scope_types = _series(df, "contract_scope_type").map(_normalise_contract_scope_type)
+    field_scope_types = _series(df, "scope_type").astype(str).str.lower()
     starts = _series(df, "contract_code_start")
     ends = _series(df, "contract_code_end")
     if contract_code:
@@ -1277,12 +1462,18 @@ def _filter_contract_scope(frame: pd.DataFrame, contract_code: str | None) -> pd
         scoped = cast(pd.DataFrame, df[priorities >= 0].copy())
         if scoped.empty:
             return scoped
-        scoped["_contract_scope_priority"] = priorities.loc[scoped.index]
+        scoped["_contract_scope_priority"] = priorities.loc[scoped.index] + 1
+        scoped.loc[field_scope_types.loc[scoped.index] == "exchange_default", "_contract_scope_priority"] = 0
         scoped = scoped.sort_values(
             by=["effective_trading_day", "effective_timestamp", "_contract_scope_priority"],
         )
         return scoped
-    return cast(pd.DataFrame, df[scope_types == "all"].copy())
+    scoped = cast(pd.DataFrame, df[scope_types == "all"].copy())
+    if not scoped.empty:
+        scoped["_contract_scope_priority"] = 1
+        exchange_default = field_scope_types.loc[scoped.index] == "exchange_default"
+        scoped.loc[exchange_default, "_contract_scope_priority"] = 0
+    return scoped
 
 
 def _field_provider_priority(provider: Any) -> int:
@@ -1373,6 +1564,7 @@ def _vectorized_values_from_subset(
     for contract_code, group in queries.groupby("contract_code", sort=False):
         contract = str(cast(Any, contract_code) or "")
         if contract:
+            field_scope_types = _series(records, "scope_type").astype(str).str.lower()
             priorities = pd.Series([
                 _contract_scope_priority(
                     scope_type=scope_type,
@@ -1389,10 +1581,13 @@ def _vectorized_values_from_subset(
                 )
             ], index=records.index)
             scoped = cast(pd.DataFrame, records[priorities >= 0].copy())
-            scoped["_scope_priority"] = priorities.loc[scoped.index]
+            scoped["_scope_priority"] = priorities.loc[scoped.index] + 1
+            scoped.loc[field_scope_types.loc[scoped.index] == "exchange_default", "_scope_priority"] = 0
         else:
             scoped = cast(pd.DataFrame, records[_series(records, "_product_level")].copy())
-            scoped["_scope_priority"] = 0
+            scoped["_scope_priority"] = 1
+            field_scope_types = _series(scoped, "scope_type").astype(str).str.lower()
+            scoped.loc[field_scope_types == "exchange_default", "_scope_priority"] = 0
         if scoped.empty:
             continue
         for priority, priority_records in scoped.groupby("_scope_priority", sort=False):
@@ -1432,6 +1627,12 @@ def _vectorized_values_from_subset(
             kind="mergesort",
         )
         best = all_candidates.groupby("_row", sort=False).tail(1)
+        _assert_vectorized_previous_value_integrity(
+            subset,
+            best,
+            raw_instrument=raw_instrument,
+            field_name=field_name,
+        )
         row_numbers = [int(cast(Any, row_number)) for row_number in best["_row"]]
         value_types = best["value_type"] if "value_type" in best.columns else pd.Series([""] * len(best))
         decoded_values = [
@@ -1456,6 +1657,13 @@ def _vectorized_values_from_subset(
             if fallback.empty:
                 continue
             fallback_row = fallback.iloc[0]
+            _assert_previous_value_integrity_row(
+                fallback_row,
+                subset,
+                contract_code=str(query.get("contract_code") or ""),
+                raw_instrument=raw_instrument,
+                field_name=field_name,
+            )
             result.at[row_number] = _decode_value(fallback_row["value"], fallback_row.get("value_type"))
         missing_rows = [int(cast(Any, row)) for row, value in result.items() if pd.isna(value)]
     if missing_rows:
@@ -1484,6 +1692,8 @@ def _constant_product_level_value(records: pd.DataFrame, queries: pd.DataFrame) 
     if len(records) != 1 or queries.empty:
         return None
     row = records.iloc[0]
+    if _decode_optional_value(row.get("previous_value"), row.get("previous_value_type")) is not None:
+        return None
     scope_codes = row.get("_scope_codes")
     if not isinstance(scope_codes, list) or scope_codes:
         return None
@@ -1510,7 +1720,10 @@ def _merge_asof_history_candidate(
 ) -> pd.DataFrame | None:
     if queries.empty or records.empty:
         return None
-    left = cast(pd.DataFrame, queries[["_row", query_key]].copy())
+    left_columns = ["_row", query_key]
+    if "contract_code" in queries.columns:
+        left_columns.append("contract_code")
+    left = cast(pd.DataFrame, queries[left_columns].copy())
     left[query_key] = pd.to_datetime(left[query_key], errors="coerce").astype("datetime64[ns]")
     left = cast(pd.DataFrame, left.sort_values(by=cast(Any, query_key)))
     right_columns = list(dict.fromkeys([
@@ -1520,8 +1733,16 @@ def _merge_asof_history_candidate(
         "effective_trading_day",
         "effective_timestamp",
         "provider",
+        "source_key",
+        "source_notice_id",
+        "previous_value",
+        "previous_value_type",
+        "contract_codes",
+        "contract_scope_type",
+        "contract_code_start",
+        "contract_code_end",
     ]))
-    right = cast(pd.DataFrame, records[right_columns].copy())
+    right = cast(pd.DataFrame, records[[column for column in right_columns if column in records.columns]].copy())
     right[record_key] = pd.to_datetime(right[record_key], errors="coerce").astype("datetime64[ns]")
     right = cast(pd.DataFrame, right.sort_values(by=cast(Any, record_key)))
     merged = pd.merge_asof(
@@ -1541,12 +1762,180 @@ def _merge_asof_history_candidate(
     merged["_provider_priority"] = _series(merged, "provider").map(_field_provider_priority)
     return cast(pd.DataFrame, merged[[
         "_row",
+        "contract_code",
         "_scope_priority",
         "_effective_sort_key",
         "_provider_priority",
         "value",
         "value_type",
+        *[
+            column for column in (
+                "effective_trading_day",
+                "effective_timestamp",
+                "provider",
+                "source_key",
+                "source_notice_id",
+                "previous_value",
+                "previous_value_type",
+                "contract_codes",
+                "contract_scope_type",
+                "contract_code_start",
+                "contract_code_end",
+            )
+            if column in merged.columns
+        ],
     ]])
+
+
+def _assert_vectorized_previous_value_integrity(
+    subset: pd.DataFrame,
+    selected: pd.DataFrame,
+    *,
+    raw_instrument: str,
+    field_name: str,
+) -> None:
+    for _, row in selected.iterrows():
+        _assert_previous_value_integrity_row(
+            row,
+            subset,
+            contract_code=str(row.get("contract_code") or ""),
+            raw_instrument=raw_instrument,
+            field_name=field_name,
+        )
+
+
+def _assert_previous_value_integrity_row(
+    row: pd.Series,
+    subset: pd.DataFrame,
+    *,
+    contract_code: str | None,
+    raw_instrument: str,
+    field_name: str,
+) -> None:
+    previous_value = _decode_optional_value(row.get("previous_value"), row.get("previous_value_type"))
+    if previous_value is None:
+        return
+    prior = _prior_history_row_for_previous_value(subset, row, contract_code=contract_code)
+    if prior is None:
+        raise HistoricalFieldIntegrityError(
+            _previous_value_integrity_message(
+                row,
+                raw_instrument=raw_instrument,
+                field_name=field_name,
+                reason="no prior historical value",
+                prior=None,
+                expected=previous_value,
+            )
+        )
+    actual = _decode_value(prior.get("value"), prior.get("value_type"))
+    if not _same_decoded_value(actual, previous_value):
+        raise HistoricalFieldIntegrityError(
+            _previous_value_integrity_message(
+                row,
+                raw_instrument=raw_instrument,
+                field_name=field_name,
+                reason=f"previous_value mismatch: expected {previous_value!r}, found {actual!r}",
+                prior=prior,
+                expected=previous_value,
+            )
+        )
+
+
+def _prior_history_row_for_previous_value(
+    subset: pd.DataFrame,
+    row: pd.Series,
+    *,
+    contract_code: str | None,
+) -> pd.Series | None:
+    if subset.empty:
+        return None
+    records = subset
+    if "_scope_codes" not in records.columns or "_scope_type" not in records.columns:
+        records = records.copy()
+        records["_scope_codes"] = _series(records, "contract_codes").map(_decode_contract_codes)
+        records["_scope_type"] = _series(records, "contract_scope_type").map(_normalise_contract_scope_type)
+    current_day = _history_row_effective_day(row)
+    candidates = records.copy()
+    before_mask = pd.Series(
+        [_history_row_effective_day(candidate) < current_day for _, candidate in candidates.iterrows()],
+        index=candidates.index,
+    )
+    candidates = cast(pd.DataFrame, candidates[before_mask].copy())
+    if candidates.empty:
+        return None
+    priorities = pd.Series([
+        _contract_scope_priority(
+            scope_type=scope_type,
+            scope_codes=codes,
+            contract_code=contract_code,
+            start=start,
+            end=end,
+        )
+        for scope_type, codes, start, end in zip(
+            _series(candidates, "contract_scope_type"),
+            _series(candidates, "_scope_codes"),
+            _series(candidates, "contract_code_start"),
+            _series(candidates, "contract_code_end"),
+        )
+    ], index=candidates.index)
+    candidates = cast(pd.DataFrame, candidates[priorities >= 0].copy())
+    if candidates.empty:
+        return None
+    candidates["_contract_scope_priority"] = priorities.loc[candidates.index]
+    max_priority = _series(candidates, "_contract_scope_priority").max()
+    candidates = cast(pd.DataFrame, candidates[_series(candidates, "_contract_scope_priority") == max_priority])
+    candidates["_previous_value_sort_key"] = [
+        _history_row_effective_key(candidate) for _, candidate in candidates.iterrows()
+    ]
+    candidates = _sort_history_candidates(candidates, effective_key="_previous_value_sort_key")
+    return cast(pd.Series, candidates.iloc[-1])
+
+
+def _history_row_effective_key(row: Mapping[str, Any] | pd.Series) -> tuple[pd.Timestamp, pd.Timestamp]:
+    day = _history_row_effective_day(row)
+    ts = _optional_timestamp(row.get("effective_timestamp"))
+    if ts is None:
+        ts = day
+    if ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    return day, ts
+
+
+def _history_row_effective_day(row: Mapping[str, Any] | pd.Series) -> pd.Timestamp:
+    return _normalise_trading_day(row.get("effective_trading_day"))
+
+
+def _decode_optional_value(value: Any, value_type: Any) -> Any:
+    text = _clean_optional_text(value)
+    if not text:
+        return None
+    return _decode_value(text, value_type)
+
+
+def _same_decoded_value(left: Any, right: Any) -> bool:
+    try:
+        return abs(float(left) - float(right)) <= 1e-12
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _previous_value_integrity_message(
+    row: Mapping[str, Any] | pd.Series,
+    *,
+    raw_instrument: str,
+    field_name: str,
+    reason: str,
+    prior: Mapping[str, Any] | pd.Series | None,
+    expected: Any,
+) -> str:
+    notice = str(row.get("source_notice_id") or row.get("source_key") or "")
+    prior_notice = "" if prior is None else str(prior.get("source_notice_id") or prior.get("source_key") or "")
+    prior_suffix = "" if not prior_notice else f"; prior={prior_notice}"
+    return (
+        "historical field previous_value integrity failed: "
+        f"{raw_instrument}.{field_name} effective={row.get('effective_trading_day')} "
+        f"notice={notice}: {reason}; declared_previous={expected!r}{prior_suffix}"
+    )
 
 
 def _series(frame: pd.DataFrame, column: str) -> pd.Series:

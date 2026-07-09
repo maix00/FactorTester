@@ -32,6 +32,8 @@ _GROUP_COLUMNS = [
     "instrument",
     "instrument_label",
     "instrument_type",
+    "scope_type",
+    "exchange",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",
@@ -119,6 +121,9 @@ def build_unified_provider(frame: pd.DataFrame) -> FieldHistoryProvider:
     provider_frame["source_date"] = provider_frame["source_dates"]
     provider_frame["source_notice_id"] = provider_frame["source_notice_ids"]
     provider_frame["raw_note"] = provider_frame["raw_notes"]
+    for column in FIELD_HISTORY_COLUMNS:
+        if column not in provider_frame.columns:
+            provider_frame[column] = ""
     return FieldHistoryProvider(cast(pd.DataFrame, provider_frame[FIELD_HISTORY_COLUMNS].copy()))
 
 

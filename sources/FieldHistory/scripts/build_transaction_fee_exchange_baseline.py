@@ -1,4 +1,4 @@
-"""Build exchange TransactionFee baseline events from a fee-unit map.
+"""Build exchange TransactionFee fee-unit audit rows from a current fee map.
 
 The user-facing fee table classifies each product as either:
 
@@ -6,17 +6,15 @@ The user-facing fee table classifies each product as either:
 - ``volume``: fixed fee per lot, stored in ``*RatioByVolume``.
 
 OpenCTP latest snapshots may contain broker add-ons in the complementary unit
-column. This builder therefore treats OpenCTP as cross-check evidence only: it
-never copies both units into exchange baseline rows. The non-applicable unit is
-not written as an exchange event; zero in the inactive unit is a derived view
-state, not an exchange rule, unless a later exchange notice explicitly switches
-the fee unit.
+column. This builder treats both the user-facing table and OpenCTP as audit
+evidence only. It must not write current fee-table values as 1900 historical
+baselines: true exchange baselines must come from listing notices or explicit
+exchange fee-change notices.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from collections.abc import Iterable, Mapping
@@ -85,10 +83,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     products = list(mapping["products"])
-    baseline_day = str(mapping.get("baseline_effective_trading_day") or "1900-01-02")
-    accessed_at = str(mapping.get("source_accessed_at") or "")
-    official_urls = dict(mapping.get("official_source_urls") or {})
-    secondary_urls = dict(mapping.get("secondary_source_urls") or {})
     openctp = _latest_product_fee_frame()
     events: list[dict[str, Any]] = []
     audit: list[dict[str, Any]] = []
@@ -101,7 +95,6 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
         default_baseline_value = _parse_fee_value(product["value"], unit=unit)
         leg_values = _parse_leg_values(product, unit=unit)
         openctp_values = _openctp_values_for_instrument(openctp, instrument)
-        source_url = official_urls.get(exchange) or secondary_urls.get("Sina") or ""
         for money_field, volume_field, leg_label in FEE_LEGS:
             if leg_label == "平今" and leg_label not in leg_values:
                 continue
@@ -113,27 +106,6 @@ def build_events(mapping: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
                 openctp_value=openctp_values.get(active_field),
                 leg_label=leg_label,
             )
-            active_field = money_field if unit == "money" else volume_field
-            events.append(_event(
-                exchange=exchange,
-                instrument=instrument,
-                label=str(product.get("label") or ""),
-                field_name=active_field,
-                value=active_value,
-                source_url=source_url,
-                accessed_at=accessed_at,
-                effective_day=baseline_day,
-                raw_note=(
-                    f"{instrument} exchange baseline transaction fee from user fee-unit table: "
-                    f"{_display_leg_value(product, leg_label)} by {unit}; {leg_label} uses {active_field}; "
-                    f"active leg source={active_source}."
-                ),
-                parser_notes=(
-                    "Baseline unit chosen from user-supplied table and cross-checked against OpenCTP latest; "
-                    "only the active exchange fee unit is stored. The complementary unit must not be "
-                    "stored as an exchange zero unless an exchange notice explicitly switches units."
-                ),
-            ))
             audit.append(_audit_row(
                 instrument=instrument,
                 exchange=exchange,
@@ -231,45 +203,6 @@ def _baseline_for_leg(*, unit: str, table_value: float, openctp_value: float | N
     if openctp_value is None:
         return table_value, "table"
     return table_value, "table"
-
-
-def _event(
-    *,
-    exchange: str,
-    instrument: str,
-    label: str,
-    field_name: str,
-    value: float,
-    source_url: str,
-    accessed_at: str,
-    effective_day: str,
-    raw_note: str,
-    parser_notes: str,
-) -> dict[str, Any]:
-    event_key = f"{exchange}|{instrument}|{field_name}|{effective_day}|{value}"
-    event_id = "transaction_fee_baseline_" + hashlib.sha1(event_key.encode("utf-8")).hexdigest()[:24]
-    return {
-        "agent_name": "codex",
-        "change_type": "baseline",
-        "contract_codes": [],
-        "contract_scope_type": "all",
-        "data_source": exchange,
-        "effective_timestamp": "",
-        "effective_trading_day": effective_day,
-        "event_id": event_id,
-        "evidence_text": raw_note,
-        "field_group": "TransactionFee",
-        "field_name": field_name,
-        "instrument": instrument,
-        "instrument_label": label,
-        "instrument_type": "future",
-        "parser_notes": parser_notes,
-        "raw_note": raw_note,
-        "source_accessed_at": accessed_at,
-        "source_notice_id": "exchange-baseline-user-table-2026-07-07",
-        "source_url": source_url,
-        "value": value,
-    }
 
 
 def _audit_row(
