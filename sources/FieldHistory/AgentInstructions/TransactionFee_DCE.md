@@ -5,6 +5,11 @@ options fee changes.
 
 ## Discovery
 
+- DCE official website access must start from the DCE Chrome portal page
+  (`http://www.dce.com.cn/dce/`).  Follow visible official links such as
+  product channels, `业务公告与通知`, `交易参数`, and `结算参数`.  Do not build
+  DCE evidence from guessed deep URLs, direct `requests` scraping, or URL paths
+  that have already been shown to fail outside Chrome.
 - Search DCE business notices for product name/code plus terms such as
   `交易手续费`, `日内交易手续费`, `平今仓交易手续费`, `手续费标准`, `调整`.
 - Prefer the notice detail page and record its notice id, URL, source date, and

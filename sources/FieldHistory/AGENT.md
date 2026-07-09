@@ -159,19 +159,17 @@ WHERE instrument = :instrument
   baseline through FieldHistory contract-scope priority.
 - Transaction fee baselines do not have to come only from a current fee table.
   They may also come from an official product listing notice, contract
-  specification, product technical manual, or exchange settlement-parameter
-  table when that source defines the initial fee unit/value. Record the exact
+  specification, product technical manual, or business rule. Record the exact
   source type in `parser_notes`. Later fee notices are stored as dated field
-  change events that override that baseline.
-- Official daily settlement-parameter snapshots may be stored as contract-level
-  dated audit events when product-level baselines cannot express close-today
-  discounts, temporary special contracts, or contract-specific fee units. Use
-  the exchange endpoint itself as `source_url`. Store only the fee field for
-  the active fee unit (`*ByMoney` for notional-ratio fees, `*ByVolume` for
-  per-lot fixed fees). Do not write the inactive unit as a zero exchange event
-  unless the exchange notice explicitly changes the product or contract from
-  one fee unit to the other. Do not label broker/OpenCTP snapshots as exchange
-  settlement-parameter events.
+  change events that override that baseline. Settlement-parameter tables can
+  identify candidate values and gaps, but they do not define ingestible
+  baselines by themselves.
+- Official daily settlement-parameter snapshots are audit evidence, not
+  FieldHistory source-of-truth events. Use them to find likely change dates and
+  to verify that notice-derived events are complete, but do not append snapshot
+  rows into `agent_field_change_events` or `historical_field_values`. If a
+  snapshot changes and no matching notice/listing/rule event exists, keep it as
+  an audit gap until the underlying source is found.
 - The active-unit-only rule above is for exchange-source events. Broker or
   OpenCTP counterparty fee snapshots may legitimately contain both `*ByMoney`
   and `*ByVolume` at the same time, because they can combine exchange fees with
@@ -188,6 +186,11 @@ WHERE instrument = :instrument
   notice id, publication date, exchange author, and the source sentence/table
   without broker markups. Ordinary broker fee pages, Sina-style snapshots, and
   fee aggregators remain audit/cross-check evidence only.
+- LocalCNFutures catalog/static-spec rows are audit candidates only. They may
+  show that `PriceTick`, `VolumeMultiple`, or a listing date is missing from
+  official-source FieldHistory, but they must not be appended as
+  `Agent:LocalCNFutures` truth rows. Use exchange listing notices, product
+  specifications, business rules, or product manuals for ingestible events.
 - Night session belongs to the next trading day. Example:
   `自2026年3月10日交易时（即3月9日夜盘交易小节时）起` means
   `effective_trading_day = 2026-03-10` and
@@ -212,6 +215,31 @@ After materialization, rebuild the relevant view, for example:
 from sources.FieldHistory.views.LimitOrderVolume import save_unified_table
 save_unified_table()
 ```
+
+## Audit Entrypoint
+
+Use one public audit entrypoint for both reconstruction horizons:
+
+```bash
+# 2024 and later replay coverage, including shared event-chain checks.
+PYTHONPATH=/path/to/repo python sources/FieldHistory/scripts/audit_field_history.py \
+  --mode 2024-plus \
+  --output-csv /tmp/field_history_2024_gaps.csv
+
+# Full baseline-to-current reconstruction.  The snapshot JSONL is generated
+# with fetch_transaction_fee_settlement_snapshots.py --mode changes and is used
+# only as audit evidence.
+PYTHONPATH=/path/to/repo python sources/FieldHistory/scripts/audit_field_history.py \
+  --mode full-history \
+  --settlement-snapshot-jsonl /tmp/field_history_fee_changes_20240102_20260709.jsonl \
+  --output-csv /tmp/field_history_full_history_gaps.csv
+```
+
+Both modes run event-chain checks.  Non-`asof_confirmed` rows may not repeat the
+previous effective value unless they carry different `previous_value` evidence
+that exposes a missing intermediate change.  Same-day same-field duplicates and
+same-day conflicting values are hard audit issues.  Every event must have both
+`effective_trading_day` and `effective_timestamp`.
 
 For checked-in JSONL event files, use the generic importer:
 

@@ -451,6 +451,63 @@ def test_field_history_contract_specific_rule_overrides_product_level_rule() -> 
     assert contract_value.contract_code == "2606"
 
 
+def test_field_history_exchange_default_rule_fills_product_gap() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/czce/default/max-limit",
+            "instrument": "*",
+            "instrument_type": "future",
+            "scope_type": "exchange_default",
+            "exchange": "CZC",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 1000,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("CF.CZC", "MaxLimitOrderVolume", "2024-02-06")
+
+    assert resolved.value == 1000
+    assert resolved.instrument == "CF"
+
+
+def test_field_history_product_rule_overrides_exchange_default_rule() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/czce/default/max-limit",
+            "instrument": "*",
+            "instrument_type": "future",
+            "scope_type": "exchange_default",
+            "exchange": "CZC",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 1000,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+        {
+            "provider": "test",
+            "source_key": "test/czce/pk/max-limit",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 500,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("PK.CZC", "MaxLimitOrderVolume", "2024-02-06")
+
+    assert resolved.value == 500
+    assert resolved.instrument == "PK"
+
+
 def test_field_history_pipe_contract_with_alpha_suffix_uses_product_baseline() -> None:
     provider = FieldHistoryProvider.from_records([
         {

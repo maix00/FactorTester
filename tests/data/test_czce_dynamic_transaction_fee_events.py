@@ -31,7 +31,19 @@ def test_czce_2020_481_dynamic_rule_materializes_only_1063_retained_contracts() 
         },
     ]
 
-    events = build_events(snapshots, rules=[RULE_2020_481])
+    prior_events = [
+        {
+            "data_source": "CZCE",
+            "instrument": "CF",
+            "contract_codes": [],
+            "contract_scope_type": "all",
+            "field_name": "CloseTodayRatioByVolume",
+            "effective_trading_day": "2017-11-07",
+            "value": 0.0,
+        },
+    ]
+
+    events = build_events(snapshots, rules=[RULE_2020_481], prior_events=prior_events)
 
     generated = {(event["instrument"], tuple(event["contract_codes"])) for event in events}
     assert ("CF", ("2203",)) in generated
@@ -43,10 +55,10 @@ def test_czce_2020_481_dynamic_rule_materializes_only_1063_retained_contracts() 
     }
     assert cf_by_field["OpenRatioByVolume"]["value"] == 2.0
     assert cf_by_field["CloseRatioByVolume"]["value"] == 2.0
-    assert cf_by_field["CloseTodayRatioByVolume"]["value"] == 0.0
-    assert cf_by_field["CloseTodayRatioByMoney"]["value"] == 0.0
-    assert cf_by_field["CloseTodayRatioByVolume"]["effective_trading_day"] == "2021-10-08"
-    assert cf_by_field["CloseTodayRatioByVolume"]["effective_timestamp"] == ""
+    assert "CloseTodayRatioByVolume" not in cf_by_field
+    assert "CloseTodayRatioByMoney" not in cf_by_field
+    assert cf_by_field["OpenRatioByVolume"]["effective_trading_day"] == "2021-10-08"
+    assert cf_by_field["OpenRatioByVolume"]["effective_timestamp"] == ""
 
 
 def test_czce_2020_481_dynamic_rule_falls_back_to_first_weekday_before_snapshot_calendar() -> None:

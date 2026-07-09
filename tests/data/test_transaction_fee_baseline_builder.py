@@ -6,7 +6,7 @@ import pytest
 from sources.FieldHistory.scripts import build_transaction_fee_exchange_baseline as builder
 
 
-def test_build_exchange_baseline_stores_only_active_fee_unit(monkeypatch) -> None:
+def test_build_exchange_fee_table_builder_emits_audit_not_history_events(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -31,16 +31,14 @@ def test_build_exchange_baseline_stores_only_active_fee_unit(monkeypatch) -> Non
     ]))
 
     events, audit = builder.build_events(mapping)
-    by_field = {event["field_name"]: event["value"] for event in events}
 
-    assert by_field["OpenRatioByVolume"] == 2.0
-    assert "OpenRatioByMoney" not in by_field
-    assert "CloseTodayRatioByMoney" not in by_field
-    assert "CloseTodayRatioByVolume" not in by_field
+    assert events == []
+    assert audit[0]["baseline_volume"] == 2.0
+    assert audit[0]["baseline_money"] is None
     assert audit[0]["inactive_openctp_nonzero"] is True
 
 
-def test_build_exchange_baseline_does_not_infer_close_today_from_generic_fee(monkeypatch) -> None:
+def test_build_exchange_fee_table_audit_does_not_infer_close_today_from_generic_fee(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -52,16 +50,12 @@ def test_build_exchange_baseline_does_not_infer_close_today_from_generic_fee(mon
     monkeypatch.setattr(builder, "load_openctp_latest_market_rule_frame", lambda **_: pd.DataFrame())
 
     events, audit = builder.build_events(mapping)
-    by_field = {event["field_name"]: event["value"] for event in events}
 
-    assert by_field == {
-        "OpenRatioByVolume": 4.0,
-        "CloseRatioByVolume": 4.0,
-    }
+    assert events == []
     assert {row["leg"] for row in audit} == {"开仓", "平昨"}
 
 
-def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monkeypatch) -> None:
+def test_build_exchange_fee_table_audit_marks_openctp_mismatch(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -93,12 +87,8 @@ def test_build_exchange_baseline_keeps_exchange_table_when_openctp_differs(monke
     ]))
 
     events, audit = builder.build_events(mapping)
-    by_field = {event["field_name"]: event["value"] for event in events}
 
-    assert by_field["OpenRatioByMoney"] == 0.000023
-    assert by_field["CloseRatioByMoney"] == 0.000023
-    assert by_field["CloseTodayRatioByMoney"] == 0.000023
-    assert "CloseTodayRatioByVolume" not in by_field
+    assert events == []
     assert [row for row in audit if row["leg"] == "平今"][0]["active_source"] == "table-openctp-mismatch"
 
 
@@ -144,7 +134,7 @@ def test_baseline_map_uses_official_czce_fee_standard_values() -> None:
     assert by_instrument["PR"]["value"] == "0.005%"
 
 
-def test_build_exchange_baseline_supports_leg_specific_money_fees(monkeypatch) -> None:
+def test_build_exchange_fee_table_audit_supports_leg_specific_money_fees(monkeypatch) -> None:
     mapping = {
         "source_accessed_at": "2026-07-07T00:00:00+08:00",
         "baseline_effective_trading_day": "1900-01-02",
@@ -163,9 +153,10 @@ def test_build_exchange_baseline_supports_leg_specific_money_fees(monkeypatch) -
     monkeypatch.setattr(builder, "load_openctp_latest_market_rule_frame", lambda **_: pd.DataFrame())
 
     events, _audit = builder.build_events(mapping)
-    by_field = {event["field_name"]: event["value"] for event in events}
 
-    assert by_field["OpenRatioByMoney"] == pytest.approx(0.00014)
-    assert by_field["CloseRatioByMoney"] == 0.0001
-    assert by_field["CloseTodayRatioByMoney"] == pytest.approx(0.00014)
-    assert "OpenRatioByVolume" not in by_field
+    assert events == []
+    by_leg = {row["leg"]: row for row in _audit}
+    assert by_leg["开仓"]["baseline_money"] == pytest.approx(0.00014)
+    assert by_leg["平昨"]["baseline_money"] == 0.0001
+    assert by_leg["平今"]["baseline_money"] == pytest.approx(0.00014)
+    assert by_leg["开仓"]["baseline_volume"] is None
