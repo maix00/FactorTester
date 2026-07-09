@@ -1,9 +1,9 @@
-"""Audit settlement-parameter fee events against exchange announcement events.
+"""Legacy helper functions for settlement-snapshot fee audits.
 
-Daily exchange settlement parameter feeds are official value snapshots, but
-they do not always carry the adjustment notice id.  This script checks whether
-snapshot-derived TransactionFee change events are also supported by an exchange
-announcement event in our event library.
+Use ``audit_field_history.py`` as the public audit entrypoint.  This module
+keeps older matching helpers used by
+``audit_transaction_fee_settlement_snapshot_alignment.py``; settlement snapshots
+are audit evidence only and must not be ingested as FieldHistory events.
 """
 
 from __future__ import annotations
@@ -27,40 +27,10 @@ FEE_FIELDS = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--events-dir",
-        default="sources/FieldHistory/events/TransactionFee",
-        help="Directory containing TransactionFee JSONL event files.",
+    raise SystemExit(
+        "audit_transaction_fee_announcement_alignment.py is no longer a public audit entrypoint. "
+        "Use audit_field_history.py --mode full-history with --settlement-snapshot-jsonl."
     )
-    parser.add_argument("--output-csv", required=True, help="Audit rows CSV path.")
-    args = parser.parse_args(argv)
-
-    events_dir = Path(args.events_dir).expanduser().resolve()
-    events = _load_events(events_dir)
-    snapshots = [event for event in events if _is_snapshot_event(event)]
-    notices = [event for event in events if _is_notice_event(event)]
-
-    snapshot_index = _snapshot_index(snapshots)
-    rows = [_audit_snapshot(event, notices, snapshot_index=snapshot_index) for event in snapshots]
-    output = Path(args.output_csv).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=_columns())
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print(json.dumps({
-        "output": str(output),
-        "snapshot_events": len(snapshots),
-        "notice_events": len(notices),
-        "status_counts": Counter(row["alignment_status"] for row in rows),
-        "status_counts_by_exchange": {
-            exchange: Counter(row["alignment_status"] for row in rows if row["data_source"] == exchange)
-            for exchange in sorted({row["data_source"] for row in rows})
-        },
-    }, ensure_ascii=False, indent=2, default=dict))
-    return 0
 
 
 def _load_events(events_dir: Path) -> list[dict[str, Any]]:
@@ -121,6 +91,56 @@ def _audit_snapshot(
         "matched_source_url": "" if match is None else str(match.get("source_url") or ""),
         "event_file": str(event.get("_event_file") or ""),
     }
+
+
+def _audit_notice_baselines(notices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    baselines = [item for item in notices if str(item.get("change_type") or "").lower() == "baseline"]
+    for first_change in notices:
+        if str(first_change.get("change_type") or "change").lower() != "change":
+            continue
+        if _has_prior_baseline(first_change, baselines):
+            continue
+        rows.append({
+            "alignment_status": "needs_baseline_before_change",
+            "data_source": str(first_change.get("data_source") or ""),
+            "instrument": str(first_change.get("instrument") or ""),
+            "contract_codes": json.dumps(first_change.get("contract_codes") or [], ensure_ascii=False),
+            "field_name": str(first_change.get("field_name") or ""),
+            "effective_trading_day": str(first_change.get("effective_trading_day") or ""),
+            "value": str(first_change.get("value")),
+            "snapshot_notice_id": "",
+            "matched_notice_id": str(first_change.get("source_notice_id") or ""),
+            "matched_notice_day": str(first_change.get("effective_trading_day") or ""),
+            "matched_source_url": str(first_change.get("source_url") or ""),
+            "event_file": str(first_change.get("_event_file") or ""),
+        })
+    return rows
+
+
+def _has_prior_baseline(change: dict[str, Any], baselines: list[dict[str, Any]]) -> bool:
+    for baseline in baselines:
+        if str(baseline.get("data_source") or "") != str(change.get("data_source") or ""):
+            continue
+        if str(baseline.get("instrument") or "") != str(change.get("instrument") or ""):
+            continue
+        if str(baseline.get("instrument_type") or "") != str(change.get("instrument_type") or ""):
+            continue
+        if str(baseline.get("field_name") or "") != str(change.get("field_name") or ""):
+            continue
+        if _event_time_key(baseline) >= _event_time_key(change):
+            continue
+        if not _contract_scope_covers(baseline, change):
+            continue
+        return True
+    return False
+
+
+def _event_time_key(event: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(event.get("effective_trading_day") or ""),
+        str(event.get("effective_timestamp") or ""),
+    )
 
 
 def _find_notice(
