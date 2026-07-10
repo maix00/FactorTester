@@ -38,6 +38,8 @@ def test_ic_scratch_factor_result_is_discarded_after_extraction(monkeypatch):
         products = ["P"]
         start_date = None
         end_date = None
+        start_dt = None
+        end_dt = None
 
         def __init__(self):
             self.results = {

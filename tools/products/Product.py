@@ -110,6 +110,9 @@ class Product(UniqueNameObject):
 
     def get_trading_spec_field(self, field: str, default: Any = None) -> Any:
         """Return one product trading-spec field with local-first fallback."""
+        local = getattr(self, field, None)
+        if local is not None:
+            return local
         try:
             from sources.OpenCTP.fields import get_product_field
             value = get_product_field(self, field)
