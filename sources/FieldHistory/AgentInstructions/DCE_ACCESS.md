@@ -233,3 +233,51 @@ event = {
 示例：
 - 《大连商品交易所风险管理办法（2023年1月修订）》（大商所发〔2023〕2号）第五条+DCE-settlement
 - 《大连商品交易所风险管理办法（2024年修订）》（大商所发〔2024〕35号）第五条+DCE-settlement
+
+---
+
+## DCE 保证金率入库规范（2026-07-10 定稿）
+
+### 数据来源
+
+DCE 结算参数 API（需通过真实 Chrome + Playwright CDP 访问）：
+`POST /dcereport/publicweb/tradepara/futAndOptSettle`
+请求体：`{"varietyId":"all","tradeDate":"YYYYMMDD","tradeType":"1","lang":null}`
+
+### 采集策略
+
+取**每月第一个交易日**的结算快照，比较相邻快照检测保证金率变更：
+1. **交割月变更**（7-8% → 20%）：发生在交割月第一个交易日。写入 `change_type='change'`，引用对应版本的风险管理办法。
+2. **非交割月调整**（其他百分比变化）：发生在任意日期。写入 `change_type='asof_confirmed'`，引用结算 API 页面。
+3. **中间阶梯（10%）** 未被月首快照捕获，可通过交易日历推导。
+
+### 版本引用规则
+
+| 日期范围 | 引用版本 | CSRC UUID |
+|---------|---------|-----------|
+| ≤ 2024-05-19 | 大商所发〔2023〕2号 | `d67e2d8e6eaa4fd0aec2c30381aa1c17` |
+| 2024-05-20 ~ 2025-02-13 | 大商所发〔2024〕35号 | `c55db8e50e1c4584a9725c902182d79a` |
+| ≥ 2025-02-14 | 大商所发〔2025〕16号 | `a787ade268dd46a691dcb94cf693b712` |
+
+### 记录格式规范
+
+**交割月变更事件：**
+- `source_notice_id`：`《大连商品交易所风险管理办法（{版本}）》（{公告字号}）第五条+DCE-settlement`
+- `raw_note`：`结算快照确认。依据：《...》第五条中规定"交割月份第一个交易日起，交易保证金标准为20%"。合约{月份}于{日期}进入交割月份后保证金由{X}%变为20%。`
+- `source_url`：指向 CSRC 法规数据库对应版本
+- `change_type`：`change`
+- `exchange`：`DCE`
+- `scope_type` / `contract_scope_type`：`contract` / `explicit`
+
+**非交割月调整事件：**
+- `source_notice_id`：`DCE-settlement-snapshot-{YYYYMMDD}`
+- `raw_note`：`大商所结算快照：{品种} {合约月份}合约{字段名}由{X}%调整为{Y}%（{旧日期}→{新日期}）。`
+- `source_url`：DCE 结算查询页面
+- `change_type`：`asof_confirmed`
+
+### 禁止行为
+
+1. ❌ 不得引用 DCE 官网当前版本 URL（6262956），需用 CSRC 法规库历史版本 UUID
+2. ❌ 不得写入英文 `raw_note`，必须全中文
+3. ❌ 不得使用 `change_type='rule'` 替代实际结算快照数据
+4. ❌ 不得在 `historical_field_values` 中创建重复 `source_key`
