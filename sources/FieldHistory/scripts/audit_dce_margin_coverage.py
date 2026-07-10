@@ -64,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     rows.extend(_check_source_format(args.store_key))
     rows.extend(_check_raw_note_format(args.store_key))
     rows.extend(_check_effective_timestamps(args.store_key))
+    rows.extend(_check_asof_confirmed_boundary(args.store_key))
 
     _print_summary(rows, limit=args.limit)
     if args.output_csv:
@@ -249,6 +250,30 @@ def _check_raw_note_format(store_key: str) -> list[dict[str, str]]:
 
 
 
+
+
+def _check_asof_confirmed_boundary(store_key: str) -> list[dict[str, str]]:
+    """Rule 3b: asof_confirmed must only appear at the 2024 boundary."""
+    rows: list[dict[str, str]] = []
+    BOUNDARY = ('2024-01-02', '20240102', '2023-12-29', '20231229', '2023-04-13', '20230413')
+    events = _load_agent_events(store_key)
+    
+    for ev in events:
+        ct = ev.get('change_type', '')
+        day = ev.get('effective_trading_day', '')
+        if ct == 'asof_confirmed' and day not in BOUNDARY:
+            rows.append({'rule': '3b-asof-boundary', 'severity': 'error',
+                'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                'detail': f'asof_confirmed on {day} outside 2024 boundary'})
+        elif ct in ('change', 'baseline') and day in BOUNDARY:
+            # Check if this is an actual notice (legitimate change) vs settlement snapshot
+            sid = ev.get('source_notice_id', '')
+            if 'settlement' in sid.lower() or 'snapshot' in sid.lower() or 'asof' in sid.lower():
+                rows.append({'rule': '3b-boundary-type', 'severity': 'error',
+                    'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                    'detail': f'{ct} on boundary day {day} should be asof_confirmed: {sid[:60]}'})
+    
+    return rows
 def _check_effective_timestamps(store_key: str) -> list[dict[str, str]]:
     """Rule 7: All records have proper effective_timestamp considering day/night sessions."""
     rows: list[dict[str, str]] = []
@@ -259,6 +284,7 @@ def _check_effective_timestamps(store_key: str) -> list[dict[str, str]]:
         '2025-01-02', '2025-02-05', '2025-04-07', '2025-05-06', '2025-06-03', '2025-10-09',
         '2026-01-05', '2026-02-24', '2026-04-07', '2026-05-06',
     }
+    NO_NIGHT_PRODUCTS = {'BB', 'FB', 'JD', 'LG', 'LH'}
     
     for ev in events:
         ts = ev.get('effective_timestamp', '')
@@ -278,8 +304,10 @@ def _check_effective_timestamps(store_key: str) -> list[dict[str, str]]:
         ts_hour = ts[11:13] if len(ts) >= 13 else ''
         
         if ct == 'change':
-            # Delivery-month events should have T21:00 (night) unless night was cancelled
-            if ts_hour == '09' and normalized_day not in NO_NIGHT_DATES:
+            # Delivery-month events should have T21:00 (night) unless night was cancelled or product has no night session
+            if ev.get('instrument', '') in NO_NIGHT_PRODUCTS:
+                pass  # No night session for this product - T09:00 is correct
+            elif ts_hour == '09' and normalized_day not in NO_NIGHT_DATES:
                 rows.append({'rule': '7-change-ts', 'severity': 'warning',
                     'instrument': ev['instrument'], 'field_name': ev['field_name'],
                     'detail': f'change event on {day} uses day timestamp {ts} but night session existed'})
