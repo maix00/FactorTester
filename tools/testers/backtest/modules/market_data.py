@@ -1032,7 +1032,7 @@ def _build_trading_day_resolver(state, ctx) -> None:
 
 def _initialize_field_state(state, ctx) -> None:
     """Populate field_state_store with baseline values at run_window start.
-    PER_EVENT lookups read from the store (O(1)) instead of per-timestamp merge_asof."""
+    Uses batch FieldHistory frame query (single timestamp) instead of per-product queries."""
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     resolver = ctx.get(MarketDataModule.trading_day_resolver)
     store = market_data_store_for(state)
@@ -1049,52 +1049,51 @@ def _initialize_field_state(state, ctx) -> None:
     if len(all_timestamps) == 0:
         return
     first_ts = all_timestamps[0]
-    # Deduplicate contracts to their parent products for field queries
-    parent_seen: set[str] = set()
-    parent_baselines: dict[str, dict[str, object]] = {}
-    for instrument in instruments:
-        parent = getattr(instrument, "parent_product", None)
-        if parent is not None and parent is not instrument:
-            pname = str(getattr(parent, "name", parent) or "")
-            if pname not in parent_seen:
-                parent_seen.add(pname)
-                try:
-                    pv = resolve_historical_fields_for_product(
-                        parent, first_ts,
-                        provider=provider, trading_day_resolver=resolver,
-                        field_names=field_names, fallback=policy,
-                    )
-                    parent_baselines[pname] = pv
-                except HistoricalFieldLookupError:
-                    parent_baselines[pname] = {}
-        else:
-            pname = str(getattr(instrument, "name", instrument) or "")
-            if pname not in parent_seen:
-                parent_seen.add(pname)
-                try:
-                    pv = resolve_historical_fields_for_product(
-                        instrument, first_ts,
-                        provider=provider, trading_day_resolver=resolver,
-                        field_names=field_names, fallback=policy,
-                    )
-                    parent_baselines[pname] = pv
-                except HistoricalFieldLookupError:
-                    parent_baselines[pname] = {}
-    # Populate store - contracts inherit from their parent product
+    
+    # Collect parent product objects (contracts resolve to parent, base products stay)
+    parent_objects: dict[str, Any] = {}
+    product_to_parent_key: dict[str, str] = {}
     for instrument in instruments:
         inst_name = str(getattr(instrument, "name", instrument) or "")
         parent = getattr(instrument, "parent_product", None)
         if parent is not None and parent is not instrument:
             pname = str(getattr(parent, "name", parent) or "")
-            if pname in parent_baselines:
-                store.field_state_store[inst_name] = dict(parent_baselines[pname])
-            else:
-                store.field_state_store[inst_name] = {}
+            product_to_parent_key[inst_name] = pname
+            if pname not in parent_objects:
+                parent_objects[pname] = parent
         else:
-            if inst_name in parent_baselines:
-                store.field_state_store[inst_name] = dict(parent_baselines[inst_name])
-            else:
-                store.field_state_store[inst_name] = {}
+            product_to_parent_key[inst_name] = inst_name
+            if inst_name not in parent_objects:
+                parent_objects[inst_name] = instrument
+    
+    # Single batch query with one timestamp
+    single_ts_index = pd.DatetimeIndex([pd.Timestamp(first_ts)])
+    frame_result = historical_fields_frame_for_products(
+        list(parent_objects.values()),
+        single_ts_index,
+        provider=provider,
+        trading_day_resolver=resolver,
+        field_names=field_names,
+        fallback=policy,
+    )
+    
+    # Extract values from the batch result
+    parent_baselines: dict[str, dict[str, object]] = {}
+    for pname in parent_objects:
+        parent_baselines[pname] = {}
+        for fname in field_names:
+            fn = str(fname)
+            fdf = frame_result.get(fn)
+            if fdf is not None and not fdf.empty:
+                val = fdf.iloc[0].get(pname)
+                if val is not None and not (isinstance(val, float) and (pd.isna(val) or val == float("inf") or val == float("-inf"))):
+                    parent_baselines[pname][fn] = val
+    
+    # Populate store  
+    for instrument in instruments:
+        inst_name = str(getattr(instrument, "name", instrument) or "")
+        pname = product_to_parent_key.get(inst_name, inst_name)
+        store.field_state_store[inst_name] = dict(parent_baselines.get(pname, {}))
     # Register FIELD_CHANGE events from FieldHistory provider's record frame
     # This replaces the old per-timestamp bulk query with incremental events
     try:
