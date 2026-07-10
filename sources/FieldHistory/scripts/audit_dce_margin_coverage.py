@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     rows.extend(_check_raw_note_format(args.store_key))
     rows.extend(_check_effective_timestamps(args.store_key))
     rows.extend(_check_asof_confirmed_boundary(args.store_key))
+    rows.extend(_check_notice_source_quality(args.store_key))
 
     _print_summary(rows, limit=args.limit)
     if args.output_csv:
@@ -316,6 +317,19 @@ def _check_effective_timestamps(store_key: str) -> list[dict[str, str]]:
                     'instrument': ev['instrument'], 'field_name': ev['field_name'],
                     'detail': f'change event on {day} uses night timestamp {ts} but night was cancelled'})
     
+    return rows
+
+def _check_notice_source_quality(store_key: str) -> list[dict[str, str]]:
+    """Rule 1b: change events must reference exchange notices, not settlement snapshots."""
+    rows: list[dict[str, str]] = []
+    events = _load_agent_events(store_key)
+    for ev in events:
+        ct = ev.get('change_type', '')
+        sid = ev.get('source_notice_id', '')
+        if ct == 'change' and sid and 'snapshot' in sid.lower():
+            rows.append({'rule': '1b-notice-source', 'severity': 'error',
+                'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                'detail': f'change event references snapshot instead of notice: {sid[:60]}'})
     return rows
 def _print_summary(rows: list[dict[str, str]], *, limit: int) -> None:
     print("DCE Margin Coverage Audit")
