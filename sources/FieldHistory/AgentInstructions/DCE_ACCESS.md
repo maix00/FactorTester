@@ -1,331 +1,153 @@
-# DCE（大商所）官网字段验证 — 数据获取方法
+# DCE（大商所）数据入库规范
 
-> 编写于 2026-07-10，在 issue-124 审计过程中验证。
-> 适用场景：Agent 需要从 DCE 官网获取合约规格、交易参数、结算参数等公开数据。
+> 最后更新：2026-07-10
+> 本文件定义了 DCE 所有历史字段入库时必须遵守的规则。违反以下规则的入库将被审计拒绝。
 
-## 背景：DCE 反爬保护
+---
 
-DCE 全站使用 **Distil Networks**（或同类）反爬系统。以下方式均被拦截：
+## 1. 数据来源
 
-| 方式 | 结果 |
-|------|------|
-| `curl` / `requests` / `urllib` | 返回反爬 JS，无实际内容 |
-| `akshare.futures_contract_info_dce()` | HTTP 412 |
-| Playwright 默认 Chromium (launch) | 返回空页面 |
+### 1.1 结算参数
 
-## 可行方法：API 调用（在已加载页面中 fetch）
+DCE 结算参数通过 Chrome CDP + Playwright 获取，不能直接 HTTP 请求（反爬拦截）。
 
-**原理**：先用真实 Chrome + Playwright CDP 加载 DCE 页面，等页面完全加载后，在页面上下文中用 `fetch` 直接调用 DCE 后端 API。此时 fetch 携带了页面已有的反爬 Cookie 和 Token，不会被拦截。
+**API 端点：** `POST /dcereport/publicweb/tradepara/futAndOptSettle`
+**请求体：** `{"varietyId":"all","tradeDate":"YYYYMMDD","tradeType":"1","lang":null}`
 
-### 操作步骤
-
-```python
-import subprocess, time, json, shutil, os
-from playwright.sync_api import sync_playwright
-
-# 1. 复制用户真实 Chrome 配置文件（唯一临时目录，不杀用户 Chrome）
-user_profile = os.path.expanduser("~/Library/Application Support/Google/Chrome")
-tmp_profile = f"/tmp/chrome-dce-{os.getpid()}"
-if os.path.exists(tmp_profile): shutil.rmtree(tmp_profile)
-os.makedirs(f"{tmp_profile}/Default", exist_ok=True)
-for item in ["Cookies", "Cookies-journal", "Network", "Local State"]:
-    src = f"{user_profile}/{item}"; dst = f"{tmp_profile}/{item}"
-    if os.path.exists(src):
-        try:
-            if os.path.isdir(src): shutil.copytree(src, dst, dirs_exist_ok=True)
-            else: shutil.copy2(src, dst)
-        except: pass
-
-# 2. 启动真实 Chrome + 调试端口（不要 pkill 已有的 Chrome）
-chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-chrome_proc = subprocess.Popen(
-    [chrome_path, "--remote-debugging-port=9222",
-     f"--user-data-dir={tmp_profile}", "--no-first-run", "--no-default-browser-check"],
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-)
-# 等待 Chrome 就绪
-import urllib.request
-for _ in range(10):
-    time.sleep(2)
-    try:
-        resp = urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=3)
-        json.loads(resp.read()); break
-    except: pass
-
-# 3. 加载结算参数页面（必须 wait_until='networkidle' 等 Vue 加载完）
-with sync_playwright() as p:
-    browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-    ctx = browser.contexts[0]
-    page = ctx.new_page()
-    page.goto(
-        "http://www.dce.com.cn/frontend/dcereport/#/zh/queryFutAndOptSettle?variety=all&tradeType=1",
-        wait_until='networkidle', timeout=30000)
-    time.sleep(3)
-
-    # 4. 调用 API 查询指定日期（改 tradeDate 即可，格式 YYYYMMDD）
-    result = page.evaluate("""async (d) => {
-        var resp = await fetch('/dcereport/publicweb/tradepara/futAndOptSettle', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json','Accept':'application/json','clientid':'web'},
-            body: JSON.stringify({varietyId:'all', tradeDate:d, tradeType:'1', lang:null})
-        });
-        return await resp.json();
-    }""", "20240102")
-
-    browser.close()
-chrome_proc.terminate()
-```
-
-### API 端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/dcereport/publicweb/tradepara/futAndOptSettle` | POST | 结算参数（保证金率、手续费、结算价） |
-| `/dcereport/publicweb/variety` | GET | 品种列表 |
-| `/dcereport/publicweb/maxTradeDate2` | POST | 最大交易日期 |
-| `/dcereport/publicweb/tradeDateNum` | POST | 交易日序号 |
-
-### API 请求/响应
-
-请求体：`{"varietyId": "all", "tradeDate": "20240102", "tradeType": "1", "lang": null}`
-
-响应字段与 DB 映射：
+**API 响应字段映射：**
 
 | API 字段 | DB 字段 | 说明 |
 |----------|---------|------|
-| `specBuyRate` | `LongMarginRatioByMoney` | 投机买保证金率（如 "0.2" = 20%） |
+| `specBuyRate` | `LongMarginRatioByMoney` | 投机买保证金率 |
 | `specSellRate` | `ShortMarginRatioByMoney` | 投机卖保证金率 |
-| `clearPrice` | - | 结算价 |
-| `openFee` / `offsetFee` | - | 开仓/平仓手续费 |
-| `style` | - | 手续费收取方式（绝对值/比例值） |
+| `openFee` | `OpenRatioByVolume`（绝对值）或 `OpenRatioByMoney`（比例值） | 开仓手续费 |
+| `offsetFee` | `CloseRatioByVolume/Money` | 平仓手续费 |
+| `style` | — | 手续费收取方式，决定用 ByVolume 还是 ByMoney |
 
-注意：API 返回**合约级**数据（每条一个合约，如 `a2401`、`a2403`），不同合约可能同时有不同的保证金率。
+### 1.2 合约规格（静态字段）
 
-## 生成真实保证金率变更事件
-
-在 issue-124 审计过程中发现了 2812 条 `change_type='rule'` 的 DCE 保证金率事件。这些是根据风险管理办法规则自动生成的推算值，不是真实的交易所变更。
-
-### 问题
-
-1. 合约级 vs 品种级：保证金率实际是合约级的（a2403、a2405 同时不同值），但 rule 事件用品种级单一值
-2. 中间值不准：交割月前一个月的实际保证金率为 7-8%，不是 rule 事件用的 10%
-3. 不是真实变更：rule 事件不是交易所发布的变更通知
-
-### 修复步骤
-
-1. 用 API 获取 8 个日期的结算快照，存于 `~/GTHT/data/dce_settlement_snapshot_2024.json`
-2. 对每个合约构建时间线，检测相邻快照间的 value 变化
-3. 对每个变更写入 `agent_field_change_events`（调用 `append_agent_field_change_events`）
-4. 物化到 `historical_field_values`（调用 `materialize_agent_events_to_history`）
-5. 更新 change_type/exchange（因 AgentFieldChangeEvent 不包含这些字段）
-
-### 写入代码
-
-```python
-from tools.data.field_history_agent_ingest import (
-    append_agent_field_change_events,
-    materialize_agent_events_to_history,
-)
-from tools.data.hub import DataHub
-from tools.data.field_history import _ensure_store_registered
-
-# 1. 先用 DCE API 获取快照数据
-# 2. 构建 event dict 列表（格式见下方）
-# 3. 写入
-hub = DataHub.get_instance()
-_ensure_store_registered(hub, 'openctp')
-ids = append_agent_field_change_events(events, store_key='openctp')
-materialized = materialize_agent_events_to_history(store_key='openctp', field_group='MarginRatio')
-
-# 4. 补充字段（AgentFieldChangeEvent 不包含这些）
-conn.execute("""
-   UPDATE agent_field_change_events
-   SET change_type='change', exchange='DCE', scope_type='contract', contract_scope_type='explicit'
-   WHERE source_notice_id='DCE-settlement-parameters-2024'
-""")
-```
-
-### Event dict 格式
-
-```python
-event = {
-    'event_id': uuid.uuid4().hex,
-    'data_source': 'DCE',
-    'field_group': 'MarginRatio',
-    'source_url': 'http://www.dce.com.cn/frontend/dcereport/...',
-    'source_accessed_at': '2026-07-10T00:00:00+08:00',
-    'agent_name': 'codex-audit-...',
-    'requester_key_hash': 'dce-settlement-audit-...',
-    'instrument': 'A',              # 品种代码
-    'instrument_label': '豆一',
-    'instrument_type': 'futures',
-    'field_name': 'LongMarginRatioByMoney',  # 或 ShortMarginRatioByMoney
-    'effective_trading_day': '20240301',     # 变更生效日期
-    'effective_timestamp': '',
-    'value': '0.2',                 # 新的保证金率
-    'contract_codes': ('2401',),    # 元组，只含一个合约代码
-    'source_notice_id': 'DCE-settlement-parameters-2024',
-    'raw_note': 'DCE settlement snapshot: A 2401 margin 0.08→0.2',
-    'evidence_text': '',
-    'parser_notes': 'Generated from DCE official settlement API snapshot',
-}
-```
-
-注意：
-- `contract_codes` 传 **tuple**（如 `("2401",)`），不是 list
-- 每个事件只能包含**一个**合约代码
-- `AgentFieldChangeEvent` 不包含 `change_type`/`exchange`/`scope_type`，写入后需单独 UPDATE
-- 每次 API 调用间隔至少 1 秒，避免触发反爬
-
-## 重要注意事项
-
-1. ❌ **不要用 `pkill -9 -f Google Chrome`** — 会杀掉用户正在使用的 Chrome
-2. ✅ 每次启动 Chrome 时用唯一的临时 Profile 目录
-3. ✅ 完成后调用 `chrome_proc.terminate()` 清理
-4. ✅ 使用 `wait_until='networkidle'` 确保 Vue SPA 完全加载
-5. ✅ API 调用必须在已加载页面的上下文中执行
+VolumeMultiple、PriceTick、MaxLimitOrderVolume、MaxMarketOrderVolume 等静态字段来自中国证监会证券期货法规数据库（CSRC），通过 `ingest_exchange_contract_rule_baselines.py` 入库。**禁止**从经纪商数据或结算快照推算这些值。
 
 ---
 
-## 附录：风险管理办法版本引用规范
+## 2. 变更事件规范
 
-### 2024年DCE交割月保证金规则引用
+### 2.1 只有变更才写入
 
-2024年DCE交割月份保证金（20%）规则引用自《大连商品交易所风险管理办法》第五条。2024年期间该办法有过两次修订，对应不同生效日期：
+`agent_field_change_events` 只存储**发生了变化的**事件。基线值（2024-01-02 状态）以 `asof_confirmed` 类型写入，之后每个检测到的变更写入一条 `change` 事件。
 
-| 生效日期范围 | 引用版本 | 公告字号 | CSRC规则库UUID |
-|-------------|---------|---------|----------------|
-| 之前 → 2024-05-19 | 2023年1月修订 | 大商所发〔2023〕2号 | `d67e2d8e6eaa4fd0aec2c30381aa1c17` |
-| 2024-05-20 → 2024-10-24 | 2024年修订 | 大商所发〔2024〕35号 | `c55db8e50e1c4584a9725c902182d79a` |
-| 2024-10-25 → 2025-02-13 | 2024年10月修订 | 大商所发〔2024〕99号 | `96f1a607806d42e7ae26200c371b7a0b` |
-| 2025-02-14 → 至今 | 2025年2月修订 | 大商所发〔2025〕16号 | `a787ade268dd46a691dcb94cf693b712` |
+### 2.2 change_type 规则
 
-**第五条原文（所有版本一致）：**
-> 除线型低密度聚乙烯(L)、聚氯乙烯(V)、聚丙烯(PP)以外品种期货合约：
-> - 交割月份前一个月第十五个交易日起 → 10%
-> - 交割月份第一个交易日起 → 20%
->
-> L、V、PP品种期货合约进入交割月份第一个交易日起，交易保证金标准为20%。
+| 类型 | 何时使用 | 允许日期 |
+|------|---------|---------|
+| `asof_confirmed` | 2024 年初的基线快照 | 仅 2024-01-02（或 2023-12-29） |
+| `change` | 所有真实变更（规则驱动或公告驱动） | 任意日期 |
+| `baseline` | 新品种上市时的初始值 | 上市日期 |
 
-### CSRC法规数据库访问
+**严禁：** 在 2024-01-02 之外的日期使用 `asof_confirmed`。
 
-所有历史版本均可通过中国证监会证券期货法规数据库查询：
-`https://neris.csrc.gov.cn/falvfagui/`
+### 2.3 source_notice_id 格式
 
-搜索"大连商品交易所风险管理办法"可获取所有历史版本。查看具体版本：
-`https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId={UUID}&body=`
-
-### 例外品种
-
-以下品种不适用标准交割月保证金规则（需另行确认其业务细则或上市公告）：
-- **BB（胶合板）**: 基础保证金40%（非标的交割月规则）
-- **J（焦炭）、JM（焦煤）**: 基础保证金20%（已处于交割月水平，无中间阶梯）
-- **L_F、PP_F、V_F**: 化工品月均价期货（2025年上市，规则不同）
-- **LG（原木）**: 2024年11月新上市，单独规则
-- **BZ（纯苯）**: 2025年上市，单独规则
-
-### source_notice_id 格式
-
+**规则驱动的保证金变更（第五条阶梯）：**
 ```
 《大连商品交易所风险管理办法（{版本名称}）》（{公告字号}）第五条+DCE-settlement
 ```
+示例：`《大连商品交易所风险管理办法（2024年修订）》（大商所发〔2024〕35号）第五条+DCE-settlement`
 
-示例：
-- 《大连商品交易所风险管理办法（2023年1月修订）》（大商所发〔2023〕2号）第五条+DCE-settlement
-- 《大连商品交易所风险管理办法（2024年修订）》（大商所发〔2024〕35号）第五条+DCE-settlement
+**公告驱动的变更（具体通知）：**
+```
+大商所发〔20XX〕XX号
+```
+示例：`大商所发〔2023〕139号`
+
+### 2.4 source_url 规则
+
+- 规则驱动变更：指向 CSRC 法规数据库对应版本的页面
+  `https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId={UUID}&body=`
+- 公告驱动变更：指向 DCE 公告页或 CSRC 对应公告页面
+- 禁止使用 DCE 官网当前版本 URL（6262956）
+
+### 2.5 raw_note 格式
+
+**规则驱动变更：**
+```
+结算快照确认。依据：《大连商品交易所风险管理办法（{版本}）》（{公告字号}）第五条中规定"{规则原文}"。{品种} {描述}后保证金由{X}%变为{Y}%。
+```
+
+**公告驱动变更：**
+```
+大商所发〔20XX〕XX号：自{日期}交易时起，{品种}期货合约交易保证金水平调整为{X}%。
+```
+
+### 2.6 effective_timestamp 规则
+
+| 场景 | 规则 | 示例 |
+|------|------|------|
+| 夜盘品种的规则变更 | 前一交易日夜间 21:00 | `2024-01-31T21:00:00` |
+| 无夜盘品种的变更 | 当日日盘 09:00 | `2024-01-02T09:00:00` |
+| 节假日后的首个交易日 | 当日日盘 09:00 | `2024-05-06T09:00:00` |
+| 15 日步事件（中间阶梯） | 当日日盘 09:00 | `2024-04-23T09:00:00` |
+| asof_confirmed 基线 | 当日日盘 09:00 | `2024-01-02T09:00:00` |
+
+**无夜盘品种列表：** BB（胶合板）、FB（纤维板）、JD（鸡蛋）、LG（原木）、LH（生猪）
+
+**节假日夜盘取消日期（前一交易日无夜盘）：**
+2024-02-19, 2024-04-08, 2024-05-06, 2024-06-11, 2024-09-18, 2024-10-08,
+2025-01-02, 2025-02-05, 2025-04-07, 2025-05-06, 2025-06-03, 2025-10-09,
+2026-01-05, 2026-02-24, 2026-04-07, 2026-05-06
+
+### 2.7 版本引用
+
+| 日期范围 | 引用版本 | 公告字号 | CSRC UUID |
+|---------|---------|---------|-----------|
+| ≤ 2024-05-19 | 2023年1月修订 | 大商所发〔2023〕2号 | `d67e2d8e6eaa4fd0aec2c30381aa1c17` |
+| 2024-05-20 ~ 2025-02-13 | 2024年修订 | 大商所发〔2024〕35号 | `c55db8e50e1c4584a9725c902182d79a` |
+| ≥ 2025-02-14 | 2025年2月修订 | 大商所发〔2025〕16号 | `a787ade268dd46a691dcb94cf693b712` |
+
+### 2.8 第五条原文
+
+> **交割月份前一个月第十五个交易日起，交易保证金标准为10%**
+> **交割月份第一个交易日起，交易保证金标准为20%**
+> 线型低密度聚乙烯(L)、聚氯乙烯(V)、聚丙烯(PP)品种期货合约进入交割月份第一个交易日起，交易保证金标准为20%。
+
+（L/V/PP 跳过 10% 阶梯，直接从基线到 20%）
 
 ---
 
-## DCE 保证金率入库规范（2026-07-10 定稿）
+## 3. 采集策略
 
-### 数据来源
+### 3.1 快照频率
 
-DCE 结算参数 API（需通过真实 Chrome + Playwright CDP 访问）：
-`POST /dcereport/publicweb/tradepara/futAndOptSettle`
-请求体：`{"varietyId":"all","tradeDate":"YYYYMMDD","tradeType":"1","lang":null}`
+取**每月第一个交易日**和**每月第15个交易日**的结算快照，比较相邻快照检测变更：
+- 月初快照：捕获交割月第一个交易日的变化（7-8% → 20%）
+- 月中快照：捕获交割月前一个月第15交易日的变化（7-8% → 10%）
 
-### 采集策略
+### 3.2 检测变更
 
-取**每月第一个交易日**的结算快照，比较相邻快照检测保证金率变更：
-1. **交割月变更**（7-8% → 20%）：发生在交割月第一个交易日。写入 `change_type='change'`，引用对应版本的风险管理办法。
-2. **非交割月调整**（其他百分比变化）：发生在任意日期。写入 `change_type='asof_confirmed'`，引用结算 API 页面。
-3. **中间阶梯（10%）** 未被月首快照捕获，可通过交易日历推导。
-
-### 版本引用规则
-
-| 日期范围 | 引用版本 | CSRC UUID |
-|---------|---------|-----------|
-| ≤ 2024-05-19 | 大商所发〔2023〕2号 | `d67e2d8e6eaa4fd0aec2c30381aa1c17` |
-| 2024-05-20 ~ 2025-02-13 | 大商所发〔2024〕35号 | `c55db8e50e1c4584a9725c902182d79a` |
-| ≥ 2025-02-14 | 大商所发〔2025〕16号 | `a787ade268dd46a691dcb94cf693b712` |
-
-### 记录格式规范
-
-**交割月变更事件：**
-- `source_notice_id`：`《大连商品交易所风险管理办法（{版本}）》（{公告字号}）第五条+DCE-settlement`
-- `raw_note`：`结算快照确认。依据：《...》第五条中规定"交割月份第一个交易日起，交易保证金标准为20%"。合约{月份}于{日期}进入交割月份后保证金由{X}%变为20%。`
-- `source_url`：指向 CSRC 法规数据库对应版本
-- `change_type`：`change`
-- `exchange`：`DCE`
-- `scope_type` / `contract_scope_type`：`contract` / `explicit`
-
-**非交割月调整事件：**
-- `source_notice_id`：`DCE-settlement-snapshot-{YYYYMMDD}`
-- `raw_note`：`大商所结算快照：{品种} {合约月份}合约{字段名}由{X}%调整为{Y}%（{旧日期}→{新日期}）。`
-- `source_url`：DCE 结算查询页面
-- `change_type`：`asof_confirmed`
-
-### 禁止行为
-
-1. ❌ 不得引用 DCE 官网当前版本 URL（6262956），需用 CSRC 法规库历史版本 UUID
-2. ❌ 不得写入英文 `raw_note`，必须全中文
-3. ❌ 不得使用 `change_type='rule'` 替代实际结算快照数据
-4. ❌ 不得在 `historical_field_values` 中创建重复 `source_key`
+比较相邻快照时，对每个合约的每个字段，如果值发生变化，写入一条 `change` 事件。
 
 ---
 
-## 已知缺口与后续工作
+## 4. 禁止行为
 
-### 1. 缺少公告引用的变更事件（298条）
+1. ❌ **不得使用 `change_type='rule'`** — 所有规则驱动变更用 `change`
+2. ❌ **不得在 2024-01-02 之外使用 `change_type='asof_confirmed'`**
+3. ❌ **不得引用 DCE 官网当前版本 URL（6262956）** — 必须用 CSRC 法规库历史版本
+4. ❌ **不得写入英文 raw_note** — 必须全中文
+5. ❌ **不得从经纪商数据推算字段值**
+6. ❌ **不得创建重复记录** — 写入前检查 `(instrument, contract_codes, field_name, effective_trading_day, value)` 是否已存在
+7. ❌ **不得在 historical_field_values 中创建重复 source_key**
+8. ❌ **不得为空 effective_timestamp**
 
-下列 DCE 产品的保证金变更事件目前引用结算快照而非公告，需要找到对应的大商所公告才能符合 1b 要求：
+---
 
-| 产品 | 变更类型 | 过渡数量 | 需要找到的公告类型 |
-|-----|---------|---------|-----------------|
-| I | 15%→11% | 20 | 铁矿石业务细则或其保证金调整通知 |
-| JM | 20%→12%, 13%↔12% | 30 | 焦煤业务细则或其保证金调整通知 |
-| BZ | 8%→12%, →14% | 14 | 纯苯业务细则或上市公告 |
-| PG | 7%→11%, →16%, 8%→7% | 50 | LPG保证金调整通知 |
-| EB/EG/L/PP/V | 7%→11%, 8%→7% | 各20-52不等 | 各品种保证金调整通知 |
-| BB | 40%→15% | 10 | 胶合板业务细则 |
-| J | 20%→12% | 20 | 焦炭业务细则 |
+## 5. 审计
 
-**查找方法**：通过 CSRC 法规数据库搜索对应产品的名称+保证金，找到匹配日期范围的公告。
-
-### 2. CZCE / SHFE / INE / GFEX / CFFEX
-
-这些交易所的 snapshot-based 事件比例更高（CZCE 99%、SHFE 86% 等），工作量更大。策略同上：先整理出按产品/变更类型分类的列表，再批量搜索公告。
-
-### 3. 数据获取方法汇总
-
-| 交易所 | 方法 | 是否需要Chrome | URL模式 |
-|-------|------|---------------|---------|
-| DCE | Chrome CDP + Playwright → API POST | ✅ | `/dcereport/publicweb/tradepara/futAndOptSettle` |
-| CZCE | HTTP GET | ❌ | `https://www.czce.com.cn/cn/DFSStaticFiles/Future/{year}/{date}/FutureDataClearParams.txt` |
-| SHFE | HTTP GET JSON | ❌ | `https://www.shfe.com.cn/data/tradedata/future/dailydata/js{date}.dat` |
-| INE | HTTP GET JSON | ❌ | `https://www.ine.cn/data/tradedata/future/dailydata/js{date}.dat` |
-| GFEX | akshare (futures_settle_gfex) | ❌ | GFEX SSL证书问题需用akshare绕过 |
-| CFFEX | 暂无可用方法 | — | 公开数据接口受限 |
-
-### 4. 审计覆盖
-
-`audit_dce_margin_coverage.py` 覆盖以下检查：
-- ✅ asof基线存在性（rule 1）
-- ✅ 重复事件检测（rule 3/5）
-- ✅ 公告引用格式（rule 4/1b via `source_notice_id`）
-- ✅ 备注中文格式（rule 4/6）
-- ✅ asof_confirmed边界（rule 3b）
-- ✅ effective_timestamp正确性（rule 3a）
-- ✅ 公告来源质量（rule 1b）
-
-新增审计规则时需在既有审计不修改的前提下追加 `_check_*` 函数。
+运行 `audit_dce_margin_coverage.py` 验证入库质量，该审计覆盖：
+- asof 基线存在性
+- 重复事件检测
+- 公告引用格式
+- 备注中文格式
+- asof_confirmed 边界（仅在 2024 年初）
+- effective_timestamp 正确性（夜盘/日盘/节假日）
+- 公告来源质量（禁止结算快照作为来源）
