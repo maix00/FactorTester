@@ -1096,6 +1096,39 @@ def _initialize_field_state(state, ctx) -> None:
                 store.field_state_store[inst_name] = dict(parent_baselines[inst_name])
             else:
                 store.field_state_store[inst_name] = {}
+    # Register FIELD_CHANGE events from historical field frames
+    frames = store.historical_field_frames
+    if isinstance(frames, dict) and frames:
+        from tools.testers.backtest.engines.native.events import EventDraft
+        import pandas as _pd
+        for field_name, field_frame in frames.items():
+            if not isinstance(field_frame, _pd.DataFrame) or field_frame.empty:
+                continue
+            prev_row = None
+            for ts_idx in range(len(field_frame)):
+                row = field_frame.iloc[ts_idx]
+                row_ts = field_frame.index[ts_idx]
+                if prev_row is not None and not row.equals(prev_row):
+                    # At least one product's value changed
+                    changes = {}
+                    for col in field_frame.columns:
+                        old_val = prev_row.get(col)
+                        new_val = row.get(col)
+                        if old_val != new_val:
+                            col_name = str(getattr(col, "name", col)) if not isinstance(col, str) else col
+                            if col_name not in changes:
+                                changes[col_name] = {}
+                            changes[col_name][field_name] = new_val
+                    if changes:
+                        for strategy in getattr(state, "strategy_configs", {}):
+                            draft = EventDraft(
+                                kind=EventKind.FIELD_CHANGE,
+                                timestamp=_pd.Timestamp(row_ts),
+                                strategy=strategy,
+                                payload={"changes": changes},
+                            )
+                            ctx._event_queue.push_event(draft)
+                prev_row = row
 
 
 def _handle_field_changes(state, ctx) -> None:
@@ -1103,14 +1136,18 @@ def _handle_field_changes(state, ctx) -> None:
     store = market_data_store_for(state)
     for strategy in ctx.active_strategies:
         for draft in ctx.payloads_for(strategy):
-            product_name = str(getattr(draft, "product_name", "") or "")
-            field = str(getattr(draft, "field", "") or "")
-            new_value = getattr(draft, "new_value", None)
-            if not product_name or not field:
+            payload = getattr(draft, "payload", None)
+            if not isinstance(payload, dict):
                 continue
-            if product_name not in store.field_state_store:
-                store.field_state_store[product_name] = {}
-            store.field_state_store[product_name][field] = new_value
+            changes = payload.get("changes", {})
+            if not isinstance(changes, dict):
+                continue
+            for product_name, fields in changes.items():
+                if not isinstance(fields, dict):
+                    continue
+                if product_name not in store.field_state_store:
+                    store.field_state_store[product_name] = {}
+                store.field_state_store[product_name].update(fields)
 
 
 def _load_historical_fields(state, ctx) -> None:
