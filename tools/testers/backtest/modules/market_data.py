@@ -354,7 +354,7 @@ class MarketDataModule(ExecutableModule):
 
     flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
-        load_historical_fields, causal_valuation,
+        # load_historical_fields removed causal_valuation,
         initialize_field_state, handle_field_changes,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
@@ -1039,9 +1039,8 @@ def _initialize_field_state(state, ctx) -> None:
     provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
     if raw_prices is None or raw_prices.empty or resolver is None or provider is None:
         return
-    policy = _historical_field_policy_for_engine(state,
-        str(getattr(store, "historical_field_policy",
-            str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value))))
+    raw_policy = getattr(store, "historical_field_policy", None) or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value
+    policy = _historical_field_policy_for_engine(state, raw_policy)
     ctx.set(MarketDataModule.historical_field_policy, policy)
     store.historical_field_policy = policy
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
@@ -1096,39 +1095,79 @@ def _initialize_field_state(state, ctx) -> None:
                 store.field_state_store[inst_name] = dict(parent_baselines[inst_name])
             else:
                 store.field_state_store[inst_name] = {}
-    # Register FIELD_CHANGE events from historical field frames
-    frames = store.historical_field_frames
-    if isinstance(frames, dict) and frames:
-        from tools.testers.backtest.engines.native.events import EventDraft
-        import pandas as _pd
-        for field_name, field_frame in frames.items():
-            if not isinstance(field_frame, _pd.DataFrame) or field_frame.empty:
-                continue
-            prev_row = None
-            for ts_idx in range(len(field_frame)):
-                row = field_frame.iloc[ts_idx]
-                row_ts = field_frame.index[ts_idx]
-                if prev_row is not None and not row.equals(prev_row):
-                    # At least one product's value changed
-                    changes = {}
-                    for col in field_frame.columns:
-                        old_val = prev_row.get(col)
-                        new_val = row.get(col)
-                        if old_val != new_val:
-                            col_name = str(getattr(col, "name", col)) if not isinstance(col, str) else col
-                            if col_name not in changes:
-                                changes[col_name] = {}
-                            changes[col_name][field_name] = new_val
-                    if changes:
-                        for strategy in getattr(state, "strategy_configs", {}):
-                            draft = EventDraft(
-                                kind=EventKind.FIELD_CHANGE,
-                                timestamp=_pd.Timestamp(row_ts),
-                                strategy=strategy,
-                                payload={"changes": changes},
-                            )
-                            ctx._event_queue.push_event(draft)
-                prev_row = row
+    # Register FIELD_CHANGE events from FieldHistory provider's record frame
+    # This replaces the old per-timestamp bulk query with incremental events
+    try:
+        provider_frame = provider.frame
+        if provider_frame is not None and not provider_frame.empty:
+            from tools.testers.backtest.engines.native.events import EventDraft
+            import pandas as _pd
+            
+            # Determine run window bounds from raw_prices index
+            all_ts = signal_timestamps(raw_prices)
+            if len(all_ts) > 1:
+                run_start = _pd.Timestamp(all_ts[0])
+                run_end = _pd.Timestamp(all_ts[-1])
+            elif len(all_ts) == 1:
+                run_start = _pd.Timestamp(all_ts[0])
+                run_end = run_start
+            else:
+                run_start = run_end = None
+            
+            if run_start is not None and run_end is not None:
+                # Build product code set from instruments
+                product_codes: set[str] = set()
+                for inst in instruments:
+                    inst_name = str(getattr(inst, "name", inst) or "")
+                    code = inst_name.split('.')[0].split('|')[0]
+                    # Extract base code (strip contract suffix like 2605)
+                    import re as _re
+                    base_code = _re.sub(r'[0-9]+$', '', code)
+                    if base_code:
+                        product_codes.add(base_code)
+                    product_codes.add(code)
+                
+                # Query provider frame for matching records in the run window
+                pf = provider_frame.copy()
+                pf_instrument = pf['instrument'].astype(str)
+                pf_field = pf['field_name'].astype(str)
+                pf_ts = pf['effective_timestamp']
+                
+                mask = pf_instrument.isin(product_codes)
+                mask &= pf_field.isin([str(f) for f in field_names])
+                mask &= pf_ts.notna()
+                mask &= (pf_ts >= run_start) & (pf_ts <= run_end)
+                
+                change_records = pf[mask]
+                if not change_records.empty:
+                    # Group by timestamp then by instrument
+                    for (change_ts,), ts_group in change_records.groupby('effective_timestamp'):
+                        changes: dict[str, dict[str, object]] = {}
+                        for _, row in ts_group.iterrows():
+                            code = str(row.get('instrument', ''))
+                            field = str(row.get('field_name', ''))
+                            value = row.get('value')
+                            # Match code to full product names
+                            for inst in instruments:
+                                inst_name = str(getattr(inst, "name", inst) or "")
+                                matches = inst_name.startswith(code + '.') or inst_name == code or inst_name.startswith(code)
+                                if matches:
+                                    product_key = inst_name
+                                    if product_key not in changes:
+                                        changes[product_key] = {}
+                                    changes[product_key][field] = value
+                        if changes:
+                            for strategy in getattr(state, "strategy_configs", {}):
+                                ctx._event_queue.push_event(EventDraft(
+                                    kind=EventKind.FIELD_CHANGE,
+                                    timestamp=_pd.Timestamp(change_ts),
+                                    strategy=strategy,
+                                    payload={"changes": changes},
+                                ))
+    except Exception:
+        import traceback
+        ctx.set(MarketDataModule.historical_field_policy, "fallback")
+
 
 
 def _handle_field_changes(state, ctx) -> None:
@@ -1151,30 +1190,11 @@ def _handle_field_changes(state, ctx) -> None:
 
 
 def _load_historical_fields(state, ctx) -> None:
-    raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
-    resolver = ctx.get(MarketDataModule.trading_day_resolver)
-    store = market_data_store_for(state)
-    raw_policy = _market_data_request(state).get("policy", store.historical_field_policy)
-    policy = _historical_field_policy_for_engine(state, raw_policy)
-    ctx.set(MarketDataModule.historical_field_policy, policy)
-    store.historical_field_policy = policy
-    field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
-    store.historical_field_names = field_names
-    store.historical_fields_cache.clear()
-    store.historical_field_frame_column_cache.clear()
-    store.historical_field_frame_row_cache.clear()
-    store.historical_field_frame_index_cache.clear()
-    if raw_prices is None or raw_prices.empty or resolver is None:
-        store.historical_field_frames = None
-        return
-    store.historical_field_frames = historical_field_frames_for_market_data(
-        list(raw_prices.columns),
-        signal_timestamps(raw_prices),
-        provider=cast(FieldHistoryProvider, store.historical_field_provider),
-        trading_day_resolver=resolver,
-        field_names=field_names,
-        policy=policy,
-    )
+    # Obsoleted by initialize_field_state.  Kept as a no-op placeholder
+    # so existing flow-registration and manifest references don't break;
+    # the actual historical-field state is now managed via field_state_store
+    # + FIELD_CHANGE events.
+    pass
 
 
 def _transaction_fee_source_for_state(state) -> str:
@@ -1881,54 +1901,11 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     if not field_names:
         return {}
     
-    # Try field_state_store first (event-driven incremental approach).
-    # If FIELD_CHANGE events have been processed up to this timestamp,
-    # the in-memory state reflects the current field values.
-    if store.field_state_store:
-        unresolved: dict[Any, dict[str, object]] = {}
-        for instrument in instruments:
-            inst_name = str(getattr(instrument, "name", instrument) or "")
-            entry = store.field_state_store.get(inst_name, {})
-            if isinstance(entry, dict):
-                unresolved[instrument] = dict(entry)
-            else:
-                unresolved[instrument] = {}
-        # Fill in any empty entries from the frames-based fallback
-        if isinstance(store.historical_field_frames, dict):
-            try:
-                frame_result = _historical_fields_at_from_frames(
-                    store.historical_field_frames,
-                    [inst for inst in instruments if not unresolved.get(inst)],
-                    timestamp,
-                    column_cache=store.historical_field_frame_column_cache,
-                    column_map_cache=store.historical_field_frame_column_map_cache,
-                    row_cache=store.historical_field_frame_row_cache,
-                    index_cache=store.historical_field_frame_index_cache,
-                    values_cache=store.historical_field_frame_values_cache,
-                )
-                for inst, vals in frame_result.items():
-                    if vals:
-                        unresolved.setdefault(inst, {}).update(vals)
-            except Exception:
-                pass
-        resolved = resolve_historical_fields_for_products_map(instruments, field_names, timestamp, provider=provider, resolver=resolver, fallback=policy)
-        for inst, vals in resolved.items():
-            inst_name = str(getattr(inst, "name", inst) or "")
-            common = store.field_state_store.get(inst_name, {})
-            if common:
-                vals.update(common)
-            unresolved.setdefault(inst, {}).update(vals)
-        result = _apply_exchange_rule_defaults(state, unresolved, instruments, field_names, timestamp)
-        store.historical_fields_cache[cache_key] = result
-        return result
-    
     table = current_prices_table_for(state)
     instruments = list(table.columns) if table is not None else []
     
-    # NEW: field_state_store (event-driven). If populated, use it directly.
+    # Primary path: field_state_store (event-driven).
     if store.field_state_store:
-        table = current_prices_table_for(state)
-        instruments = list(table.columns) if table is not None else []
         result: dict[Any, dict[str, object]] = {}
         for inst in instruments:
             inst_name = str(getattr(inst, "name", inst) or "")
@@ -1937,6 +1914,7 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
         store.historical_fields_cache[cache_key] = resolved
         return resolved
     
+    # Fallback: query FieldHistory per product (legacy path, no pre-loaded frames).
     frames = store.historical_field_frames
     if isinstance(frames, dict):
         frame_result = _historical_fields_at_from_frames(
