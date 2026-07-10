@@ -132,6 +132,49 @@ def test_market_rule_provider_separates_exchange_and_openctp_fee_sources(monkeyp
     ).value == 2.01
 
 
+def test_contract_specific_fee_overrides_product_fee_baseline() -> None:
+    rows = []
+    for contract_codes, value in [("[]", 2.0), ('["2605"]', 6.0)]:
+        rows.append({
+            "provider": "DCE",
+            "source_key": f"exchange/a/{contract_codes}",
+            "instrument": "A",
+            "instrument_label": "豆一",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "1900-01-01",
+            "effective_timestamp": "",
+            "value": value,
+            "value_type": "",
+            "contract_codes": contract_codes,
+            "source_url": "https://www.dce.com.cn/",
+            "source_date": "",
+            "source_notice_id": "exchange",
+            "raw_note": "exchange fee",
+        })
+    provider = FieldHistoryProvider.from_records(rows)
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-01-05 09:00:00"): pd.Timestamp("2026-01-05"),
+    })
+
+    product = provider.resolve_at(
+        "A",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    )
+    contract = provider.resolve_at(
+        "A2605.DCE",
+        "OpenRatioByVolume",
+        pd.Timestamp("2026-01-05 09:00:00"),
+        trading_day_resolver=resolver,
+    )
+
+    assert product.value == 2.0
+    assert contract.value == 6.0
+    assert contract.contract_code == "2605"
+
+
 def test_field_history_values_for_index_preserves_timestamp_index() -> None:
     provider = FieldHistoryProvider.from_records(_records())
     index = pd.DatetimeIndex([
@@ -271,6 +314,52 @@ def test_values_for_index_latest_available_fallback_uses_nearest_row_per_timesta
     assert values.tolist() == [100]
 
 
+def test_exchange_transaction_fee_latest_available_does_not_backfill_future_event() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "Agent:DCE",
+            "source_key": "exchange/a/open_fee",
+            "instrument": "A",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-22",
+            "value": 2.0,
+        },
+    ])
+
+    with pytest.raises(MissingHistoricalField):
+        provider.resolve_by_trading_day(
+            "A",
+            "OpenRatioByVolume",
+            "2026-01-05",
+            fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+        )
+
+
+def test_openctp_transaction_fee_latest_available_backfills_latest_snapshot() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "OpenCTP:latest",
+            "source_key": "openctp/latest_snapshot/20260622/A/OpenRatioByVolume/product",
+            "instrument": "A",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-22",
+            "value": 2.01,
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day(
+        "A",
+        "OpenRatioByVolume",
+        "2026-01-05",
+        fallback=HistoricalFieldFallbackPolicy.LATEST_AVAILABLE,
+    )
+
+    assert resolved.value == 2.01
+    assert resolved.approximated is True
+
+
 def test_field_history_store_roundtrip(tmp_path: Path) -> None:
     db_path = tmp_path / "field_history.sqlite"
     DataHub.get_instance().register_sqlite_store(SQLiteStore(
@@ -360,6 +449,63 @@ def test_field_history_contract_specific_rule_overrides_product_level_rule() -> 
     assert product_value.value == 1
     assert contract_value.value == 4
     assert contract_value.contract_code == "2606"
+
+
+def test_field_history_exchange_default_rule_fills_product_gap() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/czce/default/max-limit",
+            "instrument": "*",
+            "instrument_type": "future",
+            "scope_type": "exchange_default",
+            "exchange": "CZC",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 1000,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("CF.CZC", "MaxLimitOrderVolume", "2024-02-06")
+
+    assert resolved.value == 1000
+    assert resolved.instrument == "CF"
+
+
+def test_field_history_product_rule_overrides_exchange_default_rule() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/czce/default/max-limit",
+            "instrument": "*",
+            "instrument_type": "future",
+            "scope_type": "exchange_default",
+            "exchange": "CZC",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 1000,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+        {
+            "provider": "test",
+            "source_key": "test/czce/pk/max-limit",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "value": 500,
+            "contract_codes": [],
+            "contract_scope_type": "all",
+        },
+    ])
+
+    resolved = provider.resolve_by_trading_day("PK.CZC", "MaxLimitOrderVolume", "2024-02-06")
+
+    assert resolved.value == 500
+    assert resolved.instrument == "PK"
 
 
 def test_field_history_pipe_contract_with_alpha_suffix_uses_product_baseline() -> None:
@@ -484,3 +630,80 @@ def test_field_history_product_object_uses_main_contract_for_contract_specific_r
     )
 
     assert values.iloc[0] == 4
+
+
+def test_field_history_from_contract_scope_applies_to_later_contracts_only() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/baseline",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-01",
+            "value": 4,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/from-2607",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 2,
+            "contract_scope_type": "from_contract",
+            "contract_code_start": "2607",
+        },
+        {
+            "provider": "test",
+            "source_key": "test/old-2605-unchanged",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 4,
+            "contract_codes": ["2605"],
+            "change_type": "exception_unchanged",
+        },
+    ])
+
+    assert provider.resolve_by_trading_day("PK2605.CZC", "OpenRatioByVolume", "2026-06-25").value == 4
+    assert provider.resolve_by_trading_day("PK2607.CZC", "OpenRatioByVolume", "2026-06-25").value == 2
+    assert provider.resolve_by_trading_day("PK2701.CZC", "OpenRatioByVolume", "2026-06-25").value == 2
+
+
+def test_field_history_vectorized_from_contract_scope_matches_single_lookup() -> None:
+    provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "test",
+            "source_key": "test/baseline",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-01-01",
+            "value": 4,
+            "contract_codes": [],
+        },
+        {
+            "provider": "test",
+            "source_key": "test/from-2607",
+            "instrument": "PK",
+            "instrument_type": "future",
+            "field_name": "OpenRatioByVolume",
+            "effective_trading_day": "2026-06-24",
+            "value": 2,
+            "contract_scope_type": "from_contract",
+            "contract_code_start": "2607",
+        },
+    ])
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-06-25 09:01:00"): pd.Timestamp("2026-06-25"),
+    })
+    index = pd.DatetimeIndex([pd.Timestamp("2026-06-25 09:01:00")])
+
+    old_values = provider.values_for_index("PK2605.CZC", "OpenRatioByVolume", index, trading_day_resolver=resolver)
+    new_values = provider.values_for_index("PK2701.CZC", "OpenRatioByVolume", index, trading_day_resolver=resolver)
+
+    assert old_values.iloc[0] == 4
+    assert new_values.iloc[0] == 2

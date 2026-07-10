@@ -1,0 +1,323 @@
+"""Audit exchange TransactionFee baselines against secondary public sources.
+
+This script does not ingest fee events.  It writes an audit table that compares
+the current exchange fee view against public secondary pages such as Sina's
+futures fee table.  Official exchange notices remain the source of truth for
+historical events; secondary pages are cross-check evidence.
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from urllib.request import Request, urlopen
+
+import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from sources.FieldHistory.views.TransactionFee import (  # noqa: E402
+    FEE_UNIT_CLASSIFICATION_TABLE,
+    save_unified_table,
+)
+from tools.data.field_history import _ensure_store_registered  # noqa: E402
+from tools.data.hub import DataHub  # noqa: E402
+
+
+AUDIT_TABLE = "field_history_transaction_fee_external_audit"
+SINA_FEE_URL = "https://vip.stock.finance.sina.com.cn/q/view/vPositions_fee.php"
+LEG_BY_TITLE = {
+    "开仓手续费": "open",
+    "平昨仓手续费": "close",
+    "平今仓手续费": "close_today",
+}
+
+
+@dataclass(frozen=True)
+class ExternalFeeRow:
+    source_name: str
+    source_url: str
+    instrument: str
+    contract_code: str
+    contract_label: str
+    leg: str
+    unit: str
+    value: float
+    raw_value: str
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--store-key", default="openctp", help="DataHub SQLite store key")
+    parser.add_argument("--source", default=SINA_FEE_URL, help="Sina URL or local HTML file")
+    parser.add_argument("--source-name", default="Sina", help="External source name")
+    parser.add_argument("--output-csv", default="", help="Optional CSV copy of audit rows")
+    args = parser.parse_args(argv)
+
+    text, source_url = _load_html(args.source)
+    external = parse_sina_fee_html(text, source_url=source_url, source_name=args.source_name)
+    if not external:
+        raise ValueError(f"no fee rows parsed from {args.source!r}")
+
+    db_path = save_unified_table(store_key=args.store_key)
+    audit = build_external_audit_frame(external, store_key=args.store_key)
+    hub = DataHub.get_instance()
+    _ensure_store_registered(hub, args.store_key)
+    with hub.connect_store(args.store_key) as conn:
+        audit.to_sql(AUDIT_TABLE, conn, if_exists="replace", index=False)
+    if args.output_csv:
+        out = Path(args.output_csv).expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        audit.to_csv(out, index=False)
+    print(json.dumps({
+        "db_path": db_path,
+        "table": AUDIT_TABLE,
+        "parsed_rows": len(external),
+        "audit_rows": len(audit),
+        "statuses": audit["audit_status"].value_counts().to_dict() if not audit.empty else {},
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+def parse_sina_fee_html(text: str, *, source_url: str = SINA_FEE_URL, source_name: str = "Sina") -> list[ExternalFeeRow]:
+    rows: list[ExternalFeeRow] = []
+    row_pattern = re.compile(
+        r"<td class='heyuealink'>(?P<label>.*?)\(<b>(?P<contract>.*?)</b>\)</td>(?P<body>.*?)(?=<td class='heyuealink'>|</table>)",
+        re.S,
+    )
+    fee_pattern = re.compile(r"<td[^>]*title='(?P<title>[^']*手续费[^']*)'[^>]*>(?P<value>.*?)</td>", re.S)
+    for match in row_pattern.finditer(text):
+        label = _clean_text(match.group("label"))
+        contract_code = _clean_text(match.group("contract")).lower()
+        instrument = _instrument_from_contract(contract_code)
+        if not instrument:
+            continue
+        fee_cells = fee_pattern.findall(match.group("body"))
+        for title, raw_value_html in fee_cells:
+            leg = _leg_from_title(title)
+            if leg is None:
+                continue
+            parsed = _parse_fee_cell(_clean_text(raw_value_html))
+            if parsed is None:
+                continue
+            unit, value = parsed
+            rows.append(ExternalFeeRow(
+                source_name=source_name,
+                source_url=source_url,
+                instrument=instrument,
+                contract_code=contract_code,
+                contract_label=label,
+                leg=leg,
+                unit=unit,
+                value=value,
+                raw_value=_clean_text(raw_value_html),
+            ))
+    return rows
+
+
+def build_external_audit_frame(rows: list[ExternalFeeRow], *, store_key: str = "openctp") -> pd.DataFrame:
+    classification, latest_snapshot_contracts = _latest_classification(store_key=store_key)
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        contract_suffix = _contract_suffix(row.contract_code)
+        match = (
+            classification.get((row.instrument, contract_suffix, row.leg))
+            or classification.get((row.instrument, "", row.leg))
+        )
+        latest_snapshot_contract_set = latest_snapshot_contracts.get(row.instrument, set())
+        missing_from_latest_snapshot = bool(
+            contract_suffix
+            and latest_snapshot_contract_set
+            and contract_suffix not in latest_snapshot_contract_set
+        )
+        exchange_unit = match["unit"] if match else ""
+        exchange_value = match["value"] if match else None
+        exchange_source_notice_ids = match["source_notice_ids"] if match else ""
+        delta = None if exchange_value is None else row.value - float(exchange_value)
+        records.append({
+            "source_name": row.source_name,
+            "source_url": row.source_url,
+            "instrument": row.instrument,
+            "contract_code": row.contract_code,
+            "contract_label": row.contract_label,
+            "leg": row.leg,
+            "source_unit": row.unit,
+            "source_value": row.value,
+            "raw_value": row.raw_value,
+            "exchange_unit": exchange_unit,
+            "exchange_value": exchange_value,
+            "exchange_source_notice_ids": exchange_source_notice_ids,
+            "delta": delta,
+            "audit_status": _audit_status(
+                row.unit,
+                row.value,
+                exchange_unit,
+                exchange_value,
+                exchange_source_notice_ids=exchange_source_notice_ids,
+                missing_from_latest_snapshot=missing_from_latest_snapshot,
+            ),
+        })
+    return pd.DataFrame(records, columns=[
+        "source_name",
+        "source_url",
+        "instrument",
+        "contract_code",
+        "contract_label",
+        "leg",
+        "source_unit",
+        "source_value",
+        "raw_value",
+        "exchange_unit",
+        "exchange_value",
+        "exchange_source_notice_ids",
+        "delta",
+        "audit_status",
+    ])
+
+
+def _latest_classification(
+    *,
+    store_key: str,
+) -> tuple[dict[tuple[str, str, str], dict[str, Any]], dict[str, set[str]]]:
+    hub = DataHub.get_instance()
+    _ensure_store_registered(hub, store_key)
+    with hub.connect_store(store_key) as conn:
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+            (FEE_UNIT_CLASSIFICATION_TABLE,),
+        ).fetchone()
+        if table_exists is None:
+            return {}, {}
+        frame = pd.read_sql_query(f"SELECT * FROM {FEE_UNIT_CLASSIFICATION_TABLE}", conn)
+    if frame.empty:
+        return {}, {}
+    frame["effective_trading_day"] = frame["effective_trading_day"].astype(str)
+    frame["contract_key"] = frame["contract_codes"].map(_contract_key_from_json)
+    frame = frame.sort_values(["instrument", "contract_key", "effective_trading_day", "effective_timestamp"])
+    snapshot_frame = frame[
+        frame["source_notice_ids"].astype(str).str.contains("settlement-parameters-", regex=False)
+        & (frame["contract_key"] != "")
+    ].copy()
+    latest_snapshot_contracts: dict[str, set[str]] = {}
+    if not snapshot_frame.empty:
+        snapshot_latest_days = snapshot_frame.groupby("instrument")["effective_trading_day"].transform("max")
+        latest_snapshot_frame = snapshot_frame[snapshot_frame["effective_trading_day"] == snapshot_latest_days]
+        for item in latest_snapshot_frame.itertuples(index=False):
+            latest_snapshot_contracts.setdefault(str(item.instrument), set()).update(
+                part for part in str(item.contract_key).split(",") if part
+            )
+    latest = frame.groupby(["instrument", "contract_key"], as_index=False, sort=False).tail(1)
+    result: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in latest.itertuples(index=False):
+        for leg in ("open", "close", "close_today"):
+            result[(str(item.instrument), str(item.contract_key), leg)] = {
+                "unit": getattr(item, f"{leg}_unit"),
+                "value": getattr(item, f"{leg}_{getattr(item, f'{leg}_unit')}") if getattr(item, f"{leg}_unit") in {"money", "volume"} else 0.0,
+                "source_notice_ids": getattr(item, "source_notice_ids", ""),
+            }
+    return result, latest_snapshot_contracts
+
+
+def _load_html(source: str) -> tuple[str, str]:
+    if source.startswith(("http://", "https://")):
+        request = Request(source, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=30) as response:
+            raw = response.read()
+        return raw.decode("utf-8", errors="ignore"), source
+    path = Path(source).expanduser().resolve()
+    return path.read_text(encoding="utf-8"), str(path)
+
+
+def _clean_text(value: str) -> str:
+    value = re.sub(r"<[^>]+>", "", value)
+    return html.unescape(value).replace("\xa0", " ").strip()
+
+
+def _instrument_from_contract(contract_code: str) -> str:
+    match = re.match(r"([a-zA-Z]+)", contract_code.strip())
+    return match.group(1).upper() if match else ""
+
+
+def _contract_suffix(contract_code: str) -> str:
+    match = re.search(r"(\d+[A-Za-z]?)$", contract_code.strip())
+    return match.group(1).upper() if match else ""
+
+
+def _contract_key_from_json(value: Any) -> str:
+    text = str(value or "").strip()
+    if text in {"", "[]"}:
+        return ""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = [text]
+    if not isinstance(parsed, list) or not parsed:
+        return ""
+    suffixes = sorted({_contract_suffix(str(item)) for item in parsed if _contract_suffix(str(item))})
+    return ",".join(suffixes)
+
+
+def _leg_from_title(title: str) -> str | None:
+    for prefix, leg in LEG_BY_TITLE.items():
+        if prefix in title:
+            return leg
+    return None
+
+
+def _parse_fee_cell(raw: str) -> tuple[str, float] | None:
+    text = raw.strip()
+    if not text:
+        return None
+    ratio_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*/\s*万分之", text)
+    if ratio_match:
+        value = float(ratio_match.group(1)) / 10000.0
+        return ("zero", 0.0) if abs(value) <= 1e-15 else ("money", value)
+    yuan_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*元", text)
+    if yuan_match:
+        value = float(yuan_match.group(1))
+        return ("zero", 0.0) if abs(value) <= 1e-15 else ("volume", value)
+    return None
+
+
+def _audit_status(
+    source_unit: str,
+    source_value: float,
+    exchange_unit: str,
+    exchange_value: Any,
+    *,
+    exchange_source_notice_ids: str = "",
+    missing_from_latest_snapshot: bool = False,
+) -> str:
+    if not exchange_unit:
+        return "missing_exchange_baseline"
+    if source_unit == "zero" and abs(float(exchange_value or 0.0)) <= 1e-15:
+        return "matched"
+    if exchange_unit == "zero" and abs(source_value) <= 1e-15:
+        return "matched"
+    if exchange_value is None:
+        return "missing_exchange_value"
+    if missing_from_latest_snapshot:
+        return "secondary_contract_not_in_latest_official_snapshot"
+    if "settlement-parameters-" in str(exchange_source_notice_ids):
+        return "secondary_disagrees_official_snapshot"
+    if source_unit != exchange_unit:
+        return "unit_mismatch"
+    delta = source_value - float(exchange_value)
+    if abs(delta) <= 1e-12:
+        return "matched"
+    addon = 0.0000008 if source_unit == "money" else 0.01
+    if abs(delta - addon) <= 1e-9:
+        return "matched_with_broker_addon"
+    return "value_mismatch"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

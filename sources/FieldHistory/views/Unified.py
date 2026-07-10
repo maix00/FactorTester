@@ -17,8 +17,10 @@ from tools.data.field_history import (
     FIELD_HISTORY_COLUMNS,
     FieldHistoryProvider,
     _ensure_store_registered,
+    _clean_optional_text,
+    _normalise_change_type,
+    _normalise_contract_scope_type,
     load_historical_field_frame,
-    load_openctp_latest_market_rule_frame,
 )
 from tools.data.hub import DataHub
 
@@ -29,19 +31,24 @@ _GROUP_COLUMNS = [
     "instrument",
     "instrument_label",
     "instrument_type",
+    "scope_type",
+    "exchange",
     "field_name",
     "effective_trading_day",
     "effective_timestamp",
     "value",
     "value_type",
     "contract_codes",
+    "contract_scope_type",
+    "contract_code_start",
+    "contract_code_end",
+    "change_type",
 ]
 
 
 def load_source_frame(*, store_key: str = "openctp") -> pd.DataFrame:
     historical = load_historical_field_frame(store_key=store_key)
-    latest = load_openctp_latest_market_rule_frame(store_key=store_key)
-    frames = [frame for frame in (historical, latest) if not frame.empty]
+    frames = [frame for frame in (historical,) if not frame.empty]
     if not frames:
         return pd.DataFrame(columns=FIELD_HISTORY_COLUMNS)
     frame = cast(pd.DataFrame, pd.concat(frames, ignore_index=True, sort=False))
@@ -58,7 +65,7 @@ def build_unified_frame(source_frame: pd.DataFrame | None = None, *, store_key: 
     for column in FIELD_HISTORY_COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
-    frame["contract_codes"] = cast(pd.Series, frame["contract_codes"]).map(_normalise_contract_codes_json)
+    frame = _normalise_scope_columns(frame)
     rows: list[dict[str, Any]] = []
     for _, group in frame.groupby(_GROUP_COLUMNS, dropna=False, sort=True):
         group_df = cast(pd.DataFrame, group)
@@ -168,6 +175,28 @@ def _normalise_contract_codes_json(value: Any) -> str:
         parsed = [parsed]
     codes = sorted({str(item).strip() for item in parsed if str(item).strip()})
     return json.dumps(codes, ensure_ascii=False)
+
+
+def _normalise_scope_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    result["contract_codes"] = cast(pd.Series, result["contract_codes"]).map(_normalise_contract_codes_json)
+    result["contract_scope_type"] = [
+        _normalise_contract_scope_type(scope_type, contract_codes=contract_codes, start=start, end=end)
+        for scope_type, contract_codes, start, end in zip(
+            result["contract_scope_type"],
+            result["contract_codes"],
+            result["contract_code_start"],
+            result["contract_code_end"],
+        )
+    ]
+    result["contract_code_start"] = cast(pd.Series, result["contract_code_start"]).map(
+        lambda value: _clean_optional_text(value).upper()
+    )
+    result["contract_code_end"] = cast(pd.Series, result["contract_code_end"]).map(
+        lambda value: _clean_optional_text(value).upper()
+    )
+    result["change_type"] = cast(pd.Series, result["change_type"]).map(_normalise_change_type)
+    return result
 
 
 def _serialise_unified_frame(frame: pd.DataFrame) -> pd.DataFrame:

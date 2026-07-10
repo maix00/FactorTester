@@ -14,7 +14,11 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from tools.data.field_history import HISTORICAL_FIELD_TABLE, _ensure_store_registered
+from tools.data.field_history import (
+    HISTORICAL_FIELD_TABLE,
+    _ensure_store_registered,
+    _normalise_contract_scope_type,
+)
 from tools.data.field_history_agent_ingest import (
     AGENT_EVENT_TABLE,
     append_agent_field_change_events,
@@ -33,6 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--requester-key-hash", default="", help="Precomputed requester key hash")
     parser.add_argument("--no-materialize", action="store_true", help="Append events but do not materialize to historical_field_values")
     parser.add_argument("--no-rebuild-view", action="store_true", help="Skip rebuilding known FieldHistory views")
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Replace existing events with the same event_id before materializing; use only for source-event corrections",
+    )
     args = parser.parse_args(argv)
 
     events = _dedupe_events(_load_events(args.paths, field_group=args.field_group))
@@ -47,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     _ensure_store_registered(hub, args.store_key)
     with hub.connect_store(args.store_key) as conn:
         ensure_agent_event_schema(conn)
+        if args.replace_existing:
+            _delete_existing_events(conn, events)
         missing = [event for event in events if not _event_exists(conn, event)]
 
     if missing:
@@ -113,8 +124,22 @@ def _validate_event(event: Mapping[str, Any], *, source: str) -> None:
         return
     if not isinstance(contract_codes, list):
         raise ValueError(f"{source}: contract_codes must be a list")
-    if len(contract_codes) > 1:
-        raise ValueError(f"{source}: split contract-specific events into one contract per row")
+    scope_type = str(event.get("contract_scope_type") or "").strip().lower()
+    if scope_type and scope_type not in {"all", "explicit", "from_contract", "range"}:
+        raise ValueError(f"{source}: unsupported contract_scope_type={scope_type!r}")
+    if scope_type in {"from_contract", "range"} and not str(event.get("contract_code_start") or "").strip():
+        raise ValueError(f"{source}: {scope_type} requires contract_code_start")
+    if scope_type == "range" and not str(event.get("contract_code_end") or "").strip():
+        raise ValueError(f"{source}: range requires contract_code_end")
+    change_type = str(event.get("change_type") or "change").strip().lower()
+    if change_type not in {"change", "baseline", "reaffirmation", "exception_unchanged", "asof_confirmed", "rule"}:
+        raise ValueError(f"{source}: unsupported change_type={change_type!r}")
+    effective_session = str(event.get("effective_session") or "").strip().lower()
+    if effective_session and effective_session not in {"day", "day_open", "日盘", "日盘开盘", "night", "night_open", "夜盘", "夜盘开盘"}:
+        raise ValueError(f"{source}: unsupported effective_session={effective_session!r}")
+    source_notice_id = str(event.get("source_notice_id") or "")
+    if change_type == "baseline" and "settlement-parameters" in source_notice_id:
+        raise ValueError(f"{source}: settlement parameter snapshots are audit evidence, not baseline events")
 
 
 def _dedupe_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -144,31 +169,92 @@ def _event_exists(conn: sqlite3.Connection, event: Mapping[str, Any]) -> bool:
     ).fetchone():
         return True
     contract_codes_json = json.dumps(event.get("contract_codes") or [], ensure_ascii=False)
+    contract_code_start = str(event.get("contract_code_start") or "")
+    contract_code_end = str(event.get("contract_code_end") or "")
+    contract_scope_type = _normalise_contract_scope_type(
+        event.get("contract_scope_type"),
+        contract_codes=contract_codes_json,
+        start=contract_code_start,
+        end=contract_code_end,
+    )
     value_json = json.dumps(event["value"], ensure_ascii=False)
-    existing = conn.execute(
-        f"""
-        SELECT 1
-        FROM {HISTORICAL_FIELD_TABLE}
-        WHERE instrument = ?
-          AND instrument_type = ?
-          AND field_name = ?
-          AND effective_trading_day = ?
-          AND COALESCE(effective_timestamp, '') = COALESCE(?, '')
-          AND contract_codes = ?
-          AND value = ?
-        LIMIT 1
-        """,
-        (
-            event["instrument"],
-            event["instrument_type"],
-            event["field_name"],
-            event["effective_trading_day"],
-            str(event.get("effective_timestamp") or ""),
-            contract_codes_json,
-            value_json,
-        ),
-    ).fetchone()
+    history_columns = {
+        row["name"]
+        for row in conn.execute(f'PRAGMA table_info("{HISTORICAL_FIELD_TABLE}")').fetchall()
+    }
+    scope_filters = ""
+    scope_params: tuple[str, ...] = ()
+    if {"contract_scope_type", "contract_code_start", "contract_code_end"}.issubset(history_columns):
+        scope_filters = """
+          AND COALESCE(contract_scope_type, '') = COALESCE(?, '')
+          AND COALESCE(contract_code_start, '') = COALESCE(?, '')
+          AND COALESCE(contract_code_end, '') = COALESCE(?, '')
+        """
+        scope_params = (contract_scope_type, contract_code_start, contract_code_end)
+    field_scope_filters = ""
+    field_scope_params: tuple[str, ...] = ()
+    if {"scope_type", "exchange"}.issubset(history_columns):
+        field_scope_filters = """
+          AND COALESCE(scope_type, 'product') = COALESCE(?, 'product')
+          AND COALESCE(exchange, '') = COALESCE(?, '')
+        """
+        field_scope_params = (
+            str(event.get("scope_type") or "product").strip().lower(),
+            str(event.get("exchange") or "").strip().upper(),
+        )
+    try:
+        existing = conn.execute(
+            f"""
+            SELECT 1
+            FROM {HISTORICAL_FIELD_TABLE}
+            WHERE instrument = ?
+              AND instrument_type = ?
+              AND field_name = ?
+              AND effective_trading_day = ?
+              AND COALESCE(effective_timestamp, '') = COALESCE(?, '')
+              AND contract_codes = ?
+              {scope_filters}
+              {field_scope_filters}
+              AND value = ?
+            LIMIT 1
+            """,
+            (
+                event["instrument"],
+                event["instrument_type"],
+                event["field_name"],
+                event["effective_trading_day"],
+                str(event.get("effective_timestamp") or ""),
+                contract_codes_json,
+                *scope_params,
+                *field_scope_params,
+                value_json,
+            ),
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return False
+        raise
     return existing is not None
+
+
+def _delete_existing_events(conn: sqlite3.Connection, events: Iterable[Mapping[str, Any]]) -> None:
+    event_keys = [
+        (
+            str(event["event_id"]),
+            f"agent/{event['data_source']}/{event['event_id']}",
+        )
+        for event in events
+    ]
+    if not event_keys:
+        return
+    conn.executemany(
+        f"DELETE FROM {AGENT_EVENT_TABLE} WHERE event_id = ?",
+        [(event_id,) for event_id, _ in event_keys],
+    )
+    conn.executemany(
+        f'DELETE FROM "{HISTORICAL_FIELD_TABLE}" WHERE source_key = ?',
+        [(source_key,) for _, source_key in event_keys],
+    )
 
 
 def _rebuild_view(field_group: str, *, store_key: str) -> list[str]:
@@ -185,7 +271,11 @@ def _rebuild_view(field_group: str, *, store_key: str) -> list[str]:
         from sources.FieldHistory.views.TransactionFee import save_unified_table
 
         save_unified_table(store_key=store_key)
-        rebuilt.append("field_history_transaction_fee_unified")
+        rebuilt.extend([
+            "field_history_transaction_fee_unified",
+            "field_history_transaction_fee_exchange",
+            "field_history_transaction_fee_broker_openctp",
+        ])
     return rebuilt
 
 

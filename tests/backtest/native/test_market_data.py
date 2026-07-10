@@ -29,6 +29,11 @@ from tools.testers.backtest.modules.order_execution import OrderExecutionModule
 from tools.data.types import DataColumn
 from tools.data.types.time import DataTime
 from tools.data.types.time_freq import DataFreq
+from tools.data.field_history import (
+    FieldHistoryProvider,
+    HistoricalFieldFallbackPolicy,
+    TimestampTradingDayResolver,
+)
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 
 
@@ -1127,6 +1132,56 @@ def test_contract_multiplier_default_fallback_records_runtime_info_interval():
     assert rows[0]["details"]["source"] == "VolumeMultiple"
     assert rows[0]["details"]["fallback"] == "default:1"
     assert rows[0]["details"]["count"] == 2
+
+
+def test_latest_available_historical_field_backfill_records_runtime_info():
+    class _Product:
+        name = "CF.CZC"
+        desc = "棉花"
+
+    product = _Product()
+    timestamp = pd.Timestamp("2021-01-05 09:01:00", tz="Asia/Shanghai")
+    state = BacktestRunState()
+    state.market_data_store.current_prices_table = pd.DataFrame(
+        {product: [15000.0]},
+        index=pd.DatetimeIndex([timestamp]),
+    )
+    state.market_data_store.historical_field_names = ("MaxLimitOrderVolume",)
+    state.market_data_store.historical_field_policy = HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value
+    state.market_data_store.historical_field_provider = FieldHistoryProvider.from_records([
+        {
+            "provider": "Agent:CZCE",
+            "source_key": "agent/CZCE/max-limit-order-volume-2022",
+            "instrument": "*",
+            "instrument_label": "郑商所期货默认",
+            "instrument_type": "future",
+            "scope_type": "exchange_default",
+            "exchange": "CZC",
+            "field_name": "MaxLimitOrderVolume",
+            "effective_trading_day": "2022-12-01",
+            "effective_timestamp": "2022-12-01 09:00:00",
+            "value": 1000,
+            "contract_scope_type": "all",
+            "change_type": "baseline",
+            "source_notice_id": "郑商所公告〔2022〕74号",
+            "source_url": "https://www.czce.com.cn/",
+        }
+    ])
+    state.market_data_store.trading_day_resolver = TimestampTradingDayResolver({
+        timestamp: pd.Timestamp("2021-01-05"),
+    })
+
+    fields = market_data_module.current_historical_fields_at(state, timestamp)
+
+    assert fields[product]["MaxLimitOrderVolume"] == 1000
+    rows = [
+        row for row in state.runtime_info_rows
+        if row.get("code") == "historical_field_latest_available_backfill"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["details"]["product"] == "CF.CZC"
+    assert rows[0]["details"]["source"] == "MaxLimitOrderVolume"
+    assert rows[0]["details"]["fallback"].startswith("latest_available:")
 
 
 def test_auto_accounting_subscribes_cost_basis_method_for_market_data():
