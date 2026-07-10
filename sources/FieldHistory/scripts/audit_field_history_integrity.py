@@ -42,6 +42,9 @@ def main(argv: list[str] | None = None) -> int:
         rows.extend(_check_snapshot_source(args.store_key, ex))
         rows.extend(_check_chinese_notes(args.store_key, ex))
         rows.extend(_check_risk_measures_ref(args.store_key, ex))
+        rows.extend(_check_dce_skip_10pct(args.store_key))
+
+
 
     _print_summary(rows, limit=args.limit)
     if args.output_csv:
@@ -160,6 +163,24 @@ def _check_risk_measures_ref(store_key: str, data_source: str) -> list[dict[str,
     return rows
 
 
+
+def _check_dce_skip_10pct(store_key):
+    """DCE L/V/PP skip 10% intermediate step (Article 5 exception)."""
+    rows = []
+    hub = DataHub.get_instance()
+    with hub.connect_store(store_key) as conn:
+        for prod in ('L', 'V', 'PP'):
+            cnt = conn.execute(
+                'SELECT COUNT(*) FROM agent_field_change_events '
+                'WHERE data_source=\'DCE\' AND instrument=? '
+                'AND field_name LIKE \'%Margin%\' AND value_json=\'"0.10"\'',
+                (prod,)
+            ).fetchone()[0]
+            if cnt > 0:
+                rows.append({'rule': 'DCE-LVP-10', 'severity': 'error',
+                    'instrument': prod, 'field_name': 'Margin',
+                    'detail': f'{prod} skips 10% step but has {cnt} events with 10%'})
+    return rows
 def _print_summary(rows: list[dict[str, str]], *, limit: int) -> None:
     print("FieldHistory Cross-Exchange Integrity Audit")
     print(f"  total_issues: {len(rows)}")
