@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         rows.extend(_check_dce_no_night(args.store_key))
         rows.extend(_check_czce_calendar_day(args.store_key))
         rows.extend(_check_shfe_four_tier(args.store_key))
+        rows.extend(_check_closetoday_vs_close(args.store_key))
 
 
 
@@ -244,6 +245,33 @@ def _check_shfe_four_tier(store_key):
                 rows.append({'rule': 'SHFE-4tier', 'severity': 'info',
                     'instrument': inst, 'field_name': 'Margin',
                     'detail': f'{inst} has 20% but no 15% tier event'})
+    return rows
+
+def _check_closetoday_vs_close(store_key):
+    """Check: CloseToday fee is often different from Close fee (平今仓 vs 平仓)."""
+    rows = []
+    hub = DataHub.get_instance()
+    with hub.connect_store(store_key) as conn:
+        for ds in ('DCE', 'CZCE', 'SHFE', 'INE', 'GFEX', 'CFFEX'):
+            cur = conn.execute(
+                'SELECT instrument, field_name, value_json FROM agent_field_change_events '
+                'WHERE data_source=? AND field_name IN '
+                '(\'CloseRatioByVolume\',\'CloseRatioByMoney\',\'CloseTodayRatioByVolume\',\'CloseTodayRatioByMoney\') '
+                'ORDER BY instrument, field_name',
+                (ds,)
+            )
+            data = {}
+            for r in cur.fetchall():
+                key = (r[0], r[1])
+                data[key] = r[2]
+            for (inst, fn), val in data.items():
+                if 'CloseToday' in fn:
+                    base_fn = fn.replace('CloseToday', 'Close')
+                    base_val = data.get((inst, base_fn))
+                    if base_val and base_val == val:
+                        rows.append({'rule': 'fee-closetoday-equals-close', 'severity': 'info',
+                            'instrument': inst, 'field_name': fn,
+                            'detail': f'{ds} {inst}: CloseTodayFee {val} equals CloseFee {base_val}'})
     return rows
 def _print_summary(rows: list[dict[str, str]], *, limit: int) -> None:
     print("FieldHistory Cross-Exchange Integrity Audit")
