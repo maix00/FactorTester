@@ -281,3 +281,51 @@ DCE 结算参数 API（需通过真实 Chrome + Playwright CDP 访问）：
 2. ❌ 不得写入英文 `raw_note`，必须全中文
 3. ❌ 不得使用 `change_type='rule'` 替代实际结算快照数据
 4. ❌ 不得在 `historical_field_values` 中创建重复 `source_key`
+
+---
+
+## 已知缺口与后续工作
+
+### 1. 缺少公告引用的变更事件（298条）
+
+下列 DCE 产品的保证金变更事件目前引用结算快照而非公告，需要找到对应的大商所公告才能符合 1b 要求：
+
+| 产品 | 变更类型 | 过渡数量 | 需要找到的公告类型 |
+|-----|---------|---------|-----------------|
+| I | 15%→11% | 20 | 铁矿石业务细则或其保证金调整通知 |
+| JM | 20%→12%, 13%↔12% | 30 | 焦煤业务细则或其保证金调整通知 |
+| BZ | 8%→12%, →14% | 14 | 纯苯业务细则或上市公告 |
+| PG | 7%→11%, →16%, 8%→7% | 50 | LPG保证金调整通知 |
+| EB/EG/L/PP/V | 7%→11%, 8%→7% | 各20-52不等 | 各品种保证金调整通知 |
+| BB | 40%→15% | 10 | 胶合板业务细则 |
+| J | 20%→12% | 20 | 焦炭业务细则 |
+
+**查找方法**：通过 CSRC 法规数据库搜索对应产品的名称+保证金，找到匹配日期范围的公告。
+
+### 2. CZCE / SHFE / INE / GFEX / CFFEX
+
+这些交易所的 snapshot-based 事件比例更高（CZCE 99%、SHFE 86% 等），工作量更大。策略同上：先整理出按产品/变更类型分类的列表，再批量搜索公告。
+
+### 3. 数据获取方法汇总
+
+| 交易所 | 方法 | 是否需要Chrome | URL模式 |
+|-------|------|---------------|---------|
+| DCE | Chrome CDP + Playwright → API POST | ✅ | `/dcereport/publicweb/tradepara/futAndOptSettle` |
+| CZCE | HTTP GET | ❌ | `https://www.czce.com.cn/cn/DFSStaticFiles/Future/{year}/{date}/FutureDataClearParams.txt` |
+| SHFE | HTTP GET JSON | ❌ | `https://www.shfe.com.cn/data/tradedata/future/dailydata/js{date}.dat` |
+| INE | HTTP GET JSON | ❌ | `https://www.ine.cn/data/tradedata/future/dailydata/js{date}.dat` |
+| GFEX | akshare (futures_settle_gfex) | ❌ | GFEX SSL证书问题需用akshare绕过 |
+| CFFEX | 暂无可用方法 | — | 公开数据接口受限 |
+
+### 4. 审计覆盖
+
+`audit_dce_margin_coverage.py` 覆盖以下检查：
+- ✅ asof基线存在性（rule 1）
+- ✅ 重复事件检测（rule 3/5）
+- ✅ 公告引用格式（rule 4/1b via `source_notice_id`）
+- ✅ 备注中文格式（rule 4/6）
+- ✅ asof_confirmed边界（rule 3b）
+- ✅ effective_timestamp正确性（rule 3a）
+- ✅ 公告来源质量（rule 1b）
+
+新增审计规则时需在既有审计不修改的前提下追加 `_check_*` 函数。
