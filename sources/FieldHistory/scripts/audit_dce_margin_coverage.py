@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     rows.extend(_check_duplicates(args.store_key))
     rows.extend(_check_source_format(args.store_key))
     rows.extend(_check_raw_note_format(args.store_key))
+    rows.extend(_check_effective_timestamps(args.store_key))
 
     _print_summary(rows, limit=args.limit)
     if args.output_csv:
@@ -246,6 +247,48 @@ def _check_raw_note_format(store_key: str) -> list[dict[str, str]]:
 
     return rows
 
+
+
+def _check_effective_timestamps(store_key: str) -> list[dict[str, str]]:
+    """Rule 7: All records have proper effective_timestamp considering day/night sessions."""
+    rows: list[dict[str, str]] = []
+    events = _load_agent_events(store_key)
+    
+    NO_NIGHT_DATES = {
+        '2024-02-19', '2024-04-08', '2024-05-06', '2024-06-11', '2024-09-18', '2024-10-08',
+        '2025-01-02', '2025-02-05', '2025-04-07', '2025-05-06', '2025-06-03', '2025-10-09',
+        '2026-01-05', '2026-02-24', '2026-04-07', '2026-05-06',
+    }
+    
+    for ev in events:
+        ts = ev.get('effective_timestamp', '')
+        day = ev.get('effective_trading_day', '')
+        ct = ev.get('change_type', '')
+        if not ts:
+            rows.append({'rule': '7-empty-ts', 'severity': 'error',
+                'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                'detail': f'Missing effective_timestamp for {day}'})
+            continue
+        
+        normalized_day = day[:10]
+        if len(normalized_day) == 8 and normalized_day.isdigit():
+            normalized_day = f'{normalized_day[:4]}-{normalized_day[4:6]}-{normalized_day[6:8]}'
+        
+        ts_day = ts[:10]
+        ts_hour = ts[11:13] if len(ts) >= 13 else ''
+        
+        if ct == 'change':
+            # Delivery-month events should have T21:00 (night) unless night was cancelled
+            if ts_hour == '09' and normalized_day not in NO_NIGHT_DATES:
+                rows.append({'rule': '7-change-ts', 'severity': 'warning',
+                    'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                    'detail': f'change event on {day} uses day timestamp {ts} but night session existed'})
+            elif ts_hour == '21' and normalized_day in NO_NIGHT_DATES:
+                rows.append({'rule': '7-change-ts-night', 'severity': 'warning',
+                    'instrument': ev['instrument'], 'field_name': ev['field_name'],
+                    'detail': f'change event on {day} uses night timestamp {ts} but night was cancelled'})
+    
+    return rows
 def _print_summary(rows: list[dict[str, str]], *, limit: int) -> None:
     print("DCE Margin Coverage Audit")
     print(f"  total_issues: {len(rows)}")
