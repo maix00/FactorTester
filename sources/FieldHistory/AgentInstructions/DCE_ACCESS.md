@@ -1,0 +1,186 @@
+# DCE（大商所）官网字段验证 — 数据获取方法
+
+> 编写于 2026-07-10，在 issue-124 审计过程中验证。
+> 适用场景：Agent 需要从 DCE 官网获取合约规格、交易参数、结算参数等公开数据。
+
+## 背景：DCE 反爬保护
+
+DCE 全站使用 **Distil Networks**（或同类）反爬系统。以下方式均被拦截：
+
+| 方式 | 结果 |
+|------|------|
+| `curl` / `requests` / `urllib` | 返回反爬 JS，无实际内容 |
+| `akshare.futures_contract_info_dce()` | HTTP 412 |
+| Playwright 默认 Chromium (launch) | 返回空页面 |
+
+## 可行方法：API 调用（在已加载页面中 fetch）
+
+**原理**：先用真实 Chrome + Playwright CDP 加载 DCE 页面，等页面完全加载后，在页面上下文中用 `fetch` 直接调用 DCE 后端 API。此时 fetch 携带了页面已有的反爬 Cookie 和 Token，不会被拦截。
+
+### 操作步骤
+
+```python
+import subprocess, time, json, shutil, os
+from playwright.sync_api import sync_playwright
+
+# 1. 复制用户真实 Chrome 配置文件（唯一临时目录，不杀用户 Chrome）
+user_profile = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+tmp_profile = f"/tmp/chrome-dce-{os.getpid()}"
+if os.path.exists(tmp_profile): shutil.rmtree(tmp_profile)
+os.makedirs(f"{tmp_profile}/Default", exist_ok=True)
+for item in ["Cookies", "Cookies-journal", "Network", "Local State"]:
+    src = f"{user_profile}/{item}"; dst = f"{tmp_profile}/{item}"
+    if os.path.exists(src):
+        try:
+            if os.path.isdir(src): shutil.copytree(src, dst, dirs_exist_ok=True)
+            else: shutil.copy2(src, dst)
+        except: pass
+
+# 2. 启动真实 Chrome + 调试端口（不要 pkill 已有的 Chrome）
+chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+chrome_proc = subprocess.Popen(
+    [chrome_path, "--remote-debugging-port=9222",
+     f"--user-data-dir={tmp_profile}", "--no-first-run", "--no-default-browser-check"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+)
+# 等待 Chrome 就绪
+import urllib.request
+for _ in range(10):
+    time.sleep(2)
+    try:
+        resp = urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=3)
+        json.loads(resp.read()); break
+    except: pass
+
+# 3. 加载结算参数页面（必须 wait_until='networkidle' 等 Vue 加载完）
+with sync_playwright() as p:
+    browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+    ctx = browser.contexts[0]
+    page = ctx.new_page()
+    page.goto(
+        "http://www.dce.com.cn/frontend/dcereport/#/zh/queryFutAndOptSettle?variety=all&tradeType=1",
+        wait_until='networkidle', timeout=30000)
+    time.sleep(3)
+
+    # 4. 调用 API 查询指定日期（改 tradeDate 即可，格式 YYYYMMDD）
+    result = page.evaluate("""async (d) => {
+        var resp = await fetch('/dcereport/publicweb/tradepara/futAndOptSettle', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json','Accept':'application/json','clientid':'web'},
+            body: JSON.stringify({varietyId:'all', tradeDate:d, tradeType:'1', lang:null})
+        });
+        return await resp.json();
+    }""", "20240102")
+
+    browser.close()
+chrome_proc.terminate()
+```
+
+### API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/dcereport/publicweb/tradepara/futAndOptSettle` | POST | 结算参数（保证金率、手续费、结算价） |
+| `/dcereport/publicweb/variety` | GET | 品种列表 |
+| `/dcereport/publicweb/maxTradeDate2` | POST | 最大交易日期 |
+| `/dcereport/publicweb/tradeDateNum` | POST | 交易日序号 |
+
+### API 请求/响应
+
+请求体：`{"varietyId": "all", "tradeDate": "20240102", "tradeType": "1", "lang": null}`
+
+响应字段与 DB 映射：
+
+| API 字段 | DB 字段 | 说明 |
+|----------|---------|------|
+| `specBuyRate` | `LongMarginRatioByMoney` | 投机买保证金率（如 "0.2" = 20%） |
+| `specSellRate` | `ShortMarginRatioByMoney` | 投机卖保证金率 |
+| `clearPrice` | - | 结算价 |
+| `openFee` / `offsetFee` | - | 开仓/平仓手续费 |
+| `style` | - | 手续费收取方式（绝对值/比例值） |
+
+注意：API 返回**合约级**数据（每条一个合约，如 `a2401`、`a2403`），不同合约可能同时有不同的保证金率。
+
+## 生成真实保证金率变更事件
+
+在 issue-124 审计过程中发现了 2812 条 `change_type='rule'` 的 DCE 保证金率事件。这些是根据风险管理办法规则自动生成的推算值，不是真实的交易所变更。
+
+### 问题
+
+1. 合约级 vs 品种级：保证金率实际是合约级的（a2403、a2405 同时不同值），但 rule 事件用品种级单一值
+2. 中间值不准：交割月前一个月的实际保证金率为 7-8%，不是 rule 事件用的 10%
+3. 不是真实变更：rule 事件不是交易所发布的变更通知
+
+### 修复步骤
+
+1. 用 API 获取 8 个日期的结算快照，存于 `~/GTHT/data/dce_settlement_snapshot_2024.json`
+2. 对每个合约构建时间线，检测相邻快照间的 value 变化
+3. 对每个变更写入 `agent_field_change_events`（调用 `append_agent_field_change_events`）
+4. 物化到 `historical_field_values`（调用 `materialize_agent_events_to_history`）
+5. 更新 change_type/exchange（因 AgentFieldChangeEvent 不包含这些字段）
+
+### 写入代码
+
+```python
+from tools.data.field_history_agent_ingest import (
+    append_agent_field_change_events,
+    materialize_agent_events_to_history,
+)
+from tools.data.hub import DataHub
+from tools.data.field_history import _ensure_store_registered
+
+# 1. 先用 DCE API 获取快照数据
+# 2. 构建 event dict 列表（格式见下方）
+# 3. 写入
+hub = DataHub.get_instance()
+_ensure_store_registered(hub, 'openctp')
+ids = append_agent_field_change_events(events, store_key='openctp')
+materialized = materialize_agent_events_to_history(store_key='openctp', field_group='MarginRatio')
+
+# 4. 补充字段（AgentFieldChangeEvent 不包含这些）
+conn.execute("""
+   UPDATE agent_field_change_events
+   SET change_type='change', exchange='DCE', scope_type='contract', contract_scope_type='explicit'
+   WHERE source_notice_id='DCE-settlement-parameters-2024'
+""")
+```
+
+### Event dict 格式
+
+```python
+event = {
+    'event_id': uuid.uuid4().hex,
+    'data_source': 'DCE',
+    'field_group': 'MarginRatio',
+    'source_url': 'http://www.dce.com.cn/frontend/dcereport/...',
+    'source_accessed_at': '2026-07-10T00:00:00+08:00',
+    'agent_name': 'codex-audit-...',
+    'requester_key_hash': 'dce-settlement-audit-...',
+    'instrument': 'A',              # 品种代码
+    'instrument_label': '豆一',
+    'instrument_type': 'futures',
+    'field_name': 'LongMarginRatioByMoney',  # 或 ShortMarginRatioByMoney
+    'effective_trading_day': '20240301',     # 变更生效日期
+    'effective_timestamp': '',
+    'value': '0.2',                 # 新的保证金率
+    'contract_codes': ('2401',),    # 元组，只含一个合约代码
+    'source_notice_id': 'DCE-settlement-parameters-2024',
+    'raw_note': 'DCE settlement snapshot: A 2401 margin 0.08→0.2',
+    'evidence_text': '',
+    'parser_notes': 'Generated from DCE official settlement API snapshot',
+}
+```
+
+注意：
+- `contract_codes` 传 **tuple**（如 `("2401",)`），不是 list
+- 每个事件只能包含**一个**合约代码
+- `AgentFieldChangeEvent` 不包含 `change_type`/`exchange`/`scope_type`，写入后需单独 UPDATE
+- 每次 API 调用间隔至少 1 秒，避免触发反爬
+
+## 重要注意事项
+
+1. ❌ **不要用 `pkill -9 -f Google Chrome`** — 会杀掉用户正在使用的 Chrome
+2. ✅ 每次启动 Chrome 时用唯一的临时 Profile 目录
+3. ✅ 完成后调用 `chrome_proc.terminate()` 清理
+4. ✅ 使用 `wait_until='networkidle'` 确保 Vue SPA 完全加载
+5. ✅ API 调用必须在已加载页面的上下文中执行
