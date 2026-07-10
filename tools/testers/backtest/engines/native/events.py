@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from tools.testers.backtest.engines.native.strategy import Strategy
 
 
+
+
+
 class EventKind(IntEnum):
     """Values are priority order, not arbitrary labels — at the same
     timestamp, the lower value pops first from the EventQueue (see
@@ -22,6 +25,9 @@ class EventKind(IntEnum):
     ledger lifecycle events settle account state. Values are spaced so a future
     EventKind can be inserted without renumbering everything after it."""
     BAR = 0       # a market bar has arrived; live factors may update state
+    FIELD_CHANGE = -5  # historical market-rule field change event; processed before any
+                       # BAR so the field snapshot is already current for the
+                       # entire timestamp
     SIGNAL = 10   # a strategy signal/rebalance decision point has arrived
     TRADE_INTENT = 15  # a non-signal trade intent (e.g. contract rollover,
                        # auto-close/force-close or risk liquidation). Domain
