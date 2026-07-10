@@ -43,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
         rows.extend(_check_chinese_notes(args.store_key, ex))
         rows.extend(_check_risk_measures_ref(args.store_key, ex))
         rows.extend(_check_dce_skip_10pct(args.store_key))
+        rows.extend(_check_dce_no_night(args.store_key))
+        rows.extend(_check_czce_calendar_day(args.store_key))
+        rows.extend(_check_shfe_four_tier(args.store_key))
 
 
 
@@ -154,12 +157,13 @@ def _check_risk_measures_ref(store_key: str, data_source: str) -> list[dict[str,
         return rows
     
     for ev in _load(store_key, data_source):
-        if ev.get('field_name') in ('LongMarginRatioByMoney', 'ShortMarginRatioByMoney') and ev.get('change_type') == 'change':
+        if ev.get('field_name') in ('LongMarginRatioByMoney', 'ShortMarginRatioByMoney'):
             sid = ev.get('source_notice_id', '')
-            if kw not in sid:
-                rows.append({'rule': f'{data_source}-risk-ref-missing', 'severity': 'warning',
+            # Only flag events that reference settlement snapshots (not listing notices or specific notice IDs)
+            if 'snapshot' in sid.lower():
+                rows.append({'rule': f'{data_source}-risk-ref-missing', 'severity': 'error',
                     'instrument': ev['instrument'], 'field_name': ev['field_name'],
-                    'detail': f'Missing risk mgmt ref: {sid[:60]}'})
+                    'detail': f'Reference to settlement snapshot: {sid[:60]}'})
     return rows
 
 
@@ -180,6 +184,66 @@ def _check_dce_skip_10pct(store_key):
                 rows.append({'rule': 'DCE-LVP-10', 'severity': 'error',
                     'instrument': prod, 'field_name': 'Margin',
                     'detail': f'{prod} skips 10% step but has {cnt} events with 10%'})
+    return rows
+
+def _check_dce_no_night(store_key):
+    """DCE products without night session should have T09:00 timestamps."""
+    rows = []
+    no_night = {'BB', 'FB', 'JD', 'LG', 'LH'}
+    hub = DataHub.get_instance()
+    with hub.connect_store(store_key) as conn:
+        for prod in no_night:
+            cur = conn.execute(
+                'SELECT COUNT(*) FROM agent_field_change_events '
+                'WHERE data_source=\'DCE\' AND instrument=? '
+                'AND effective_timestamp LIKE \'%T21:%\'',
+                (prod,)
+            )
+            cnt = cur.fetchone()[0]
+            if cnt > 0:
+                rows.append({'rule': 'DCE-no-night-ts', 'severity': 'error',
+                    'instrument': prod, 'field_name': 'All',
+                    'detail': f'{prod} has no night session but {cnt} events use T21:00'})
+    return rows
+
+def _check_czce_calendar_day(store_key):
+    """CZCE uses calendar-day not trading-day for tier transitions."""
+    rows = []
+    hub = DataHub.get_instance()
+    with hub.connect_store(store_key) as conn:
+        count = conn.execute(
+            'SELECT COUNT(*) FROM agent_field_change_events '
+            'WHERE data_source=\'CZCE\' AND field_name LIKE \'%Margin%\' '
+            'AND source_notice_id LIKE \'%交易日%\''
+        ).fetchone()[0]
+        if count > 0:
+            rows.append({'rule': 'CZCE-calendar', 'severity': 'info',
+                'instrument': 'CZCE', 'field_name': 'Margin',
+                'detail': f'CZCE uses calendar-day tiers, check {count} events for correct ref'})
+    return rows
+
+def _check_shfe_four_tier(store_key):
+    """SHFE has 4 tiers: baseline -> 10% -> 15% -> 20%."""
+    rows = []
+    hub = DataHub.get_instance()
+    with hub.connect_store(store_key) as conn:
+        cur = conn.execute(
+            'SELECT DISTINCT instrument FROM agent_field_change_events '
+            'WHERE data_source=\'SHFE\' AND field_name LIKE \'%Margin%\' '
+            'AND value_json=\'"0.20"\''
+        )
+        for r in cur.fetchall():
+            inst = r[0]
+            has_15 = conn.execute(
+                'SELECT COUNT(*) FROM agent_field_change_events '
+                'WHERE data_source=\'SHFE\' AND instrument=? '
+                'AND field_name LIKE \'%Margin%\' AND value_json=\'"0.15"\'',
+                (inst,)
+            ).fetchone()[0]
+            if not has_15:
+                rows.append({'rule': 'SHFE-4tier', 'severity': 'info',
+                    'instrument': inst, 'field_name': 'Margin',
+                    'detail': f'{inst} has 20% but no 15% tier event'})
     return rows
 def _print_summary(rows: list[dict[str, str]], *, limit: int) -> None:
     print("FieldHistory Cross-Exchange Integrity Audit")
