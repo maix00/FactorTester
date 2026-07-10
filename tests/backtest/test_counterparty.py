@@ -8,6 +8,7 @@ from tools.testers.backtest.engines.native.strategy_config_builder import (
 from tools.testers.backtest.modules.engine import EngineModule
 from tools.testers.backtest.modules.fee import FeeModule
 from tools.testers.backtest.modules.market_data import _required_market_rule_field_names
+from tools.testers.backtest.modules.market_data import _transaction_fee_source_for_state
 from tools.testers.backtest.modules.margin import MarginModule
 from tools.testers.backtest.modules.trading_rule import TradingRuleModule
 from tools.testers.settings.counterparty import (
@@ -39,6 +40,12 @@ def test_exchange_base_profile_is_registered_at_import_time():
     assert profile.label
 
 
+def test_openctp_broker_profile_is_registered_at_import_time():
+    profile = counterparty_profile("openctp_broker")
+    assert profile is not None
+    assert profile.label
+
+
 def test_counterparty_profile_resolves_to_ledger_config_not_strategy_config():
     account = BacktestRunState()
     apply_strategy_configs(
@@ -49,13 +56,66 @@ def test_counterparty_profile_resolves_to_ledger_config_not_strategy_config():
     ledger_id = next(iter(account.ledger_configs))
     ledger_config = account.ledger_config_for(ledger_id)
     assert ledger_config.fee_mode == "auto"
+    assert ledger_config.transaction_fee_source == "exchange"
     assert ledger_config.margin_mode == "auto"
     assert ledger_config.accounting_mode == "Auto"
     assert ledger_config.use_int_position is True
     config = next(iter(account.strategy_configs.values()))
     assert config.get(FeeModule.fee_mode, None) is None
+    assert config.get(FeeModule.transaction_fee_source, None) is None
     assert config.get(MarginModule.margin_mode, None) is None
     assert config.get(TradingRuleModule.accounting_mode, None) is None
+
+
+def test_openctp_broker_profile_resolves_fee_source_to_ledger_config():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", **_GROUP_FIELDS}},
+        counterparty="openctp_broker",
+    )
+
+    ledger_id = next(iter(account.ledger_configs))
+    ledger_config = account.ledger_config_for(ledger_id)
+    assert ledger_config.fee_mode == "auto"
+    assert ledger_config.transaction_fee_source == "openctp"
+
+    config = next(iter(account.strategy_configs.values()))
+    assert config.get(FeeModule.fee_mode, None) is None
+    assert config.get(FeeModule.transaction_fee_source, None) is None
+
+
+def test_market_data_fee_source_is_selected_before_replay():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {"A1": {"engine_mode": "custom", **_GROUP_FIELDS}},
+        counterparty="openctp_broker",
+    )
+
+    assert _transaction_fee_source_for_state(account) == "openctp"
+
+
+def test_market_data_rejects_mixed_fee_sources_in_one_native_run():
+    account = BacktestRunState()
+    apply_strategy_configs(
+        account,
+        {
+            "A1": {"engine_mode": "custom", **_GROUP_FIELDS},
+            "A2": {"engine_mode": "custom", **_GROUP_FIELDS},
+        },
+        counterparty_by_strategy={
+            "A1": "exchange_base",
+            "A2": "openctp_broker",
+        },
+    )
+
+    try:
+        _transaction_fee_source_for_state(account)
+    except ValueError as exc:
+        assert "只能使用一个交易费来源" in str(exc)
+    else:
+        raise AssertionError("expected mixed transaction fee sources to fail")
 
 
 def test_explicit_margin_close_keeps_chip_value_and_skips_margin_flows():

@@ -64,6 +64,7 @@ _LEDGER_LOOKUP_FLOWS = {
 }
 _LEDGER_OWNED_SETTING_NAMES = {
     "fee_mode",
+    "transaction_fee_source",
     "fixed_fee_rate",
     "margin_mode",
     "fixed_margin_ratio",

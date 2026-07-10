@@ -24,6 +24,7 @@ class LedgerConfig:
     """Ledger-owned accounting and execution-rule configuration."""
 
     fee_mode: str | None = None
+    transaction_fee_source: str | None = None
     fixed_fee_rate: float | None = None
     margin_mode: str | None = None
     fixed_margin_ratio: float | None = None
@@ -47,6 +48,7 @@ def ledger_config_from_mapping(raw: Mapping[str, Any] | LedgerConfig | None) -> 
         return raw
     known = {
         "fee_mode",
+        "transaction_fee_source",
         "fixed_fee_rate",
         "margin_mode",
         "fixed_margin_ratio",
@@ -63,6 +65,7 @@ def ledger_config_from_mapping(raw: Mapping[str, Any] | LedgerConfig | None) -> 
     }
     return LedgerConfig(
         fee_mode=_optional_str(raw.get("fee_mode")),
+        transaction_fee_source=_optional_str(raw.get("transaction_fee_source")),
         fixed_fee_rate=_optional_float(raw.get("fixed_fee_rate")),
         margin_mode=_optional_str(raw.get("margin_mode")),
         fixed_margin_ratio=_optional_float(raw.get("fixed_margin_ratio")),
@@ -86,6 +89,7 @@ def merge_ledger_configs(*configs: LedgerConfig) -> LedgerConfig:
     for config in configs:
         for field_name in (
             "fee_mode",
+            "transaction_fee_source",
             "fixed_fee_rate",
             "margin_mode",
             "fixed_margin_ratio",
@@ -112,6 +116,7 @@ def ledger_config_field_values(config: LedgerConfig) -> dict[str, Any]:
         key: value
         for key in (
             "fee_mode",
+            "transaction_fee_source",
             "fixed_fee_rate",
             "margin_mode",
             "fixed_margin_ratio",

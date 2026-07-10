@@ -90,19 +90,45 @@ def test_limit_order_volume_unified_provider_resolves_contract_scope() -> None:
     assert value.contract_code == "2604"
 
 
-def test_market_data_limit_order_fields_use_field_history_view(monkeypatch) -> None:
-    raw_provider = FieldHistoryProvider.from_records([
+def test_limit_order_volume_unified_provider_resolves_from_contract_scope() -> None:
+    frame = pd.DataFrame([
         {
-            "provider": "raw",
-            "source_key": "raw",
+            "provider": "Agent:DCE",
+            "source_key": "agent/DCE/from-contract",
             "instrument": "BZ",
+            "instrument_label": "纯苯",
             "instrument_type": "future",
             "field_name": "MinLimitOrderVolume",
             "effective_trading_day": "2026-03-10",
-            "value": 1,
-            "contract_codes": ["2604"],
+            "effective_timestamp": "2026-03-09 21:00:00",
+            "value": "4",
+            "value_type": "int",
+            "contract_codes": "[]",
+            "contract_scope_type": "from_contract",
+            "contract_code_start": "2606",
+            "source_url": "http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html",
+            "source_date": "2026-06-29T12:00:00+08:00",
+            "source_notice_id": "大商所发〔2026〕74号",
+            "raw_note": "BZ2606及后续合约交易指令每次最小开仓下单数量调整为4手",
         },
     ])
+    provider = build_unified_provider(build_unified_frame(frame))
+    resolver = TimestampTradingDayResolver({
+        pd.Timestamp("2026-03-10 09:01:00"): pd.Timestamp("2026-03-10"),
+    })
+
+    value = provider.resolve_at(
+        "BZ2607.DCE",
+        "MinLimitOrderVolume",
+        pd.Timestamp("2026-03-10 09:01:00"),
+        trading_day_resolver=resolver,
+    )
+
+    assert value.value == 4
+    assert value.contract_code == "2607"
+
+
+def test_market_data_limit_order_fields_use_provided_unified_provider() -> None:
     unified_provider = FieldHistoryProvider.from_records([
         {
             "provider": "Unified",
@@ -116,16 +142,12 @@ def test_market_data_limit_order_fields_use_field_history_view(monkeypatch) -> N
         },
     ])
 
-    import sources.FieldHistory.views.Unified as unified_view
-
-    monkeypatch.setattr(unified_view, "load_unified_provider", lambda: unified_provider)
-
     index = pd.DatetimeIndex([pd.Timestamp("2026-03-10 09:01:00")])
     market_data_module = _load_market_data_module()
     frames = market_data_module.historical_field_frames_for_market_data(
         ["BZ2604.DCE"],
         index,
-        provider=raw_provider,
+        provider=unified_provider,
         trading_day_resolver=TimestampTradingDayResolver({
             pd.Timestamp("2026-03-10 09:01:00"): pd.Timestamp("2026-03-10"),
         }),

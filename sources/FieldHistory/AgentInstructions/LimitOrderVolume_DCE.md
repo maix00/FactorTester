@@ -5,11 +5,17 @@ Use this file when cleaning DCE official announcements for order-volume fields.
 ## Source
 
 - Official site: `http://www.dce.com.cn`
-- Announcement list: `http://www.dce.com.cn/dce/ywggytz/ywggytz.htm`
+- Start from the DCE official portal in Chrome: `http://www.dce.com.cn/dce/`.
+  Navigate through visible official entries such as product channels,
+  `业务公告与通知`, `交易参数`, and `结算参数`.  Do not use guessed DCE deep
+  links, direct `requests` scraping, or paths that have already been shown to
+  fail outside Chrome as discovery methods.
+- Announcement list: find it from the portal's `业务公告与通知` entry.
 - Example source:
   `http://www.dce.com.cn/dce/content/2026/ywggytz/18627837.html`
 - Rules fallback: product business rules under `http://www.dce.com.cn`.
-  Search `site:dce.com.cn/dce/content.thtml <品种名> 期货业务细则 交易指令 每次最大下单数量`.
+  Prefer product-channel navigation in Chrome, then record the final official
+  URL that Chrome resolves.
 
 ## Field Group
 
