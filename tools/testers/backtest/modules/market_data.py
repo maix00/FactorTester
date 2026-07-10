@@ -87,6 +87,11 @@ class MarketDataStore:
     historical_field_frame_values_cache: dict[int, tuple[pd.DataFrame, Any]] = field(default_factory=dict)
     historical_field_latest_available_warning_keys: set[tuple[str, str, Any]] = field(default_factory=set)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
+    field_state_store: dict[str, dict[str, object]] = field(default_factory=dict)
+    """Current snapshot of market-rule field values, keyed by product_name then field_name.
+    Populated by initialize_field_state (PRE_REPLAY) and updated by handle_field_changes
+    (PER_EVENT/FIELD_CHANGE). Replaces the old per-timestamp historical_field_frames DataFrames.
+    """
 
     def publish_raw(self, raw: dict[str, Any]) -> None:
         self.raw_prices_table = raw.get("raw_prices")
@@ -262,6 +267,22 @@ class MarketDataModule(ExecutableModule):
         description="加载历史交易规则字段",
         compute=lambda state, ctx: _load_historical_fields(state, ctx),
     )
+    initialize_field_state: ClassVar[Flow] = Flow(
+        "initialize_field_state",
+        inputs=(raw_prices, trading_day_resolver),
+        outputs=(historical_field_policy,),
+        phase=Phase.PRE_REPLAY, order=44, after=(build_trading_day_resolver,),
+        description="初始化字段状态缓存",
+        compute=lambda state, ctx: _initialize_field_state(state, ctx),
+    )
+    handle_field_changes: ClassVar[Flow] = Flow(
+        "handle_field_changes",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT, event_kind=EventKind.FIELD_CHANGE, order=0,
+        description="处理字段变更事件",
+        compute=lambda state, ctx: _handle_field_changes(state, ctx),
+    )
     causal_valuation: ClassVar[Flow] = Flow(
         "causal_valuation", inputs=(raw_prices,), outputs=(),
         phase=Phase.PRE_REPLAY, order=45, after=(load_raw_market_data,),
@@ -334,6 +355,7 @@ class MarketDataModule(ExecutableModule):
     flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
         load_historical_fields, causal_valuation,
+        initialize_field_state, handle_field_changes,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
         lookup_current_prices_on_ledger,
@@ -1006,6 +1028,89 @@ def _build_trading_day_resolver(state, ctx) -> None:
     resolver = build_trading_day_resolver_from_market_data(raw_prices)
     ctx.set(MarketDataModule.trading_day_resolver, resolver)
     store.trading_day_resolver = resolver
+
+
+def _initialize_field_state(state, ctx) -> None:
+    """Populate field_state_store with baseline values at run_window start.
+    PER_EVENT lookups read from the store (O(1)) instead of per-timestamp merge_asof."""
+    raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
+    resolver = ctx.get(MarketDataModule.trading_day_resolver)
+    store = market_data_store_for(state)
+    provider = cast(FieldHistoryProvider | None, store.historical_field_provider)
+    if raw_prices is None or raw_prices.empty or resolver is None or provider is None:
+        return
+    policy = _historical_field_policy_for_engine(state,
+        str(getattr(store, "historical_field_policy",
+            str(HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value))))
+    ctx.set(MarketDataModule.historical_field_policy, policy)
+    store.historical_field_policy = policy
+    field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
+    instruments = list(raw_prices.columns)
+    all_timestamps = signal_timestamps(raw_prices)
+    if len(all_timestamps) == 0:
+        return
+    first_ts = all_timestamps[0]
+    # Deduplicate contracts to their parent products for field queries
+    parent_seen: set[str] = set()
+    parent_baselines: dict[str, dict[str, object]] = {}
+    for instrument in instruments:
+        parent = getattr(instrument, "parent_product", None)
+        if parent is not None and parent is not instrument:
+            pname = str(getattr(parent, "name", parent) or "")
+            if pname not in parent_seen:
+                parent_seen.add(pname)
+                try:
+                    pv = resolve_historical_fields_for_product(
+                        parent, first_ts,
+                        provider=provider, trading_day_resolver=resolver,
+                        field_names=field_names, fallback=policy,
+                    )
+                    parent_baselines[pname] = pv
+                except HistoricalFieldLookupError:
+                    parent_baselines[pname] = {}
+        else:
+            pname = str(getattr(instrument, "name", instrument) or "")
+            if pname not in parent_seen:
+                parent_seen.add(pname)
+                try:
+                    pv = resolve_historical_fields_for_product(
+                        instrument, first_ts,
+                        provider=provider, trading_day_resolver=resolver,
+                        field_names=field_names, fallback=policy,
+                    )
+                    parent_baselines[pname] = pv
+                except HistoricalFieldLookupError:
+                    parent_baselines[pname] = {}
+    # Populate store - contracts inherit from their parent product
+    for instrument in instruments:
+        inst_name = str(getattr(instrument, "name", instrument) or "")
+        parent = getattr(instrument, "parent_product", None)
+        if parent is not None and parent is not instrument:
+            pname = str(getattr(parent, "name", parent) or "")
+            if pname in parent_baselines:
+                store.field_state_store[inst_name] = dict(parent_baselines[pname])
+            else:
+                store.field_state_store[inst_name] = {}
+        else:
+            if inst_name in parent_baselines:
+                store.field_state_store[inst_name] = dict(parent_baselines[inst_name])
+            else:
+                store.field_state_store[inst_name] = {}
+
+
+def _handle_field_changes(state, ctx) -> None:
+    """Process FIELD_CHANGE events: update field_state_store with new values."""
+    store = market_data_store_for(state)
+    for strategy in ctx.active_strategies:
+        for draft in ctx.payloads_for(strategy):
+            product_name = str(getattr(draft, "product_name", "") or "")
+            field = str(getattr(draft, "field", "") or "")
+            new_value = getattr(draft, "new_value", None)
+            if not product_name or not field:
+                continue
+            if product_name not in store.field_state_store:
+                store.field_state_store[product_name] = {}
+            store.field_state_store[product_name][field] = new_value
 
 
 def _load_historical_fields(state, ctx) -> None:
@@ -1738,8 +1843,63 @@ def current_historical_fields_at(state, timestamp: pd.Timestamp) -> dict[Any, di
     field_names = cast(tuple[object, ...], tuple(store.historical_field_names))
     if not field_names:
         return {}
+    
+    # Try field_state_store first (event-driven incremental approach).
+    # If FIELD_CHANGE events have been processed up to this timestamp,
+    # the in-memory state reflects the current field values.
+    if store.field_state_store:
+        unresolved: dict[Any, dict[str, object]] = {}
+        for instrument in instruments:
+            inst_name = str(getattr(instrument, "name", instrument) or "")
+            entry = store.field_state_store.get(inst_name, {})
+            if isinstance(entry, dict):
+                unresolved[instrument] = dict(entry)
+            else:
+                unresolved[instrument] = {}
+        # Fill in any empty entries from the frames-based fallback
+        if isinstance(store.historical_field_frames, dict):
+            try:
+                frame_result = _historical_fields_at_from_frames(
+                    store.historical_field_frames,
+                    [inst for inst in instruments if not unresolved.get(inst)],
+                    timestamp,
+                    column_cache=store.historical_field_frame_column_cache,
+                    column_map_cache=store.historical_field_frame_column_map_cache,
+                    row_cache=store.historical_field_frame_row_cache,
+                    index_cache=store.historical_field_frame_index_cache,
+                    values_cache=store.historical_field_frame_values_cache,
+                )
+                for inst, vals in frame_result.items():
+                    if vals:
+                        unresolved.setdefault(inst, {}).update(vals)
+            except Exception:
+                pass
+        resolved = resolve_historical_fields_for_products_map(instruments, field_names, timestamp, provider=provider, resolver=resolver, fallback=policy)
+        for inst, vals in resolved.items():
+            inst_name = str(getattr(inst, "name", inst) or "")
+            common = store.field_state_store.get(inst_name, {})
+            if common:
+                vals.update(common)
+            unresolved.setdefault(inst, {}).update(vals)
+        result = _apply_exchange_rule_defaults(state, unresolved, instruments, field_names, timestamp)
+        store.historical_fields_cache[cache_key] = result
+        return result
+    
     table = current_prices_table_for(state)
     instruments = list(table.columns) if table is not None else []
+    
+    # NEW: field_state_store (event-driven). If populated, use it directly.
+    if store.field_state_store:
+        table = current_prices_table_for(state)
+        instruments = list(table.columns) if table is not None else []
+        result: dict[Any, dict[str, object]] = {}
+        for inst in instruments:
+            inst_name = str(getattr(inst, "name", inst) or "")
+            result[inst] = store.field_state_store.get(inst_name, {})
+        resolved = _apply_exchange_rule_defaults(state, result, instruments, field_names, timestamp)
+        store.historical_fields_cache[cache_key] = resolved
+        return resolved
+    
     frames = store.historical_field_frames
     if isinstance(frames, dict):
         frame_result = _historical_fields_at_from_frames(
