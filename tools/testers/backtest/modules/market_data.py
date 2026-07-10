@@ -354,7 +354,7 @@ class MarketDataModule(ExecutableModule):
 
     flows: ClassVar[tuple[Flow | FlowBinding, ...]] = (
         resolve_market_data_request, check_market_data_coverage, load_raw_market_data, build_trading_day_resolver,
-        # load_historical_fields removed causal_valuation,
+        causal_valuation,
         initialize_field_state, handle_field_changes,
         lookup_current_prices_on_bar, lookup_current_prices_on_signal,
         lookup_current_prices_on_order, lookup_current_prices_on_trade_intent,
