@@ -594,7 +594,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
     for _s in applicable:
         try:
             _cfg = state.config_for(_s)
-            _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
+            _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
             _config_vals = {}
             for _kf in _KEY_CONFIG_FIELDS:
                 try:
@@ -741,13 +741,15 @@ def make_dispatcher(
                     for _s in applicable:
                         try:
                             _cfg = state.config_for(_s)
-                            _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
+                            _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
                             _config_vals = {}
                             for _kf in _KEY_CONFIG_FIELDS:
                                 try:
-                                    _fv = _cfg.get(_kf)
-                                    if _fv is not None:
-                                        _config_vals[_kf] = str(_fv)
+                                    for _fref, _fval in _cfg.field_values.items():
+                                        if hasattr(_fref, 'name') and _fref.name == _kf:
+                                            if _fval is not None:
+                                                _config_vals[_kf] = str(_fval)
+                                            break
                                 except:
                                     pass
                             _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
