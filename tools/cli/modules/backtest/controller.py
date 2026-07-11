@@ -27,6 +27,40 @@ from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fie
 _short_alias_map: dict[str, str] = {}
 _step_shared_config_displayed: bool = False
 
+# Field name -> Chinese label mapping (built from module field registrations)
+_field_labels: dict[str, str] = {}
+try:
+    from tools.testers.backtest.modules.fee import FeeModule
+    from tools.testers.backtest.modules.margin import MarginModule
+    from tools.testers.backtest.modules.trading_rule import TradingRuleModule
+    from tools.testers.backtest.modules.ledger_module import LedgerModule
+    from tools.testers.backtest.modules.group_membership import GroupMembershipModule
+    from tools.testers.backtest.modules.equity_curve import EquityCurveModule
+    from tools.testers.backtest.modules.run_window import RunWindowModule
+    from tools.testers.backtest.modules.cash_pool import CashPoolModule
+    from tools.testers.backtest.modules.slippage import SlippageModule
+    from tools.testers.backtest.modules.order_construct import OrderConstructModule
+    from tools.testers.backtest.modules.strategy_book import StrategyBookModule
+    from tools.testers.backtest.modules.factor_signal import FactorSignalModule
+    from tools.testers.backtest.modules.engine import EngineModule
+    for _mod in [FeeModule, MarginModule, TradingRuleModule, LedgerModule,
+                  GroupMembershipModule, EquityCurveModule, RunWindowModule,
+                  CashPoolModule, SlippageModule, OrderConstructModule,
+                  StrategyBookModule, FactorSignalModule, EngineModule]:
+        if hasattr(_mod, 'fields'):
+            for _fn, _fd in _mod.fields.items():
+                _label = getattr(_fd, 'label', '') or ''
+                if _label:
+                    _field_labels[_fn] = _label
+except Exception:
+    pass
+
+
+def _flabel(name: str) -> str:
+    """Return field name with Chinese label: 'margin_mode (保证金模式)'"""
+    cn = _field_labels.get(name)
+    return f"{name} ({cn})" if cn else name
+
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
     parse_add_group_selectors,
@@ -2059,7 +2093,7 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                         _diff_fields.append(_fk)
                 if _diff_fields and len(_all_strat_cfgs) > 1:
                     from tools.cli.table import render_table as _rt
-                    _headers = ["Short"] + _diff_fields
+                    _headers = ["Short"] + [_flabel(f) for f in _diff_fields]
                     _rows = []
                     for _sa in sorted(_all_strat_cfgs):
                         _row = [_sa]
@@ -2071,11 +2105,12 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                         click.echo(_line)
                     click.echo("")
             if _all_shared:
-                _kw = max(len(k) for k in _all_shared)
+                _labeled = {_flabel(k): v for k, v in _all_shared.items()}
+                _kw = max(len(k) for k in _labeled)
                 click.echo(f"{'─'*60}")
                 click.echo("⚙️  共享配置:")
-                for k in sorted(_all_shared):
-                    click.echo(f"    {k.ljust(_kw)} = {_all_shared[k]}")
+                for k in sorted(_labeled):
+                    click.echo(f"    {k.ljust(_kw)} = {_labeled[k]}")
                 click.echo("")
         flow_name = str(data.get("flow_name") or "")
         inputs = data.get("inputs") or []
