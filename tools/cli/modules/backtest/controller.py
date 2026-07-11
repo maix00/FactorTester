@@ -2081,13 +2081,13 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                             _str_cfg = {k: v for k, v in _cfg.items() if v not in ("", "None", "0", "0.0")}
                             _all_strat_cfgs[_sa] = _str_cfg
                             _all_cfg_keys.update(_str_cfg.keys())
-                # Find fields that differ between strategies
+                # Find fields that differ between strategies (skip object refs)
                 _diff_fields: list[str] = []
                 for _fk in sorted(_all_cfg_keys):
                     _vals = set()
                     for _sa, _sc in _all_strat_cfgs.items():
                         v = _sc.get(_fk)
-                        if v is not None:
+                        if v is not None and not v.startswith("<") and v != "None":
                             _vals.add(v)
                     if len(_vals) > 1:
                         _diff_fields.append(_fk)
@@ -2098,9 +2098,12 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                     for _sa in sorted(_all_strat_cfgs):
                         _row = [_sa]
                         for _fk in _diff_fields:
-                            _row.append(_all_strat_cfgs[_sa].get(_fk, ""))
+                            _val = _all_strat_cfgs[_sa].get(_fk, "")
+                            if _val.startswith("<") or _val == "None":
+                                _val = ""
+                            _row.append(_val)
                         _rows.append(_row)
-                    click.echo("📋  策略差异化配置:")
+                    click.echo("📋  策略一览:")
                     for _line in _rt(_headers, _rows, indent="  "):
                         click.echo(_line)
                     click.echo("")
@@ -2330,57 +2333,7 @@ def _print_strategy_summary(state) -> None:
             click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
         click.echo("")
     
-    # Factor + path + strategy table
-    from tools.cli.table import render_table as _rt
-    factor_shared = ""
-    for g in groups:
-        f = g.get("factor", "")
-        if f:
-            factor_shared = str(f)
-            break
-    pp_shared = ""
-    pp_neg = ""
-    for g in groups:
-        pp = g.get("product_path_selection") or {}
-        if isinstance(pp, dict):
-            pn = pp.get("name", "") or ""
-            if pn:
-                pp_shared = str(pn)
-            pp_pos = pp.get("path", "") or ""
-            pp_neg_val = pp.get("negative_path", "") or pp.get("exclude_path", "") or ""
-            if pp_pos and str(pp_pos) and not pp_shared:
-                pp_shared = str(pp_pos)
-            if pp_neg_val and str(pp_neg_val):
-                pp_neg = str(pp_neg_val)
-        if pp_shared:
-            break
-    if factor_shared or pp_shared:
-        _fkw = max(len("因子"), len("产品路径"))
-        if factor_shared:
-            click.echo(f"    {'因子'.ljust(_fkw)}  = {factor_shared}")
-        if pp_shared:
-            pp_line = str(pp_shared)
-            if pp_neg:
-                pp_line += f"  (负路径: {pp_neg})"
-            click.echo(f"    {'产品路径'.ljust(_fkw)}  = {pp_line}")
-        click.echo("")
-    # Strategy table
-    headers = ["Short", "组名", "分组", "序号"]
-    rows = []
-    for g in groups:
-        short = str(g.get("shortAlias", "") or "")
-        name = str(g.get("name", "") or "")
-        split = str(g.get("split_count", g.get("splitCount", "")) or "")
-        idx = str(g.get("group_index", g.get("groupIndex", "")) or "")
-        rows.append((short, name, split, idx))
-    for ls in state.backtest_ls_configs or []:
-        short = str(ls.get("shortAlias", "") or "")
-        name = str(ls.get("name", "") or "")
-        rows.append((short, name, "-", "-"))
-    click.echo("📋  策略一览:")
-    for line in _rt(headers, rows, indent="  "):
-        click.echo(line)
-    click.echo("")
+
 
 
 def _run_backtest(
