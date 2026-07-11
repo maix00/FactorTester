@@ -23,6 +23,9 @@ from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
+# Module-level mapping from group ID to short alias, populated at run time
+_short_alias_map: dict[str, str] = {}
+
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
     parse_add_group_selectors,
@@ -2047,8 +2050,10 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
             for _s in strategies:
                 if isinstance(_s, dict):
                     _sid = _s.get("id", "?")
-                    # Extract short alias (before the colon)
                     _short = _sid.split(":")[0] if ":" in _sid else _sid
+                    _sa = _short_alias_map.get(_short)
+                    if _sa:
+                        _short = _sa
                     _sids.append(_short)
                 else:
                     _sids.append(str(_s))
@@ -2181,6 +2186,14 @@ def _print_strategy_summary(state) -> None:
     groups = state.backtest_groups
     if not groups:
         return
+    # Build shortAlias mapping
+    import tools.cli.modules.backtest.controller as _ctrl_mod
+    _ctrl_mod._short_alias_map.clear()
+    for _g in groups:
+        _gid = str(_g.get("id", "") or "")
+        _sa = str(_g.get("shortAlias", "") or "")
+        if _gid and _sa:
+            _ctrl_mod._short_alias_map[_gid] = _sa
     
     # Collect local-settings (shared config)
     local_settings = state.backtest_local_settings or {}
@@ -2191,17 +2204,17 @@ def _print_strategy_summary(state) -> None:
         click.echo("")
     
     # Build strategy table
-    headers = ["ID", "组名", "因子", "产品路径", "分组", "序号"]
+    headers = ["Short", "组名", "因子", "产品路径", "分组", "序号"]
     rows = []
     for g in groups:
-        gid = str(g.get("id", "") or "")
+        short = str(g.get("shortAlias", "") or "")
         name = str(g.get("name", "") or "")
         factor = str(g.get("factor", "") or "")
         pp = g.get("product_path_selection") or {}
         pp_name = str(pp.get("name", "") if isinstance(pp, dict) else pp)[:30]
         split = str(g.get("split_count", g.get("splitCount", "")) or "")
         idx = str(g.get("group_index", g.get("groupIndex", "")) or "")
-        rows.append((gid, name, factor, pp_name, split, idx))
+        rows.append((short, name, factor, pp_name, split, idx))
     
     click.echo("📋  策略一览:")
     for line in render_table(headers, rows, indent="  ", max_widths=(28, 40, 30, 30, 6, 6)):
