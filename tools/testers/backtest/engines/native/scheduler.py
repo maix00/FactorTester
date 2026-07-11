@@ -636,11 +636,14 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         except:
             _cp_id = '?'
         _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
-    _mode_fields = ["engine_mode", "data_source_mode", "freq_fixed", "freq_mode",
+    _mode_fields = ["engine", "engine_mode", "margin_mode", "fee_mode",
+                      "data_source_mode", "freq_fixed", "freq_mode",
                       "historical_field_policy", "allocation_policy", "liquidity_mode",
                       "participation_rate", "slippage_mode", "slippage_bps",
-                      "quantity_rounding_policy", "margin_mode", "fee_mode",
-                      "equity_compute_live", "position_policy"]
+                      "quantity_rounding_policy", "equity_compute_live", "position_policy",
+                      "slippage_mode", "collateral_fraction", "strategy_book_mode",
+                      "ledger_session_policy", "initial_capital_major", "base_currency",
+                      "start_date", "end_date", "start_time", "end_time", "timezone"]
     _mode_info = {}
     for _s2 in applicable:
         try:

@@ -28,7 +28,8 @@ _short_alias_map: dict[str, str] = {}
 _step_shared_config_displayed: bool = False
 
 # Field name -> Chinese label mapping (built from module field registrations)
-_field_labels: dict[str, str] = {}
+_field_labels: dict[str, str] = {"factor": "因子", "product_path": "产品路径"}
+_field_tab_order: dict[str, int] = {}
 try:
     from tools.testers.backtest.modules.fee import FeeModule
     from tools.testers.backtest.modules.margin import MarginModule
@@ -52,6 +53,9 @@ try:
                 _label = getattr(_fd, 'label', '') or ''
                 if _label:
                     _field_labels[_fn] = _label
+                    _to = getattr(_fd, 'tab_order', None)
+                    if _to is not None:
+                        _field_tab_order[_fn] = _to
 except Exception:
     pass
 
@@ -2067,6 +2071,23 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
             _ctrl._step_shared_config_displayed = True
             _all_shared = dict(data.get("mode_info") or {})
             _strategies_data = data.get("strategies") or []
+            # Add factor and product path from CLI state
+            try:
+                import json as _json
+                with open('/Users/maxdeux/.factortester/state.json') as _sf:
+                    _st = _json.load(_sf)
+                for _g in _st.get("backtest_groups", []):
+                    _f = _g.get("factor", "")
+                    if _f:
+                        _all_shared["factor"] = str(_f)
+                    _pp = _g.get("product_path_selection", {})
+                    if isinstance(_pp, dict):
+                        _pn = _pp.get("name", "")
+                        if _pn:
+                            _all_shared["product_path"] = str(_pn)
+                    break
+            except Exception:
+                pass
             # Per-strategy differing config comparison
             if _strategies_data:
                 _all_strat_cfgs: dict[str, dict[str, str]] = {}
@@ -2107,6 +2128,10 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                     for _line in _rt(_headers, _rows, indent="  "):
                         click.echo(_line)
                     click.echo("")
+            # Remove from shared config any field that differs per-strategy
+            if _all_shared and _diff_fields:
+                for _df in _diff_fields:
+                    _all_shared.pop(_df, None)
             if _all_shared:
                 _labeled = {_flabel(k): v for k, v in _all_shared.items()}
                 _kw = max(len(k) for k in _labeled)
@@ -2164,7 +2189,15 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                     click.echo(f"    📋 {_lid}")
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
-            for inp in inputs:
+            # Sort inputs by tab_order (from field registry)
+            try:
+                _sorted_inputs = sorted(inputs, key=lambda x: (
+                    _field_tab_order.get(x.get("name", "") if isinstance(x, dict) else str(x), 999),
+                    str(x.get("name", x) if isinstance(x, dict) else x)
+                ))
+            except Exception:
+                _sorted_inputs = inputs
+            for inp in _sorted_inputs:
                 if isinstance(inp, dict):
                     iname = inp.get("name", "?")
                     ival = inp.get("value")
@@ -2263,11 +2296,9 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                         click.echo(f"      (未设置)")
                 else:
                     click.echo(f"      {before_str} → {after_str}")
-    import sys as _ss
-    if _ss.stdin.isatty():
-        click.echo("")
-        click.echo("Press Enter to continue...")
-        input()
+    click.echo("")
+    click.echo("Press Enter to continue...")
+    input()
     if run_token:
         try:
             client.session.post("/step_continue", {"run_token": run_token})
