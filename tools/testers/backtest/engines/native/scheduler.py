@@ -588,13 +588,24 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         _input_with_vals.append({"name": _ik, "value": _iv})
     _ctx_strategies = []
     _ctx_ledgers = []
+    _KEY_CONFIG_FIELDS = ["margin_mode", "fee_mode", "allocation_policy", "slippage_mode",
+                          "slippage_bps", "liquidity_mode", "participation_rate",
+                          "quantity_rounding_policy", "engine_mode", "collateral_fraction"]
     for _s in applicable:
         try:
             _cfg = state.config_for(_s)
             _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
-            _ctx_strategies.append(str(_alias))
+            _config_vals = {}
+            for _kf in _KEY_CONFIG_FIELDS:
+                try:
+                    _fv = _cfg.get(_kf)
+                    if _fv is not None:
+                        _config_vals[_kf] = str(_fv)
+                except:
+                    pass
+            _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
         except:
-            _ctx_strategies.append(str(_s))
+            _ctx_strategies.append({"id": str(_s), "config": {}})
     for _l in all_active_ledgers if all_active_ledgers else getattr(ctx, 'active_ledgers', frozenset()):
         from tools.testers.backtest.engines.native.ledger import ledger_identity as _lid_fn2
         try:
@@ -616,10 +627,10 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         "strategies": _ctx_strategies,
         "ledgers": _ctx_ledgers,
     })
-    return _bef
+    return _bef, _ctx_strategies, _ctx_ledgers
 
 
-def _step_after_flow(f, state, step_callback, _bef):
+def _step_after_flow(f, state, step_callback, _bef, _strategies=None, _ledgers=None):
     """Capture output changes and emit step 'after' event."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
         return
@@ -640,11 +651,14 @@ def _step_after_flow(f, state, step_callback, _bef):
     if _changes:
         _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
         if _real_changes:
-            step_callback({
-                "phase": "after",
-                "flow_name": f.effective_description or "",
-                "changes": _real_changes,
-            })
+            _after_extra = {"phase": "after",
+                              "flow_name": f.effective_description or "",
+                              "changes": _real_changes}
+            if _strategies:
+                _after_extra["strategies"] = _strategies
+            if _ledgers:
+                _after_extra["ledgers"] = _ledgers
+            step_callback(_after_extra)
 
 
 
@@ -721,13 +735,24 @@ def make_dispatcher(
                     # Build strategy/ledger context
                     _ctx_strategies = []
                     _ctx_ledgers = []
+                    _KEY_CONFIG_FIELDS = ["margin_mode", "fee_mode", "allocation_policy", "slippage_mode",
+                                          "slippage_bps", "liquidity_mode", "participation_rate",
+                                          "quantity_rounding_policy", "engine_mode", "collateral_fraction"]
                     for _s in applicable:
                         try:
                             _cfg = state.config_for(_s)
                             _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
-                            _ctx_strategies.append(str(_alias))
+                            _config_vals = {}
+                            for _kf in _KEY_CONFIG_FIELDS:
+                                try:
+                                    _fv = _cfg.get(_kf)
+                                    if _fv is not None:
+                                        _config_vals[_kf] = str(_fv)
+                                except:
+                                    pass
+                            _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
                         except:
-                            _ctx_strategies.append(str(_s))
+                            _ctx_strategies.append({"id": str(_s), "config": {}})
                     for _l in all_active_ledgers:
                         _lkey = _ledger_identity_for_scheduler(_l) if hasattr(_l, 'ledger') else _l
                         try:
@@ -773,11 +798,16 @@ def make_dispatcher(
                     # Filter out spurious N/A->None changes
                     _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
                     if _real_changes:
-                        step_callback({
+                        _after_data = {
                             "phase": "after",
                             "flow_name": f.effective_description or "",
                             "changes": _real_changes,
-                        })
+                        }
+                        if _ctx_strategies:
+                            _after_data["strategies"] = _ctx_strategies
+                        if _ctx_ledgers:
+                            _after_data["ledgers"] = _ctx_ledgers
+                        step_callback(_after_data)
                 elif step_callback is None:
                     for _ref in f.outputs:
                         try:
@@ -998,9 +1028,12 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
-        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        _bf_result = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        _bef = _bf_result[0] if isinstance(_bf_result, tuple) else _bf_result
+        _ctx_strategies = _bf_result[1] if isinstance(_bf_result, tuple) and len(_bf_result) > 1 else None
+        _ctx_ledgers = _bf_result[2] if isinstance(_bf_result, tuple) and len(_bf_result) > 2 else None
         _compute_flow(f, state, ctx)
-        _step_after_flow(f, state, step_callback, _bef)
+        _step_after_flow(f, state, step_callback, _bef, _strategies=_ctx_strategies, _ledgers=_ctx_ledgers)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -1020,9 +1053,12 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
-        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        _bf_result = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
+        _bef = _bf_result[0] if isinstance(_bf_result, tuple) else _bf_result
+        _ctx_strategies = _bf_result[1] if isinstance(_bf_result, tuple) and len(_bf_result) > 1 else None
+        _ctx_ledgers = _bf_result[2] if isinstance(_bf_result, tuple) and len(_bf_result) > 2 else None
         _compute_flow(f, state, ctx)
-        _step_after_flow(f, state, step_callback, _bef)
+        _step_after_flow(f, state, step_callback, _bef, _strategies=_ctx_strategies, _ledgers=_ctx_ledgers)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     tracker.complete()

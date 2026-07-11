@@ -2040,16 +2040,24 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if strategies:
             click.echo(f"🎯  策略 ({len(strategies)} 个):")
             for _s in strategies:
-                click.echo(f"    • {_s}")
+                if isinstance(_s, dict):
+                    _sid = _s.get("id", "?")
+                    _cfg = _s.get("config", {})
+                    click.echo(f"    📋 {_sid}")
+                    if _cfg:
+                        for _ck, _cv in sorted(_cfg.items()):
+                            click.echo(f"        {_ck} = {_cv}")
+                else:
+                    click.echo(f"    • {_s}")
         if ledgers:
             click.echo(f"📒  账本 ({len(ledgers)} 个):")
             for _l in ledgers:
                 _lid = _l.get("ledger", "?")
                 _cp = _l.get("cash_pool", "?")
                 if _cp and _cp != "?":
-                    click.echo(f"    • {_lid}  →  资金池: {_cp}")
+                    click.echo(f"    📋 {_lid}  →  资金池: {_cp}")
                 else:
-                    click.echo(f"    • {_lid}")
+                    click.echo(f"    📋 {_lid}")
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
             for inp in inputs:
@@ -2057,11 +2065,9 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                     iname = inp.get("name", "?")
                     ival = inp.get("value")
                     ival_str = str(ival) if ival is not None else None
-                    # Check if value is meaningful
                     if ival is not None and ival_str not in ("<N/A>", "None", ""):
                         if len(ival_str) > 80:
                             click.echo(f"    📄 {iname}:")
-                            # Format long values with indentation
                             for _vline in ival_str.replace("), ", "),\n").split("\n"):
                                 if _vline.strip():
                                     click.echo(f"        {_vline.strip()}")
@@ -2076,6 +2082,29 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
     elif phase == "after":
         flow_name = str(data.get("flow_name") or "")
         changes = data.get("changes") or []
+        strategies = data.get("strategies") or []
+        ledgers = data.get("ledgers") or []
+        if strategies:
+            click.echo(f"🎯  关联策略 ({len(strategies)} 个):")
+            for _s in strategies:
+                if isinstance(_s, dict):
+                    _sid = _s.get("id", "?")
+                    _cfg = _s.get("config", {})
+                    click.echo(f"    📋 {_sid}")
+                    if _cfg:
+                        for _ck, _cv in sorted(_cfg.items()):
+                            click.echo(f"        {_ck} = {_cv}")
+                else:
+                    click.echo(f"    • {_s}")
+        if ledgers:
+            click.echo(f"📒  关联账本 ({len(ledgers)} 个):")
+            for _l in ledgers:
+                _lid = _l.get("ledger", "?")
+                _cp = _l.get("cash_pool", "?")
+                if _cp and _cp != "?":
+                    click.echo(f"    📋 {_lid}  →  资金池: {_cp}")
+                else:
+                    click.echo(f"    📋 {_lid}")
         if changes:
             click.echo(f"📍 {flow_name} — 字段变更:")
             for c in changes:
@@ -2085,7 +2114,9 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                 before_str = str(before) if before and str(before) not in ("<N/A>", "None", "") else "(未设置)"
                 after_str = str(after) if after and str(after) not in ("<N/A>", "None", "") else "(未设置)"
                 click.echo(f"  ✏️  {field}:")
-                if len(before_str) > 80 or len(after_str) > 80:
+                if before_str == "(未设置)" and after_str == "(未设置)":
+                    click.echo(f"      (无变化)")
+                elif len(before_str) > 80 or len(after_str) > 80:
                     if before_str != "(未设置)":
                         click.echo(f"      BEFORE:")
                         for _bl in str(before).replace("), ", "),\n").split("\n"):
