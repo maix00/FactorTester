@@ -611,21 +611,16 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         _input_with_vals.append({"name": _ik, "value": _iv, "all_values": _all_vals})
     _ctx_strategies = []
     _ctx_ledgers = []
-    _KEY_CONFIG_FIELDS = ["margin_mode", "fee_mode", "allocation_policy", "slippage_mode",
-                          "slippage_bps", "liquidity_mode", "participation_rate",
-                          "quantity_rounding_policy", "engine_mode", "collateral_fraction"]
     for _s in applicable:
         try:
             _cfg = state.config_for(_s)
             _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
             _config_vals = {}
-            for _kf in _KEY_CONFIG_FIELDS:
-                try:
-                    _fv = _cfg.get(_kf)
-                    if _fv is not None:
-                        _config_vals[_kf] = str(_fv)
-                except:
-                    pass
+            for _fref, _fval in _cfg.field_values.items():
+                _fn = getattr(_fref, 'name', '')
+                if _fval is not None and str(_fval) not in ('', 'None', '0', '0.0', '[]', '{}', 'auto', 'none'):
+                    if not any(_fn.startswith(p) for p in ('raw_', 'sized_', 'expanded_', 'contract_', 'bar_event_', 'force_close_', 'rollover_', 'margin_check_', 'margin_liquidation_', 'dispatched_', 'signal_freq_', 'long_short_diagnostic_', 'product_path_', 'daily_mark_', 'daily_basepoint_', 'counterparty_', 'bar_open_', 'bar_end_', 'evaluation_', 'strategy_windows', 'run_window_envelope', 'currency_conversion_', 'required_', 'calendar_')):
+                        _config_vals[_fn] = str(_fval)
             _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
         except:
             _ctx_strategies.append({"id": str(_s), "config": {}})
@@ -777,24 +772,16 @@ def make_dispatcher(
                     # Build strategy/ledger context
                     _ctx_strategies = []
                     _ctx_ledgers = []
-                    _KEY_CONFIG_FIELDS = ["margin_mode", "fee_mode", "allocation_policy", "slippage_mode",
-                                          "slippage_bps", "liquidity_mode", "participation_rate",
-                                          "quantity_rounding_policy", "engine_mode", "collateral_fraction"]
                     for _s in applicable:
                         try:
                             _cfg = state.config_for(_s)
                             _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
                             _config_vals = {}
-                            for _kf in _KEY_CONFIG_FIELDS:
-                                try:
-                                    for _fref, _fval in _cfg.field_values.items():
-                                        if hasattr(_fref, 'name') and _fref.name == _kf:
-                                            if _fval is not None:
-                                                _config_vals[_kf] = str(_fval)
-                                            break
-                                except:
-                                    pass
-                            _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
+                            for _fref, _fval in _cfg.field_values.items():
+                                _fn = getattr(_fref, 'name', '')
+                                if _fval is not None and str(_fval) not in ('', 'None', '0', '0.0', '[]', '{}', 'auto', 'none'):
+                                    if not any(_fn.startswith(p) for p in ('raw_', 'sized_', 'expanded_', 'contract_', 'bar_event_', 'force_close_', 'rollover_', 'margin_check_', 'margin_liquidation_', 'dispatched_', 'signal_freq_', 'long_short_diagnostic_', 'product_path_', 'daily_mark_', 'daily_basepoint_', 'counterparty_', 'bar_open_', 'bar_end_', 'evaluation_', 'strategy_windows', 'run_window_envelope', 'currency_conversion_', 'required_', 'calendar_')):
+                                        _config_vals[_fn] = str(_fval)
                         except:
                             _ctx_strategies.append({"id": str(_s), "config": {}})
                     for _l in all_active_ledgers:
