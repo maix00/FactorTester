@@ -2212,30 +2212,32 @@ def _print_strategy_summary(state) -> None:
             all_field_keys.update(sc.keys())
     if local_settings or per_strategy_configs:
         click.echo(f"{'─'*60}")
-    # Shared local-settings (aligned =)
-    if local_settings:
-        click.echo("⚙️  共享配置 (local-settings):")
-        _kw = max(len(k) for k in local_settings)
-        for k in sorted(local_settings):
-            click.echo(f"    {k.ljust(_kw)} = {local_settings[k]}")
-        click.echo("")
-    # Fields identical across all strategies
+    # Compute unified key width for = alignment across all sections
+    _all_keys: list[str] = list(local_settings.keys())
     if per_strategy_configs:
         shared: dict[str, str] = {}
         for fk in sorted(all_field_keys):
             vals = set()
-            for gid, sc in per_strategy_configs.items():
+            for _gid, sc in per_strategy_configs.items():
                 v = sc.get(fk)
                 if v is not None:
                     vals.add(v)
             if len(vals) == 1:
                 shared[fk] = vals.pop()
-        if shared:
-            click.echo("⚙️  共享策略配置:")
-            _kw = max(len(k) for k in shared)
-            for k in sorted(shared):
-                click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
-            click.echo("")
+        _all_keys.extend(shared.keys())
+    else:
+        shared = {}
+    _kw = max((len(k) for k in _all_keys), default=0)
+    if local_settings:
+        click.echo("⚙️  共享配置 (local-settings):")
+        for k in sorted(local_settings):
+            click.echo(f"    {k.ljust(_kw)} = {local_settings[k]}")
+        click.echo("")
+    if shared:
+        click.echo("⚙️  共享策略配置:")
+        for k in sorted(shared):
+            click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
+        click.echo("")
     
     # Build strategy table
     headers = ["Short", "组名", "因子", "产品路径", "分组", "序号"]
