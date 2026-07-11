@@ -2032,6 +2032,44 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if not _ctrl._step_shared_config_displayed:
             _ctrl._step_shared_config_displayed = True
             _all_shared = dict(data.get("mode_info") or {})
+            _strategies_data = data.get("strategies") or []
+            # Per-strategy differing config comparison
+            if _strategies_data:
+                _all_strat_cfgs: dict[str, dict[str, str]] = {}
+                _all_cfg_keys: set[str] = set()
+                for _sd in _strategies_data:
+                    if isinstance(_sd, dict):
+                        _sid = str(_sd.get("id", "?"))
+                        _short = _sid.split(":")[0] if ":" in _sid else _sid
+                        _sa = _short_alias_map.get(_short, _short)
+                        _cfg = _sd.get("config") or {}
+                        if isinstance(_cfg, dict):
+                            _str_cfg = {k: v for k, v in _cfg.items() if v not in ("", "None", "0", "0.0")}
+                            _all_strat_cfgs[_sa] = _str_cfg
+                            _all_cfg_keys.update(_str_cfg.keys())
+                # Find fields that differ between strategies
+                _diff_fields: list[str] = []
+                for _fk in sorted(_all_cfg_keys):
+                    _vals = set()
+                    for _sa, _sc in _all_strat_cfgs.items():
+                        v = _sc.get(_fk)
+                        if v is not None:
+                            _vals.add(v)
+                    if len(_vals) > 1:
+                        _diff_fields.append(_fk)
+                if _diff_fields and len(_all_strat_cfgs) > 1:
+                    from tools.cli.table import render_table as _rt
+                    _headers = ["Short"] + _diff_fields
+                    _rows = []
+                    for _sa in sorted(_all_strat_cfgs):
+                        _row = [_sa]
+                        for _fk in _diff_fields:
+                            _row.append(_all_strat_cfgs[_sa].get(_fk, ""))
+                        _rows.append(_row)
+                    click.echo("📋  策略差异化配置:")
+                    for _line in _rt(_headers, _rows, indent="  "):
+                        click.echo(_line)
+                    click.echo("")
             if _all_shared:
                 _kw = max(len(k) for k in _all_shared)
                 click.echo(f"{'─'*60}")
