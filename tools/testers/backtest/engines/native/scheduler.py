@@ -601,7 +601,33 @@ def make_dispatcher(
             ctx.active_strategies = applicable
             if tracker is not None:
                 tracker.activity(f, timestamp=timestamp, phase="event_replay", strategies=applicable)
+            if _step_mode_globals.get("enabled", False):
+                import copy as _copy
+                _bef = {}
+                for _ref in f.inputs:
+                    try:
+                        key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
+                        _bef[key] = _copy.deepcopy(state.ledger.get(_ref.field_name))
+                    except:
+                        pass
+                print(f"\n{'─'*60}")
+                print(f"⏱  [{timestamp}] {f.effective_description}")
+                print(f"📥  Inputs: {list(_bef.keys())}")
+                if hasattr(f, 'description') and f.description:
+                    print(f"📝  {f.description}")
+                print(f"{'─'*60}")
+                input("Press Enter...")
             _compute_flow(f, state, ctx)
+            if _step_mode_globals.get("enabled", False):
+                for _ref in f.outputs:
+                    try:
+                        _after = state.ledger.get(_ref.field_name)
+                        _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
+                        _bef_val = _bef.get(_key, '<N/A>')
+                        if str(_bef_val) != str(_after):
+                            print(f"  ✏️  {_ref.field_name}: {_bef_val} → {_after}")
+                    except:
+                        pass
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
@@ -753,7 +779,9 @@ def run(
     activity_sink: ProgressSink | None = None,
     audit_flow_contract: bool = False,
     enforce_flow_contract: bool = False,
+    step_mode: bool = False,
 ) -> None:
+    _step_mode_globals["enabled"] = step_mode
     """Invariant: run() itself never calls event_queue.push_event directly
     — events are only ever registered by some Flow's compute via
     ctx.set()/ctx.set_for() (FlowContext._push_if_event). Any future change
