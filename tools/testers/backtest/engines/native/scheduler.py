@@ -998,7 +998,7 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
-        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, set())
+        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
         _compute_flow(f, state, ctx)
         _step_after_flow(f, state, step_callback, _bef)
         tracker.phase_flow_done(phase="pre_replay")
@@ -1020,7 +1020,7 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
-        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, set())
+        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
         _compute_flow(f, state, ctx)
         _step_after_flow(f, state, step_callback, _bef)
         tracker.phase_flow_done(phase="post_replay")
