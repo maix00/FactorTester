@@ -16,6 +16,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
+def _ledger_value(state: "BacktestRunState", name: str) -> Any:
+    """Read a field from any available ledger."""
+    for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
+        try:
+            return _ledger_inst.get(name)
+        except:
+            pass
+    return None
+
+
 import pandas as pd
 
 from .events import EventDraft, EventKind
@@ -608,7 +618,7 @@ def make_dispatcher(
                 for _ref in f.inputs:
                     try:
                         key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-                        _bef[key] = _copy.deepcopy(state.ledger.get(_ref.field_name))
+                        _bef[key] = _copy.deepcopy(_ledger_value(state, _ref.name))
                     except:
                         pass
                 _input_keys = list(_bef.keys())
@@ -633,12 +643,12 @@ def make_dispatcher(
                 _changes = []
                 for _ref in f.outputs:
                     try:
-                        _after = state.ledger.get(_ref.field_name)
+                        _after = _ledger_value(state, _ref.name)
                         _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                         _bef_val = _bef.get(_key, '<N/A>')
                         if str(_bef_val) != str(_after):
                             _changes.append({
-                                "field": _ref.field_name,
+                                "field": _ref.name,
                                 "before": str(_bef_val),
                                 "after": str(_after),
                             })
@@ -653,11 +663,11 @@ def make_dispatcher(
                 elif step_callback is None:
                     for _ref in f.outputs:
                         try:
-                            _after = state.ledger.get(_ref.field_name)
+                            _after = _ledger_value(state, _ref.name)
                             _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                             _bef_val = _bef.get(_key, '<N/A>')
                             if str(_bef_val) != str(_after):
-                                print(f"  ✏️  {_ref.field_name}: {_bef_val} -> {_after}")
+                                print(f"  ✏️  {_ref.name}: {_bef_val} -> {_after}")
                         except:
                             pass
             if tracker is not None:
