@@ -63,7 +63,7 @@ class BacktestRunRenderer:
         if event_name == "activity":
             self._print_activity(data)
             if self.step_mode:
-                self._step_prompt()
+                self._step_activity(data)
             return
         if event_name in {"signal_progress", "progress"}:
             self._print_progress(data)
@@ -362,6 +362,26 @@ class BacktestRunRenderer:
         click.echo("Press Enter to continue...")
         input()
         click.echo("")
+
+    def _step_activity(self, data: dict[str, Any]) -> None:
+        """Show step info from activity event and pause."""
+        if not self.step_mode:
+            return
+        flow_label = str(data.get("flow_label") or data.get("flow_name") or "")
+        phase = str(data.get("phase") or "")
+        phase_label = str(data.get("phase_label") or phase)
+        timestamp = str(data.get("timestamp") or "")
+        event_kind = str(data.get("event_kind") or "")
+        click.echo(f"\n{'─'*60}")
+        click.echo(f"⏱  [{timestamp}]")
+        click.echo(f"📂  {flow_label}")
+        if event_kind:
+            click.echo(f"📌  事件: {event_kind}")
+        click.echo(f"📂  阶段: {phase_label}")
+        click.echo(f"{'─'*60}")
+        click.echo("")
+        click.echo("Press Enter to continue...")
+        input()
 
     def _status_lines(self) -> list[str]:
         lines: list[str] = []
