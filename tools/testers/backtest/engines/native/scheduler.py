@@ -656,6 +656,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         "timestamp": str(timestamp) if timestamp is not None else "",
         "flow_name": f.effective_description or "",
         "flow_id": f.name or "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
         "inputs": _input_with_vals,
         "description": getattr(f, 'description', '') or '',
         "strategies": _ctx_strategies,
@@ -689,7 +690,10 @@ def _step_after_flow(f, state, step_callback, _bef, _strategies=None, _ledgers=N
             _after_extra = {"phase": "after",
                               "flow_name": f.effective_description or "",
                         "flow_id": f.name or "",
+                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
         "flow_id": f.name or "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
                               "changes": _real_changes}
             if _strategies:
                 _after_extra["strategies"] = _strategies
@@ -815,7 +819,10 @@ def make_dispatcher(
                         "timestamp": str(timestamp),
                         "flow_name": f.effective_description or "",
                         "flow_id": f.name or "",
+                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
         "flow_id": f.name or "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
                         "inputs": _input_with_vals,
                         "description": getattr(f, 'description', '') or '',
                         "strategies": _ctx_strategies,
@@ -854,7 +861,10 @@ def make_dispatcher(
                             "phase": "after",
                             "flow_name": f.effective_description or "",
                         "flow_id": f.name or "",
+                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
         "flow_id": f.name or "",
+        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
                             "changes": _real_changes,
                         }
                         if _ctx_strategies:

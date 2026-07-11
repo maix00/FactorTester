@@ -2048,18 +2048,20 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         mode_info = data.get("mode_info") or {}
         phase = str(data.get("phase") or "")
         flow_id = str(data.get("flow_id") or "")
+        flow_phase = str(data.get("flow_phase") or "")
         ts_display = timestamp if timestamp else ""
-        ts_line = f"  [{ts_display}]" if ts_display else ""
-        phase_label = {"pre_replay": "预处理", "event_replay": "事件回放", "post_replay": "结果整理"}.get(phase, phase)
-        flow_label = f"{flow_name} ({flow_id})" if flow_id else flow_name
+        phase_upper = flow_phase.upper() if flow_phase else ""
+        _phase_label_map = {"pre_replay": "预处理", "event_replay": "事件回放", "post_replay": "结果整理"}
+        phase_cn = _phase_label_map.get(flow_phase, "")
+        phase_text = f"{phase_upper} ({phase_cn})" if phase_cn else phase_upper
+        flow_text = f"{flow_id} ({flow_name})" if flow_id else flow_name
+        ts_text = f"[{ts_display}]" if ts_display else "-"
+        # Aligned field labels
+        _flw = max(len("phase:"), len("flow:"), len("timestamp:"))
         click.echo(f"\n{'═'*60}")
-        if ts_display:
-            click.echo(f"⏱  [{ts_display}]  📂 {phase_label}")
-        else:
-            click.echo(f"📂 {phase_label}")
-        click.echo(f"📌  {flow_label}")
-        if description:
-            click.echo(f"📝  {description}")
+        click.echo(f"    {'phase:'.ljust(_flw)}  {phase_text}")
+        click.echo(f"    {'flow:'.ljust(_flw)}  {flow_text}")
+        click.echo(f"    {'timestamp:'.ljust(_flw)}  {ts_text}")
         click.echo(f"{'─'*60}")
 
         if strategies:
