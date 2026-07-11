@@ -26,6 +26,7 @@ from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fie
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
 _step_shared_config_displayed: bool = False
+_step_pending_after: dict | None = None
 
 # Field name -> Chinese label mapping (built from module field registrations)
 _field_labels: dict[str, str] = {"factor": "因子", "product_path": "产品路径"}
@@ -2296,8 +2297,8 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                         click.echo(f"      (未设置)")
                 else:
                     click.echo(f"      {before_str} → {after_str}")
+    click.echo("")
     if phase == "before":
-        click.echo("")
         click.echo("Press Enter to continue...")
         input()
     if run_token:
