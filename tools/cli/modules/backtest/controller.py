@@ -25,6 +25,7 @@ from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
+_step_config_displayed: bool = False
 
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
@@ -2026,7 +2027,44 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
     """Handle a step-through debug event from the server."""
     phase = str(data.get("phase") or "")
+    import tools.cli.modules.backtest.controller as _ctrl
     if phase == "before":
+        # On first step, display detailed shared config from server data
+        if not _ctrl._step_config_displayed:
+            _ctrl._step_config_displayed = True
+            _strategies_data = data.get("strategies") or []
+            if _strategies_data:
+                # Collect configs from all strategies to find shared fields
+                _all_strat_configs: list[dict[str, str]] = []
+                for _sd in _strategies_data:
+                    if isinstance(_sd, dict):
+                        _cfg = _sd.get("config") or {}
+                        if isinstance(_cfg, dict):
+                            _all_strat_configs.append(_cfg)
+                if _all_strat_configs:
+                    # Build full shared config
+                    _all_keys: set[str] = set()
+                    for _sc in _all_strat_configs:
+                        _all_keys.update(_sc.keys())
+                    _shared_conf: dict[str, str] = {}
+                    for _fk in sorted(_all_keys):
+                        _vals = set()
+                        for _sc in _all_strat_configs:
+                            if _fk in _sc:
+                                _vals.add(_sc[_fk])
+                        if len(_vals) == 1:
+                            _shared_conf[_fk] = _vals.pop()
+                    # Merge with mode_info
+                    _mode_info = data.get("mode_info") or {}
+                    _all_shared = dict(_mode_info)
+                    _all_shared.update(_shared_conf)
+                    if _all_shared:
+                        _kw = max(len(k) for k in _all_shared)
+                        click.echo(f"{'─'*60}")
+                        click.echo("⚙️  全量共享配置 (local-settings + 全局策略):")
+                        for _k in sorted(_all_shared):
+                            click.echo(f"    {_k.ljust(_kw)} = {_all_shared[_k]}")
+                        click.echo("")
         flow_name = str(data.get("flow_name") or "")
         inputs = data.get("inputs") or []
         description = str(data.get("description") or "")
@@ -2239,22 +2277,45 @@ def _print_strategy_summary(state) -> None:
             click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
         click.echo("")
     
-    # Build strategy table
-    headers = ["Short", "组名", "因子", "产品路径", "分组", "序号"]
+    # Build strategy table: regular groups + LS configs
+    local_settings = state.backtest_local_settings or {}
+    factor_shared = local_settings.get("factor") or ""
+    if not factor_shared:
+        for g in groups:
+            f = g.get("factor", "")
+            if f:
+                factor_shared = f
+                break
+    pp_shared = ""
+    for g in groups:
+        pp = g.get("product_path_selection") or {}
+        pn = pp.get("name", "") if isinstance(pp, dict) else ""
+        if pn:
+            pp_shared = pn
+            break
+    from tools.cli.table import render_table as _rt
+    headers = ["Short", "组名", "分组", "序号"]
     rows = []
     for g in groups:
         short = str(g.get("shortAlias", "") or "")
         name = str(g.get("name", "") or "")
-        factor = str(g.get("factor", "") or "")
-        pp = g.get("product_path_selection") or {}
-        pp_name = str(pp.get("name", "") if isinstance(pp, dict) else pp)[:30]
         split = str(g.get("split_count", g.get("splitCount", "")) or "")
         idx = str(g.get("group_index", g.get("groupIndex", "")) or "")
-        rows.append((short, name, factor, pp_name, split, idx))
-    
+        rows.append((short, name, split, idx))
+    # LS configs
+    for ls in state.backtest_ls_configs or []:
+        short = str(ls.get("shortAlias", "") or "")
+        name = str(ls.get("name", "") or "")
+        split = "-"
+        idx = "-"
+        rows.append((short, name, split, idx))
     click.echo("📋  策略一览:")
-    for line in render_table(headers, rows, indent="  ", max_widths=(28, 40, 30, 30, 6, 6)):
+    for line in _rt(headers, rows, indent="  "):
         click.echo(line)
+    if factor_shared:
+        click.echo(f"📦  共享因子: {factor_shared}")
+    if pp_shared:
+        click.echo(f"📦  产品路径: {pp_shared}")
     click.echo("")
 
 
@@ -2283,7 +2344,8 @@ def _run_backtest(
     else:
         _run_token_id = run_payload.get("run_token", "")
     click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
-    _print_run_strategy_info(groups, display_ls_configs)
+    if not step_mode:
+        _print_run_strategy_info(groups, display_ls_configs)
     payload_strategy_book = run_payload.get("strategy_book")
     payload_ledger_configs = run_payload.get("ledger_configs")
     if show_topology:
