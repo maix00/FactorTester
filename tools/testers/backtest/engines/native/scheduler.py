@@ -569,6 +569,85 @@ class _ProgressTracker:
             self._activity_sink.emit_signal_progress(completed=1, total=1, phase="done", percent=100.0)
 
 
+
+def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
+    """Capture inputs and emit step 'before' event for pre/post replay flows."""
+    if not _step_mode_globals.get("enabled", False) or step_callback is None:
+        return {}
+    import copy as _copy
+    _bef = {}
+    for _ref in f.inputs:
+        try:
+            key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
+            _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
+        except:
+            pass
+    _input_with_vals = []
+    for _ik in list(_bef.keys()):
+        _iv = _bef.get(_ik)
+        _input_with_vals.append({"name": _ik, "value": _iv})
+    _ctx_strategies = []
+    _ctx_ledgers = []
+    for _s in applicable:
+        try:
+            _cfg = state.config_for(_s)
+            _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
+            _ctx_strategies.append(str(_alias))
+        except:
+            _ctx_strategies.append(str(_s))
+    for _l in all_active_ledgers if all_active_ledgers else getattr(ctx, 'active_ledgers', frozenset()):
+        from tools.testers.backtest.engines.native.ledger import ledger_identity as _lid_fn2
+        try:
+            _lkey = _lid_fn2(_l)
+        except:
+            _lkey = str(_l)
+        try:
+            from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger as _cp_id_fn2
+            _cp_id = _cp_id_fn2(state, _l)
+        except:
+            _cp_id = '?'
+        _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
+    step_callback({
+        "phase": "before",
+        "timestamp": str(timestamp) if timestamp is not None else "",
+        "flow_name": f.effective_description or "",
+        "inputs": _input_with_vals,
+        "description": getattr(f, 'description', '') or '',
+        "strategies": _ctx_strategies,
+        "ledgers": _ctx_ledgers,
+    })
+    return _bef
+
+
+def _step_after_flow(f, state, step_callback, _bef):
+    """Capture output changes and emit step 'after' event."""
+    if not _step_mode_globals.get("enabled", False) or step_callback is None:
+        return
+    _changes = []
+    for _ref in f.outputs:
+        try:
+            _after = _ledger_value(state, _ref)
+            _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
+            _bef_val = _bef.get(_key, '<N/A>')
+            if str(_bef_val) != str(_after):
+                _changes.append({
+                    "field": _ref.name,
+                    "before": str(_bef_val),
+                    "after": str(_after),
+                })
+        except:
+            pass
+    if _changes:
+        _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
+        if _real_changes:
+            step_callback({
+                "phase": "after",
+                "flow_name": f.effective_description or "",
+                "changes": _real_changes,
+            })
+
+
+
 def make_dispatcher(
     ordered_flows: list[ResolvedFlow],
     state: "BacktestRunState",
@@ -919,7 +998,9 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
+        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, set())
         _compute_flow(f, state, ctx)
+        _step_after_flow(f, state, step_callback, _bef)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -939,7 +1020,9 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
+        _bef = _step_before_flow(f, state, ctx, None, step_callback, applicable, set())
         _compute_flow(f, state, ctx)
+        _step_after_flow(f, state, step_callback, _bef)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     tracker.complete()
