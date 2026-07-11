@@ -126,6 +126,24 @@ def template(ctx: click.Context) -> None:
     switch_backtest_space(state, BACKTEST_SPACE)
     args = tuple(ctx.args)
     source_module = ""
+    # Parse --factor-family from args before other commands
+    factor_family_from_args = ""
+    cleaned_args: list[str] = []
+    _skip_next = False
+    for i, arg in enumerate(args):
+        if _skip_next:
+            _skip_next = False
+            continue
+        if arg == "--factor-family":
+            if i + 1 < len(args):
+                factor_family_from_args = str(args[i + 1])
+                _skip_next = True
+            continue
+        cleaned_args.append(arg)
+    args = tuple(cleaned_args)
+    if factor_family_from_args:
+        state.factor_family = factor_family_from_args
+
     if args[:1] == ("--from-module-template",):
         if len(args) < 3:
             raise click.ClickException("--from-module-template 需要模块名和动作，例如: --from-module-template single_factor_test load <模板>")
@@ -137,7 +155,7 @@ def template(ctx: click.Context) -> None:
         _print_backtest_template_help(state)
         return
     if not state.factor_family:
-        raise click.ClickException("template 命令需要先选择因子家族：factortester single_factor_test --factor-family SgCCS")
+        raise click.ClickException("template 命令需要先选择因子家族，例如加上 --factor-family SgCCS")
     if args[0] in {"list", "ls"}:
         _list_backtest_templates(state.factor_family)
         return
@@ -413,16 +431,15 @@ def _print_backtest_template_help(state) -> None:
     click.echo("backtest template 命令")
     current = state.factor_family or "（未选择）"
     click.echo(f"当前因子家族: {current}")
-    click.echo("  list / ls                 列出当前因子家族的设置模板")
-    click.echo("  load <模板ID或名称>        加载模板到顶层 backtest 草稿")
-    click.echo("  --from-module-template single_factor_test load <模板>  从 single_factor_test 模板显式导入")
-    click.echo("  save [模板名]              保存当前 CLI 草稿为设置模板")
+    click.echo("  list --factor-family <因子家族>    列出指定因子家族的设置模板")
+    click.echo("  load <模板ID或名称>               加载模板到 backtest 草稿")
+    click.echo("  --from-module-template single_factor_test load <模板>  从 single_factor_test 模块显式导入模板")
+    click.echo("  save [模板名]                     保存当前 CLI 草稿为设置模板")
     click.echo("")
     click.echo("示例:")
-    click.echo("  factortester single_factor_test --factor-family SgCCS")
-    click.echo("  factortester backtest template list")
-    click.echo("  factortester backtest template --from-module-template single_factor_test load '2026-06-02 07:20:47'")
-    click.echo("  factortester backtest template save 'CLI 草稿'")
+    click.echo("  factortester backtest template --factor-family SgCCS list")
+    click.echo("  factortester backtest template --from-module-template single_factor_test --factor-family SgCCS load 1")
+    click.echo("  factortester backtest template --factor-family SgCCS save 'CLI 草稿'")
 
 
 def _list_backtest_templates(factor_family: str) -> None:
