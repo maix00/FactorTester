@@ -2043,8 +2043,9 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         click.echo(f"{'─'*60}")
         if mode_info:
             click.echo(f"⚙️  运行模式:")
-            for _mk, _mv in sorted(mode_info.items()):
-                click.echo(f"    {_mk} = {_mv}")
+            _kw = max(len(k) for k in mode_info)
+            for _mk in sorted(mode_info):
+                click.echo(f"    {_mk.ljust(_kw)} = {mode_info[_mk]}")
         if strategies:
             _sids = []
             for _s in strategies:
@@ -2195,13 +2196,46 @@ def _print_strategy_summary(state) -> None:
         if _gid and _sa:
             _ctrl_mod._short_alias_map[_gid] = _sa
     
-    # Collect local-settings (shared config)
-    local_settings = state.backtest_local_settings or {}
+    # Collect all configs: local-settings + per-strategy
+    local_settings = dict(state.backtest_local_settings or {})
+    per_strategy_configs: dict[str, dict[str, str]] = {}
+    all_field_keys: set[str] = set(local_settings.keys())
+    for g in state.backtest_groups:
+        gid = str(g.get("id", "") or "")
+        sc = {}
+        for fld in ["factor", "split_count", "group_index", "liquidity_mode"]:
+            val = g.get(fld)
+            if val is not None:
+                sc[fld] = str(val)
+        if sc:
+            per_strategy_configs[gid] = sc
+            all_field_keys.update(sc.keys())
+    if local_settings or per_strategy_configs:
+        click.echo(f"{'─'*60}")
+    # Shared local-settings (aligned =)
     if local_settings:
         click.echo("⚙️  共享配置 (local-settings):")
-        for k, v in sorted(local_settings.items()):
-            click.echo(f"    {k} = {v}")
+        _kw = max(len(k) for k in local_settings)
+        for k in sorted(local_settings):
+            click.echo(f"    {k.ljust(_kw)} = {local_settings[k]}")
         click.echo("")
+    # Fields identical across all strategies
+    if per_strategy_configs:
+        shared: dict[str, str] = {}
+        for fk in sorted(all_field_keys):
+            vals = set()
+            for gid, sc in per_strategy_configs.items():
+                v = sc.get(fk)
+                if v is not None:
+                    vals.add(v)
+            if len(vals) == 1:
+                shared[fk] = vals.pop()
+        if shared:
+            click.echo("⚙️  共享策略配置:")
+            _kw = max(len(k) for k in shared)
+            for k in sorted(shared):
+                click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
+            click.echo("")
     
     # Build strategy table
     headers = ["Short", "组名", "因子", "产品路径", "分组", "序号"]
