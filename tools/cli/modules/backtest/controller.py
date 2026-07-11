@@ -2296,9 +2296,10 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                         click.echo(f"      (未设置)")
                 else:
                     click.echo(f"      {before_str} → {after_str}")
-    click.echo("")
-    click.echo("Press Enter to continue...")
-    input()
+    if phase == "before":
+        click.echo("")
+        click.echo("Press Enter to continue...")
+        input()
     if run_token:
         try:
             client.session.post("/step_continue", {"run_token": run_token})
