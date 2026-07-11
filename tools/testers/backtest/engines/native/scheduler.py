@@ -639,12 +639,33 @@ def make_dispatcher(
                     for _ik in _input_keys:
                         _iv = _bef.get(_ik)
                         _input_with_vals.append({"name": _ik, "value": _iv})
+                    # Build strategy/ledger context
+                    _ctx_strategies = []
+                    _ctx_ledgers = []
+                    for _s in applicable:
+                        try:
+                            _cfg = state.config_for(_s)
+                            _alias = getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s)
+                            _ctx_strategies.append(str(_alias))
+                        except:
+                            _ctx_strategies.append(str(_s))
+                    for _l in all_active_ledgers:
+                        _lkey = _ledger_identity_for_scheduler(_l) if hasattr(_l, 'ledger') else _l
+                        try:
+                            from tools.testers.backtest.modules.cash_pool import cash_pool_config_for_ledger as _cp_cfg
+                            _cp = _cp_cfg(state, _l)
+                            _cp_id = getattr(_cp, 'cash_pool_id', '?')
+                        except:
+                            _cp_id = '?'
+                        _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
                     step_callback({
                         "phase": "before",
                         "timestamp": str(timestamp),
                         "flow_name": f.effective_description or "",
                         "inputs": _input_with_vals,
                         "description": getattr(f, 'description', '') or '',
+                        "strategies": _ctx_strategies,
+                        "ledgers": _ctx_ledgers,
                     })
                 else:
                     print(f"\n{'─'*60}")

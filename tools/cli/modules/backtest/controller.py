@@ -2028,11 +2028,20 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         inputs = data.get("inputs") or []
         description = str(data.get("description") or "")
         timestamp = str(data.get("timestamp") or "")
+        strategies = data.get("strategies") or []
+        ledgers = data.get("ledgers") or []
         ts_display = timestamp if timestamp else "(无时间戳)"
         click.echo(f"\n{'─'*60}")
         click.echo(f"⏱  [{ts_display}] {flow_name}")
         if description:
             click.echo(f"📝  {description}")
+        if strategies:
+            click.echo(f"🎯  策略 ({len(strategies)}): {', '.join(strategies[:3])}" + (f" ..." if len(strategies)>3 else ""))
+        if ledgers:
+            for _l in ledgers:
+                _lid = _l.get("ledger", "?")
+                _cp = _l.get("cash_pool", "?")
+                click.echo(f"📒  账本: {_lid}  ·  资金池: {_cp}")
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
             for inp in inputs:
