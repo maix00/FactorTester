@@ -2376,8 +2376,19 @@ def _run_backtest(
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
-    if step_mode:
-        _print_strategy_summary(state)
+    # Build shortAlias mapping
+    import tools.cli.modules.backtest.controller as _ctrl_mod
+    _ctrl_mod._short_alias_map.clear()
+    for _g in state.backtest_groups:
+        _gid = str(_g.get("id", "") or "")
+        _sa = str(_g.get("shortAlias", "") or "")
+        if _gid and _sa:
+            _ctrl_mod._short_alias_map[_gid] = _sa
+    for _ls in state.backtest_ls_configs or []:
+        _ls_id = str(_ls.get("id", "") or "")
+        _ls_sa = str(_ls.get("shortAlias", "") or "")
+        if _ls_id and _ls_sa:
+            _ctrl_mod._short_alias_map[_ls_id] = _ls_sa
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
