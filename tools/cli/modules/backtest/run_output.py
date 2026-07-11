@@ -329,7 +329,7 @@ class BacktestRunRenderer:
 
     def _step_activity(self, data: dict[str, Any]) -> None:
         """Show step info from activity event and pause."""
-        if not self.step_mode:
+        if self.step_mode:
             return
         flow_label = str(data.get("flow_label") or data.get("flow_name") or "")
         phase = str(data.get("phase") or "")
