@@ -2070,7 +2070,12 @@ def _run_backtest(
     display_ls_configs = ls_configs if ls_configs is not None else state.backtest_ls_configs
     run_payload = payload or _run_payload(state, groups=groups)
     if step_mode:
+        import uuid as _uuid
+        _run_token_id = _uuid.uuid4().hex
+        run_payload["run_token"] = _run_token_id
         run_payload["step_mode"] = True
+    else:
+        _run_token_id = run_payload.get("run_token", "")
     click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
     _print_run_strategy_info(groups, display_ls_configs)
     payload_strategy_book = run_payload.get("strategy_book")
@@ -2086,7 +2091,6 @@ def _run_backtest(
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
-    _run_token = run_payload.get("run_token", "")
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
@@ -2094,7 +2098,7 @@ def _run_backtest(
             message = data.get("error") if isinstance(data, dict) else data
             raise click.ClickException(f"分组测试失败: {message}")
         if event_name == "step" and isinstance(data, dict):
-            _handle_step_event(data, client, _run_token)
+            _handle_step_event(data, client, _run_token_id)
         elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
     renderer.handle("complete", {})

@@ -273,7 +273,9 @@ class BacktestRunRenderer:
         if not _is_tty():
             if not self._should_log_progress(key):
                 return
-            click.echo(line)
+            import sys as _sys
+            _sys.stderr.write("\r" + line.ljust(80))
+            _sys.stderr.flush()
             return
         self._progress_lines[key] = line
         self._render_status_region()
@@ -339,7 +341,13 @@ class BacktestRunRenderer:
             click.echo(message)
             self._render_status_region()
             return
-        click.echo(message)
+        if _is_tty():
+            click.echo(message)
+            return
+        # When showing progress bar, overwrite same line
+        import sys as _sys
+        _sys.stderr.write("\r" + message.ljust(80))
+        _sys.stderr.flush()
 
     def _status_lines(self) -> list[str]:
         lines: list[str] = []
