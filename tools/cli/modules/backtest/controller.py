@@ -2031,36 +2031,48 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         strategies = data.get("strategies") or []
         ledgers = data.get("ledgers") or []
         ts_display = timestamp if timestamp else "(无时间戳)"
-        click.echo(f"\n{'─'*60}")
-        click.echo(f"⏱  [{ts_display}] {flow_name}")
+        click.echo(f"\n{'═'*60}")
+        click.echo(f"⏱  [{ts_display}]")
+        click.echo(f"📌  {flow_name}")
         if description:
             click.echo(f"📝  {description}")
+        click.echo(f"{'─'*60}")
         if strategies:
-            click.echo(f"🎯  策略 ({len(strategies)}): {', '.join(strategies[:3])}" + (f" ..." if len(strategies)>3 else ""))
+            click.echo(f"🎯  策略 ({len(strategies)} 个):")
+            for _s in strategies:
+                click.echo(f"    • {_s}")
         if ledgers:
-            _ledger_ids = [_l.get("ledger", "?") for _l in ledgers]
-            _cp_ids = set([str(_l.get("cash_pool", "?")) for _l in ledgers if _l.get("cash_pool", "?") != "?"])
-            _cp_text = f"  ·  资金池: {', '.join(sorted(_cp_ids))}" if _cp_ids else ""
-            _ledger_summary = ', '.join(_ledger_ids[:5])
-            if len(_ledger_ids) > 5:
-                _ledger_summary += f" ... ({len(_ledger_ids)} total)"
-            click.echo(f"📒  账本 ({len(_ledger_ids)}): {_ledger_summary}{_cp_text}")
+            click.echo(f"📒  账本 ({len(ledgers)} 个):")
+            for _l in ledgers:
+                _lid = _l.get("ledger", "?")
+                _cp = _l.get("cash_pool", "?")
+                if _cp and _cp != "?":
+                    click.echo(f"    • {_lid}  →  资金池: {_cp}")
+                else:
+                    click.echo(f"    • {_lid}")
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
             for inp in inputs:
                 if isinstance(inp, dict):
                     iname = inp.get("name", "?")
-                    ival = inp.get("value", "<N/A>")
-                    if ival is not None and str(ival) != "<N/A>":
-                        ival_str = str(ival)
-                        if len(ival_str) > 120:
-                            ival_str = ival_str[:117] + "..."
-                        click.echo(f"    • {iname} = {ival_str}")
+                    ival = inp.get("value")
+                    ival_str = str(ival) if ival is not None else None
+                    # Check if value is meaningful
+                    if ival is not None and ival_str not in ("<N/A>", "None", ""):
+                        if len(ival_str) > 80:
+                            click.echo(f"    📄 {iname}:")
+                            # Format long values with indentation
+                            for _vline in ival_str.replace("), ", "),\n").split("\n"):
+                                if _vline.strip():
+                                    click.echo(f"        {_vline.strip()}")
+                        else:
+                            click.echo(f"    • {iname} = {ival_str}")
+                    elif ival is not None and ival_str in ("<N/A>", "None", ""):
+                        click.echo(f"    • {iname}  =  (空)")
                     else:
-                        click.echo(f"    • {iname}")
+                        click.echo(f"    • {iname}  =  (尚未初始化)")
                 else:
                     click.echo(f"    • {inp}")
-        click.echo(f"{'─'*60}")
     elif phase == "after":
         flow_name = str(data.get("flow_name") or "")
         changes = data.get("changes") or []
@@ -2070,14 +2082,26 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                 field = c.get("field", "")
                 before = c.get("before", "")
                 after = c.get("after", "")
-                # Show full values without truncation
-                if len(before) > 200 or len(after) > 200:
-                    click.echo(f"  ✏️  {field}:")
-                    click.echo(f"      BEFORE: {before}")
-                    click.echo(f"      AFTER:  {after}")
+                before_str = str(before) if before and str(before) not in ("<N/A>", "None", "") else "(未设置)"
+                after_str = str(after) if after and str(after) not in ("<N/A>", "None", "") else "(未设置)"
+                click.echo(f"  ✏️  {field}:")
+                if len(before_str) > 80 or len(after_str) > 80:
+                    if before_str != "(未设置)":
+                        click.echo(f"      BEFORE:")
+                        for _bl in str(before).replace("), ", "),\n").split("\n"):
+                            if _bl.strip():
+                                click.echo(f"        {_bl.strip()}")
+                    else:
+                        click.echo(f"      BEFORE: (未设置)")
+                    if after_str != "(未设置)":
+                        click.echo(f"      AFTER:")
+                        for _al in str(after).replace("), ", "),\n").split("\n"):
+                            if _al.strip():
+                                click.echo(f"        {_al.strip()}")
+                    else:
+                        click.echo(f"      AFTER: (未设置)")
                 else:
-                    click.echo(f"  ✏️  {field}: {before} → {after}")
-    # Auto-advance when stdin is piped (not interactive TTY)
+                    click.echo(f"      {before_str} → {after_str}")
     import sys as _ss
     if _ss.stdin.isatty():
         click.echo("")
@@ -2088,7 +2112,6 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
             client.session.post("/step_continue", {"run_token": run_token})
         except Exception:
             pass
-
 
 def _run_backtest(
     state,

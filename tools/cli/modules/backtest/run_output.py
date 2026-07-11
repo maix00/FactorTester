@@ -157,6 +157,8 @@ class BacktestRunRenderer:
             self._echo(f"[运行信息] {data}")
 
     def _print_activity(self, data: Any) -> None:
+        if self.step_mode:
+            return
         if not isinstance(data, dict):
             if data:
                 self._echo(f"[activity] {data}")
