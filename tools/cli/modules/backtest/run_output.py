@@ -20,9 +20,11 @@ EVENT_PHASE = "event_replay"
 class BacktestRunRenderer:
     """Render the web backtest progress protocol for terminal users."""
 
-    def __init__(self, *, verbose: bool = False, live: bool = False) -> None:
+    def __init__(self, *, verbose: bool = False, live: bool = False, step_mode: bool = False) -> None:
         self.verbose = verbose
         self.live = live
+        self.step_mode = step_mode
+        self._step_pending: list[dict[str, Any]] = []
         self._manifest_printed = False
         self._current_phase = ""
         self._last_percent: float | None = None
@@ -60,6 +62,8 @@ class BacktestRunRenderer:
             return
         if event_name == "activity":
             self._print_activity(data)
+            if self.step_mode:
+                self._step_prompt()
             return
         if event_name in {"signal_progress", "progress"}:
             self._print_progress(data)
@@ -274,8 +278,8 @@ class BacktestRunRenderer:
             if not self._should_log_progress(key):
                 return
             import sys as _sys
-            _sys.stderr.write("\r" + line.ljust(80))
-            _sys.stderr.flush()
+            _sys.stdout.write("\r" + line.ljust(80))
+            _sys.stdout.flush()
             return
         self._progress_lines[key] = line
         self._render_status_region()
@@ -346,8 +350,18 @@ class BacktestRunRenderer:
             return
         # When showing progress bar, overwrite same line
         import sys as _sys
-        _sys.stderr.write("\r" + message.ljust(80))
-        _sys.stderr.flush()
+        _sys.stdout.write("\r" + message.ljust(80))
+        _sys.stdout.flush()
+
+    def _step_prompt(self) -> None:
+        """Wait for user Enter between steps in step mode."""
+        if not self.step_mode:
+            return
+        click.echo("")
+        click.echo("─" * 60)
+        click.echo("Press Enter to continue...")
+        input()
+        click.echo("")
 
     def _status_lines(self) -> list[str]:
         lines: list[str] = []

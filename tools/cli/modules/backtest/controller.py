@@ -2090,7 +2090,7 @@ def _run_backtest(
         elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
-    renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
+    renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
