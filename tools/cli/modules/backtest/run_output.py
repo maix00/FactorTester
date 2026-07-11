@@ -334,16 +334,26 @@ class BacktestRunRenderer:
         phase_label = str(data.get("phase_label") or phase)
         timestamp = str(data.get("timestamp") or "")
         event_kind = str(data.get("event_kind") or "")
+        strategies = data.get("strategies")
+        mode_info = data.get("mode_info")
         ts_display = timestamp if timestamp else "(无时间戳)"
         click.echo(f"\n{'─'*60}")
         click.echo(f"⏱  [{ts_display}]")
         click.echo(f"📂  {flow_label}  ·  阶段: {phase_label}")
         if event_kind:
             click.echo(f"📌  事件: {event_kind}")
+        if strategies:
+            labels = [s.get("label",s.get("alias",s.get("name",str(s)))) for s in (strategies if isinstance(strategies,list) else [strategies])]
+            click.echo(f"🎯  策略: {', '.join(labels[:5])}" + (f" ... ({len(labels)} total)" if len(labels) > 5 else ""))
+        if isinstance(mode_info, dict) and mode_info:
+            click.echo(f"⚙️   模式: {' · '.join(f'{k}={v}' for k,v in mode_info.items())}")
         click.echo(f"{'─'*60}")
-        click.echo("")
-        click.echo("Press Enter to continue...")
-        input()
+        # Auto-advance when piping (not a TTY)
+        import sys as _step_sys
+        if _step_sys.stdin.isatty():
+            click.echo("")
+            click.echo("Press Enter to continue...")
+            input()
 
 def _extract_phases(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict):

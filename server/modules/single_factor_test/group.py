@@ -3285,7 +3285,7 @@ def run_group_test_stream():
                 "backtest", run_state=account, group_owner=group_owner,
                 settings_by_strategy=resolved_settings_by_alias,
                 run_id=run_token, progress=_on_progress, activity_sink=emitter,
-                step_callback=step_callback,
+                step_mode=step_mode, step_callback=step_callback,
             )
             runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
             serialized_execution = _serialize_event_execution(

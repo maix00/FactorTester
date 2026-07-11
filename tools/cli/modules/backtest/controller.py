@@ -2028,23 +2028,38 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         inputs = data.get("inputs") or []
         description = str(data.get("description") or "")
         timestamp = str(data.get("timestamp") or "")
+        ts_display = timestamp if timestamp else "(无时间戳)"
         click.echo(f"\n{'─'*60}")
-        click.echo(f"⏱  [{timestamp}] {flow_name}")
-        if inputs:
-            click.echo(f"📥  输入字段: {', '.join(inputs)}")
+        click.echo(f"⏱  [{ts_display}] {flow_name}")
         if description:
             click.echo(f"📝  {description}")
+        if inputs:
+            click.echo(f"📥  输入字段 ({len(inputs)} 个):")
+            for inp in inputs:
+                click.echo(f"    • {inp}")
         click.echo(f"{'─'*60}")
     elif phase == "after":
         flow_name = str(data.get("flow_name") or "")
         changes = data.get("changes") or []
-        for c in changes:
-            field = c.get("field", "")
-            before = c.get("before", "")
-            after = c.get("after", "")
-            click.echo(f"  ✏️  {field}: {before} → {after}")
-    click.echo("")
-    input("Press Enter to continue...")
+        if changes:
+            click.echo(f"📍 {flow_name} — 字段变更:")
+            for c in changes:
+                field = c.get("field", "")
+                before = c.get("before", "")
+                after = c.get("after", "")
+                # Show full values without truncation
+                if len(before) > 200 or len(after) > 200:
+                    click.echo(f"  ✏️  {field}:")
+                    click.echo(f"      BEFORE: {before}")
+                    click.echo(f"      AFTER:  {after}")
+                else:
+                    click.echo(f"  ✏️  {field}: {before} → {after}")
+    # Auto-advance when stdin is piped (not interactive TTY)
+    import sys as _ss
+    if _ss.stdin.isatty():
+        click.echo("")
+        click.echo("Press Enter to continue...")
+        input()
     if run_token:
         try:
             client.session.post("/step_continue", {"run_token": run_token})
