@@ -274,49 +274,22 @@ class BacktestRunRenderer:
             self._echo(line)
 
     def _update_progress_line(self, key: str, line: str) -> None:
-        if not _is_tty():
-            if not self._should_log_progress(key):
-                return
-            import sys as _sys
-            _sys.stdout.write("\r" + line.ljust(80))
-            _sys.stdout.flush()
-            return
         self._progress_lines[key] = line
-        self._render_status_region()
+        # Only log "total" progress line, bucketed to avoid flooding
+        if key == "total":
+            percent = self._overall_percent()
+            bucket = int(percent // 5)
+            previous = self._last_log_progress_bucket.get("total")
+            if previous == bucket:
+                return
+            self._last_log_progress_bucket["total"] = bucket
+            click.echo(line)
 
     def _update_activity_line(self, line: str) -> None:
-        if not _is_tty():
-            self._echo(line)
-            return
-        previous = self._activity_line
-        if previous and line.startswith(previous):
-            self._type_activity_line(line, start=len(previous))
-            return
-        if len(line) <= 24:
-            self._activity_line = line
-            self._render_status_region()
-            return
-        self._activity_line = ""
-        for index in range(1, len(line) + 1):
-            self._activity_line = line[:index]
-            self._render_status_region()
-            time.sleep(self._activity_typewriter_delay)
-
-    def _type_activity_line(self, line: str, *, start: int) -> None:
-        for index in range(start + 1, len(line) + 1):
-            self._activity_line = line[:index]
-            self._render_status_region()
-            time.sleep(self._activity_typewriter_delay)
-        self._activity_line = line
-        self._render_status_region()
+        self._echo(line)
 
     def _update_mode_line(self, line: str, *, log_when_not_tty: bool) -> None:
-        if not _is_tty():
-            if log_when_not_tty:
-                self._echo(line)
-            return
-        self._mode_line = line
-        self._render_status_region()
+        self._echo(line)
 
     def _should_log_progress(self, key: str) -> bool:
         percent = self._phase_progress.get(key, self._overall_percent() if key == "total" else 0.0)
@@ -340,18 +313,7 @@ class BacktestRunRenderer:
         return True
 
     def _echo(self, message: str) -> None:
-        if _is_tty() and self._status_height:
-            self._clear_status_region(for_redraw=False)
-            click.echo(message)
-            self._render_status_region()
-            return
-        if _is_tty():
-            click.echo(message)
-            return
-        # When showing progress bar, overwrite same line
-        import sys as _sys
-        _sys.stdout.write("\r" + message.ljust(80))
-        _sys.stdout.flush()
+        click.echo(message)
 
     def _step_prompt(self) -> None:
         """Wait for user Enter between steps in step mode."""
@@ -372,64 +334,16 @@ class BacktestRunRenderer:
         phase_label = str(data.get("phase_label") or phase)
         timestamp = str(data.get("timestamp") or "")
         event_kind = str(data.get("event_kind") or "")
+        ts_display = timestamp if timestamp else "(无时间戳)"
         click.echo(f"\n{'─'*60}")
-        click.echo(f"⏱  [{timestamp}]")
-        click.echo(f"📂  {flow_label}")
+        click.echo(f"⏱  [{ts_display}]")
+        click.echo(f"📂  {flow_label}  ·  阶段: {phase_label}")
         if event_kind:
             click.echo(f"📌  事件: {event_kind}")
-        click.echo(f"📂  阶段: {phase_label}")
         click.echo(f"{'─'*60}")
         click.echo("")
         click.echo("Press Enter to continue...")
         input()
-
-    def _status_lines(self) -> list[str]:
-        lines: list[str] = []
-        if "total" in self._progress_lines:
-            lines.append(self._progress_lines["total"])
-        if self._activity_line:
-            lines.append(self._activity_line)
-        if self._mode_line:
-            lines.append(self._mode_line)
-        for key in self._phase_order:
-            if key in self._progress_lines:
-                lines.append(self._progress_lines[key])
-        for key, line in self._progress_lines.items():
-            if key != "total" and key not in self._phase_order:
-                lines.append(line)
-        if self.live and self._latest_chart_lines:
-            if lines:
-                lines.append("")
-            lines.extend(self._latest_chart_lines)
-        return lines
-
-    def _render_status_region(self) -> None:
-        if not _is_tty():
-            return
-        self._clear_status_region(for_redraw=True)
-        lines = self._status_lines()
-        width = _terminal_width()
-        for line in lines:
-            _write_tty_line("\x1b[2K" + line[:width])
-            sys.stdout.write("\n")
-        sys.stdout.flush()
-        self._status_height = len(lines)
-
-    def _clear_status_region(self, *, for_redraw: bool) -> None:
-        if not self._status_height:
-            return
-        height = self._status_height
-        sys.stdout.write(f"\x1b[{height}F")
-        for index in range(height):
-            sys.stdout.write("\r\x1b[2K")
-            if index < height - 1:
-                sys.stdout.write("\x1b[1B")
-        if height > 1:
-            sys.stdout.write(f"\x1b[{height - 1}F")
-        sys.stdout.write("\r")
-        sys.stdout.flush()
-        self._status_height = 0
-
 
 def _extract_phases(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict):
