@@ -555,6 +555,7 @@ def make_dispatcher(
     audit_contract: bool = False,
     enforce_contract: bool = False,
     flow_strategies: dict[str, frozenset["Strategy"]] | None = None,
+    step_callback: "Callable[[dict[str, Any]], None] | None" = None,
 ) -> Callable[[list[EventDraft]], None]:
     applicable_by_flow = flow_strategies or _flow_strategy_sets(state, ordered_flows)
     strategies_by_ledger = _ledger_strategy_sets(state)
@@ -610,24 +611,55 @@ def make_dispatcher(
                         _bef[key] = _copy.deepcopy(state.ledger.get(_ref.field_name))
                     except:
                         pass
-                print(f"\n{'─'*60}")
-                print(f"⏱  [{timestamp}] {f.effective_description}")
-                print(f"📥  Inputs: {list(_bef.keys())}")
-                if hasattr(f, 'description') and f.description:
-                    print(f"📝  {f.description}")
-                print(f"{'─'*60}")
-                input("Press Enter...")
+                _input_keys = list(_bef.keys())
+                if step_callback is not None:
+                    step_callback({
+                        "phase": "before",
+                        "timestamp": str(timestamp),
+                        "flow_name": f.effective_description or "",
+                        "inputs": _input_keys,
+                        "description": getattr(f, 'description', '') or '',
+                    })
+                else:
+                    print(f"\n{'─'*60}")
+                    print(f"⏱  [{timestamp}] {f.effective_description}")
+                    print(f"📥  Inputs: {_input_keys}")
+                    if hasattr(f, 'description') and f.description:
+                        print(f"📝  {f.description}")
+                    print(f"{'─'*60}")
+                    input("Press Enter...")
             _compute_flow(f, state, ctx)
             if _step_mode_globals.get("enabled", False):
+                _changes = []
                 for _ref in f.outputs:
                     try:
                         _after = state.ledger.get(_ref.field_name)
                         _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                         _bef_val = _bef.get(_key, '<N/A>')
                         if str(_bef_val) != str(_after):
-                            print(f"  ✏️  {_ref.field_name}: {_bef_val} → {_after}")
+                            _changes.append({
+                                "field": _ref.field_name,
+                                "before": str(_bef_val),
+                                "after": str(_after),
+                            })
                     except:
                         pass
+                if step_callback is not None and _changes:
+                    step_callback({
+                        "phase": "after",
+                        "flow_name": f.effective_description or "",
+                        "changes": _changes,
+                    })
+                elif step_callback is None:
+                    for _ref in f.outputs:
+                        try:
+                            _after = state.ledger.get(_ref.field_name)
+                            _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
+                            _bef_val = _bef.get(_key, '<N/A>')
+                            if str(_bef_val) != str(_after):
+                                print(f"  ✏️  {_ref.field_name}: {_bef_val} -> {_after}")
+                        except:
+                            pass
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
@@ -771,6 +803,8 @@ def _mode_value_text(value: Any) -> str:
     return type(value).__name__
 
 
+_step_mode_globals = {"enabled": False}
+
 def run(
     state: "BacktestRunState",
     event_queue: EventQueue,
@@ -780,6 +814,7 @@ def run(
     audit_flow_contract: bool = False,
     enforce_flow_contract: bool = False,
     step_mode: bool = False,
+    step_callback: "Callable[[dict[str, Any]], None] | None" = None,
 ) -> None:
     _step_mode_globals["enabled"] = step_mode
     """Invariant: run() itself never calls event_queue.push_event directly
@@ -819,6 +854,7 @@ def run(
                     audit_flow_contract,
                     enforce_flow_contract,
                     flow_strategies,
+                    step_callback=step_callback,
                 ),
             )
 

@@ -65,6 +65,10 @@ from . import sft_bp
 import server.services.page_runtime as runtime_state
 from server.services.session_runtime import current_user, current_user_obj
 from server.modules.shared.price_data_helpers import to_epoch_ms
+
+# Step-through debug mode: run_token -> threading.Event for step continuation
+_step_events: dict[str, "threading.Event"] = {}
+
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
 _log = logging.getLogger(__name__)
@@ -3146,6 +3150,9 @@ def run_group_test_stream():
     data = dict(data)
     data['_run_user'] = run_user
     data['_group_owner_username'] = owner
+    step_mode = bool(data.get('step_mode', False))
+    if step_mode:
+        _step_events[run_token] = threading.Event()
 
     emitter = SSEProgressEmitter()
 
@@ -3263,10 +3270,22 @@ def run_group_test_stream():
                 if active_run.cancelled.is_set():
                     raise BacktestCancelled()
 
+            step_callback = None
+            if step_mode and run_token in _step_events:
+                _step_event = _step_events[run_token]
+                def _make_step_callback(emitter, event):
+                    def _cb(info: dict[str, Any]) -> None:
+                        emitter.emit_step(info)
+                        event.wait()
+                        event.clear()
+                    return _cb
+                step_callback = _make_step_callback(emitter, _step_event)
+
             execution = tester.dispatch(
                 "backtest", run_state=account, group_owner=group_owner,
                 settings_by_strategy=resolved_settings_by_alias,
                 run_id=run_token, progress=_on_progress, activity_sink=emitter,
+                step_callback=step_callback,
             )
             runtime_info_rows = list(getattr(account, "runtime_info_rows", ()))
             serialized_execution = _serialize_event_execution(
@@ -3330,8 +3349,21 @@ def run_group_test_stream():
             import traceback as _tb
             emitter.emit_error(str(e), traceback=_tb.format_exc())
         finally:
+            _step_events.pop(run_token, None)
             backtest_runs.finish(run_token)
             emitter.close()
 
     threading.Thread(target=_compute_and_emit, daemon=True).start()
     return emitter.get_response()
+
+
+@sft_bp.route('/step_continue', methods=['POST'])
+def step_continue():
+    """Continue a paused step-through backtest."""
+    import json as _json
+    data = request.get_json(silent=True) or {}
+    run_token = str(data.get('run_token') or '')
+    if not run_token or run_token not in _step_events:
+        return jsonify({'success': False, 'error': '无效的 run_token 或 step 模式未启动'}), 400
+    _step_events[run_token].set()
+    return jsonify({'success': True})

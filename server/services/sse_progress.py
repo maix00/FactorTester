@@ -104,6 +104,10 @@ class SSEProgressEmitter:
         payload.update(extra)
         self._q.put(self._event("error", payload))
 
+    def emit_step(self, step_info: dict[str, Any]) -> None:
+        """Emit a step-through event for interactive debugging."""
+        self._q.put(self._event("step", step_info))
+
     def close(self) -> None:
         """发送流结束哨兵。工作线程完成后调用。"""
         self._q.put(None)

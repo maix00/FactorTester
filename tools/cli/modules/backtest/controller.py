@@ -62,12 +62,14 @@ _ADD_GROUP_SELECTOR_ROOTS = {
 
 @click.group("backtest", invoke_without_command=True, context_settings=SELECTOR_CONTEXT)
 @click.option("--run", is_flag=True, help="运行当前 backtest 草稿中的全部策略。")
+@click.option("--step", is_flag=True, help="单步调试模式：每步暂停，按 Enter 继续，显示每个 Flow 的处理和字段变更。")
 @click.option("--verbose", is_flag=True, help="运行时打印完整 SSE 进度事件摘要。")
 @click.pass_context
 @friendly_errors
 def backtest(
     ctx: click.Context,
     run: bool,
+    step: bool,
     verbose: bool,
 ) -> None:
     """进入通用回测控制界面。
@@ -110,7 +112,7 @@ def backtest(
     enter_backtest_state(state, scope=BACKTEST_SPACE)
     save_state(state)
     if run:
-        _run_backtest(state, groups=state.backtest_groups, verbose=verbose)
+        _run_backtest(state, groups=state.backtest_groups, verbose=verbose, step_mode=step)
         return
     print_backtest_welcome(state)
 
@@ -2000,11 +2002,45 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
         click.echo(line)
 
 
+
+def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
+    """Handle a step-through debug event from the server."""
+    phase = str(data.get("phase") or "")
+    if phase == "before":
+        flow_name = str(data.get("flow_name") or "")
+        inputs = data.get("inputs") or []
+        description = str(data.get("description") or "")
+        timestamp = str(data.get("timestamp") or "")
+        click.echo(f"\n{'─'*60}")
+        click.echo(f"⏱  [{timestamp}] {flow_name}")
+        if inputs:
+            click.echo(f"📥  输入字段: {', '.join(inputs)}")
+        if description:
+            click.echo(f"📝  {description}")
+        click.echo(f"{'─'*60}")
+    elif phase == "after":
+        flow_name = str(data.get("flow_name") or "")
+        changes = data.get("changes") or []
+        for c in changes:
+            field = c.get("field", "")
+            before = c.get("before", "")
+            after = c.get("after", "")
+            click.echo(f"  ✏️  {field}: {before} → {after}")
+    click.echo("")
+    input("Press Enter to continue...")
+    if run_token:
+        try:
+            client.session.post("/step_continue", {"run_token": run_token})
+        except Exception:
+            pass
+
+
 def _run_backtest(
     state,
     *,
     groups: list[dict[str, Any]],
     verbose: bool = False,
+    step_mode: bool = False,
     ls_configs: list[dict[str, Any]] | None = None,
     payload: dict[str, Any] | None = None,
     title: str = "回测",
@@ -2016,6 +2052,8 @@ def _run_backtest(
         raise click.ClickException("没有可运行的分组；请先用 factortester group --add 新增分组")
     display_ls_configs = ls_configs if ls_configs is not None else state.backtest_ls_configs
     run_payload = payload or _run_payload(state, groups=groups)
+    if step_mode:
+        run_payload["step_mode"] = True
     click.echo(f"开始运行{title}: groups={len(groups)}, long-short={len(display_ls_configs)}")
     _print_run_strategy_info(groups, display_ls_configs)
     payload_strategy_book = run_payload.get("strategy_book")
@@ -2031,13 +2069,16 @@ def _run_backtest(
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client))
+    _run_token = run_payload.get("run_token", "")
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
         if event_name == "error":
             message = data.get("error") if isinstance(data, dict) else data
             raise click.ClickException(f"分组测试失败: {message}")
-        if event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
+        if event_name == "step" and isinstance(data, dict):
+            _handle_step_event(data, client, _run_token)
+        elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
     renderer.handle("complete", {})
     if renderer.last_result:
