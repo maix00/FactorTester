@@ -2030,6 +2030,7 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         timestamp = str(data.get("timestamp") or "")
         strategies = data.get("strategies") or []
         ledgers = data.get("ledgers") or []
+        mode_info = data.get("mode_info") or {}
         ts_display = timestamp if timestamp else "(无时间戳)"
         click.echo(f"\n{'═'*60}")
         click.echo(f"⏱  [{ts_display}]")
@@ -2037,6 +2038,10 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if description:
             click.echo(f"📝  {description}")
         click.echo(f"{'─'*60}")
+        if mode_info:
+            click.echo(f"⚙️  运行模式:")
+            for _mk, _mv in sorted(mode_info.items()):
+                click.echo(f"    {_mk} = {_mv}")
         if strategies:
             click.echo(f"🎯  策略 ({len(strategies)} 个):")
             for _s in strategies:
@@ -2065,18 +2070,48 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                     iname = inp.get("name", "?")
                     ival = inp.get("value")
                     ival_str = str(ival) if ival is not None else None
-                    if ival is not None and ival_str not in ("<N/A>", "None", ""):
-                        if len(ival_str) > 80:
-                            click.echo(f"    📄 {iname}:")
-                            for _vline in ival_str.replace("), ", "),\n").split("\n"):
-                                if _vline.strip():
-                                    click.echo(f"        {_vline.strip()}")
+                    all_vals = inp.get("all_values")
+                    if all_vals:
+                        unique_by_key = {}
+                        for _av in all_vals:
+                            _v = _av.get("value")
+                            if _v is not None:
+                                _k = _av.get("key", "?")
+                                _s = _av.get("source", "?")
+                                unique_by_key[f"{_s}:{_k}"] = _v
+                        val_set = set(str(v) for v in unique_by_key.values())
+                        if len(val_set) <= 1 and unique_by_key:
+                            single = next(iter(unique_by_key.values()))
+                            vs = str(single)
+                            if len(vs) > 80:
+                                click.echo(f"    📄 {iname}:")
+                                for _vl in vs.replace("), ", "),\\n").split("\\n"):
+                                    if _vl.strip(): click.echo(f"        {_vl.strip()}")
+                            else:
+                                click.echo(f"    • {iname} = {vs}")
+                        elif len(val_set) > 1:
+                            click.echo(f"    📄 {iname}  (按来源不同):")
+                            for _k, _v in sorted(unique_by_key.items()):
+                                _vs = str(_v) if _v is not None else "(空)"
+                                _short = _k.split("/")[-1][:25]
+                                if len(_vs) > 60:
+                                    click.echo(f"      [{_short}]:")
+                                    for _vl in _vs.replace("), ", "),\\n").split("\\n"):
+                                        if _vl.strip(): click.echo(f"        {_vl.strip()}")
+                                else:
+                                    click.echo(f"      [{_short}] {_vs}")
                         else:
-                            click.echo(f"    • {iname} = {ival_str}")
-                    elif ival is not None and ival_str in ("<N/A>", "None", ""):
-                        click.echo(f"    • {iname}  =  (空)")
+                            click.echo(f"    • {iname}  =  (空)")
                     else:
-                        click.echo(f"    • {iname}  =  (尚未初始化)")
+                        if ival is not None and ival_str and ival_str not in ("<N/A>", "None", ""):
+                            if len(ival_str) > 80:
+                                click.echo(f"    📄 {iname}:")
+                                for _vl in ival_str.replace("), ", "),\\n").split("\\n"):
+                                    if _vl.strip(): click.echo(f"        {_vl.strip()}")
+                            else:
+                                click.echo(f"    • {iname} = {ival_str}")
+                        else:
+                            click.echo(f"    • {iname}  =  (空)")
                 else:
                     click.echo(f"    • {inp}")
     elif phase == "after":
@@ -2117,20 +2152,18 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
                 if before_str == "(未设置)" and after_str == "(未设置)":
                     click.echo(f"      (无变化)")
                 elif len(before_str) > 80 or len(after_str) > 80:
+                    click.echo(f"      BEFORE:")
                     if before_str != "(未设置)":
-                        click.echo(f"      BEFORE:")
-                        for _bl in str(before).replace("), ", "),\n").split("\n"):
-                            if _bl.strip():
-                                click.echo(f"        {_bl.strip()}")
+                        for _bl in str(before).replace("), ", "),\\n").split("\\n"):
+                            if _bl.strip(): click.echo(f"        {_bl.strip()}")
                     else:
-                        click.echo(f"      BEFORE: (未设置)")
+                        click.echo(f"      (未设置)")
+                    click.echo(f"      AFTER:")
                     if after_str != "(未设置)":
-                        click.echo(f"      AFTER:")
-                        for _al in str(after).replace("), ", "),\n").split("\n"):
-                            if _al.strip():
-                                click.echo(f"        {_al.strip()}")
+                        for _al in str(after).replace("), ", "),\\n").split("\\n"):
+                            if _al.strip(): click.echo(f"        {_al.strip()}")
                     else:
-                        click.echo(f"      AFTER: (未设置)")
+                        click.echo(f"      (未设置)")
                 else:
                     click.echo(f"      {before_str} → {after_str}")
     import sys as _ss

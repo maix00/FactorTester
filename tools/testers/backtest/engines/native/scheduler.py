@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
 def _ledger_value(state: "BacktestRunState", ref: Any) -> Any:
-    """Read a runtime ledger field or a config field using its FieldRef."""
-    # Try runtime ledgers first
+    """Read a runtime ledger field using its FieldRef. Returns first non-None."""
     for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
         try:
             result = _ledger_inst.get(ref)
@@ -26,7 +25,6 @@ def _ledger_value(state: "BacktestRunState", ref: Any) -> Any:
                 return result
         except:
             pass
-    # Try strategy configs for config-only fields
     try:
         for _sid, _sc in getattr(state, 'strategy_configs', {}).items():
             if hasattr(_sc, 'get'):
@@ -36,6 +34,28 @@ def _ledger_value(state: "BacktestRunState", ref: Any) -> Any:
     except:
         pass
     return None
+
+
+def _all_ledger_values(state: "BacktestRunState", ref: Any) -> list[dict]:
+    """Return values for ALL ledgers/strategies for a given field, not just the first."""
+    results = []
+    # Runtime ledgers
+    for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
+        try:
+            result = _ledger_inst.get(ref)
+            results.append({"source": "ledger", "key": str(_lid), "value": result})
+        except:
+            pass
+    # Strategy configs
+    for _sid, _sc in getattr(state, 'strategy_configs', {}).items():
+        try:
+            if hasattr(_sc, 'get'):
+                result = _sc.get(ref)
+                fn = getattr(_sid, 'alias', None) or str(_sid)
+                results.append({"source": "config", "key": fn, "value": result})
+        except:
+            pass
+    return results
 
 
 import pandas as pd
@@ -576,16 +596,19 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         return {}
     import copy as _copy
     _bef = {}
+    _refs_by_key = {}
     for _ref in f.inputs:
         try:
             key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
             _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
+            _refs_by_key[key] = _ref
         except:
             pass
     _input_with_vals = []
     for _ik in list(_bef.keys()):
         _iv = _bef.get(_ik)
-        _input_with_vals.append({"name": _ik, "value": _iv})
+        _all_vals = _all_ledger_values(state, _refs_by_key.get(_ik))
+        _input_with_vals.append({"name": _ik, "value": _iv, "all_values": _all_vals})
     _ctx_strategies = []
     _ctx_ledgers = []
     _KEY_CONFIG_FIELDS = ["margin_mode", "fee_mode", "allocation_policy", "slippage_mode",
@@ -618,6 +641,21 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         except:
             _cp_id = '?'
         _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
+    _mode_fields = ["engine_mode", "data_source_mode", "freq_fixed", "freq_mode",
+                      "historical_field_policy", "allocation_policy", "liquidity_mode",
+                      "participation_rate", "slippage_mode", "slippage_bps",
+                      "quantity_rounding_policy", "margin_mode", "fee_mode",
+                      "equity_compute_live", "position_policy"]
+    _mode_info = {}
+    for _s2 in applicable:
+        try:
+            _cfg2 = state.config_for(_s2)
+            for _fref, _fval in _cfg2.field_values.items():
+                _fn = getattr(_fref, 'name', None)
+                if _fn in _mode_fields and _fval is not None:
+                    _mode_info[_fn] = str(_fval)
+        except:
+            pass
     step_callback({
         "phase": "before",
         "timestamp": str(timestamp) if timestamp is not None else "",
@@ -626,6 +664,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         "description": getattr(f, 'description', '') or '',
         "strategies": _ctx_strategies,
         "ledgers": _ctx_ledgers,
+        "mode_info": _mode_info,
     })
     return _bef, _ctx_strategies, _ctx_ledgers
 
@@ -720,10 +759,12 @@ def make_dispatcher(
             if _step_mode_globals.get("enabled", False):
                 import copy as _copy
                 _bef = {}
+                _refs_by_key = {}
                 for _ref in f.inputs:
                     try:
                         key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                         _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
+                        _refs_by_key[key] = _ref
                     except:
                         pass
                 _input_keys = list(_bef.keys())
@@ -731,7 +772,8 @@ def make_dispatcher(
                     _input_with_vals = []
                     for _ik in _input_keys:
                         _iv = _bef.get(_ik)
-                        _input_with_vals.append({"name": _ik, "value": _iv})
+                        _all_vals = _all_ledger_values(state, _refs_by_key.get(_ik))
+                        _input_with_vals.append({"name": _ik, "value": _iv, "all_values": _all_vals})
                     # Build strategy/ledger context
                     _ctx_strategies = []
                     _ctx_ledgers = []
@@ -763,6 +805,21 @@ def make_dispatcher(
                         except:
                             _cp_id = '?'
                         _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
+                    _mode_fields = ["engine_mode", "data_source_mode", "freq_fixed", "freq_mode",
+                                      "historical_field_policy", "allocation_policy", "liquidity_mode",
+                                      "participation_rate", "slippage_mode", "slippage_bps",
+                                      "quantity_rounding_policy", "margin_mode", "fee_mode",
+                                      "equity_compute_live", "position_policy"]
+                    _mode_info = {}
+                    for _s2 in applicable:
+                        try:
+                            _cfg2 = state.config_for(_s2)
+                            for _fref, _fval in _cfg2.field_values.items():
+                                _fn = getattr(_fref, 'name', None)
+                                if _fn in _mode_fields and _fval is not None:
+                                    _mode_info[_fn] = str(_fval)
+                        except:
+                            pass
                     step_callback({
                         "phase": "before",
                         "timestamp": str(timestamp),
@@ -771,6 +828,7 @@ def make_dispatcher(
                         "description": getattr(f, 'description', '') or '',
                         "strategies": _ctx_strategies,
                         "ledgers": _ctx_ledgers,
+                        "mode_info": _mode_info,
                     })
                 else:
                     print(f"\n{'─'*60}")
