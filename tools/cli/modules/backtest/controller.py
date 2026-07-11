@@ -2043,17 +2043,16 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
             for _mk, _mv in sorted(mode_info.items()):
                 click.echo(f"    {_mk} = {_mv}")
         if strategies:
-            click.echo(f"🎯  策略 ({len(strategies)} 个):")
+            _sids = []
             for _s in strategies:
                 if isinstance(_s, dict):
                     _sid = _s.get("id", "?")
-                    _cfg = _s.get("config", {})
-                    click.echo(f"    📋 {_sid}")
-                    if _cfg:
-                        for _ck, _cv in sorted(_cfg.items()):
-                            click.echo(f"        {_ck} = {_cv}")
+                    # Extract short alias (before the colon)
+                    _short = _sid.split(":")[0] if ":" in _sid else _sid
+                    _sids.append(_short)
                 else:
-                    click.echo(f"    • {_s}")
+                    _sids.append(str(_s))
+            click.echo(f"🎯  策略 ({len(_sids)}): {', '.join(_sids)}")
         if ledgers:
             click.echo(f"📒  账本 ({len(ledgers)} 个):")
             for _l in ledgers:
@@ -2120,17 +2119,15 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         strategies = data.get("strategies") or []
         ledgers = data.get("ledgers") or []
         if strategies:
-            click.echo(f"🎯  关联策略 ({len(strategies)} 个):")
+            _sids = []
             for _s in strategies:
                 if isinstance(_s, dict):
                     _sid = _s.get("id", "?")
-                    _cfg = _s.get("config", {})
-                    click.echo(f"    📋 {_sid}")
-                    if _cfg:
-                        for _ck, _cv in sorted(_cfg.items()):
-                            click.echo(f"        {_ck} = {_cv}")
+                    _short = _sid.split(":")[0] if ":" in _sid else _sid
+                    _sids.append(_short)
                 else:
-                    click.echo(f"    • {_s}")
+                    _sids.append(str(_s))
+            click.echo(f"🎯  策略 ({len(_sids)}): {', '.join(_sids)}")
         if ledgers:
             click.echo(f"📒  关联账本 ({len(ledgers)} 个):")
             for _l in ledgers:
@@ -2177,6 +2174,41 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         except Exception:
             pass
 
+def _print_strategy_summary(state) -> None:
+    """Print a comparison table of all strategies at startup."""
+    from tools.cli.table import render_table, display_width
+    
+    groups = state.backtest_groups
+    if not groups:
+        return
+    
+    # Collect local-settings (shared config)
+    local_settings = state.backtest_local_settings or {}
+    if local_settings:
+        click.echo("⚙️  共享配置 (local-settings):")
+        for k, v in sorted(local_settings.items()):
+            click.echo(f"    {k} = {v}")
+        click.echo("")
+    
+    # Build strategy table
+    headers = ["ID", "组名", "因子", "产品路径", "分组", "序号"]
+    rows = []
+    for g in groups:
+        gid = str(g.get("id", "") or "")
+        name = str(g.get("name", "") or "")
+        factor = str(g.get("factor", "") or "")
+        pp = g.get("product_path_selection") or {}
+        pp_name = str(pp.get("name", "") if isinstance(pp, dict) else pp)[:30]
+        split = str(g.get("split_count", g.get("splitCount", "")) or "")
+        idx = str(g.get("group_index", g.get("groupIndex", "")) or "")
+        rows.append((gid, name, factor, pp_name, split, idx))
+    
+    click.echo("📋  策略一览:")
+    for line in render_table(headers, rows, indent="  ", max_widths=(28, 40, 30, 30, 6, 6)):
+        click.echo(line)
+    click.echo("")
+
+
 def _run_backtest(
     state,
     *,
@@ -2216,6 +2248,8 @@ def _run_backtest(
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
+    if step_mode:
+        _print_strategy_summary(state)
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
