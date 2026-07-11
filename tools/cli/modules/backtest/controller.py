@@ -2046,10 +2046,18 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         strategies = data.get("strategies") or []
         ledgers = data.get("ledgers") or []
         mode_info = data.get("mode_info") or {}
-        ts_display = timestamp if timestamp else "(无时间戳)"
+        phase = str(data.get("phase") or "")
+        flow_id = str(data.get("flow_id") or "")
+        ts_display = timestamp if timestamp else ""
+        ts_line = f"  [{ts_display}]" if ts_display else ""
+        phase_label = {"pre_replay": "预处理", "event_replay": "事件回放", "post_replay": "结果整理"}.get(phase, phase)
+        flow_label = f"{flow_name} ({flow_id})" if flow_id else flow_name
         click.echo(f"\n{'═'*60}")
-        click.echo(f"⏱  [{ts_display}]")
-        click.echo(f"📌  {flow_name}")
+        if ts_display:
+            click.echo(f"⏱  [{ts_display}]  📂 {phase_label}")
+        else:
+            click.echo(f"📂 {phase_label}")
+        click.echo(f"📌  {flow_label}")
         if description:
             click.echo(f"📝  {description}")
         click.echo(f"{'─'*60}")
