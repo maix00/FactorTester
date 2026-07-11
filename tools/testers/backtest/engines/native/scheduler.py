@@ -16,13 +16,25 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
-def _ledger_value(state: "BacktestRunState", name: str) -> Any:
-    """Read a field from any available ledger."""
+def _ledger_value(state: "BacktestRunState", ref: Any) -> Any:
+    """Read a runtime ledger field or a config field using its FieldRef."""
+    # Try runtime ledgers first
     for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
         try:
-            return _ledger_inst.get(name)
+            result = _ledger_inst.get(ref)
+            if result is not None:
+                return result
         except:
             pass
+    # Try strategy configs for config-only fields
+    try:
+        for _sid, _sc in getattr(state, 'strategy_configs', {}).items():
+            if hasattr(_sc, 'get'):
+                result = _sc.get(ref)
+                if result is not None:
+                    return result
+    except:
+        pass
     return None
 
 
@@ -618,16 +630,20 @@ def make_dispatcher(
                 for _ref in f.inputs:
                     try:
                         key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-                        _bef[key] = _copy.deepcopy(_ledger_value(state, _ref.name))
+                        _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
                     except:
                         pass
                 _input_keys = list(_bef.keys())
                 if step_callback is not None:
+                    _input_with_vals = []
+                    for _ik in _input_keys:
+                        _iv = _bef.get(_ik)
+                        _input_with_vals.append({"name": _ik, "value": _iv})
                     step_callback({
                         "phase": "before",
                         "timestamp": str(timestamp),
                         "flow_name": f.effective_description or "",
-                        "inputs": _input_keys,
+                        "inputs": _input_with_vals,
                         "description": getattr(f, 'description', '') or '',
                     })
                 else:
@@ -643,7 +659,7 @@ def make_dispatcher(
                 _changes = []
                 for _ref in f.outputs:
                     try:
-                        _after = _ledger_value(state, _ref.name)
+                        _after = _ledger_value(state, _ref)
                         _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                         _bef_val = _bef.get(_key, '<N/A>')
                         if str(_bef_val) != str(_after):
@@ -655,15 +671,18 @@ def make_dispatcher(
                     except:
                         pass
                 if step_callback is not None and _changes:
-                    step_callback({
-                        "phase": "after",
-                        "flow_name": f.effective_description or "",
-                        "changes": _changes,
-                    })
+                    # Filter out spurious N/A->None changes
+                    _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
+                    if _real_changes:
+                        step_callback({
+                            "phase": "after",
+                            "flow_name": f.effective_description or "",
+                            "changes": _real_changes,
+                        })
                 elif step_callback is None:
                     for _ref in f.outputs:
                         try:
-                            _after = _ledger_value(state, _ref.name)
+                            _after = _ledger_value(state, _ref)
                             _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
                             _bef_val = _bef.get(_key, '<N/A>')
                             if str(_bef_val) != str(_after):

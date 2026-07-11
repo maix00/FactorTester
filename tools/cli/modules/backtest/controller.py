@@ -2036,7 +2036,18 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
             for inp in inputs:
-                click.echo(f"    • {inp}")
+                if isinstance(inp, dict):
+                    iname = inp.get("name", "?")
+                    ival = inp.get("value", "<N/A>")
+                    if ival is not None and str(ival) != "<N/A>":
+                        ival_str = str(ival)
+                        if len(ival_str) > 120:
+                            ival_str = ival_str[:117] + "..."
+                        click.echo(f"    • {iname} = {ival_str}")
+                    else:
+                        click.echo(f"    • {iname}")
+                else:
+                    click.echo(f"    • {inp}")
         click.echo(f"{'─'*60}")
     elif phase == "after":
         flow_name = str(data.get("flow_name") or "")
