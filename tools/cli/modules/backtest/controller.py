@@ -25,7 +25,6 @@ from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
-_step_config_displayed: bool = False
 
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
@@ -2027,44 +2026,7 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
     """Handle a step-through debug event from the server."""
     phase = str(data.get("phase") or "")
-    import tools.cli.modules.backtest.controller as _ctrl
     if phase == "before":
-        # On first step, display detailed shared config from server data
-        if not _ctrl._step_config_displayed:
-            _ctrl._step_config_displayed = True
-            _strategies_data = data.get("strategies") or []
-            if _strategies_data:
-                # Collect configs from all strategies to find shared fields
-                _all_strat_configs: list[dict[str, str]] = []
-                for _sd in _strategies_data:
-                    if isinstance(_sd, dict):
-                        _cfg = _sd.get("config") or {}
-                        if isinstance(_cfg, dict):
-                            _all_strat_configs.append(_cfg)
-                if _all_strat_configs:
-                    # Build full shared config
-                    _all_keys: set[str] = set()
-                    for _sc in _all_strat_configs:
-                        _all_keys.update(_sc.keys())
-                    _shared_conf: dict[str, str] = {}
-                    for _fk in sorted(_all_keys):
-                        _vals = set()
-                        for _sc in _all_strat_configs:
-                            if _fk in _sc:
-                                _vals.add(_sc[_fk])
-                        if len(_vals) == 1:
-                            _shared_conf[_fk] = _vals.pop()
-                    # Merge with mode_info
-                    _mode_info = data.get("mode_info") or {}
-                    _all_shared = dict(_mode_info)
-                    _all_shared.update(_shared_conf)
-                    if _all_shared:
-                        _kw = max(len(k) for k in _all_shared)
-                        click.echo(f"{'─'*60}")
-                        click.echo("⚙️  全量共享配置 (local-settings + 全局策略):")
-                        for _k in sorted(_all_shared):
-                            click.echo(f"    {_k.ljust(_kw)} = {_all_shared[_k]}")
-                        click.echo("")
         flow_name = str(data.get("flow_name") or "")
         inputs = data.get("inputs") or []
         description = str(data.get("description") or "")
@@ -2277,23 +2239,53 @@ def _print_strategy_summary(state) -> None:
             click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
         click.echo("")
     
-    # Build strategy table: regular groups + LS configs
-    local_settings = state.backtest_local_settings or {}
-    factor_shared = local_settings.get("factor") or ""
+    # Shared config (from CLI state) + factor + path + strategy table
+    from tools.cli.table import render_table as _rt
+    local_settings = dict(state.backtest_local_settings or {})
+    # Factor & product path
+    factor_shared = local_settings.pop("factor", "") or ""
     if not factor_shared:
         for g in groups:
             f = g.get("factor", "")
             if f:
-                factor_shared = f
+                factor_shared = str(f)
                 break
     pp_shared = ""
+    pp_neg = ""
     for g in groups:
         pp = g.get("product_path_selection") or {}
-        pn = pp.get("name", "") if isinstance(pp, dict) else ""
-        if pn:
-            pp_shared = pn
+        if isinstance(pp, dict):
+            pn = pp.get("name", "") or ""
+            if pn:
+                pp_shared = str(pn)
+            # Check for positive/negative paths
+            pp_pos = pp.get("path") or pp.get("positive_path", "") or ""
+            pp_neg_val = pp.get("negative_path", "") or pp.get("exclude_path", "") or ""
+            if pp_pos and str(pp_pos):
+                if not pp_shared:
+                    pp_shared = str(pp_pos)
+            if pp_neg_val and str(pp_neg_val):
+                pp_neg = str(pp_neg_val)
+        if pp_shared:
             break
-    from tools.cli.table import render_table as _rt
+    # Build shared config from local_settings
+    click.echo(f"{'─'*60}")
+    if local_settings:
+        _kw = max(len(k) for k in local_settings)
+        click.echo("⚙️  共享配置:")
+        for k in sorted(local_settings):
+            v = str(local_settings[k])
+            click.echo(f"    {k.ljust(_kw)} = {v}")
+    if factor_shared:
+        _fkw = max(len("因子"), len("产品路径"))
+        click.echo(f"    {'因子'.ljust(_fkw)}  = {factor_shared}")
+        if pp_shared:
+            pp_line = str(pp_shared)
+            if pp_neg:
+                pp_line += f"  (负路径: {pp_neg})"
+            click.echo(f"    {'产品路径'.ljust(_fkw)}  = {pp_line}")
+    click.echo("")
+    # Strategy table
     headers = ["Short", "组名", "分组", "序号"]
     rows = []
     for g in groups:
@@ -2302,20 +2294,13 @@ def _print_strategy_summary(state) -> None:
         split = str(g.get("split_count", g.get("splitCount", "")) or "")
         idx = str(g.get("group_index", g.get("groupIndex", "")) or "")
         rows.append((short, name, split, idx))
-    # LS configs
     for ls in state.backtest_ls_configs or []:
         short = str(ls.get("shortAlias", "") or "")
         name = str(ls.get("name", "") or "")
-        split = "-"
-        idx = "-"
-        rows.append((short, name, split, idx))
+        rows.append((short, name, "-", "-"))
     click.echo("📋  策略一览:")
     for line in _rt(headers, rows, indent="  "):
         click.echo(line)
-    if factor_shared:
-        click.echo(f"📦  共享因子: {factor_shared}")
-    if pp_shared:
-        click.echo(f"📦  产品路径: {pp_shared}")
     click.echo("")
 
 
