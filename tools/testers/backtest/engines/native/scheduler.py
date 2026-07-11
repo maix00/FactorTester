@@ -652,9 +652,8 @@ def make_dispatcher(
                     for _l in all_active_ledgers:
                         _lkey = _ledger_identity_for_scheduler(_l) if hasattr(_l, 'ledger') else _l
                         try:
-                            from tools.testers.backtest.modules.cash_pool import cash_pool_config_for_ledger as _cp_cfg
-                            _cp = _cp_cfg(state, _l)
-                            _cp_id = getattr(_cp, 'cash_pool_id', '?')
+                            from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger as _cp_id_fn
+                            _cp_id = _cp_id_fn(state, _l)
                         except:
                             _cp_id = '?'
                         _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})

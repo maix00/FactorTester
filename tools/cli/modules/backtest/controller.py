@@ -2038,10 +2038,13 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if strategies:
             click.echo(f"🎯  策略 ({len(strategies)}): {', '.join(strategies[:3])}" + (f" ..." if len(strategies)>3 else ""))
         if ledgers:
-            for _l in ledgers:
-                _lid = _l.get("ledger", "?")
-                _cp = _l.get("cash_pool", "?")
-                click.echo(f"📒  账本: {_lid}  ·  资金池: {_cp}")
+            _ledger_ids = [_l.get("ledger", "?") for _l in ledgers]
+            _cp_ids = set([str(_l.get("cash_pool", "?")) for _l in ledgers if _l.get("cash_pool", "?") != "?"])
+            _cp_text = f"  ·  资金池: {', '.join(sorted(_cp_ids))}" if _cp_ids else ""
+            _ledger_summary = ', '.join(_ledger_ids[:5])
+            if len(_ledger_ids) > 5:
+                _ledger_summary += f" ... ({len(_ledger_ids)} total)"
+            click.echo(f"📒  账本 ({len(_ledger_ids)}): {_ledger_summary}{_cp_text}")
         if inputs:
             click.echo(f"📥  输入字段 ({len(inputs)} 个):")
             for inp in inputs:
