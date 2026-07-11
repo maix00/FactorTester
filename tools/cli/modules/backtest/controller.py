@@ -25,6 +25,7 @@ from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
+_step_shared_config_displayed: bool = False
 
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
@@ -2027,6 +2028,17 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
     """Handle a step-through debug event from the server."""
     phase = str(data.get("phase") or "")
     if phase == "before":
+        import tools.cli.modules.backtest.controller as _ctrl
+        if not _ctrl._step_shared_config_displayed:
+            _ctrl._step_shared_config_displayed = True
+            _all_shared = dict(data.get("mode_info") or {})
+            if _all_shared:
+                _kw = max(len(k) for k in _all_shared)
+                click.echo(f"{'─'*60}")
+                click.echo("⚙️  共享配置:")
+                for k in sorted(_all_shared):
+                    click.echo(f"    {k.ljust(_kw)} = {_all_shared[k]}")
+                click.echo("")
         flow_name = str(data.get("flow_name") or "")
         inputs = data.get("inputs") or []
         description = str(data.get("description") or "")
@@ -2041,11 +2053,7 @@ def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
         if description:
             click.echo(f"📝  {description}")
         click.echo(f"{'─'*60}")
-        if mode_info:
-            click.echo(f"⚙️  运行模式:")
-            _kw = max(len(k) for k in mode_info)
-            for _mk in sorted(mode_info):
-                click.echo(f"    {_mk.ljust(_kw)} = {mode_info[_mk]}")
+
         if strategies:
             _sids = []
             for _s in strategies:
@@ -2239,17 +2247,14 @@ def _print_strategy_summary(state) -> None:
             click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
         click.echo("")
     
-    # Shared config (from CLI state) + factor + path + strategy table
+    # Factor + path + strategy table
     from tools.cli.table import render_table as _rt
-    local_settings = dict(state.backtest_local_settings or {})
-    # Factor & product path
-    factor_shared = local_settings.pop("factor", "") or ""
-    if not factor_shared:
-        for g in groups:
-            f = g.get("factor", "")
-            if f:
-                factor_shared = str(f)
-                break
+    factor_shared = ""
+    for g in groups:
+        f = g.get("factor", "")
+        if f:
+            factor_shared = str(f)
+            break
     pp_shared = ""
     pp_neg = ""
     for g in groups:
@@ -2258,33 +2263,24 @@ def _print_strategy_summary(state) -> None:
             pn = pp.get("name", "") or ""
             if pn:
                 pp_shared = str(pn)
-            # Check for positive/negative paths
-            pp_pos = pp.get("path") or pp.get("positive_path", "") or ""
+            pp_pos = pp.get("path", "") or ""
             pp_neg_val = pp.get("negative_path", "") or pp.get("exclude_path", "") or ""
-            if pp_pos and str(pp_pos):
-                if not pp_shared:
-                    pp_shared = str(pp_pos)
+            if pp_pos and str(pp_pos) and not pp_shared:
+                pp_shared = str(pp_pos)
             if pp_neg_val and str(pp_neg_val):
                 pp_neg = str(pp_neg_val)
         if pp_shared:
             break
-    # Build shared config from local_settings
-    click.echo(f"{'─'*60}")
-    if local_settings:
-        _kw = max(len(k) for k in local_settings)
-        click.echo("⚙️  共享配置:")
-        for k in sorted(local_settings):
-            v = str(local_settings[k])
-            click.echo(f"    {k.ljust(_kw)} = {v}")
-    if factor_shared:
+    if factor_shared or pp_shared:
         _fkw = max(len("因子"), len("产品路径"))
-        click.echo(f"    {'因子'.ljust(_fkw)}  = {factor_shared}")
+        if factor_shared:
+            click.echo(f"    {'因子'.ljust(_fkw)}  = {factor_shared}")
         if pp_shared:
             pp_line = str(pp_shared)
             if pp_neg:
                 pp_line += f"  (负路径: {pp_neg})"
             click.echo(f"    {'产品路径'.ljust(_fkw)}  = {pp_line}")
-    click.echo("")
+        click.echo("")
     # Strategy table
     headers = ["Short", "组名", "分组", "序号"]
     rows = []
