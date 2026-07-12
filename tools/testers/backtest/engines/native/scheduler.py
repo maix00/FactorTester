@@ -673,6 +673,8 @@ def _audit_field_values(
     ref: "FieldRef",
     strategies: frozenset["Strategy"],
     ledger_snapshots: list[dict[str, Any]],
+    *,
+    include_strategy_config: bool,
 ) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
     strategy_key_labels = {str(strategy): _strategy_alias(state, strategy) for strategy in strategies}
@@ -682,7 +684,7 @@ def _audit_field_values(
     for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
         alias = _strategy_alias(state, strategy)
         config = state.config_for(strategy)
-        if ref in config.field_values:
+        if include_strategy_config and ref in config.field_values:
             values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref], key_labels=strategy_key_labels)})
         contextual = ctx._values_by_strategy.get(ref, {}).get(strategy, _AUDIT_MISSING)
         if contextual is not _AUDIT_MISSING:
@@ -715,11 +717,20 @@ def _audit_field_records(
     refs: tuple["FieldRef", ...],
     strategies: frozenset["Strategy"],
     ledger_snapshots: list[dict[str, Any]],
+    *,
+    include_strategy_config: bool,
 ) -> list[dict[str, Any]]:
     return [
         {
             "field": ref.qualified_name,
-            "values": _audit_field_values(state, ctx, ref, strategies, ledger_snapshots),
+            "values": _audit_field_values(
+                state,
+                ctx,
+                ref,
+                strategies,
+                ledger_snapshots,
+                include_strategy_config=include_strategy_config,
+            ),
         }
         for ref in refs
     ]
@@ -826,8 +837,12 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
     ledger_snapshots = _audit_ledgers(state, applicable, all_active_ledgers or ctx.active_ledgers)
     return {
         "timestamp": str(timestamp) if timestamp is not None else "",
-        "inputs": _audit_field_records(state, ctx, f.inputs, applicable, ledger_snapshots),
-        "outputs_before": _audit_field_records(state, ctx, f.outputs, applicable, ledger_snapshots),
+        "inputs": _audit_field_records(
+            state, ctx, f.inputs, applicable, ledger_snapshots, include_strategy_config=True,
+        ),
+        "outputs_before": _audit_field_records(
+            state, ctx, f.outputs, applicable, ledger_snapshots, include_strategy_config=False,
+        ),
         "ledgers_before": ledger_snapshots,
         "strategies": _audit_strategy_context(state, applicable, ledger_snapshots),
         "event_payloads": _audit_event_payloads(state, ctx, applicable, ledger_snapshots),
@@ -841,7 +856,9 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         return
     strategies = ctx.active_strategies
     ledgers_after = _audit_ledgers(state, strategies, ctx.active_ledgers)
-    outputs_after = _audit_field_records(state, ctx, f.outputs, strategies, ledgers_after)
+    outputs_after = _audit_field_records(
+        state, ctx, f.outputs, strategies, ledgers_after, include_strategy_config=False,
+    )
     outputs_before = {entry["field"]: entry["values"] for entry in before.get("outputs_before", [])}
     output_changes = []
     for output in outputs_after:
