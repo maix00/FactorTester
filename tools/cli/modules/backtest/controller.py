@@ -2323,7 +2323,7 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
     payload = {
         "page_uuid": state.page_uuid,
         "local_settings": dict(state.backtest_local_settings),
-        "groups": [dict(group) for group in groups],
+        "groups": [_serialize_group_for_run(group) for group in groups],
         "ls_configs": list(state.backtest_ls_configs),
     }
     if state.backtest_strategy_book:
@@ -2333,6 +2333,18 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
             str(ledger): dict(config)
             for ledger, config in state.backtest_ledger_configs.items()
         }
+    return payload
+
+
+def _serialize_group_for_run(group: dict[str, Any]) -> dict[str, Any]:
+    """Translate the CLI's registered field names at the HTTP boundary."""
+    payload = dict(group)
+    if "split_count" in group:
+        payload["splitCount"] = group["split_count"]
+    if "group_index" in group:
+        payload["groupIndex"] = group["group_index"]
+    if "factor" in group:
+        payload["factorAlias"] = group["factor"]
     return payload
 
 

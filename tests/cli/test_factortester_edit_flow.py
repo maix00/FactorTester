@@ -17,7 +17,7 @@ from tools.cli.http import ClientConfig, HttpClientError, save_config
 import tools.cli.modules.backtest.run_output as run_output
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
-from tools.cli.modules.backtest.controller import _coalesce_strategy_values
+from tools.cli.modules.backtest.controller import _coalesce_strategy_values, _serialize_group_for_run
 from tools.cli.modules.registry import ControllerRegistry
 
 
@@ -34,6 +34,23 @@ def test_step_audit_coalesces_only_equal_per_strategy_values() -> None:
         {"scope": "strategy_config", "strategy": "A1, A2", "value": "auto"},
         {"scope": "strategy_config", "strategy": "A3", "value": "fixed"},
     ]
+
+
+def test_run_payload_uses_backend_group_contract_names() -> None:
+    assert _serialize_group_for_run({
+        "name": "A1",
+        "split_count": 5,
+        "group_index": 1,
+        "factor": "SgCCS|N:2m",
+    }) == {
+        "name": "A1",
+        "split_count": 5,
+        "group_index": 1,
+        "factor": "SgCCS|N:2m",
+        "splitCount": 5,
+        "groupIndex": 1,
+        "factorAlias": "SgCCS|N:2m",
+    }
 
 
 @contextmanager
