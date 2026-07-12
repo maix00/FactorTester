@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 from flask import session
 
 from tools.factors.FactorFamily import FactorFamily
-from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source
+from tools.data.factor_workspace.storage import load_factor_source, load_public_factor_source, public_factor_path
 
 if TYPE_CHECKING:
     from tools.factors.Factors import Factor
@@ -146,51 +146,114 @@ def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _split_factor_owner_ref(ref: str) -> tuple[str | None, str]:
+    text = str(ref or "").strip()
+    if ":" not in text:
+        return None, text
+    owner, family = text.split(":", 1)
+    if not owner or not family:
+        return None, text
+    return owner, family
+
+
+def _public_factor_source_exists(factor_id: str) -> bool:
+    return os.path.isfile(public_factor_path(factor_id)) or bool(load_public_factor_source(factor_id))
+
+
+def _resolve_factor_family_ref(module_name: str, username: str | None) -> tuple[str, str, str, str]:
+    """Resolve an optional owner-qualified factor family reference.
+
+    Long-lived factor sources are intentionally limited to public factor
+    families and the current user's own custom factor families. Page UUIDs may
+    cache live objects, but they are not an authority for resolving new factor
+    identities.
+    """
+    owner, factor_id = _split_factor_owner_ref(module_name)
+    active_user = str(username or session.get('username') or "").strip() or None
+    if owner == "$COMMON":
+        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+    if owner:
+        if not active_user or owner != active_user:
+            raise PermissionError(
+                f"Cannot load factor family {module_name!r}: owner {owner!r} is not accessible "
+                f"for current user {active_user!r}"
+            )
+        return "custom", owner, factor_id, f"{owner}:{factor_id}"
+    if _public_factor_source_exists(factor_id):
+        return "public", "$COMMON", factor_id, f"$COMMON:{factor_id}"
+    return "custom", active_user or "", factor_id, f"{active_user}:{factor_id}" if active_user else factor_id
+
+
 def get_factor_family_instance(module_name, username: str | None = None, page_uuid: str | None = None):
     """Load a FactorFamily instance.
 
     Priority:
-      1. page_uuid 的 page_families 缓存
-      2. 构建新实例（公共因子或自定义因子）并写入 page 缓存
+      1. Resolve source identity from public factor library or current user's
+         custom factor library. page_uuid is never an authority for existence.
+      2. Reuse page cache only after the long-lived source identity is valid.
+      3. Build a new instance from that source when cache misses.
     """
-    # 1. 检查 page 级缓存
+    module_name = str(module_name or "").strip()
+    source_kind, owner, factor_id, cache_key = _resolve_factor_family_ref(module_name, username)
+    factors_dir = os.path.join(os.getcwd(), "Factors")
+    module_path = os.path.join(factors_dir, f"{factor_id}.py")
+    source_code = ""
+
+    if source_kind == "public":
+        source_code = load_public_factor_source(factor_id) or ''
+        if not source_code:
+            raise ImportError(f"Cannot load factor '{factor_id}': not found in public factor library")
+        user_prefix = "$COMMON"
+    else:
+        if not owner:
+            raise ImportError(f"Cannot load factor '{factor_id}': not found in '{module_path}' and no active user session")
+        source_code = load_factor_source(owner, factor_id) or ''
+        if not source_code:
+            raise ImportError(f"Cannot load factor '{factor_id}': not found in custom factor library for user '{owner}'")
+        user_prefix = owner
+
+    # page cache is only a reuse layer after source existence is proven above.
     if page_uuid:
         with _page_cache_lock:
             ff_dict = page_families.get(page_uuid, {})
-            if module_name in ff_dict:
-                return ff_dict[module_name]
+            if cache_key in ff_dict:
+                return ff_dict[cache_key]
+            if source_kind == "public" and factor_id in ff_dict:
+                return ff_dict[factor_id]
 
-    # 2. 公共因子
-    factors_dir = os.path.join(os.getcwd(), "Factors")
-    module_path = os.path.join(factors_dir, f"{module_name}.py")
-    if os.path.isfile(module_path):
-        source_code = load_public_factor_source(module_name) or ''
-        ff = _build_factor_from_source(module_name, source_code, user_prefix="$COMMON")
-        if ff is None:
-            raise ImportError(f"Cannot load factor '{module_name}': source exists but no FactorFamily class found in '{module_path}'")
-    else:
-        # 3. 自定义因子
-        if username is None:
-            username = session.get('username')
-        if username:
-            custom_source = load_factor_source(username, module_name) or ''
-            ff = _build_factor_from_source(module_name, custom_source, user_prefix=username)
-            if ff is not None:
-                with _custom_factor_cache_lock:
-                    _custom_factor_cache[(username, module_name)] = ff
-                if page_uuid:
-                    with _page_cache_lock:
-                        page_families.setdefault(page_uuid, {})[module_name] = ff
-                return ff
-            raise ImportError(f"Cannot load factor '{module_name}': not found in public sources or database for user '{username}'")
-        raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' and no active user session")
+    ff = _build_factor_from_source(factor_id, source_code, user_prefix=user_prefix)
+    if ff is None:
+        location = module_path if source_kind == "public" else f"custom factor library for user '{owner}'"
+        raise ImportError(f"Cannot load factor '{factor_id}': source exists but no FactorFamily class found in {location}")
+    if source_kind == "custom":
+        with _custom_factor_cache_lock:
+            _custom_factor_cache[(owner, factor_id)] = ff
 
-    # 4. 写入 page 级缓存
     if page_uuid:
         with _page_cache_lock:
-            page_families.setdefault(page_uuid, {})[module_name] = ff
+            page_families.setdefault(page_uuid, {})[cache_key] = ff
 
     return ff
+
+
+def factor_from_alias(factor_alias: str, *, username: str | None = None, page_uuid: str | None = None):
+    """Create a one-off Factor from a transport alias without page storage.
+
+    The family portion may be ``Family`` or ``owner:Family``.  Resolution is
+    restricted to public families and the current user's own custom families.
+    The created Factor is not inserted into page_factors.
+    """
+    alias = str(factor_alias or "").strip()
+    if not alias:
+        raise ValueError("factor_alias is empty")
+    family_ref = alias.split("|", 1)[0]
+    owner, family_id = _split_factor_owner_ref(family_ref)
+    family = get_factor_family_instance(family_ref, username=username, page_uuid=page_uuid)
+    family_alias = getattr(family, "alias", family_id)
+    canonical_alias = alias
+    if owner:
+        canonical_alias = f"{family_alias}{alias[len(family_ref):]}"
+    return family.factor_from_alias(canonical_alias)
 
 
 def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:

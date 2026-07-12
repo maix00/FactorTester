@@ -4,6 +4,7 @@ import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import (
     _audit_contract_metadata_value,
+    _audit_price_tables_value,
     _audit_ledger_changes,
     _audit_ledger_topology,
     _audit_value,
@@ -192,6 +193,32 @@ def test_step_audit_contract_metadata_keeps_every_contract_as_compact_rows() -> 
             {"product": "EC.INE", "contract": "INE|F|EC|2604", "start": "2026-01-12", "end": "2026-03-27"},
         ],
     }
+
+
+def test_step_audit_price_tables_summarizes_basis_tables_without_values() -> None:
+    index = pd.date_range("2026-01-01 09:00:00", periods=25, freq="min")
+    close = pd.DataFrame({"RB.SHF": range(25), "AG.SHF": range(100, 125)}, index=index)
+    open_ = close + 0.5
+
+    serialized = _audit_price_tables_value({"close": close, "open": open_})
+
+    assert serialized["type"] == "PriceTablesSummary"
+    assert serialized["columns"] == ["basis", "shape", "index", "columns"]
+    assert serialized["rows"] == [
+        {
+            "basis": "close",
+            "shape": [25, 2],
+            "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+            "columns": ["RB.SHF", "AG.SHF"],
+        },
+        {
+            "basis": "open",
+            "shape": [25, 2],
+            "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+            "columns": ["RB.SHF", "AG.SHF"],
+        },
+    ]
+    assert "sample" not in serialized["rows"][0]
 
 
 def test_step_ledger_topology_omits_unrelated_full_state_but_keeps_identity_and_cash() -> None:

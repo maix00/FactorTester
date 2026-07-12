@@ -2100,6 +2100,8 @@ def _audit_special_text(value: Any) -> str | None:
         return None
     if value.get("type") == "ContractMetadataTable":
         return _audit_contract_metadata_text(value)
+    if value.get("type") == "PriceTablesSummary":
+        return _audit_price_tables_text(value)
     return None
 
 
@@ -2124,6 +2126,55 @@ def _audit_contract_metadata_text(value: dict[str, Any]) -> str:
         table_rows,
         max_widths=(18, 24, 16, 16),
     ))
+
+
+def _audit_price_tables_text(value: dict[str, Any]) -> str:
+    rows = value.get("rows")
+    if not isinstance(rows, list):
+        return "price_tables: (no rows)"
+    table_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        shape = row.get("shape")
+        if isinstance(shape, list | tuple) and len(shape) == 2:
+            shape_text = f"{shape[0]} x {shape[1]}"
+        else:
+            shape_text = str(shape or "")
+        index_value = row.get("index")
+        if isinstance(index_value, dict) and {"start", "end"} <= set(index_value):
+            index_text = f"{index_value.get('start')} → {index_value.get('end')}"
+        else:
+            index_text = str(index_value or "")
+        table_rows.append((
+            str(row.get("basis") or ""),
+            shape_text,
+            index_text,
+            _audit_columns_summary(row.get("columns")),
+        ))
+    if not table_rows:
+        return "price_tables: (empty)"
+    return "\n".join(render_table(
+        ("价格字段", "shape", "index", "columns"),
+        table_rows,
+        max_widths=(16, 14, 46, 46),
+    ))
+
+
+def _audit_columns_summary(columns: Any) -> str:
+    if isinstance(columns, dict):
+        count = columns.get("count")
+        sampled = columns.get("sampled")
+        sampled_count = len(sampled) if isinstance(sampled, list) else 0
+        if count is not None and sampled_count:
+            return f"{count} columns; sample shows {sampled_count} columns"
+        if count is not None:
+            return f"{count} columns"
+    if isinstance(columns, list):
+        if len(columns) <= 20:
+            return json.dumps(columns, ensure_ascii=False, default=str)
+        return f"{len(columns)} columns"
+    return str(columns or "")
 
 
 def _audit_pandas_text(value: Any) -> str | None:

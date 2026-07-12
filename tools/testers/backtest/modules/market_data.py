@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, ClassVar, cast
 
@@ -60,6 +61,19 @@ from tools.traderules import (
 
 @dataclass
 class MarketDataStore:
+    _guarded_write_fields: ClassVar[frozenset[str]] = frozenset({
+        "raw_prices_table",
+        "current_prices_table",
+        "market_price_tables",
+        "factor_field_tables",
+        "volume_table",
+        "included_products",
+        "historical_field_provider",
+        "historical_field_policy",
+        "historical_field_names",
+        "historical_field_frames",
+    })
+
     raw_input: dict[str, Any] = field(default_factory=dict)
     request: dict[str, Any] = field(default_factory=dict)
     load_plan: list[Any] = field(default_factory=list)
@@ -90,21 +104,48 @@ class MarketDataStore:
     historical_field_latest_available_warning_keys: set[tuple[str, str, Any]] = field(default_factory=set)
     runtime_info_excluded_product_sets: list[tuple[Any, ...]] = field(default_factory=list)
     field_state_store: dict[str, dict[str, object]] = field(default_factory=dict)
+    _guarded_writes_enabled: bool = field(default=False, init=False, repr=False)
+    _guarded_write_depth: int = field(default=0, init=False, repr=False)
     """Current snapshot of market-rule field values, keyed by product_name then field_name.
     Populated by initialize_field_state (PRE_REPLAY) and updated by handle_field_changes
     (PER_EVENT/FIELD_CHANGE). Replaces the old per-timestamp historical_field_frames DataFrames.
     """
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name in self._guarded_write_fields
+            and getattr(self, "_guarded_writes_enabled", False)
+            and getattr(self, "_guarded_write_depth", 0) <= 0
+        ):
+            raise RuntimeError(
+                f"MarketDataStore.{name} is guarded during step/audit runs; "
+                "write it through a named publish_* method and mirror the value "
+                "through a declared FlowContext output when it is flow-visible."
+            )
+        super().__setattr__(name, value)
+
+    @contextmanager
+    def _unguarded_write(self):
+        self._guarded_write_depth += 1
+        try:
+            yield
+        finally:
+            self._guarded_write_depth -= 1
+
+    def set_guarded_writes_enabled(self, enabled: bool) -> None:
+        self._guarded_writes_enabled = bool(enabled)
+
     def publish_raw(self, raw: dict[str, Any]) -> None:
-        self.raw_prices_table = raw.get("raw_prices")
-        self.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-        self.factor_field_tables = raw.get("factor_field_tables") or {}
-        self.historical_field_provider = raw.get("historical_field_provider")
-        included_products = raw.get("included_products")
-        self.included_products = frozenset(included_products) if included_products is not None else None
-        self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
-        self.historical_field_names = tuple(raw.get("historical_field_names", ()))
-        self.volume_table = raw.get("volume")
+        with self._unguarded_write():
+            self.raw_prices_table = raw.get("raw_prices")
+            self.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
+            self.factor_field_tables = raw.get("factor_field_tables") or {}
+            self.historical_field_provider = raw.get("historical_field_provider")
+            included_products = raw.get("included_products")
+            self.included_products = frozenset(included_products) if included_products is not None else None
+            self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+            self.historical_field_names = tuple(raw.get("historical_field_names", ()))
+            self.volume_table = raw.get("volume")
         self.market_snapshot_cache.clear()
         self.table_values_cache.clear()
         self.historical_fields_cache.clear()
@@ -115,12 +156,33 @@ class MarketDataStore:
         self.historical_field_frame_values_cache.clear()
         self.historical_field_latest_available_warning_keys.clear()
 
+    def publish_coverage_seed(self, raw: dict[str, Any]) -> None:
+        with self._unguarded_write():
+            raw_prices = raw.get("raw_prices")
+            self.series_by_product = {
+                product: raw_prices[product]
+                for product in getattr(raw_prices, "columns", [])
+            }
+            self.market_price_tables = raw.get("price_tables") or {"close": raw_prices}
+            self.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+
+    def publish_historical_field_policy(self, policy: str) -> None:
+        with self._unguarded_write():
+            self.historical_field_policy = policy
+
+    def publish_causal_valuation(self, current_prices_table: Any) -> None:
+        with self._unguarded_write():
+            self.current_prices_table = current_prices_table
+        self.market_snapshot_cache.clear()
+        self.table_values_cache.clear()
+
 
 class MarketDataModule(ExecutableModule):
     key: ClassVar[str] = "market_data"
     label: ClassVar[str] = "市场数据"
 
-    raw_prices: ClassVar[FieldRef[Any]] = FieldRef("raw_prices")          # pd.DataFrame, index=ts, columns=Product, may have NaN gaps
+    raw_prices: ClassVar[FieldRef[Any]] = FieldRef("raw_prices")          # close pd.DataFrame, index=ts, columns=Product, may have NaN gaps
+    price_tables: ClassVar[FieldRef[Any]] = FieldRef("price_tables")      # dict[basis, pd.DataFrame] for open/high/low/close/vwap/settlement/etc.
     lot_sizes: ClassVar[FieldRef[Any]] = FieldRef("lot_sizes")            # dict[Product, float]
     margin_ratio: ClassVar[FieldRef[Any]] = FieldRef("margin_ratio")      # dict[Product, float]
     settlement_price: ClassVar[FieldRef[Any]] = FieldRef("settlement_price")  # pd.DataFrame, index=ts, columns=Product
@@ -161,6 +223,7 @@ class MarketDataModule(ExecutableModule):
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "raw_prices": FieldDefinition(public=False),
+        "price_tables": FieldDefinition(public=False),
         "lot_sizes": FieldDefinition(public=False),
         "margin_ratio": FieldDefinition(public=False),
         "settlement_price": FieldDefinition(public=False),
@@ -257,7 +320,7 @@ class MarketDataModule(ExecutableModule):
         "load_raw_market_data",
         inputs=(EngineModule.engine_mode, TermStructureExpandModule.contract_metadata),
         outputs=(
-            raw_prices, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
+            raw_prices, price_tables, lot_sizes, margin_ratio, settlement_price, volume, historical_field_provider,
         ),
         phase=Phase.PRE_REPLAY, order=40, after=(check_market_data_coverage,),
         description="装载行情数据",
@@ -587,12 +650,7 @@ def _check_market_data_coverage(state, ctx) -> None:
     store = market_data_store_for(state)
     if "raw_market_data" in request:
         raw = request["raw_market_data"]
-        store.series_by_product = {
-            product: raw.get("raw_prices")[product]
-            for product in getattr(raw.get("raw_prices"), "columns", [])
-        }
-        store.market_price_tables = raw.get("price_tables") or {"close": raw.get("raw_prices")}
-        store.excluded_out_of_range = tuple(raw.get("excluded_out_of_range_products", ()))
+        store.publish_coverage_seed(raw)
         return
     products_by_strategy = _products_by_strategy_from_selection_context(state, ctx)
     products = _products_from_selection_context(state, ctx) or list(request.get("products") or ())
@@ -1112,7 +1170,7 @@ def _initialize_field_state(state, ctx) -> None:
     raw_policy = getattr(store, "historical_field_policy", None) or HistoricalFieldFallbackPolicy.LATEST_AVAILABLE.value
     policy = _historical_field_policy_for_engine(state, raw_policy)
     ctx.set(MarketDataModule.historical_field_policy, policy)
-    store.historical_field_policy = policy
+    store.publish_historical_field_policy(policy)
     field_names = tuple(store.historical_field_names or _MARKET_RULE_FIELD_NAMES)
     instruments = list(raw_prices.columns)
     all_timestamps = signal_timestamps(raw_prices)
@@ -1292,6 +1350,7 @@ def _transaction_fee_source_for_ledger_config(ledger_config=None) -> str:
 
 def _publish_raw_market_data(state, ctx, raw: dict[str, Any]) -> None:
     ctx.set(MarketDataModule.raw_prices, raw.get("raw_prices"))
+    ctx.set(MarketDataModule.price_tables, raw.get("price_tables") or {"close": raw.get("raw_prices")})
     ctx.set(MarketDataModule.lot_sizes, raw.get("lot_sizes", {}))
     ctx.set(MarketDataModule.margin_ratio, raw.get("margin_ratio", {}))
     ctx.set(MarketDataModule.settlement_price, raw.get("settlement_price"))
@@ -1567,9 +1626,7 @@ def _required_market_rule_field_names(state) -> tuple[str, ...]:
 def _causal_valuation(state, ctx) -> None:
     raw_prices: pd.DataFrame = ctx.get(MarketDataModule.raw_prices)
     store = market_data_store_for(state)
-    store.current_prices_table = raw_prices.ffill()
-    store.market_snapshot_cache.clear()
-    store.table_values_cache.clear()
+    store.publish_causal_valuation(raw_prices.ffill())
 
 
 def _set_current_market_snapshot(state, ctx) -> None:

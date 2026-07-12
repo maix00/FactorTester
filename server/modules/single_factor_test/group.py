@@ -1959,6 +1959,7 @@ def _resolve_group_strategy_settings(
     resolved_backtest_settings: dict[str, dict[str, Any]],
     fallback_group_settings: dict[str, Any],
     page_uuid: str,
+    username: str,
     data: dict,
     page_factors_dict: dict,
     selection_cache: dict[str, Any],
@@ -1994,7 +1995,14 @@ def _resolve_group_strategy_settings(
     factor_alias = str(g.get('factorAlias', ''))
     factor = page_factors_dict.get(factor_alias)
     if factor is None:
-        raise ValueError(f"未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。")
+        from server.services.factor_registry import factor_from_alias
+        try:
+            factor = factor_from_alias(factor_alias, username=username, page_uuid=page_uuid)
+        except Exception as exc:
+            raise ValueError(
+                f"未找到因子 {factor_alias}。仅允许从当前用户可访问的公共因子家族"
+                "或当前用户自己的因子家族解析。"
+            ) from exc
     group_settings['factor'] = factor
 
     return group_settings
@@ -3177,7 +3185,7 @@ def run_group_test_stream():
                 resolved_settings_by_alias[group_id] = _resolve_group_strategy_settings(
                     g, resolved_backtest_settings=resolved_backtest_settings,
                     fallback_group_settings=fallback_group_settings,
-                    page_uuid=page_uuid, data=payload, page_factors_dict=page_factors_dict,
+                    page_uuid=page_uuid, username=owner, data=payload, page_factors_dict=page_factors_dict,
                     selection_cache=selection_cache,
                 )
             group_owner.extend(_build_group_owner_rows(flat_groups, is_ls=False))

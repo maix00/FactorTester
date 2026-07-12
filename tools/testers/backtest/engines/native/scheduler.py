@@ -31,6 +31,7 @@ _AUDIT_EDGE_SAMPLE_ROWS = 3
 _AUDIT_EDGE_SAMPLE_COLUMNS = 5
 _AUDIT_EDGE_SAMPLE_ITEMS = 3
 _CONTRACT_METADATA_FIELD = "TermStructureExpandModule.contract_metadata"
+_PRICE_TABLES_FIELD = "MarketDataModule.price_tables"
 
 
 def _audit_index_bounds(index: Any, *, key_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -163,9 +164,43 @@ def _audit_contract_metadata_value(value: Any) -> Any:
     }
 
 
+def _audit_price_tables_value(value: Any, *, key_labels: Mapping[str, str] | None = None) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        return _audit_value(value, key_labels=key_labels)
+    rows: list[dict[str, Any]] = []
+    for basis in sorted(value.keys(), key=str):
+        table = value[basis]
+        if isinstance(table, pd.DataFrame):
+            row_count, column_count = table.shape
+            columns, _sample = _audit_frame_column_payload(table, key_labels=key_labels)
+            rows.append({
+                "basis": str(basis),
+                "shape": [int(row_count), int(column_count)],
+                "index": _audit_index_bounds(table.index, key_labels=key_labels),
+                "columns": columns,
+            })
+        else:
+            rows.append({
+                "basis": str(basis),
+                "shape": None,
+                "index": None,
+                "columns": None,
+                "value": _audit_value(table, key_labels=key_labels),
+            })
+    return {
+        "type": "PriceTablesSummary",
+        "columns": ["basis", "shape", "index", "columns"],
+        "rows": rows,
+    }
+
+
 def _audit_field_value(ref: "FieldRef", value: Any, *, key_labels: Mapping[str, str] | None = None) -> Any:
     if ref.qualified_name == _CONTRACT_METADATA_FIELD:
         return _audit_contract_metadata_value(value)
+    if ref.qualified_name == _PRICE_TABLES_FIELD:
+        return _audit_price_tables_value(value, key_labels=key_labels)
     return _audit_value(value, key_labels=key_labels)
 
 
@@ -1313,6 +1348,26 @@ def _mode_value_text(value: Any) -> str:
 
 _step_mode_globals = {"enabled": False}
 
+
+def _set_state_store_guards(state: "BacktestRunState", enabled: bool) -> list[tuple[Any, bool]]:
+    """Enable opt-in store mutation guards during step/contract-audit runs.
+
+    FlowContext can audit declared FieldRef reads/writes directly. Long-lived
+    state stores need their own guard because direct attribute assignment would
+    otherwise bypass Flow declarations and be invisible to step-mode audit.
+    Stores that participate expose set_guarded_writes_enabled(bool).
+    """
+    restored: list[tuple[Any, bool]] = []
+    for store in (getattr(state, "market_data_store", None),):
+        setter = getattr(store, "set_guarded_writes_enabled", None)
+        if not callable(setter):
+            continue
+        previous = bool(getattr(store, "_guarded_writes_enabled", False))
+        setter(enabled)
+        restored.append((store, previous))
+    return restored
+
+
 def run(
     state: "BacktestRunState",
     event_queue: EventQueue,
@@ -1324,7 +1379,38 @@ def run(
     step_mode: bool = False,
     step_callback: "Callable[[dict[str, Any]], None] | None" = None,
 ) -> None:
+    previous_step_mode = bool(_step_mode_globals.get("enabled", False))
     _step_mode_globals["enabled"] = step_mode
+    guarded_stores = _set_state_store_guards(state, step_mode or audit_flow_contract or enforce_flow_contract)
+    try:
+        _run_with_guards(
+            state,
+            event_queue,
+            resolved_flows,
+            progress=progress,
+            activity_sink=activity_sink,
+            audit_flow_contract=audit_flow_contract,
+            enforce_flow_contract=enforce_flow_contract,
+            step_callback=step_callback,
+        )
+    finally:
+        for store, previous in guarded_stores:
+            setter = getattr(store, "set_guarded_writes_enabled", None)
+            if callable(setter):
+                setter(previous)
+        _step_mode_globals["enabled"] = previous_step_mode
+
+
+def _run_with_guards(
+    state: "BacktestRunState",
+    event_queue: EventQueue,
+    resolved_flows: list[ResolvedFlow],
+    progress: Callable[[int, int, str], None] | None = None,
+    activity_sink: ProgressSink | None = None,
+    audit_flow_contract: bool = False,
+    enforce_flow_contract: bool = False,
+    step_callback: "Callable[[dict[str, Any]], None] | None" = None,
+) -> None:
     """Invariant: run() itself never calls event_queue.push_event directly
     — events are only ever registered by some Flow's compute via
     ctx.set()/ctx.set_for() (FlowContext._push_if_event). Any future change

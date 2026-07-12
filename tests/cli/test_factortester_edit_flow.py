@@ -309,6 +309,34 @@ def test_step_audit_formats_contract_metadata_as_compact_table() -> None:
     assert "contract_product" not in text
 
 
+def test_step_audit_formats_price_tables_as_basis_summary() -> None:
+    text = _audit_text({
+        "type": "PriceTablesSummary",
+        "columns": ["basis", "shape", "index", "columns"],
+        "rows": [
+            {
+                "basis": "close",
+                "shape": [25, 2],
+                "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+                "columns": ["RB.SHF", "AG.SHF"],
+            },
+            {
+                "basis": "open",
+                "shape": [25, 5000],
+                "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+                "columns": {"count": 5000, "sampled": ["C0", "C1", "C4998", "C4999"], "sample_truncated": True},
+            },
+        ],
+    })
+
+    assert "价格字段" in text
+    assert "close" in text
+    assert "open" in text
+    assert "25 x 5000" in text
+    assert "5000 columns; sample shows 4 columns" in text
+    assert '"rows"' not in text
+
+
 def test_step_audit_formats_series_payloads_as_tables() -> None:
     text = _audit_text({
         "type": "Series",

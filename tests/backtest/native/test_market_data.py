@@ -47,6 +47,24 @@ def test_load_raw_market_data_reads_from_account_supplied_input():
     assert ctx.get(MarketDataModule.lot_sizes) == {"P1": 5.0}
 
 
+def test_market_data_store_guard_blocks_direct_runtime_writes_but_allows_publish_methods():
+    account = BacktestRunState()
+    store = account.market_data_store
+    store.set_guarded_writes_enabled(True)
+    prices = pd.DataFrame({"P1": [1.0]}, index=pd.date_range("2024-01-01", periods=1))
+
+    with pytest.raises(RuntimeError, match="MarketDataStore.current_prices_table is guarded"):
+        store.current_prices_table = prices
+
+    store.publish_causal_valuation(prices)
+    assert store.current_prices_table is prices
+
+    store.set_guarded_writes_enabled(False)
+    replacement = pd.DataFrame({"P1": [2.0]}, index=pd.date_range("2024-01-02", periods=1))
+    store.current_prices_table = replacement
+    assert store.current_prices_table is replacement
+
+
 def test_load_raw_market_data_carries_price_limit_columns_into_order_constraints():
     class _Product:
         name = "P.XLIM"
@@ -853,6 +871,9 @@ def test_load_raw_market_data_keeps_all_price_columns_as_price_tables():
     assert account.market_data_store.market_price_tables["close"][product].tolist() == [10.5, 20.5]
     assert account.market_data_store.market_price_tables["vwap"][product].tolist() == [10.25, 20.25]
     assert ctx.get(MarketDataModule.raw_prices)[product].tolist() == [10.5, 20.5]
+    price_tables = ctx.get(MarketDataModule.price_tables)
+    assert set(price_tables) >= {"open", "high", "low", "close", "vwap"}
+    assert price_tables["open"][product].tolist() == [10.0, 20.0]
 
 
 def test_load_raw_market_data_combines_disjoint_products_with_distinct_frequency():
