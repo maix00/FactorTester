@@ -17,9 +17,10 @@ from tools.testers.backtest.modules.factor import FactorModule
 from tools.testers.backtest.modules.factor_signal import (
     FactorSignalModule, _evaluate_signal_live, _evaluate_signal_precomputed, _observe_signal_live_bar,
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
-    _factor_calculation_key, normalize_signal_timestamp,
+    _evaluate_factor_for_strategies, _factor_calculation_key, normalize_signal_timestamp,
 )
 from tools.testers.backtest.modules.market_data import MarketDataModule
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import RunWindowModule
 
 
@@ -90,6 +91,52 @@ def test_factor_calculation_key_separates_market_data_source_and_frequency():
 
     assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_source)
     assert _factor_calculation_key(factor_key, base) != _factor_calculation_key(factor_key, different_frequency)
+
+
+def test_precomputed_factor_uses_registered_products_and_runtime_window_without_wrapper():
+    strategy = Strategy(alias="A")
+
+    class _Selection:
+        selection_id = "selection-1"
+        products = ("P2", "P1")
+
+    class _Factor:
+        def __init__(self) -> None:
+            self.calls: list[tuple] = []
+
+        def evaluate(self, products, *, freq=None, start_dt=None, end_dt=None, warmup_window=None):
+            self.calls.append((tuple(products), freq, start_dt, end_dt, warmup_window))
+            return pd.DataFrame({"P1": [1.0]}, index=[pd.Timestamp("2024-01-02 09:00")])
+
+    factor = _Factor()
+    config = StrategyConfig(
+        strategy=strategy,
+        field_values={
+            FactorModule.factor: factor,
+            ProductSelectionModule.product_path_selection: _Selection(),
+            RunWindowModule.time_precision: "exact",
+            RunWindowModule.timezone: "Asia/Shanghai",
+            RunWindowModule.start_date: "2024-01-02",
+            RunWindowModule.start_time: "09:00",
+            RunWindowModule.end_date: "2024-01-03",
+            RunWindowModule.end_time: "15:00",
+            FactorSignalModule.warmup_mode: "fixed",
+            FactorSignalModule.warmup_window: "2d",
+        },
+    )
+    account = BacktestRunState(strategy_configs={strategy: config})
+    ctx = FlowContext(timestamp=None, event_queue=EventQueue())
+    ctx.set_for(ProductSelectionModule.products, strategy, frozenset({"P1", "P2"}))
+    ctx.set_for(MarketDataModule.required_frequency, strategy, DataFreq.DAY1)
+
+    _evaluate_factor_for_strategies(factor, [strategy], account, ctx)
+
+    products, freq, start_dt, end_dt, warmup_window = factor.calls[0]
+    assert products == ("P1", "P2")
+    assert freq == DataFreq.DAY1
+    assert start_dt.ts == pd.Timestamp("2024-01-02 09:00", tz="Asia/Shanghai")
+    assert end_dt.ts == pd.Timestamp("2024-01-03 15:00", tz="Asia/Shanghai")
+    assert warmup_window == pd.Timedelta("2D")
 
 
 def test_signal_live_groups_by_shared_align_params_calls_once_per_group():
