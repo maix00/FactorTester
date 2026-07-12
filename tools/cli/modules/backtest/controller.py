@@ -2122,14 +2122,27 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
         if not values:
             click.echo("    （当前无值）")
             continue
-        for entry in values:
-            if isinstance(entry, dict):
-                _print_audit_value(
-                    "    ",
-                    _audit_source_label(entry),
-                    _display_field_value(str(record.get("field") or ""), entry.get("value")),
-                )
-
+        field_name = str(record.get("field") or "")
+        scopes = {e.get("scope") for e in values if isinstance(e, dict)}
+        display_vals = {str(_display_field_value(field_name, e.get("value"))) for e in values if isinstance(e, dict)}
+        if len(display_vals) == 1:
+            value = next(iter(display_vals))
+            if scopes == {"strategy_config"}:
+                scope_label = "[跨策略]"
+            elif scopes <= {"ledger", "ledger_config", "strategy_config"}:
+                scope_label = "[跨账本]"
+            else:
+                scope_label = "[共享]"
+            _print_audit_value("    ", scope_label, value)
+        else:
+            for entry in values:
+                if isinstance(entry, dict):
+                    _print_audit_value(
+                        "    ",
+                        _audit_source_label(entry),
+                        _display_field_value(field_name, entry.get("value")),
+                    )
+        
 
 def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
     click.echo(title)
