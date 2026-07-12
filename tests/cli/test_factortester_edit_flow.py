@@ -6,6 +6,7 @@ import contextlib
 import io
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import click
 from click.testing import CliRunner
@@ -20,6 +21,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
     _serialize_group_for_run,
+    _serialize_strategy_book_for_run,
     _set_step_navigation,
     _unchanged_output_records,
 )
@@ -73,6 +75,25 @@ def test_run_payload_uses_backend_group_contract_names() -> None:
         "groupIndex": 1,
         "factorAlias": "SgCCS|N:2m",
     }
+
+
+def test_strategy_book_short_aliases_are_mapped_to_runtime_strategy_ids() -> None:
+    state = SimpleNamespace(backtest_strategy_book={
+        "strategies": {
+            "A1": {"ledger_ids": ["shared"], "default_ledger_id": "shared"},
+            "A2": {"ledger_ids": ["shared"], "default_ledger_id": "shared"},
+        },
+        "cash_pools": {"shared": "pool-main"},
+    })
+    groups = [
+        {"id": "bg_runtime_1", "name": "完整模板分组名1", "shortAlias": "A1"},
+        {"id": "bg_runtime_2", "name": "完整模板分组名2", "shortAlias": "A2"},
+    ]
+
+    payload = _serialize_strategy_book_for_run(state, groups)
+
+    assert set(payload["strategies"]) == {"bg_runtime_1", "bg_runtime_2"}
+    assert payload["strategies"]["bg_runtime_1"]["ledger_ids"] == ["shared"]
 
 
 @contextmanager

@@ -2423,11 +2423,15 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _serialize_strategy_book_for_run(state, groups: list[dict[str, Any]]) -> dict[str, Any]:
     payload = _strategy_book_payload(state)
-    strategy_ids = {
-        str(group.get("name") or group.get("id") or ""): str(group.get("id") or "")
-        for group in groups
-        if str(group.get("id") or "")
-    }
+    strategy_ids: dict[str, str] = {}
+    for group in groups:
+        strategy_id = str(group.get("id") or "")
+        if not strategy_id:
+            continue
+        for candidate in (group.get("shortAlias"), group.get("name"), strategy_id):
+            alias = str(candidate or "")
+            if alias:
+                strategy_ids[alias] = strategy_id
     strategies = payload.get("strategies")
     if isinstance(strategies, dict):
         payload["strategies"] = {
