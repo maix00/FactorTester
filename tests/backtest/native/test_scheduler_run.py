@@ -269,6 +269,7 @@ def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():
     shared = ledger_identity("shared-book")
     other = ledger_identity("other-book")
     seen: list[frozenset] = []
+    step_records: list[dict] = []
 
     flow = Flow(
         "ledger_flow", inputs=(), outputs=(), phase=Phase.PER_EVENT, event_kind=EventKind.LEDGER,
@@ -283,12 +284,14 @@ def test_make_dispatcher_ledger_events_activate_exact_registered_strategies():
     store.register_strategy_ledgers(s3, (other.name,), default_ledger_id=other.name)
     queue = EventQueue()
 
-    from tools.testers.backtest.engines.native.scheduler import make_dispatcher, sort_and_validate
-    groups = sort_and_validate(registry.resolve())
-    dispatcher = make_dispatcher(groups[(Phase.PER_EVENT, EventKind.LEDGER)], account, queue)
-    dispatcher([EventDraft(EventKind.LEDGER, pd.Timestamp("2024-01-01"), ledger=shared)])
+    queue.push_event(EventDraft(EventKind.LEDGER, pd.Timestamp("2024-01-01"), ledger=shared))
+    run(account, queue, registry.resolve(), step_mode=True, step_callback=step_records.append)
 
     assert seen == [frozenset({s1, s2})]
+    assert [item["strategy"] for item in step_records[0]["strategies"]] == ["A", "B"]
+    assert [item["ledger"] for item in step_records[0]["ledgers_before"]] == ["shared-book"]
+    assert "C" not in {item["strategy"] for item in step_records[0]["strategies"]}
+    assert "other-book" not in {item["ledger"] for item in step_records[0]["ledgers_before"]}
 
 
 def test_progress_fires_across_all_three_phases_with_description():
@@ -325,11 +328,12 @@ def test_progress_fires_across_all_three_phases_with_description():
     assert "on_signal" in labels
 
 
-def test_step_mode_emits_one_complete_post_compute_record_per_flow_across_phases():
-    """The interactive client must receive exactly one blocking record per flow.
+def test_step_mode_emits_every_flow_invocation_and_keeps_phase_coverage():
+    """The client receives every real flow invocation without sampling.
 
     Each record is emitted after compute, so the declared output contains the
-    value the flow just produced rather than a separate before/after protocol.
+    value the flow just produced. Repeating the same event flow produces the
+    next step because Enter means exactly one flow invocation.
     """
     from tools.testers.backtest.modules.base import FieldRef
 
@@ -361,15 +365,88 @@ def test_step_mode_emits_one_complete_post_compute_record_per_flow_across_phases
     account = _account([strategy], active_flow_names=frozenset({"pre", "event", "post"}))
     queue = EventQueue()
     queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), strategy))
+    queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-02"), strategy))
 
     run(account, queue, registry.resolve(), step_mode=True, step_callback=records.append)
 
     assert [(record["flow_phase"], record["flow_id"]) for record in records] == [
         ("pre_replay", "pre"),
         ("per_event", "event"),
+        ("per_event", "event"),
         ("post_replay", "post"),
     ]
     assert all(record["phase"] == "step" for record in records)
     assert records[0]["outputs"][0]["values"][0]["value"] == "pre"
     assert records[1]["outputs"][0]["values"][0]["value"] == "event"
-    assert records[2]["outputs"][0]["values"][0]["value"] == "post"
+    assert records[2]["outputs"][0]["values"][0]["value"] == "event"
+    assert records[3]["outputs"][0]["values"][0]["value"] == "post"
+
+
+def test_step_fast_forward_skips_audit_capture_but_not_flow_compute():
+    strategy = Strategy(alias="S-fast")
+    computed: list[str] = []
+    records: list[dict] = []
+
+    class Callback:
+        def should_capture(self, timestamp) -> bool:
+            return False
+
+        def __call__(self, record: dict) -> None:
+            records.append(record)
+
+    flow = Flow(
+        "fast", inputs=(), outputs=(), phase=Phase.PRE_REPLAY,
+        compute=lambda account, ctx: computed.append("ran"),
+    )
+    account = _account([strategy], active_flow_names=frozenset({"fast"}))
+
+    run(account, EventQueue(), [flow], step_mode=True, step_callback=Callback())
+
+    assert computed == ["ran"]
+    assert records == []
+
+
+def test_step_mode_reports_mutable_event_payload_before_and_after_per_strategy():
+    strategy = Strategy(alias="S-payload")
+    records: list[dict] = []
+
+    def mutate_payload(account, ctx) -> None:
+        ctx.payloads_for(strategy)[0]["fee_cost"] = 12.5
+
+    flow = Flow(
+        "mutate_payload",
+        inputs=(),
+        outputs=(),
+        phase=Phase.PER_EVENT,
+        event_kind=EventKind.ORDER,
+        description="修改订单载荷",
+        compute=mutate_payload,
+    )
+    account = _account([strategy], active_flow_names=frozenset({"mutate_payload"}))
+    queue = EventQueue()
+    queue.push_event(EventDraft(
+        EventKind.ORDER,
+        pd.Timestamp("2024-01-01"),
+        strategy,
+        {"quantity": 2.0},
+    ))
+
+    run(account, queue, [flow], step_mode=True, step_callback=records.append)
+
+    assert records[0]["event_payloads"] == [{
+        "scope": "strategy",
+        "strategy": "S-payload",
+        "payloads": [{"quantity": 2.0}],
+    }]
+    assert records[0]["event_payloads_after"][0]["payloads"] == [{
+        "fee_cost": 12.5,
+        "quantity": 2.0,
+    }]
+    assert records[0]["event_payload_changes"] == [{
+        "scope": "strategy",
+        "strategy": "S-payload",
+        "ledger": None,
+        "cash_pool": None,
+        "before": [{"quantity": 2.0}],
+        "after": [{"fee_cost": 12.5, "quantity": 2.0}],
+    }]

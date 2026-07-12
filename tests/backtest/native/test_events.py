@@ -9,6 +9,7 @@ from tools.testers.backtest.engines.native.strategy import Strategy
 def test_event_kind_values_and_ordering():
     assert list(EventKind) == [
         EventKind.BAR,
+        EventKind.FIELD_CHANGE,
         EventKind.SIGNAL,
         EventKind.TRADE_INTENT,
         EventKind.ORDER,

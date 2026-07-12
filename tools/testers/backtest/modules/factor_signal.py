@@ -154,7 +154,7 @@ class FactorSignalModule(ExecutableModule):
             MarketDataModule.required_data_source,
             MarketDataModule.required_frequency,
         ),
-        outputs=(),
+        outputs=(signal_value,),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记预计算信号",
         compute=lambda state, ctx: _schedule_signal_precomputed_timestamps(state, ctx),

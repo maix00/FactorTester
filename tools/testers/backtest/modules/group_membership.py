@@ -150,7 +150,8 @@ class GroupMembershipModule(TargetStrategyModule):
         order=10, compute=lambda state, ctx: _group_quantile_membership(state, ctx),
     )
     schedule_order_execution: ClassVar[Flow] = Flow(
-        "schedule_order_execution", inputs=(OrderConstructModule.orders,), outputs=(),
+        "schedule_order_execution",
+        inputs=(OrderConstructModule.orders,), outputs=(dispatched_order_events,),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=40,
         after=(OrderConstructModule.construct_orders,),
         description="登记订单执行事件",

@@ -256,18 +256,24 @@ def sort_and_validate(
 def _sort_and_validate_group(flows: list[ResolvedFlow]) -> list[ResolvedFlow]:
     ordered = sorted(flows, key=lambda f: (f.order, f.name))
     position = {f.name: i for i, f in enumerate(ordered)}
-    producer_of: dict["FieldRef", str] = {}
+    producers_of: dict["FieldRef", list[str]] = defaultdict(list)
     for f in ordered:
         for out in f.outputs:
-            producer_of[out] = f.name
+            producers_of[out].append(f.name)
 
     for f in ordered:
         for inp in f.inputs:
-            owner = producer_of.get(inp)
-            if owner is not None and position[owner] > position[f.name]:
+            producers = producers_of.get(inp, [])
+            prior_or_current = [
+                producer
+                for producer in producers
+                if position[producer] <= position[f.name]
+            ]
+            if producers and not prior_or_current:
+                future_producers = ", ".join(repr(producer) for producer in producers)
                 raise SchedulerError(
                     f"flow {f.name!r} depends on {inp.qualified_name!r}, "
-                    f"but producer flow {owner!r} is ordered after it")
+                    f"but all producer flows ({future_producers}) are ordered after it")
         for dep in f.after:
             if dep.name in position and position[dep.name] > position[f.name]:
                 raise SchedulerError(f"flow {f.name!r} must be ordered after {dep.qualified_name!r}")
@@ -779,6 +785,36 @@ def _audit_event_payloads(
     return payloads
 
 
+def _audit_event_payload_changes(
+    before: list[dict[str, Any]], after: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Diff mutable event payloads by their strategy/ledger routing scope."""
+    def key(entry: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            entry.get("scope"), entry.get("strategy"), entry.get("ledger"),
+            entry.get("cash_pool"),
+        )
+
+    before_by_key = {key(entry): entry.get("payloads") for entry in before}
+    after_by_key = {key(entry): entry.get("payloads") for entry in after}
+    changes: list[dict[str, Any]] = []
+    for entry_key in sorted(set(before_by_key) | set(after_by_key), key=str):
+        old = before_by_key.get(entry_key, _AUDIT_MISSING)
+        new = after_by_key.get(entry_key, _AUDIT_MISSING)
+        if old == new:
+            continue
+        scope, strategy, ledger, cash_pool = entry_key
+        changes.append({
+            "scope": scope,
+            "strategy": strategy,
+            "ledger": ledger,
+            "cash_pool": cash_pool,
+            "before": None if old is _AUDIT_MISSING else old,
+            "after": None if new is _AUDIT_MISSING else new,
+        })
+    return changes
+
+
 def _audit_record_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
     def key(entry: dict[str, Any]) -> tuple[Any, ...]:
         return (
@@ -816,6 +852,7 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
         metadata = new or old
         if old.get("cash") != new.get("cash"):
             changes.append({
+                "scope": "ledger",
                 "ledger": ledger_name,
                 "cash_pool": metadata.get("cash_pool"),
                 "strategies": metadata.get("strategies", []),
@@ -828,6 +865,7 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
             new_value = new.get("fields", {}).get(field_name)
             if old_value != new_value:
                 changes.append({
+                    "scope": "ledger",
                     "ledger": ledger_name,
                     "cash_pool": metadata.get("cash_pool"),
                     "strategies": metadata.get("strategies", []),
@@ -838,9 +876,25 @@ def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, An
     return changes
 
 
+def _audit_ledger_topology(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep routing/cash identity; field values travel via inputs/changes."""
+    return [
+        {
+            "ledger": item.get("ledger"),
+            "strategies": list(item.get("strategies") or []),
+            "cash_pool": item.get("cash_pool"),
+            "cash": item.get("cash"),
+        }
+        for item in snapshots
+    ]
+
+
 def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
     """Capture a complete pre-compute snapshot; emission happens after compute."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
+        return {}
+    should_capture = getattr(step_callback, "should_capture", None)
+    if callable(should_capture) and not should_capture(timestamp):
         return {}
     ledger_snapshots = _audit_ledgers(state, applicable, all_active_ledgers or ctx.active_ledgers)
     return {
@@ -860,7 +914,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
 
 def _step_after_flow(f, state, ctx, step_callback, before):
     """Emit one complete, post-compute audit event for a flow."""
-    if not _step_mode_globals.get("enabled", False) or step_callback is None:
+    if not _step_mode_globals.get("enabled", False) or step_callback is None or not before:
         return
     strategies = ctx.active_strategies
     ledgers_after = _audit_ledgers(state, strategies, ctx.active_ledgers)
@@ -872,6 +926,11 @@ def _step_after_flow(f, state, ctx, step_callback, before):
     for output in outputs_after:
         for change in _audit_record_changes(outputs_before.get(output["field"], []), output["values"]):
             output_changes.append({"field": output["field"], **change})
+    ledger_changes = _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after)
+    event_payloads_after = _audit_event_payloads(state, ctx, strategies, ledgers_after)
+    event_payload_changes = _audit_event_payload_changes(
+        before.get("event_payloads", []), event_payloads_after,
+    )
     step_callback({
         "phase": "step",
         "timestamp": before.get("timestamp", ""),
@@ -883,10 +942,12 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "outputs": outputs_after,
         "output_changes": output_changes,
         "strategies": before.get("strategies", []),
-        "ledgers_before": before.get("ledgers_before", []),
-        "ledgers_after": ledgers_after,
-        "ledger_changes": _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after),
+        "ledgers_before": _audit_ledger_topology(before.get("ledgers_before", [])),
+        "ledgers_after": _audit_ledger_topology(ledgers_after),
+        "ledger_changes": ledger_changes,
         "event_payloads": before.get("event_payloads", []),
+        "event_payloads_after": event_payloads_after,
+        "event_payload_changes": event_payload_changes,
         "input_contract_violations": list(ctx.contract_violations())[before.get("contract_violation_count", 0):],
     })
 

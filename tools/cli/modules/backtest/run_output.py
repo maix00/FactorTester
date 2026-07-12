@@ -264,12 +264,11 @@ class BacktestRunRenderer:
         return max(0.0, min(100.0, self._overall_progress))
 
     def _print_live_chart(self, lines: list[str]) -> None:
-        if _is_tty():
-            self._latest_chart_lines = lines
-            self._render_status_region()
-            return
-        # Non-TTY logs and tests must remain readable and append-only.
-        self._echo("[live] 刷新净值曲线")
+        # Status-region ANSI repainting was intentionally removed from this
+        # renderer.  Keep both TTY and redirected output append-only; otherwise
+        # a final result on a real terminal calls a removed repaint method.
+        if not _is_tty():
+            self._echo("[live] 刷新净值曲线")
         for line in lines:
             self._echo(line)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -2110,27 +2111,6 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
     return "共享上下文"
 
 
-def _coalesce_strategy_values(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Group equal per-strategy values without hiding any differing value."""
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    passthrough: list[dict[str, Any]] = []
-    for entry in values:
-        scope = str(entry.get("scope") or "")
-        if scope not in {"strategy_config", "strategy_context"}:
-            passthrough.append(entry)
-            continue
-        key = (scope, json.dumps(entry.get("value"), ensure_ascii=False, sort_keys=True, default=str))
-        groups.setdefault(key, []).append(entry)
-
-    result = list(passthrough)
-    for entries in groups.values():
-        representative = dict(entries[0])
-        aliases = [str(item.get("strategy") or "?") for item in entries]
-        representative["strategy"] = ", ".join(aliases)
-        result.append(representative)
-    return result
-
-
 def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
     click.echo(title)
     if not records:
@@ -2142,7 +2122,7 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
         if not values:
             click.echo("    （当前无值）")
             continue
-        for entry in _coalesce_strategy_values(values):
+        for entry in values:
             if isinstance(entry, dict):
                 _print_audit_value(
                     "    ",
@@ -2166,7 +2146,7 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
-    click.echo("账本、现金池与策略路由（执行前）")
+    click.echo("本次 flow 的 active ledgers / cash pools（执行前）")
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
         return
@@ -2176,15 +2156,17 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
         click.echo(f"    绑定策略 = {strategies}")
         click.echo(f"    现金池 = {ledger.get('cash_pool') or '?'}")
         _print_audit_value("    ", "现金池余额", ledger.get("cash"))
-        fields = ledger.get("fields") or {}
-        if fields:
-            click.echo("    账本字段:")
-            for field_name, value in sorted(fields.items()):
-                _print_audit_value("      ", _audit_field_label(str(field_name)), value)
+
+
+def _unchanged_output_records(
+    records: list[dict[str, Any]], changes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    changed_fields = {str(change.get("field") or "") for change in changes}
+    return [record for record in records if str(record.get("field") or "") not in changed_fields]
 
 
 def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
-    click.echo("策略与账本路由")
+    click.echo("本次 flow 的 active strategies")
     if not strategies:
         click.echo("  （此 flow 尚未关联策略）")
         return
@@ -2198,7 +2180,7 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
     if not payloads:
         return
-    click.echo("本批事件载荷")
+    click.echo("本批事件载荷（执行前）")
     for payload in payloads:
         if payload.get("scope") == "strategy":
             label = f"策略 {payload.get('strategy') or '?'}"
@@ -2207,13 +2189,98 @@ def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
         _print_audit_value("  ", label, payload.get("payloads"))
 
 
+def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
+    click.echo("事件载荷变化")
+    if not changes:
+        click.echo("  （无变化）")
+        return
+    for change in changes:
+        if change.get("scope") == "strategy":
+            label = f"策略 {change.get('strategy') or '?'}"
+        else:
+            label = (
+                f"账本 {change.get('ledger') or '?'}"
+                f" | 现金池 {change.get('cash_pool') or '?'}"
+            )
+        click.echo(f"  {label}")
+        _print_audit_value("    ", "修改前", change.get("before"))
+        _print_audit_value("    ", "修改后", change.get("after"))
+
+
+@dataclass
+class _StepNavigator:
+    until: datetime | None = None
+    to_end: bool = False
+
+    def should_display(self, timestamp: Any) -> bool:
+        if self.to_end:
+            return False
+        if self.until is None:
+            return True
+        current = _parse_step_timestamp(timestamp)
+        if current is None or current < self.until:
+            return False
+        self.until = None
+        return True
+
+
+def _parse_step_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        # Compare the wall-clock timestamp exactly as printed by the server;
+        # the remote CLI machine may live in a different local timezone.
+        parsed = parsed.replace(tzinfo=None)
+    return parsed
+
+
+def _set_step_navigation(navigator: _StepNavigator, command: str) -> str | None:
+    text = command.strip()
+    if not text:
+        return None
+    if text.lower() in {"end", "finish"}:
+        navigator.to_end = True
+        navigator.until = None
+        return None
+    if text.lower().startswith("until "):
+        target = _parse_step_timestamp(text[6:].strip())
+        if target is None:
+            return "无法解析时刻；示例: until 2026-01-15 10:30:00"
+        navigator.until = target
+        navigator.to_end = False
+        return None
+    return "未知命令；使用 Enter、until <时刻> 或 end"
+
+
+def _continue_step(client, run_token: str, navigator: _StepNavigator | None = None) -> None:
+    payload: dict[str, Any] = {"run_token": run_token, "action": "continue"}
+    if navigator is not None and navigator.to_end:
+        payload["action"] = "end"
+    elif navigator is not None and navigator.until is not None:
+        payload["action"] = "until"
+        payload["until"] = navigator.until.isoformat(sep=" ")
+    try:
+        client.session.post("/step_continue", payload)
+    except Exception as exc:
+        raise click.ClickException(f"无法继续单步回测: {exc}") from exc
+
+
 def _handle_step_event(
     data: dict[str, Any],
     client,
     run_token: str,
+    navigator: _StepNavigator,
 ) -> None:
     """Render one complete, post-compute audit record and continue once."""
     if str(data.get("phase") or "") != "step":
+        return
+    if not navigator.should_display(data.get("timestamp")):
+        _continue_step(client, run_token, navigator)
         return
 
     flow_phase = str(data.get("flow_phase") or "")
@@ -2231,8 +2298,13 @@ def _handle_step_event(
     _print_ledger_snapshot(list(data.get("ledgers_before") or []))
     _print_event_payloads(list(data.get("event_payloads") or []))
     _print_audit_fields("输入字段", list(data.get("inputs") or []))
-    _print_audit_fields("输出字段（执行后）", list(data.get("outputs") or []))
-    _print_audit_changes("声明输出的变化", list(data.get("output_changes") or []))
+    output_changes = list(data.get("output_changes") or [])
+    _print_audit_fields(
+        "输出字段（未变化）",
+        _unchanged_output_records(list(data.get("outputs") or []), output_changes),
+    )
+    _print_audit_changes("声明输出的变化", output_changes)
+    _print_event_payload_changes(list(data.get("event_payload_changes") or []))
     _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []))
     violations = list(data.get("input_contract_violations") or [])
     if violations:
@@ -2241,12 +2313,13 @@ def _handle_step_event(
             click.echo(f"  {violation.get('access')} {violation.get('field')}（未在 flow inputs/outputs 注册）")
 
     click.echo("")
-    click.echo("Press Enter to continue...")
-    input()
-    try:
-        client.session.post("/step_continue", {"run_token": run_token})
-    except Exception as exc:
-        raise click.ClickException(f"无法继续单步回测: {exc}") from exc
+    while True:
+        click.echo("命令: Enter=下一步 | until <时刻>=快进到时刻 | end=快进到底")
+        error = _set_step_navigation(navigator, input("step> "))
+        if error is None:
+            break
+        click.echo(f"  {error}")
+    _continue_step(client, run_token, navigator)
 
 def _run_backtest(
     state,
@@ -2292,6 +2365,7 @@ def _run_backtest(
     # run so a new login/page_uuid cannot depend on an older page cache.
     _register_template_factors(state, client)
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
+    step_navigator = _StepNavigator()
     # Build shortAlias mapping
     import tools.cli.modules.backtest.controller as _ctrl_mod
     _ctrl_mod._short_alias_map.clear()
@@ -2319,6 +2393,7 @@ def _run_backtest(
                 data,
                 client,
                 _run_token_id,
+                step_navigator,
             )
         elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)

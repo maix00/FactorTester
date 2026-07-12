@@ -224,7 +224,10 @@ class MarketDataModule(ExecutableModule):
 
     resolve_market_data_request: ClassVar[Flow] = Flow(
         "resolve_market_data_request",
-        inputs=(data_source_mode, data_source, freq_mode, freq_fixed, FactorModule.factor),
+        inputs=(
+            data_source_mode, data_source, freq_mode, freq_fixed,
+            FactorModule.factor, ProductSelectionModule.products,
+        ),
         outputs=(required_data_source, required_frequency),
         phase=Phase.PRE_REPLAY, order=37,
         after=(RunWindowModule.resolve_run_window, ProductSelectionModule.resolve_product_selection),
@@ -256,7 +259,8 @@ class MarketDataModule(ExecutableModule):
         compute=lambda state, ctx: _load_raw_market_data(state, ctx),
     )
     build_trading_day_resolver: ClassVar[Flow] = Flow(
-        "build_trading_day_resolver", inputs=(raw_prices,), outputs=(trading_day_resolver,),
+        "build_trading_day_resolver",
+        inputs=(raw_prices, historical_field_provider), outputs=(trading_day_resolver,),
         phase=Phase.PRE_REPLAY, order=43, after=(load_raw_market_data,),
         description="建立交易日映射",
         compute=lambda state, ctx: _build_trading_day_resolver(state, ctx),

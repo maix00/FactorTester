@@ -58,14 +58,18 @@ class EquityCurveModule(ExecutableModule):
     }
 
     record_equity_on_signal: ClassVar[Flow] = Flow(
-        "record_equity_on_signal", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
+        "record_equity_on_signal",
+        inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields, MarketDataModule.current_prices),
+        outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.SIGNAL, order=20,
         after=(LedgerModule.equity_on_signal,),
         description="记录信号时点净值",
         compute=lambda state, ctx: _record_equity(state, ctx),
     )
     record_equity_on_order: ClassVar[Flow] = Flow(
-        "record_equity_on_order", inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields), outputs=(),
+        "record_equity_on_order",
+        inputs=(LedgerModule.equity, MarketDataModule.current_historical_fields, MarketDataModule.current_prices),
+        outputs=(),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=920,
         after=(LedgerModule.equity_on_order,),
         description="记录订单后净值",

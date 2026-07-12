@@ -79,6 +79,12 @@ class TradingRuleModule(ExecutableModule):
 
     _ledger_cash_ref: ClassVar[FieldRef[Any]] = FieldRef("cash", owner="LedgerModule")
     _ledger_positions_ref: ClassVar[FieldRef[Any]] = FieldRef("positions", owner="LedgerModule")
+    _current_market_snapshot_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "current_market_snapshot", owner="MarketDataModule",
+    )
+    _current_historical_fields_ref: ClassVar[FieldRef[Any]] = FieldRef(
+        "current_historical_fields", owner="MarketDataModule",
+    )
 
     fields: ClassVar[dict[str, FieldDefinition]] = {
         "accounting_mode": FieldDefinition(
@@ -129,7 +135,11 @@ class TradingRuleModule(ExecutableModule):
     )
     apply_daily_mark_to_market: ClassVar[Flow] = Flow(
         "apply_daily_mark_to_market",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref),
+        inputs=(
+            _ledger_cash_ref, _ledger_positions_ref,
+            _current_market_snapshot_ref,
+            _current_historical_fields_ref,
+        ),
         outputs=(_ledger_cash_ref, _ledger_positions_ref),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,
@@ -511,13 +521,12 @@ def _trading_day_text(value: object) -> str:
 
 def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
     from tools.testers.backtest.modules.market_data import (
-        MarketDataModule,
         historical_fields_for_product,
         contract_multiplier_from_fields,
     )
     from tools.testers.backtest.modules.cash_pool import cash_for_ledger, set_cash_for_ledger_pool
 
-    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {})
+    snapshot = ctx.get(TradingRuleModule._current_market_snapshot_ref, {})
     settlement_prices = snapshot.get("settlement") or {}
     close_prices = snapshot.get("close", {})
     for ledger in _ledger_targets(state, ctx):
@@ -526,7 +535,7 @@ def _apply_daily_mark_to_market(state: Any, ctx: Any) -> None:
         if cash is None:
             raise KeyError(f"ledger {ledger.ledger_id!r} has no cash for daily mark-to-market")
         positions = ledger.get(TradingRuleModule._ledger_positions_ref, {})
-        historical_fields = ctx.get(MarketDataModule.current_historical_fields, {}) or {}
+        historical_fields = ctx.get(TradingRuleModule._current_historical_fields_ref, {}) or {}
         for product, entry in positions.items():
             quantity = float(entry.quantity or 0.0)
             if abs(quantity) <= 1e-12:

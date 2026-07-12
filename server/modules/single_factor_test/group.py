@@ -68,6 +68,43 @@ from server.modules.shared.price_data_helpers import to_epoch_ms
 
 # Step-through debug mode: run_token -> threading.Event for step continuation
 _step_events: dict[str, "threading.Event"] = {}
+_step_controls: dict[str, dict[str, Any]] = {}
+
+
+def _step_should_pause(control: dict[str, Any], info: dict[str, Any]) -> bool:
+    mode = str(control.get("mode") or "step")
+    if mode == "end":
+        return False
+    if mode != "until":
+        return True
+    timestamp = str(info.get("timestamp") or "").strip()
+    target = control.get("until")
+    if not timestamp or target is None or pd.Timestamp(timestamp).tz_localize(None) < target:
+        return False
+    control["mode"] = "step"
+    control["until"] = None
+    return True
+
+
+def _apply_step_action(control: dict[str, Any], action: str, raw_until: str = "") -> None:
+    if action == "continue":
+        control["mode"] = "step"
+        control["until"] = None
+        return
+    if action == "end":
+        control["mode"] = "end"
+        control["until"] = None
+        return
+    if action != "until":
+        raise ValueError(f"未知 step action: {action}")
+    try:
+        target = pd.Timestamp(raw_until)
+    except Exception as exc:
+        raise ValueError("until 时刻格式无效") from exc
+    if pd.isna(target):
+        raise ValueError("until 时刻格式无效")
+    control["mode"] = "until"
+    control["until"] = target.tz_localize(None)
 
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
 
@@ -3089,6 +3126,7 @@ def run_group_test_stream():
     step_mode = bool(data.get('step_mode', False))
     if step_mode:
         _step_events[run_token] = threading.Event()
+        _step_controls[run_token] = {"mode": "step", "until": None}
 
     emitter = SSEProgressEmitter()
 
@@ -3209,13 +3247,17 @@ def run_group_test_stream():
             step_callback = None
             if step_mode and run_token in _step_events:
                 _step_event = _step_events[run_token]
-                def _make_step_callback(emitter, event):
+                _step_control = _step_controls[run_token]
+                def _make_step_callback(emitter, event, control):
                     def _cb(info: dict[str, Any]) -> None:
                         emitter.emit_step(info)
                         event.wait()
                         event.clear()
+                    _cb.should_capture = lambda timestamp: _step_should_pause(
+                        control, {"timestamp": timestamp},
+                    )
                     return _cb
-                step_callback = _make_step_callback(emitter, _step_event)
+                step_callback = _make_step_callback(emitter, _step_event, _step_control)
 
             execution = tester.dispatch(
                 "backtest", run_state=account, group_owner=group_owner,
@@ -3286,6 +3328,7 @@ def run_group_test_stream():
             emitter.emit_error(str(e), traceback=_tb.format_exc())
         finally:
             _step_events.pop(run_token, None)
+            _step_controls.pop(run_token, None)
             backtest_runs.finish(run_token)
             emitter.close()
 
@@ -3295,11 +3338,16 @@ def run_group_test_stream():
 
 @sft_bp.route('/step_continue', methods=['POST'])
 def step_continue():
-    """Continue a paused step-through backtest."""
-    import json as _json
+    """Continue one flow, fast-forward to a timestamp, or run to the end."""
     data = request.get_json(silent=True) or {}
     run_token = str(data.get('run_token') or '')
-    if not run_token or run_token not in _step_events:
+    if not run_token or run_token not in _step_events or run_token not in _step_controls:
         return jsonify({'success': False, 'error': '无效的 run_token 或 step 模式未启动'}), 400
+    action = str(data.get('action') or 'continue').strip().lower()
+    control = _step_controls[run_token]
+    try:
+        _apply_step_action(control, action, str(data.get('until') or '').strip())
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
     _step_events[run_token].set()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'mode': control['mode']})

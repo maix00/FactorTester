@@ -17,24 +17,46 @@ from tools.cli.http import ClientConfig, HttpClientError, save_config
 import tools.cli.modules.backtest.run_output as run_output
 from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
-from tools.cli.modules.backtest.controller import _coalesce_strategy_values, _serialize_group_for_run
+from tools.cli.modules.backtest.controller import (
+    _StepNavigator,
+    _serialize_group_for_run,
+    _set_step_navigation,
+    _unchanged_output_records,
+)
 from tools.cli.modules.registry import ControllerRegistry
 
 
-def test_step_audit_coalesces_only_equal_per_strategy_values() -> None:
-    values = [
-        {"scope": "strategy_config", "strategy": "A1", "value": "auto"},
-        {"scope": "strategy_config", "strategy": "A2", "value": "auto"},
-        {"scope": "strategy_config", "strategy": "A3", "value": "fixed"},
-        {"scope": "ledger_config", "ledger": "L1", "value": "auto"},
+def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
+    records = [
+        {"field": "Ledger.cash", "values": [{"scope": "context", "value": 90}]},
+        {"field": "Ledger.status", "values": [{"scope": "context", "value": "open"}]},
     ]
 
-    assert _coalesce_strategy_values(values) == [
-        {"scope": "ledger_config", "ledger": "L1", "value": "auto"},
-        {"scope": "strategy_config", "strategy": "A1, A2", "value": "auto"},
-        {"scope": "strategy_config", "strategy": "A3", "value": "fixed"},
+    assert _unchanged_output_records(records, [{"field": "Ledger.cash", "before": 100, "after": 90}]) == [
+        records[1],
     ]
 
+
+def test_step_navigation_supports_until_and_end_without_skipping_computation() -> None:
+    navigator = _StepNavigator()
+
+    assert _set_step_navigation(navigator, "until 2026-01-15 10:30:00") is None
+    assert not navigator.should_display("")
+    assert not navigator.should_display("2026-01-15 10:29:59")
+    assert navigator.should_display("2026-01-15 10:30:00")
+    assert navigator.until is None
+
+    assert _set_step_navigation(navigator, "end") is None
+    assert navigator.to_end
+    assert not navigator.should_display("2026-01-31 15:00:00")
+
+
+def test_step_navigation_rejects_unknown_or_invalid_commands() -> None:
+    navigator = _StepNavigator()
+
+    assert _set_step_navigation(navigator, "until nope")
+    assert _set_step_navigation(navigator, "next")
+    assert _set_step_navigation(navigator, "") is None
 
 def test_run_payload_uses_backend_group_contract_names() -> None:
     assert _serialize_group_for_run({
@@ -1663,6 +1685,20 @@ def test_backtest_tty_status_keeps_pre_and_post_current_flow() -> None:
     assert "当前: 回放准备 · 1/1 解析运行时间窗口" in raw
     assert "当前: 结果整理 · 1/1 计算风险指标" in raw
     assert "\n\n\n" not in raw
+
+
+def test_backtest_tty_live_result_is_append_only_and_does_not_repaint() -> None:
+    class TtyBuffer(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    renderer = BacktestRunRenderer(verbose=False, live=True)
+    stream = TtyBuffer()
+
+    with contextlib.redirect_stdout(stream):
+        renderer._print_live_chart(["净值曲线:", "A1  100 ─ 101"])
+
+    assert stream.getvalue().splitlines() == ["净值曲线:", "A1  100 ─ 101"]
 
 
 def test_backtest_verbose_event_activity_is_throttled(monkeypatch) -> None:
