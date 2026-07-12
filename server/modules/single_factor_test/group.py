@@ -1916,83 +1916,6 @@ def _product_list_from_group_payload(group: dict) -> list[str] | None:
     return None
 
 
-class _FactorEvaluateAdapter:
-    """Wraps a real Factor + its resolved product universe so
-    FactorSignalModule can evaluate it through an explicit run window while
-    the real `Factor.evaluate(products, ...)` signature keeps product and time
-    inputs mandatory."""
-
-    def __init__(self, factor: Any, products) -> None:
-        self._factor = factor
-        self._products = products
-
-    @property
-    def underlying_factor(self) -> Any:
-        return self._factor
-
-    @property
-    def expression(self) -> Any:
-        return (
-            getattr(self._factor, "expression", None)
-            or getattr(self._factor, "_expr", None)
-            or getattr(self._factor, "_source_expr", None)
-        )
-
-    def to_audit_dict(self) -> dict[str, str]:
-        """Expose the selected factor identity without serializing runtime state."""
-        factor = self._factor
-        identity = (
-            getattr(factor, "alias", None)
-            or getattr(factor, "name", None)
-            or getattr(factor, "label", None)
-            or str(factor)
-        )
-        return {"type": type(factor).__name__, "identity": str(identity)}
-
-    def supports_vectorized(self) -> bool:
-        flag = getattr(self._factor, "supports_vectorized", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_vectorized", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def supports_incremental(self) -> bool:
-        flag = getattr(self._factor, "supports_incremental", None)
-        if callable(flag):
-            return bool(flag())
-        if flag is not None:
-            return bool(flag)
-        expr = self.expression
-        expr_flag = getattr(expr, "supports_incremental", None)
-        return bool(expr_flag()) if callable(expr_flag) else bool(expr_flag if expr_flag is not None else True)
-
-    def required_warmup_window(self) -> Any:
-        required = getattr(self._factor, "required_warmup_window", None) or getattr(self._factor, "required_lookback", None)
-        if callable(required):
-            return required()
-        if required is not None:
-            return required
-        return None
-
-    def backtest_factor_cache_key(self) -> tuple:
-        factor_key = (
-            getattr(self._factor, "alias", None)
-            or getattr(self._factor, "name", None)
-            or id(self._factor)
-        )
-        product_key = tuple(str(getattr(product, "name", product)) for product in self._products)
-        return ("factor_evaluate_adapter", factor_key, product_key)
-
-    def evaluate(self, *, start_dt=None, end_dt=None, run_window=None, warmup_window=None) -> pd.DataFrame:
-        if run_window is not None and (start_dt is None or end_dt is None):
-            start_dt, end_dt = run_window
-        self._factor.evaluate(self._products, start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window)
-        return self._factor.table
-
-
 def _resolve_group_strategy_settings(
     g: dict,
     *,
@@ -2034,7 +1957,7 @@ def _resolve_group_strategy_settings(
     factor = page_factors_dict.get(factor_alias)
     if factor is None:
         raise ValueError(f"未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。")
-    group_settings['factor'] = _FactorEvaluateAdapter(factor, selection.products)
+    group_settings['factor'] = factor
 
     return group_settings
 

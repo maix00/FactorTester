@@ -33,9 +33,7 @@ class _FakeSelection:
 
 
 class _FakeFactor:
-    """Stands in for the real domain Factor -- evaluate(products) takes an
-    argument (unlike FactorModule.factor's zero-arg contract), matching what
-    _FactorEvaluateAdapter is built to bridge."""
+    """Stands in for the resolved Factor/FactorExpr evaluation contract."""
 
     def __init__(self, table: pd.DataFrame) -> None:
         self._table = table
@@ -79,9 +77,7 @@ def test_resolve_group_strategy_settings_converts_index_and_resolves_objects(mon
     assert settings["product_path_selection"] is selection
     assert selection_cache["sel-1"] is selection
 
-    # The adapter's zero-arg evaluate() must produce the real factor's table.
-    factor_adapter = settings["factor"]
-    assert factor_adapter.evaluate() is factor_table
+    assert settings["factor"] is factor
 
 
 def test_resolve_group_strategy_settings_reuses_cached_selection(monkeypatch):
@@ -139,10 +135,7 @@ def test_resolve_group_strategy_settings_keeps_full_factor_pool_and_passes_produ
 
     assert settings["product_path_selection"] is selection
     assert settings["product_mask_names"] == (p2.name, p3.name)
-    adapter = settings["factor"]
-    adapter.evaluate()
-    assert factor.last_products == [p1, p2, p3]
-    assert factor.table is not None
+    assert settings["factor"] is factor
 
 
 def test_resolve_group_strategy_settings_missing_factor_raises(monkeypatch):

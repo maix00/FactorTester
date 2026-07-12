@@ -23,6 +23,7 @@ from tools.testers.backtest.engines.native.fields import ExecutableModule, Field
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
 from tools.testers.backtest.modules.market_data import MarketDataModule, current_prices_table_for
+from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
     _expr_operands as _run_window_expr_operands,
@@ -147,7 +148,12 @@ class FactorSignalModule(ExecutableModule):
     )
     signal_precomputed: ClassVar[Flow] = Flow(
         "signal_precomputed",
-        inputs=(FactorModule.factor, MarketDataModule.required_data_source, MarketDataModule.required_frequency),
+        inputs=(
+            FactorModule.factor,
+            ProductSelectionModule.products,
+            MarketDataModule.required_data_source,
+            MarketDataModule.required_frequency,
+        ),
         outputs=(),
         phase=Phase.PRE_REPLAY, order=50,
         description="登记预计算信号",
@@ -325,10 +331,19 @@ def _factor_calculation_key(factor_key: Any, config) -> tuple:
     return (
         factor_key,
         "calculation",
+        _strategy_product_selection_key(config),
         _strategy_run_window_key(config),
         _strategy_warmup_key(config),
         _strategy_market_data_key(config),
     )
+
+
+def _strategy_product_selection_key(config) -> tuple:
+    selection = config.get(ProductSelectionModule.product_path_selection)
+    products = tuple(
+        sorted(str(getattr(product, "name", product)) for product in getattr(selection, "products", ()))
+    )
+    return ("products", str(getattr(selection, "selection_id", "")), products)
 
 
 def _strategy_market_data_key(config) -> tuple:
@@ -382,9 +397,8 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, state, ctx) -
     warmup_window = _warmup_window_for_strategies(factor, strategies, state)
     frequency = _market_data_frequency_for_strategies(strategies, ctx)
     _market_data_source_for_strategies(strategies, ctx)
+    products = _products_for_strategies(strategies, ctx)
     evaluate = getattr(factor, "evaluate")
-    if start_dt is None or end_dt is None:
-        return evaluate()
     try:
         signature = inspect.signature(evaluate)
     except (TypeError, ValueError):
@@ -396,11 +410,35 @@ def _evaluate_factor_for_strategies(factor: Any, strategies: list, state, ctx) -
         kwargs["warmup_window"] = warmup_window
     if frequency is not None and (accepts_kwargs or "freq" in params):
         kwargs["freq"] = frequency
-    if accepts_kwargs or "start_dt" in params or "end_dt" in params:
-        return evaluate(start_dt=start_dt, end_dt=end_dt, **kwargs)
-    if "run_window" in params:
-        return evaluate(run_window=(start_dt, end_dt), **kwargs)
-    return evaluate()
+    if start_dt is not None and end_dt is not None:
+        if accepts_kwargs or "start_dt" in params or "end_dt" in params:
+            kwargs.update(start_dt=start_dt, end_dt=end_dt)
+        elif "run_window" in params:
+            kwargs["run_window"] = (start_dt, end_dt)
+    if accepts_kwargs or "products" in params:
+        return evaluate(products=products, **kwargs)
+    positional_parameters = [
+        parameter
+        for parameter in params.values()
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    if positional_parameters:
+        return evaluate(products, **kwargs)
+    return evaluate(**kwargs)
+
+
+def _products_for_strategies(strategies: list, ctx) -> tuple[Any, ...]:
+    products_by_strategy = {
+        strategy: tuple(sorted(ctx.get_for(ProductSelectionModule.products, strategy) or (), key=str))
+        for strategy in strategies
+    }
+    distinct = {products for products in products_by_strategy.values()}
+    if len(distinct) != 1:
+        raise ValueError("共享因子计算要求策略使用相同的产品路径")
+    return next(iter(distinct), ())
 
 
 def _market_data_frequency_for_strategies(strategies: list, ctx) -> Any | None:

@@ -525,14 +525,12 @@ def _infer_required_frequency_from_factor(factor: Any, products: list[Any]) -> D
 
 
 def _desired_factor_frequencies(factor: Any) -> set[DataFreq]:
-    factor_obj = getattr(factor, "underlying_factor", None) or getattr(factor, "_factor", None) or factor
     desired: set[DataFreq] = set()
-    signal_freq = getattr(factor_obj, "freq", None) or getattr(factor_obj, "_freq", None)
+    signal_freq = getattr(factor, "freq", None) or getattr(factor, "_freq", None)
     if signal_freq is not None:
         desired.add(DataFreq(signal_freq))
     expr = (
-        getattr(factor_obj, "_expr", None)
-        or getattr(factor_obj, "expression", None)
+        getattr(factor, "_expr", None)
         or getattr(factor, "expression", None)
     )
     for const_ref in getattr(expr, "const_refs", ()) or ():
