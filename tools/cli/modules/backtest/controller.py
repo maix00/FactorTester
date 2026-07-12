@@ -2210,6 +2210,11 @@ def _handle_step_event(
     _print_audit_fields("输出字段（执行后）", list(data.get("outputs") or []))
     _print_audit_changes("声明输出的变化", list(data.get("output_changes") or []))
     _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []))
+    violations = list(data.get("input_contract_violations") or [])
+    if violations:
+        click.echo("输入声明缺项")
+        for violation in violations:
+            click.echo(f"  {violation.get('access')} {violation.get('field')}（未在 flow inputs/outputs 注册）")
 
     click.echo("")
     click.echo("Press Enter to continue...")

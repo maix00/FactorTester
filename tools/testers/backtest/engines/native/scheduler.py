@@ -820,6 +820,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         "ledgers_before": ledger_snapshots,
         "strategies": _audit_strategy_context(state, applicable, ledger_snapshots),
         "event_payloads": _audit_event_payloads(state, ctx, applicable, ledger_snapshots),
+        "contract_violation_count": len(ctx.contract_violations()),
     }
 
 
@@ -850,6 +851,7 @@ def _step_after_flow(f, state, ctx, step_callback, before):
         "ledgers_after": ledgers_after,
         "ledger_changes": _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after),
         "event_payloads": before.get("event_payloads", []),
+        "input_contract_violations": list(ctx.contract_violations())[before.get("contract_violation_count", 0):],
     })
 
 

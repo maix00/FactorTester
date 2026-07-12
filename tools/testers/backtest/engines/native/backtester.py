@@ -73,7 +73,16 @@ def run_backtest_task(
         )
     registry = _build_registry()
     queue = EventQueue()
-    run(run_state, queue, registry.resolve(), progress=progress, activity_sink=activity_sink, step_mode=step_mode, step_callback=step_callback)
+    run(
+        run_state,
+        queue,
+        registry.resolve(),
+        progress=progress,
+        activity_sink=activity_sink,
+        audit_flow_contract=step_mode,
+        step_mode=step_mode,
+        step_callback=step_callback,
+    )
 
     by_alias = {strategy.alias: strategy for strategy in run_state.strategy_configs}
     portfolios: dict[str, Any] = {}
