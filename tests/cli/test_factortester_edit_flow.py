@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import contextlib
 import io
@@ -24,9 +25,11 @@ from tools.cli.modules.backtest.controller import (
     _handle_step_event,
     _print_audit_changes,
     _print_contract_audit,
+    _print_event_payload_changes,
     _print_audit_fields,
     _print_ledger_snapshot,
     _print_strategy_context,
+    _print_wrapped_line,
     _serialize_group_for_run,
     _serialize_strategy_book_for_run,
     _set_step_navigation,
@@ -133,11 +136,48 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     _print_audit_changes("账本与现金池变化", changes)
 
     out = capsys.readouterr().out
-    assert "账本 L1, L2 | 现金池 P1, P2 | 策略 A1, A2" in out
+    assert "合并 2 个账本 / 2 个现金池 / 2 个策略" in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "strategies" in out
+    assert "L1" in out
+    assert "P1" in out
+    assert "A1" in out
+    assert "L2" in out
+    assert "P2" in out
+    assert "A2" in out
     assert "100 -> 90" in out
     assert "修改前" not in out
     assert "修改后" not in out
     assert "[跨账本]" not in out
+
+
+def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
+    changes = [
+        {
+            "field": "MarginModule.margin_requirement",
+            "scope": "ledger",
+            "ledger": f"private:L{index}",
+            "cash_pool": f"pool-{index}",
+            "strategies": [f"A{index}"],
+            "before": None,
+            "after": 0.0,
+        }
+        for index in range(1, 9)
+    ]
+
+    _print_audit_changes("账本与现金池变化", changes)
+
+    out = capsys.readouterr().out
+    assert "合并 8 个账本 / 8 个现金池 / 8 个策略" in out
+    assert "private:L1, private:L2" not in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "strategies" in out
+    assert "private:L8" in out
+    assert "pool-8" in out
+    assert "A8" in out
+    assert out.count("null -> 0.0") == 1
 
 
 def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
@@ -330,10 +370,13 @@ def test_step_audit_formats_price_tables_as_basis_summary() -> None:
     })
 
     assert "价格字段" in text
-    assert "close" in text
-    assert "open" in text
-    assert "25 x 5000" in text
-    assert "5000 columns; sample shows 4 columns" in text
+    assert "价格字段: close" in text
+    assert "  shape   = 25 x 2" in text
+    assert "  index   = 2026-01-01 09:00:00 → 2026-01-01 09:24:00" in text
+    assert '  columns = ["RB.SHF", "AG.SHF"]' in text
+    assert "价格字段: open" in text
+    assert "  shape   = 25 x 5000" in text
+    assert "  columns = 5000 columns; sample shows 4 columns" in text
     assert '"rows"' not in text
 
 
@@ -365,6 +408,31 @@ def test_step_audit_empty_message_is_explicit(capsys) -> None:
     out = capsys.readouterr().out
     assert "所有声明输出字段均发生变化" in out
     assert "无声明字段" not in out
+
+
+def test_step_section_headers_are_prominent(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [])
+    _print_event_payload_changes([])
+    _print_contract_audit([])
+
+    out = capsys.readouterr().out
+    assert "━━ 声明输出的变化 ━━" in out
+    assert "━━ 本批事件草稿载荷变化（非完整事件队列） ━━" in out
+    assert "━━ 字段声明审计 ━━" in out
+    assert "事件载荷变化" not in out
+
+
+def test_step_wrapped_long_values_indent_continuation(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((50, 20)))
+
+    _print_wrapped_line(
+        "    策略配置 A1 = Product/Futures/CNFutures/日夜盘/夜盘1/_products/RB.SHF",
+        continuation_indent="      ",
+    )
+
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) > 1
+    assert out[1].startswith("      ")
 
 
 def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:

@@ -11,6 +11,8 @@ import contextlib
 import io
 import json
 import ast
+import shutil
+import textwrap
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -84,7 +86,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
-from tools.cli.table import render_key_value_rows, render_table
+from tools.cli.table import render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -2132,7 +2134,7 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
     rows = value.get("rows")
     if not isinstance(rows, list):
         return "price_tables: (no rows)"
-    table_rows = []
+    lines: list[str] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -2146,19 +2148,15 @@ def _audit_price_tables_text(value: dict[str, Any]) -> str:
             index_text = f"{index_value.get('start')} → {index_value.get('end')}"
         else:
             index_text = str(index_value or "")
-        table_rows.append((
-            str(row.get("basis") or ""),
-            shape_text,
-            index_text,
-            _audit_columns_summary(row.get("columns")),
-        ))
-    if not table_rows:
+        if lines:
+            lines.append("")
+        lines.append(f"价格字段: {row.get('basis') or ''}")
+        lines.append(f"  shape   = {shape_text}")
+        lines.append(f"  index   = {index_text}")
+        lines.append(f"  columns = {_audit_columns_summary(row.get('columns'))}")
+    if not lines:
         return "price_tables: (empty)"
-    return "\n".join(render_table(
-        ("价格字段", "shape", "index", "columns"),
-        table_rows,
-        max_widths=(16, 14, 46, 46),
-    ))
+    return "\n".join(lines)
 
 
 def _audit_columns_summary(columns: Any) -> str:
@@ -2369,12 +2367,38 @@ def _print_audit_value(prefix: str, label: str, value: Any) -> None:
         return
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) == 1:
-        for line in render_key_value_rows(((label, lines[0]),), indent=prefix):
-            click.echo(line)
+        _print_wrapped_line(f"{prefix}{label} = {lines[0]}", continuation_indent=f"{prefix}  ")
         return
     click.echo(f"{prefix}{label} =")
     for line in lines:
-        click.echo(f"{prefix}  {line}")
+        _print_wrapped_line(f"{prefix}  {line}", continuation_indent=f"{prefix}    ")
+
+
+def _step_section_title(title: str) -> str:
+    return f"━━ {title} ━━"
+
+
+def _print_step_section(title: str) -> None:
+    click.secho(_step_section_title(title), fg="cyan", bold=True, color=True)
+
+
+def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
+    width = max(40, min(shutil.get_terminal_size((120, 20)).columns, 120))
+    if len(line) <= width:
+        click.echo(line)
+        return
+    wrapped = textwrap.wrap(
+        line,
+        width=width,
+        subsequent_indent=continuation_indent,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    if not wrapped:
+        click.echo(line)
+        return
+    for wrapped_line in wrapped:
+        click.echo(wrapped_line)
 
 
 def _audit_display_key(value: Any) -> str:
@@ -2437,8 +2461,12 @@ def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
             return "[共享]"
         return f"策略上下文 {strategies}"
     if scopes <= {"ledger"}:
+        if len(entries) > 1:
+            return _audit_ledger_group_label(entries, prefix="合并")
         return f"账本 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
     if scopes <= {"ledger_config"}:
+        if len(entries) > 1:
+            return _audit_ledger_group_label(entries, prefix="合并账本配置")
         return f"账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
     if scopes <= {"context"}:
         return "[共享]"
@@ -2453,7 +2481,52 @@ def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
     return "[合并] " + "；".join(_audit_source_label(entry) for entry in entries)
 
 
-def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list[tuple[str, Any]]:
+def _audit_ledger_group_label(entries: list[dict[str, Any]], *, prefix: str) -> str:
+    ledgers = {str(entry.get("ledger") or "") for entry in entries if entry.get("ledger") not in (None, "")}
+    cash_pools = {str(entry.get("cash_pool") or "") for entry in entries if entry.get("cash_pool") not in (None, "")}
+    strategies = {
+        str(strategy)
+        for entry in entries
+        for strategy in (entry.get("strategies") if isinstance(entry.get("strategies"), list) else [])
+        if strategy not in (None, "")
+    }
+    parts = [f"{prefix} {len(ledgers)} 个账本"]
+    if cash_pools:
+        parts.append(f"{len(cash_pools)} 个现金池")
+    if strategies:
+        parts.append(f"{len(strategies)} 个策略")
+    return " / ".join(parts)
+
+
+def _audit_source_route_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    scopes = {str(entry.get("scope") or "") for entry in entries}
+    if len(entries) <= 1 or not scopes <= {"ledger", "ledger_config"}:
+        return []
+    rows = []
+    for entry in entries:
+        rows.append((
+            str(entry.get("ledger") or "?"),
+            str(entry.get("cash_pool") or "?"),
+            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
+        ))
+    return sorted(rows)
+
+
+def _print_audit_source_routes(prefix: str, entries: list[dict[str, Any]]) -> bool:
+    rows = _audit_source_route_rows(entries)
+    if not rows:
+        return False
+    for line in render_table(
+        ("ledger", "cash pool", "strategies"),
+        rows,
+        indent=prefix,
+        max_widths=(34, 34, 52),
+    ):
+        click.echo(line)
+    return True
+
+
+def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
     for entry in values:
         if not isinstance(entry, dict):
@@ -2462,10 +2535,7 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
         key = _audit_display_key(display_value)
         bucket = groups.setdefault(key, {"value": display_value, "entries": []})
         bucket["entries"].append(entry)
-    return [
-        (_audit_source_group_label(bucket["entries"]), bucket["value"])
-        for bucket in groups.values()
-    ]
+    return list(groups.values())
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
@@ -2477,16 +2547,18 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
     if len(before_lines) == 1 and len(after_lines) == 1:
-        for line in render_key_value_rows(((label, f"{before_lines[0]} -> {after_lines[0]}"),), indent=prefix):
-            click.echo(line)
+        _print_wrapped_line(
+            f"{prefix}{label} = {before_lines[0]} -> {after_lines[0]}",
+            continuation_indent=f"{prefix}  ",
+        )
         return
     click.echo(f"{prefix}{label}:")
     click.echo(f"{prefix}  before =")
     for line in before_lines:
-        click.echo(f"{prefix}    {line}")
+        _print_wrapped_line(f"{prefix}    {line}", continuation_indent=f"{prefix}      ")
     click.echo(f"{prefix}  after =")
     for line in after_lines:
-        click.echo(f"{prefix}    {line}")
+        _print_wrapped_line(f"{prefix}    {line}", continuation_indent=f"{prefix}      ")
 
 
 def _audit_field_label(qualified_name: str) -> str:
@@ -2527,7 +2599,7 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
 
 
 def _print_audit_fields(title: str, records: list[dict[str, Any]], *, empty_message: str = "（无字段）") -> None:
-    click.echo(title)
+    _print_step_section(title)
     if not records:
         click.echo(f"  {empty_message}")
         return
@@ -2538,12 +2610,18 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]], *, empty_mess
             click.echo("    （当前无值）")
             continue
         field_name = str(record.get("field") or "")
-        for label, value in _audit_grouped_values(field_name, values):
-            _print_audit_value("    ", label, value)
+        for bucket in _audit_grouped_values(field_name, values):
+            label = _audit_source_group_label(bucket["entries"])
+            if _audit_source_route_rows(bucket["entries"]):
+                click.echo(f"    {label}:")
+                _print_audit_source_routes("      ", bucket["entries"])
+                _print_audit_value("      ", "value", bucket["value"])
+            else:
+                _print_audit_value("    ", label, bucket["value"])
         
 
 def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
-    click.echo(title)
+    _print_step_section(title)
     if not changes:
         click.echo("  （无变化）")
         return
@@ -2560,16 +2638,17 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
             bucket = grouped.setdefault(key, {"before": before, "after": after, "entries": []})
             bucket["entries"].append(change)
         for bucket in grouped.values():
-            _print_audit_diff_value(
-                "    ",
-                _audit_source_group_label(bucket["entries"]),
-                bucket["before"],
-                bucket["after"],
-            )
+            label = _audit_source_group_label(bucket["entries"])
+            if _audit_source_route_rows(bucket["entries"]):
+                click.echo(f"    {label}:")
+                _print_audit_source_routes("      ", bucket["entries"])
+                _print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
+            else:
+                _print_audit_diff_value("    ", label, bucket["before"], bucket["after"])
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
-    click.echo("本次 flow 的 active ledgers / cash pools（执行前）")
+    _print_step_section("本次 flow 的 active ledgers / cash pools（执行前）")
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
         return
@@ -2594,7 +2673,7 @@ def _unchanged_output_records(
 
 
 def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
-    click.echo("本次 flow 的 active strategies")
+    _print_step_section("本次 flow 的 active strategies")
     if not strategies:
         click.echo("  （此 flow 尚未关联策略）")
         return
@@ -2612,7 +2691,7 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
     if not payloads:
         return
-    click.echo("本批事件载荷（执行前）")
+    _print_step_section("本批事件草稿载荷（执行前，非完整事件队列）")
     for payload in payloads:
         if payload.get("scope") == "strategy":
             label = f"策略 {payload.get('strategy') or '?'}"
@@ -2622,7 +2701,7 @@ def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
 
 
 def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
-    click.echo("事件载荷变化")
+    _print_step_section("本批事件草稿载荷变化（非完整事件队列）")
     if not changes:
         click.echo("  （无变化）")
         return
@@ -2641,7 +2720,7 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
 
 
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
-    click.echo("字段声明审计")
+    _print_step_section("字段声明审计")
     if not violations:
         click.echo("  已通过：本 flow 未读取未声明输入字段，也未写入未声明输出字段")
         return
