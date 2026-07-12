@@ -27,9 +27,9 @@ from tools.cli.modules.backtest.controller import (
     _print_contract_audit,
     _print_event_payload_changes,
     _print_audit_fields,
+    _print_audit_value,
     _print_ledger_snapshot,
     _print_strategy_context,
-    _print_wrapped_line,
     _serialize_group_for_run,
     _serialize_strategy_book_for_run,
     _set_step_navigation,
@@ -422,17 +422,42 @@ def test_step_section_headers_are_prominent(capsys) -> None:
     assert "事件载荷变化" not in out
 
 
-def test_step_wrapped_long_values_indent_continuation(capsys, monkeypatch) -> None:
+def test_step_wrapped_long_scalar_values_align_to_value_column(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((50, 20)))
 
-    _print_wrapped_line(
-        "    策略配置 A1 = Product/Futures/CNFutures/日夜盘/夜盘1/_products/RB.SHF",
-        continuation_indent="      ",
-    )
+    _print_audit_value("    ", "策略配置 A1", "Product/Futures/CNFutures/日夜盘/夜盘1/_products/RB.SHF")
 
     out = capsys.readouterr().out.splitlines()
     assert len(out) > 1
-    assert out[1].startswith("      ")
+    assert out[1].startswith(" " * len("    策略配置 A1 = "))
+
+
+def test_step_multiline_dataframe_values_are_not_wrapped_by_audit_printer(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((50, 20)))
+    value = {
+        "type": "DataFrame",
+        "shape": [25, 2],
+        "columns": ["RB.SHF", "SHFE|F|RB|2610"],
+        "index": {
+            "start": ["2026-05-26 00:00:00", "2026-05-26 09:01:00+08:00"],
+            "end": ["2026-05-27 00:00:00", "2026-05-27 15:00:00+08:00"],
+        },
+        "sample": {
+            "head": {
+                "columns": ["RB.SHF", "SHFE|F|RB|2610"],
+                "index": [["2026-05-26 00:00:00", "2026-05-26 09:01:00+08:00"]],
+                "rows": [[3187.0, 3187.0]],
+            }
+        },
+        "truncated": True,
+    }
+
+    expected_lines = _audit_text(value).splitlines()
+    _print_audit_value("    ", "after", value)
+
+    out = capsys.readouterr().out.splitlines()
+    printed_value_lines = [line.removeprefix("      ") for line in out[1:]]
+    assert printed_value_lines == expected_lines
 
 
 def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:

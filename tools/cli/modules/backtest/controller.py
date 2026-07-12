@@ -86,7 +86,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
-from tools.cli.table import render_table
+from tools.cli.table import display_width, render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -2367,11 +2367,11 @@ def _print_audit_value(prefix: str, label: str, value: Any) -> None:
         return
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) == 1:
-        _print_wrapped_line(f"{prefix}{label} = {lines[0]}", continuation_indent=f"{prefix}  ")
+        _print_key_value_line(prefix, label, lines[0])
         return
     click.echo(f"{prefix}{label} =")
     for line in lines:
-        _print_wrapped_line(f"{prefix}  {line}", continuation_indent=f"{prefix}    ")
+        _print_audit_block_line(f"{prefix}  ", line)
 
 
 def _step_section_title(title: str) -> str:
@@ -2382,8 +2382,24 @@ def _print_step_section(title: str) -> None:
     click.secho(_step_section_title(title), fg="cyan", bold=True, color=True)
 
 
+def _print_key_value_line(prefix: str, label: str, value: str) -> None:
+    line_prefix = f"{prefix}{label} = "
+    _print_wrapped_line(
+        f"{line_prefix}{value}",
+        continuation_indent=" " * display_width(line_prefix),
+    )
+
+
+def _print_audit_block_line(prefix: str, line: str) -> None:
+    if " = " not in line:
+        click.echo(f"{prefix}{line}")
+        return
+    key, value = line.split(" = ", 1)
+    _print_key_value_line(prefix, key, value)
+
+
 def _print_wrapped_line(line: str, *, continuation_indent: str) -> None:
-    width = max(40, min(shutil.get_terminal_size((120, 20)).columns, 120))
+    width = max(40, shutil.get_terminal_size((120, 20)).columns)
     if len(line) <= width:
         click.echo(line)
         return
@@ -2547,18 +2563,15 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
     if len(before_lines) == 1 and len(after_lines) == 1:
-        _print_wrapped_line(
-            f"{prefix}{label} = {before_lines[0]} -> {after_lines[0]}",
-            continuation_indent=f"{prefix}  ",
-        )
+        _print_key_value_line(prefix, label, f"{before_lines[0]} -> {after_lines[0]}")
         return
     click.echo(f"{prefix}{label}:")
     click.echo(f"{prefix}  before =")
     for line in before_lines:
-        _print_wrapped_line(f"{prefix}    {line}", continuation_indent=f"{prefix}      ")
+        _print_audit_block_line(f"{prefix}    ", line)
     click.echo(f"{prefix}  after =")
     for line in after_lines:
-        _print_wrapped_line(f"{prefix}    {line}", continuation_indent=f"{prefix}      ")
+        _print_audit_block_line(f"{prefix}    ", line)
 
 
 def _audit_field_label(qualified_name: str) -> str:
