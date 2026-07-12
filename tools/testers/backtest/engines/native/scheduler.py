@@ -686,6 +686,15 @@ def _audit_field_values(
                 "strategies": ledger["strategies"],
                 "value": value,
             })
+        ledger_config = ledger.get("ledger_config") or {}
+        if ref.name in ledger_config:
+            values.append({
+                "scope": "ledger_config",
+                "ledger": ledger["ledger"],
+                "cash_pool": ledger["cash_pool"],
+                "strategies": ledger["strategies"],
+                "value": ledger_config[ref.name],
+            })
     return values
 
 
@@ -712,14 +721,9 @@ def _audit_strategy_context(state: "BacktestRunState", strategies: frozenset["St
             ledgers_by_strategy[strategy].append(ledger["ledger"])
     result: list[dict[str, Any]] = []
     for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
-        config = state.config_for(strategy)
         result.append({
             "strategy": _strategy_alias(state, strategy),
             "ledgers": sorted(ledgers_by_strategy.get(_strategy_alias(state, strategy), [])),
-            "config": {
-                ref.qualified_name: _audit_value(value)
-                for ref, value in config.field_values.items()
-            },
         })
     return result
 

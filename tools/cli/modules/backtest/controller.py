@@ -2098,6 +2098,12 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
             f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'}"
             f" | 策略 {strategies}"
         )
+    if scope == "ledger_config":
+        strategies = ", ".join(entry.get("strategies") or []) or "无"
+        return (
+            f"账本配置 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'}"
+            f" | 策略 {strategies}"
+        )
     return "共享上下文"
 
 
@@ -2135,7 +2141,7 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
         _print_audit_value("    ", "修改后", _display_field_value(str(change.get("field") or ""), change.get("after")))
 
 
-def _print_ledger_snapshot(ledgers: list[dict[str, Any]], *, show_configuration: bool) -> None:
+def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
     click.echo("账本、现金池与策略路由（执行前）")
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
@@ -2146,9 +2152,6 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]], *, show_configuration:
         click.echo(f"    绑定策略 = {strategies}")
         click.echo(f"    现金池 = {ledger.get('cash_pool') or '?'}")
         _print_audit_value("    ", "现金池余额", ledger.get("cash"))
-        if show_configuration:
-            _print_audit_value("    ", "现金池配置", ledger.get("cash_pool_config"))
-            _print_audit_value("    ", "账本配置", ledger.get("ledger_config"))
         fields = ledger.get("fields") or {}
         if fields:
             click.echo("    账本字段:")
@@ -2168,51 +2171,6 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
         click.echo(f"    关联账本 = {ledgers}")
 
 
-def _print_registered_configuration(strategies: list[dict[str, Any]]) -> None:
-    """Print registered values once, separating common and strategy-specific values."""
-    by_strategy = {
-        str(item.get("strategy") or "?"): dict(item.get("config") or {})
-        for item in strategies
-        if isinstance(item, dict)
-    }
-    if not by_strategy:
-        return
-
-    all_fields = sorted({field for config in by_strategy.values() for field in config})
-    shared: list[tuple[str, Any]] = []
-    different: list[tuple[str, list[tuple[str, Any]]]] = []
-    for field_name in all_fields:
-        values = [
-            (strategy, _display_field_value(field_name, config.get(field_name)))
-            for strategy, config in sorted(by_strategy.items())
-        ]
-        encoded = {json.dumps(value, ensure_ascii=False, sort_keys=True, default=str) for _, value in values}
-        if len(encoded) == 1:
-            shared.append((_audit_field_label(field_name), values[0][1]))
-        else:
-            different.append((field_name, values))
-
-    click.echo("回测配置")
-    if shared:
-        click.echo("  共享配置")
-        scalar_rows = [(label, value) for label, value in shared if "\n" not in _audit_text(value)]
-        for line in render_key_value_rows(scalar_rows, indent="    "):
-            click.echo(line)
-        for label, value in shared:
-            if "\n" in _audit_text(value):
-                _print_audit_value("    ", label, value)
-    if different:
-        click.echo("  逐策略配置")
-        for field_name, values in different:
-            click.echo(f"    {_audit_field_label(field_name)}:")
-            scalar_rows = [(strategy, value) for strategy, value in values if "\n" not in _audit_text(value)]
-            for line in render_key_value_rows(scalar_rows, indent="      "):
-                click.echo(line)
-            for strategy, value in values:
-                if "\n" in _audit_text(value):
-                    _print_audit_value("      ", strategy, value)
-
-
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
     if not payloads:
         return
@@ -2229,8 +2187,6 @@ def _handle_step_event(
     data: dict[str, Any],
     client,
     run_token: str,
-    *,
-    show_configuration: bool,
 ) -> None:
     """Render one complete, post-compute audit record and continue once."""
     if str(data.get("phase") or "") != "step":
@@ -2247,13 +2203,8 @@ def _handle_step_event(
         click.echo(f"说明: {description}")
 
     strategies = list(data.get("strategies") or [])
-    if show_configuration:
-        _print_registered_configuration(strategies)
     _print_strategy_context(strategies)
-    _print_ledger_snapshot(
-        list(data.get("ledgers_before") or []),
-        show_configuration=show_configuration,
-    )
+    _print_ledger_snapshot(list(data.get("ledgers_before") or []))
     _print_event_payloads(list(data.get("event_payloads") or []))
     _print_audit_fields("输入字段", list(data.get("inputs") or []))
     _print_audit_fields("输出字段（执行后）", list(data.get("outputs") or []))
@@ -2381,7 +2332,6 @@ def _run_backtest(
         _ls_sa = str(_ls.get("shortAlias", "") or "")
         if _ls_id and _ls_sa:
             _ctrl_mod._short_alias_map[_ls_id] = _ls_sa
-    show_step_configuration = step_mode
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
@@ -2393,9 +2343,7 @@ def _run_backtest(
                 data,
                 client,
                 _run_token_id,
-                show_configuration=show_step_configuration,
             )
-            show_step_configuration = False
         elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
     renderer.handle("complete", {})
