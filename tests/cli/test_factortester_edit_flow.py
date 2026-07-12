@@ -144,7 +144,8 @@ def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
     }])
 
     out = capsys.readouterr().out
-    assert '"A1, A2, A3": {' in out
+    assert "策略 A1, A2, A3 =" in out
+    assert '"A1, A2, A3": {' not in out
     assert out.count('"warmup_window": "0 days 00:02:00"') == 1
 
 

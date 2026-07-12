@@ -2063,11 +2063,9 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 
 
 def _audit_text(value: Any) -> str:
-    value = _collapse_repeated_mapping_values(value)
     if isinstance(value, str):
         parsed = _parse_audit_literal(value)
         if parsed is not None:
-            parsed = _collapse_repeated_mapping_values(parsed)
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
@@ -2090,32 +2088,6 @@ def _parse_audit_literal(value: str) -> Any | None:
     return None
 
 
-def _collapse_repeated_mapping_values(value: Any) -> Any:
-    if isinstance(value, dict) and len(value) > 1:
-        items = list(value.items())
-        if all(isinstance(item_value, (dict, list)) for _, item_value in items):
-            groups: dict[str, dict[str, Any]] = {}
-            for item_key, item_value in items:
-                display_value = _collapse_repeated_mapping_values(item_value)
-                group_key = _audit_display_key(display_value)
-                bucket = groups.setdefault(group_key, {"keys": [], "value": display_value})
-                bucket["keys"].append(str(item_key))
-            if len(groups) < len(items):
-                return {
-                    ", ".join(sorted(bucket["keys"])): bucket["value"]
-                    for bucket in groups.values()
-                }
-        return {
-            str(item_key): _collapse_repeated_mapping_values(item_value)
-            for item_key, item_value in items
-        }
-    if isinstance(value, list):
-        return [_collapse_repeated_mapping_values(item) for item in value]
-    if isinstance(value, tuple):
-        return [_collapse_repeated_mapping_values(item) for item in value]
-    return value
-
-
 def _display_field_value(qualified_name: str, value: Any) -> Any:
     offset = _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0)
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -2124,6 +2096,12 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
 
 
 def _print_audit_value(prefix: str, label: str, value: Any) -> None:
+    grouped = _audit_repeated_owner_groups(value)
+    if grouped:
+        click.echo(f"{prefix}{label} =")
+        for owner_label, owner_value in grouped:
+            _print_audit_value(f"{prefix}  ", owner_label, owner_value)
+        return
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) == 1:
         for line in render_key_value_rows(((label, lines[0]),), indent=prefix):
@@ -2136,6 +2114,34 @@ def _print_audit_value(prefix: str, label: str, value: Any) -> None:
 
 def _audit_display_key(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _audit_normalized_value(value: Any) -> Any:
+    if isinstance(value, str):
+        parsed = _parse_audit_literal(value)
+        if parsed is not None:
+            return parsed
+    return value
+
+
+def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, dict) or len(normalized) <= 1:
+        return []
+    items = list(normalized.items())
+    if not all(isinstance(item_value, (dict, list)) for _, item_value in items):
+        return []
+    groups: dict[str, dict[str, Any]] = {}
+    for item_key, item_value in items:
+        group_key = _audit_display_key(item_value)
+        bucket = groups.setdefault(group_key, {"keys": [], "value": item_value})
+        bucket["keys"].append(str(item_key))
+    if len(groups) >= len(items):
+        return []
+    return [
+        (f"策略 {', '.join(sorted(bucket['keys']))}", bucket["value"])
+        for bucket in groups.values()
+    ]
 
 
 def _audit_join(values: list[Any]) -> str:
@@ -2190,6 +2196,11 @@ def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list
 
 
 def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
+    if _audit_repeated_owner_groups(before) or _audit_repeated_owner_groups(after):
+        click.echo(f"{prefix}{label}:")
+        _print_audit_value(f"{prefix}  ", "before", before)
+        _print_audit_value(f"{prefix}  ", "after", after)
+        return
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
     if len(before_lines) == 1 and len(after_lines) == 1:
