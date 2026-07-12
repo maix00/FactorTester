@@ -2327,11 +2327,27 @@ def _run_payload(state, *, groups: list[dict[str, Any]]) -> dict[str, Any]:
         "ls_configs": list(state.backtest_ls_configs),
     }
     if state.backtest_strategy_book:
-        payload["strategy_book"] = _strategy_book_payload(state)
+        payload["strategy_book"] = _serialize_strategy_book_for_run(state, groups)
     if state.backtest_ledger_configs:
         payload["ledger_configs"] = {
             str(ledger): dict(config)
             for ledger, config in state.backtest_ledger_configs.items()
+        }
+    return payload
+
+
+def _serialize_strategy_book_for_run(state, groups: list[dict[str, Any]]) -> dict[str, Any]:
+    payload = _strategy_book_payload(state)
+    strategy_ids = {
+        str(group.get("name") or group.get("id") or ""): str(group.get("id") or "")
+        for group in groups
+        if str(group.get("id") or "")
+    }
+    strategies = payload.get("strategies")
+    if isinstance(strategies, dict):
+        payload["strategies"] = {
+            strategy_ids.get(str(alias), str(alias)): value
+            for alias, value in strategies.items()
         }
     return payload
 

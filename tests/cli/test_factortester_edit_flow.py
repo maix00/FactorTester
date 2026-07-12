@@ -1438,8 +1438,9 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
     assert all(group["slippage_mode"] == "fixed_bps" for group in payload["groups"])
     assert all(group["slippage_bps"] == "3" for group in payload["groups"])
     assert payload["ls_configs"][0]["name"] == "LS A1/A2"
-    assert payload["strategy_book"]["strategies"]["A1"]["ledger_ids"] == ["shared-main"]
-    assert payload["strategy_book"]["strategies"]["A1"]["default_ledger_id"] == "shared-main"
+    group_ids = {group["name"]: group["id"] for group in payload["groups"]}
+    assert payload["strategy_book"]["strategies"][group_ids["A1"]]["ledger_ids"] == ["shared-main"]
+    assert payload["strategy_book"]["strategies"][group_ids["A1"]]["default_ledger_id"] == "shared-main"
     assert payload["strategy_book"]["cash_pools"]["shared-main"] == "pool-main"
     assert payload["strategy_book"]["cash_pool_configs"]["pool-main"]["initial_capital_major"] == 100000000.0
     assert payload["strategy_book"]["cash_pool_configs"]["pool-main"]["base_currency"] == "CNY"
