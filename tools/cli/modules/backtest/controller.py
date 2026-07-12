@@ -2528,10 +2528,21 @@ def _audit_source_route_rows(entries: list[dict[str, Any]]) -> list[tuple[str, s
     return sorted(rows)
 
 
-def _print_audit_source_routes(prefix: str, entries: list[dict[str, Any]]) -> bool:
+def _print_audit_source_routes(
+    prefix: str,
+    entries: list[dict[str, Any]],
+    *,
+    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
+) -> bool:
     rows = _audit_source_route_rows(entries)
     if not rows:
         return False
+    route_key = tuple(rows)
+    if route_state is not None and route_key in route_state:
+        click.echo(f"{prefix}ledger/cash pool/strategy 路由同上")
+        return True
+    if route_state is not None:
+        route_state.add(route_key)
     for line in render_table(
         ("ledger", "cash pool", "strategies"),
         rows,
@@ -2611,7 +2622,13 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
     return "共享上下文"
 
 
-def _print_audit_fields(title: str, records: list[dict[str, Any]], *, empty_message: str = "（无字段）") -> None:
+def _print_audit_fields(
+    title: str,
+    records: list[dict[str, Any]],
+    *,
+    empty_message: str = "（无字段）",
+    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
+) -> None:
     _print_step_section(title)
     if not records:
         click.echo(f"  {empty_message}")
@@ -2627,13 +2644,18 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]], *, empty_mess
             label = _audit_source_group_label(bucket["entries"])
             if _audit_source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
-                _print_audit_source_routes("      ", bucket["entries"])
+                _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
                 _print_audit_value("      ", "value", bucket["value"])
             else:
                 _print_audit_value("    ", label, bucket["value"])
         
 
-def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
+def _print_audit_changes(
+    title: str,
+    changes: list[dict[str, Any]],
+    *,
+    route_state: set[tuple[tuple[str, str, str], ...]] | None = None,
+) -> None:
     _print_step_section(title)
     if not changes:
         click.echo("  （无变化）")
@@ -2654,7 +2676,7 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
             label = _audit_source_group_label(bucket["entries"])
             if _audit_source_route_rows(bucket["entries"]):
                 click.echo(f"    {label}:")
-                _print_audit_source_routes("      ", bucket["entries"])
+                _print_audit_source_routes("      ", bucket["entries"], route_state=route_state)
                 _print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
             else:
                 _print_audit_diff_value("    ", label, bucket["before"], bucket["after"])
@@ -2834,10 +2856,12 @@ def _handle_step_event(
     _print_strategy_context(strategies)
     _print_ledger_snapshot(list(data.get("ledgers_before") or []))
     _print_event_payloads(list(data.get("event_payloads") or []))
+    route_state: set[tuple[tuple[str, str, str], ...]] = set()
     _print_audit_fields(
         "输入字段",
         list(data.get("inputs") or []),
         empty_message="（此 flow 未声明输入字段）",
+        route_state=route_state,
     )
     output_changes = list(data.get("output_changes") or [])
     outputs = list(data.get("outputs") or [])
@@ -2852,10 +2876,11 @@ def _handle_step_event(
         "声明输出字段（未变化）",
         unchanged_outputs,
         empty_message=unchanged_output_message,
+        route_state=route_state,
     )
-    _print_audit_changes("声明输出的变化", output_changes)
+    _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
     _print_event_payload_changes(list(data.get("event_payload_changes") or []))
-    _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []))
+    _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []), route_state=route_state)
     _print_contract_audit(list(data.get("input_contract_violations") or []))
 
     click.echo("")

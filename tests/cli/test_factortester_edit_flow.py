@@ -180,6 +180,51 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     assert out.count("null -> 0.0") == 1
 
 
+def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
+    route_state: set[tuple[tuple[str, str, str], ...]] = set()
+    values = [
+        {
+            "scope": "ledger_config",
+            "ledger": f"private:L{index}",
+            "cash_pool": f"pool-{index}",
+            "strategies": [f"A{index}"],
+            "value": "Auto",
+        }
+        for index in range(1, 4)
+    ]
+    changes = [
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": f"private:L{index}",
+            "cash_pool": f"pool-{index}",
+            "strategies": [f"A{index}"],
+            "before": None,
+            "after": 100,
+        }
+        for index in range(1, 4)
+    ]
+
+    _print_audit_fields(
+        "输入字段",
+        [{"field": "TradingRuleModule.accounting_mode", "values": values}],
+        route_state=route_state,
+    )
+    _print_audit_fields(
+        "输入字段",
+        [{"field": "TradingRuleModule.cost_basis_method", "values": values}],
+        route_state=route_state,
+    )
+    _print_audit_changes("账本与现金池变化", changes, route_state=route_state)
+
+    out = capsys.readouterr().out
+    assert out.count("private:L1") == 1
+    assert out.count("pool-1") == 1
+    assert out.count("ledger/cash pool/strategy 路由同上") == 2
+    assert "value = Auto" in out
+    assert "null -> 100" in out
+
+
 def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     changes = [
         {
