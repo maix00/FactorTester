@@ -2301,6 +2301,8 @@ def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
+    if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
+        return "auto（自动选择）"
     offset = _field_display_offsets.get(qualified_name, _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0))
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
         return value + offset
@@ -2389,6 +2391,14 @@ def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
         return f"账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
     if scopes <= {"context"}:
         return "[共享]"
+    if scopes <= {"context", "strategy_context"}:
+        if strategies == "无":
+            return "[共享]"
+        return f"共享上下文 + 策略上下文 {strategies}"
+    if scopes <= {"context", "strategy_config"}:
+        if strategies == "无":
+            return "[共享]"
+        return f"共享上下文 + 策略配置 {strategies}"
     return "[合并] " + "；".join(_audit_source_label(entry) for entry in entries)
 
 
@@ -2579,6 +2589,18 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
         )
 
 
+def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
+    click.echo("字段声明审计")
+    if not violations:
+        click.echo("  已通过：本 flow 未读取未声明输入字段，也未写入未声明输出字段")
+        return
+    for violation in violations:
+        access = str(violation.get("access") or "")
+        action = "读取未声明输入" if access == "read" else "写入未声明输出" if access == "write" else f"未声明 {access}"
+        field = violation.get("field") or "?"
+        click.echo(f"  {action}: {field}")
+
+
 @dataclass
 class _StepNavigator:
     until: datetime | None = None
@@ -2691,11 +2713,7 @@ def _handle_step_event(
     _print_audit_changes("声明输出的变化", output_changes)
     _print_event_payload_changes(list(data.get("event_payload_changes") or []))
     _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []))
-    violations = list(data.get("input_contract_violations") or [])
-    if violations:
-        click.echo("输入声明缺项")
-        for violation in violations:
-            click.echo(f"  {violation.get('access')} {violation.get('field')}（未在 flow inputs/outputs 注册）")
+    _print_contract_audit(list(data.get("input_contract_violations") or []))
 
     click.echo("")
     while True:

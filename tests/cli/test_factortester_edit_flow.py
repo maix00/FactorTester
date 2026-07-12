@@ -23,6 +23,7 @@ from tools.cli.modules.backtest.controller import (
     _audit_text,
     _handle_step_event,
     _print_audit_changes,
+    _print_contract_audit,
     _print_audit_fields,
     _print_ledger_snapshot,
     _print_strategy_context,
@@ -172,6 +173,31 @@ def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     assert out.count("before =") == 2
     assert out.count("after =") == 2
     assert "[跨策略]" not in out
+
+
+def test_step_audit_groups_shared_and_strategy_context_sources(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [
+        {"field": "MarketDataModule.required_data_source", "scope": "context", "before": None, "after": []},
+        {
+            "field": "MarketDataModule.required_data_source",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": [],
+        },
+        {
+            "field": "MarketDataModule.required_data_source",
+            "scope": "strategy_context",
+            "strategy": "A2",
+            "before": None,
+            "after": [],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "共享上下文 + 策略上下文 A1, A2" in out
+    assert "null -> auto（自动选择）" in out
+    assert "[合并]" not in out
 
 
 def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
@@ -351,6 +377,21 @@ def test_step_navigation_rejects_unknown_or_invalid_commands() -> None:
     assert _set_step_navigation(navigator, "until nope")
     assert _set_step_navigation(navigator, "next")
     assert _set_step_navigation(navigator, "") is None
+
+
+def test_step_contract_audit_reports_pass_and_read_write_violations(capsys) -> None:
+    _print_contract_audit([])
+    out = capsys.readouterr().out
+    assert "字段声明审计" in out
+    assert "已通过" in out
+
+    _print_contract_audit([
+        {"access": "read", "field": "A.input"},
+        {"access": "write", "field": "B.output"},
+    ])
+    out = capsys.readouterr().out
+    assert "读取未声明输入: A.input" in out
+    assert "写入未声明输出: B.output" in out
 
 
 def test_step_flow_header_is_red(capsys, monkeypatch) -> None:

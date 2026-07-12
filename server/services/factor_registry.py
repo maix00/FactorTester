@@ -112,11 +112,12 @@ def clear_page_factor_family(page_uuid: str, factor_family_alias: str) -> None:
             pass
 
 
-def _build_factor_from_source(module_name: str, source_code: str) -> FactorFamily | None:
+def _build_factor_from_source(module_name: str, source_code: str, *, user_prefix: str | None = "$COMMON") -> FactorFamily | None:
     if not source_code:
         return None
     tmpdir = tempfile.mkdtemp(prefix='factor_src_')
     tmpfile = os.path.join(tmpdir, f'{module_name}.py')
+    token = None
     try:
         with open(tmpfile, 'w', encoding='utf-8') as file:
             file.write(source_code)
@@ -125,6 +126,8 @@ def _build_factor_from_source(module_name: str, source_code: str) -> FactorFamil
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        from tools.factors.FactorTester import _active_user_prefix
+        token = _active_user_prefix.set(user_prefix or "")
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
@@ -133,6 +136,12 @@ def _build_factor_from_source(module_name: str, source_code: str) -> FactorFamil
     except Exception:
         return None
     finally:
+        if token is not None:
+            try:
+                from tools.factors.FactorTester import _active_user_prefix
+                _active_user_prefix.reset(token)
+            except Exception:
+                pass
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -156,7 +165,7 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
     module_path = os.path.join(factors_dir, f"{module_name}.py")
     if os.path.isfile(module_path):
         source_code = load_public_factor_source(module_name) or ''
-        ff = _build_factor_from_source(module_name, source_code)
+        ff = _build_factor_from_source(module_name, source_code, user_prefix="$COMMON")
         if ff is None:
             raise ImportError(f"Cannot load factor '{module_name}': source exists but no FactorFamily class found in '{module_path}'")
     else:
@@ -165,7 +174,7 @@ def get_factor_family_instance(module_name, username: str | None = None, page_uu
             username = session.get('username')
         if username:
             custom_source = load_factor_source(username, module_name) or ''
-            ff = _build_factor_from_source(module_name, custom_source)
+            ff = _build_factor_from_source(module_name, custom_source, user_prefix=username)
             if ff is not None:
                 with _custom_factor_cache_lock:
                     _custom_factor_cache[(username, module_name)] = ff
@@ -188,7 +197,7 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
     source_code = load_factor_source(username, factor_id) or ''
     if not source_code:
         return None
-    return _build_factor_from_source(f'_cf_{username}_{factor_id}', source_code)
+    return _build_factor_from_source(f'_cf_{username}_{factor_id}', source_code, user_prefix=username)
 
 
 def get_custom_factor_instance(username: str, factor_id: str) -> FactorFamily | None:
