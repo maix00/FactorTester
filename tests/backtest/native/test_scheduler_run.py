@@ -323,3 +323,53 @@ def test_progress_fires_across_all_three_phases_with_description():
     assert "预处理" in labels       # pre_flow's description
     assert "post_flow" in labels    # post's name (no description given)
     assert "on_signal" in labels
+
+
+def test_step_mode_emits_one_complete_post_compute_record_per_flow_across_phases():
+    """The interactive client must receive exactly one blocking record per flow.
+
+    Each record is emitted after compute, so the declared output contains the
+    value the flow just produced rather than a separate before/after protocol.
+    """
+    from tools.testers.backtest.modules.base import FieldRef
+
+    strategy = Strategy(alias="S")
+    output = FieldRef("audit_output", owner="Audit")
+    records: list[dict] = []
+
+    def compute(value: str):
+        def _compute(account, ctx) -> None:
+            ctx.set(output, value)
+        return _compute
+
+    pre = Flow(
+        "pre", inputs=(), outputs=(output,), phase=Phase.PRE_REPLAY,
+        description="准备审计输入", compute=compute("pre"),
+    )
+    event = Flow(
+        "event", inputs=(output,), outputs=(output,), phase=Phase.PER_EVENT,
+        event_kind=EventKind.SIGNAL, description="处理审计事件", compute=compute("event"),
+    )
+    post = Flow(
+        "post", inputs=(output,), outputs=(output,), phase=Phase.POST_REPLAY,
+        description="整理审计结果", compute=compute("post"),
+    )
+    registry = FlowRegistry()
+    for flow in (pre, event, post):
+        registry.register_flow(flow)
+
+    account = _account([strategy], active_flow_names=frozenset({"pre", "event", "post"}))
+    queue = EventQueue()
+    queue.push_event(EventDraft(EventKind.SIGNAL, pd.Timestamp("2024-01-01"), strategy))
+
+    run(account, queue, registry.resolve(), step_mode=True, step_callback=records.append)
+
+    assert [(record["flow_phase"], record["flow_id"]) for record in records] == [
+        ("pre_replay", "pre"),
+        ("per_event", "event"),
+        ("post_replay", "post"),
+    ]
+    assert all(record["phase"] == "step" for record in records)
+    assert records[0]["outputs"][0]["values"][0]["value"] == "pre"
+    assert records[1]["outputs"][0]["values"][0]["value"] == "event"
+    assert records[2]["outputs"][0]["values"][0]["value"] == "post"

@@ -1938,6 +1938,17 @@ class _FactorEvaluateAdapter:
             or getattr(self._factor, "_source_expr", None)
         )
 
+    def to_audit_dict(self) -> dict[str, str]:
+        """Expose the selected factor identity without serializing runtime state."""
+        factor = self._factor
+        identity = (
+            getattr(factor, "alias", None)
+            or getattr(factor, "name", None)
+            or getattr(factor, "label", None)
+            or str(factor)
+        )
+        return {"type": type(factor).__name__, "identity": str(identity)}
+
     def supports_vectorized(self) -> bool:
         flag = getattr(self._factor, "supports_vectorized", None)
         if callable(flag):

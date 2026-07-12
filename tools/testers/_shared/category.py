@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..contracts import ScopePolicy, SettingDefinition
-from ..registry import ApplicationSettings
+from tools.testers.settings.contracts import ScopePolicy, SettingDefinition
+from tools.testers.settings.registry import ApplicationSettings
 
 CATEGORY_CANDIDATE_KEYS = ("category_candidates",)
 CATEGORY_SELECTION_KEYS = ("category",)

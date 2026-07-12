@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,32 +24,19 @@ from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
+from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
-_step_shared_config_displayed: bool = False
-_step_pending_after: dict | None = None
 
-# Field name -> Chinese label mapping (built from module field registrations)
-_field_labels: dict[str, str] = {"factor": "因子", "product_path": "产品路径"}
+# Field metadata comes from the executable-module registry, not a hand-picked
+# controller list. Adding a registered backtest module automatically makes its
+# labels and chip ordering available to this renderer.
+_field_labels: dict[str, str] = {}
 _field_tab_order: dict[str, int] = {}
 try:
-    from tools.testers.backtest.modules.fee import FeeModule
-    from tools.testers.backtest.modules.margin import MarginModule
-    from tools.testers.backtest.modules.trading_rule import TradingRuleModule
-    from tools.testers.backtest.modules.ledger_module import LedgerModule
-    from tools.testers.backtest.modules.group_membership import GroupMembershipModule
-    from tools.testers.backtest.modules.equity_curve import EquityCurveModule
-    from tools.testers.backtest.modules.run_window import RunWindowModule
-    from tools.testers.backtest.modules.cash_pool import CashPoolModule
-    from tools.testers.backtest.modules.slippage import SlippageModule
-    from tools.testers.backtest.modules.order_construct import OrderConstructModule
-    from tools.testers.backtest.modules.strategy_book import StrategyBookModule
-    from tools.testers.backtest.modules.factor_signal import FactorSignalModule
-    from tools.testers.backtest.modules.engine import EngineModule
-    for _mod in [FeeModule, MarginModule, TradingRuleModule, LedgerModule,
-                  GroupMembershipModule, EquityCurveModule, RunWindowModule,
-                  CashPoolModule, SlippageModule, OrderConstructModule,
-                  StrategyBookModule, FactorSignalModule, EngineModule]:
+    from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
+
+    for _mod in _ALL_MODULE_CLASSES:
         if hasattr(_mod, 'fields'):
             for _fn, _fd in _mod.fields.items():
                 _label = getattr(_fd, 'label', '') or ''
@@ -66,6 +54,7 @@ def _flabel(name: str) -> str:
     cn = _field_labels.get(name)
     return f"{name} ({cn})" if cn else name
 
+
 from tools.cli.modules.backtest.shared.selectors import (
     AddGroupSelectors,
     parse_add_group_selectors,
@@ -79,7 +68,7 @@ from tools.cli.modules.backtest.shared.selectors import (
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
-from tools.cli.table import render_table
+from tools.cli.table import render_key_value_rows, render_table
 
 
 SELECTOR_CONTEXT = {"ignore_unknown_options": True, "allow_extra_args": True}
@@ -2063,249 +2052,199 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 
 
 
-def _handle_step_event(data: dict[str, Any], client, run_token: str) -> None:
-    """Handle a step-through debug event from the server."""
-    phase = str(data.get("phase") or "")
-    if phase == "before":
-        import tools.cli.modules.backtest.controller as _ctrl
-        if not _ctrl._step_shared_config_displayed:
-            _ctrl._step_shared_config_displayed = True
-            _all_shared = dict(data.get("mode_info") or {})
-            _strategies_data = data.get("strategies") or []
-            # Add factor and product path from CLI state
-            try:
-                import json as _json
-                with open('/Users/maxdeux/.factortester/state.json') as _sf:
-                    _st = _json.load(_sf)
-                for _g in _st.get("backtest_groups", []):
-                    _f = _g.get("factor", "")
-                    if _f:
-                        _all_shared["factor"] = str(_f)
-                    _pp = _g.get("product_path_selection", {})
-                    if isinstance(_pp, dict):
-                        _pn = _pp.get("name", "")
-                        if _pn:
-                            _all_shared["product_path"] = str(_pn)
-                    break
-            except Exception:
-                pass
-            # Per-strategy differing config comparison
-            if _strategies_data:
-                _all_strat_cfgs: dict[str, dict[str, str]] = {}
-                _all_cfg_keys: set[str] = set()
-                for _sd in _strategies_data:
-                    if isinstance(_sd, dict):
-                        _sid = str(_sd.get("id", "?"))
-                        _short = _sid.split(":")[0] if ":" in _sid else _sid
-                        _sa = _short_alias_map.get(_short, _short)
-                        _cfg = _sd.get("config") or {}
-                        if isinstance(_cfg, dict):
-                            _str_cfg = {k: v for k, v in _cfg.items() if v not in ("", "None", "0", "0.0")}
-                            _all_strat_cfgs[_sa] = _str_cfg
-                            _all_cfg_keys.update(_str_cfg.keys())
-                # Find fields that differ between strategies (skip object refs)
-                _diff_fields: list[str] = []
-                for _fk in sorted(_all_cfg_keys):
-                    _vals = set()
-                    for _sa, _sc in _all_strat_cfgs.items():
-                        v = _sc.get(_fk)
-                        if v is not None and not v.startswith("<") and v != "None":
-                            _vals.add(v)
-                    if len(_vals) > 1:
-                        _diff_fields.append(_fk)
-                if _diff_fields and len(_all_strat_cfgs) > 1:
-                    from tools.cli.table import render_table as _rt
-                    _headers = ["Short"] + [_flabel(f) for f in _diff_fields]
-                    _rows = []
-                    for _sa in sorted(_all_strat_cfgs):
-                        _row = [_sa]
-                        for _fk in _diff_fields:
-                            _val = _all_strat_cfgs[_sa].get(_fk, "")
-                            if _val.startswith("<") or _val == "None":
-                                _val = ""
-                            _row.append(_val)
-                        _rows.append(_row)
-                    click.echo("📋  策略一览:")
-                    for _line in _rt(_headers, _rows, indent="  "):
-                        click.echo(_line)
-                    click.echo("")
-            # Remove from shared config any field that differs per-strategy
-            if _all_shared and _diff_fields:
-                for _df in _diff_fields:
-                    _all_shared.pop(_df, None)
-            if _all_shared:
-                _labeled = {_flabel(k): v for k, v in _all_shared.items()}
-                _kw = max(len(k) for k in _labeled)
-                click.echo(f"{'─'*60}")
-                click.echo("⚙️  共享配置:")
-                for k in sorted(_labeled):
-                    click.echo(f"    {k.ljust(_kw)} = {_labeled[k]}")
-                click.echo("")
-        flow_name = str(data.get("flow_name") or "")
-        inputs = data.get("inputs") or []
-        description = str(data.get("description") or "")
-        timestamp = str(data.get("timestamp") or "")
-        strategies = data.get("strategies") or []
-        ledgers = data.get("ledgers") or []
-        mode_info = data.get("mode_info") or {}
-        phase = str(data.get("phase") or "")
-        flow_id = str(data.get("flow_id") or "")
-        flow_phase = str(data.get("flow_phase") or "")
-        ts_display = timestamp if timestamp else ""
-        phase_upper = flow_phase.upper() if flow_phase else ""
-        _phase_label_map = {"pre_replay": "预处理", "event_replay": "事件回放", "post_replay": "结果整理"}
-        phase_cn = _phase_label_map.get(flow_phase, "")
-        phase_text = f"{phase_upper} ({phase_cn})" if phase_cn else phase_upper
-        flow_text = f"{flow_id} ({flow_name})" if flow_id else flow_name
-        ts_text = f"[{ts_display}]" if ts_display else "-"
-        # Aligned field labels
-        _flw = max(len("phase:"), len("flow:"), len("timestamp:"))
-        click.echo(f"\n{'═'*60}")
-        click.echo(f"    {'phase:'.ljust(_flw)}  {phase_text}")
-        click.echo(f"    {'flow:'.ljust(_flw)}  {flow_text}")
-        click.echo(f"    {'timestamp:'.ljust(_flw)}  {ts_text}")
-        click.echo(f"{'─'*60}")
 
-        if strategies:
-            _sids = []
-            for _s in strategies:
-                if isinstance(_s, dict):
-                    _sid = _s.get("id", "?")
-                    _short = _sid.split(":")[0] if ":" in _sid else _sid
-                    _sa = _short_alias_map.get(_short)
-                    if _sa:
-                        _short = _sa
-                    _sids.append(_short)
-                else:
-                    _sids.append(str(_s))
-            click.echo(f"🎯  策略 ({len(_sids)}): {', '.join(_sids)}")
-        if ledgers:
-            click.echo(f"📒  账本 ({len(ledgers)} 个):")
-            for _l in ledgers:
-                _lid = _l.get("ledger", "?")
-                _cp = _l.get("cash_pool", "?")
-                if _cp and _cp != "?":
-                    click.echo(f"    📋 {_lid}  →  资金池: {_cp}")
-                else:
-                    click.echo(f"    📋 {_lid}")
-        if inputs:
-            click.echo(f"📥  输入字段 ({len(inputs)} 个):")
-            # Sort inputs by tab_order (from field registry)
-            try:
-                _sorted_inputs = sorted(inputs, key=lambda x: (
-                    _field_tab_order.get(x.get("name", "") if isinstance(x, dict) else str(x), 999),
-                    str(x.get("name", x) if isinstance(x, dict) else x)
-                ))
-            except Exception:
-                _sorted_inputs = inputs
-            for inp in _sorted_inputs:
-                if isinstance(inp, dict):
-                    iname = inp.get("name", "?")
-                    ival = inp.get("value")
-                    ival_str = str(ival) if ival is not None else None
-                    all_vals = inp.get("all_values")
-                    if all_vals:
-                        unique_by_key = {}
-                        for _av in all_vals:
-                            _v = _av.get("value")
-                            if _v is not None:
-                                _k = _av.get("key", "?")
-                                _s = _av.get("source", "?")
-                                unique_by_key[f"{_s}:{_k}"] = _v
-                        val_set = set(str(v) for v in unique_by_key.values())
-                        if len(val_set) <= 1 and unique_by_key:
-                            single = next(iter(unique_by_key.values()))
-                            vs = str(single)
-                            if len(vs) > 80:
-                                click.echo(f"    📄 {iname}:")
-                                for _vl in vs.replace("), ", "),\\n").split("\\n"):
-                                    if _vl.strip(): click.echo(f"        {_vl.strip()}")
-                            else:
-                                click.echo(f"    • {iname} = {vs}")
-                        elif len(val_set) > 1:
-                            click.echo(f"    📄 {iname}  (按来源不同):")
-                            for _k, _v in sorted(unique_by_key.items()):
-                                _vs = str(_v) if _v is not None else "(空)"
-                                _short = _k.split("/")[-1][:25]
-                                if len(_vs) > 60:
-                                    click.echo(f"      [{_short}]:")
-                                    for _vl in _vs.replace("), ", "),\\n").split("\\n"):
-                                        if _vl.strip(): click.echo(f"        {_vl.strip()}")
-                                else:
-                                    click.echo(f"      [{_short}] {_vs}")
-                        else:
-                            click.echo(f"    • {iname}  =  (空)")
-                    else:
-                        if ival is not None and ival_str and ival_str not in ("<N/A>", "None", ""):
-                            if len(ival_str) > 80:
-                                click.echo(f"    📄 {iname}:")
-                                for _vl in ival_str.replace("), ", "),\\n").split("\\n"):
-                                    if _vl.strip(): click.echo(f"        {_vl.strip()}")
-                            else:
-                                click.echo(f"    • {iname} = {ival_str}")
-                        else:
-                            click.echo(f"    • {iname}  =  (空)")
-                else:
-                    click.echo(f"    • {inp}")
-    elif phase == "after":
-        flow_name = str(data.get("flow_name") or "")
-        changes = data.get("changes") or []
-        strategies = data.get("strategies") or []
-        ledgers = data.get("ledgers") or []
-        if strategies:
-            _sids = []
-            for _s in strategies:
-                if isinstance(_s, dict):
-                    _sid = _s.get("id", "?")
-                    _short = _sid.split(":")[0] if ":" in _sid else _sid
-                    _sids.append(_short)
-                else:
-                    _sids.append(str(_s))
-            click.echo(f"🎯  策略 ({len(_sids)}): {', '.join(_sids)}")
-        if ledgers:
-            click.echo(f"📒  关联账本 ({len(ledgers)} 个):")
-            for _l in ledgers:
-                _lid = _l.get("ledger", "?")
-                _cp = _l.get("cash_pool", "?")
-                if _cp and _cp != "?":
-                    click.echo(f"    📋 {_lid}  →  资金池: {_cp}")
-                else:
-                    click.echo(f"    📋 {_lid}")
-        if changes:
-            click.echo(f"📍 {flow_name} — 字段变更:")
-            for c in changes:
-                field = c.get("field", "")
-                before = c.get("before", "")
-                after = c.get("after", "")
-                before_str = str(before) if before and str(before) not in ("<N/A>", "None", "") else "(未设置)"
-                after_str = str(after) if after and str(after) not in ("<N/A>", "None", "") else "(未设置)"
-                click.echo(f"  ✏️  {field}:")
-                if before_str == "(未设置)" and after_str == "(未设置)":
-                    click.echo(f"      (无变化)")
-                elif len(before_str) > 80 or len(after_str) > 80:
-                    click.echo(f"      BEFORE:")
-                    if before_str != "(未设置)":
-                        for _bl in str(before).replace("), ", "),\\n").split("\\n"):
-                            if _bl.strip(): click.echo(f"        {_bl.strip()}")
-                    else:
-                        click.echo(f"      (未设置)")
-                    click.echo(f"      AFTER:")
-                    if after_str != "(未设置)":
-                        for _al in str(after).replace("), ", "),\\n").split("\\n"):
-                            if _al.strip(): click.echo(f"        {_al.strip()}")
-                    else:
-                        click.echo(f"      (未设置)")
-                else:
-                    click.echo(f"      {before_str} → {after_str}")
+def _audit_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def _print_audit_value(prefix: str, label: str, value: Any) -> None:
+    lines = _audit_text(value).splitlines() or [""]
+    if len(lines) == 1:
+        for line in render_key_value_rows(((label, lines[0]),), indent=prefix):
+            click.echo(line)
+        return
+    click.echo(f"{prefix}{label} =")
+    for line in lines:
+        click.echo(f"{prefix}  {line}")
+
+
+def _audit_field_label(qualified_name: str) -> str:
+    field_name = qualified_name.rsplit(".", 1)[-1]
+    return f"{_flabel(field_name)} [{qualified_name}]"
+
+
+def _audit_source_label(entry: dict[str, Any]) -> str:
+    scope = str(entry.get("scope") or "")
+    if scope == "strategy_config":
+        return f"策略配置 {entry.get('strategy') or '?'}"
+    if scope == "strategy_context":
+        return f"策略上下文 {entry.get('strategy') or '?'}"
+    if scope == "ledger":
+        strategies = ", ".join(entry.get("strategies") or []) or "无"
+        return (
+            f"账本 {entry.get('ledger') or '?'} | 现金池 {entry.get('cash_pool') or '?'}"
+            f" | 策略 {strategies}"
+        )
+    return "共享上下文"
+
+
+def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
+    click.echo(title)
+    if not records:
+        click.echo("  （无声明字段）")
+        return
+    for record in records:
+        click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
+        values = record.get("values") or []
+        if not values:
+            click.echo("    （当前无值）")
+            continue
+        for entry in values:
+            if isinstance(entry, dict):
+                _print_audit_value("    ", _audit_source_label(entry), entry.get("value"))
+
+
+def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
+    click.echo(title)
+    if not changes:
+        click.echo("  （无变化）")
+        return
+    for change in changes:
+        field = _audit_field_label(str(change.get("field") or ""))
+        source = _audit_source_label(change)
+        click.echo(f"  {field}:")
+        click.echo(f"    来源 = {source}")
+        _print_audit_value("    ", "修改前", change.get("before"))
+        _print_audit_value("    ", "修改后", change.get("after"))
+
+
+def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
+    click.echo("账本、现金池与策略路由（执行前）")
+    if not ledgers:
+        click.echo("  （此 flow 尚未关联账本）")
+        return
+    for ledger in ledgers:
+        strategies = ", ".join(ledger.get("strategies") or []) or "无"
+        click.echo(f"  账本 {ledger.get('ledger') or '?'}")
+        click.echo(f"    绑定策略 = {strategies}")
+        click.echo(f"    现金池 = {ledger.get('cash_pool') or '?'}")
+        _print_audit_value("    ", "现金池余额", ledger.get("cash"))
+        _print_audit_value("    ", "现金池配置", ledger.get("cash_pool_config"))
+        _print_audit_value("    ", "账本配置", ledger.get("ledger_config"))
+        fields = ledger.get("fields") or {}
+        if fields:
+            click.echo("    账本字段:")
+            for field_name, value in sorted(fields.items()):
+                _print_audit_value("      ", _audit_field_label(str(field_name)), value)
+
+
+def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
+    click.echo("策略与账本路由")
+    if not strategies:
+        click.echo("  （此 flow 尚未关联策略）")
+        return
+    for strategy in strategies:
+        alias = str(strategy.get("strategy") or "?")
+        ledgers = ", ".join(strategy.get("ledgers") or []) or "无"
+        click.echo(f"  策略 {alias}")
+        click.echo(f"    关联账本 = {ledgers}")
+
+
+def _print_registered_configuration(strategies: list[dict[str, Any]]) -> None:
+    """Print registered values once, separating common and strategy-specific values."""
+    by_strategy = {
+        str(item.get("strategy") or "?"): dict(item.get("config") or {})
+        for item in strategies
+        if isinstance(item, dict)
+    }
+    if not by_strategy:
+        return
+
+    all_fields = sorted({field for config in by_strategy.values() for field in config})
+    shared: list[tuple[str, Any]] = []
+    different: list[tuple[str, list[tuple[str, Any]]]] = []
+    for field_name in all_fields:
+        values = [(strategy, config.get(field_name)) for strategy, config in sorted(by_strategy.items())]
+        encoded = {json.dumps(value, ensure_ascii=False, sort_keys=True, default=str) for _, value in values}
+        if len(encoded) == 1:
+            shared.append((_audit_field_label(field_name), values[0][1]))
+        else:
+            different.append((field_name, values))
+
+    click.echo("回测配置")
+    if shared:
+        click.echo("  共享配置")
+        scalar_rows = [(label, value) for label, value in shared if "\n" not in _audit_text(value)]
+        for line in render_key_value_rows(scalar_rows, indent="    "):
+            click.echo(line)
+        for label, value in shared:
+            if "\n" in _audit_text(value):
+                _print_audit_value("    ", label, value)
+    if different:
+        click.echo("  逐策略配置")
+        for field_name, values in different:
+            click.echo(f"    {_audit_field_label(field_name)}:")
+            scalar_rows = [(strategy, value) for strategy, value in values if "\n" not in _audit_text(value)]
+            for line in render_key_value_rows(scalar_rows, indent="      "):
+                click.echo(line)
+            for strategy, value in values:
+                if "\n" in _audit_text(value):
+                    _print_audit_value("      ", strategy, value)
+
+
+def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
+    if not payloads:
+        return
+    click.echo("本批事件载荷")
+    for payload in payloads:
+        if payload.get("scope") == "strategy":
+            label = f"策略 {payload.get('strategy') or '?'}"
+        else:
+            label = f"账本 {payload.get('ledger') or '?'} | 现金池 {payload.get('cash_pool') or '?'}"
+        _print_audit_value("  ", label, payload.get("payloads"))
+
+
+def _handle_step_event(
+    data: dict[str, Any],
+    client,
+    run_token: str,
+    *,
+    show_configuration: bool,
+) -> None:
+    """Render one complete, post-compute audit record and continue once."""
+    if str(data.get("phase") or "") != "step":
+        return
+
+    flow_phase = str(data.get("flow_phase") or "")
+    flow_name = str(data.get("flow_name") or "")
+    flow_id = str(data.get("flow_id") or "")
+    phase_text = f"{flow_phase.upper()} ({phase_label(flow_phase)})"
     click.echo("")
-    if phase == "before":
-        click.echo("Press Enter to continue...")
-        input()
-    if run_token:
-        try:
-            client.session.post("/step_continue", {"run_token": run_token})
-        except Exception:
-            pass
+    click.echo(f"flow: {phase_text} · {flow_id} ({flow_name})")
+    description = str(data.get("description") or "")
+    if description:
+        click.echo(f"说明: {description}")
+
+    strategies = list(data.get("strategies") or [])
+    if show_configuration:
+        _print_registered_configuration(strategies)
+    _print_strategy_context(strategies)
+    _print_ledger_snapshot(list(data.get("ledgers_before") or []))
+    _print_event_payloads(list(data.get("event_payloads") or []))
+    _print_audit_fields("输入字段", list(data.get("inputs") or []))
+    _print_audit_fields("输出字段（执行后）", list(data.get("outputs") or []))
+    _print_audit_changes("声明输出的变化", list(data.get("output_changes") or []))
+    _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []))
+
+    click.echo("")
+    click.echo("Press Enter to continue...")
+    input()
+    try:
+        client.session.post("/step_continue", {"run_token": run_token})
+    except Exception as exc:
+        raise click.ClickException(f"无法继续单步回测: {exc}") from exc
 
 def _print_strategy_summary(state) -> None:
     """Print a comparison table of all strategies at startup."""
@@ -2337,8 +2276,6 @@ def _print_strategy_summary(state) -> None:
         if sc:
             per_strategy_configs[gid] = sc
             all_field_keys.update(sc.keys())
-    if local_settings or per_strategy_configs:
-        click.echo(f"{'─'*60}")
     # Compute unified key width for = alignment across all sections
     _all_keys: list[str] = list(local_settings.keys())
     if per_strategy_configs:
@@ -2422,6 +2359,7 @@ def _run_backtest(
         _ls_sa = str(_ls.get("shortAlias", "") or "")
         if _ls_id and _ls_sa:
             _ctrl_mod._short_alias_map[_ls_id] = _ls_sa
+    show_step_configuration = step_mode
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")
@@ -2429,7 +2367,13 @@ def _run_backtest(
             message = data.get("error") if isinstance(data, dict) else data
             raise click.ClickException(f"分组测试失败: {message}")
         if event_name == "step" and isinstance(data, dict):
-            _handle_step_event(data, client, _run_token_id)
+            _handle_step_event(
+                data,
+                client,
+                _run_token_id,
+                show_configuration=show_step_configuration,
+            )
+            show_step_configuration = False
         elif event_name in {"activity_manifest", "runtime_info", "progress", "activity", "signal_progress", "result", "complete", "done"}:
             renderer.handle(event_name, data)
     renderer.handle("complete", {})

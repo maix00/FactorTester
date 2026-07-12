@@ -62,8 +62,6 @@ class BacktestRunRenderer:
             return
         if event_name == "activity":
             self._print_activity(data)
-            if self.step_mode:
-                self._step_activity(data)
             return
         if event_name in {"signal_progress", "progress"}:
             self._print_progress(data)
@@ -329,7 +327,7 @@ class BacktestRunRenderer:
 
     def _step_activity(self, data: dict[str, Any]) -> None:
         """Show step info from activity event and pause."""
-        if self.step_mode:
+        if not self.step_mode:
             return
         flow_label = str(data.get("flow_label") or data.get("flow_name") or "")
         phase = str(data.get("phase") or "")

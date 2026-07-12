@@ -17,9 +17,23 @@ from .fields import FieldRef
 
 
 class Phase(str, Enum):
-    PRE_REPLAY = "pre_replay"     # runs once before the replay loop, batched
-    PER_EVENT = "per_event"       # runs once per dispatched event of its event_kind
-    POST_REPLAY = "post_replay"   # runs once after the replay loop, batched
+    def __new__(cls, value: str, label: str):
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.label = label
+        return member
+
+    PRE_REPLAY = ("pre_replay", "回放准备")
+    PER_EVENT = ("per_event", "事件回放")
+    POST_REPLAY = ("post_replay", "结果整理")
+
+
+def phase_label(value: Phase | str) -> str:
+    """Return the label declared by ``Phase`` for a phase value."""
+    try:
+        return Phase(value).label
+    except ValueError:
+        return str(value)
 
 
 @dataclass(frozen=True)

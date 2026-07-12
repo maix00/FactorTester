@@ -11,57 +11,90 @@ from __future__ import annotations
 
 import heapq
 import itertools
+import math
 import warnings
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
-def _ledger_value(state: "BacktestRunState", ref: Any) -> Any:
-    """Read a runtime ledger field using its FieldRef. Returns first non-None."""
-    for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
-        try:
-            result = _ledger_inst.get(ref)
-            if result is not None:
-                return result
-        except:
-            pass
+
+_AUDIT_MISSING = object()
+
+
+def _audit_value(value: Any, *, _seen: set[int] | None = None) -> Any:
+    """Convert a runtime value into lossless, SSE-safe audit data.
+
+    The step protocol must not rely on a terminal's abbreviated ``repr``. In
+    particular, pandas values are emitted as complete rows/columns, and nested
+    mappings/collections are recursively preserved.
+    """
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, (pd.Timestamp, pd.Timedelta)):
+        return str(value)
+    if isinstance(value, pd.Series):
+        return {
+            "type": "Series",
+            "name": _audit_value(value.name),
+            "index": [_audit_value(item) for item in value.index.tolist()],
+            "values": [_audit_value(item) for item in value.tolist()],
+        }
+    if isinstance(value, pd.DataFrame):
+        return {
+            "type": "DataFrame",
+            "columns": [_audit_value(column) for column in value.columns.tolist()],
+            "index": [_audit_value(item) for item in value.index.tolist()],
+            "rows": [
+                [_audit_value(item) for item in row]
+                for row in value.itertuples(index=False, name=None)
+            ],
+        }
+
+    seen = _seen if _seen is not None else set()
+    object_id = id(value)
+    if object_id in seen:
+        return {"type": type(value).__name__, "cycle": True}
+    seen.add(object_id)
     try:
-        for _sid, _sc in getattr(state, 'strategy_configs', {}).items():
-            if hasattr(_sc, 'get'):
-                result = _sc.get(ref)
-                if result is not None:
-                    return result
-    except:
-        pass
-    return None
-
-
-def _all_ledger_values(state: "BacktestRunState", ref: Any) -> list[dict]:
-    """Return values for ALL ledgers/strategies for a given field, not just the first."""
-    results = []
-    # Runtime ledgers
-    for _lid, _ledger_inst in getattr(state, 'ledgers', {}).items():
-        try:
-            result = _ledger_inst.get(ref)
-            results.append({"source": "ledger", "key": str(_lid), "value": result})
-        except:
-            pass
-    # Strategy configs
-    for _sid, _sc in getattr(state, 'strategy_configs', {}).items():
-        try:
-            if hasattr(_sc, 'get'):
-                result = _sc.get(ref)
-                fn = getattr(_sid, 'alias', None) or str(_sid)
-                results.append({"source": "config", "key": fn, "value": result})
-        except:
-            pass
-    return results
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, Mapping):
+            return {str(key): _audit_value(item, _seen=seen) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [_audit_value(item, _seen=seen) for item in value]
+        to_audit_dict = getattr(value, "to_audit_dict", None)
+        if callable(to_audit_dict):
+            return _audit_value(to_audit_dict(), _seen=seen)
+        to_selection = getattr(value, "to_product_path_selection_dict", None)
+        if callable(to_selection):
+            return _audit_value(to_selection(), _seen=seen)
+        if is_dataclass(value):
+            # ``dataclasses.asdict`` deep-copies every nested member. Runtime
+            # product views deliberately cannot be reconstructed by deepcopy,
+            # so traverse declared fields without mutating or copying them.
+            return {
+                field.name: _audit_value(getattr(value, field.name), _seen=seen)
+                for field in dataclass_fields(value)
+            }
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return _audit_value(to_dict(), _seen=seen)
+            except (TypeError, ValueError):
+                pass
+        return {"type": type(value).__name__, "repr": str(value)}
+    finally:
+        seen.discard(object_id)
 
 
 import pandas as pd
 
 from .events import EventDraft, EventKind
-from .flow import Flow, FlowBinding, Phase
+from .flow import Flow, FlowBinding, Phase, phase_label
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -85,13 +118,6 @@ class ProgressSink(Protocol):
         phase: str = "event_replay",
         percent: float | None = None,
     ) -> None: ...
-
-
-_PHASE_LABELS: dict[str, str] = {
-    "pre_replay": "回放准备",
-    "event_replay": "事件回放",
-    "post_replay": "结果整理",
-}
 
 
 # ── FlowRegistry ──────────────────────────────────────────────────
@@ -523,7 +549,7 @@ class _ProgressTracker:
         active_strategies = strategies or _strategies_using_flow(self._state, flow.name, self._flow_strategies)
         self._activity_sink.emit_activity(
             phase=activity_phase,
-            phase_label=_PHASE_LABELS.get(activity_phase, activity_phase),
+            phase_label=phase_label(activity_phase),
             flow_key=flow.activity_key,
             flow_name=flow.name,
             flow_label=flow.effective_description,
@@ -590,119 +616,230 @@ class _ProgressTracker:
 
 
 
+def _strategy_alias(strategy: Any) -> str:
+    return str(getattr(strategy, "alias", None) or strategy)
+
+
+def _audit_ledgers(state: "BacktestRunState", strategies: frozenset["Strategy"], active_ledgers: frozenset[Any]) -> list[dict[str, Any]]:
+    """Snapshot the complete ledger/cash-pool topology without mutating it."""
+    from tools.testers.backtest.engines.native.ledger import ledger_identity
+    from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger, strategy_book_store_for
+
+    book = strategy_book_store_for(state)
+    strategies_by_ledger: dict[Any, set[str]] = defaultdict(set)
+    ledger_keys = {ledger_identity(ledger) for ledger in active_ledgers}
+    for strategy in strategies:
+        for ledger in book.ledgers_for_strategy(state, strategy):
+            ledger_key = ledger_identity(ledger)
+            ledger_keys.add(ledger_key)
+            strategies_by_ledger[ledger_key].add(_strategy_alias(strategy))
+
+    cash_store = getattr(state, "cash_pool_store", None)
+    snapshots: list[dict[str, Any]] = []
+    for ledger in sorted(ledger_keys, key=lambda item: item.name):
+        ledger_state = state.ledgers.get(ledger)
+        pool_id = str(cash_pool_id_for_ledger(state, ledger))
+        field_values = {
+            ref.qualified_name: _audit_value(value)
+            for ref, value in (ledger_state.fields.items() if ledger_state is not None else ())
+        }
+        snapshots.append({
+            "ledger": ledger.name,
+            "strategies": sorted(strategies_by_ledger.get(ledger, set())),
+            "cash_pool": pool_id,
+            "cash": _audit_value(getattr(cash_store, "cash_by_pool", {}).get(pool_id)),
+            "cash_pool_config": _audit_value(getattr(cash_store, "config_by_pool", {}).get(pool_id)),
+            "ledger_config": _audit_value(state.ledger_configs.get(ledger)),
+            "fields": field_values,
+        })
+    return snapshots
+
+
+def _audit_field_values(
+    state: "BacktestRunState",
+    ctx: FlowContext,
+    ref: "FieldRef",
+    strategies: frozenset["Strategy"],
+    ledger_snapshots: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    common = ctx._values.get(ref, _AUDIT_MISSING)
+    if common is not _AUDIT_MISSING:
+        values.append({"scope": "context", "value": _audit_value(common)})
+    for strategy in sorted(strategies, key=_strategy_alias):
+        alias = _strategy_alias(strategy)
+        config = state.config_for(strategy)
+        if ref in config.field_values:
+            values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref])})
+        contextual = ctx._values_by_strategy.get(ref, {}).get(strategy, _AUDIT_MISSING)
+        if contextual is not _AUDIT_MISSING:
+            values.append({"scope": "strategy_context", "strategy": alias, "value": _audit_value(contextual)})
+    for ledger in ledger_snapshots:
+        value = ledger["fields"].get(ref.qualified_name, _AUDIT_MISSING)
+        if value is not _AUDIT_MISSING:
+            values.append({
+                "scope": "ledger",
+                "ledger": ledger["ledger"],
+                "cash_pool": ledger["cash_pool"],
+                "strategies": ledger["strategies"],
+                "value": value,
+            })
+    return values
+
+
+def _audit_field_records(
+    state: "BacktestRunState",
+    ctx: FlowContext,
+    refs: tuple["FieldRef", ...],
+    strategies: frozenset["Strategy"],
+    ledger_snapshots: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "field": ref.qualified_name,
+            "values": _audit_field_values(state, ctx, ref, strategies, ledger_snapshots),
+        }
+        for ref in refs
+    ]
+
+
+def _audit_strategy_context(state: "BacktestRunState", strategies: frozenset["Strategy"], ledger_snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ledgers_by_strategy: dict[str, list[str]] = defaultdict(list)
+    for ledger in ledger_snapshots:
+        for strategy in ledger["strategies"]:
+            ledgers_by_strategy[strategy].append(ledger["ledger"])
+    result: list[dict[str, Any]] = []
+    for strategy in sorted(strategies, key=_strategy_alias):
+        config = state.config_for(strategy)
+        result.append({
+            "strategy": _strategy_alias(strategy),
+            "ledgers": sorted(ledgers_by_strategy.get(_strategy_alias(strategy), [])),
+            "config": {
+                ref.qualified_name: _audit_value(value)
+                for ref, value in config.field_values.items()
+            },
+        })
+    return result
+
+
+def _audit_event_payloads(ctx: FlowContext, strategies: frozenset["Strategy"], ledger_snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for strategy in sorted(strategies, key=_strategy_alias):
+        values = ctx.payloads_for(strategy) if strategy in ctx._drafts_by_strategy else []
+        if values:
+            payloads.append({"scope": "strategy", "strategy": _strategy_alias(strategy), "payloads": _audit_value(values)})
+    for ledger in ledger_snapshots:
+        from tools.testers.backtest.engines.native.ledger import ledger_identity
+
+        ledger_key = ledger_identity(ledger["ledger"])
+        values = ctx.payloads_for_ledger(ledger_key) if ledger_key in ctx._drafts_by_ledger else []
+        if values:
+            payloads.append({"scope": "ledger", "ledger": ledger["ledger"], "cash_pool": ledger["cash_pool"], "payloads": _audit_value(values)})
+    return payloads
+
+
+def _audit_record_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def key(entry: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            entry.get("scope"), entry.get("strategy"), entry.get("ledger"),
+            tuple(entry.get("strategies") or ()), entry.get("cash_pool"),
+        )
+
+    before_by_key = {key(entry): entry.get("value") for entry in before}
+    after_by_key = {key(entry): entry.get("value") for entry in after}
+    changes: list[dict[str, Any]] = []
+    for entry_key in sorted(set(before_by_key) | set(after_by_key), key=str):
+        old = before_by_key.get(entry_key, _AUDIT_MISSING)
+        new = after_by_key.get(entry_key, _AUDIT_MISSING)
+        if old != new:
+            scope, strategy, ledger, strategies, cash_pool = entry_key
+            changes.append({
+                "scope": scope,
+                "strategy": strategy,
+                "ledger": ledger,
+                "strategies": list(strategies),
+                "cash_pool": cash_pool,
+                "before": None if old is _AUDIT_MISSING else old,
+                "after": None if new is _AUDIT_MISSING else new,
+            })
+    return changes
+
+
+def _audit_ledger_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    before_by_ledger = {entry["ledger"]: entry for entry in before}
+    after_by_ledger = {entry["ledger"]: entry for entry in after}
+    changes: list[dict[str, Any]] = []
+    for ledger_name in sorted(set(before_by_ledger) | set(after_by_ledger)):
+        old = before_by_ledger.get(ledger_name, {})
+        new = after_by_ledger.get(ledger_name, {})
+        metadata = new or old
+        if old.get("cash") != new.get("cash"):
+            changes.append({
+                "ledger": ledger_name,
+                "cash_pool": metadata.get("cash_pool"),
+                "strategies": metadata.get("strategies", []),
+                "field": "CashPoolModule.cash",
+                "before": old.get("cash"),
+                "after": new.get("cash"),
+            })
+        for field_name in sorted(set(old.get("fields", {})) | set(new.get("fields", {}))):
+            old_value = old.get("fields", {}).get(field_name)
+            new_value = new.get("fields", {}).get(field_name)
+            if old_value != new_value:
+                changes.append({
+                    "ledger": ledger_name,
+                    "cash_pool": metadata.get("cash_pool"),
+                    "strategies": metadata.get("strategies", []),
+                    "field": field_name,
+                    "before": old_value,
+                    "after": new_value,
+                })
+    return changes
+
+
 def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers):
-    """Capture inputs and emit step 'before' event for pre/post replay flows."""
+    """Capture a complete pre-compute snapshot; emission happens after compute."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
         return {}
-    import copy as _copy
-    _bef = {}
-    _refs_by_key = {}
-    for _ref in f.inputs:
-        try:
-            key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-            _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
-            _refs_by_key[key] = _ref
-        except:
-            pass
-    _input_with_vals = []
-    for _ik in list(_bef.keys()):
-        _iv = _bef.get(_ik)
-        _all_vals = _all_ledger_values(state, _refs_by_key.get(_ik))
-        _input_with_vals.append({"name": _ik, "value": _iv, "all_values": _all_vals})
-    _ctx_strategies = []
-    _ctx_ledgers = []
-    for _s in applicable:
-        try:
-            _cfg = state.config_for(_s)
-            _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
-            _config_vals = {}
-            for _fref, _fval in _cfg.field_values.items():
-                _fn = getattr(_fref, 'name', '')
-                if _fval is not None and str(_fval) not in ('', 'None', '0', '0.0', '[]', '{}', 'auto', 'none'):
-                    if not any(_fn.startswith(p) for p in ('raw_', 'sized_', 'expanded_', 'contract_', 'bar_event_', 'force_close_', 'rollover_', 'margin_check_', 'margin_liquidation_', 'dispatched_', 'signal_freq_', 'long_short_diagnostic_', 'product_path_', 'daily_mark_', 'daily_basepoint_', 'counterparty_', 'bar_open_', 'bar_end_', 'evaluation_', 'strategy_windows', 'run_window_envelope', 'currency_conversion_', 'required_', 'calendar_')):
-                        _config_vals[_fn] = str(_fval)
-            _ctx_strategies.append({"id": str(_alias), "config": _config_vals})
-        except:
-            _ctx_strategies.append({"id": str(_s), "config": {}})
-    for _l in all_active_ledgers if all_active_ledgers else getattr(ctx, 'active_ledgers', frozenset()):
-        from tools.testers.backtest.engines.native.ledger import ledger_identity as _lid_fn2
-        try:
-            _lkey = _lid_fn2(_l)
-        except:
-            _lkey = str(_l)
-        try:
-            from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger as _cp_id_fn2
-            _cp_id = _cp_id_fn2(state, _l)
-        except:
-            _cp_id = '?'
-        _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
-    _mode_fields = ["engine", "engine_mode", "margin_mode", "fee_mode",
-                      "data_source_mode", "freq_fixed", "freq_mode",
-                      "historical_field_policy", "allocation_policy", "liquidity_mode",
-                      "participation_rate", "slippage_mode", "slippage_bps",
-                      "quantity_rounding_policy", "equity_compute_live", "position_policy",
-                      "slippage_mode", "collateral_fraction", "strategy_book_mode",
-                      "ledger_session_policy", "initial_capital_major", "base_currency",
-                      "start_date", "end_date", "start_time", "end_time", "timezone"]
-    _mode_info = {}
-    for _s2 in applicable:
-        try:
-            _cfg2 = state.config_for(_s2)
-            for _fref, _fval in _cfg2.field_values.items():
-                _fn = getattr(_fref, 'name', None)
-                if _fn in _mode_fields and _fval is not None:
-                    _mode_info[_fn] = str(_fval)
-        except:
-            pass
-    step_callback({
-        "phase": "before",
+    ledger_snapshots = _audit_ledgers(state, applicable, all_active_ledgers or ctx.active_ledgers)
+    return {
         "timestamp": str(timestamp) if timestamp is not None else "",
-        "flow_name": f.effective_description or "",
-        "flow_id": f.name or "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "inputs": _input_with_vals,
-        "description": getattr(f, 'description', '') or '',
-        "strategies": _ctx_strategies,
-        "ledgers": _ctx_ledgers,
-        "mode_info": _mode_info,
-    })
-    return _bef, _ctx_strategies, _ctx_ledgers
+        "inputs": _audit_field_records(state, ctx, f.inputs, applicable, ledger_snapshots),
+        "outputs_before": _audit_field_records(state, ctx, f.outputs, applicable, ledger_snapshots),
+        "ledgers_before": ledger_snapshots,
+        "strategies": _audit_strategy_context(state, applicable, ledger_snapshots),
+        "event_payloads": _audit_event_payloads(ctx, applicable, ledger_snapshots),
+    }
 
 
-def _step_after_flow(f, state, step_callback, _bef, _strategies=None, _ledgers=None):
-    """Capture output changes and emit step 'after' event."""
+def _step_after_flow(f, state, ctx, step_callback, before):
+    """Emit one complete, post-compute audit event for a flow."""
     if not _step_mode_globals.get("enabled", False) or step_callback is None:
         return
-    _changes = []
-    for _ref in f.outputs:
-        try:
-            _after = _ledger_value(state, _ref)
-            _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-            _bef_val = _bef.get(_key, '<N/A>')
-            if str(_bef_val) != str(_after):
-                _changes.append({
-                    "field": _ref.name,
-                    "before": str(_bef_val),
-                    "after": str(_after),
-                })
-        except:
-            pass
-    if _changes:
-        _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
-        if _real_changes:
-            _after_extra = {"phase": "after",
-                              "flow_name": f.effective_description or "",
-                        "flow_id": f.name or "",
-                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
+    strategies = ctx.active_strategies
+    ledgers_after = _audit_ledgers(state, strategies, ctx.active_ledgers)
+    outputs_after = _audit_field_records(state, ctx, f.outputs, strategies, ledgers_after)
+    outputs_before = {entry["field"]: entry["values"] for entry in before.get("outputs_before", [])}
+    output_changes = []
+    for output in outputs_after:
+        for change in _audit_record_changes(outputs_before.get(output["field"], []), output["values"]):
+            output_changes.append({"field": output["field"], **change})
+    step_callback({
+        "phase": "step",
+        "timestamp": before.get("timestamp", ""),
+        "flow_name": f.effective_description or "",
         "flow_id": f.name or "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-                              "changes": _real_changes}
-            if _strategies:
-                _after_extra["strategies"] = _strategies
-            if _ledgers:
-                _after_extra["ledgers"] = _ledgers
-            step_callback(_after_extra)
+        "flow_phase": f.phase.value,
+        "description": getattr(f, "description", "") or "",
+        "inputs": before.get("inputs", []),
+        "outputs": outputs_after,
+        "output_changes": output_changes,
+        "strategies": before.get("strategies", []),
+        "ledgers_before": before.get("ledgers_before", []),
+        "ledgers_after": ledgers_after,
+        "ledger_changes": _audit_ledger_changes(before.get("ledgers_before", []), ledgers_after),
+        "event_payloads": before.get("event_payloads", []),
+    })
 
 
 
@@ -761,130 +898,11 @@ def make_dispatcher(
             ctx.active_strategies = applicable
             if tracker is not None:
                 tracker.activity(f, timestamp=timestamp, phase="event_replay", strategies=applicable)
-            if _step_mode_globals.get("enabled", False):
-                import copy as _copy
-                _bef = {}
-                _refs_by_key = {}
-                for _ref in f.inputs:
-                    try:
-                        key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-                        _bef[key] = _copy.deepcopy(_ledger_value(state, _ref))
-                        _refs_by_key[key] = _ref
-                    except:
-                        pass
-                _input_keys = list(_bef.keys())
-                if step_callback is not None:
-                    _input_with_vals = []
-                    for _ik in _input_keys:
-                        _iv = _bef.get(_ik)
-                        _all_vals = _all_ledger_values(state, _refs_by_key.get(_ik))
-                        _input_with_vals.append({"name": _ik, "value": _iv, "all_values": _all_vals})
-                    # Build strategy/ledger context
-                    _ctx_strategies = []
-                    _ctx_ledgers = []
-                    for _s in applicable:
-                        try:
-                            _cfg = state.config_for(_s)
-                            _alias = getattr(_s, 'alias', None) or (getattr(_cfg, 'strategy', str(_s)) if hasattr(_cfg, 'strategy') else str(_s))
-                            _config_vals = {}
-                            for _fref, _fval in _cfg.field_values.items():
-                                _fn = getattr(_fref, 'name', '')
-                                if _fval is not None and str(_fval) not in ('', 'None', '0', '0.0', '[]', '{}', 'auto', 'none'):
-                                    if not any(_fn.startswith(p) for p in ('raw_', 'sized_', 'expanded_', 'contract_', 'bar_event_', 'force_close_', 'rollover_', 'margin_check_', 'margin_liquidation_', 'dispatched_', 'signal_freq_', 'long_short_diagnostic_', 'product_path_', 'daily_mark_', 'daily_basepoint_', 'counterparty_', 'bar_open_', 'bar_end_', 'evaluation_', 'strategy_windows', 'run_window_envelope', 'currency_conversion_', 'required_', 'calendar_')):
-                                        _config_vals[_fn] = str(_fval)
-                        except:
-                            _ctx_strategies.append({"id": str(_s), "config": {}})
-                    for _l in all_active_ledgers:
-                        _lkey = _ledger_identity_for_scheduler(_l) if hasattr(_l, 'ledger') else _l
-                        try:
-                            from tools.testers.backtest.modules.strategy_book import cash_pool_id_for_ledger as _cp_id_fn
-                            _cp_id = _cp_id_fn(state, _l)
-                        except:
-                            _cp_id = '?'
-                        _ctx_ledgers.append({"ledger": str(_lkey), "cash_pool": str(_cp_id)})
-                    _mode_fields = ["engine_mode", "data_source_mode", "freq_fixed", "freq_mode",
-                                      "historical_field_policy", "allocation_policy", "liquidity_mode",
-                                      "participation_rate", "slippage_mode", "slippage_bps",
-                                      "quantity_rounding_policy", "margin_mode", "fee_mode",
-                                      "equity_compute_live", "position_policy"]
-                    _mode_info = {}
-                    for _s2 in applicable:
-                        try:
-                            _cfg2 = state.config_for(_s2)
-                            for _fref, _fval in _cfg2.field_values.items():
-                                _fn = getattr(_fref, 'name', None)
-                                if _fn in _mode_fields and _fval is not None:
-                                    _mode_info[_fn] = str(_fval)
-                        except:
-                            pass
-                    step_callback({
-                        "phase": "before",
-                        "timestamp": str(timestamp),
-                        "flow_name": f.effective_description or "",
-                        "flow_id": f.name or "",
-                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "flow_id": f.name or "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-                        "inputs": _input_with_vals,
-                        "description": getattr(f, 'description', '') or '',
-                        "strategies": _ctx_strategies,
-                        "ledgers": _ctx_ledgers,
-                        "mode_info": _mode_info,
-                    })
-                else:
-                    print(f"\n{'─'*60}")
-                    print(f"⏱  [{timestamp}] {f.effective_description}")
-                    print(f"📥  Inputs: {_input_keys}")
-                    if hasattr(f, 'description') and f.description:
-                        print(f"📝  {f.description}")
-                    print(f"{'─'*60}")
-                    input("Press Enter...")
+            before = _step_before_flow(
+                f, state, ctx, timestamp, step_callback, applicable, all_active_ledgers,
+            )
             _compute_flow(f, state, ctx)
-            if _step_mode_globals.get("enabled", False):
-                _changes = []
-                for _ref in f.outputs:
-                    try:
-                        _after = _ledger_value(state, _ref)
-                        _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-                        _bef_val = _bef.get(_key, '<N/A>')
-                        if str(_bef_val) != str(_after):
-                            _changes.append({
-                                "field": _ref.name,
-                                "before": str(_bef_val),
-                                "after": str(_after),
-                            })
-                    except:
-                        pass
-                if step_callback is not None and _changes:
-                    # Filter out spurious N/A->None changes
-                    _real_changes = [c for c in _changes if str(c.get("before","")) not in ("<N/A>", "None", "") or str(c.get("after","")) not in ("<N/A>", "None", "")]
-                    if _real_changes:
-                        _after_data = {
-                            "phase": "after",
-                            "flow_name": f.effective_description or "",
-                        "flow_id": f.name or "",
-                        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-        "flow_id": f.name or "",
-        "flow_phase": f.phase.value if hasattr(f, "phase") and f.phase is not None else "",
-                            "changes": _real_changes,
-                        }
-                        if _ctx_strategies:
-                            _after_data["strategies"] = _ctx_strategies
-                        if _ctx_ledgers:
-                            _after_data["ledgers"] = _ctx_ledgers
-                        step_callback(_after_data)
-                elif step_callback is None:
-                    for _ref in f.outputs:
-                        try:
-                            _after = _ledger_value(state, _ref)
-                            _key = _ref.qualified_name if hasattr(_ref, 'qualified_name') else str(_ref)
-                            _bef_val = _bef.get(_key, '<N/A>')
-                            if str(_bef_val) != str(_after):
-                                print(f"  ✏️  {_ref.name}: {_bef_val} -> {_after}")
-                        except:
-                            pass
+            _step_after_flow(f, state, ctx, step_callback, before)
             if tracker is not None:
                 tracker.tick(f.effective_description, phase=f.phase)
         if tracker is not None and batch and batch[0].kind is EventKind.SIGNAL:
@@ -952,34 +970,7 @@ def _pre_post_applicable_strategies(
     return _strategies_using_flow(state, flow.name, flow_strategies)
 
 
-_MODE_FIELD_SUFFIXES = ("_mode", "_method", "_policy")
-_MODE_FIELD_NAMES = {
-    "engine_mode",
-    "accounting_mode",
-    "cost_basis_method",
-    "money_calculation_policy",
-    "factor_mode",
-    "warmup_mode",
-    "freq_mode",
-    "freq_fixed",
-    "data_source_mode",
-    "data_sources",
-    "margin_mode",
-    "fee_mode",
-    "transaction_fee_source",
-    "liquidity_mode",
-    "slippage_mode",
-    "allocation_mode",
-    "rebalance_event_mode",
-    "equity_compute_live",
-    "matching_model",
-}
-_SKIP_MODE_FIELD_NAMES = {
-    "factor_candidates",
-    "product_path_candidates",
-    "product_path_selection",
-    "factor",
-}
+
 
 
 def _mode_info_for_flow(
@@ -994,14 +985,6 @@ def _mode_info_for_flow(
         config = state.config_for(strategy)
         for ref, value in config.field_values.items():
             name = str(getattr(ref, "name", ref) or "")
-            if not _is_mode_field(name):
-                continue
-            owner = str(getattr(ref, "owner", "") or "")
-            if owner and flow.owner and owner not in {flow.owner, "EngineModule", "MarketDataModule"}:
-                # Keep global run modes plus the flow owner's own modes; this
-                # keeps the fixed CLI line compact while still diagnosing why
-                # the current flow chose a branch.
-                continue
             values_by_name.setdefault(name, set()).add(_mode_value_text(value))
     mode_info: dict[str, Any] = {}
     for name in sorted(values_by_name):
@@ -1010,10 +993,7 @@ def _mode_info_for_flow(
     return mode_info
 
 
-def _is_mode_field(name: str) -> bool:
-    if not name or name in _SKIP_MODE_FIELD_NAMES:
-        return False
-    return name in _MODE_FIELD_NAMES or name.endswith(_MODE_FIELD_SUFFIXES)
+
 
 
 def _mode_value_text(value: Any) -> str:
@@ -1095,12 +1075,9 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="pre_replay", strategies=applicable)
-        _bf_result = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
-        _bef = _bf_result[0] if isinstance(_bf_result, tuple) else _bf_result
-        _ctx_strategies = _bf_result[1] if isinstance(_bf_result, tuple) and len(_bf_result) > 1 else None
-        _ctx_ledgers = _bf_result[2] if isinstance(_bf_result, tuple) and len(_bf_result) > 2 else None
+        before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
         _compute_flow(f, state, ctx)
-        _step_after_flow(f, state, step_callback, _bef, _strategies=_ctx_strategies, _ledgers=_ctx_ledgers)
+        _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="pre_replay")
         tracker.tick(f.effective_description, phase=Phase.PRE_REPLAY)
 
@@ -1120,12 +1097,9 @@ def run(
             continue
         ctx.active_strategies = applicable
         tracker.activity(f, timestamp=None, phase="post_replay", strategies=applicable)
-        _bf_result = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
-        _bef = _bf_result[0] if isinstance(_bf_result, tuple) else _bf_result
-        _ctx_strategies = _bf_result[1] if isinstance(_bf_result, tuple) and len(_bf_result) > 1 else None
-        _ctx_ledgers = _bf_result[2] if isinstance(_bf_result, tuple) and len(_bf_result) > 2 else None
+        before = _step_before_flow(f, state, ctx, None, step_callback, applicable, ctx.active_ledgers)
         _compute_flow(f, state, ctx)
-        _step_after_flow(f, state, step_callback, _bef, _strategies=_ctx_strategies, _ledgers=_ctx_ledgers)
+        _step_after_flow(f, state, ctx, step_callback, before)
         tracker.phase_flow_done(phase="post_replay")
         tracker.tick(f.effective_description, phase=Phase.POST_REPLAY)
     tracker.complete()
@@ -1214,7 +1188,7 @@ def _phase_spec(key: str, flows: list[ResolvedFlow] | tuple[ResolvedFlow, ...]) 
     visible_flows = [flow for flow in flows if not flow.input_materialization]
     return {
         "key": key,
-        "label": _PHASE_LABELS.get(key, key),
+        "label": phase_label(key),
         "flows": [
             {
                 "phase": key,

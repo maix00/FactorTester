@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..contracts import ScopePolicy, SettingDefinition
-from ..registry import ApplicationSettings
+from tools.testers.settings.contracts import ScopePolicy, SettingDefinition
+from tools.testers.settings.registry import ApplicationSettings
 from tools.products.product_path_selection import ProductPathSelection
 
 PRODUCT_PATH_SELECTION_KEYS = ("product_path_selection",)

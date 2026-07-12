@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.testers.settings.applications import (
+from tools.testers._shared import (
     CATEGORY_CANDIDATE_KEYS,
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
