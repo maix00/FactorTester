@@ -2135,7 +2135,7 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
         _print_audit_value("    ", "修改后", _display_field_value(str(change.get("field") or ""), change.get("after")))
 
 
-def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
+def _print_ledger_snapshot(ledgers: list[dict[str, Any]], *, show_configuration: bool) -> None:
     click.echo("账本、现金池与策略路由（执行前）")
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
@@ -2146,8 +2146,9 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
         click.echo(f"    绑定策略 = {strategies}")
         click.echo(f"    现金池 = {ledger.get('cash_pool') or '?'}")
         _print_audit_value("    ", "现金池余额", ledger.get("cash"))
-        _print_audit_value("    ", "现金池配置", ledger.get("cash_pool_config"))
-        _print_audit_value("    ", "账本配置", ledger.get("ledger_config"))
+        if show_configuration:
+            _print_audit_value("    ", "现金池配置", ledger.get("cash_pool_config"))
+            _print_audit_value("    ", "账本配置", ledger.get("ledger_config"))
         fields = ledger.get("fields") or {}
         if fields:
             click.echo("    账本字段:")
@@ -2249,7 +2250,10 @@ def _handle_step_event(
     if show_configuration:
         _print_registered_configuration(strategies)
     _print_strategy_context(strategies)
-    _print_ledger_snapshot(list(data.get("ledgers_before") or []))
+    _print_ledger_snapshot(
+        list(data.get("ledgers_before") or []),
+        show_configuration=show_configuration,
+    )
     _print_event_payloads(list(data.get("event_payloads") or []))
     _print_audit_fields("输入字段", list(data.get("inputs") or []))
     _print_audit_fields("输出字段（执行后）", list(data.get("outputs") or []))
