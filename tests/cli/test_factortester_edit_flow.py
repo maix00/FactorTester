@@ -215,6 +215,70 @@ def test_step_audit_formats_python_literal_strings_as_json() -> None:
     assert "'id'" not in text
 
 
+def test_step_audit_formats_dataframe_payloads_as_tables() -> None:
+    text = _audit_text({
+        "type": "DataFrame",
+        "shape": [25, 2],
+        "columns": ["RB.SHF", "AG.SHF"],
+        "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+        "sample": {
+            "head": {
+                "columns": ["RB.SHF", "AG.SHF"],
+                "index": ["2026-01-01 09:00:00", "2026-01-01 09:01:00"],
+                "rows": [[1.0, 3.0], [2.0, 4.0]],
+            }
+        },
+        "truncated": True,
+    })
+
+    assert text.startswith("pd.DataFrame shape=(25, 2) index=2026-01-01 09:00:00")
+    assert "truncated=True" in text
+    assert 'columns = ["RB.SHF", "AG.SHF"]' in text
+    assert "sample.head:" in text
+    assert "RB.SHF" in text
+    assert "2026-01-01 09:01:00" in text
+    assert '"rows"' not in text
+
+
+def test_step_audit_formats_wide_dataframe_columns_as_counts() -> None:
+    text = _audit_text({
+        "type": "DataFrame",
+        "shape": [25, 5000],
+        "columns": {"count": 5000, "sampled": ["C0", "C1", "C4998", "C4999"], "sample_truncated": True},
+        "index": {"start": "2026-01-01 09:00:00", "end": "2026-01-01 09:24:00"},
+        "sample": {
+            "head": {
+                "columns": ["C0", "C1", "C4998", "C4999"],
+                "index": ["2026-01-01 09:00:00"],
+                "rows": [[1.0, 2.0, 3.0, 4.0]],
+            }
+        },
+        "truncated": True,
+    })
+
+    assert "columns = 5000 columns; sample shows 4 columns" in text
+    assert "C4999" in text
+    assert "sampled" not in text
+
+
+def test_step_audit_formats_series_payloads_as_tables() -> None:
+    text = _audit_text({
+        "type": "Series",
+        "name": "close",
+        "length": 25,
+        "index": {"start": "2026-01-01", "end": "2026-01-25"},
+        "sample": {"head": {"index": ["2026-01-01", "2026-01-02"], "values": [1.0, 2.0]}},
+        "truncated": True,
+    })
+
+    assert text.startswith("pd.Series name='close' length=25 index=2026-01-01")
+    assert "truncated=True" in text
+    assert "sample.head:" in text
+    assert "value" in text
+    assert "2026-01-02" in text
+    assert '"values"' not in text
+
+
 def test_step_audit_empty_message_is_explicit(capsys) -> None:
     _print_audit_fields(
         "声明输出字段（未变化）",

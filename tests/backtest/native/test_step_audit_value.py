@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import pandas as pd
+
 from tools.testers.backtest.engines.native.scheduler import (
     _audit_ledger_changes,
     _audit_ledger_topology,
@@ -22,6 +24,137 @@ def test_step_audit_serializes_dataclass_instance_without_treating_class_as_inst
     assert serialized_class["type"] == "type"
     assert serialized_class["repr"].endswith("._AuditRecord'>")
     assert _audit_value(_FalseDataclassMarker())["type"] == "_FalseDataclassMarker"
+
+
+def test_step_audit_keeps_small_dataframes_complete() -> None:
+    frame = pd.DataFrame(
+        {"RB.SHF": [1.0, 2.0], "AG.SHF": [3.0, 4.0]},
+        index=pd.to_datetime(["2026-01-01 09:00:00", "2026-01-01 09:01:00"]),
+    )
+
+    assert _audit_value(frame) == {
+        "type": "DataFrame",
+        "columns": ["RB.SHF", "AG.SHF"],
+        "index": ["2026-01-01 09:00:00", "2026-01-01 09:01:00"],
+        "rows": [[1.0, 3.0], [2.0, 4.0]],
+    }
+
+
+def test_step_audit_summarizes_large_dataframes_as_dataframe_samples() -> None:
+    index = pd.date_range("2026-01-01 09:00:00", periods=25, freq="min")
+    frame = pd.DataFrame(
+        {
+            "RB.SHF": range(25),
+            "AG.SHF": range(100, 125),
+        },
+        index=index,
+    )
+
+    serialized = _audit_value(frame)
+
+    assert serialized["type"] == "DataFrame"
+    assert serialized["shape"] == [25, 2]
+    assert serialized["columns"] == ["RB.SHF", "AG.SHF"]
+    assert serialized["index"] == {
+        "start": "2026-01-01 09:00:00",
+        "end": "2026-01-01 09:24:00",
+    }
+    assert serialized["truncated"] is True
+    assert serialized["sample"]["head"] == {
+        "columns": ["RB.SHF", "AG.SHF"],
+        "index": [
+            "2026-01-01 09:00:00",
+            "2026-01-01 09:01:00",
+            "2026-01-01 09:02:00",
+        ],
+        "rows": [[0, 100], [1, 101], [2, 102]],
+    }
+    assert serialized["sample"]["tail"] == {
+        "columns": ["RB.SHF", "AG.SHF"],
+        "index": [
+            "2026-01-01 09:22:00",
+            "2026-01-01 09:23:00",
+            "2026-01-01 09:24:00",
+        ],
+        "rows": [[22, 122], [23, 123], [24, 124]],
+    }
+    assert "rows" not in serialized
+
+
+def test_step_audit_summarizes_wide_dataframes_without_all_columns() -> None:
+    index = pd.date_range("2026-01-01 09:00:00", periods=25, freq="min")
+    frame = pd.DataFrame(
+        {f"C{column}": [column] * 25 for column in range(30)},
+        index=index,
+    )
+
+    serialized = _audit_value(frame)
+
+    assert serialized["type"] == "DataFrame"
+    assert serialized["shape"] == [25, 30]
+    assert serialized["columns"] == {
+        "count": 30,
+        "sampled": ["C0", "C1", "C2", "C3", "C4", "C25", "C26", "C27", "C28", "C29"],
+        "sample_truncated": True,
+    }
+    assert serialized["sample"]["head"]["columns"] == [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C25",
+        "C26",
+        "C27",
+        "C28",
+        "C29",
+    ]
+    assert serialized["sample"]["head"]["rows"][0] == [0, 1, 2, 3, 4, 25, 26, 27, 28, 29]
+
+
+def test_step_audit_summarizes_large_series_with_head_tail_samples() -> None:
+    series = pd.Series(range(25), index=pd.date_range("2026-01-01", periods=25, freq="D"), name="close")
+
+    serialized = _audit_value(series)
+
+    assert serialized["type"] == "Series"
+    assert serialized["name"] == "close"
+    assert serialized["length"] == 25
+    assert serialized["index"] == {
+        "start": "2026-01-01 00:00:00",
+        "end": "2026-01-25 00:00:00",
+    }
+    assert serialized["truncated"] is True
+    assert serialized["sample"]["head"]["values"] == [0, 1, 2]
+    assert serialized["sample"]["tail"]["values"] == [22, 23, 24]
+
+
+def test_step_audit_summarizes_long_mapping_lists() -> None:
+    values = [{"contract": f"C{index}", "price": index} for index in range(10)]
+
+    serialized = _audit_value(values)
+
+    assert serialized == {
+        "type": "list",
+        "length": 10,
+        "sample": {
+            "head": [
+                {"contract": "C0", "price": 0},
+                {"contract": "C1", "price": 1},
+                {"contract": "C2", "price": 2},
+            ],
+            "tail": [
+                {"contract": "C7", "price": 7},
+                {"contract": "C8", "price": 8},
+                {"contract": "C9", "price": 9},
+            ],
+        },
+        "truncated": True,
+    }
+
+
+def test_step_audit_keeps_moderate_scalar_lists_complete() -> None:
+    assert _audit_value([f"P{index}" for index in range(23)]) == [f"P{index}" for index in range(23)]
 
 
 def test_step_ledger_topology_omits_unrelated_full_state_but_keeps_identity_and_cash() -> None:

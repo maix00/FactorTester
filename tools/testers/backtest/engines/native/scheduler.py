@@ -21,6 +21,117 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 
 
 _AUDIT_MISSING = object()
+_AUDIT_MAX_FULL_SERIES_LENGTH = 20
+_AUDIT_MAX_FULL_FRAME_ROWS = 20
+_AUDIT_MAX_FULL_FRAME_CELLS = 200
+_AUDIT_MAX_FULL_FRAME_COLUMNS = 20
+_AUDIT_MAX_FULL_MAPPING_SEQUENCE_ITEMS = 6
+_AUDIT_MAX_FULL_SEQUENCE_ITEMS = 100
+_AUDIT_EDGE_SAMPLE_ROWS = 3
+_AUDIT_EDGE_SAMPLE_COLUMNS = 5
+_AUDIT_EDGE_SAMPLE_ITEMS = 3
+
+
+def _audit_index_bounds(index: Any, *, key_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
+    if len(index) == 0:
+        return {"start": None, "end": None}
+    return {
+        "start": _audit_value(index[0], key_labels=key_labels),
+        "end": _audit_value(index[-1], key_labels=key_labels),
+    }
+
+
+def _audit_series_sample(
+    value: "pd.Series",
+    *,
+    key_labels: Mapping[str, str] | None = None,
+    rows: int = _AUDIT_EDGE_SAMPLE_ROWS,
+) -> dict[str, Any]:
+    def _slice_payload(sample: "pd.Series") -> dict[str, Any]:
+        return {
+            "index": [_audit_value(item, key_labels=key_labels) for item in sample.index.tolist()],
+            "values": [_audit_value(item, key_labels=key_labels) for item in sample.tolist()],
+        }
+
+    if len(value) <= rows * 2:
+        return {"head": _slice_payload(value)}
+    return {
+        "head": _slice_payload(value.head(rows)),
+        "tail": _slice_payload(value.tail(rows)),
+    }
+
+
+def _audit_frame_rows(
+    value: "pd.DataFrame",
+    *,
+    key_labels: Mapping[str, str] | None = None,
+) -> list[list[Any]]:
+    return [
+        [_audit_value(item, key_labels=key_labels) for item in row]
+        for row in value.itertuples(index=False, name=None)
+    ]
+
+
+def _audit_frame_column_payload(
+    value: "pd.DataFrame",
+    *,
+    key_labels: Mapping[str, str] | None = None,
+) -> tuple[Any, "pd.DataFrame"]:
+    if len(value.columns) <= _AUDIT_MAX_FULL_FRAME_COLUMNS:
+        return (
+            [_audit_value(column, key_labels=key_labels) for column in value.columns.tolist()],
+            value,
+        )
+
+    head_columns = list(value.columns[:_AUDIT_EDGE_SAMPLE_COLUMNS])
+    tail_columns = list(value.columns[-_AUDIT_EDGE_SAMPLE_COLUMNS:])
+    sampled_columns = list(dict.fromkeys([*head_columns, *tail_columns]))
+    return (
+        {
+            "count": int(len(value.columns)),
+            "sampled": [_audit_value(column, key_labels=key_labels) for column in sampled_columns],
+            "sample_truncated": True,
+        },
+        value.loc[:, sampled_columns],
+    )
+
+
+def _audit_frame_sample(
+    value: "pd.DataFrame",
+    *,
+    key_labels: Mapping[str, str] | None = None,
+    rows: int = _AUDIT_EDGE_SAMPLE_ROWS,
+) -> dict[str, Any]:
+    columns = [_audit_value(column, key_labels=key_labels) for column in value.columns.tolist()]
+
+    def _slice_payload(sample: "pd.DataFrame") -> dict[str, Any]:
+        return {
+            "columns": columns,
+            "index": [_audit_value(item, key_labels=key_labels) for item in sample.index.tolist()],
+            "rows": _audit_frame_rows(sample, key_labels=key_labels),
+        }
+
+    if len(value) <= rows * 2:
+        return {"head": _slice_payload(value)}
+    return {
+        "head": _slice_payload(value.head(rows)),
+        "tail": _slice_payload(value.tail(rows)),
+    }
+
+
+def _audit_sequence_sample(
+    values: list[Any],
+    *,
+    key_labels: Mapping[str, str] | None = None,
+    seen: set[int] | None = None,
+    items: int = _AUDIT_EDGE_SAMPLE_ITEMS,
+) -> dict[str, Any]:
+    if len(values) <= items * 2:
+        return {"head": [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values]}
+    return {
+        "head": [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values[:items]],
+        "tail": [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values[-items:]],
+    }
 
 
 def _audit_value(
@@ -29,11 +140,13 @@ def _audit_value(
     key_labels: Mapping[str, str] | None = None,
     _seen: set[int] | None = None,
 ) -> Any:
-    """Convert a runtime value into lossless, SSE-safe audit data.
+    """Convert a runtime value into SSE-safe audit data.
 
-    The step protocol must not rely on a terminal's abbreviated ``repr``. In
-    particular, pandas values are emitted as complete rows/columns, and nested
-    mappings/collections are recursively preserved.
+    The step protocol must not rely on a terminal's abbreviated ``repr``.
+    Nested mappings/collections are recursively preserved. Large pandas values
+    are intentionally summarized: raw market-data tables can span many rows and
+    products, while step-mode audit only needs enough shape/range/sample
+    evidence for a human to verify which data window was used.
     """
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -42,6 +155,15 @@ def _audit_value(
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
     if isinstance(value, pd.Series):
+        if len(value) > _AUDIT_MAX_FULL_SERIES_LENGTH:
+            return {
+                "type": "Series",
+                "name": _audit_value(value.name, key_labels=key_labels),
+                "length": int(len(value)),
+                "index": _audit_index_bounds(value.index, key_labels=key_labels),
+                "sample": _audit_series_sample(value, key_labels=key_labels),
+                "truncated": True,
+            }
         return {
             "type": "Series",
             "name": _audit_value(value.name, key_labels=key_labels),
@@ -49,14 +171,22 @@ def _audit_value(
             "values": [_audit_value(item, key_labels=key_labels) for item in value.tolist()],
         }
     if isinstance(value, pd.DataFrame):
+        rows, columns = value.shape
+        if rows > _AUDIT_MAX_FULL_FRAME_ROWS or rows * columns > _AUDIT_MAX_FULL_FRAME_CELLS:
+            column_payload, sample_frame = _audit_frame_column_payload(value, key_labels=key_labels)
+            return {
+                "type": "DataFrame",
+                "shape": [int(rows), int(columns)],
+                "columns": column_payload,
+                "index": _audit_index_bounds(value.index, key_labels=key_labels),
+                "sample": _audit_frame_sample(sample_frame, key_labels=key_labels),
+                "truncated": True,
+            }
         return {
             "type": "DataFrame",
             "columns": [_audit_value(column, key_labels=key_labels) for column in value.columns.tolist()],
             "index": [_audit_value(item, key_labels=key_labels) for item in value.index.tolist()],
-            "rows": [
-                [_audit_value(item, key_labels=key_labels) for item in row]
-                for row in value.itertuples(index=False, name=None)
-            ],
+            "rows": _audit_frame_rows(value, key_labels=key_labels),
         }
 
     seen = _seen if _seen is not None else set()
@@ -78,7 +208,22 @@ def _audit_value(
         if isinstance(value, (list, tuple, set, frozenset)):
             if value and isinstance(next(iter(value)), UniqueNameObject):
                 return str(sorted(value, key=str))
-            return [_audit_value(item, key_labels=key_labels, _seen=seen) for item in value]
+            values = list(value)
+            if len(values) > _AUDIT_MAX_FULL_MAPPING_SEQUENCE_ITEMS and all(isinstance(item, Mapping) for item in values):
+                return {
+                    "type": type(value).__name__,
+                    "length": int(len(values)),
+                    "sample": _audit_sequence_sample(values, key_labels=key_labels, seen=seen),
+                    "truncated": True,
+                }
+            if len(values) > _AUDIT_MAX_FULL_SEQUENCE_ITEMS:
+                return {
+                    "type": type(value).__name__,
+                    "length": int(len(values)),
+                    "sample": _audit_sequence_sample(values, key_labels=key_labels, seen=seen),
+                    "truncated": True,
+                }
+            return [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values]
         if isinstance(value, UniqueNameObject):
             return str(value)
         to_audit_dict = getattr(value, "to_audit_dict", None)

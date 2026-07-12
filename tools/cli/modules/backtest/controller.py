@@ -2077,10 +2077,122 @@ def _audit_text(value: Any) -> str:
         parsed = _parse_audit_literal(value)
         if parsed is not None:
             parsed = _compact_audit_display_aliases(parsed)
+            pandas_text = _audit_pandas_text(parsed)
+            if pandas_text is not None:
+                return pandas_text
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     value = _compact_audit_display_aliases(value)
+    pandas_text = _audit_pandas_text(value)
+    if pandas_text is not None:
+        return pandas_text
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def _audit_pandas_text(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    value_type = value.get("type")
+    if value_type == "DataFrame":
+        return _audit_dataframe_text(value)
+    if value_type == "Series":
+        return _audit_series_text(value)
+    return None
+
+
+def _audit_dataframe_text(value: dict[str, Any]) -> str:
+    lines: list[str] = []
+    shape = value.get("shape")
+    if isinstance(shape, list | tuple) and len(shape) == 2:
+        header = f"pd.DataFrame shape=({shape[0]}, {shape[1]})"
+    else:
+        rows = value.get("rows")
+        columns = value.get("columns")
+        row_count = len(rows) if isinstance(rows, list) else "?"
+        column_count = len(columns) if isinstance(columns, list) else "?"
+        header = f"pd.DataFrame shape=({row_count}, {column_count})"
+    index_bounds = value.get("index")
+    if isinstance(index_bounds, dict) and {"start", "end"} <= set(index_bounds):
+        header = f"{header} index={index_bounds.get('start')} → {index_bounds.get('end')}"
+    if value.get("truncated"):
+        header = f"{header} truncated=True"
+    lines.append(header)
+    columns = value.get("columns")
+    if value.get("truncated"):
+        if isinstance(columns, list):
+            lines.append(f"columns = {json.dumps(columns, ensure_ascii=False, default=str)}")
+        elif isinstance(columns, dict):
+            count = columns.get("count")
+            sampled = columns.get("sampled")
+            sampled_count = len(sampled) if isinstance(sampled, list) else 0
+            if count is not None and sampled_count:
+                lines.append(f"columns = {count} columns; sample shows {sampled_count} columns")
+            elif count is not None:
+                lines.append(f"columns = {count} columns")
+
+    if isinstance(value.get("sample"), dict):
+        sample = value["sample"]
+        for name in ("head", "tail"):
+            part = sample.get(name)
+            if isinstance(part, dict):
+                lines.append(f"sample.{name}:")
+                lines.extend(_audit_dataframe_table_lines(part, indent="  "))
+    else:
+        lines.extend(_audit_dataframe_table_lines(value, indent="  "))
+    return "\n".join(lines)
+
+
+def _audit_dataframe_table_lines(value: dict[str, Any], *, indent: str = "") -> list[str]:
+    columns = [str(column) for column in value.get("columns", [])]
+    indexes = value.get("index", [])
+    rows = value.get("rows", [])
+    if not isinstance(indexes, list) or not isinstance(rows, list):
+        return [f"{indent}(no tabular rows)"]
+    table_rows = []
+    for index, row in zip(indexes, rows, strict=False):
+        row_values = row if isinstance(row, list) else [row]
+        table_rows.append((str(index), *[str(item) for item in row_values]))
+    if not table_rows:
+        return [f"{indent}(empty)"]
+    return render_table(("index", *columns), table_rows, indent=indent)
+
+
+def _audit_series_text(value: dict[str, Any]) -> str:
+    name = value.get("name")
+    length = value.get("length")
+    if length is not None:
+        header = f"pd.Series name={name!r} length={length}"
+    else:
+        values = value.get("values")
+        header = f"pd.Series name={name!r} length={len(values) if isinstance(values, list) else '?'}"
+    index_bounds = value.get("index")
+    if isinstance(index_bounds, dict) and {"start", "end"} <= set(index_bounds):
+        header = f"{header} index={index_bounds.get('start')} → {index_bounds.get('end')}"
+    if value.get("truncated"):
+        header = f"{header} truncated=True"
+
+    lines = [header]
+    if isinstance(value.get("sample"), dict):
+        sample = value["sample"]
+        for name in ("head", "tail"):
+            part = sample.get(name)
+            if isinstance(part, dict):
+                lines.append(f"sample.{name}:")
+                lines.extend(_audit_series_table_lines(part, indent="  "))
+    else:
+        lines.extend(_audit_series_table_lines(value, indent="  "))
+    return "\n".join(lines)
+
+
+def _audit_series_table_lines(value: dict[str, Any], *, indent: str = "") -> list[str]:
+    indexes = value.get("index", [])
+    values = value.get("values", [])
+    if not isinstance(indexes, list) or not isinstance(values, list):
+        return [f"{indent}(no series rows)"]
+    table_rows = [(str(index), str(item)) for index, item in zip(indexes, values, strict=False)]
+    if not table_rows:
+        return [f"{indent}(empty)"]
+    return render_table(("index", "value"), table_rows, indent=indent)
 
 
 def _parse_audit_literal(value: str) -> Any | None:
