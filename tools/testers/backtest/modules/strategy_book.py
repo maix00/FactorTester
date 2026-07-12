@@ -166,6 +166,7 @@ class StrategyBookStore:
     cash_pool_by_ledger: dict[Ledger, str] = field(default_factory=dict)
     product_ledger_by_strategy: dict[tuple[object, object], Ledger] = field(default_factory=dict)
     policies: StrategyBookPolicies = field(default_factory=StrategyBookPolicies)
+    display_name_by_strategy: dict[object, str] = field(default_factory=dict)
 
     def register_strategy_ledgers(
         self,
@@ -174,6 +175,7 @@ class StrategyBookStore:
         *,
         default_ledger_id: str,
         cash_pool_ids_by_ledger: Mapping[str, str] | None = None,
+        display_name: str | None = None,
     ) -> None:
         allowed = {ledger_identity(str(ledger_id)) for ledger_id in ledger_ids}
         if not allowed:
@@ -185,6 +187,8 @@ class StrategyBookStore:
                 f"{sorted(ledger.name for ledger in allowed)}"
             )
         self.ledgers_by_strategy[strategy] = allowed
+        if display_name:
+            self.display_name_by_strategy[strategy] = str(display_name)
         self._default_ledger_by_strategy[strategy] = default
         pool_mapping = cash_pool_ids_by_ledger or {}
         for ledger in allowed:
@@ -192,6 +196,9 @@ class StrategyBookStore:
 
     def ledgers_for_strategy(self, state: object, strategy: object) -> set[Ledger]:
         return self.ledgers_by_strategy.get(strategy, {ledger_identity(f"private:{_strategy_alias(strategy)}")})
+
+    def display_name_for_strategy(self, strategy: object) -> str:
+        return self.display_name_by_strategy.get(strategy, _strategy_alias(strategy))
 
     def default_ledger_for_strategy(self, state: object, strategy: object) -> Ledger:
         return self._default_ledger_by_strategy.get(strategy, ledger_identity(f"private:{_strategy_alias(strategy)}"))
@@ -238,7 +245,12 @@ def strategy_book_store_for(state: object) -> StrategyBookStore:
     return store
 
 
-def materialize_strategy_book_store(state: object, strategy_book: object, strategies: Mapping[str, object]) -> StrategyBookStore:
+def materialize_strategy_book_store(
+    state: object,
+    strategy_book: object,
+    strategies: Mapping[str, object],
+    resolved_settings_by_alias: Mapping[str, Mapping[str, Any]] | None = None,
+) -> StrategyBookStore:
     book = strategy_book if hasattr(strategy_book, "ledger_ids_for_strategy") else StrategyBookSimple()
     store = strategy_book_store_for(state)
     store.policies = _policies_from_strategy_book(strategy_book, book)
@@ -256,6 +268,7 @@ def materialize_strategy_book_store(state: object, strategy_book: object, strate
             ledger_ids,
             default_ledger_id=default,
             cash_pool_ids_by_ledger=cash_pool_ids,
+            display_name=str((resolved_settings_by_alias or {}).get(alias, {}).get("display_name") or alias),
         )
     return store
 

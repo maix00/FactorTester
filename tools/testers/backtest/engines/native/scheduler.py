@@ -616,8 +616,10 @@ class _ProgressTracker:
 
 
 
-def _strategy_alias(strategy: Any) -> str:
-    return str(getattr(strategy, "alias", None) or strategy)
+def _strategy_alias(state: "BacktestRunState", strategy: Any) -> str:
+    from tools.testers.backtest.modules.strategy_book import strategy_book_store_for
+
+    return strategy_book_store_for(state).display_name_for_strategy(strategy)
 
 
 def _audit_ledgers(state: "BacktestRunState", strategies: frozenset["Strategy"], active_ledgers: frozenset[Any]) -> list[dict[str, Any]]:
@@ -632,7 +634,7 @@ def _audit_ledgers(state: "BacktestRunState", strategies: frozenset["Strategy"],
         for ledger in book.ledgers_for_strategy(state, strategy):
             ledger_key = ledger_identity(ledger)
             ledger_keys.add(ledger_key)
-            strategies_by_ledger[ledger_key].add(_strategy_alias(strategy))
+            strategies_by_ledger[ledger_key].add(_strategy_alias(state, strategy))
 
     cash_store = getattr(state, "cash_pool_store", None)
     snapshots: list[dict[str, Any]] = []
@@ -666,8 +668,8 @@ def _audit_field_values(
     common = ctx._values.get(ref, _AUDIT_MISSING)
     if common is not _AUDIT_MISSING:
         values.append({"scope": "context", "value": _audit_value(common)})
-    for strategy in sorted(strategies, key=_strategy_alias):
-        alias = _strategy_alias(strategy)
+    for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
+        alias = _strategy_alias(state, strategy)
         config = state.config_for(strategy)
         if ref in config.field_values:
             values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref])})
@@ -709,11 +711,11 @@ def _audit_strategy_context(state: "BacktestRunState", strategies: frozenset["St
         for strategy in ledger["strategies"]:
             ledgers_by_strategy[strategy].append(ledger["ledger"])
     result: list[dict[str, Any]] = []
-    for strategy in sorted(strategies, key=_strategy_alias):
+    for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
         config = state.config_for(strategy)
         result.append({
-            "strategy": _strategy_alias(strategy),
-            "ledgers": sorted(ledgers_by_strategy.get(_strategy_alias(strategy), [])),
+            "strategy": _strategy_alias(state, strategy),
+            "ledgers": sorted(ledgers_by_strategy.get(_strategy_alias(state, strategy), [])),
             "config": {
                 ref.qualified_name: _audit_value(value)
                 for ref, value in config.field_values.items()
@@ -722,12 +724,17 @@ def _audit_strategy_context(state: "BacktestRunState", strategies: frozenset["St
     return result
 
 
-def _audit_event_payloads(ctx: FlowContext, strategies: frozenset["Strategy"], ledger_snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _audit_event_payloads(
+    state: "BacktestRunState",
+    ctx: FlowContext,
+    strategies: frozenset["Strategy"],
+    ledger_snapshots: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
-    for strategy in sorted(strategies, key=_strategy_alias):
+    for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
         values = ctx.payloads_for(strategy) if strategy in ctx._drafts_by_strategy else []
         if values:
-            payloads.append({"scope": "strategy", "strategy": _strategy_alias(strategy), "payloads": _audit_value(values)})
+            payloads.append({"scope": "strategy", "strategy": _strategy_alias(state, strategy), "payloads": _audit_value(values)})
     for ledger in ledger_snapshots:
         from tools.testers.backtest.engines.native.ledger import ledger_identity
 
@@ -808,7 +815,7 @@ def _step_before_flow(f, state, ctx, timestamp, step_callback, applicable, all_a
         "outputs_before": _audit_field_records(state, ctx, f.outputs, applicable, ledger_snapshots),
         "ledgers_before": ledger_snapshots,
         "strategies": _audit_strategy_context(state, applicable, ledger_snapshots),
-        "event_payloads": _audit_event_payloads(ctx, applicable, ledger_snapshots),
+        "event_payloads": _audit_event_payloads(state, ctx, applicable, ledger_snapshots),
     }
 
 

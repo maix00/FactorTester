@@ -315,7 +315,7 @@ def apply_strategy_configs(
     book = strategy_book or StrategyBookSimple()
     resolved = {str(alias): dict(settings) for alias, settings in resolved_settings_by_alias.items()}
     strategy_objects = {alias: Strategy(alias=alias) for alias in resolved}
-    materialize_strategy_book_store(state, book, strategy_objects)
+    materialize_strategy_book_store(state, book, strategy_objects, resolved)
     _resolve_cash_pool_configs(resolved, state=state, strategies_by_alias=strategy_objects, strategy_book=book)
     state.ledger_configs = _resolve_ledger_configs(
         resolved,

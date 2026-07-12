@@ -97,7 +97,7 @@ class GroupMembershipModule(TargetStrategyModule):
         "group_index": FieldDefinition(
             public=True, label="分组", default=1, frontend_only_default=True, control_template="number", tab="group_strategy",
             chip_template="分组: {value}", tab_label="分组数量", tab_order=90,
-            scope_policy="group_only",
+            scope_policy="group_only", display_offset=1,
         ),
         "execution_timing": FieldDefinition(
             public=False, label="成交时机", default="next_bar", control_template="select", tab="order",

@@ -33,6 +33,7 @@ _short_alias_map: dict[str, str] = {}
 # labels and chip ordering available to this renderer.
 _field_labels: dict[str, str] = {}
 _field_tab_order: dict[str, int] = {}
+_field_display_offsets: dict[str, int] = {}
 try:
     from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
 
@@ -45,6 +46,9 @@ try:
                     _to = getattr(_fd, 'tab_order', None)
                     if _to is not None:
                         _field_tab_order[_fn] = _to
+                    _offset = getattr(_fd, "display_offset", 0)
+                    if _offset:
+                        _field_display_offsets[_fn] = int(_offset)
 except Exception:
     pass
 
@@ -2059,6 +2063,13 @@ def _audit_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
+def _display_field_value(qualified_name: str, value: Any) -> Any:
+    offset = _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0)
+    if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value + offset
+    return value
+
+
 def _print_audit_value(prefix: str, label: str, value: Any) -> None:
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) == 1:
@@ -2103,7 +2114,11 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
             continue
         for entry in values:
             if isinstance(entry, dict):
-                _print_audit_value("    ", _audit_source_label(entry), entry.get("value"))
+                _print_audit_value(
+                    "    ",
+                    _audit_source_label(entry),
+                    _display_field_value(str(record.get("field") or ""), entry.get("value")),
+                )
 
 
 def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
@@ -2116,8 +2131,8 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
         source = _audit_source_label(change)
         click.echo(f"  {field}:")
         click.echo(f"    来源 = {source}")
-        _print_audit_value("    ", "修改前", change.get("before"))
-        _print_audit_value("    ", "修改后", change.get("after"))
+        _print_audit_value("    ", "修改前", _display_field_value(str(change.get("field") or ""), change.get("before")))
+        _print_audit_value("    ", "修改后", _display_field_value(str(change.get("field") or ""), change.get("after")))
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
@@ -2166,7 +2181,10 @@ def _print_registered_configuration(strategies: list[dict[str, Any]]) -> None:
     shared: list[tuple[str, Any]] = []
     different: list[tuple[str, list[tuple[str, Any]]]] = []
     for field_name in all_fields:
-        values = [(strategy, config.get(field_name)) for strategy, config in sorted(by_strategy.items())]
+        values = [
+            (strategy, _display_field_value(field_name, config.get(field_name)))
+            for strategy, config in sorted(by_strategy.items())
+        ]
         encoded = {json.dumps(value, ensure_ascii=False, sort_keys=True, default=str) for _, value in values}
         if len(encoded) == 1:
             shared.append((_audit_field_label(field_name), values[0][1]))

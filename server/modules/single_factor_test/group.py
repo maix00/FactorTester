@@ -1940,6 +1940,7 @@ def _resolve_group_strategy_settings(
         raise ValueError(f"缺少 splitCount: group={g.get('name') or group_id}")
     group_settings['split_count'] = int(raw_split_count)
     group_settings['group_index'] = int(g.get('groupIndex', 1)) - 1  # 前端 1-based -> 后端 0-based
+    group_settings['display_name'] = str(g.get('shortAlias') or g.get('name') or group_id)
 
     selection_id = _group_product_path_selection_id(g)
     if not selection_id:
@@ -2021,6 +2022,7 @@ def _resolve_long_short_strategy_settings(
     })
     settings["strategy_kind"] = "long_short"
     settings["strategy_id"] = strategy_id
+    settings["display_name"] = str(config.get("shortAlias") or config.get("name") or strategy_id)
     settings["long_leg_strategy_ids"] = long_legs
     settings["short_leg_strategy_ids"] = short_legs
     return settings
