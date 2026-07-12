@@ -22,7 +22,11 @@ from tools.testers.backtest.engines.native.events import EventDraft, EventKind
 from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
 from tools.testers.backtest.engines.native.flow import Flow, Phase
 from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
-from tools.testers.backtest.modules.market_data import MarketDataModule, current_prices_table_for
+from tools.testers.backtest.modules.market_data import (
+    MarketDataModule,
+    current_prices_table_for,
+    resolved_bar_frequency_for_strategy,
+)
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
@@ -79,6 +83,7 @@ class FactorSignalModule(ExecutableModule):
     end_session_gap: ClassVar[FieldRef[Any]] = FieldRef("end_session_gap")
     calendar_frequency: ClassVar[FieldRef[Any]] = FieldRef("calendar_frequency")
     signal_value: ClassVar[FieldRef[Any]] = FieldRef("signal_value")  # dict[Product, float]
+    live_factor_state: ClassVar[FieldRef[Any]] = FieldRef("live_factor_state")
     factor_mode: ClassVar[FieldRef[str]] = FieldRef("factor_mode")
     warmup_mode: ClassVar[FieldRef[str]] = FieldRef("warmup_mode")
     warmup_window: ClassVar[FieldRef[Any]] = FieldRef("warmup_window")
@@ -137,6 +142,7 @@ class FactorSignalModule(ExecutableModule):
             options=(("auto", "按因子频率自动判断"), ("1min", "1 分钟"), ("5min", "5 分钟"), ("1day", "1 天")),
             chip_template="时钟: {value}", tab_label="回测时钟", tab_order=190,
         ),
+        "live_factor_state": FieldDefinition(public=False),
     }
 
     signal_live: ClassVar[Flow] = Flow(
@@ -168,7 +174,12 @@ class FactorSignalModule(ExecutableModule):
         compute=lambda state, ctx: _evaluate_signal_live(state, ctx),
     )
     signal_live_on_bar: ClassVar[Flow] = Flow(
-        "signal_live", inputs=(FactorModule.factor,), outputs=(),
+        "signal_live", inputs=(
+            FactorModule.factor,
+            MarketDataModule.required_frequency,
+            MarketDataModule.required_factor_columns,
+            MarketDataModule.current_market_snapshot,
+        ), outputs=(live_factor_state,),
         phase=Phase.PER_EVENT, event_kind=EventKind.BAR, order=5,
         description="更新实时因子状态",
         compute=lambda state, ctx: _observe_signal_live_bar(state, ctx),
@@ -257,7 +268,7 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
             end_session_skip=end_session_skip,
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(end_session_gap)),
         )
-        scheduled = _clip_signal_table_to_strategy_window(aligned, state.config_for(strategies[0]))
+        scheduled = _clip_scheduled_table_to_strategy_window(aligned, state.config_for(strategies[0]))
         _append_signal_drafts(drafts, signal_event_times(scheduled), strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)  # pushes every draft via FlowContext._push_if_event
 
@@ -517,7 +528,7 @@ def _schedule_table_for_strategy(table: pd.DataFrame, config) -> pd.DataFrame:
             end_session_skip=config.get(FactorSignalModule.end_session_skip, True),
             end_session_gap=cast(pd.Timedelta, pd.Timedelta(config.get(FactorSignalModule.end_session_gap, "3h"))),
         )
-    return _clip_signal_table_to_strategy_window(scheduled, config)
+    return _clip_scheduled_table_to_strategy_window(scheduled, config)
 
 
 def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
@@ -525,6 +536,25 @@ def _clip_signal_table_to_strategy_window(table: pd.DataFrame, config) -> pd.Dat
     if start_dt is None or end_dt is None:
         return table
     mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    return table.loc[mask]
+
+
+def _clip_scheduled_table_to_strategy_window(table: pd.DataFrame, config) -> pd.DataFrame:
+    """Clip a scheduled table by the timestamp that will enter EventQueue.
+
+    ``signal_align(..., "1d")`` deliberately keeps both a semantic
+    ``_SIGNAL@DAY1`` level and the selected intraday bar timestamp.  Exact run
+    windows must therefore compare the finest/event-time level, while
+    trading-day windows retain DataIndex's trading-day-aware slicing.
+    """
+    start_dt, end_dt = _strategy_run_window_datetimes(config)
+    if start_dt is None or end_dt is None:
+        return table
+    if start_dt.precision == "trading_day" or end_dt.precision == "trading_day":
+        mask = DataIndex(table.index).slice_by_datatime(start_dt, end_dt)
+    else:
+        event_index = DataIndex(table.index).finest_index
+        mask = DataIndex(event_index).slice_by_datatime(start_dt, end_dt)
     return table.loc[mask]
 
 
@@ -648,8 +678,9 @@ def _precomputed_signal_cache_key(index_key: Any) -> Any:
 
 def _observe_signal_live_bar(state, ctx) -> None:
     """Feed one bar of current market data into each active live factor."""
-    prices = ctx.get(FieldRef("current_prices", owner="MarketDataModule"), {})
-    if not prices:
+    snapshot = ctx.get(MarketDataModule.current_market_snapshot, {}) or {}
+    fields_by_product = _factor_fields_by_product(snapshot)
+    if not fields_by_product:
         return
     store = state.factor_signal_store
     tables = store.live_price_tables
@@ -664,7 +695,8 @@ def _observe_signal_live_bar(state, ctx) -> None:
         by_factor[state_key].append(strategy)
         factor_by_key[state_key] = factor
 
-    row = pd.DataFrame([prices], index=[pd.Timestamp(ctx.timestamp)])
+    close_prices = snapshot.get("close", {})
+    row = pd.DataFrame([close_prices], index=[pd.Timestamp(ctx.timestamp)])
     for factor_key in by_factor:
         factor = factor_by_key[factor_key]
         table = tables.get(factor_key)
@@ -678,17 +710,35 @@ def _observe_signal_live_bar(state, ctx) -> None:
             executor = _compile_live_factor_executor(
                 factor,
                 by_factor[factor_key][0],
-                prices.keys(),
-                getattr(state, "source_freq", None),
+                fields_by_product.keys(),
+                resolved_bar_frequency_for_strategy(state, by_factor[factor_key][0]),
             )
             if executor is not None:
                 executors[factor_key] = executor
         if executor is not None:
-            executor.on_bar(pd.Timestamp(ctx.timestamp), prices)
+            executor.on_bar(pd.Timestamp(ctx.timestamp), fields_by_product)
+            current_value = getattr(executor, "on_signal", None)
+            if callable(current_value):
+                values = _row_to_signal_values(current_value(ctx.timestamp))
+                for strategy in by_factor[factor_key]:
+                    ctx.set_for(FactorSignalModule.live_factor_state, strategy, values)
             continue
         on_bar = getattr(factor, "on_bar", None)
         if callable(on_bar):
-            on_bar(pd.Timestamp(ctx.timestamp), dict(prices))
+            # Preserve the public live-adapter contract: custom factors receive
+            # the scalar close-price map. Compiled FactorExpr executors consume
+            # the richer canonical DataColumn mapping above.
+            on_bar(pd.Timestamp(ctx.timestamp), dict(close_prices))
+
+
+def _factor_fields_by_product(snapshot: dict[str, dict[Any, float]]) -> dict[Any, dict[str, float]]:
+    fields: dict[Any, dict[str, float]] = defaultdict(dict)
+    for column_name, values in snapshot.items():
+        if not str(column_name).isupper() or not isinstance(values, dict):
+            continue
+        for product, value in values.items():
+            fields[product][str(column_name)] = float(value)
+    return dict(fields)
 
 
 def _live_signal_values(factor: Any, timestamp: pd.Timestamp, price_table: pd.DataFrame | None) -> dict:
