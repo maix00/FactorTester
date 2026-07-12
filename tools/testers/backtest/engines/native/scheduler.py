@@ -74,12 +74,13 @@ def _audit_value(
                 )
                 for key, item in value.items()
             }
+        from tools.data.types import UniqueNameObject
         if isinstance(value, (list, tuple, set, frozenset)):
-            from tools.data.types import UniqueNameObject
-
             if value and isinstance(next(iter(value)), UniqueNameObject):
                 return str(sorted(value, key=str))
             return [_audit_value(item, key_labels=key_labels, _seen=seen) for item in value]
+        if isinstance(value, UniqueNameObject):
+            return str(value)
         to_audit_dict = getattr(value, "to_audit_dict", None)
         if callable(to_audit_dict):
             return _audit_value(to_audit_dict(), key_labels=key_labels, _seen=seen)
