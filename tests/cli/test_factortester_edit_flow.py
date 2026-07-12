@@ -20,6 +20,11 @@ from tools.cli.modules.keys import public_module_key
 from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
+    _audit_text,
+    _print_audit_changes,
+    _print_audit_fields,
+    _print_ledger_snapshot,
+    _print_strategy_context,
     _serialize_group_for_run,
     _serialize_strategy_book_for_run,
     _set_step_navigation,
@@ -37,6 +42,130 @@ def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
     assert _unchanged_output_records(records, [{"field": "Ledger.cash", "before": 100, "after": 90}]) == [
         records[1],
     ]
+
+
+def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> None:
+    records = [{
+        "field": "TradingRuleModule.window",
+        "values": [
+            {"scope": "strategy_config", "strategy": "A1", "value": "0 days 00:02:00"},
+            {"scope": "strategy_config", "strategy": "A2", "value": "0 days 00:02:00"},
+            {"scope": "strategy_config", "strategy": "A3", "value": "0 days 00:05:00"},
+        ],
+    }]
+
+    _print_audit_fields("输入字段", records)
+
+    out = capsys.readouterr().out
+    assert "[跨策略] 策略配置 A1, A2" in out
+    assert "0 days 00:02:00" in out
+    assert "[策略] 策略配置 A3" in out
+    assert "0 days 00:05:00" in out
+
+
+def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
+    changes = [
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": "L1",
+            "cash_pool": "P1",
+            "strategies": ["A1"],
+            "before": 100,
+            "after": 90,
+        },
+        {
+            "field": "CashPoolModule.cash",
+            "scope": "ledger",
+            "ledger": "L2",
+            "cash_pool": "P2",
+            "strategies": ["A2"],
+            "before": 100,
+            "after": 90,
+        },
+    ]
+
+    _print_audit_changes("账本与现金池变化", changes)
+
+    out = capsys.readouterr().out
+    assert "[跨账本] 账本 L1, L2 | 现金池 P1, P2 | 策略 A1, A2" in out
+    assert "100 -> 90" in out
+    assert "修改前" not in out
+    assert "修改后" not in out
+
+
+def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
+    changes = [
+        {
+            "field": "TargetModule.target_weights",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": {"CJ.CZC": 0.5, "SF.CZC": 0.5},
+        },
+        {
+            "field": "TargetModule.target_weights",
+            "scope": "strategy_context",
+            "strategy": "A2",
+            "before": None,
+            "after": {"CJ.CZC": 0.5, "SF.CZC": 0.5},
+        },
+        {
+            "field": "TargetModule.target_weights",
+            "scope": "strategy_context",
+            "strategy": "A3",
+            "before": None,
+            "after": {"SI.GFE": 1.0},
+        },
+    ]
+
+    _print_audit_changes("声明输出的变化", changes)
+
+    out = capsys.readouterr().out
+    assert "[跨策略] 策略上下文 A1, A2" in out
+    assert "[策略] 策略上下文 A3" in out
+    assert out.count("before =") == 2
+    assert out.count("after =") == 2
+
+
+def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [{
+        "field": "ProductSelectionModule.products",
+        "scope": "strategy_context",
+        "before": None,
+        "after": ["AP.CZC", "CJ.CZC"],
+    }])
+
+    out = capsys.readouterr().out
+    assert "[共享]" in out
+    assert "策略上下文 无" not in out
+
+
+def test_step_audit_formats_python_literal_strings_as_json() -> None:
+    text = _audit_text("{'id': 'pg_bc7963105fe8', 'selected_paths': ['Product/Futures/CNFutures/日夜盘/日盘']}")
+
+    assert text.startswith("{\n")
+    assert '"id": "pg_bc7963105fe8"' in text
+    assert '"selected_paths": [' in text
+    assert "'id'" not in text
+
+
+def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
+    _print_strategy_context([
+        {"strategy": "A1", "ledgers": ["private:A1"]},
+        {"strategy": "A2", "ledgers": ["private:A2"]},
+    ])
+    _print_ledger_snapshot([
+        {"ledger": "private:A1", "cash_pool": "private:A1", "strategies": ["A1"], "cash": 100},
+        {"ledger": "private:A2", "cash_pool": "private:A2", "strategies": ["A2"], "cash": 200},
+    ])
+
+    out = capsys.readouterr().out
+    assert "strategy" in out
+    assert "private:A1" in out
+    assert "cash pool" in out
+    assert "绑定策略" not in out
+    assert "现金池余额" not in out
 
 
 def test_step_navigation_supports_until_and_end_without_skipping_computation() -> None:

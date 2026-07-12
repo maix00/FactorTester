@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import ast
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -2063,8 +2064,28 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 
 def _audit_text(value: Any) -> str:
     if isinstance(value, str):
+        parsed = _parse_audit_literal(value)
+        if parsed is not None:
+            return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def _parse_audit_literal(value: str) -> Any | None:
+    text = value.strip()
+    if len(text) < 2 or text[0] not in "[{":
+        return None
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = ast.literal_eval(text)
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+        return None
+    if isinstance(parsed, (dict, list, tuple)):
+        return parsed
+    return None
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
@@ -2083,6 +2104,81 @@ def _print_audit_value(prefix: str, label: str, value: Any) -> None:
     click.echo(f"{prefix}{label} =")
     for line in lines:
         click.echo(f"{prefix}  {line}")
+
+
+def _audit_display_key(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _audit_join(values: list[Any]) -> str:
+    unique = sorted({str(value) for value in values if value not in (None, "")})
+    return ", ".join(unique) if unique else "无"
+
+
+def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
+    scopes = {str(entry.get("scope") or "") for entry in entries}
+    strategies = _audit_join([
+        strategy
+        for entry in entries
+        for strategy in (
+            entry.get("strategies")
+            if isinstance(entry.get("strategies"), list)
+            else [entry.get("strategy")]
+        )
+    ])
+    ledgers = _audit_join([entry.get("ledger") for entry in entries])
+    cash_pools = _audit_join([entry.get("cash_pool") for entry in entries])
+
+    if scopes <= {"strategy_config"}:
+        if strategies == "无":
+            return "[共享]"
+        prefix = "[跨策略]" if len(entries) > 1 else "[策略]"
+        return f"{prefix} 策略配置 {strategies}"
+    if scopes <= {"strategy_context"}:
+        if strategies == "无":
+            return "[共享]"
+        prefix = "[跨策略]" if len(entries) > 1 else "[策略]"
+        return f"{prefix} 策略上下文 {strategies}"
+    if scopes <= {"ledger"}:
+        prefix = "[跨账本]" if len(entries) > 1 else "[账本]"
+        return f"{prefix} 账本 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
+    if scopes <= {"ledger_config"}:
+        prefix = "[跨账本]" if len(entries) > 1 else "[账本]"
+        return f"{prefix} 账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
+    if scopes <= {"context"}:
+        return "[共享]"
+    return "[合并] " + "；".join(_audit_source_label(entry) for entry in entries)
+
+
+def _audit_grouped_values(field_name: str, values: list[dict[str, Any]]) -> list[tuple[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for entry in values:
+        if not isinstance(entry, dict):
+            continue
+        display_value = _display_field_value(field_name, entry.get("value"))
+        key = _audit_display_key(display_value)
+        bucket = groups.setdefault(key, {"value": display_value, "entries": []})
+        bucket["entries"].append(entry)
+    return [
+        (_audit_source_group_label(bucket["entries"]), bucket["value"])
+        for bucket in groups.values()
+    ]
+
+
+def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) -> None:
+    before_lines = _audit_text(before).splitlines() or [""]
+    after_lines = _audit_text(after).splitlines() or [""]
+    if len(before_lines) == 1 and len(after_lines) == 1:
+        for line in render_key_value_rows(((label, f"{before_lines[0]} -> {after_lines[0]}"),), indent=prefix):
+            click.echo(line)
+        return
+    click.echo(f"{prefix}{label}:")
+    click.echo(f"{prefix}  before =")
+    for line in before_lines:
+        click.echo(f"{prefix}    {line}")
+    click.echo(f"{prefix}  after =")
+    for line in after_lines:
+        click.echo(f"{prefix}    {line}")
 
 
 def _audit_field_label(qualified_name: str) -> str:
@@ -2123,25 +2219,8 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
             click.echo("    （当前无值）")
             continue
         field_name = str(record.get("field") or "")
-        scopes = {e.get("scope") for e in values if isinstance(e, dict)}
-        display_vals = {str(_display_field_value(field_name, e.get("value"))) for e in values if isinstance(e, dict)}
-        if len(display_vals) == 1:
-            value = next(iter(display_vals))
-            if scopes == {"strategy_config"}:
-                scope_label = "[跨策略]"
-            elif scopes <= {"ledger", "ledger_config", "strategy_config"}:
-                scope_label = "[跨账本]"
-            else:
-                scope_label = "[共享]"
-            _print_audit_value("    ", scope_label, value)
-        else:
-            for entry in values:
-                if isinstance(entry, dict):
-                    _print_audit_value(
-                        "    ",
-                        _audit_source_label(entry),
-                        _display_field_value(field_name, entry.get("value")),
-                    )
+        for label, value in _audit_grouped_values(field_name, values):
+            _print_audit_value("    ", label, value)
         
 
 def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
@@ -2149,13 +2228,25 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
     if not changes:
         click.echo("  （无变化）")
         return
+    by_field: dict[str, list[dict[str, Any]]] = {}
     for change in changes:
-        field = _audit_field_label(str(change.get("field") or ""))
-        source = _audit_source_label(change)
-        click.echo(f"  {field}:")
-        click.echo(f"    来源 = {source}")
-        _print_audit_value("    ", "修改前", _display_field_value(str(change.get("field") or ""), change.get("before")))
-        _print_audit_value("    ", "修改后", _display_field_value(str(change.get("field") or ""), change.get("after")))
+        by_field.setdefault(str(change.get("field") or ""), []).append(change)
+    for field_name, field_changes in by_field.items():
+        click.echo(f"  {_audit_field_label(field_name)}:")
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for change in field_changes:
+            before = _display_field_value(field_name, change.get("before"))
+            after = _display_field_value(field_name, change.get("after"))
+            key = (_audit_display_key(before), _audit_display_key(after))
+            bucket = grouped.setdefault(key, {"before": before, "after": after, "entries": []})
+            bucket["entries"].append(change)
+        for bucket in grouped.values():
+            _print_audit_diff_value(
+                "    ",
+                _audit_source_group_label(bucket["entries"]),
+                bucket["before"],
+                bucket["after"],
+            )
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
@@ -2163,12 +2254,17 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
         return
-    for ledger in ledgers:
-        strategies = ", ".join(ledger.get("strategies") or []) or "无"
-        click.echo(f"  账本 {ledger.get('ledger') or '?'}")
-        click.echo(f"    绑定策略 = {strategies}")
-        click.echo(f"    现金池 = {ledger.get('cash_pool') or '?'}")
-        _print_audit_value("    ", "现金池余额", ledger.get("cash"))
+    rows = [
+        (
+            ledger.get("ledger") or "?",
+            ledger.get("cash_pool") or "?",
+            ", ".join(ledger.get("strategies") or []) or "无",
+            _audit_text(ledger.get("cash")).replace("\n", " "),
+        )
+        for ledger in ledgers
+    ]
+    for line in render_table(("ledger", "cash pool", "strategies", "cash"), rows, indent="  ", max_widths=(32, 32, 36, 24)):
+        click.echo(line)
 
 
 def _unchanged_output_records(
@@ -2183,11 +2279,15 @@ def _print_strategy_context(strategies: list[dict[str, Any]]) -> None:
     if not strategies:
         click.echo("  （此 flow 尚未关联策略）")
         return
-    for strategy in strategies:
-        alias = str(strategy.get("strategy") or "?")
-        ledgers = ", ".join(strategy.get("ledgers") or []) or "无"
-        click.echo(f"  策略 {alias}")
-        click.echo(f"    关联账本 = {ledgers}")
+    rows = [
+        (
+            str(strategy.get("strategy") or "?"),
+            ", ".join(strategy.get("ledgers") or []) or "无",
+        )
+        for strategy in strategies
+    ]
+    for line in render_table(("strategy", "ledgers"), rows, indent="  ", max_widths=(24, 52)):
+        click.echo(line)
 
 
 def _print_event_payloads(payloads: list[dict[str, Any]]) -> None:
@@ -2207,17 +2307,18 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
     if not changes:
         click.echo("  （无变化）")
         return
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for change in changes:
-        if change.get("scope") == "strategy":
-            label = f"策略 {change.get('strategy') or '?'}"
-        else:
-            label = (
-                f"账本 {change.get('ledger') or '?'}"
-                f" | 现金池 {change.get('cash_pool') or '?'}"
-            )
-        click.echo(f"  {label}")
-        _print_audit_value("    ", "修改前", change.get("before"))
-        _print_audit_value("    ", "修改后", change.get("after"))
+        key = (_audit_display_key(change.get("before")), _audit_display_key(change.get("after")))
+        bucket = grouped.setdefault(key, {"before": change.get("before"), "after": change.get("after"), "entries": []})
+        bucket["entries"].append(change)
+    for bucket in grouped.values():
+        _print_audit_diff_value(
+            "  ",
+            _audit_source_group_label(bucket["entries"]),
+            bucket["before"],
+            bucket["after"],
+        )
 
 
 @dataclass
