@@ -1295,6 +1295,12 @@ def test_backtest_group_actions_batch_edit_describe_list_and_run_use_login_page_
             {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
         ])
 
+    @app.post("/add_factor_by_params")
+    def add_factor_by_params_for_backtest_actions():
+        payload = request.get_json() or {}
+        assert payload["page_uuid"] == "page-login-1"
+        return jsonify(success=True, factor_alias="SgCCS|N:1m")
+
     @app.post("/run_group_test_stream")
     def run_group_test_stream():
         received_payloads.append(request.get_json())
@@ -1486,6 +1492,12 @@ def test_backtest_run_renders_manifest_progress_and_verbose_events(tmp_path, mon
         return jsonify(success=True, modules=[
             {"key": "backtest", "label": "回测", "kind": "module", "application": "group_test", "has_children": True},
         ])
+
+    @app.post("/add_factor_by_params")
+    def add_factor_by_params_for_run_renderer():
+        payload = request.get_json() or {}
+        assert payload["page_uuid"] == "page-login-1"
+        return jsonify(success=True, factor_alias="SgCCS|N:1m")
 
     @app.post("/run_group_test_stream")
     def run_group_test_stream():

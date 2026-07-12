@@ -82,14 +82,22 @@ def _audit_value(
         to_selection = getattr(value, "to_product_path_selection_dict", None)
         if callable(to_selection):
             return _audit_value(to_selection(), key_labels=key_labels, _seen=seen)
-        if is_dataclass(value):
+        if is_dataclass(value) and not isinstance(value, type):
             # ``dataclasses.asdict`` deep-copies every nested member. Runtime
             # product views deliberately cannot be reconstructed by deepcopy,
             # so traverse declared fields without mutating or copying them.
-            return {
-                field.name: _audit_value(getattr(value, field.name), key_labels=key_labels, _seen=seen)
-                for field in dataclass_fields(value)
-            }
+            try:
+                declared_fields = dataclass_fields(value)
+            except (AttributeError, TypeError):
+                # Some dynamic/runtime objects expose a non-dataclass
+                # ``__dataclass_fields__`` marker.  ``is_dataclass`` accepts
+                # those, while ``fields`` correctly rejects them.
+                declared_fields = ()
+            if declared_fields:
+                return {
+                    field.name: _audit_value(getattr(value, field.name), key_labels=key_labels, _seen=seen)
+                    for field in declared_fields
+                }
         to_dict = getattr(value, "to_dict", None)
         if callable(to_dict):
             try:

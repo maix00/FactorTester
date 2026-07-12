@@ -626,9 +626,12 @@ def _register_template_factors(state, client) -> int:
     }
     registered = 0
     for alias in aliases:
-        params = _params_from_factor_alias(alias, state.factor_family)
+        # A generic backtest draft may contain several factor families and
+        # does not require the page-level ``state.factor_family`` selector.
+        factor_family = alias.split("|", 1)[0]
+        params = _params_from_factor_alias(alias, factor_family)
         data = client.add_candidate("factor", {
-            "factor_family_alias": state.factor_family,
+            "factor_family_alias": factor_family,
             "params": params,
             "page_uuid": state.page_uuid,
         })
@@ -2284,6 +2287,10 @@ def _run_backtest(
         elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
             _print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
+    # A saved template/CLI draft persists aliases and parameters, never Factor
+    # instances.  Recreate one-off Factors in the current page before every
+    # run so a new login/page_uuid cannot depend on an older page cache.
+    _register_template_factors(state, client)
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
     # Build shortAlias mapping
     import tools.cli.modules.backtest.controller as _ctrl_mod
@@ -2303,6 +2310,9 @@ def _run_backtest(
         data = event.get("data")
         if event_name == "error":
             message = data.get("error") if isinstance(data, dict) else data
+            traceback_text = str(data.get("traceback") or "").strip() if isinstance(data, dict) else ""
+            if traceback_text:
+                message = f"{message}\n{traceback_text}"
             raise click.ClickException(f"分组测试失败: {message}")
         if event_name == "step" and isinstance(data, dict):
             _handle_step_event(
