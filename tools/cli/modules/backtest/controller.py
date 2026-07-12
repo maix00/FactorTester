@@ -2063,9 +2063,11 @@ def _print_factor_grid_result_summary(state, scenarios: list[dict[str, str]], *,
 
 
 def _audit_text(value: Any) -> str:
+    value = _collapse_repeated_mapping_values(value)
     if isinstance(value, str):
         parsed = _parse_audit_literal(value)
         if parsed is not None:
+            parsed = _collapse_repeated_mapping_values(parsed)
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
@@ -2086,6 +2088,32 @@ def _parse_audit_literal(value: str) -> Any | None:
     if isinstance(parsed, (dict, list, tuple)):
         return parsed
     return None
+
+
+def _collapse_repeated_mapping_values(value: Any) -> Any:
+    if isinstance(value, dict) and len(value) > 1:
+        items = list(value.items())
+        if all(isinstance(item_value, (dict, list)) for _, item_value in items):
+            groups: dict[str, dict[str, Any]] = {}
+            for item_key, item_value in items:
+                display_value = _collapse_repeated_mapping_values(item_value)
+                group_key = _audit_display_key(display_value)
+                bucket = groups.setdefault(group_key, {"keys": [], "value": display_value})
+                bucket["keys"].append(str(item_key))
+            if len(groups) < len(items):
+                return {
+                    ", ".join(sorted(bucket["keys"])): bucket["value"]
+                    for bucket in groups.values()
+                }
+        return {
+            str(item_key): _collapse_repeated_mapping_values(item_value)
+            for item_key, item_value in items
+        }
+    if isinstance(value, list):
+        return [_collapse_repeated_mapping_values(item) for item in value]
+    if isinstance(value, tuple):
+        return [_collapse_repeated_mapping_values(item) for item in value]
+    return value
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
@@ -2132,19 +2160,15 @@ def _audit_source_group_label(entries: list[dict[str, Any]]) -> str:
     if scopes <= {"strategy_config"}:
         if strategies == "无":
             return "[共享]"
-        prefix = "[跨策略]" if len(entries) > 1 else "[策略]"
-        return f"{prefix} 策略配置 {strategies}"
+        return f"策略配置 {strategies}"
     if scopes <= {"strategy_context"}:
         if strategies == "无":
             return "[共享]"
-        prefix = "[跨策略]" if len(entries) > 1 else "[策略]"
-        return f"{prefix} 策略上下文 {strategies}"
+        return f"策略上下文 {strategies}"
     if scopes <= {"ledger"}:
-        prefix = "[跨账本]" if len(entries) > 1 else "[账本]"
-        return f"{prefix} 账本 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
+        return f"账本 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
     if scopes <= {"ledger_config"}:
-        prefix = "[跨账本]" if len(entries) > 1 else "[账本]"
-        return f"{prefix} 账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
+        return f"账本配置 {ledgers} | 现金池 {cash_pools} | 策略 {strategies}"
     if scopes <= {"context"}:
         return "[共享]"
     return "[合并] " + "；".join(_audit_source_label(entry) for entry in entries)

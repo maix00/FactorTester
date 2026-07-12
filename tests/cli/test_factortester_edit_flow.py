@@ -57,10 +57,11 @@ def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> 
     _print_audit_fields("输入字段", records)
 
     out = capsys.readouterr().out
-    assert "[跨策略] 策略配置 A1, A2" in out
+    assert "策略配置 A1, A2" in out
     assert "0 days 00:02:00" in out
-    assert "[策略] 策略配置 A3" in out
+    assert "策略配置 A3" in out
     assert "0 days 00:05:00" in out
+    assert "[跨策略]" not in out
 
 
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
@@ -88,10 +89,11 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     _print_audit_changes("账本与现金池变化", changes)
 
     out = capsys.readouterr().out
-    assert "[跨账本] 账本 L1, L2 | 现金池 P1, P2 | 策略 A1, A2" in out
+    assert "账本 L1, L2 | 现金池 P1, P2 | 策略 A1, A2" in out
     assert "100 -> 90" in out
     assert "修改前" not in out
     assert "修改后" not in out
+    assert "[跨账本]" not in out
 
 
 def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
@@ -122,10 +124,28 @@ def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     _print_audit_changes("声明输出的变化", changes)
 
     out = capsys.readouterr().out
-    assert "[跨策略] 策略上下文 A1, A2" in out
-    assert "[策略] 策略上下文 A3" in out
+    assert "策略上下文 A1, A2" in out
+    assert "策略上下文 A3" in out
     assert out.count("before =") == 2
     assert out.count("after =") == 2
+    assert "[跨策略]" not in out
+
+
+def test_step_audit_collapses_repeated_strategy_mapping_values(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [{
+        "field": "RunWindowModule.strategy_windows",
+        "scope": "context",
+        "before": None,
+        "after": {
+            "A1": {"warmup_window": "0 days 00:02:00"},
+            "A2": {"warmup_window": "0 days 00:02:00"},
+            "A3": {"warmup_window": "0 days 00:02:00"},
+        },
+    }])
+
+    out = capsys.readouterr().out
+    assert '"A1, A2, A3": {' in out
+    assert out.count('"warmup_window": "0 days 00:02:00"') == 1
 
 
 def test_step_audit_unowned_strategy_context_change_is_shared(capsys) -> None:
