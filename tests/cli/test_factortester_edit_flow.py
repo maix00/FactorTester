@@ -64,6 +64,48 @@ def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> 
     assert "[跨策略]" not in out
 
 
+def test_step_audit_fields_follow_backend_display_order(capsys) -> None:
+    records = [
+        {"field": "RunWindowModule.timezone", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "Asia/Shanghai"}]},
+        {"field": "FactorModule.factor", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "SgCCS|N:2m"}]},
+        {"field": "RunWindowModule.start_time", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "09:00"}]},
+        {"field": "RunWindowModule.end_date", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "2026-01-31"}]},
+        {"field": "RunWindowModule.start_date", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "2026-01-01"}]},
+        {"field": "RunWindowModule.end_time", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "15:00"}]},
+        {"field": "RunWindowModule.time_precision", "values": [{"scope": "strategy_config", "strategy": "A1", "value": "exact"}]},
+    ]
+
+    _print_audit_fields("输入字段", records)
+
+    out = capsys.readouterr().out
+    ordered = [
+        "start_date",
+        "factor",
+        "end_date",
+        "time_precision",
+        "start_time",
+        "end_time",
+        "timezone",
+    ]
+    positions = [out.index(name) for name in ordered]
+    assert positions == sorted(positions)
+
+
+def test_step_audit_changes_follow_backend_display_order(capsys) -> None:
+    changes = [
+        {"field": "RunWindowModule.timezone", "scope": "context", "before": None, "after": "Asia/Shanghai"},
+        {"field": "RunWindowModule.start_date", "scope": "context", "before": None, "after": "2026-01-01"},
+        {"field": "RunWindowModule.time_precision", "scope": "context", "before": None, "after": "exact"},
+    ]
+
+    _print_audit_changes("声明输出的变化", changes)
+
+    out = capsys.readouterr().out
+    ordered = ["start_date", "time_precision", "timezone"]
+    positions = [out.index(name) for name in ordered]
+    assert positions == sorted(positions)
+
+
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
     changes = [
         {

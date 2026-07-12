@@ -35,6 +35,7 @@ _short_alias_map: dict[str, str] = {}
 # labels and chip ordering available to this renderer.
 _field_labels: dict[str, str] = {}
 _field_tab_order: dict[str, int] = {}
+_field_display_order: dict[str, int] = {}
 _field_display_offsets: dict[str, int] = {}
 try:
     from tools.testers.backtest.modules.registry import _ALL_MODULE_CLASSES
@@ -42,22 +43,31 @@ try:
     for _mod in _ALL_MODULE_CLASSES:
         if hasattr(_mod, 'fields'):
             for _fn, _fd in _mod.fields.items():
+                _qualified = f"{_mod.__name__}.{_fn}"
                 _label = getattr(_fd, 'label', '') or ''
                 if _label:
                     _field_labels[_fn] = _label
+                    _field_labels[_qualified] = _label
                     _to = getattr(_fd, 'tab_order', None)
                     if _to is not None:
                         _field_tab_order[_fn] = _to
+                        _field_tab_order[_qualified] = _to
+                    _serialization = getattr(_fd, "serialization", None) or {}
+                    if isinstance(_serialization, dict) and _serialization.get("display_order") is not None:
+                        _display_order = int(_serialization["display_order"])
+                        _field_display_order[_fn] = _display_order
+                        _field_display_order[_qualified] = _display_order
                     _offset = getattr(_fd, "display_offset", 0)
                     if _offset:
                         _field_display_offsets[_fn] = int(_offset)
+                        _field_display_offsets[_qualified] = int(_offset)
 except Exception:
     pass
 
 
 def _flabel(name: str) -> str:
     """Return field name with Chinese label: 'margin_mode (保证金模式)'"""
-    cn = _field_labels.get(name)
+    cn = _field_labels.get(name) or _field_labels.get(name.rsplit(".", 1)[-1])
     return f"{name} ({cn})" if cn else name
 
 
@@ -2089,7 +2099,7 @@ def _parse_audit_literal(value: str) -> Any | None:
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
-    offset = _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0)
+    offset = _field_display_offsets.get(qualified_name, _field_display_offsets.get(qualified_name.rsplit(".", 1)[-1], 0))
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
         return value + offset
     return value
@@ -2221,6 +2231,17 @@ def _audit_field_label(qualified_name: str) -> str:
     return f"{_flabel(field_name)} [{qualified_name}]"
 
 
+def _audit_field_sort_key(qualified_name: str) -> tuple[int, int, str]:
+    field_name = qualified_name.rsplit(".", 1)[-1]
+    display_order = _field_display_order.get(qualified_name, _field_display_order.get(field_name))
+    tab_order = _field_tab_order.get(qualified_name, _field_tab_order.get(field_name))
+    return (
+        int(display_order) if display_order is not None else 1_000_000,
+        int(tab_order) if tab_order is not None else 1_000_000,
+        qualified_name,
+    )
+
+
 def _audit_source_label(entry: dict[str, Any]) -> str:
     scope = str(entry.get("scope") or "")
     if scope == "strategy_config":
@@ -2247,7 +2268,7 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
     if not records:
         click.echo("  （无声明字段）")
         return
-    for record in records:
+    for record in sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or ""))):
         click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
         values = record.get("values") or []
         if not values:
@@ -2266,7 +2287,7 @@ def _print_audit_changes(title: str, changes: list[dict[str, Any]]) -> None:
     by_field: dict[str, list[dict[str, Any]]] = {}
     for change in changes:
         by_field.setdefault(str(change.get("field") or ""), []).append(change)
-    for field_name, field_changes in by_field.items():
+    for field_name, field_changes in sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0])):
         click.echo(f"  {_audit_field_label(field_name)}:")
         grouped: dict[tuple[str, str], dict[str, Any]] = {}
         for change in field_changes:
