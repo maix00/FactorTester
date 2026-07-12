@@ -51,6 +51,10 @@ class LedgerModule(ExecutableModule):
     initial_capital_major: ClassVar[FieldRef[float]] = CashPoolModule.initial_capital_major
     base_currency: ClassVar[FieldRef[str]] = CashPoolModule.base_currency
     currency_conversion_fee_rate: ClassVar[FieldRef[float]] = CashPoolModule.currency_conversion_fee_rate
+    _fee_mode_ref: ClassVar[FieldRef[str]] = FieldRef("fee_mode", owner="FeeModule")
+    _fixed_fee_rate_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_fee_rate", owner="FeeModule")
+    _margin_mode_ref: ClassVar[FieldRef[str]] = FieldRef("margin_mode", owner="MarginModule")
+    _fixed_margin_ratio_ref: ClassVar[FieldRef[float]] = FieldRef("fixed_margin_ratio", owner="MarginModule")
 
     fields: ClassVar[dict[str, FieldDefinition]] = {}
 
@@ -71,7 +75,19 @@ class LedgerModule(ExecutableModule):
         order=10, compute=lambda state, ctx: _basic_equity(state, ctx),
     )
     apply_order_fill: ClassVar[Flow] = Flow(
-        "apply_order_fill", inputs=(MarketDataModule.current_prices, MarketDataModule.current_historical_fields), outputs=(positions, cash),
+        "apply_order_fill",
+        inputs=(
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+            TradingRuleModule.accounting_mode,
+            TradingRuleModule.cost_basis_method,
+            TradingRuleModule.use_int_position,
+            _fee_mode_ref,
+            _fixed_fee_rate_ref,
+            _margin_mode_ref,
+            _fixed_margin_ratio_ref,
+        ),
+        outputs=(positions, cash),
         phase=Phase.PER_EVENT, event_kind=EventKind.ORDER, order=10,
         description="成交落账",
         compute=lambda state, ctx: _apply_order_fill(state, ctx),

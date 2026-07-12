@@ -143,7 +143,17 @@ class MarginModule(ExecutableModule):
     )
     apply_margin_requirement_change: ClassVar[Flow] = Flow(
         "apply_margin_requirement_change",
-        inputs=(_ledger_cash_ref, _ledger_positions_ref),
+        inputs=(
+            _ledger_cash_ref,
+            _ledger_positions_ref,
+            margin_mode,
+            fixed_margin_ratio,
+            margin_call_mode,
+            liquidation_target_buffer,
+            FieldRef("current_prices", owner="MarketDataModule"),
+            FieldRef("current_market_snapshot", owner="MarketDataModule"),
+            FieldRef("current_historical_fields", owner="MarketDataModule"),
+        ),
         outputs=(margin_requirement, margin_reserved, margin_deficit, margin_excess),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.LEDGER,

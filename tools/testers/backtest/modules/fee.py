@@ -108,7 +108,13 @@ class FeeModule(ExecutableModule):
 
     resolve_fee_cost: ClassVar[Flow] = Flow(
         "resolve_fee_cost",
-        inputs=(fee_mode, fixed_fee_rate, MarketDataModule.current_prices, MarketDataModule.current_historical_fields),
+        inputs=(
+            fee_mode,
+            transaction_fee_source,
+            fixed_fee_rate,
+            MarketDataModule.current_prices,
+            MarketDataModule.current_historical_fields,
+        ),
         outputs=(),
         phase=Phase.PER_EVENT,
         event_kind=EventKind.ORDER,

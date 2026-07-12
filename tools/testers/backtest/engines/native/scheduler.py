@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
 _AUDIT_MISSING = object()
 
 
-def _audit_value(value: Any, *, _seen: set[int] | None = None) -> Any:
+def _audit_value(
+    value: Any,
+    *,
+    key_labels: Mapping[str, str] | None = None,
+    _seen: set[int] | None = None,
+) -> Any:
     """Convert a runtime value into lossless, SSE-safe audit data.
 
     The step protocol must not rely on a terminal's abbreviated ``repr``. In
@@ -39,17 +44,17 @@ def _audit_value(value: Any, *, _seen: set[int] | None = None) -> Any:
     if isinstance(value, pd.Series):
         return {
             "type": "Series",
-            "name": _audit_value(value.name),
-            "index": [_audit_value(item) for item in value.index.tolist()],
-            "values": [_audit_value(item) for item in value.tolist()],
+            "name": _audit_value(value.name, key_labels=key_labels),
+            "index": [_audit_value(item, key_labels=key_labels) for item in value.index.tolist()],
+            "values": [_audit_value(item, key_labels=key_labels) for item in value.tolist()],
         }
     if isinstance(value, pd.DataFrame):
         return {
             "type": "DataFrame",
-            "columns": [_audit_value(column) for column in value.columns.tolist()],
-            "index": [_audit_value(item) for item in value.index.tolist()],
+            "columns": [_audit_value(column, key_labels=key_labels) for column in value.columns.tolist()],
+            "index": [_audit_value(item, key_labels=key_labels) for item in value.index.tolist()],
             "rows": [
-                [_audit_value(item) for item in row]
+                [_audit_value(item, key_labels=key_labels) for item in row]
                 for row in value.itertuples(index=False, name=None)
             ],
         }
@@ -63,27 +68,32 @@ def _audit_value(value: Any, *, _seen: set[int] | None = None) -> Any:
         if isinstance(value, Enum):
             return value.value
         if isinstance(value, Mapping):
-            return {str(key): _audit_value(item, _seen=seen) for key, item in value.items()}
+            return {
+                key_labels.get(str(key), str(key)) if key_labels is not None else str(key): _audit_value(
+                    item, key_labels=key_labels, _seen=seen,
+                )
+                for key, item in value.items()
+            }
         if isinstance(value, (list, tuple, set, frozenset)):
-            return [_audit_value(item, _seen=seen) for item in value]
+            return [_audit_value(item, key_labels=key_labels, _seen=seen) for item in value]
         to_audit_dict = getattr(value, "to_audit_dict", None)
         if callable(to_audit_dict):
-            return _audit_value(to_audit_dict(), _seen=seen)
+            return _audit_value(to_audit_dict(), key_labels=key_labels, _seen=seen)
         to_selection = getattr(value, "to_product_path_selection_dict", None)
         if callable(to_selection):
-            return _audit_value(to_selection(), _seen=seen)
+            return _audit_value(to_selection(), key_labels=key_labels, _seen=seen)
         if is_dataclass(value):
             # ``dataclasses.asdict`` deep-copies every nested member. Runtime
             # product views deliberately cannot be reconstructed by deepcopy,
             # so traverse declared fields without mutating or copying them.
             return {
-                field.name: _audit_value(getattr(value, field.name), _seen=seen)
+                field.name: _audit_value(getattr(value, field.name), key_labels=key_labels, _seen=seen)
                 for field in dataclass_fields(value)
             }
         to_dict = getattr(value, "to_dict", None)
         if callable(to_dict):
             try:
-                return _audit_value(to_dict(), _seen=seen)
+                return _audit_value(to_dict(), key_labels=key_labels, _seen=seen)
             except (TypeError, ValueError):
                 pass
         return {"type": type(value).__name__, "repr": str(value)}
@@ -665,17 +675,18 @@ def _audit_field_values(
     ledger_snapshots: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
+    strategy_key_labels = {str(strategy): _strategy_alias(state, strategy) for strategy in strategies}
     common = ctx._values.get(ref, _AUDIT_MISSING)
     if common is not _AUDIT_MISSING:
-        values.append({"scope": "context", "value": _audit_value(common)})
+        values.append({"scope": "context", "value": _audit_value(common, key_labels=strategy_key_labels)})
     for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
         alias = _strategy_alias(state, strategy)
         config = state.config_for(strategy)
         if ref in config.field_values:
-            values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref])})
+            values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref], key_labels=strategy_key_labels)})
         contextual = ctx._values_by_strategy.get(ref, {}).get(strategy, _AUDIT_MISSING)
         if contextual is not _AUDIT_MISSING:
-            values.append({"scope": "strategy_context", "strategy": alias, "value": _audit_value(contextual)})
+            values.append({"scope": "strategy_context", "strategy": alias, "value": _audit_value(contextual, key_labels=strategy_key_labels)})
     for ledger in ledger_snapshots:
         value = ledger["fields"].get(ref.qualified_name, _AUDIT_MISSING)
         if value is not _AUDIT_MISSING:
