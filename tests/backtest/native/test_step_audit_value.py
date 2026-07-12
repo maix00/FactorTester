@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from tools.testers.backtest.engines.native.scheduler import (
+    _audit_contract_metadata_value,
     _audit_ledger_changes,
     _audit_ledger_topology,
     _audit_value,
@@ -155,6 +156,42 @@ def test_step_audit_summarizes_long_mapping_lists() -> None:
 
 def test_step_audit_keeps_moderate_scalar_lists_complete() -> None:
     assert _audit_value([f"P{index}" for index in range(23)]) == [f"P{index}" for index in range(23)]
+
+
+def test_step_audit_contract_metadata_keeps_every_contract_as_compact_rows() -> None:
+    metadata = [
+        {
+            "product": "AP.CZC",
+            "contract": "AP605.CZC",
+            "start": "2025-12-03",
+            "end": "2026-04-10",
+            "uid": "CZCE|F|AP|2605",
+            "extra_field": "not printed",
+        },
+        {
+            "product": "EC.INE",
+            "contract_product": "INE|F|EC|2602",
+            "start": "2025-11-13",
+            "end": "2026-01-09",
+            "delivery_date": "2026-02-23",
+        },
+        {
+            "product": "EC.INE",
+            "uid": "INE|F|EC|2604",
+            "start": "2026-01-12",
+            "end": "2026-03-27",
+        },
+    ]
+
+    assert _audit_contract_metadata_value(metadata) == {
+        "type": "ContractMetadataTable",
+        "columns": ["product", "contract", "start", "end"],
+        "rows": [
+            {"product": "AP.CZC", "contract": "AP605.CZC", "start": "2025-12-03", "end": "2026-04-10"},
+            {"product": "EC.INE", "contract": "INE|F|EC|2602", "start": "2025-11-13", "end": "2026-01-09"},
+            {"product": "EC.INE", "contract": "INE|F|EC|2604", "start": "2026-01-12", "end": "2026-03-27"},
+        ],
+    }
 
 
 def test_step_ledger_topology_omits_unrelated_full_state_but_keeps_identity_and_cash() -> None:

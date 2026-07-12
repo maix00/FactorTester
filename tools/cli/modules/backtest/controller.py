@@ -2077,16 +2077,53 @@ def _audit_text(value: Any) -> str:
         parsed = _parse_audit_literal(value)
         if parsed is not None:
             parsed = _compact_audit_display_aliases(parsed)
+            special_text = _audit_special_text(parsed)
+            if special_text is not None:
+                return special_text
             pandas_text = _audit_pandas_text(parsed)
             if pandas_text is not None:
                 return pandas_text
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
     value = _compact_audit_display_aliases(value)
+    special_text = _audit_special_text(value)
+    if special_text is not None:
+        return special_text
     pandas_text = _audit_pandas_text(value)
     if pandas_text is not None:
         return pandas_text
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+
+def _audit_special_text(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") == "ContractMetadataTable":
+        return _audit_contract_metadata_text(value)
+    return None
+
+
+def _audit_contract_metadata_text(value: dict[str, Any]) -> str:
+    rows = value.get("rows")
+    if not isinstance(rows, list):
+        return "contract_metadata: (no rows)"
+    table_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        table_rows.append((
+            row.get("product") or "",
+            row.get("contract") or "",
+            row.get("start") or "",
+            row.get("end") or "",
+        ))
+    if not table_rows:
+        return "contract_metadata: (empty)"
+    return "\n".join(render_table(
+        ("原产品", "新合约", "起始时间", "终止时间"),
+        table_rows,
+        max_widths=(18, 24, 16, 16),
+    ))
 
 
 def _audit_pandas_text(value: Any) -> str | None:

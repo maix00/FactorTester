@@ -30,6 +30,7 @@ _AUDIT_MAX_FULL_SEQUENCE_ITEMS = 100
 _AUDIT_EDGE_SAMPLE_ROWS = 3
 _AUDIT_EDGE_SAMPLE_COLUMNS = 5
 _AUDIT_EDGE_SAMPLE_ITEMS = 3
+_CONTRACT_METADATA_FIELD = "TermStructureExpandModule.contract_metadata"
 
 
 def _audit_index_bounds(index: Any, *, key_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -132,6 +133,40 @@ def _audit_sequence_sample(
         "head": [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values[:items]],
         "tail": [_audit_value(item, key_labels=key_labels, _seen=seen) for item in values[-items:]],
     }
+
+
+def _audit_contract_metadata_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        return _audit_value(value)
+    rows: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            rows.append({
+                "product": "",
+                "contract": _audit_value(item),
+                "start": "",
+                "end": "",
+            })
+            continue
+        rows.append({
+            "product": _audit_value(item.get("product") or ""),
+            "contract": _audit_value(item.get("contract") or item.get("contract_product") or item.get("uid") or ""),
+            "start": _audit_value(item.get("start") or ""),
+            "end": _audit_value(item.get("end") or ""),
+        })
+    return {
+        "type": "ContractMetadataTable",
+        "columns": ["product", "contract", "start", "end"],
+        "rows": rows,
+    }
+
+
+def _audit_field_value(ref: "FieldRef", value: Any, *, key_labels: Mapping[str, str] | None = None) -> Any:
+    if ref.qualified_name == _CONTRACT_METADATA_FIELD:
+        return _audit_contract_metadata_value(value)
+    return _audit_value(value, key_labels=key_labels)
 
 
 def _audit_value(
@@ -844,15 +879,23 @@ def _audit_field_values(
     strategy_key_labels = {str(strategy): _strategy_alias(state, strategy) for strategy in strategies}
     common = ctx._values.get(ref, _AUDIT_MISSING)
     if common is not _AUDIT_MISSING:
-        values.append({"scope": "context", "value": _audit_value(common, key_labels=strategy_key_labels)})
+        values.append({"scope": "context", "value": _audit_field_value(ref, common, key_labels=strategy_key_labels)})
     for strategy in sorted(strategies, key=lambda item: _strategy_alias(state, item)):
         alias = _strategy_alias(state, strategy)
         config = state.config_for(strategy)
         if include_strategy_config and ref in config.field_values:
-            values.append({"scope": "strategy_config", "strategy": alias, "value": _audit_value(config.field_values[ref], key_labels=strategy_key_labels)})
+            values.append({
+                "scope": "strategy_config",
+                "strategy": alias,
+                "value": _audit_field_value(ref, config.field_values[ref], key_labels=strategy_key_labels),
+            })
         contextual = ctx._values_by_strategy.get(ref, {}).get(strategy, _AUDIT_MISSING)
         if contextual is not _AUDIT_MISSING:
-            values.append({"scope": "strategy_context", "strategy": alias, "value": _audit_value(contextual, key_labels=strategy_key_labels)})
+            values.append({
+                "scope": "strategy_context",
+                "strategy": alias,
+                "value": _audit_field_value(ref, contextual, key_labels=strategy_key_labels),
+            })
     for ledger in ledger_snapshots:
         value = ledger["fields"].get(ref.qualified_name, _AUDIT_MISSING)
         if value is not _AUDIT_MISSING:

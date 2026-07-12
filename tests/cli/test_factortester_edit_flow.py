@@ -262,6 +262,27 @@ def test_step_audit_formats_wide_dataframe_columns_as_counts() -> None:
     assert "sampled" not in text
 
 
+def test_step_audit_formats_contract_metadata_as_compact_table() -> None:
+    text = _audit_text({
+        "type": "ContractMetadataTable",
+        "columns": ["product", "contract", "start", "end"],
+        "rows": [
+            {"product": "AP.CZC", "contract": "AP605.CZC", "start": "2025-12-03", "end": "2026-04-10"},
+            {"product": "EC.INE", "contract": "INE|F|EC|2602", "start": "2025-11-13", "end": "2026-01-09"},
+        ],
+    })
+
+    assert "原产品" in text
+    assert "新合约" in text
+    assert "起始时间" in text
+    assert "终止时间" in text
+    assert "AP.CZC" in text
+    assert "AP605.CZC" in text
+    assert "INE|F|EC|2602" in text
+    assert '"rows"' not in text
+    assert "contract_product" not in text
+
+
 def test_step_audit_formats_series_payloads_as_tables() -> None:
     text = _audit_text({
         "type": "Series",
