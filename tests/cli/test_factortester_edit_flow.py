@@ -21,6 +21,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.controller import (
     _StepNavigator,
     _audit_text,
+    _handle_step_event,
     _print_audit_changes,
     _print_audit_fields,
     _print_ledger_snapshot,
@@ -329,6 +330,43 @@ def test_step_navigation_rejects_unknown_or_invalid_commands() -> None:
     assert _set_step_navigation(navigator, "until nope")
     assert _set_step_navigation(navigator, "next")
     assert _set_step_navigation(navigator, "") is None
+
+
+def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
+    posted: list[tuple[str, dict[str, object]]] = []
+
+    class _Session:
+        def post(self, path: str, payload: dict[str, object]) -> None:
+            posted.append((path, payload))
+
+    client = SimpleNamespace(session=_Session())
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    _handle_step_event(
+        {
+            "phase": "step",
+            "flow_phase": "pre_replay",
+            "flow_id": "resolve_run_window",
+            "flow_name": "解析运行时间窗口",
+            "description": "",
+            "strategies": [],
+            "ledgers_before": [],
+            "inputs": [],
+            "outputs": [],
+            "output_changes": [],
+            "event_payload_changes": [],
+            "ledger_changes": [],
+        },
+        client,
+        "run-token",
+        _StepNavigator(),
+    )
+
+    out = capsys.readouterr().out
+    assert "\x1b[31mflow: PRE_REPLAY" in out
+    assert "\x1b[0m" in out
+    assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]
+
 
 def test_run_payload_uses_backend_group_contract_names() -> None:
     assert _serialize_group_for_run({

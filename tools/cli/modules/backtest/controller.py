@@ -2623,7 +2623,7 @@ def _handle_step_event(
     flow_id = str(data.get("flow_id") or "")
     phase_text = f"{flow_phase.upper()} ({phase_label(flow_phase)})"
     click.echo("")
-    click.echo(f"flow: {phase_text} · {flow_id} ({flow_name})")
+    click.secho(f"flow: {phase_text} · {flow_id} ({flow_name})", fg="red", color=True)
     description = str(data.get("description") or "")
     if description:
         click.echo(f"说明: {description}")
