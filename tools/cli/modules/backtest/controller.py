@@ -2076,8 +2076,10 @@ def _audit_text(value: Any) -> str:
     if isinstance(value, str):
         parsed = _parse_audit_literal(value)
         if parsed is not None:
+            parsed = _compact_audit_display_aliases(parsed)
             return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         return value
+    value = _compact_audit_display_aliases(value)
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
@@ -2096,6 +2098,57 @@ def _parse_audit_literal(value: str) -> Any | None:
     if isinstance(parsed, (dict, list, tuple)):
         return parsed
     return None
+
+
+def _compact_audit_display_aliases(value: Any) -> Any:
+    if isinstance(value, dict):
+        compacted = {
+            str(key): _compact_audit_display_aliases(item)
+            for key, item in value.items()
+        }
+        if _looks_like_product_path_selection(compacted):
+            return _compact_product_path_selection_for_audit(compacted)
+        return compacted
+    if isinstance(value, list):
+        return [_compact_audit_display_aliases(item) for item in value]
+    if isinstance(value, tuple):
+        return [_compact_audit_display_aliases(item) for item in value]
+    return value
+
+
+def _looks_like_product_path_selection(value: dict[str, Any]) -> bool:
+    return bool(
+        "product_path_selection_id" in value
+        or ("id" in value and ("selected_paths" in value or "paths" in value))
+        or ("selected_paths" in value and "paths" in value)
+        or ("product_group_template_id" in value and "path_id" in value)
+    )
+
+
+def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    selection_id = value.get("product_path_selection_id") or value.get("selection_id") or value.get("id")
+    if selection_id not in (None, ""):
+        compacted["product_path_selection_id"] = selection_id
+    label = value.get("label") or value.get("product_group")
+    if label not in (None, ""):
+        compacted["label"] = label
+    product_group = value.get("product_group")
+    if product_group not in (None, "", label):
+        compacted["product_group"] = product_group
+    template_id = value.get("product_group_template_id") or value.get("path_id")
+    if template_id not in (None, ""):
+        compacted["product_group_template_id"] = template_id
+    paths = value.get("paths") if "paths" in value else value.get("selected_paths")
+    if paths not in (None, ""):
+        compacted["paths"] = paths
+    source_type = value.get("source_type")
+    if source_type not in (None, ""):
+        compacted["source_type"] = source_type
+    source_key = value.get("source_key")
+    if source_key not in (None, "", selection_id, template_id):
+        compacted["source_key"] = source_key
+    return compacted
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
@@ -2130,8 +2183,8 @@ def _audit_normalized_value(value: Any) -> Any:
     if isinstance(value, str):
         parsed = _parse_audit_literal(value)
         if parsed is not None:
-            return parsed
-    return value
+            return _compact_audit_display_aliases(parsed)
+    return _compact_audit_display_aliases(value)
 
 
 def _audit_repeated_owner_groups(value: Any) -> list[tuple[str, Any]]:
@@ -2263,10 +2316,10 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
     return "共享上下文"
 
 
-def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
+def _print_audit_fields(title: str, records: list[dict[str, Any]], *, empty_message: str = "（无字段）") -> None:
     click.echo(title)
     if not records:
-        click.echo("  （无声明字段）")
+        click.echo(f"  {empty_message}")
         return
     for record in sorted(records, key=lambda item: _audit_field_sort_key(str(item.get("field") or ""))):
         click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
@@ -2467,11 +2520,24 @@ def _handle_step_event(
     _print_strategy_context(strategies)
     _print_ledger_snapshot(list(data.get("ledgers_before") or []))
     _print_event_payloads(list(data.get("event_payloads") or []))
-    _print_audit_fields("输入字段", list(data.get("inputs") or []))
-    output_changes = list(data.get("output_changes") or [])
     _print_audit_fields(
-        "输出字段（未变化）",
-        _unchanged_output_records(list(data.get("outputs") or []), output_changes),
+        "输入字段",
+        list(data.get("inputs") or []),
+        empty_message="（此 flow 未声明输入字段）",
+    )
+    output_changes = list(data.get("output_changes") or [])
+    outputs = list(data.get("outputs") or [])
+    unchanged_outputs = _unchanged_output_records(outputs, output_changes)
+    if not outputs:
+        unchanged_output_message = "（此 flow 未声明输出字段）"
+    elif output_changes:
+        unchanged_output_message = "（所有声明输出字段均发生变化，见下方“声明输出的变化”）"
+    else:
+        unchanged_output_message = "（没有未变化的声明输出字段）"
+    _print_audit_fields(
+        "声明输出字段（未变化）",
+        unchanged_outputs,
+        empty_message=unchanged_output_message,
     )
     _print_audit_changes("声明输出的变化", output_changes)
     _print_event_payload_changes(list(data.get("event_payload_changes") or []))

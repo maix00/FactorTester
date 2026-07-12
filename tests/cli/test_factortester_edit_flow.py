@@ -208,9 +208,23 @@ def test_step_audit_formats_python_literal_strings_as_json() -> None:
     text = _audit_text("{'id': 'pg_bc7963105fe8', 'selected_paths': ['Product/Futures/CNFutures/日夜盘/日盘']}")
 
     assert text.startswith("{\n")
-    assert '"id": "pg_bc7963105fe8"' in text
-    assert '"selected_paths": [' in text
+    assert '"product_path_selection_id": "pg_bc7963105fe8"' in text
+    assert '"paths": [' in text
+    assert '"selected_paths"' not in text
+    assert '"id"' not in text
     assert "'id'" not in text
+
+
+def test_step_audit_empty_message_is_explicit(capsys) -> None:
+    _print_audit_fields(
+        "声明输出字段（未变化）",
+        [],
+        empty_message="（所有声明输出字段均发生变化，见下方“声明输出的变化”）",
+    )
+
+    out = capsys.readouterr().out
+    assert "所有声明输出字段均发生变化" in out
+    assert "无声明字段" not in out
 
 
 def test_step_active_context_renders_compact_one_line_rows(capsys) -> None:
