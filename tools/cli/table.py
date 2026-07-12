@@ -28,7 +28,7 @@ def pad_display(value: object, width: int, *, align: str = "left") -> str:
     """Pad one cell with Rich's Unicode-aware width handling."""
     text = str(value)
     if align == "right":
-        return set_cell_size(text, width, align="right")
+        return " " * max(width - cell_len(text), 0) + set_cell_size(text, width)
     return set_cell_size(text, width)
 
 

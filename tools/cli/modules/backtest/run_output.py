@@ -275,14 +275,7 @@ class BacktestRunRenderer:
 
     def _update_progress_line(self, key: str, line: str) -> None:
         self._progress_lines[key] = line
-        # Only log "total" progress line, bucketed to avoid flooding
-        if key == "total":
-            percent = self._overall_percent()
-            bucket = int(percent // 5)
-            previous = self._last_log_progress_bucket.get("total")
-            if previous == bucket:
-                return
-            self._last_log_progress_bucket["total"] = bucket
+        if not _is_tty() and self._should_log_progress(key):
             click.echo(line)
 
     def _update_activity_line(self, line: str) -> None:

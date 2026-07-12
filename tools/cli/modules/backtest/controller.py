@@ -2107,6 +2107,27 @@ def _audit_source_label(entry: dict[str, Any]) -> str:
     return "共享上下文"
 
 
+def _coalesce_strategy_values(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group equal per-strategy values without hiding any differing value."""
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    passthrough: list[dict[str, Any]] = []
+    for entry in values:
+        scope = str(entry.get("scope") or "")
+        if scope not in {"strategy_config", "strategy_context"}:
+            passthrough.append(entry)
+            continue
+        key = (scope, json.dumps(entry.get("value"), ensure_ascii=False, sort_keys=True, default=str))
+        groups.setdefault(key, []).append(entry)
+
+    result = list(passthrough)
+    for entries in groups.values():
+        representative = dict(entries[0])
+        aliases = [str(item.get("strategy") or "?") for item in entries]
+        representative["strategy"] = ", ".join(aliases)
+        result.append(representative)
+    return result
+
+
 def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
     click.echo(title)
     if not records:
@@ -2118,7 +2139,7 @@ def _print_audit_fields(title: str, records: list[dict[str, Any]]) -> None:
         if not values:
             click.echo("    （当前无值）")
             continue
-        for entry in values:
+        for entry in _coalesce_strategy_values(values):
             if isinstance(entry, dict):
                 _print_audit_value(
                     "    ",
@@ -2223,66 +2244,6 @@ def _handle_step_event(
         client.session.post("/step_continue", {"run_token": run_token})
     except Exception as exc:
         raise click.ClickException(f"无法继续单步回测: {exc}") from exc
-
-def _print_strategy_summary(state) -> None:
-    """Print a comparison table of all strategies at startup."""
-    from tools.cli.table import render_table, display_width
-    
-    groups = state.backtest_groups
-    if not groups:
-        return
-    # Build shortAlias mapping
-    import tools.cli.modules.backtest.controller as _ctrl_mod
-    _ctrl_mod._short_alias_map.clear()
-    for _g in groups:
-        _gid = str(_g.get("id", "") or "")
-        _sa = str(_g.get("shortAlias", "") or "")
-        if _gid and _sa:
-            _ctrl_mod._short_alias_map[_gid] = _sa
-    
-    # Collect all configs: local-settings + per-strategy
-    local_settings = dict(state.backtest_local_settings or {})
-    per_strategy_configs: dict[str, dict[str, str]] = {}
-    all_field_keys: set[str] = set(local_settings.keys())
-    for g in state.backtest_groups:
-        gid = str(g.get("id", "") or "")
-        sc = {}
-        for fld in ["factor", "split_count", "group_index", "liquidity_mode"]:
-            val = g.get(fld)
-            if val is not None:
-                sc[fld] = str(val)
-        if sc:
-            per_strategy_configs[gid] = sc
-            all_field_keys.update(sc.keys())
-    # Compute unified key width for = alignment across all sections
-    _all_keys: list[str] = list(local_settings.keys())
-    if per_strategy_configs:
-        shared: dict[str, str] = {}
-        for fk in sorted(all_field_keys):
-            vals = set()
-            for _gid, sc in per_strategy_configs.items():
-                v = sc.get(fk)
-                if v is not None:
-                    vals.add(v)
-            if len(vals) == 1:
-                shared[fk] = vals.pop()
-        _all_keys.extend(shared.keys())
-    else:
-        shared = {}
-    _kw = max((len(k) for k in _all_keys), default=0)
-    if local_settings:
-        click.echo("⚙️  共享配置 (local-settings):")
-        for k in sorted(local_settings):
-            click.echo(f"    {k.ljust(_kw)} = {local_settings[k]}")
-        click.echo("")
-    if shared:
-        click.echo("⚙️  共享策略配置:")
-        for k in sorted(shared):
-            click.echo(f"    {k.ljust(_kw)} = {shared[k]}")
-        click.echo("")
-    
-
-
 
 def _run_backtest(
     state,
