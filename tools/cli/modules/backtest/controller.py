@@ -33,6 +33,7 @@ from tools.cli.modules.backtest.audit_formatters import strategy as strategy_for
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
 from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
+from tools.cli.modules.backtest import step_runtime
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
@@ -2382,14 +2383,6 @@ def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
         click.echo(line)
 
 
-def _continue_step(client, run_token: str, navigator: step_display_formatter.StepNavigator | None = None) -> None:
-    payload = step_display_formatter.step_continue_payload(run_token, navigator)
-    try:
-        client.session.post("/step_continue", payload)
-    except Exception as exc:
-        raise click.ClickException(f"无法继续单步回测: {exc}") from exc
-
-
 def _handle_step_event(
     data: dict[str, Any],
     client,
@@ -2400,7 +2393,7 @@ def _handle_step_event(
     if str(data.get("phase") or "") != "step":
         return
     if not navigator.should_display(data.get("timestamp")):
-        _continue_step(client, run_token, navigator)
+        step_runtime.continue_step(client, run_token, navigator)
         return
 
     flow_phase = str(data.get("flow_phase") or "")
@@ -2443,13 +2436,8 @@ def _handle_step_event(
         _print_contract_audit(list(data.get("input_contract_violations") or []))
 
     click.echo("")
-    while True:
-        click.echo("命令: Enter=下一步 | until <时刻>=快进到时刻 | end=快进到底")
-        error = step_display_formatter.set_step_navigation(navigator, input("step> "))
-        if error is None:
-            break
-        click.echo(f"  {error}")
-    _continue_step(client, run_token, navigator)
+    step_runtime.prompt_step_navigation(navigator)
+    step_runtime.continue_step(client, run_token, navigator)
 
 def _run_backtest(
     state,
