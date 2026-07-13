@@ -17,7 +17,7 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.display import print_backtest_welcome
 from tools.cli.core.errors import friendly_errors
-from tools.cli.field_help import field_flag, field_type_label, render_settings_help
+from tools.cli.field_help import render_settings_help
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
@@ -936,72 +936,15 @@ def _print_group_batch_help() -> None:
 
 
 def _print_add_group_field_help(state, option: str) -> None:
-    field_key = _field_key_for_option(option)
+    field_key = config_view_formatter.group_field_key_for_option(option)
     if field_key is None:
         raise click.ClickException(f"无法识别 group 字段: {option}")
     _, store = _stores_for_backtest(state)
-    meta = store.field(field_key)
-    if meta:
-        click.echo(f"{option} 字段说明")
-        click.echo(f"  后端字段: {field_key}")
-        click.echo(f"  中文名: {meta.get('label') or field_key}")
-        click.echo(f"  类型: {field_type_label(meta)}")
-        click.echo(f"  默认值: {meta.get('value')!r}")
-        click.echo(f"  可见: {'是' if store.is_visible(field_key) else '否'}")
-        click.echo(f"  可编辑: {'是' if store.is_editable(field_key) else '否'}")
-        if meta.get("options"):
-            options = ", ".join(
-                f"{item.get('value')}({item.get('label') or item.get('value')})"
-                for item in meta["options"]
-                if isinstance(item, dict)
-            )
-            click.echo(f"  允许值: {options}")
-        if meta.get("help_text"):
-            click.echo(f"  说明: {meta['help_text']}")
-        click.echo(f"  写法: {field_flag(field_key)} VALUE")
-        return
-    local = _ADD_GROUP_LOCAL_FIELD_HELP.get(field_key)
-    if local is None:
+    lines = config_view_formatter.add_group_field_help_lines(option, field_key, store)
+    if lines is None:
         raise click.ClickException(f"字段尚未由后端注册: {field_key}")
-    click.echo(f"{option} 字段说明")
-    click.echo(f"  字段: {field_key}")
-    click.echo(f"  中文名: {local['label']}")
-    click.echo(f"  类型: {local['type']}")
-    click.echo(f"  说明: {local['help']}")
-    click.echo(f"  写法: {option} {local['metavar']}")
-
-
-def _field_key_for_option(option: str) -> str | None:
-    normalized = option.lstrip("-").replace("-", "_")
-    aliases = {
-        "name": "group_name",
-        "group_name": "group_name",
-        "factor_family": "factor_family",
-        "split_count": "split_count",
-        "group_index": "group_index",
-        "product_group": "product_path_selection",
-        "product_path": "product_path_selection",
-        "product_path_candidates": "product_path_candidates",
-        "factor": "factor",
-        "factor_candidates": "factor_candidates",
-    }
-    return aliases.get(normalized, normalized or None)
-
-
-_ADD_GROUP_LOCAL_FIELD_HELP = {
-    "group_name": {
-        "label": "分组名称",
-        "type": "str",
-        "metavar": "NAME",
-        "help": "当前新增分组在回测草稿中的显示名称；不参与后端因子或交易语义。",
-    },
-    "factor_family": {
-        "label": "因子家族",
-        "type": "str",
-        "metavar": "ALIAS",
-        "help": "仅用于本次分组中解析或现场创建因子；backtest 模块本身不绑定因子家族。",
-    },
-}
+    for line in lines:
+        click.echo(line)
 
 
 def _parse_group_add_selectors(args: tuple[str, ...], *, batch: bool) -> list[AddGroupSelectors]:

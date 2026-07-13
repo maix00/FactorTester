@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.cli.field_help import field_flag
+from tools.cli.field_help import field_flag, field_type_label
 from tools.cli.modules.backtest.shared.selectors import selection_label
 from tools.cli.table import render_table
 
@@ -48,6 +48,21 @@ LEDGER_CONFIG_HELP_LINES = (
     "  这些字段属于 ledger-owned 配置，会传给后端 LedgerConfig；不是普通 per-strategy 字段。",
     "  其他字段可用 --field value 或 field=value 透传，但后端会按 LedgerConfig 校验/忽略未知 metadata。",
 )
+
+ADD_GROUP_LOCAL_FIELD_HELP = {
+    "group_name": {
+        "label": "分组名称",
+        "type": "str",
+        "metavar": "NAME",
+        "help": "当前新增分组在回测草稿中的显示名称；不参与后端因子或交易语义。",
+    },
+    "factor_family": {
+        "label": "因子家族",
+        "type": "str",
+        "metavar": "ALIAS",
+        "help": "仅用于本次分组中解析或现场创建因子；backtest 模块本身不绑定因子家族。",
+    },
+}
 
 RESULT_HINT_LINES = (
     "结果查看:",
@@ -106,6 +121,59 @@ def local_settings_lines(local_settings: dict[str, Any], store) -> list[str]:
         lines.append("关键有效字段")
         lines.extend(render_table(("字段", "名称", "默认值", "有效值"), rows, indent="  ", max_widths=(30, 18, 24, 34)))
     return lines
+
+
+def group_field_key_for_option(option: str) -> str | None:
+    normalized = option.lstrip("-").replace("-", "_")
+    aliases = {
+        "name": "group_name",
+        "group_name": "group_name",
+        "factor_family": "factor_family",
+        "split_count": "split_count",
+        "group_index": "group_index",
+        "product_group": "product_path_selection",
+        "product_path": "product_path_selection",
+        "product_path_candidates": "product_path_candidates",
+        "factor": "factor",
+        "factor_candidates": "factor_candidates",
+    }
+    return aliases.get(normalized, normalized or None)
+
+
+def add_group_field_help_lines(option: str, field_key: str, store) -> list[str] | None:
+    meta = store.field(field_key)
+    if meta:
+        lines = [
+            f"{option} 字段说明",
+            f"  后端字段: {field_key}",
+            f"  中文名: {meta.get('label') or field_key}",
+            f"  类型: {field_type_label(meta)}",
+            f"  默认值: {meta.get('value')!r}",
+            f"  可见: {'是' if store.is_visible(field_key) else '否'}",
+            f"  可编辑: {'是' if store.is_editable(field_key) else '否'}",
+        ]
+        if meta.get("options"):
+            options = ", ".join(
+                f"{item.get('value')}({item.get('label') or item.get('value')})"
+                for item in meta["options"]
+                if isinstance(item, dict)
+            )
+            lines.append(f"  允许值: {options}")
+        if meta.get("help_text"):
+            lines.append(f"  说明: {meta['help_text']}")
+        lines.append(f"  写法: {field_flag(field_key)} VALUE")
+        return lines
+    local = ADD_GROUP_LOCAL_FIELD_HELP.get(field_key)
+    if local is None:
+        return None
+    return [
+        f"{option} 字段说明",
+        f"  字段: {field_key}",
+        f"  中文名: {local['label']}",
+        f"  类型: {local['type']}",
+        f"  说明: {local['help']}",
+        f"  写法: {option} {local['metavar']}",
+    ]
 
 
 def group_list_lines(groups: list[dict[str, Any]]) -> list[str]:
