@@ -258,25 +258,11 @@ def template(ctx: click.Context) -> None:
     """管理 backtest 设置模板的便捷入口。"""
     state = load_state()
     switch_backtest_space(state, BACKTEST_SPACE)
-    args = tuple(ctx.args)
+    parsed_args = config_arg_helpers.parse_template_args(tuple(ctx.args))
+    args = parsed_args.args
     source_module = ""
-    # Parse --factor-family from args before other commands
-    factor_family_from_args = ""
-    cleaned_args: list[str] = []
-    _skip_next = False
-    for i, arg in enumerate(args):
-        if _skip_next:
-            _skip_next = False
-            continue
-        if arg == "--factor-family":
-            if i + 1 < len(args):
-                factor_family_from_args = str(args[i + 1])
-                _skip_next = True
-            continue
-        cleaned_args.append(arg)
-    args = tuple(cleaned_args)
-    if factor_family_from_args:
-        state.factor_family = factor_family_from_args
+    if parsed_args.factor_family:
+        state.factor_family = parsed_args.factor_family
 
     if args[:1] == ("--from-module-template",):
         if len(args) < 3:

@@ -2,9 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import click
+
+
+@dataclass(frozen=True)
+class TemplateArgs:
+    args: tuple[str, ...]
+    factor_family: str = ""
+
+
+def parse_template_args(args: tuple[str, ...]) -> TemplateArgs:
+    factor_family = ""
+    cleaned_args: list[str] = []
+    skip_next = False
+    for index, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--factor-family":
+            if index + 1 < len(args):
+                factor_family = str(args[index + 1])
+                skip_next = True
+            continue
+        cleaned_args.append(arg)
+    return TemplateArgs(args=tuple(cleaned_args), factor_family=factor_family)
 
 
 def parse_ledger_config_args(args: tuple[str, ...], *, arg_value, parse_raw_settings) -> dict[str, Any]:
