@@ -164,6 +164,7 @@ from tools.cli.modules.backtest import results_commands as results_command_handl
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
+from tools.cli.modules.backtest import config_state as config_state_helpers
 from tools.cli.modules.backtest import compare_views as compare_view_formatter
 from tools.cli.modules.backtest import compare_payloads as compare_payload_helpers
 from tools.cli.modules.backtest import template_state as template_state_helpers
@@ -440,12 +441,12 @@ def strategy_book(ctx: click.Context) -> None:
         click.echo("已切换为 StrategyBookSimple: 每个 strategy 一个私有 ledger / cash pool")
         return
     if args[0] == "ledger":
-        _apply_strategy_book_ledger(state, args[1:])
+        config_state_helpers.apply_strategy_book_ledger(state, args[1:], arg_value=_arg_value)
         save_state(state)
         _print_strategy_book(state)
         return
     if args[0] == "cash-pool":
-        _apply_strategy_book_cash_pool(state, args[1:])
+        config_state_helpers.apply_strategy_book_cash_pool(state, args[1:], arg_value=_arg_value)
         save_state(state)
         _print_strategy_book(state)
         return
@@ -1154,49 +1155,7 @@ def _print_long_short_list(state) -> None:
 
 
 def _strategy_book_payload(state) -> dict[str, Any]:
-    payload = dict(state.backtest_strategy_book or {})
-    payload.setdefault("strategies", {})
-    payload.setdefault("cash_pools", {})
-    payload.setdefault("cash_pool_configs", {})
-    return payload
-
-
-def _apply_strategy_book_ledger(state, args: tuple[str, ...]) -> None:
-    strategy = _arg_value(args, "--strategy")
-    ledger = _arg_value(args, "--ledger")
-    if not strategy or not ledger:
-        raise click.ClickException("strategy-book ledger 必须传 --strategy STRATEGY --ledger LEDGER")
-    cash_pool = _arg_value(args, "--cash-pool") or ledger
-    make_default = "--default" in args
-    payload = _strategy_book_payload(state)
-    strategies = payload.setdefault("strategies", {})
-    raw_entry = strategies.get(strategy)
-    entry = dict(raw_entry) if isinstance(raw_entry, dict) else {}
-    ledgers = list(entry.get("ledger_ids") or entry.get("ledgers") or [])
-    if ledger not in ledgers:
-        ledgers.append(ledger)
-    entry["ledger_ids"] = ledgers
-    if make_default or not entry.get("default_ledger_id"):
-        entry["default_ledger_id"] = ledger
-    strategies[strategy] = entry
-    payload.setdefault("cash_pools", {})[ledger] = cash_pool
-    state.backtest_strategy_book = payload
-
-
-def _apply_strategy_book_cash_pool(state, args: tuple[str, ...]) -> None:
-    cash_pool = _arg_value(args, "--cash-pool")
-    if not cash_pool:
-        raise click.ClickException("strategy-book cash-pool 必须传 --cash-pool ID")
-    payload = _strategy_book_payload(state)
-    configs = payload.setdefault("cash_pool_configs", {})
-    config = dict(configs.get(cash_pool) or {})
-    _set_optional_float_arg(config, args, "--initial-capital-major", "initial_capital_major")
-    base_currency = _arg_value(args, "--base-currency")
-    if base_currency:
-        config["base_currency"] = base_currency
-    _set_optional_float_arg(config, args, "--currency-conversion-fee-rate", "currency_conversion_fee_rate")
-    configs[cash_pool] = config
-    state.backtest_strategy_book = payload
+    return config_state_helpers.strategy_book_payload(state)
 
 
 def _print_strategy_book(state) -> None:
@@ -1235,10 +1194,6 @@ def _print_ledger_config_payload(configs: dict[str, Any]) -> None:
 def _print_ledger_config_help() -> None:
     for line in config_view_formatter.LEDGER_CONFIG_HELP_LINES:
         click.echo(line)
-
-
-def _set_optional_float_arg(target: dict[str, Any], args: tuple[str, ...], flag: str, key: str) -> None:
-    config_arg_helpers.set_optional_float_arg(target, args, flag, key, arg_value=_arg_value)
 
 
 def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
