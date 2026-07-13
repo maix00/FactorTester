@@ -163,6 +163,7 @@ from tools.cli.modules.backtest import result_output as result_output_formatter
 from tools.cli.modules.backtest import results_data as results_data_formatter
 from tools.cli.modules.backtest import results_views as results_view_formatter
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
+from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
 
@@ -1148,21 +1149,13 @@ def _print_group_field_help(state, option: str, *, batch: bool = False) -> None:
 
 
 def _print_group_add_help() -> None:
-    click.echo("group --add 动作说明")
-    click.echo("  用途: 新增一个或多个分组策略草稿。")
-    click.echo("  单个新增: group --add --group-name A1 --split-count 5 --group-index 1")
-    click.echo("  批量新增: group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5")
-    click.echo("  产品路径: --product-group from-candidates --name 中国期货日盘")
-    click.echo("  因子: --factor --alias 'SgCCS|N:2m|$F:1m|$Rev'")
+    for line in config_view_formatter.GROUP_ADD_HELP_LINES:
+        click.echo(line)
 
 
 def _print_group_batch_help() -> None:
-    click.echo("group --add --batch 字段说明")
-    click.echo("  用途: 一次新增一个分组集合中的所有组。")
-    click.echo("  必填: --group-names NAME...，例如 A1 A2 A3 A4 A5")
-    click.echo("  分组数: 省略 --split-count 时默认等于 group-names 个数。")
-    click.echo("  分组序号: 不允许填写 --group-index；按 group-names 顺序自动生成 1..N。")
-    click.echo("  写法: factortester group --add --batch --group-names A1 A2 A3 A4 A5 --split-count 5")
+    for line in config_view_formatter.GROUP_BATCH_HELP_LINES:
+        click.echo(line)
 
 
 def _print_add_group_field_help(state, option: str) -> None:
@@ -1428,42 +1421,14 @@ def _selected_groups(state, args: tuple[str, ...], *, default_all: bool = False)
 
 def _print_group_list(state) -> None:
     click.echo("分组列表")
-    if not state.backtest_groups:
-        click.echo("  （空）")
-        return
-    for index, group_item in enumerate(state.backtest_groups, start=1):
-        name = group_item.get("name") or group_item.get("id") or f"group-{index}"
-        parts = [str(name)]
-        split_count = group_item.get("split_count", group_item.get("splitCount"))
-        group_index = group_item.get("group_index", group_item.get("groupIndex"))
-        factor = group_item.get("factor", group_item.get("factorAlias"))
-        if split_count is not None:
-            parts.append(f"分组数={split_count}")
-        if group_index is not None:
-            parts.append(f"分组序号={group_index}")
-        product_path = selection_label(group_item.get("product_path_selection"))
-        if product_path:
-            parts.append(f"产品路径={product_path}")
-        if factor:
-            parts.append(f"因子={factor}")
-        click.echo(f"  {index}. " + " · ".join(parts))
+    for line in config_view_formatter.group_list_lines(state.backtest_groups):
+        click.echo(line)
 
 
 def _print_long_short_list(state) -> None:
     click.echo("Long-Short 列表")
-    if not state.backtest_ls_configs:
-        click.echo("  （空）")
-        return
-    for index, config in enumerate(state.backtest_ls_configs, start=1):
-        long_group = config.get("long_group") or {}
-        short_group = config.get("short_group") or {}
-        long_label = long_group.get("name") or long_group.get("id") or config.get("long_group_id") or config.get("longGroupId")
-        short_label = short_group.get("name") or short_group.get("id") or config.get("short_group_id") or config.get("shortGroupId")
-        click.echo(
-            f"  {index}. {config.get('name') or f'ls-{index}'} · "
-            f"多头={long_label} · "
-            f"空头={short_label}"
-        )
+    for line in config_view_formatter.long_short_list_lines(state.backtest_ls_configs):
+        click.echo(line)
 
 
 def _strategy_book_payload(state) -> dict[str, Any]:
@@ -1518,46 +1483,13 @@ def _print_strategy_book(state) -> None:
 
 
 def _print_strategy_book_payload(payload: dict[str, Any]) -> None:
-    strategies = payload.get("strategies") or {}
-    cash_pools = payload.get("cash_pools") or {}
-    cash_pool_configs = payload.get("cash_pool_configs") or {}
-    click.echo("StrategyBook")
-    if not strategies:
-        click.echo("  模式: StrategyBookSimple · 每个 strategy 一个私有 ledger / cash pool")
-    else:
-        rows = []
-        for strategy, entry in strategies.items():
-            entry_map = entry if isinstance(entry, dict) else {"ledger_ids": [entry], "default_ledger_id": entry}
-            ledger_ids = list(entry_map.get("ledger_ids") or entry_map.get("ledgers") or [])
-            default = str(entry_map.get("default_ledger_id") or (ledger_ids[0] if ledger_ids else ""))
-            pools = ", ".join(f"{ledger}->{cash_pools.get(ledger, ledger)}" for ledger in ledger_ids)
-            rows.append((strategy, ", ".join(ledger_ids), default, pools))
-        for line in render_table(("strategy", "ledgers", "default", "cash pools"), rows, indent="  ", max_widths=(20, 28, 18, 42)):
-            click.echo(line)
-    if cash_pool_configs:
-        click.echo("Cash pools")
-        rows = [
-            (
-                pool_id,
-                config.get("initial_capital_major", ""),
-                config.get("base_currency", ""),
-                config.get("currency_conversion_fee_rate", ""),
-            )
-            for pool_id, config in cash_pool_configs.items()
-            if isinstance(config, dict)
-        ]
-        for line in render_table(("cash_pool", "initial", "currency", "fx_fee"), rows, indent="  ", max_widths=(24, 14, 10, 10)):
-            click.echo(line)
+    for line in config_view_formatter.strategy_book_lines(payload):
+        click.echo(line)
 
 
 def _print_strategy_book_help() -> None:
-    click.echo("backtest strategy-book 命令")
-    click.echo("  show                         查看当前 strategy/ledger/cash pool 拓扑")
-    click.echo("  simple                       恢复默认: 每个 strategy 一个私有 ledger/cash pool")
-    click.echo("  ledger --strategy A1 --ledger shared --cash-pool pool-main [--default]")
-    click.echo("                               让 strategy A1 可操作 ledger shared，并映射到 cash pool")
-    click.echo("  cash-pool --cash-pool pool-main --initial-capital-major 100000000 --base-currency CNY")
-    click.echo("                               设置 cash pool 的初始资金与币种")
+    for line in config_view_formatter.STRATEGY_BOOK_HELP_LINES:
+        click.echo(line)
 
 
 def _parse_ledger_config_args(args: tuple[str, ...]) -> dict[str, Any]:
@@ -1636,28 +1568,13 @@ def _print_ledger_configs(state) -> None:
 
 
 def _print_ledger_config_payload(configs: dict[str, Any]) -> None:
-    if not configs:
-        click.echo("  （空；使用后端注册字段的默认/推断规则）")
-        return
-    rows = []
-    for ledger, config in configs.items():
-        config_map = config if isinstance(config, dict) else {}
-        summary = ", ".join(f"{key}={value}" for key, value in sorted(config_map.items()))
-        rows.append((ledger, summary))
-    for line in render_table(("ledger", "config"), rows, indent="  ", max_widths=(24, 90)):
+    for line in config_view_formatter.ledger_config_lines(configs):
         click.echo(line)
 
 
 def _print_ledger_config_help() -> None:
-    click.echo("backtest ledger-config 命令")
-    click.echo("  show / list")
-    click.echo("  --ledger LEDGER --fee-mode auto --transaction-fee-source exchange --margin-mode auto --accounting-mode Auto")
-    click.echo("  --transaction-fee-source 可选: exchange, openctp")
-    click.echo("  --daily-mark-to-market-enabled true --cost-basis-method fifo")
-    click.echo("  --cash-reserve-ratio 0.1 --cash-reserve-major 1000000")
-    click.echo("说明:")
-    click.echo("  这些字段属于 ledger-owned 配置，会传给后端 LedgerConfig；不是普通 per-strategy 字段。")
-    click.echo("  其他字段可用 --field value 或 field=value 透传，但后端会按 LedgerConfig 校验/忽略未知 metadata。")
+    for line in config_view_formatter.LEDGER_CONFIG_HELP_LINES:
+        click.echo(line)
 
 
 def _set_optional_float_arg(target: dict[str, Any], args: tuple[str, ...], flag: str, key: str) -> None:
@@ -1685,17 +1602,8 @@ def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
 
 
 def _print_group(group: dict[str, Any]) -> None:
-    if group.get("name"):
-        click.echo(f"名称: {group['name']}")
-    split_count = group.get("split_count", group.get("splitCount"))
-    group_index = group.get("group_index", group.get("groupIndex"))
-    factor = group.get("factor", group.get("factorAlias"))
-    if split_count is not None:
-        click.echo(f"分组数: {split_count}")
-    if group_index is not None:
-        click.echo(f"分组序号: {group_index}")
-    click.echo(f"产品路径: {selection_label(group.get('product_path_selection'))}")
-    click.echo(f"因子: {factor}")
+    for line in config_view_formatter.group_detail_lines(group):
+        click.echo(line)
 
 
 def _print_backtest_compare_help() -> None:
