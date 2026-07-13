@@ -24,6 +24,7 @@ from tools.cli.modules.backtest.controller import (
     _StepNavigator,
     _audit_change_cell,
     _audit_scalar_sequence_text,
+    _audit_step_event_context,
     _audit_table_lines,
     _audit_text,
     _handle_step_event,
@@ -1077,6 +1078,34 @@ def test_step_audit_field_state_baseline_samples_products_then_transposes(capsys
     assert "P0.EX" in out
     assert "P9.EX" in out
     assert "P4.EX" not in out
+
+
+def test_step_audit_field_state_baseline_filters_to_event_products(capsys) -> None:
+    after = {
+        "SM.CZC": {"VolumeMultiple": 5, "LongMarginRatioByMoney": 0.12},
+        "CZCE|F|SM|2603": {"VolumeMultiple": 5, "LongMarginRatioByMoney": 0.12},
+        **{f"P{index}.EX": {"VolumeMultiple": index, "LongMarginRatioByMoney": index / 100} for index in range(10)},
+    }
+    with _audit_step_event_context({
+        "current_event": {
+            "event_kind": "ORDER",
+            "subjects": [{"strategy": "A1", "subject": "CZCE|F|SM|2603", "action": "scheduled"}],
+        },
+    }):
+        _print_audit_changes("声明输出的变化", [{
+            "field": "MarketDataModule.field_state_baseline",
+            "scope": "context",
+            "before": None,
+            "after": after,
+        }])
+
+    out = capsys.readouterr().out
+    assert "event products: CZCE|F|SM|2603, SM.CZC" in out
+    assert "sample products:" not in out
+    assert "CZCE|F|SM|2603" in out
+    assert "SM.CZC" in out
+    assert "P0.EX" not in out
+    assert "P9.EX" not in out
 
 
 def test_step_audit_field_state_baseline_diff_only_prints_changed_rows(capsys) -> None:

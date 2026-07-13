@@ -36,6 +36,7 @@ from tools.testers.backtest.engines.native.flow import phase_label
 _short_alias_map: dict[str, str] = {}
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+_audit_field_state_product_filter: tuple[str, ...] = ()
 
 
 def _strip_ansi(value: object) -> str:
@@ -44,6 +45,76 @@ def _strip_ansi(value: object) -> str:
 
 def _audit_display_width(value: object) -> int:
     return display_width(_strip_ansi(value))
+
+
+@contextlib.contextmanager
+def _audit_step_event_context(data: dict[str, Any]):
+    global _audit_field_state_product_filter
+    previous = _audit_field_state_product_filter
+    _audit_field_state_product_filter = _audit_event_product_filter(data)
+    try:
+        yield
+    finally:
+        _audit_field_state_product_filter = previous
+
+
+def _audit_event_product_filter(data: dict[str, Any]) -> tuple[str, ...]:
+    values: list[Any] = []
+    current_event = data.get("current_event")
+    if isinstance(current_event, dict):
+        subjects = current_event.get("subjects")
+        if isinstance(subjects, list):
+            for subject in subjects:
+                if not isinstance(subject, dict):
+                    continue
+                for key in ("subject", "product", "contract", "instrument", "contract_product"):
+                    values.append(subject.get(key))
+                payload = subject.get("payload")
+                if isinstance(payload, dict):
+                    values.extend(_audit_payload_product_values(payload))
+    for collection_name in ("event_payloads", "event_payload_changes"):
+        collection = data.get(collection_name)
+        if isinstance(collection, list):
+            for item in collection:
+                if isinstance(item, dict):
+                    values.extend(_audit_payload_product_values(item))
+                    payload = item.get("payload")
+                    if isinstance(payload, dict):
+                        values.extend(_audit_payload_product_values(payload))
+    return tuple(dict.fromkeys(key for value in values for key in _audit_product_filter_keys(value)))
+
+
+def _audit_payload_product_values(payload: dict[str, Any]) -> list[Any]:
+    values = []
+    for key in ("subject", "product", "contract", "instrument", "contract_product", "uid"):
+        values.append(payload.get(key))
+    order = payload.get("order")
+    if isinstance(order, dict):
+        values.extend(_audit_payload_product_values(order))
+    return values
+
+
+def _audit_product_filter_keys(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    keys = [text]
+    if "|" in text:
+        parts = text.split("|")
+        if len(parts) >= 4:
+            exchange = parts[0].upper()
+            root = parts[2].upper()
+            suffix = {
+                "CZCE": "CZC",
+                "DCE": "DCE",
+                "GFEX": "GFE",
+                "GFE": "GFE",
+                "SHFE": "SHF",
+                "INE": "INE",
+                "CFFEX": "CFE",
+            }.get(exchange, exchange)
+            keys.append(f"{root}.{suffix}")
+    return keys
 
 
 def _pad_audit_cell(value: object, width: int) -> str:
@@ -4284,6 +4355,18 @@ def _audit_historical_field_state_summary(value: Any) -> dict[str, Any] | None:
         rows.append(row)
     if not rows or not field_names:
         return None
+    product_filter = _audit_field_state_product_filter
+    if product_filter:
+        filter_set = set(product_filter)
+        filtered_rows = [row for row in rows if str(row.get("product") or "") in filter_set]
+        if filtered_rows:
+            rows = filtered_rows
+            return {
+                "type": "HistoricalFieldStateTable",
+                "fields": field_names,
+                "rows": rows,
+                "product_filter": tuple(product for product in product_filter if product in {str(row.get("product") or "") for row in rows}),
+            }
     return {"type": "HistoricalFieldStateTable", "fields": field_names, "rows": rows}
 
 
@@ -4295,7 +4378,8 @@ def _audit_historical_field_state_text(value: dict[str, Any]) -> str:
     field_rows = [row for row in rows if isinstance(row, dict)]
     if not field_rows:
         return "historical field state: (empty)"
-    return "\n".join(_audit_field_state_transposed_lines(fields, field_rows))
+    product_filter = tuple(str(item) for item in (value.get("product_filter") or ()))
+    return "\n".join(_audit_field_state_transposed_lines(fields, field_rows, product_filter=product_filter))
 
 
 def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | None:
@@ -4335,11 +4419,21 @@ def _audit_historical_field_state_diff_text(before: Any, after: Any) -> str | No
             table_rows.append(changed_row)
     if not table_rows:
         return "（无变化）"
-    return "\n".join(_audit_field_state_transposed_lines(fields, table_rows))
+    product_filter = tuple(str(item) for item in (after.get("product_filter") or before.get("product_filter") or ()))
+    return "\n".join(_audit_field_state_transposed_lines(fields, table_rows, product_filter=product_filter))
 
 
-def _audit_field_state_transposed_lines(fields: list[str], rows: list[dict[str, Any]]) -> list[str]:
-    sampled_rows, note = _audit_sample_field_state_products(rows)
+def _audit_field_state_transposed_lines(
+    fields: list[str],
+    rows: list[dict[str, Any]],
+    *,
+    product_filter: tuple[str, ...] = (),
+) -> list[str]:
+    if product_filter:
+        sampled_rows = sorted(rows, key=lambda row: str(row.get("product") or ""))
+        note = f"event products: {', '.join(product_filter)}"
+    else:
+        sampled_rows, note = _audit_sample_field_state_products(rows)
     products = [str(row.get("product") or "") for row in sampled_rows]
     table_rows = []
     for field in fields:
@@ -5535,35 +5629,36 @@ def _handle_step_event(
     if description:
         click.echo(f"说明: {description}")
 
-    strategies = list(data.get("strategies") or [])
-    _print_strategy_context(strategies)
-    _print_event_payloads(list(data.get("event_payloads") or []))
-    route_state: set[tuple[tuple[str, str, str], ...]] = set()
-    _print_audit_fields(
-        "输入字段",
-        list(data.get("inputs") or []),
-        empty_message="（此 flow 未声明输入字段）",
-        route_state=route_state,
-    )
-    output_changes = list(data.get("output_changes") or [])
-    outputs = list(data.get("outputs") or [])
-    unchanged_outputs = _unchanged_output_records(outputs, output_changes)
-    if not outputs:
-        unchanged_output_message = "（此 flow 未声明输出字段）"
-    elif output_changes:
-        unchanged_output_message = "（所有声明输出字段均发生变化，见下方“声明输出的变化”）"
-    else:
-        unchanged_output_message = "（没有未变化的声明输出字段）"
-    _print_audit_fields(
-        "声明输出字段（未变化）",
-        unchanged_outputs,
-        empty_message=unchanged_output_message,
-        route_state=route_state,
-    )
-    _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
-    _print_event_payload_changes(list(data.get("event_payload_changes") or []))
-    _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []), route_state=route_state)
-    _print_contract_audit(list(data.get("input_contract_violations") or []))
+    with _audit_step_event_context(data):
+        strategies = list(data.get("strategies") or [])
+        _print_strategy_context(strategies)
+        _print_event_payloads(list(data.get("event_payloads") or []))
+        route_state: set[tuple[tuple[str, str, str], ...]] = set()
+        _print_audit_fields(
+            "输入字段",
+            list(data.get("inputs") or []),
+            empty_message="（此 flow 未声明输入字段）",
+            route_state=route_state,
+        )
+        output_changes = list(data.get("output_changes") or [])
+        outputs = list(data.get("outputs") or [])
+        unchanged_outputs = _unchanged_output_records(outputs, output_changes)
+        if not outputs:
+            unchanged_output_message = "（此 flow 未声明输出字段）"
+        elif output_changes:
+            unchanged_output_message = "（所有声明输出字段均发生变化，见下方“声明输出的变化”）"
+        else:
+            unchanged_output_message = "（没有未变化的声明输出字段）"
+        _print_audit_fields(
+            "声明输出字段（未变化）",
+            unchanged_outputs,
+            empty_message=unchanged_output_message,
+            route_state=route_state,
+        )
+        _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)
+        _print_event_payload_changes(list(data.get("event_payload_changes") or []))
+        _print_audit_changes("账本与现金池变化", list(data.get("ledger_changes") or []), route_state=route_state)
+        _print_contract_audit(list(data.get("input_contract_violations") or []))
 
     click.echo("")
     while True:
