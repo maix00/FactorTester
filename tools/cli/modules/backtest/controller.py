@@ -165,6 +165,7 @@ from tools.cli.modules.backtest import run_config as run_config_helpers
 from tools.cli.modules.backtest import config_views as config_view_formatter
 from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest import config_state as config_state_helpers
+from tools.cli.modules.backtest import config_commands as config_command_handlers
 from tools.cli.modules.backtest import compare_commands as compare_command_handlers
 from tools.cli.modules.backtest import long_short_commands as long_short_command_handlers
 from tools.cli.modules.backtest import template_state as template_state_helpers
@@ -373,29 +374,13 @@ def strategy_book(ctx: click.Context) -> None:
     """配置 strategy -> ledger -> cash pool 拓扑。"""
     state = load_state()
     _ensure_active_backtest_scope(state)
-    args = tuple(ctx.args)
-    if not args or args[0] in {"show", "list", "ls"}:
-        _print_strategy_book(state)
-        return
-    if args[0] in {"help", "--help", "-h"}:
-        _print_strategy_book_help()
-        return
-    if args[0] == "simple":
-        state.backtest_strategy_book.clear()
+    changed = config_command_handlers.handle_strategy_book_command(
+        state,
+        tuple(ctx.args),
+        arg_value=_arg_value,
+    )
+    if changed:
         save_state(state)
-        click.echo("已切换为 StrategyBookSimple: 每个 strategy 一个私有 ledger / cash pool")
-        return
-    if args[0] == "ledger":
-        config_state_helpers.apply_strategy_book_ledger(state, args[1:], arg_value=_arg_value)
-        save_state(state)
-        _print_strategy_book(state)
-        return
-    if args[0] == "cash-pool":
-        config_state_helpers.apply_strategy_book_cash_pool(state, args[1:], arg_value=_arg_value)
-        save_state(state)
-        _print_strategy_book(state)
-        return
-    raise click.ClickException("strategy-book 支持: show, simple, ledger, cash-pool")
 
 
 @backtest.command("ledger-config", context_settings=SELECTOR_HELP_CONTEXT)
@@ -405,25 +390,13 @@ def ledger_config(ctx: click.Context) -> None:
     """配置 ledger-owned 字段，如费用、保证金、DMTM、现金保留。"""
     state = load_state()
     _ensure_active_backtest_scope(state)
-    args = tuple(ctx.args)
-    if not args or args[0] in {"show", "list", "ls"}:
-        _print_ledger_configs(state)
-        return
-    if args[0] in {"help", "--help", "-h"}:
-        _print_ledger_config_help()
-        return
-    ledger = _arg_value(args, "--ledger")
-    if not ledger:
-        raise click.ClickException("ledger-config 必须传 --ledger LEDGER")
-    values = _parse_ledger_config_args(args)
-    if not values:
-        raise click.ClickException("ledger-config 缺少要设置的字段；用 --help 查看支持字段")
-    current = dict(state.backtest_ledger_configs.get(ledger) or {})
-    current.update(values)
-    state.backtest_ledger_configs[ledger] = current
-    save_state(state)
-    click.echo(f"已更新 ledger config: {ledger}")
-    _print_ledger_configs(state)
+    changed = config_command_handlers.handle_ledger_config_command(
+        state,
+        tuple(ctx.args),
+        arg_value=_arg_value,
+    )
+    if changed:
+        save_state(state)
 
 
 @backtest.command("clear")
@@ -876,44 +849,6 @@ def _print_long_short_list(state) -> None:
 
 def _strategy_book_payload(state) -> dict[str, Any]:
     return config_state_helpers.strategy_book_payload(state)
-
-
-def _print_strategy_book(state) -> None:
-    payload = _strategy_book_payload(state)
-    _print_strategy_book_payload(payload)
-
-
-def _print_strategy_book_payload(payload: dict[str, Any]) -> None:
-    for line in config_view_formatter.strategy_book_lines(payload):
-        click.echo(line)
-
-
-def _print_strategy_book_help() -> None:
-    for line in config_view_formatter.STRATEGY_BOOK_HELP_LINES:
-        click.echo(line)
-
-
-def _parse_ledger_config_args(args: tuple[str, ...]) -> dict[str, Any]:
-    return config_arg_helpers.parse_ledger_config_args(
-        args,
-        arg_value=_arg_value,
-        parse_raw_settings=config_arg_helpers.parse_raw_settings,
-    )
-
-
-def _print_ledger_configs(state) -> None:
-    click.echo("Ledger configs")
-    _print_ledger_config_payload(state.backtest_ledger_configs)
-
-
-def _print_ledger_config_payload(configs: dict[str, Any]) -> None:
-    for line in config_view_formatter.ledger_config_lines(configs):
-        click.echo(line)
-
-
-def _print_ledger_config_help() -> None:
-    for line in config_view_formatter.LEDGER_CONFIG_HELP_LINES:
-        click.echo(line)
 
 
 def _group_ref(group: dict[str, Any]) -> dict[str, Any]:
@@ -2870,13 +2805,13 @@ def _run_backtest(
     payload_ledger_configs = run_payload.get("ledger_configs")
     if show_topology:
         if state.backtest_strategy_book and payload is None:
-            _print_strategy_book(state)
+            config_command_handlers.print_strategy_book(state)
         elif isinstance(payload_strategy_book, dict) and payload_strategy_book:
-            _print_strategy_book_payload(payload_strategy_book)
+            config_command_handlers.print_strategy_book_payload(payload_strategy_book)
         if state.backtest_ledger_configs and payload is None:
-            _print_ledger_configs(state)
+            config_command_handlers.print_ledger_configs(state)
         elif isinstance(payload_ledger_configs, dict) and payload_ledger_configs:
-            _print_ledger_config_payload(payload_ledger_configs)
+            config_command_handlers.print_ledger_config_payload(payload_ledger_configs)
     client = client_from_config()
     # A saved template/CLI draft persists aliases and parameters, never Factor
     # instances.  Recreate one-off Factors in the current page before every
