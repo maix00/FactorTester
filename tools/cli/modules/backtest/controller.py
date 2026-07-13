@@ -299,8 +299,8 @@ def local_settings(ctx: click.Context) -> None:
     if not args or args[0] in {"show", "list", "ls"}:
         _print_backtest_local_settings(state)
         return
-    show_help = _has_context_help(args)
-    setting_args = _strip_context_help(args)
+    show_help = config_arg_helpers.has_context_help(args)
+    setting_args = config_arg_helpers.strip_context_help(args)
     if setting_args:
         _apply_raw_local_settings(state, setting_args)
     if show_help:
@@ -533,17 +533,17 @@ def group(
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state, scope=BACKTEST_SPACE)
     args = tuple(ctx.args)
-    show_help = _has_context_help(args)
+    show_help = config_arg_helpers.has_context_help(args)
     verbose = "--verbose" in args
     args = tuple(arg for arg in args if arg != "--verbose")
-    help_target = _context_help_target(args)
-    clean_args = _strip_context_help(args)
-    if _is_list_action(clean_args):
+    help_target = config_arg_helpers.context_help_target(args)
+    clean_args = config_arg_helpers.strip_context_help(args)
+    if config_arg_helpers.is_list_action(clean_args):
         _print_group_list(state)
         return
-    action = _group_action(clean_args)
-    selector_args, setting_args = _split_selector_and_local_setting_args(_strip_group_action_args(clean_args), selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
-    group_settings = _parse_raw_settings(tuple(setting_args)) if setting_args else {}
+    action = config_arg_helpers.group_action(clean_args)
+    selector_args, setting_args = config_arg_helpers.split_selector_and_local_setting_args(config_arg_helpers.strip_group_action_args(clean_args), selector_roots=_ADD_GROUP_SELECTOR_ROOTS)
+    group_settings = config_arg_helpers.parse_raw_settings(tuple(setting_args)) if setting_args else {}
     if show_help and help_target and not help_target.has_value:
         _print_group_field_help(state, help_target.option, batch="--batch" in clean_args)
         return
@@ -563,7 +563,7 @@ def group(
             _print_group(group_item)
     elif action == "edit":
         groups = _selected_groups(state, clean_args)
-        selectors = parse_add_group_selectors(_remove_group_name_args(tuple(selector_args)))
+        selectors = parse_add_group_selectors(config_arg_helpers.remove_group_name_args(tuple(selector_args)))
         for group_item in groups:
             _edit_group(state, group_item, selectors=selectors, extra_values=group_settings)
         click.echo(f"已修改分组: {len(groups)}")
@@ -595,9 +595,9 @@ def long_short(ctx: click.Context) -> None:
     if state.current_parent not in {BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY}:
         enter_backtest_state(state, scope=BACKTEST_SPACE)
     args = tuple(ctx.args)
-    show_help = _has_context_help(args)
-    clean_args = _strip_context_help(args)
-    if _is_list_action(clean_args):
+    show_help = config_arg_helpers.has_context_help(args)
+    clean_args = config_arg_helpers.strip_context_help(args)
+    if config_arg_helpers.is_list_action(clean_args):
         _print_long_short_list(state)
         return
     if show_help:
@@ -635,173 +635,7 @@ def enter_backtest_state(state, *, scope: str = BACKTEST_SPACE) -> None:
 
 
 def _apply_raw_local_settings(state, args: tuple[str, ...]) -> None:
-    state.backtest_local_settings.update(_parse_raw_settings(args))
-
-
-def _parse_raw_settings(args: tuple[str, ...]) -> dict[str, Any]:
-    values: dict[str, Any] = {}
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if "=" in token and not token.startswith("--"):
-            key, value = _parse_key_value(token)
-            values[key] = value
-            i += 1
-            continue
-        if not token.startswith("--"):
-            raise click.ClickException(f"无法识别设置参数: {token}")
-        key = token[2:].replace("-", "_")
-        if not key:
-            raise click.ClickException("设置字段名不能为空")
-        if i + 1 >= len(args) or args[i + 1].startswith("--"):
-            parsed_value: Any = True
-            i += 1
-        else:
-            parsed_value = args[i + 1]
-            i += 2
-        values[key] = parsed_value
-    return values
-
-
-def _parse_key_value(item: str) -> tuple[str, str]:
-    if "=" not in item:
-        raise click.ClickException("local-settings 必须使用 KEY=VALUE 格式")
-    key, value = item.split("=", 1)
-    key = key.strip()
-    if not key:
-        raise click.ClickException("local-settings 的 KEY 不能为空")
-    return key, value.strip()
-
-
-def _has_context_help(args: tuple[str, ...]) -> bool:
-    return "--help" in args or "-h" in args
-
-
-class _HelpTarget:
-    def __init__(self, option: str, *, has_value: bool) -> None:
-        self.option = option
-        self.has_value = has_value
-
-
-def _context_help_target(args: tuple[str, ...]) -> _HelpTarget | None:
-    help_positions = [index for index, token in enumerate(args) if token in {"--help", "-h"}]
-    if not help_positions:
-        return None
-    help_index = help_positions[0]
-    if help_index == 0:
-        return None
-    previous = args[help_index - 1]
-    if previous.startswith("--"):
-        return _HelpTarget(previous, has_value=False)
-    for index in range(help_index - 2, -1, -1):
-        token = args[index]
-        if token.startswith("--"):
-            return _HelpTarget(token, has_value=True)
-    return None
-
-
-def _strip_context_help(args: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(arg for arg in args if arg not in {"--help", "-h"})
-
-
-def _is_list_action(args: tuple[str, ...]) -> bool:
-    return bool(args) and args[0] == "list"
-
-
-def _group_action(args: tuple[str, ...]) -> str:
-    if "--add" in args:
-        return "add"
-    if "--derive" in args:
-        return "derive"
-    if "--copy" in args:
-        return "copy"
-    if "--edit" in args:
-        return "edit"
-    if "--describe" in args:
-        return "describe"
-    if "--run" in args:
-        return "run"
-    return ""
-
-
-def _strip_group_action_args(args: tuple[str, ...]) -> tuple[str, ...]:
-    result: list[str] = []
-    removed_action_add = False
-    for arg in args:
-        if arg == "--add" and not removed_action_add:
-            removed_action_add = True
-            continue
-        if arg in {"--edit", "--describe", "--run", "--batch", "--derive", "--copy"}:
-            continue
-        result.append(arg)
-    return tuple(result)
-
-
-def _group_names_from_args(args: tuple[str, ...]) -> list[str]:
-    names: list[str] = []
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if token in {"--group-name", "--group_name"}:
-            names.append(_require_arg_value(args, i, token))
-            i += 2
-            continue
-        if token in {"--group-names", "--group_names"}:
-            i += 1
-            while i < len(args) and not args[i].startswith("--"):
-                names.append(args[i])
-                i += 1
-            continue
-        i += 1
-    return names
-
-
-def _require_arg_value(args: tuple[str, ...], index: int, option: str) -> str:
-    if index + 1 >= len(args) or args[index + 1].startswith("--"):
-        raise click.ClickException(f"{option} 缺少参数")
-    return args[index + 1]
-
-
-def _split_selector_and_local_setting_args(args: tuple[str, ...], *, selector_roots: set[str]) -> tuple[list[str], list[str]]:
-    selector_args: list[str] = []
-    setting_args: list[str] = []
-    selector_mode = False
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if token == "--add":
-            selector_mode = True
-            selector_args.append(token)
-            i += 1
-            continue
-        if token in selector_roots:
-            selector_mode = True
-            selector_args.append(token)
-            if i + 1 < len(args) and not (args[i + 1].startswith("--") and args[i + 1] not in {"--from-candidates"}):
-                selector_args.append(args[i + 1])
-                i += 2
-            else:
-                i += 1
-            continue
-        if token.startswith("--") and not selector_mode:
-            setting_args.append(token)
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                setting_args.append(args[i + 1])
-                i += 2
-            else:
-                i += 1
-            continue
-        if token.startswith("--"):
-            setting_args.append(token)
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                setting_args.append(args[i + 1])
-                i += 2
-            else:
-                i += 1
-            continue
-        selector_args.append(token)
-        i += 1
-    return selector_args, setting_args
+    state.backtest_local_settings.update(config_arg_helpers.parse_raw_settings(args))
 
 
 def _validate_registered_local_settings(state) -> None:
@@ -872,16 +706,16 @@ def _print_add_group_field_help(state, option: str) -> None:
 
 def _parse_group_add_selectors(args: tuple[str, ...], *, batch: bool) -> list[AddGroupSelectors]:
     if not batch:
-        names = _group_names_from_args(args)
+        names = config_arg_helpers.group_names_from_args(args)
         if not names:
             raise click.ClickException("group --add 必须传 --group-name；不再支持 group --group-name 直接新增")
         return parse_add_group_selector_groups(args)
     if "--group-index" in args or "--group_index" in args:
         raise click.ClickException("group --add --batch 不允许传 --group-index；序号由 --group-names 顺序自动生成")
-    names = _group_names_from_args(args)
+    names = config_arg_helpers.group_names_from_args(args)
     if not names:
         raise click.ClickException("group --add --batch 必须传 --group-names NAME...")
-    base_args = _remove_group_name_args(args)
+    base_args = config_arg_helpers.remove_group_name_args(args)
     base = parse_add_group_selectors(base_args)
     split_count = base.split_count or len(names)
     selectors: list[AddGroupSelectors] = []
@@ -894,24 +728,6 @@ def _parse_group_add_selectors(args: tuple[str, ...], *, batch: bool) -> list[Ad
     return selectors
 
 
-def _remove_group_name_args(args: tuple[str, ...]) -> tuple[str, ...]:
-    result: list[str] = []
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if token in {"--group-name", "--group_name"}:
-            i += 2
-            continue
-        if token in {"--group-names", "--group_names"}:
-            i += 1
-            while i < len(args) and not args[i].startswith("--"):
-                i += 1
-            continue
-        result.append(token)
-        i += 1
-    return tuple(result)
-
-
 def _derive_or_copy_groups(
     state,
     args: tuple[str, ...],
@@ -920,11 +736,11 @@ def _derive_or_copy_groups(
     extra_values: dict[str, Any] | None,
     derived: bool,
 ) -> list[dict[str, Any]]:
-    names = _group_names_from_args(args)
+    names = config_arg_helpers.group_names_from_args(args)
     if len(names) < 2:
         raise click.ClickException("group --derive/--copy 需要先传源分组，再传至少一个新分组名：--group-name A1 --derive --group-name A1a")
     source = _find_group_by_name(state, names[0])
-    selectors = parse_add_group_selectors(_remove_group_name_args(selectors_args))
+    selectors = parse_add_group_selectors(config_arg_helpers.remove_group_name_args(selectors_args))
     created: list[dict[str, Any]] = []
     for target_name in names[1:]:
         group_item = dict(source)
@@ -1054,7 +870,7 @@ def _find_group_by_name(state, name: str) -> dict[str, Any]:
 
 
 def _selected_groups(state, args: tuple[str, ...], *, default_all: bool = False) -> list[dict[str, Any]]:
-    names = _group_names_from_args(args)
+    names = config_arg_helpers.group_names_from_args(args)
     if not names:
         if default_all:
             return list(state.backtest_groups)
@@ -1097,7 +913,7 @@ def _parse_ledger_config_args(args: tuple[str, ...]) -> dict[str, Any]:
     return config_arg_helpers.parse_ledger_config_args(
         args,
         arg_value=_arg_value,
-        parse_raw_settings=_parse_raw_settings,
+        parse_raw_settings=config_arg_helpers.parse_raw_settings,
     )
 
 

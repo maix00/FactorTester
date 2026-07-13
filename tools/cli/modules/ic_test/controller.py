@@ -10,7 +10,7 @@ from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import render_settings_help
 from tools.cli.field_store import FieldStore
-from tools.cli.modules.backtest.controller import _parse_raw_settings
+from tools.cli.modules.backtest import config_args as config_arg_helpers
 from tools.cli.modules.backtest.shared.selectors import (
     FactorSelector,
     ProductGroupSelector,
@@ -70,7 +70,7 @@ def local_settings(ctx: click.Context) -> None:
     show_help = "--help" in args or "-h" in args
     args = tuple(arg for arg in args if arg not in {"--help", "-h"})
     if args:
-        values = _parse_raw_settings(args)
+        values = config_arg_helpers.parse_raw_settings(args)
         _validate_ic_settings(state, values)
         state.ic_test_local_settings.update(values)
     if show_help:
@@ -375,7 +375,7 @@ def _settings_after_selector_args(args: tuple[str, ...]) -> dict[str, Any]:
             i += 2
         else:
             i += 1
-    return _parse_raw_settings(tuple(out)) if out else {}
+    return config_arg_helpers.parse_raw_settings(tuple(out)) if out else {}
 
 
 def _selected_configs(state, args: tuple[str, ...], *, default_all: bool = False) -> list[dict[str, Any]]:
