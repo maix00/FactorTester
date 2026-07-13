@@ -2094,6 +2094,9 @@ def _audit_text(value: Any) -> str:
     event_payload_text = _audit_event_payload_table_text(value)
     if event_payload_text is not None:
         return event_payload_text
+    order_text = _audit_order_table_text(value)
+    if order_text is not None:
+        return order_text
     special_text = _audit_special_text(value)
     if special_text is not None:
         return special_text
@@ -2244,6 +2247,73 @@ def _looks_like_event_payload(value: dict[str, Any]) -> bool:
         return False
     event_keys = {"ledger_id", "trading_day", "product", "notice_type", "notice_reason", "reason"}
     return any(key in value for key in event_keys) or len(value) == 1
+
+
+def _audit_order_table_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        if _looks_like_order_record(value):
+            return "\n".join(_audit_order_table_lines([value]))
+        return _audit_order_sample_table_text(value)
+    if not isinstance(value, list) or not value:
+        return None
+    if not _audit_is_order_list(value):
+        return None
+    return "\n".join(_audit_order_table_lines(value))
+
+
+def _audit_order_sample_table_text(value: dict[str, Any]) -> str | None:
+    if value.get("type") not in {"list", "tuple", "set", "frozenset"}:
+        return None
+    sample = value.get("sample")
+    if not isinstance(sample, dict):
+        return None
+    parts: list[tuple[str, list[dict[str, Any]]]] = []
+    for name in ("head", "tail"):
+        items = sample.get(name)
+        if isinstance(items, list) and items and _audit_is_order_list(items):
+            parts.append((name, items))
+    if not parts:
+        return None
+    length = value.get("length")
+    header = f"订单列表 length={length}" if length is not None else "订单列表"
+    if value.get("truncated"):
+        header = f"{header} truncated=True"
+    lines = [header]
+    for name, items in parts:
+        lines.append(f"sample.{name}:")
+        lines.extend(_audit_order_table_lines(items, indent="  "))
+    return "\n".join(lines)
+
+
+def _audit_is_order_list(value: list[Any]) -> bool:
+    return all(isinstance(item, dict) and _looks_like_order_record(item) for item in value)
+
+
+def _looks_like_order_record(value: dict[str, Any]) -> bool:
+    required = {"instrument", "quantity", "intent_quantity", "status", "strategy", "timestamp"}
+    return required <= set(value)
+
+
+def _audit_order_table_lines(value: list[dict[str, Any]], *, indent: str = "") -> list[str]:
+    rows = []
+    for item in value:
+        fields = item.get("fields")
+        rows.append((
+            item.get("timestamp") or "",
+            item.get("strategy") or "",
+            item.get("instrument") or "",
+            _audit_scalar_cell(item.get("intent_quantity")),
+            _audit_scalar_cell(item.get("quantity")),
+            item.get("status") or "",
+            item.get("reject_reason") or "",
+            item.get("order_id") or "",
+            fields if isinstance(fields, dict) and fields else "",
+        ))
+    return _audit_table_lines(
+        ("timestamp", "strategy", "instrument", "intent_qty", "qty", "status", "reject_reason", "order_id", "fields"),
+        rows,
+        indent=indent,
+    )
 
 
 def _audit_trade_intent_text(value: dict[str, Any]) -> str:

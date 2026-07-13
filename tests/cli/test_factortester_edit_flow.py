@@ -530,6 +530,57 @@ def test_step_audit_renders_event_payload_lists_as_table() -> None:
     assert '"ledger_id"' not in text
 
 
+def test_step_audit_renders_orders_as_table_with_field_details() -> None:
+    text = _audit_text([
+        {
+            "fields": {
+                "effective_price": 5924.0,
+                "execution_price_basis": "open",
+                "fee_cost": 1263.0,
+                "price_timestamp": "2026-01-05 09:02:00+08:00",
+            },
+            "instrument": "CZCE|F|SM|2603",
+            "intent_quantity": 421.0,
+            "order_id": "order-1",
+            "quantity": 421.0,
+            "reject_reason": None,
+            "status": "filled",
+            "strategy": "A1",
+            "timestamp": "2026-01-05 09:01:00+08:00",
+        }
+    ])
+
+    assert "timestamp" in text
+    assert "instrument" in text
+    assert "intent_qty" in text
+    assert "CZCE|F|SM|2603" in text
+    assert "filled" in text
+    assert "明细 1 (fields):" in text
+    assert "effective_price" in text
+    assert "fee_cost" in text
+    assert '"fields"' not in text
+
+
+def test_step_audit_renders_single_order_detail_as_table() -> None:
+    text = _audit_text({
+        "fields": {"price_timestamp": "2026-01-05 09:02:00+08:00"},
+        "instrument": "CZCE|F|SM|2603",
+        "intent_quantity": 421.0,
+        "order_id": "order-1",
+        "quantity": 421.0,
+        "reject_reason": None,
+        "status": "scheduled",
+        "strategy": "A1",
+        "timestamp": "2026-01-05 09:01:00+08:00",
+    })
+
+    assert "timestamp" in text
+    assert "CZCE|F|SM|2603" in text
+    assert "scheduled" in text
+    assert "price_timestamp" in text
+    assert '"instrument"' not in text
+
+
 def test_step_audit_renders_trading_day_resolver_summary() -> None:
     text = _audit_text({
         "type": "TimestampTradingDayResolver",
