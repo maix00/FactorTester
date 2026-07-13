@@ -33,6 +33,7 @@ from tools.cli.modules.backtest.audit_formatters import run_window as run_window
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
+from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 from tools.data.types.data_money import _format_data_money
@@ -178,32 +179,7 @@ def _audit_change_highlight_content(line: str) -> str:
 
 
 def _audit_scalar_sequence_text(value: list[Any] | tuple[Any, ...], *, width: int = 72) -> str:
-    items = [str(item) for item in value]
-    if not items:
-        return "[]"
-    lines: list[str] = []
-    current = "["
-    for index, item in enumerate(items):
-        token = item + ("," if index < len(items) - 1 else "")
-        separator = "" if current.endswith("[") else " "
-        candidate = f"{current}{separator}{token}"
-        if _audit_display_width(candidate) <= width:
-            current = candidate
-            continue
-        if current != "[":
-            lines.append(current)
-            current = f"  {token}"
-        else:
-            lines.append(f"[{token}")
-            current = "  "
-    closing_candidate = f"{current}]"
-    if _audit_display_width(closing_candidate) <= width:
-        lines.append(closing_candidate)
-    else:
-        if current.strip():
-            lines.append(current)
-        lines.append("]")
-    return "\n".join(lines)
+    return value_text_formatter.scalar_sequence_text(value, width=width)
 
 
 @dataclass(frozen=True)
@@ -3332,90 +3308,30 @@ def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: lis
 
 
 def _audit_mapping_table_text(value: Any) -> str | None:
-    if not isinstance(value, dict) or not value:
-        return None
-    if any(str(key) == "type" for key in value):
-        return None
-    if all(not isinstance(item, (dict, list, tuple)) for item in value.values()):
-        rows = [(str(key), _audit_scalar_cell(item)) for key, item in value.items()]
-        return "\n".join(_audit_table_lines(("key", "value"), rows))
-    if all(isinstance(item, dict) for item in value.values()):
-        historical_summary = _audit_historical_field_state_summary(value)
-        if historical_summary is not None and _audit_is_historical_field_state_summary(historical_summary):
-            return _audit_historical_field_state_text(historical_summary)
-        child_keys: list[str] = []
-        for item in value.values():
-            if not isinstance(item, dict):
-                return None
-            for child_key, child_value in item.items():
-                if isinstance(child_value, (dict, list, tuple)):
-                    return None
-                child_key_text = str(child_key)
-                if child_key_text not in child_keys:
-                    child_keys.append(child_key_text)
-        if not child_keys:
-            return None
-        rows = [
-            tuple([str(key), *[_audit_scalar_cell(item.get(child_key)) for child_key in child_keys]])
-            for key, item in value.items()
-            if isinstance(item, dict)
-        ]
-        return "\n".join(_audit_table_lines(("key", *child_keys), rows))
-    return None
+    return value_text_formatter.mapping_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        historical_summary=_audit_historical_field_state_summary,
+        is_historical_summary=_audit_is_historical_field_state_summary,
+        historical_text=_audit_historical_field_state_text,
+    )
 
 
 def _audit_sequence_mapping_table_text(value: Any) -> str | None:
-    if not isinstance(value, (list, tuple)) or not value:
-        return None
-    if len(value) > 6 or not all(isinstance(item, dict) for item in value):
-        return None
-    child_keys: list[str] = []
-    for item in value:
-        for child_key, child_value in item.items():
-            if isinstance(child_value, (dict, list, tuple)):
-                return None
-            child_key_text = str(child_key)
-            if child_key_text not in child_keys:
-                child_keys.append(child_key_text)
-    if not child_keys:
-        return None
-    rows = [
-        tuple(_audit_scalar_cell(item.get(child_key)) for child_key in child_keys)
-        for item in value
-    ]
-    return "\n".join(_audit_table_lines(tuple(child_keys), rows, allow_transpose=False))
+    return value_text_formatter.sequence_mapping_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+    )
 
 
 def _audit_scalar_cell(value: Any) -> str:
-    if value is None:
-        return "null"
-    if _audit_is_data_money_dict(value):
-        return _audit_cash_summary(value)
-    if isinstance(value, float):
-        return f"{value:.12g}"
-    return str(value)
+    return value_text_formatter.scalar_cell(value, cash_summary=_audit_cash_summary)
 
 
 def _audit_contract_metadata_text(value: dict[str, Any]) -> str:
-    rows = value.get("rows")
-    if not isinstance(rows, list):
-        return "contract_metadata: (no rows)"
-    table_rows = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        table_rows.append((
-            row.get("product") or "",
-            row.get("contract") or "",
-            row.get("start") or "",
-            row.get("end") or "",
-        ))
-    if not table_rows:
-        return "contract_metadata: (empty)"
-    return "\n".join(_audit_table_lines(
-        ("原产品", "新合约", "起始时间", "终止时间"),
-        table_rows,
-    ))
+    return value_text_formatter.contract_metadata_text(value, table_lines=_audit_table_lines)
 
 
 def _audit_table_lines(
