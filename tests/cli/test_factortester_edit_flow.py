@@ -765,7 +765,7 @@ def test_step_audit_single_cash_scalar_uses_cash_pool_total_table(capsys) -> Non
     assert "cash" in out
 
 
-def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, monkeypatch) -> None:
+def test_step_audit_splits_wide_combined_ledger_fields_by_terminal_width(capsys, monkeypatch) -> None:
     monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((72, 20)))
     values = [
         {
@@ -796,7 +796,8 @@ def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, m
     assert "合并账本字段" not in out
     assert "margin_mode" in out
     assert "cost_basis_method" in out
-    assert "columns 1/" not in out
+    assert "columns 1/" in out
+    assert max(len(_strip_ansi(line)) for line in out.splitlines()) <= 120
 
 
 def test_step_audit_displays_backend_null_dmtm_ledger_config_verbatim(capsys) -> None:
@@ -1568,7 +1569,35 @@ def test_step_audit_annotates_signal_frequency_and_inactive_warmup_window(capsys
 
     out = capsys.readouterr().out
     assert "30d（fixed模式配置；当前auto未生效）" in out
-    assert "1d（信号调度；行情频率见required_frequency=MIN1）" in out
+    assert "1d（信号事件频率；因子/行情数据频率见required_frequency=MIN1）" in out
+
+
+def test_step_audit_current_historical_fields_samples_and_transposes(capsys) -> None:
+    after = {
+        f"P{index}.EX": {
+            "VolumeMultiple": index,
+            "LongMarginRatioByMoney": index / 100,
+            "CostBasisMethod": "DailyMarkToMarket",
+        }
+        for index in range(10)
+    }
+    _print_audit_changes("声明输出的变化", [{
+        "field": "MarketDataModule.current_historical_fields",
+        "scope": "context",
+        "before": None,
+        "after": after,
+    }])
+
+    out = capsys.readouterr().out
+    assert "current_historical_fields [MarketDataModule.current_historical_fields]" in out
+    assert "sample products: 6/10" in out
+    assert "field" in out
+    assert "VolumeMultiple" in out
+    assert "LongMarginRatioByMoney" in out
+    assert "CostBasisMethod" in out
+    assert "P0.EX" in out
+    assert "P9.EX" in out
+    assert "P4.EX" not in out
 
 
 def test_step_audit_formats_python_literal_strings_as_json() -> None:
@@ -1707,7 +1736,8 @@ def test_step_audit_transposes_wide_two_key_tables(monkeypatch) -> None:
     assert "表格已转置" in text
     assert "2026-01-28 15:00:00+08:00 | A5" in text
     assert "lifecycle_source_function" in text
-    assert "columns 1/" not in text
+    assert "columns 1/" in text
+    assert max(len(_strip_ansi(line)) for line in lines) <= 140
 
 
 def test_step_audit_transposes_positions_after_grouping_when_columns_dominate() -> None:

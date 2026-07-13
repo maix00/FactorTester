@@ -3363,7 +3363,7 @@ def _audit_annotated_strategy_row_values(field_columns: list[str], row_values: t
         signal_value = values[signal_freq_index]
         required_value = values[required_frequency_index]
         if signal_value not in ("", "null", None) and required_value not in ("", "null", None):
-            values[signal_freq_index] = f"{signal_value}（信号调度；行情频率见required_frequency={required_value}）"
+            values[signal_freq_index] = f"{signal_value}（信号事件频率；因子/行情数据频率见required_frequency={required_value}）"
     return tuple(values)
 
 
@@ -3754,6 +3754,9 @@ def _audit_mapping_table_text(value: Any) -> str | None:
         rows = [(str(key), _audit_scalar_cell(item)) for key, item in value.items()]
         return "\n".join(_audit_table_lines(("key", "value"), rows))
     if all(isinstance(item, dict) for item in value.values()):
+        historical_summary = _audit_historical_field_state_summary(value)
+        if historical_summary is not None and _audit_is_historical_field_state_summary(historical_summary):
+            return _audit_historical_field_state_text(historical_summary)
         child_keys: list[str] = []
         for item in value.values():
             if not isinstance(item, dict):
@@ -3961,13 +3964,22 @@ def _audit_transposed_table_lines(
     key_label = " + ".join(header_list[:key_count])
     lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}，行标={key_label}）"]
     lines.extend(key_detail_lines)
-    lines.extend(_audit_wrapped_table_block_lines(
-        transposed_headers,
-        [[str(item) for item in row] for row in transposed_rows],
-        transposed_widths,
-        list(range(len(transposed_headers))),
-        indent=indent,
-    ))
+    transposed_scalar_rows = [[str(item) for item in row] for row in transposed_rows]
+    column_groups = _audit_table_column_groups(transposed_headers, transposed_scalar_rows, transposed_widths, indent=indent)
+    for group_index, columns in enumerate(column_groups, start=1):
+        if len(column_groups) > 1:
+            if group_index > 1 or key_detail_lines:
+                lines.append("")
+            visible_headers = [transposed_headers[column] for column in columns]
+            non_key_headers = visible_headers[_audit_table_key_column_count(transposed_headers):]
+            lines.append(f"{indent}columns {group_index}/{len(column_groups)}: {', '.join(non_key_headers)}")
+        lines.extend(_audit_wrapped_table_block_lines(
+            transposed_headers,
+            transposed_scalar_rows,
+            transposed_widths,
+            columns,
+            indent=indent,
+        ))
     return lines
 
 
@@ -4050,12 +4062,6 @@ def _audit_table_column_groups(
 ) -> list[list[int]]:
     if not header_list:
         return [[]]
-    # Prefer one logical table for one field.  Width-based column splitting is a
-    # last resort for genuinely wide tables; modest ledger/strategy tables are
-    # easier to audit when all value fields stay together even if the terminal
-    # wraps a little.
-    if len(header_list) <= 24:
-        return [list(range(len(header_list)))]
     max_width = _audit_max_width()
     full_width = len(indent) + sum(widths) + max(len(widths) - 1, 0) * 2
     if full_width <= max_width:
@@ -4370,6 +4376,26 @@ def _audit_historical_field_state_summary(value: Any) -> dict[str, Any] | None:
     return {"type": "HistoricalFieldStateTable", "fields": field_names, "rows": rows}
 
 
+def _audit_is_historical_field_state_summary(value: dict[str, Any]) -> bool:
+    fields = {str(field) for field in (value.get("fields") or [])}
+    hints = {
+        "VolumeMultiple",
+        "OpenRatioByMoney",
+        "OpenRatioByVolume",
+        "CloseRatioByMoney",
+        "CloseRatioByVolume",
+        "CloseTodayRatioByMoney",
+        "CloseTodayRatioByVolume",
+        "LongMarginRatioByMoney",
+        "ShortMarginRatioByMoney",
+        "LongMarginRatioByVolume",
+        "ShortMarginRatioByVolume",
+        "CostBasisMethod",
+        "MoneyCalculationPolicy",
+    }
+    return bool(fields & hints)
+
+
 def _audit_historical_field_state_text(value: dict[str, Any]) -> str:
     fields = [str(field) for field in (value.get("fields") or [])]
     rows = value.get("rows")
@@ -4442,7 +4468,7 @@ def _audit_field_state_transposed_lines(
             table_rows.append(tuple([field, *values]))
     lines: list[str] = []
     if note:
-        lines.append(note)
+        lines.extend(_wrap_audit_text(note, width=_audit_max_width(), subsequent_indent="  "))
     if table_rows:
         lines.extend(_audit_table_lines(("field", *products), table_rows, allow_transpose=False))
     return lines or ["（无字段值）"]
