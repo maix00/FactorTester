@@ -128,3 +128,15 @@ def step_badge_box_lines(
         *[f"┃ {table_render.pad_cell(line, box_width)} ┃" for line in display_lines],
         f"┗{border}┛",
     ]
+
+
+def contract_audit_lines(violations: list[dict[str, Any]]) -> list[str]:
+    if not violations:
+        return ["  已通过：本 flow 未读取未声明输入字段，也未写入未声明输出字段"]
+    lines: list[str] = []
+    for violation in violations:
+        access = str(violation.get("access") or "")
+        action = "读取未声明输入" if access == "read" else "写入未声明输出" if access == "write" else f"未声明 {access}"
+        field = violation.get("field") or "?"
+        lines.append(f"  {action}: {field}")
+    return lines

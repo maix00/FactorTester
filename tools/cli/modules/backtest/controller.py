@@ -4036,14 +4036,8 @@ def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, f
 
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
     _print_step_section("字段声明审计")
-    if not violations:
-        click.echo("  已通过：本 flow 未读取未声明输入字段，也未写入未声明输出字段")
-        return
-    for violation in violations:
-        access = str(violation.get("access") or "")
-        action = "读取未声明输入" if access == "read" else "写入未声明输出" if access == "write" else f"未声明 {access}"
-        field = violation.get("field") or "?"
-        click.echo(f"  {action}: {field}")
+    for line in step_display_formatter.contract_audit_lines(violations):
+        click.echo(line)
 
 
 _StepNavigator = step_display_formatter.StepNavigator
