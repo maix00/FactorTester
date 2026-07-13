@@ -17,7 +17,6 @@ import click
 from tools.cli.core.context import client_from_config, ensure_child_available
 from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import render_settings_help
-from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import delta_tables as delta_table_formatter
 from tools.cli.modules.backtest.audit_formatters import display_values as display_value_formatter
@@ -35,7 +34,6 @@ from tools.cli.modules.backtest.audit_formatters import strategy as strategy_for
 from tools.cli.modules.backtest.audit_formatters import table_render as table_render_formatter
 from tools.cli.modules.backtest.audit_formatters import trade_intents as trade_intent_formatter
 from tools.cli.modules.backtest.audit_formatters import value_text as value_text_formatter
-from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
@@ -509,7 +507,7 @@ def _validate_registered_local_settings(state) -> None:
 
 
 def _validate_settings_dict(state, values: dict[str, Any], *, prefix: str = "设置") -> None:
-    _, store = _stores_for_backtest(state)
+    _, store = config_state_helpers.stores_for_backtest(state)
     unknown = [key for key in values if key not in store.defaults]
     if unknown:
         raise click.ClickException(f"{prefix} 包含未注册字段: " + ", ".join(sorted(unknown)))
@@ -521,7 +519,7 @@ def _validate_settings_dict(state, values: dict[str, Any], *, prefix: str = "设
 
 
 def _print_backtest_settings_help(state, *, values: dict[str, Any] | None = None) -> None:
-    _, store = _stores_for_backtest(state)
+    _, store = config_state_helpers.stores_for_backtest(state)
     for key, value in (values or {}).items():
         store.set(key, value)
     for line in render_settings_help(store, title="回测设置上下文"):
@@ -531,7 +529,7 @@ def _print_backtest_settings_help(state, *, values: dict[str, Any] | None = None
 def _print_backtest_local_settings(state, *, validate: bool = True) -> None:
     if validate:
         _validate_registered_local_settings(state)
-    _, store = _stores_for_backtest(state)
+    _, store = config_state_helpers.stores_for_backtest(state)
     for line in config_view_formatter.local_settings_lines(state.backtest_local_settings, store):
         click.echo(line)
 
@@ -562,7 +560,7 @@ def _print_add_group_field_help(state, option: str) -> None:
     field_key = config_view_formatter.group_field_key_for_option(option)
     if field_key is None:
         raise click.ClickException(f"无法识别 group 字段: {option}")
-    _, store = _stores_for_backtest(state)
+    _, store = config_state_helpers.stores_for_backtest(state)
     lines = config_view_formatter.add_group_field_help_lines(option, field_key, store)
     if lines is None:
         raise click.ClickException(f"字段尚未由后端注册: {field_key}")
@@ -631,8 +629,8 @@ def _append_group(
     extra_values: dict[str, Any] | None = None,
 ) -> None:
     client = client_from_config()
-    _ensure_page_candidates(state, client)
-    page_store, backtest_store = _stores_for_backtest(state, client)
+    config_state_helpers.ensure_page_candidates(state, client)
+    page_store, backtest_store = config_state_helpers.stores_for_backtest(state, client)
     fields = resolve_backtest_public_fields(backtest_store)
     product_selection = resolve_product_group_selector(state, selectors.product_group, fields=fields)
     if product_selection:
@@ -650,7 +648,7 @@ def _append_group(
     if factor:
         backtest_store.set(fields.factor, factor)
     elif not selectors.factor_family_path and not backtest_store.effective(fields.factor):
-        _load_default_factor_for_product_group(state, client, page_store, factor_family=factor_family, product_group_label=product_group_label)
+        config_state_helpers.load_default_factor_for_product_group(state, client, page_store, factor_family=factor_family, product_group_label=product_group_label)
     resolved_product_path = backtest_store.effective(fields.product_path_selection)
     resolved_factor = backtest_store.effective(fields.factor)
     if not resolved_product_path:
@@ -690,8 +688,8 @@ def _edit_group(
     if selectors.group_index is not None:
         group["group_index"] = selectors.group_index
     client = client_from_config()
-    _ensure_page_candidates(state, client)
-    page_store, backtest_store = _stores_for_backtest(state, client)
+    config_state_helpers.ensure_page_candidates(state, client)
+    page_store, backtest_store = config_state_helpers.stores_for_backtest(state, client)
     fields = resolve_backtest_public_fields(backtest_store)
     product_selection = resolve_product_group_selector(state, selectors.product_group, fields=fields)
     if product_selection:
@@ -2801,39 +2799,10 @@ def _print_run_strategy_info(groups: list[dict[str, Any]], ls_configs: list[dict
 
 
 def _equity_curve_live_enabled(state, *, client=None) -> bool:
-    _, store = _stores_for_backtest(state, client=client)
+    _, store = config_state_helpers.stores_for_backtest(state, client=client)
     return run_config_helpers.equity_curve_live_enabled(store)
 
 
 def _print_run_event(event_name: str, data: Any) -> None:
     for line in config_view_formatter.run_event_lines(event_name, data):
         click.echo(line)
-
-
-def _stores_for_backtest(state, client=None) -> tuple[FieldStore, FieldStore]:
-    client = client or client_from_config()
-    page_store = FieldStore.from_manifest(client.manifest("single_factor_page"), values=state.page_settings)
-    backtest_store = FieldStore.from_manifest(client.manifest(BACKTEST_BACKEND_KEY), values=state.backtest_local_settings, parent=page_store)
-    return page_store, backtest_store
-
-
-def _ensure_page_candidates(state, client) -> None:
-    page_store = FieldStore.from_manifest(client.manifest("single_factor_page"), values=state.page_settings)
-    fields = resolve_backtest_public_fields(page_store)
-    if not page_store.effective(fields.product_path_candidates):
-        groups = client.list_candidates(fields.product_path_candidates)
-        page_store.set(fields.product_path_candidates, groups)
-        if groups and not page_store.effective(fields.product_path_selection):
-            page_store.set(fields.product_path_selection, product_group_selection(groups[0]))
-    state.page_settings = page_store.to_payload()
-
-
-def _load_default_factor_for_product_group(state, client, page_store: FieldStore, *, factor_family: str, product_group_label: str) -> None:
-    if not factor_family:
-        return
-    overview = client.factor_library_overview(factor_family=factor_family, product_group=product_group_label)
-    factors = list(overview.get("factors") or [])
-    fields = resolve_backtest_public_fields(page_store)
-    page_store.set(fields.factor_candidates, factors)
-    if factors:
-        page_store.set(fields.factor, str(factors[0].get("factor_alias") or factors[0].get("alias") or ""))
