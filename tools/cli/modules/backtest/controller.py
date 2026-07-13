@@ -3386,19 +3386,8 @@ def _run_backtest(
     template_state_helpers.register_template_factors(state, client)
     renderer = BacktestRunRenderer(verbose=verbose, live=_equity_curve_live_enabled(state, client=client), step_mode=step_mode)
     step_navigator = _StepNavigator()
-    # Build shortAlias mapping
-    import tools.cli.modules.backtest.controller as _ctrl_mod
-    _ctrl_mod._short_alias_map.clear()
-    for _g in state.backtest_groups:
-        _gid = str(_g.get("id", "") or "")
-        _sa = str(_g.get("shortAlias", "") or "")
-        if _gid and _sa:
-            _ctrl_mod._short_alias_map[_gid] = _sa
-    for _ls in state.backtest_ls_configs or []:
-        _ls_id = str(_ls.get("id", "") or "")
-        _ls_sa = str(_ls.get("shortAlias", "") or "")
-        if _ls_id and _ls_sa:
-            _ctrl_mod._short_alias_map[_ls_id] = _ls_sa
+    _short_alias_map.clear()
+    _short_alias_map.update(step_display_formatter.build_short_alias_map(state.backtest_groups, state.backtest_ls_configs))
     for event in client.run_group_test_stream(run_payload):
         event_name = str(event.get("event") or "message")
         data = event.get("data")

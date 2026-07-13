@@ -219,6 +219,21 @@ def active_strategy_short_alias(strategy: dict[str, Any], *, short_alias_map: di
     return strategy_id or "?"
 
 
+def build_short_alias_map(groups: list[dict[str, Any]], ls_configs: list[dict[str, Any]] | None) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for group in groups:
+        group_id = str(group.get("id", "") or "")
+        short_alias = str(group.get("shortAlias", "") or "")
+        if group_id and short_alias:
+            aliases[group_id] = short_alias
+    for config in ls_configs or []:
+        config_id = str(config.get("id", "") or "")
+        short_alias = str(config.get("shortAlias", "") or "")
+        if config_id and short_alias:
+            aliases[config_id] = short_alias
+    return aliases
+
+
 def payloads_empty(value: Any) -> bool:
     return value in (None, [], [None], [None, None])
 
