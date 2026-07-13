@@ -231,6 +231,52 @@ def strategy_scalar_change_record_table(
     return columns, by_strategy
 
 
+def strategy_scalar_value_rows(
+    field_name: str,
+    values: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    ledger_scalar_text: LedgerScalarText,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    if not is_strategy_entries(values):
+        return None
+    grouped: dict[str, list[str]] = {}
+    for entry in values:
+        value_text = ledger_scalar_text(display_field_value(field_name, entry.get("value")))
+        if value_text is None:
+            return None
+        grouped.setdefault(value_text, []).append(str(entry.get("strategy") or "?"))
+    rows = [
+        (", ".join(sorted(dict.fromkeys(strategies))), value_text)
+        for value_text, strategies in grouped.items()
+    ]
+    return ("strategies", "value"), sorted(rows)
+
+
+def strategy_scalar_change_rows(
+    field_name: str,
+    changes: Sequence[Mapping[str, Any]],
+    *,
+    display_field_value: DisplayFieldValue,
+    ledger_scalar_text: LedgerScalarText,
+    change_cell: ChangeCell,
+) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
+    if not is_strategy_entries(changes):
+        return None
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for change in changes:
+        before_text = ledger_scalar_text(display_field_value(field_name, change.get("before")))
+        after_text = ledger_scalar_text(display_field_value(field_name, change.get("after")))
+        if before_text is None or after_text is None:
+            return None
+        grouped.setdefault((before_text, after_text), []).append(str(change.get("strategy") or "?"))
+    rows = [
+        (", ".join(sorted(dict.fromkeys(strategies))), change_cell(before_text, after_text))
+        for (before_text, after_text), strategies in grouped.items()
+    ]
+    return ("strategy", "change"), sorted(rows)
+
+
 def combine_strategy_tables(
     tables: Sequence[tuple[Sequence[str], Mapping[str, tuple[Any, ...]]]],
     *,

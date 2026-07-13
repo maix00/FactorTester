@@ -1036,19 +1036,16 @@ def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[
 
 
 def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
-    if not strategy_formatter.is_strategy_entries(values):
+    result = strategy_formatter.strategy_scalar_value_rows(
+        field_name,
+        values,
+        display_field_value=_display_field_value,
+        ledger_scalar_text=_audit_ledger_scalar_text,
+    )
+    if result is None:
         return False
-    grouped: dict[str, list[str]] = {}
-    for entry in values:
-        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
-        if value_text is None:
-            return False
-        grouped.setdefault(value_text, []).append(str(entry.get("strategy") or "?"))
-    rows = [
-        (", ".join(sorted(dict.fromkeys(strategies))), value_text)
-        for value_text, strategies in grouped.items()
-    ]
-    for line in _audit_table_lines(("strategies", "value"), sorted(rows), indent=prefix):
+    headers, rows = result
+    for line in _audit_table_lines(headers, rows, indent=prefix):
         click.echo(line)
     return True
 
@@ -1366,22 +1363,17 @@ def _market_data_series_sample_cells(field_label: str, value: dict[str, Any]) ->
 
 
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
-    if not strategy_formatter.is_strategy_entries(changes):
+    result = strategy_formatter.strategy_scalar_change_rows(
+        field_name,
+        changes,
+        display_field_value=_display_field_value,
+        ledger_scalar_text=_audit_ledger_scalar_text,
+        change_cell=_audit_change_cell,
+    )
+    if result is None:
         return False
-    grouped: dict[tuple[str, str], list[str]] = {}
-    for change in changes:
-        before = _display_field_value(field_name, change.get("before"))
-        after = _display_field_value(field_name, change.get("after"))
-        before_text = _audit_ledger_scalar_text(before)
-        after_text = _audit_ledger_scalar_text(after)
-        if before_text is None or after_text is None:
-            return False
-        grouped.setdefault((before_text, after_text), []).append(str(change.get("strategy") or "?"))
-    rows = [
-        (", ".join(sorted(dict.fromkeys(strategies))), _audit_change_cell(before_text, after_text))
-        for (before_text, after_text), strategies in grouped.items()
-    ]
-    for line in _audit_table_lines(("strategy", "change"), sorted(rows), indent=prefix):
+    headers, rows = result
+    for line in _audit_table_lines(headers, rows, indent=prefix):
         click.echo(line)
     return True
 
