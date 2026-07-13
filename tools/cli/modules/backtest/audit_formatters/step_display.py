@@ -12,6 +12,7 @@ from tools.cli.modules.backtest.audit_formatters import table_render
 
 DisplayKey = Callable[[Any], str]
 Normalize = Callable[[Any], Any]
+CashSummary = Callable[[Any], str]
 
 
 @dataclass
@@ -230,3 +231,28 @@ def event_payload_label(payload: dict[str, Any]) -> str:
     if payload.get("scope") == "strategy":
         return f"策略 {payload.get('strategy') or '?'}"
     return f"账本 {payload.get('ledger') or '?'} | 现金池 {payload.get('cash_pool') or '?'}"
+
+
+def ledger_snapshot_rows(ledgers: list[dict[str, Any]], *, cash_summary: CashSummary) -> list[tuple[Any, ...]]:
+    return [
+        (
+            ledger.get("ledger") or "?",
+            ledger.get("cash_pool") or "?",
+            ", ".join(ledger.get("strategies") or []) or "无",
+            cash_summary(ledger.get("cash")),
+        )
+        for ledger in ledgers
+    ]
+
+
+def event_payload_change_buckets(
+    changes: list[dict[str, Any]],
+    *,
+    display_key: DisplayKey,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for change in changes:
+        key = (display_key(change.get("before")), display_key(change.get("after")))
+        bucket = grouped.setdefault(key, {"before": change.get("before"), "after": change.get("after"), "entries": []})
+        bucket["entries"].append(change)
+    return list(grouped.values())

@@ -3207,15 +3207,7 @@ def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
     if not ledgers:
         click.echo("  （此 flow 尚未关联账本）")
         return
-    rows = [
-        (
-            ledger.get("ledger") or "?",
-            ledger.get("cash_pool") or "?",
-            ", ".join(ledger.get("strategies") or []) or "无",
-            _audit_cash_summary(ledger.get("cash")),
-        )
-        for ledger in ledgers
-    ]
+    rows = step_display_formatter.ledger_snapshot_rows(ledgers, cash_summary=_audit_cash_summary)
     for line in _audit_table_lines(("ledger", "cash pool", "strategies", "cash"), rows, indent="  "):
         click.echo(line)
 
@@ -3262,12 +3254,7 @@ def _print_event_payload_changes(changes: list[dict[str, Any]]) -> None:
     if not changes:
         click.echo("  （无变化）")
         return
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for change in changes:
-        key = (_audit_display_key(change.get("before")), _audit_display_key(change.get("after")))
-        bucket = grouped.setdefault(key, {"before": change.get("before"), "after": change.get("after"), "entries": []})
-        bucket["entries"].append(change)
-    for bucket in grouped.values():
+    for bucket in step_display_formatter.event_payload_change_buckets(changes, display_key=_audit_display_key):
         _print_audit_diff_value(
             "  ",
             _audit_source_group_label(bucket["entries"]),
