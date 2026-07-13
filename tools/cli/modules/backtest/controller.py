@@ -161,6 +161,7 @@ from tools.cli.modules.backtest.run_output import BacktestRunRenderer
 from tools.cli.modules.backtest.run_output import _chart_body_width, _multi_series_chart, _result_series
 from tools.cli.modules.backtest import result_output as result_output_formatter
 from tools.cli.modules.backtest import results_data as results_data_formatter
+from tools.cli.modules.backtest import results_views as results_view_formatter
 from tools.cli.modules.backtest import run_payloads as run_payload_formatter
 from tools.cli.state import BACKTEST_SPACE, load_state, save_state, switch_backtest_space
 from tools.cli.table import pad_display, render_table
@@ -4436,30 +4437,8 @@ def _serialize_group_for_run(group: dict[str, Any]) -> dict[str, Any]:
 
 
 def _print_results_help() -> None:
-    click.echo("backtest results 命令")
-    click.echo("  summary                         最近一次运行的统计表格")
-    click.echo("  equity                          最近一次运行的多策略净值图")
-    click.echo("  attribution [--group-name NAME]  归因摘要: gross / fee / net / final")
-    click.echo("    --by product|ledger|cash-pool 按产品/账本/资金池聚合手续费")
-    click.echo("    --top N                       聚合表显示前 N 行(默认10)")
-    click.echo("  ledgers [--group-name NAME]      按 ledger/cash pool 汇总成交落账回放")
-    click.echo("  detail --group-name NAME         查看 web 组内 overlay 的贡献/费率摘要")
-    click.echo("    --level product|contract      产品或合约层级(默认product)")
-    click.echo("  ranking                          查看分组排序能力摘要")
-    click.echo("  snapshot --index N              查看第 N 个时间点的持仓/资金快照")
-    click.echo("  snapshot --timestamp-ms MS      查看指定 epoch 毫秒附近的快照")
-    click.echo("  order-flow [--group-name NAME]  查看订单流明细(时间/品种/数量/成交价/状态)")
-    click.echo("    --show fee                    显示 fee_cost / cash / margin 诊断列")
-    click.echo("    --ledger ID                   只显示指定账本的记录")
-    click.echo("    --cash-pool ID                只显示指定资金池的记录")
-    click.echo("    --order-id ID                 只看某笔订单的完整生命周期")
-    click.echo("    --limit N                     每个策略最多显示的记录数(默认20, 0=全部)")
-    click.echo("    --counts-only                 只显示记录条数，不展开明细")
-    click.echo("")
-    click.echo("输出选项（所有 results 子命令通用）:")
-    click.echo("  --output PATH                   写入文件")
-    click.echo("  --no-terminal                   不打印到终端，仅写文件")
-    click.echo("  --append                        追加写入文件而不是覆盖")
+    for line in results_view_formatter.results_help_lines():
+        click.echo(line)
 
 
 def _parse_result_output_options(args: tuple[str, ...]) -> tuple[dict[str, Any], tuple[str, ...]]:
