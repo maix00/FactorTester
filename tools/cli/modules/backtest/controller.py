@@ -30,6 +30,7 @@ from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.backtest.audit_formatters import events as events_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
+from tools.cli.modules.backtest.audit_formatters import orders as orders_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
 from tools.cli.modules.backtest.audit_formatters import strategy as strategy_formatter
 from tools.cli.modules.products.controller import product_group_selection
@@ -2455,189 +2456,69 @@ def _looks_like_event_payload(value: dict[str, Any]) -> bool:
 
 
 def _audit_order_table_text(value: Any) -> str | None:
-    if isinstance(value, dict):
-        if _looks_like_order_record(value):
-            return "\n".join(_audit_order_table_lines([value]))
-        return _audit_order_sample_table_text(value)
-    if not isinstance(value, list) or not value:
-        return None
-    if not _audit_is_order_list(value):
-        return None
-    return "\n".join(_audit_order_table_lines(value))
+    return orders_formatter.order_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_sequence=_audit_single_sample_sequence,
+    )
 
 
 def _audit_order_sample_table_text(value: dict[str, Any]) -> str | None:
-    if value.get("type") not in {"list", "tuple", "set", "frozenset"}:
-        return None
-    sample = value.get("sample")
-    if not isinstance(sample, dict):
-        return None
-    selected = _audit_select_sample_part(sample, lambda items: isinstance(items, list) and items and _audit_is_order_list(items))
-    if selected is None:
-        return None
-    length = value.get("length")
-    header = f"订单列表 length={length}" if length is not None else "订单列表"
-    if value.get("truncated"):
-        header = f"{header} truncated=True"
-    lines = [header]
-    lines.extend(_audit_sample_note_lines(sample, selected.name))
-    items, row_notes = _audit_single_sample_sequence(selected.value)
-    lines.extend(row_notes)
-    lines.append(f"sample.{selected.name}:")
-    lines.extend(_audit_order_table_lines(items, indent="  "))
-    return "\n".join(lines)
+    return orders_formatter.order_sample_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_sequence=_audit_single_sample_sequence,
+    )
 
 
 def _audit_is_order_list(value: list[Any]) -> bool:
-    return all(isinstance(item, dict) and _looks_like_order_record(item) for item in value)
+    return orders_formatter.is_order_list(value)
 
 
 def _looks_like_order_record(value: dict[str, Any]) -> bool:
-    required = {"instrument", "quantity", "intent_quantity", "status", "strategy", "timestamp"}
-    return required <= set(value)
+    return orders_formatter.looks_like_order_record(value)
 
 
 def _audit_order_table_lines(value: list[dict[str, Any]], *, indent: str = "") -> list[str]:
-    rows = []
-    for item in value:
-        fields = item.get("fields")
-        rows.append((
-            item.get("timestamp") or "",
-            item.get("strategy") or "",
-            item.get("instrument") or "",
-            _audit_scalar_cell(item.get("intent_quantity")),
-            _audit_scalar_cell(item.get("quantity")),
-            item.get("status") or "",
-            item.get("reject_reason") or "",
-            item.get("order_id") or "",
-            fields if isinstance(fields, dict) and fields else "",
-        ))
-    return _audit_table_lines(
-        ("timestamp", "strategy", "instrument", "intent_qty", "qty", "status", "reject_reason", "order_id", "fields"),
-        rows,
+    return orders_formatter.order_table_lines(
+        value,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
         indent=indent,
     )
 
 
 def _audit_order_record_key(item: dict[str, Any], fallback_index: int) -> str:
-    order_id = item.get("order_id")
-    if order_id not in (None, ""):
-        return str(order_id)
-    return "|".join(str(part) for part in (
-        item.get("timestamp") or "",
-        item.get("strategy") or "",
-        item.get("instrument") or "",
-        fallback_index,
-    ))
+    return orders_formatter.order_record_key(item, fallback_index)
 
 
 def _audit_order_field_values(item: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        return {}
-    fields = item.get("fields")
-    return dict(fields) if isinstance(fields, dict) else {}
+    return orders_formatter.order_field_values(item)
 
 
 def _audit_order_field_change_cell(before: Any, after: Any) -> str:
-    before_text = _audit_scalar_cell(before)
-    after_text = _audit_scalar_cell(after)
-    if before_text == after_text:
-        return after_text
-    return _audit_change_cell(before_text, after_text)
+    return orders_formatter.order_field_change_cell(
+        before,
+        after,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_order_diff_text(before: Any, after: Any) -> str | None:
-    before_list = [] if before is None else before
-    after_list = [] if after is None else after
-    if not isinstance(before_list, list) or not isinstance(after_list, list):
-        return None
-    if before_list and not _audit_is_order_list(before_list):
-        return None
-    if after_list and not _audit_is_order_list(after_list):
-        return None
-    if not before_list and not after_list:
-        return "（无订单变化）"
-
-    before_by_key = {_audit_order_record_key(item, index): item for index, item in enumerate(before_list) if isinstance(item, dict)}
-    after_by_key = {_audit_order_record_key(item, index): item for index, item in enumerate(after_list) if isinstance(item, dict)}
-    keys = [key for key in after_by_key]
-    keys.extend(key for key in before_by_key if key not in after_by_key)
-
-    base_columns = [
-        "timestamp", "strategy", "instrument", "intent_quantity", "quantity",
-        "status", "reject_reason", "order_id",
-    ]
-    field_columns: list[str] = []
-    preferred_fields = [
-        "price_timestamp",
-        "execution_price_basis",
-        "effective_price",
-        "fee_open_quantity",
-        "fee_close_quantity",
-        "fee_close_today_quantity",
-        "fee_close_yesterday_quantity",
-        "fee_close_today",
-        "fee_cost",
-        "margin_required",
-        "available_cash",
-        "cash_required",
-        "max_quantity",
-    ]
-    field_seen: set[str] = set()
-    for key in keys:
-        before_fields = _audit_order_field_values(before_by_key.get(key))
-        after_fields = _audit_order_field_values(after_by_key.get(key))
-        for field in preferred_fields:
-            if field in before_fields or field in after_fields:
-                field_seen.add(field)
-        for field in sorted(set(before_fields) | set(after_fields)):
-            if field not in field_seen:
-                field_seen.add(field)
-    field_columns = [field for field in preferred_fields if field in field_seen]
-    field_columns.extend(sorted(field_seen - set(field_columns)))
-
-    rows: list[tuple[Any, ...]] = []
-    for key in keys:
-        before_item = before_by_key.get(key)
-        after_item = after_by_key.get(key)
-        display_item = after_item or before_item or {}
-        before_fields = _audit_order_field_values(before_item)
-        after_fields = _audit_order_field_values(after_item)
-        if before_item is None:
-            operation = "新增"
-        elif after_item is None:
-            operation = "删除"
-        else:
-            operation = "修改"
-        row: list[Any] = [operation]
-        for column in base_columns:
-            before_value = before_item.get(column) if isinstance(before_item, dict) else None
-            after_value = after_item.get(column) if isinstance(after_item, dict) else None
-            display_value = display_item.get(column) if isinstance(display_item, dict) else None
-            if operation == "新增":
-                row.append(_audit_scalar_cell(after_value))
-            elif operation == "删除":
-                row.append(_audit_scalar_cell(before_value))
-            elif before_value != after_value:
-                row.append(_audit_order_field_change_cell(before_value, after_value))
-            else:
-                row.append(_audit_scalar_cell(display_value))
-        for field in field_columns:
-            if operation == "新增":
-                row.append(_audit_scalar_cell(after_fields.get(field)))
-            elif operation == "删除":
-                row.append(_audit_scalar_cell(before_fields.get(field)))
-            else:
-                row.append(_audit_order_field_change_cell(before_fields.get(field), after_fields.get(field)))
-        rows.append(tuple(row))
-
-    if not rows:
-        return "（无订单变化）"
-    lines = [
-        f"订单变化表 rows={len(rows)}（未截断；字段变化以黄色 before -> after 标识）"
-    ]
-    lines.extend(_audit_table_lines(("op", *base_columns, *field_columns), rows))
-    return "\n".join(lines)
+    return orders_formatter.order_diff_text(
+        before,
+        after,
+        table_lines=_audit_table_lines,
+        scalar_cell=_audit_scalar_cell,
+        change_cell=_audit_change_cell,
+    )
 
 
 def _audit_trade_intent_text(value: dict[str, Any]) -> str:
