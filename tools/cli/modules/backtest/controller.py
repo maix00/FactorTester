@@ -11,7 +11,6 @@ import contextlib
 import io
 import json
 import ast
-import math
 import re
 import shutil
 import textwrap
@@ -28,6 +27,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.field_help import field_flag, field_type_label, render_settings_help
 from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
+from tools.cli.modules.backtest.audit_formatters import events as events_formatter
 from tools.cli.modules.backtest.audit_formatters import ledger as ledger_formatter
 from tools.cli.modules.backtest.audit_formatters import market_data as market_data_formatter
 from tools.cli.modules.backtest.audit_formatters import run_window as run_window_formatter
@@ -2375,37 +2375,28 @@ def _audit_runtime_object_text(value: dict[str, Any]) -> str | None:
 def _audit_event_draft_table_text(value: Any) -> str | None:
     if isinstance(value, dict):
         return _audit_event_draft_sample_table_text(value)
-    if not isinstance(value, list) or not value:
-        return None
-    if not _audit_is_event_draft_list(value):
-        return None
-    return "\n".join(_audit_event_draft_table_lines(value))
+    return events_formatter.event_draft_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        notice_scalar=_audit_notice_scalar,
+    )
 
 
 def _audit_event_draft_sample_table_text(value: dict[str, Any]) -> str | None:
-    if value.get("type") not in {"list", "tuple", "set", "frozenset"}:
-        return None
-    sample = value.get("sample")
-    if not isinstance(sample, dict):
-        return None
-    selected = _audit_select_sample_part(sample, lambda items: isinstance(items, list) and items and _audit_is_event_draft_list(items))
-    if selected is None:
-        return None
-    length = value.get("length")
-    header = f"事件草稿列表 length={length}" if length is not None else "事件草稿列表"
-    if value.get("truncated"):
-        header = f"{header} truncated=True"
-    lines = [header]
-    lines.extend(_audit_sample_note_lines(sample, selected.name))
-    items, row_notes = _audit_single_sample_sequence(selected.value)
-    lines.extend(row_notes)
-    lines.append(f"sample.{selected.name}:")
-    lines.extend(_audit_event_draft_table_lines(items, indent="  "))
-    return "\n".join(lines)
+    return events_formatter.event_draft_sample_table_text(
+        value,
+        table_lines=_audit_table_lines,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        notice_scalar=_audit_notice_scalar,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_sequence=_audit_single_sample_sequence,
+    )
 
 
 def _audit_is_event_draft_list(value: list[Any]) -> bool:
-    return all(isinstance(item, dict) and item.get("type") == "EventDraft" for item in value)
+    return events_formatter.is_event_draft_list(value)
 
 
 def _audit_event_draft_table_lines(
@@ -2413,26 +2404,11 @@ def _audit_event_draft_table_lines(
     *,
     indent: str = "",
 ) -> list[str]:
-    lifecycle_notice_lines = _audit_lifecycle_notice_table_lines(value, indent=indent)
-    if lifecycle_notice_lines is not None:
-        return lifecycle_notice_lines
-    rows = []
-    for item in value:
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        details = _audit_event_payload_details(payload)
-        route = item.get("strategy") or item.get("ledger") or ""
-        rows.append((
-            item.get("timestamp") or "",
-            item.get("kind") or payload.get("kind") or "",
-            route,
-            payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
-            payload.get("notice_type") or payload.get("kind") or "",
-            payload.get("notice_reason") or payload.get("reason") or "",
-            details if details else "",
-        ))
-    return _audit_table_lines(
-        ("timestamp", "event", "route", "subject", "action", "reason", "details"),
-        rows,
+    return events_formatter.event_draft_table_lines(
+        value,
+        table_lines=_audit_table_lines,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        notice_scalar=_audit_notice_scalar,
         indent=indent,
     )
 
@@ -2442,153 +2418,39 @@ def _audit_lifecycle_notice_table_lines(
     *,
     indent: str = "",
 ) -> list[str] | None:
-    extra_columns: list[str] = []
-    preferred_extra_columns = [
-        "lifecycle_source_type",
-        "lifecycle_source",
-        "lifecycle_source_function",
-        "lifecycle_source_query_date",
-        "lifecycle_fetched_at",
-        "lifecycle_exchange",
-        "open_date",
-        "expire_date",
-        "notice_date",
-    ]
-    ignored = {
-        "product",
-        "contract",
-        "uid",
-        "contract_product",
-        "contract_object",
-        "notice_type",
-        "notice_reason",
-        "last_trade_date",
-        "delivery_date",
-    }
-    for item in value:
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        for key, item_value in payload.items():
-            key_text = str(key)
-            if key_text in ignored or _audit_table_cell_is_complex(item_value):
-                continue
-            if key_text not in extra_columns:
-                extra_columns.append(key_text)
-    extra_columns = [
-        key for key in preferred_extra_columns if key in extra_columns
-    ] + [
-        key for key in extra_columns if key not in preferred_extra_columns
-    ]
-    grouped_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for item in value:
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        notice_type = payload.get("notice_type")
-        if notice_type not in {"force_close", "rollover"}:
-            return None
-        row_key = (
-            item.get("timestamp") or "",
-            payload.get("product") or "",
-            _audit_notice_scalar(payload.get("contract_product") or payload.get("contract") or payload.get("uid") or payload.get("contract_object")),
-            notice_type,
-            payload.get("notice_reason") or "",
-            _audit_notice_scalar(payload.get("last_trade_date")),
-            _audit_notice_scalar(payload.get("delivery_date")),
-            *[_audit_notice_scalar(payload.get(column)) for column in extra_columns],
-        )
-        grouped = grouped_rows.setdefault(row_key, {"strategies": []})
-        strategy = item.get("strategy")
-        if strategy not in (None, ""):
-            grouped["strategies"].append(str(strategy))
-    rows = []
-    for row_key, grouped in grouped_rows.items():
-        strategies = ", ".join(sorted(dict.fromkeys(grouped.get("strategies") or [])))
-        rows.append(tuple([row_key[0], strategies, *row_key[1:]]))
-    if not rows:
-        return None
-    return _audit_table_lines(
-        ("notice_time", "strategy", "product", "contract", "notice_type", "reason", "last_trade_date", "delivery_date", *extra_columns),
-        rows,
+    return events_formatter.lifecycle_notice_table_lines(
+        value,
+        table_lines=_audit_table_lines,
+        table_cell_is_complex=_audit_table_cell_is_complex,
+        notice_scalar=_audit_notice_scalar,
         indent=indent,
     )
 
 
 def _audit_notice_scalar(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and math.isnan(value):
-        return ""
-    if str(value).strip().lower() in {"nan", "nat", "none"}:
-        return ""
-    if isinstance(value, dict):
-        for key in ("name", "repr", "value", "contract_product", "contract", "uid"):
-            item = value.get(key)
-            if item not in (None, ""):
-                return str(item)
-        return _audit_text(value).replace("\n", " ")
-    return str(value)
+    return events_formatter.notice_scalar(value, audit_text=_audit_text)
 
 
 def _audit_trading_day_resolver_text(value: dict[str, Any]) -> str:
-    lines = ["TimestampTradingDayResolver: timestamp -> trading_day（仅用于交易日级历史字段记录）"]
-    effective_rule = value.get("effective_rule")
-    if effective_rule:
-        lines.append(f"effective_rule = {effective_rule}")
-    mapping_count = value.get("mapping_count")
-    if mapping_count is not None:
-        lines.append(f"mapping_count = {mapping_count}")
-    timestamp_index = value.get("timestamp_index")
-    if isinstance(timestamp_index, dict) and {"start", "end"} <= set(timestamp_index):
-        lines.append(f"timestamp_index = {timestamp_index.get('start')} → {timestamp_index.get('end')}")
-    trading_days = value.get("trading_days")
-    if isinstance(trading_days, dict):
-        count = trading_days.get("count")
-        start = trading_days.get("start")
-        end = trading_days.get("end")
-        if count is not None:
-            lines.append(f"trading_days = {count} days; {start} → {end}")
-    sample = value.get("sample")
-    if isinstance(sample, dict):
-        selected = _audit_select_sample_part(sample, lambda part: isinstance(part, dict))
-        if selected is not None:
-            lines.extend(_audit_sample_note_lines(sample, selected.name))
-            part, row_notes = _audit_single_sample_frame(selected.value)
-            lines.extend(row_notes)
-            lines.append(f"sample.{selected.name}:")
-            lines.extend(_audit_dataframe_table_lines(part, indent="  "))
-    return "\n".join(lines)
+    return events_formatter.trading_day_resolver_text(
+        value,
+        select_sample_part=_audit_select_sample_part,
+        sample_note_lines=_audit_sample_note_lines,
+        single_sample_frame=_audit_single_sample_frame,
+        dataframe_table_lines=_audit_dataframe_table_lines,
+    )
 
 
 def _audit_event_payload_details(payload: Any) -> Any:
-    if not isinstance(payload, dict):
-        return payload
-    ignored = {"kind", "ledger_id", "trading_day", "notice_type", "notice_reason", "reason", "product"}
-    return {key: value for key, value in payload.items() if key not in ignored}
+    return events_formatter.event_payload_details(payload)
 
 
 def _audit_event_payload_table_text(value: Any) -> str | None:
-    if not isinstance(value, list) or not value:
-        return None
-    if not all(isinstance(item, dict) for item in value):
-        return None
-    if not all(_looks_like_event_payload(item) for item in value):
-        return None
-    rows = []
-    for payload in value:
-        details = _audit_event_payload_details(payload)
-        rows.append((
-            payload.get("kind") or "",
-            payload.get("product") or payload.get("ledger_id") or payload.get("trading_day") or "",
-            payload.get("notice_type") or payload.get("kind") or "",
-            payload.get("notice_reason") or payload.get("reason") or "",
-            details if details else "",
-        ))
-    return "\n".join(_audit_table_lines(("event", "subject", "action", "reason", "details"), rows))
+    return events_formatter.event_payload_table_text(value, table_lines=_audit_table_lines)
 
 
 def _looks_like_event_payload(value: dict[str, Any]) -> bool:
-    if "kind" not in value:
-        return False
-    event_keys = {"ledger_id", "trading_day", "product", "notice_type", "notice_reason", "reason"}
-    return any(key in value for key in event_keys) or len(value) == 1
+    return events_formatter.looks_like_event_payload(value)
 
 
 def _audit_order_table_text(value: Any) -> str | None:
