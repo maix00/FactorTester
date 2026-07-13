@@ -151,11 +151,51 @@ def test_step_badge_uses_light_pink_background(capsys) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[30m\x1b[48;2;255;214;231m" in out
+    assert "\x1b[30m\x1b[48;2;255;238;246m" in out
     assert "\x1b[101m" not in out
     assert "\x1b[105m" not in out
     assert "\x1b[41m" not in out
     assert "apply_order_fill" in out
+    assert "flow           = PER_EVENT" in _strip_ansi(out)
+    assert "timestamp      = 2026-01-05 09:01:00+08:00" in _strip_ansi(out)
+    assert "event_kind     = ORDER" in _strip_ansi(out)
+    assert "batch_count    = 1" in _strip_ansi(out)
+
+
+def test_step_badge_wraps_event_subjects_at_value_column(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((76, 20)))
+
+    _print_step_badge_box(
+        {
+            "current_event": {
+                "event_kind": "ORDER",
+                "batch_count": 3,
+                "subjects": [
+                    {
+                        "strategy": "A1",
+                        "subject": "CZCE|F|SM|2603-with-a-very-long-subject-name",
+                        "action": "filled",
+                    },
+                    {
+                        "strategy": "A2",
+                        "subject": "DCE|F|LH|2605-with-a-very-long-subject-name",
+                        "action": "scheduled",
+                    },
+                ],
+            },
+        },
+        "PER_EVENT (事件回放)",
+        "apply_order_fill",
+        "成交落账",
+        "2026-01-05 09:01:00+08:00",
+    )
+
+    lines = [_strip_ansi(line) for line in capsys.readouterr().out.splitlines()]
+    subject_lines = [line for line in lines if "event_subjects" in line or "CZCE|F|SM|2603" in line or "DCE|F|LH|2605" in line]
+    assert any("event_subjects = " in line for line in subject_lines)
+    continuation_lines = [line for line in subject_lines if "event_subjects" not in line]
+    assert continuation_lines
+    assert all("┃                " in line for line in continuation_lines)
 
 
 def test_data_money_repr_distinguishes_minor_int_and_major_float() -> None:
@@ -928,14 +968,175 @@ def test_step_audit_groups_identical_strategy_changes_inline(capsys) -> None:
     out = capsys.readouterr().out
     assert "before:" not in out
     assert "after:" not in out
-    assert "strategy" in out
+    assert "strategies" in out
     assert "A1, A2" in out
     assert "A3" in out
     assert "CJ.CZC" in out
     assert "SI.GFE" in out
-    assert "null -> 0.5" in out
+    assert "null -> key     value" in out
     assert "before =" not in out
     assert "after =" not in out
+
+
+def test_step_audit_expands_long_short_leg_strategy_fields(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((90, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "LongShortCompositionModule.long_leg_strategy_ids",
+            "values": [{"scope": "strategy_config", "strategy": "LS A1/A5", "value": [{
+                "group_id": "bg_mpuvbhda_1",
+                "strategy_id": "bg_mpuvbhda_1",
+                "weight": 1.0,
+            }]}],
+        },
+        {
+            "field": "LongShortCompositionModule.short_leg_strategy_ids",
+            "values": [{"scope": "strategy_config", "strategy": "LS A1/A5", "value": [{
+                "group_id": "bg_mpuwogji_5",
+                "strategy_id": "bg_mpuwogji_5",
+                "weight": 1.0,
+            }]}],
+        },
+        {
+            "field": "LongShortCompositionModule.strategy_kind",
+            "values": [{"scope": "strategy_config", "strategy": "LS A1/A5", "value": "long_short"}],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "long_leg_strategy_ids.group_id" in out
+    assert "long_leg_strategy_ids.strategy_id" in out
+    assert "short_leg_strategy_ids.weight" in out
+    assert "strategy_kind" in out
+    assert "表格已转置" in out
+    assert "[明细" not in out
+
+
+def test_step_audit_inlines_medium_target_weights_in_strategy_table(capsys) -> None:
+    _print_audit_fields("输入字段", [
+        {
+            "field": "TargetStrategyModule.target_weights",
+            "values": [{"scope": "strategy_context", "strategy": "A2", "value": {
+                "LH.DCE": 0.25,
+                "LC.GFE": 0.25,
+                "SM.CZC": 0.25,
+                "PS.GFE": 0.25,
+            }}],
+        },
+        {
+            "field": "EngineModule.engine_mode",
+            "values": [{"scope": "strategy_context", "strategy": "A2", "value": "auto"}],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "target_weights" in out
+    assert "key" in out
+    assert "LH.DCE" in out
+    assert "PS.GFE" in out
+    assert "[明细" not in out
+
+
+def test_step_audit_keeps_raw_deltas_in_ledger_table(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((90, 20)))
+
+    _print_audit_fields("输入字段", [
+        {
+            "field": "OrderConstructModule.raw_deltas",
+            "values": [{
+                "scope": "ledger",
+                "ledger": "private:L1",
+                "cash_pool": "private:P1",
+                "strategies": ["A1"],
+                "value": {"CJ.CZC": 2, "SF.CZC": -1},
+            }],
+        },
+        {
+            "field": "OrderConstructModule.max_order_count",
+            "values": [{
+                "scope": "ledger",
+                "ledger": "private:L1",
+                "cash_pool": "private:P1",
+                "strategies": ["A1"],
+                "value": 10,
+            }],
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "raw_deltas [OrderConstructModule.raw_deltas]" in out
+    assert "max_order_count [OrderConstructModule.max_order_count]" in out
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "strategies" in out
+    assert "CJ.CZC" in out
+    assert "SF.CZC" in out
+    assert "账本 private:L1" not in out
+
+
+def test_step_audit_keeps_raw_deltas_in_strategy_product_table(capsys) -> None:
+    _print_audit_changes("声明输出的变化", [
+        {
+            "field": "OrderConstructModule.raw_deltas",
+            "scope": "strategy_context",
+            "strategy": "A1",
+            "before": None,
+            "after": {"CJ.CZC": 2.5, "SF.CZC": 0, "SM.CZC": -1.5},
+        },
+        {
+            "field": "OrderConstructModule.raw_deltas",
+            "scope": "strategy_context",
+            "strategy": "A2",
+            "before": None,
+            "after": {"CJ.CZC": 0, "SF.CZC": 0},
+        },
+    ])
+
+    out = capsys.readouterr().out
+    assert "raw_deltas [OrderConstructModule.raw_deltas]" in out
+    assert "owner" in out
+    assert "product" in out
+    assert "A1" in out
+    assert "CJ.CZC" in out
+    assert "SM.CZC" in out
+    assert "其余 1 个产品" in out
+    assert "其余 2 个产品" in out
+    assert "[明细" not in out
+
+
+def test_step_audit_reuses_identical_detail_refs() -> None:
+    detail = {"items": list(range(12)), "note": "same-detail"}
+
+    lines = _audit_table_lines(
+        ("strategy", "signal_value", "current_historical_fields.shared"),
+        [
+            ("A1", detail, detail),
+            ("A2", detail, detail),
+        ],
+    )
+
+    text = "\n".join(lines)
+    assert text.count("[明细 1]") == 2
+    assert text.count("[明细 2]") == 2
+    assert "明细 3" not in text
+
+
+def test_step_audit_transposes_when_table_would_split_three_column_groups(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((64, 20)))
+
+    lines = _audit_table_lines(
+        ("strategies", "field_a", "field_b", "field_c", "field_d", "field_e", "field_f", "field_g"),
+        [
+            ("A1", "a" * 20, "b" * 20, "c" * 20, "d" * 20, "e" * 20, "f" * 20, "g" * 20),
+            ("A2", "a" * 20, "b" * 20, "c" * 20, "d" * 20, "e" * 20, "f" * 20, "g" * 20),
+        ],
+    )
+
+    text = "\n".join(lines)
+    assert "表格已转置" in text
+    assert "field_a" in text
+    assert "A1" in text
 
 
 def test_step_audit_renders_trade_intent_changes_as_tables(capsys) -> None:
@@ -971,10 +1172,10 @@ def test_step_audit_renders_trade_intent_changes_as_tables(capsys) -> None:
     assert "before:" not in out
     assert "after:" not in out
     assert "A1, A2" in out
-    assert "CJ.CZC" in out
     assert "reason" in out
-    assert "null -> group_quantile" in out
+    assert "null -> TargetWeightIntent(reason=group_quantile; 2 weights)" in out
     assert "group_quantile" in out
+    assert "target_weight" not in out
     assert "[跨策略]" not in out
 
 
@@ -1418,7 +1619,7 @@ def test_step_audit_renders_orders_as_table_with_field_details() -> None:
     assert "intent_qty" in text
     assert "CZCE|F|SM|2603" in text
     assert "filled" in text
-    assert "明细 1 (fields):" in text
+    assert "明细 1 (fields):" not in text
     assert "effective_price" in text
     assert "fee_cost" in text
     assert '"fields"' not in text
@@ -1784,7 +1985,9 @@ def test_step_audit_transposed_tables_split_long_row_labels(monkeypatch) -> None
     assert "表格已转置" in text
     assert "行标明细" in text
     assert "行1" in text
-    assert long_strategy in text
+    assert "bg_mpv90jxe_1:35b39e39e72e4b0e96" in text
+    assert "f43a313b29ea9e" in text
+    assert max(len(_strip_ansi(line)) for line in lines) <= 100
     assert f"column         2026-01-05 09:01:00.000001+08:00 | {long_strategy}" not in text
 
 
@@ -2058,14 +2261,15 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[30m\x1b[48;2;255;214;231m┏" in out
+    assert "\x1b[30m\x1b[48;2;255;238;246m┏" in out
     assert "\x1b[101m" not in out
     assert "\x1b[105m" not in out
     assert "\x1b[41m" not in out
-    assert "FLOW PRE_REPLAY" in out
-    assert "timestamp: 2026-01-05 09:02:00+08:00" in out
-    assert "event: kind=ORDER; batch_count=1" in out
-    assert "event_subjects: A1:CZCE|F|SM|2603/scheduled" in out
+    assert "flow           = PRE_REPLAY" in out
+    assert "timestamp      = 2026-01-05 09:02:00+08:00" in out
+    assert "event_kind     = ORDER" in out
+    assert "batch_count    = 1" in out
+    assert "event_subjects = A1:CZCE|F|SM|2603/scheduled" in out
     assert "\x1b[0m" in out
     assert posted == [("/step_continue", {"run_token": "run-token", "action": "continue"})]
 

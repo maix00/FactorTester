@@ -135,7 +135,7 @@ def _audit_change_highlight(text: str) -> str:
 
 
 def _audit_badge_highlight(text: str) -> str:
-    return f"\x1b[30m\x1b[48;2;255;214;231m{text}\x1b[0m"
+    return f"\x1b[30m\x1b[48;2;255;238;246m{text}\x1b[0m"
 
 
 def _audit_change_highlight_content(line: str) -> str:
@@ -2296,6 +2296,9 @@ def _audit_text(value: Any) -> str:
     pandas_text = _audit_pandas_text(value)
     if pandas_text is not None:
         return pandas_text
+    sequence_mapping_text = _audit_sequence_mapping_table_text(value)
+    if sequence_mapping_text is not None:
+        return sequence_mapping_text
     mapping_text = _audit_mapping_table_text(value)
     if mapping_text is not None:
         return mapping_text
@@ -2998,6 +3001,125 @@ def _print_lifecycle_notice_change(prefix: str, field_name: str, changes: list[d
     return True
 
 
+_ORDER_DELTA_FIELD_NAMES = {"raw_deltas", "sized_deltas", "deltas"}
+
+
+def _print_delta_mapping_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if short_name not in _ORDER_DELTA_FIELD_NAMES or not values:
+        return False
+    rows: list[tuple[str, str, str]] = []
+    for entry in values:
+        mapping = _audit_delta_mapping(_display_field_value(field_name, entry.get("value")))
+        if mapping is None:
+            return False
+        rows.extend(_audit_delta_value_rows(_audit_delta_owner_label(entry), mapping))
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in _audit_table_lines(("owner", "product", short_name), rows, indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _print_delta_mapping_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    short_name = field_name.rsplit(".", 1)[-1]
+    if short_name not in _ORDER_DELTA_FIELD_NAMES or not changes:
+        return False
+    rows: list[tuple[str, str, str]] = []
+    for change in changes:
+        before_mapping = _audit_delta_mapping(_display_field_value(field_name, change.get("before")))
+        after_mapping = _audit_delta_mapping(_display_field_value(field_name, change.get("after")))
+        if before_mapping is None or after_mapping is None:
+            return False
+        rows.extend(_audit_delta_change_rows(_audit_delta_owner_label(change), before_mapping, after_mapping))
+    if not rows:
+        click.echo(f"{prefix}（无变化）")
+        return True
+    click.echo(f"{prefix}{_audit_combined_single_field_label(field_name)}", color=True)
+    for line in _audit_table_lines(("owner", "product", short_name), rows, indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _audit_delta_mapping(value: Any) -> dict[str, Any] | None:
+    normalized = _audit_normalized_value(value)
+    if normalized in (None, ""):
+        return {}
+    if not isinstance(normalized, dict):
+        return None
+    result: dict[str, Any] = {}
+    for product, quantity in normalized.items():
+        if isinstance(quantity, (dict, list, tuple)):
+            return None
+        result[str(product)] = quantity
+    return result
+
+
+def _audit_delta_owner_label(entry: dict[str, Any]) -> str:
+    strategy = entry.get("strategy")
+    if strategy not in (None, ""):
+        return str(strategy)
+    strategies = entry.get("strategies")
+    if isinstance(strategies, list) and strategies:
+        strategy_text = ", ".join(str(item) for item in strategies if item not in (None, ""))
+    else:
+        strategy_text = ""
+    ledger = entry.get("ledger")
+    cash_pool = entry.get("cash_pool")
+    if ledger not in (None, "") or cash_pool not in (None, ""):
+        route = f"{ledger or '?'} / {cash_pool or '?'}"
+        return f"{route} / {strategy_text or '无策略'}"
+    return strategy_text or "[共享]"
+
+
+def _audit_delta_value_rows(owner: str, mapping: dict[str, Any]) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    zero_count = 0
+    for product, value in sorted(mapping.items()):
+        if _audit_is_zero_value(value):
+            zero_count += 1
+            continue
+        rows.append((owner, product, _audit_scalar_cell(value)))
+    if zero_count:
+        rows.append((owner, f"其余 {zero_count} 个产品", "0"))
+    if not rows:
+        rows.append((owner, "全部产品", "0"))
+    return rows
+
+
+def _audit_delta_change_rows(owner: str, before: dict[str, Any], after: dict[str, Any]) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    zero_change_count = 0
+    missing = object()
+    for product in sorted(set(before) | set(after)):
+        before_value = before.get(product, missing)
+        after_value = after.get(product, missing)
+        if before_value == after_value:
+            continue
+        before_text = "null" if before_value is missing else _audit_scalar_cell(before_value)
+        after_text = "null" if after_value is missing else _audit_scalar_cell(after_value)
+        if _audit_is_zero_text(after_text) and before_text in {"null", "0"}:
+            zero_change_count += 1
+            continue
+        rows.append((owner, product, _audit_change_cell(before_text, after_text)))
+    if zero_change_count:
+        rows.append((owner, f"其余 {zero_change_count} 个产品", _audit_change_cell("null", "0")))
+    return rows
+
+
+def _audit_is_zero_value(value: Any) -> bool:
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return str(value).strip() in {"0", "0.0"}
+
+
+def _audit_is_zero_text(value: str) -> bool:
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return value.strip() in {"0", "0.0"}
+
+
 def _dedupe_audit_list(values: list[Any]) -> list[Any]:
     seen: set[str] = set()
     result: list[Any] = []
@@ -3019,9 +3141,10 @@ def _audit_ledger_scalar_text(value: Any) -> str | None:
         return _audit_scalar_sequence_text(normalized)
     lines = _audit_text(value).splitlines() or [""]
     if len(lines) != 1:
-        return None
+        inline_text = _audit_inline_complex_cell_text(value)
+        return inline_text
     if _audit_table_cell_is_complex(normalized):
-        return None
+        return _audit_inline_complex_cell_text(value)
     return lines[0]
 
 
@@ -3276,9 +3399,6 @@ def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], di
     if not present_scopes:
         return None
     short_name = field_name.rsplit(".", 1)[-1]
-    columns = [short_name] if len(present_scopes) == 1 else [
-        f"{short_name}.{_audit_scope_suffix(scope)}" for scope in present_scopes
-    ]
     shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
     shared_value: Any = shared_values[-1] if shared_values else _AUDIT_MISSING
     by_strategy_scope: dict[tuple[str, str], Any] = {}
@@ -3289,16 +3409,78 @@ def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[list[str], di
             return None
         by_strategy_scope[key] = value
     strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
+    scope_specs: list[tuple[str, list[str], bool]] = []
+    for scope in present_scopes:
+        base_column = short_name if len(present_scopes) == 1 else f"{short_name}.{_audit_scope_suffix(scope)}"
+        candidate_values = [
+            shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), _AUDIT_MISSING)
+            for strategy in strategies
+        ]
+        expanded_columns = _audit_strategy_subfield_columns(short_name, base_column, candidate_values)
+        if expanded_columns is None:
+            scope_specs.append((scope, [base_column], False))
+        else:
+            scope_specs.append((scope, expanded_columns, True))
+    columns = [column for _scope, scope_columns, _expanded in scope_specs for column in scope_columns]
     by_strategy: dict[str, tuple[Any, ...]] = {}
     for strategy in strategies:
         row_values: list[Any] = []
-        for scope in present_scopes:
+        for scope, scope_columns, expanded in scope_specs:
             value = shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), _AUDIT_MISSING)
-            row_values.append("" if value is _AUDIT_MISSING else _audit_strategy_table_cell(field_name, value))
+            if value is _AUDIT_MISSING:
+                row_values.extend([""] * len(scope_columns))
+            elif expanded:
+                row_values.extend(_audit_strategy_subfield_values(value, len(scope_columns)))
+            else:
+                row_values.append(_audit_strategy_table_cell(field_name, value))
         by_strategy[strategy] = tuple(row_values)
     if not by_strategy:
         return None
     return columns, by_strategy
+
+
+def _audit_strategy_subfield_columns(short_name: str, base_column: str, values: list[Any]) -> list[str] | None:
+    if short_name not in {"long_leg_strategy_ids", "short_leg_strategy_ids"}:
+        return None
+    columns: list[str] | None = None
+    for value in values:
+        if value is _AUDIT_MISSING:
+            continue
+        child_keys = _audit_single_mapping_sequence_keys(value)
+        if child_keys is None:
+            return None
+        candidate = [f"{base_column}.{child_key}" for child_key in child_keys]
+        if columns is None:
+            columns = candidate
+        elif columns != candidate:
+            return None
+    return columns
+
+
+def _audit_strategy_subfield_values(value: Any, expected_count: int) -> list[str]:
+    item = _audit_single_mapping_sequence_item(value)
+    if item is None:
+        return [""] * expected_count
+    return [_audit_scalar_cell(item.get(child_key)) for child_key in list(item)[:expected_count]]
+
+
+def _audit_single_mapping_sequence_keys(value: Any) -> list[str] | None:
+    item = _audit_single_mapping_sequence_item(value)
+    if item is None:
+        return None
+    return [str(key) for key in item]
+
+
+def _audit_single_mapping_sequence_item(value: Any) -> dict[str, Any] | None:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, (list, tuple)) or len(normalized) != 1:
+        return None
+    item = normalized[0]
+    if not isinstance(item, dict) or not item:
+        return None
+    if any(isinstance(child_value, (dict, list, tuple)) for child_value in item.values()):
+        return None
+    return item
 
 
 def _audit_scope_suffix(scope: str) -> str:
@@ -3778,6 +3960,28 @@ def _audit_mapping_table_text(value: Any) -> str | None:
     return None
 
 
+def _audit_sequence_mapping_table_text(value: Any) -> str | None:
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    if len(value) > 6 or not all(isinstance(item, dict) for item in value):
+        return None
+    child_keys: list[str] = []
+    for item in value:
+        for child_key, child_value in item.items():
+            if isinstance(child_value, (dict, list, tuple)):
+                return None
+            child_key_text = str(child_key)
+            if child_key_text not in child_keys:
+                child_keys.append(child_key_text)
+    if not child_keys:
+        return None
+    rows = [
+        tuple(_audit_scalar_cell(item.get(child_key)) for child_key in child_keys)
+        for item in value
+    ]
+    return "\n".join(_audit_table_lines(tuple(child_keys), rows, allow_transpose=False))
+
+
 def _audit_scalar_cell(value: Any) -> str:
     if value is None:
         return "null"
@@ -3823,6 +4027,7 @@ def _audit_table_lines(
     header_list = [str(header) for header in headers]
     scalar_rows: list[list[str]] = []
     details: list[tuple[int, str, Any]] = []
+    detail_indexes: dict[tuple[str, str], int] = {}
     detail_index = 1
     for row in rows:
         scalar_row: list[str] = []
@@ -3833,18 +4038,26 @@ def _audit_table_lines(
                 if inline_text is not None:
                     scalar_row.append(inline_text)
                 else:
-                    scalar_row.append(f"[明细 {detail_index}]")
-                    details.append((detail_index, header, cell))
-                    detail_index += 1
+                    detail_key = (str(header), _audit_display_key(_audit_normalized_value(cell)))
+                    existing_index = detail_indexes.get(detail_key)
+                    if existing_index is None:
+                        existing_index = detail_index
+                        detail_indexes[detail_key] = existing_index
+                        details.append((existing_index, header, cell))
+                        detail_index += 1
+                    scalar_row.append(f"[明细 {existing_index}]")
             else:
                 scalar_row.append(str(cell))
         scalar_rows.append(scalar_row)
     widths = [
-        max(
-            _audit_display_width(header_list[column]),
-            *(
-                max(_audit_display_width(part) for part in (row[column].splitlines() or [""]))
-                for row in scalar_rows
+        _audit_capped_column_width(
+            header_list[column],
+            max(
+                _audit_display_width(header_list[column]),
+                *(
+                    max(_audit_display_width(part) for part in (row[column].splitlines() or [""]))
+                    for row in scalar_rows
+                ),
             ),
         )
         for column in range(len(header_list))
@@ -3877,9 +4090,9 @@ def _audit_table_lines(
 def _audit_inline_complex_cell_text(value: Any) -> str | None:
     text = _audit_text(value)
     lines = text.splitlines() or [""]
-    if len(lines) > 4:
+    if len(lines) > 8:
         return None
-    if any(_audit_display_width(line) > 64 for line in lines):
+    if any(_audit_display_width(line) > 72 for line in lines):
         return None
     return text
 
@@ -3907,7 +4120,7 @@ def _audit_transposed_table_lines(
     if header_list and header_list[0] == "op":
         return None
     key_count = _audit_table_key_column_count(header_list)
-    if header_list and header_list[0] in {"strategy", "strategies"} and len(scalar_rows) > 1:
+    if header_list and header_list[0] in {"strategy", "strategies"} and len(scalar_rows) > 8:
         return None
     value_column_count = max(len(header_list) - 1, 0)
     should_transpose_dense = (
@@ -3927,7 +4140,13 @@ def _audit_transposed_table_lines(
             for column in range(key_count, len(header_list))
         )
     )
-    if not (should_transpose_dense or should_transpose_long_cell) and (len(header_list) <= 8 or len(scalar_rows) > 3):
+    split_groups = _audit_table_column_groups(header_list, scalar_rows, widths, indent=indent)
+    should_transpose_many_splits = (
+        len(split_groups) >= 3
+        and len(scalar_rows) <= 8
+        and len(header_list) >= 5
+    )
+    if not (should_transpose_dense or should_transpose_long_cell or should_transpose_many_splits) and (len(header_list) <= 8 or len(scalar_rows) > 3):
         return None
     if key_count < 1 or key_count > 2:
         return None
@@ -3937,7 +4156,7 @@ def _audit_transposed_table_lines(
         " | ".join(row[column] for column in range(key_count)).strip()
         for row in scalar_rows
     ]
-    if full_width <= max_width and not should_transpose_dense:
+    if full_width <= max_width and not (should_transpose_dense or should_transpose_many_splits):
         return None
     key_detail_lines: list[str] = []
     if any(_audit_display_width(header) > 48 for header in row_headers):
@@ -3996,7 +4215,7 @@ def _audit_table_block_lines(
     ]
     for row in scalar_rows:
         cell_lines = [
-            (row[column].splitlines() or [""])
+            _audit_wrapped_table_cell(row[column], width=widths[column], max_lines=12)
             for column in columns
         ]
         row_height = max(len(lines_for_cell) for lines_for_cell in cell_lines)
@@ -4007,6 +4226,20 @@ def _audit_table_block_lines(
                 physical_cells.append(_pad_audit_cell(parts[line_index] if line_index < len(parts) else "", widths[column]))
             lines.append(indent + "  ".join(physical_cells).rstrip())
     return lines
+
+
+def _audit_capped_column_width(header: str, width: int) -> int:
+    header_width = _audit_display_width(header)
+    header_key = header.strip().lower()
+    if header_key in {"products", "product", "instrument", "contract"}:
+        return max(header_width, min(width, 56))
+    if header_key in {"ledger", "cash pool", "ledgers", "cash pools"}:
+        return max(header_width, min(width, 28))
+    if header_key in {"strategies", "strategy"}:
+        return max(header_width, min(width, 32))
+    if header_key in {"order_id"}:
+        return max(header_width, min(width, 48))
+    return max(header_width, min(width, 72))
 
 
 def _audit_wrapped_table_block_lines(
@@ -4845,6 +5078,10 @@ def _compact_product_path_selection_for_audit(value: dict[str, Any]) -> dict[str
 
 
 def _display_field_value(qualified_name: str, value: Any) -> Any:
+    if qualified_name.rsplit(".", 1)[-1] == "trade_intent":
+        summary = _audit_trade_intent_summary(value)
+        if summary is not None:
+            return summary
     if qualified_name == "LedgerModule.positions" or qualified_name.rsplit(".", 1)[-1] == "positions":
         summary = _audit_positions_summary(value)
         if summary is not None:
@@ -4867,6 +5104,22 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
     if offset and isinstance(value, (int, float)) and not isinstance(value, bool):
         return value + offset
     return value
+
+
+def _audit_trade_intent_summary(value: Any) -> str | None:
+    normalized = _audit_normalized_value(value)
+    if not isinstance(normalized, dict):
+        return None
+    intent_type = str(normalized.get("type") or "").strip()
+    if intent_type not in {"TargetWeightIntent", "OrderDeltaIntent"}:
+        return None
+    reason = str(normalized.get("reason") or "").strip()
+    payload = normalized.get("weights") if intent_type == "TargetWeightIntent" else normalized.get("deltas")
+    count = len(payload) if isinstance(payload, dict) else 0
+    suffix = "weights" if intent_type == "TargetWeightIntent" else "deltas"
+    if reason:
+        return f"{intent_type}(reason={reason}; {count} {suffix})"
+    return f"{intent_type}({count} {suffix})"
 
 
 def _print_audit_value(prefix: str, label: str, value: Any) -> None:
@@ -5229,6 +5482,11 @@ def _print_audit_fields(
     index = 0
     while index < len(sorted_records):
         record = sorted_records[index]
+        field_name = str(record.get("field") or "")
+        values = record.get("values") or []
+        if _print_delta_mapping_value_table("    ", field_name, values):
+            index += 1
+            continue
         combined = [record]
         current_table = _cash_pool_scalar_record_table(record)
         combined_printer = _print_combined_cash_pool_scalar_value_table
@@ -5255,8 +5513,6 @@ def _print_audit_fields(
         if current_table is not None and combined_printer("    ", combined):
             index += len(combined)
             continue
-        field_name = str(record.get("field") or "")
-        values = record.get("values") or []
         values = _drop_empty_non_ledger_entries_when_ledger_values_exist(field_name, values)
         if not values:
             click.echo(f"  {_audit_combined_single_field_label(field_name)}:", color=True)
@@ -5311,6 +5567,9 @@ def _print_audit_changes(
     index = 0
     while index < len(sorted_items):
         field_name, field_changes = sorted_items[index]
+        if _print_delta_mapping_change_table("    ", field_name, field_changes):
+            index += 1
+            continue
         combined = [(field_name, field_changes)]
         combined_printer = None
         current_table: tuple[Any, ...] | None = _cash_pool_scalar_change_record_table(field_name, field_changes)
@@ -5532,21 +5791,21 @@ def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, f
         current_event = {}
     event_kind = str(current_event.get("event_kind") or data.get("event_kind") or "")
     batch_count = current_event.get("batch_count")
-    lines = [
-        f"FLOW {phase_text} · {flow_id} ({flow_name})",
-        f"timestamp: {timestamp_text or '-'}",
+    fields = [
+        ("flow", f"{phase_text} · {flow_id} ({flow_name})"),
+        ("timestamp", timestamp_text or "-"),
     ]
     if event_kind or batch_count not in (None, ""):
-        lines.append(f"event: kind={event_kind or '-'}; batch_count={batch_count if batch_count not in (None, '') else '-'}")
-        lines.append(f"event_subjects: {_current_event_subject_summary(current_event)}")
+        fields.append(("event_kind", event_kind or "-"))
+        fields.append(("batch_count", str(batch_count) if batch_count not in (None, "") else "-"))
+        fields.append(("event_subjects", _current_event_subject_summary(current_event)))
+    key_width = max(_audit_display_width(key) for key, _value in fields)
     max_width = _audit_max_width() - 4
     display_lines: list[str] = []
-    for line in lines:
-        if ": " in line:
-            key, _value = line.split(": ", 1)
-            continuation = " " * (len(key) + 2)
-        else:
-            continuation = ""
+    for key, value in fields:
+        line_prefix = f"{_pad_audit_cell(key, key_width)} = "
+        line = f"{line_prefix}{value}"
+        continuation = " " * _audit_display_width(line_prefix)
         display_lines.extend(_wrap_audit_text(line, width=max_width, subsequent_indent=continuation))
     box_width = min(max_width, max(_audit_display_width(line) for line in display_lines))
     border = "━" * (box_width + 2)
