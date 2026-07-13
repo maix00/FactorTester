@@ -2625,14 +2625,11 @@ def _audit_changed_lot_count(before_lots: list[Any], after_lots: list[Any]) -> i
 
 
 def _audit_pandas_text(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    value_type = value.get("type")
-    if value_type == "DataFrame":
-        return _audit_dataframe_text(value)
-    if value_type == "Series":
-        return _audit_series_text(value)
-    return None
+    return market_data_formatter.pandas_text(
+        value,
+        dataframe_formatter=_audit_dataframe_text,
+        series_formatter=_audit_series_text,
+    )
 
 
 def _audit_dataframe_text(value: dict[str, Any]) -> str:

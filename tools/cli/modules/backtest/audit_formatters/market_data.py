@@ -395,6 +395,22 @@ def dataframe_text(
     return "\n".join(lines)
 
 
+def pandas_text(
+    value: Any,
+    *,
+    dataframe_formatter: Callable[[dict[str, Any]], str],
+    series_formatter: Callable[[dict[str, Any]], str],
+) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    value_type = value.get("type")
+    if value_type == "DataFrame":
+        return dataframe_formatter(value)
+    if value_type == "Series":
+        return series_formatter(value)
+    return None
+
+
 def dataframe_table_lines(
     value: Mapping[str, Any],
     *,
