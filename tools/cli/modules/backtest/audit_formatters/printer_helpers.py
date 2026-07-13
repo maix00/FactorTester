@@ -10,6 +10,7 @@ import click
 
 DisplayValue = Callable[[str, Any], Any]
 ValueIsEmpty = Callable[[Any], bool]
+ScalarRecordCandidate = tuple[tuple[Any, ...] | None, Any, bool]
 
 
 def combined_single_field_label(qualified_name: str) -> str:
@@ -59,3 +60,14 @@ def drop_empty_non_ledger_entries_when_ledger_values_exist(
             continue
         compacted.append(entry)
     return compacted or values
+
+
+def combined_scalar_routes(table: tuple[Any, ...]) -> tuple[Any, ...]:
+    return tuple(sorted(table[1]))
+
+
+def scalar_record_group(candidates: list[ScalarRecordCandidate]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
+    for table, printer, _is_strategy in candidates:
+        if table is not None:
+            return table, printer, combined_scalar_routes(table)
+    return None, None, None

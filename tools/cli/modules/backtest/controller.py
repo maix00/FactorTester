@@ -3058,39 +3058,23 @@ def _print_audit_fields(
         index += 1
         
 
-def _combined_scalar_routes(table: tuple[Any, ...], *, strategy: bool) -> tuple[Any, ...]:
-    if strategy:
-        return tuple(sorted(table[1]))
-    return tuple(sorted(table[1]))
-
-
 def _scalar_value_record_group(record: dict[str, Any]) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
-    table = _cash_pool_scalar_record_table(record)
-    if table is not None:
-        return table, _print_combined_cash_pool_scalar_value_table, _combined_scalar_routes(table, strategy=False)
-    table = _strategy_scalar_record_table(record)
-    if table is not None:
-        return table, _print_combined_strategy_scalar_value_table, _combined_scalar_routes(table, strategy=True)
-    table = _ledger_scalar_record_table(record)
-    if table is not None:
-        return table, _print_combined_ledger_scalar_value_table, _combined_scalar_routes(table, strategy=False)
-    return None, None, None
+    return audit_printer_helpers.scalar_record_group([
+        (_cash_pool_scalar_record_table(record), _print_combined_cash_pool_scalar_value_table, False),
+        (_strategy_scalar_record_table(record), _print_combined_strategy_scalar_value_table, True),
+        (_ledger_scalar_record_table(record), _print_combined_ledger_scalar_value_table, False),
+    ])
 
 
 def _scalar_change_record_group(
     field_name: str,
     field_changes: list[dict[str, Any]],
 ) -> tuple[tuple[Any, ...] | None, Any, tuple[Any, ...] | None]:
-    table = _cash_pool_scalar_change_record_table(field_name, field_changes)
-    if table is not None:
-        return table, _print_combined_cash_pool_scalar_change_table, _combined_scalar_routes(table, strategy=False)
-    table = _strategy_scalar_change_record_table(field_name, field_changes)
-    if table is not None:
-        return table, _print_combined_strategy_scalar_change_table, _combined_scalar_routes(table, strategy=True)
-    table = _ledger_scalar_change_record_table(field_name, field_changes)
-    if table is not None:
-        return table, _print_combined_ledger_scalar_change_table, _combined_scalar_routes(table, strategy=False)
-    return None, None, None
+    return audit_printer_helpers.scalar_record_group([
+        (_cash_pool_scalar_change_record_table(field_name, field_changes), _print_combined_cash_pool_scalar_change_table, False),
+        (_strategy_scalar_change_record_table(field_name, field_changes), _print_combined_strategy_scalar_change_table, True),
+        (_ledger_scalar_change_record_table(field_name, field_changes), _print_combined_ledger_scalar_change_table, False),
+    ])
 
 
 def _print_audit_changes(
