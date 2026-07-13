@@ -2264,18 +2264,15 @@ def _handle_step_event(
             empty_message="（此 flow 未声明输入字段）",
             route_state=route_state,
         )
-        output_changes = step_display_formatter.merge_declared_and_ledger_changes(
-            list(data.get("output_changes") or []),
-            list(data.get("ledger_changes") or []),
+        unchanged_outputs, output_changes, unchanged_message = step_display_formatter.output_audit_sections(
+            data,
             display_key=_audit_display_key,
             normalize=_audit_normalized_value,
         )
-        outputs = list(data.get("outputs") or [])
-        unchanged_outputs = step_display_formatter.unchanged_output_records(outputs, output_changes)
         _print_audit_fields(
             "声明输出字段（未变化）",
             unchanged_outputs,
-            empty_message=step_display_formatter.unchanged_output_message(outputs, output_changes),
+            empty_message=unchanged_message,
             route_state=route_state,
         )
         _print_audit_changes("声明输出的变化", output_changes, route_state=route_state)

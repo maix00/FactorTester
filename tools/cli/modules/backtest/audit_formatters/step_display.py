@@ -183,6 +183,23 @@ def merge_declared_and_ledger_changes(
     return merged
 
 
+def output_audit_sections(
+    data: dict[str, Any],
+    *,
+    display_key: DisplayKey,
+    normalize: Normalize,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    output_changes = merge_declared_and_ledger_changes(
+        list(data.get("output_changes") or []),
+        list(data.get("ledger_changes") or []),
+        display_key=display_key,
+        normalize=normalize,
+    )
+    outputs = list(data.get("outputs") or [])
+    unchanged_outputs = unchanged_output_records(outputs, output_changes)
+    return unchanged_outputs, output_changes, unchanged_output_message(outputs, output_changes)
+
+
 def step_change_identity(
     change: dict[str, Any],
     *,
