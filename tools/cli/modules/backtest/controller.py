@@ -30,6 +30,7 @@ from tools.cli.field_store import FieldStore
 from tools.cli.modules.keys import BACKTEST_BACKEND_KEY, BACKTEST_PUBLIC_KEY
 from tools.cli.modules.products.controller import product_group_selection
 from tools.cli.modules.backtest.shared.fields import resolve_backtest_public_fields
+from tools.data.types.data_money import _format_data_money
 from tools.testers.backtest.engines.native.flow import phase_label
 # Module-level mapping from group ID to short alias, populated at run time
 _short_alias_map: dict[str, str] = {}
@@ -2896,6 +2897,60 @@ def _audit_join_entry_strategies(entries: list[dict[str, Any]]) -> str:
     return ", ".join(sorted(dict.fromkeys(values))) if values else "无"
 
 
+def _cash_pool_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
+    field_name = str(record.get("field") or "")
+    values = record.get("values") or []
+    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(values):
+        return None
+    rows: dict[tuple[str, str, str], str] = {}
+    for entry in values:
+        value_text = _audit_ledger_scalar_text(_display_field_value(field_name, entry.get("value")))
+        if value_text is None:
+            return None
+        route = (
+            str(entry.get("cash_pool") or "?"),
+            str(entry.get("ledger") or "?"),
+            ", ".join(str(strategy) for strategy in (entry.get("strategies") or [])) or "无",
+        )
+        rows[route] = value_text
+    if not rows:
+        return None
+    return field_name.rsplit(".", 1)[-1], _merge_cash_pool_routes(rows)
+
+
+def _merge_cash_pool_routes(rows: dict[tuple[str, str, str], str]) -> dict[tuple[str, str, str], str]:
+    grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for (cash_pool, ledger, strategies), value in rows.items():
+        grouped.setdefault((cash_pool, value), []).append((ledger, strategies))
+    return {
+        (
+            cash_pool,
+            ", ".join(sorted(dict.fromkeys(ledger for ledger, _ in entries))),
+            ", ".join(sorted(dict.fromkeys(strategy for _, strategies in entries for strategy in strategies.split(", ") if strategy and strategy != "无"))) or "无",
+        ): value
+        for (cash_pool, value), entries in grouped.items()
+    }
+
+
+def _print_combined_cash_pool_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
+    tables = [_cash_pool_scalar_record_table(record) for record in records]
+    if any(table is None for table in tables) or not tables:
+        return False
+    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
+    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[1] for table in tables if table is not None]
+    rows = [
+        tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
+        for cash_pool, ledgers, strategies in route_keys[0]
+    ]
+    click.echo(f"{prefix}cash pool 总表: {_audit_combined_field_label(records)}", color=True)
+    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
 def _print_ledger_scalar_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
     if not _audit_is_ledger_entries(values):
         return False
@@ -2952,6 +3007,69 @@ def _print_strategy_scalar_value_table(prefix: str, field_name: str, values: lis
     return True
 
 
+def _print_strategy_record_value_table(prefix: str, field_name: str, values: list[dict[str, Any]]) -> bool:
+    if not values or any(str(entry.get("scope") or "") in {"ledger", "ledger_config"} for entry in values):
+        return False
+    strategy_entries = [
+        entry for entry in values
+        if str(entry.get("scope") or "") in {"strategy_config", "strategy_context"} and entry.get("strategy")
+    ]
+    if not strategy_entries:
+        return False
+    strategies = sorted(dict.fromkeys(str(entry.get("strategy") or "?") for entry in strategy_entries))
+    scope_order = ["context", "strategy_context", "strategy_config"]
+    present_scopes = [
+        scope for scope in scope_order
+        if any(str(entry.get("scope") or "") == scope for entry in values)
+    ]
+    if not present_scopes:
+        return False
+    short_name = field_name.rsplit(".", 1)[-1]
+    headers = [short_name] if len(present_scopes) == 1 else [_audit_scope_column_label(scope) for scope in present_scopes]
+    missing = object()
+    shared_values = [entry.get("value") for entry in values if str(entry.get("scope") or "") == "context"]
+    shared_value: Any = shared_values[-1] if shared_values else missing
+    by_strategy_scope: dict[tuple[str, str], Any] = {}
+    for entry in strategy_entries:
+        by_strategy_scope[(str(entry.get("strategy") or "?"), str(entry.get("scope") or ""))] = entry.get("value")
+    grouped: dict[tuple[str, ...], dict[str, Any]] = {}
+    for strategy in strategies:
+        row_values = []
+        row_keys = []
+        for scope in present_scopes:
+            value = shared_value if scope == "context" else by_strategy_scope.get((strategy, scope), missing)
+            display_value = "" if value is missing else _audit_strategy_table_cell(field_name, value)
+            row_values.append(display_value)
+            row_keys.append(_audit_display_key(display_value))
+        bucket = grouped.setdefault(tuple(row_keys), {"strategies": [], "values": row_values})
+        bucket["strategies"].append(strategy)
+    rows = [
+        tuple([", ".join(bucket["strategies"]), *bucket["values"]])
+        for bucket in grouped.values()
+    ]
+    click.echo(f"{prefix}合并策略字段: {_audit_combined_single_field_label(field_name)}", color=True)
+    for line in _audit_table_lines(("strategies", *headers), rows, indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _audit_strategy_table_cell(field_name: str, value: Any) -> Any:
+    display_value = _display_field_value(field_name, value)
+    if _audit_table_cell_is_complex(display_value):
+        return display_value
+    return _audit_scalar_cell(display_value)
+
+
+def _audit_scope_column_label(scope: str) -> str:
+    if scope == "context":
+        return "共享"
+    if scope == "strategy_context":
+        return "策略上下文"
+    if scope == "strategy_config":
+        return "策略配置"
+    return scope or "value"
+
+
 def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[str, str, dict[str, str]] | None:
     field_name = str(record.get("field") or "")
     values = record.get("values") or []
@@ -2976,7 +3094,7 @@ def _strategy_scalar_record_table(record: dict[str, Any]) -> tuple[str, str, dic
 
 def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_strategy_scalar_record_table(record) for record in records]
-    if any(table is None for table in tables) or len(tables) < 2:
+    if any(table is None for table in tables) or not tables:
         return False
     scopes = {table[1] for table in tables if table is not None}
     if len(scopes) != 1:
@@ -2994,7 +3112,7 @@ def _print_combined_strategy_scalar_value_table(prefix: str, records: list[dict[
         tuple([", ".join(strategies), *row_values])
         for row_values, strategies in grouped_rows.items()
     ]
-    click.echo(f"{prefix}合并策略字段:")
+    click.echo(f"{prefix}合并策略字段: {_audit_combined_field_label(records)}", color=True)
     for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
@@ -3094,7 +3212,7 @@ def _ledger_scalar_record_table(record: dict[str, Any]) -> tuple[str, dict[tuple
 
 def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[str, Any]]) -> bool:
     tables = [_ledger_scalar_record_table(record) for record in records]
-    if any(table is None for table in tables) or len(tables) < 2:
+    if any(table is None for table in tables) or not tables:
         return False
     route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
     if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
@@ -3105,10 +3223,18 @@ def _print_combined_ledger_scalar_value_table(prefix: str, records: list[dict[st
         tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
         for ledger, cash_pool, strategies in route_keys[0]
     ]
-    click.echo(f"{prefix}合并账本字段:")
+    click.echo(f"{prefix}合并账本字段: {_audit_combined_field_label(records)}", color=True)
     for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
         click.echo(line)
     return True
+
+
+def _audit_combined_field_label(records: list[dict[str, Any]]) -> str:
+    return "；".join(_audit_combined_single_field_label(str(record.get("field") or "")) for record in records)
+
+
+def _audit_combined_single_field_label(qualified_name: str) -> str:
+    return click.style(f"{qualified_name.rsplit('.', 1)[-1]} [{qualified_name}]", bold=True)
 
 
 def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
@@ -3132,31 +3258,153 @@ def _print_strategy_scalar_change_table(prefix: str, field_name: str, changes: l
     return True
 
 
+def _print_cash_pool_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
+    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
+        return False
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for change in changes:
+        before = _display_field_value(field_name, change.get("before"))
+        after = _display_field_value(field_name, change.get("after"))
+        before_text = _audit_ledger_scalar_text(before)
+        after_text = _audit_ledger_scalar_text(after)
+        if before_text is None or after_text is None:
+            return False
+        grouped.setdefault(_audit_cash_pool_group_key(change, before_text, after_text), []).append(change)
+    rows = [
+        (
+            cash_pool,
+            _audit_join_entry_values(entries, "ledger"),
+            _audit_join_entry_strategies(entries),
+            _audit_change_cell(before_text, after_text),
+        )
+        for (cash_pool, before_text, after_text), entries in grouped.items()
+    ]
+    click.echo(f"{prefix}cash pool 总表: {_audit_field_label(field_name)}")
+    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", field_name.rsplit(".", 1)[-1]), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _strategy_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, str, dict[str, str]] | None:
+    if not _audit_is_strategy_entries(changes):
+        return None
+    scopes = {str(change.get("scope") or "") for change in changes}
+    if len(scopes) != 1:
+        return None
+    by_strategy: dict[str, str] = {}
+    for change in changes:
+        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
+        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
+        if before_text is None or after_text is None:
+            return None
+        by_strategy[str(change.get("strategy") or "?")] = _audit_change_cell(before_text, after_text)
+    return field_name.rsplit(".", 1)[-1], next(iter(scopes)), by_strategy
+
+
+def _ledger_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
+    if _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
+        return None
+    rows: dict[tuple[str, str, str], str] = {}
+    for change in changes:
+        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
+        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
+        if before_text is None or after_text is None:
+            return None
+        route = (
+            str(change.get("ledger") or "?"),
+            str(change.get("cash_pool") or "?"),
+            ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
+        )
+        rows[route] = _audit_change_cell(before_text, after_text)
+    return field_name.rsplit(".", 1)[-1], rows
+
+
+def _cash_pool_scalar_change_record_table(field_name: str, changes: list[dict[str, Any]]) -> tuple[str, dict[tuple[str, str, str], str]] | None:
+    if not _audit_is_cash_field(field_name) or not _audit_is_ledger_entries(changes):
+        return None
+    raw_rows: dict[tuple[str, str, str], str] = {}
+    for change in changes:
+        before_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("before")))
+        after_text = _audit_ledger_scalar_text(_display_field_value(field_name, change.get("after")))
+        if before_text is None or after_text is None:
+            return None
+        route = (
+            str(change.get("cash_pool") or "?"),
+            str(change.get("ledger") or "?"),
+            ", ".join(str(strategy) for strategy in (change.get("strategies") or [])) or "无",
+        )
+        raw_rows[route] = _audit_change_cell(before_text, after_text)
+    return field_name.rsplit(".", 1)[-1], _merge_cash_pool_routes(raw_rows)
+
+
+def _print_combined_strategy_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    tables = [_strategy_scalar_change_record_table(field_name, changes) for field_name, changes in records]
+    if any(table is None for table in tables) or not tables:
+        return False
+    scopes = {table[1] for table in tables if table is not None}
+    strategy_keys = [tuple(sorted(table[2])) for table in tables if table is not None]
+    if len(scopes) != 1 or not strategy_keys or any(keys != strategy_keys[0] for keys in strategy_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[2] for table in tables if table is not None]
+    grouped_rows: dict[tuple[str, ...], list[str]] = {}
+    for strategy in strategy_keys[0]:
+        row_values = tuple(value_map[strategy] for value_map in value_maps)
+        grouped_rows.setdefault(row_values, []).append(strategy)
+    rows = [tuple([", ".join(strategies), *row_values]) for row_values, strategies in grouped_rows.items()]
+    click.echo(f"{prefix}合并策略字段: {_audit_combined_change_field_label(records)}", color=True)
+    for line in _audit_table_lines(("strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _print_combined_ledger_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    tables = [_ledger_scalar_change_record_table(field_name, changes) for field_name, changes in records]
+    if any(table is None for table in tables) or not tables:
+        return False
+    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
+    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[1] for table in tables if table is not None]
+    rows = [
+        tuple([ledger, cash_pool, strategies, *[value_map[(ledger, cash_pool, strategies)] for value_map in value_maps]])
+        for ledger, cash_pool, strategies in route_keys[0]
+    ]
+    click.echo(f"{prefix}合并账本字段: {_audit_combined_change_field_label(records)}", color=True)
+    for line in _audit_table_lines(("ledger", "cash pool", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _print_combined_cash_pool_scalar_change_table(prefix: str, records: list[tuple[str, list[dict[str, Any]]]]) -> bool:
+    tables = [_cash_pool_scalar_change_record_table(field_name, changes) for field_name, changes in records]
+    if any(table is None for table in tables) or not tables:
+        return False
+    route_keys = [tuple(sorted(table[1])) for table in tables if table is not None]
+    if not route_keys or any(keys != route_keys[0] for keys in route_keys[1:]):
+        return False
+    field_columns = [table[0] for table in tables if table is not None]
+    value_maps = [table[1] for table in tables if table is not None]
+    rows = [
+        tuple([cash_pool, ledgers, strategies, *[value_map[(cash_pool, ledgers, strategies)] for value_map in value_maps]])
+        for cash_pool, ledgers, strategies in route_keys[0]
+    ]
+    click.echo(f"{prefix}cash pool 总表: {_audit_combined_change_field_label(records)}", color=True)
+    for line in _audit_table_lines(("cash pool", "ledgers", "strategies", *field_columns), sorted(rows), indent=f"{prefix}  "):
+        click.echo(line)
+    return True
+
+
+def _audit_combined_change_field_label(records: list[tuple[str, list[dict[str, Any]]]]) -> str:
+    return "；".join(_audit_combined_single_field_label(field_name) for field_name, _ in records)
+
+
 def _print_ledger_scalar_change_table(prefix: str, field_name: str, changes: list[dict[str, Any]]) -> bool:
     if not _audit_is_ledger_entries(changes):
         return False
     if _audit_is_cash_field(field_name):
-        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        for change in changes:
-            before = _display_field_value(field_name, change.get("before"))
-            after = _display_field_value(field_name, change.get("after"))
-            before_text = _audit_ledger_scalar_text(before)
-            after_text = _audit_ledger_scalar_text(after)
-            if before_text is None or after_text is None:
-                return False
-            grouped.setdefault(_audit_cash_pool_group_key(change, before_text, after_text), []).append(change)
-        rows = [
-            (
-                cash_pool,
-                _audit_join_entry_values(entries, "ledger"),
-                _audit_join_entry_strategies(entries),
-                _audit_change_cell(before_text, after_text),
-            )
-            for (cash_pool, before_text, after_text), entries in grouped.items()
-        ]
-        for line in _audit_table_lines(("cash pool", "ledgers", "strategies", "change"), sorted(rows), indent=prefix):
-            click.echo(line)
-        return True
+        return False
     rows: list[tuple[str, str, str, str]] = []
     for change in changes:
         before = _display_field_value(field_name, change.get("before"))
@@ -3209,6 +3457,8 @@ def _audit_mapping_table_text(value: Any) -> str | None:
 def _audit_scalar_cell(value: Any) -> str:
     if value is None:
         return "null"
+    if _audit_is_data_money_dict(value):
+        return _audit_cash_summary(value)
     if isinstance(value, float):
         return f"{value:.12g}"
     return str(value)
@@ -3446,7 +3696,13 @@ def _audit_table_key_column_count(header_list: list[str]) -> int:
 
 
 def _audit_table_cell_is_complex(value: Any) -> bool:
+    if _audit_is_data_money_dict(value):
+        return False
     return isinstance(value, (dict, list, tuple)) and not _audit_table_cell_is_scalar_sequence(value)
+
+
+def _audit_is_data_money_dict(value: Any) -> bool:
+    return isinstance(value, dict) and {"amount", "currency", "use_minor_units"} <= set(value)
 
 
 def _audit_table_cell_is_scalar_sequence(value: Any) -> bool:
@@ -4121,6 +4377,10 @@ def _display_field_value(qualified_name: str, value: Any) -> Any:
             return summary
     if qualified_name == "MarketDataModule.required_data_source" and value in ((), []):
         return "auto（自动选择）"
+    if qualified_name == "TradingRuleModule.daily_mark_to_market_enabled" and value in (None, ""):
+        return "auto（逐产品按历史字段解析）"
+    if qualified_name == "TradingRuleModule.cost_basis_method" and value in (None, ""):
+        return "auto（逐产品按历史字段解析）"
     if qualified_name.rsplit(".", 1)[-1] == "cash":
         return _audit_cash_summary(value)
     if isinstance(value, (list, tuple)) and all(not isinstance(item, (dict, list, tuple)) for item in value):
@@ -4370,8 +4630,9 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
         return
     if _audit_repeated_owner_groups(before) or _audit_repeated_owner_groups(after):
         click.echo(f"{prefix}{label}:")
-        _print_audit_value(f"{prefix}  ", "before", before)
-        _print_audit_value(f"{prefix}  ", "after", after)
+        click.echo(f"{prefix}  {_audit_change_cell(_audit_inline_summary(before), _audit_inline_summary(after))}")
+        _print_audit_value(f"{prefix}  ", "旧值", before)
+        _print_audit_value(f"{prefix}  ", "新值", after)
         return
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
@@ -4379,12 +4640,23 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
         _print_key_value_line(prefix, label, _audit_change_cell(before_lines[0], after_lines[0]))
         return
     click.echo(f"{prefix}{label}:")
-    click.echo(f"{prefix}  before =")
+    click.echo(f"{prefix}  {_audit_change_cell(_audit_inline_summary(before), _audit_inline_summary(after))}")
+    click.echo(f"{prefix}  旧值:")
     for line in before_lines:
         _print_audit_block_line(f"{prefix}    ", line)
-    click.echo(f"{prefix}  after =")
+    click.echo(f"{prefix}  新值:")
     for line in after_lines:
         _print_audit_block_line(f"{prefix}    ", line)
+
+
+def _audit_inline_summary(value: Any) -> str:
+    text = _audit_text(value).splitlines()
+    if not text:
+        return ""
+    first = text[0].strip()
+    if len(text) == 1 and _audit_display_width(first) <= 80:
+        return first
+    return f"{first} ... ({len(text)} 行)"
 
 
 def _audit_field_label(qualified_name: str) -> str:
@@ -4440,8 +4712,11 @@ def _print_audit_fields(
     while index < len(sorted_records):
         record = sorted_records[index]
         combined = [record]
-        current_table = _strategy_scalar_record_table(record)
-        combined_printer = _print_combined_strategy_scalar_value_table
+        current_table = _cash_pool_scalar_record_table(record)
+        combined_printer = _print_combined_cash_pool_scalar_value_table
+        if current_table is None:
+            current_table = _strategy_scalar_record_table(record)
+            combined_printer = _print_combined_strategy_scalar_value_table
         if current_table is None:
             current_table = _ledger_scalar_record_table(record)
             combined_printer = _print_combined_ledger_scalar_value_table
@@ -4449,25 +4724,30 @@ def _print_audit_fields(
             current_routes = _combined_scalar_routes(current_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table)
             lookahead = index + 1
             while lookahead < len(sorted_records):
-                next_table = (
-                    _strategy_scalar_record_table(sorted_records[lookahead])
-                    if combined_printer is _print_combined_strategy_scalar_value_table
-                    else _ledger_scalar_record_table(sorted_records[lookahead])
-                )
+                if combined_printer is _print_combined_cash_pool_scalar_value_table:
+                    next_table = _cash_pool_scalar_record_table(sorted_records[lookahead])
+                elif combined_printer is _print_combined_strategy_scalar_value_table:
+                    next_table = _strategy_scalar_record_table(sorted_records[lookahead])
+                else:
+                    next_table = _ledger_scalar_record_table(sorted_records[lookahead])
                 if next_table is None or _combined_scalar_routes(next_table, strategy=combined_printer is _print_combined_strategy_scalar_value_table) != current_routes:
                     break
                 combined.append(sorted_records[lookahead])
                 lookahead += 1
-        if len(combined) >= 2 and combined_printer("    ", combined):
+        if current_table is not None and combined_printer("    ", combined):
             index += len(combined)
             continue
-        click.echo(f"  {_audit_field_label(str(record.get('field') or ''))}:")
+        field_name = str(record.get("field") or "")
         values = record.get("values") or []
         if not values:
+            click.echo(f"  {_audit_field_label(field_name)}:")
             click.echo("    （当前无值）")
             index += 1
             continue
-        field_name = str(record.get("field") or "")
+        if _print_strategy_record_value_table("    ", field_name, values):
+            index += 1
+            continue
+        click.echo(f"  {_audit_field_label(field_name)}:")
         if _print_ledger_scalar_value_table("    ", field_name, values):
             index += 1
             continue
@@ -4508,19 +4788,59 @@ def _print_audit_changes(
     by_field: dict[str, list[dict[str, Any]]] = {}
     for change in changes:
         by_field.setdefault(str(change.get("field") or ""), []).append(change)
-    for field_name, field_changes in sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0])):
+    sorted_items = sorted(by_field.items(), key=lambda item: _audit_field_sort_key(item[0]))
+    index = 0
+    while index < len(sorted_items):
+        field_name, field_changes = sorted_items[index]
+        combined = [(field_name, field_changes)]
+        combined_printer = None
+        current_table: tuple[Any, ...] | None = _cash_pool_scalar_change_record_table(field_name, field_changes)
+        combined_printer = _print_combined_cash_pool_scalar_change_table
+        if current_table is None:
+            current_table = _strategy_scalar_change_record_table(field_name, field_changes)
+            combined_printer = _print_combined_strategy_scalar_change_table
+        if current_table is None:
+            current_table = _ledger_scalar_change_record_table(field_name, field_changes)
+            combined_printer = _print_combined_ledger_scalar_change_table
+        if current_table is not None:
+            current_routes = _combined_scalar_routes(current_table, strategy=combined_printer is _print_combined_strategy_scalar_change_table)
+            lookahead = index + 1
+            while lookahead < len(sorted_items):
+                next_field, next_changes = sorted_items[lookahead]
+                if combined_printer is _print_combined_cash_pool_scalar_change_table:
+                    next_table = _cash_pool_scalar_change_record_table(next_field, next_changes)
+                elif combined_printer is _print_combined_strategy_scalar_change_table:
+                    next_table = _strategy_scalar_change_record_table(next_field, next_changes)
+                else:
+                    next_table = _ledger_scalar_change_record_table(next_field, next_changes)
+                if next_table is None or _combined_scalar_routes(next_table, strategy=combined_printer is _print_combined_strategy_scalar_change_table) != current_routes:
+                    break
+                combined.append((next_field, next_changes))
+                lookahead += 1
+        if current_table is not None and combined_printer is not None and combined_printer("  ", combined):
+            index += len(combined)
+            continue
         click.echo(f"  {_audit_field_label(field_name)}:")
         if _print_lifecycle_notice_change("    ", field_name, field_changes):
+            index += 1
             continue
         if _print_weight_change_tables("    ", field_name, field_changes):
+            index += 1
             continue
         if _print_strategy_scalar_change_table("    ", field_name, field_changes):
+            index += 1
             continue
         if _print_positions_change_table("    ", field_name, field_changes):
+            index += 1
+            continue
+        if _print_cash_pool_scalar_change_table("    ", field_name, field_changes):
+            index += 1
             continue
         if _print_ledger_scalar_change_table("    ", field_name, field_changes):
+            index += 1
             continue
         if _print_ledger_grouped_changes("    ", field_name, field_changes):
+            index += 1
             continue
         grouped: dict[tuple[str, str], dict[str, Any]] = {}
         for change in field_changes:
@@ -4538,6 +4858,7 @@ def _print_audit_changes(
                 _print_audit_diff_value("      ", "value", bucket["before"], bucket["after"])
             else:
                 _print_audit_diff_value("    ", label, bucket["before"], bucket["after"])
+        index += 1
 
 
 def _print_ledger_snapshot(ledgers: list[dict[str, Any]]) -> None:
@@ -4569,13 +4890,12 @@ def _audit_cash_summary(value: Any) -> str:
         currency = str(value.get("currency") or "")
         scale = value.get("scale")
         use_minor = bool(value.get("use_minor_units"))
-        try:
-            if use_minor and scale:
-                major = float(amount_value) / float(scale)
-                return f"{major:,.2f} {currency}".strip()
-        except (TypeError, ValueError, ZeroDivisionError):
-            pass
-        return " ".join(str(part) for part in (amount_value, currency) if part not in (None, ""))
+        if currency and scale not in (None, ""):
+            try:
+                return _format_data_money(amount_value, currency, use_minor, int(scale))
+            except (TypeError, ValueError):
+                pass
+        return f"DataMoney({' '.join(str(part) for part in (amount_value, currency) if part not in (None, ''))})"
     return _audit_text(value).replace("\n", " ")
 
 

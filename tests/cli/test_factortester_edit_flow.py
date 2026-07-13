@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import threading
 import contextlib
@@ -40,6 +41,14 @@ from tools.cli.modules.backtest.controller import (
     _display_field_value,
 )
 from tools.cli.modules.registry import ControllerRegistry
+from tools.data.types.data_money import DataMoney
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def test_step_audit_does_not_repeat_changed_output_after_value() -> None:
@@ -67,7 +76,7 @@ def test_step_audit_groups_identical_values_by_partial_strategy_sets(capsys) -> 
 
     out = capsys.readouterr().out
     assert "strategies" in out
-    assert "value" in out
+    assert "window" in out
     assert "A1, A2" in out
     assert "0 days 00:02:00" in out
     assert "A3" in out
@@ -125,6 +134,14 @@ def test_step_audit_change_cell_uses_distinct_highlight() -> None:
     assert "100 -> 90" in cell
 
 
+def test_data_money_repr_distinguishes_minor_int_and_major_float() -> None:
+    minor = DataMoney(10000000000, "CNY", True, 100)
+    major = DataMoney(100000000.0, "CNY", False, 100)
+
+    assert repr(minor) == "DataMoney(100,000,000,00 CNY)"
+    assert repr(major) == "DataMoney(100,000,000.00 CNY)"
+
+
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
     changes = [
         {
@@ -161,7 +178,9 @@ def test_step_audit_groups_identical_changes_inline_without_before_after_section
     assert "L2" in out
     assert "P2" in out
     assert "A2" in out
-    assert "change" in out
+    plain = _strip_ansi(out)
+    assert "cash pool 总表: cash [CashPoolModule.cash]" in plain
+    assert "cash" in out
     assert "100 -> 90" in out
     assert "100" in out
     assert "90" in out
@@ -218,9 +237,11 @@ def test_step_audit_groups_cash_by_cash_pool_with_bound_ledgers(capsys) -> None:
     assert "P1" in out
     assert "L1, L2" in out
     assert "A1, A2" in out
-    assert "100.00 CNY" in out
-    assert "90.00 CNY" in out
+    assert "DataMoney(100,00 CNY)" in out
+    assert "DataMoney(90,00 CNY)" in out
     assert out.count("P1") == 1
+    plain = _strip_ansi(out)
+    assert "cash pool 总表: cash [CashPoolModule.cash]" in plain
 
 
 def test_step_audit_groups_complex_ledger_fields_by_ledger(capsys) -> None:
@@ -296,7 +317,7 @@ def test_step_audit_renders_positions_as_grouped_table() -> None:
     assert "lots_count" in text
     assert "AP.CZC, CJ.CZC" in text
     assert "RB.SHF" in text
-    assert "1,200.00 CNY" in text
+    assert "DataMoney(1,200,00 CNY)" in text
     assert "[明细" not in text
 
 
@@ -414,7 +435,7 @@ def test_step_audit_keeps_merged_ledger_sources_readable(capsys) -> None:
     assert "private:L8" in out
     assert "pool-8" in out
     assert "A8" in out
-    assert "change" in out
+    assert "margin_requirement" in out
     assert "null -> 0.0" in out
     assert out.count("null") == 8
     assert out.count("0") >= 8
@@ -442,6 +463,8 @@ def test_step_audit_combines_repeated_ledger_scalar_input_fields(capsys) -> None
 
     out = capsys.readouterr().out
     assert "合并账本字段" in out
+    assert "accounting_mode [TradingRuleModule.accounting_mode]" in out
+    assert "use_int_position [TradingRuleModule.use_int_position]" in out
     assert "accounting_mode" in out
     assert "use_int_position" in out
     assert out.count("ledger") == 1
@@ -473,12 +496,15 @@ def test_step_audit_combines_repeated_strategy_scalar_input_fields(capsys) -> No
 
     out = capsys.readouterr().out
     assert "合并策略字段" in out
+    assert "\x1b[1mbase_currency [CashPoolModule.base_currency]\x1b[0m" in out
+    assert "base_currency [CashPoolModule.base_currency]" in out
+    assert "initial_capital_major [CashPoolModule.initial_capital_major]" in out
+    assert "engine_mode [EngineModule.engine_mode]" in out
     assert "base_currency" in out
     assert "initial_capital_major" in out
     assert "engine_mode" in out
     assert "A1, A2" in out
     assert out.count("strategies") == 1
-    assert "base_currency [CashPoolModule.base_currency]" not in out
     assert "策略配置 A1, A2 = CNY" not in out
 
 
@@ -505,6 +531,55 @@ def test_step_audit_strategy_scalar_table_merges_only_identical_rows(capsys) -> 
     assert "A1, A2" in out
     assert "A3" in out
     assert "表格已转置" not in out
+
+
+def test_step_audit_single_strategy_scalar_uses_strategy_total_table(capsys) -> None:
+    _print_audit_fields("输入字段", [{
+        "field": "EngineModule.engine_mode",
+        "values": [
+            {"scope": "strategy_config", "strategy": "A1", "value": "auto"},
+            {"scope": "strategy_config", "strategy": "A2", "value": "auto"},
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "合并策略字段: engine_mode [EngineModule.engine_mode]" in plain
+    assert "strategies" in out
+    assert "engine_mode" in out
+    assert "value" not in out
+
+
+def test_step_audit_single_ledger_scalar_uses_ledger_total_table(capsys) -> None:
+    _print_audit_fields("输入字段", [{
+        "field": "TradingRuleModule.accounting_mode",
+        "values": [
+            {"scope": "ledger_config", "ledger": "L1", "cash_pool": "P1", "strategies": ["A1"], "value": "Auto"},
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "合并账本字段: accounting_mode [TradingRuleModule.accounting_mode]" in plain
+    assert "ledger" in out
+    assert "cash pool" in out
+    assert "accounting_mode" in out
+
+
+def test_step_audit_single_cash_scalar_uses_cash_pool_total_table(capsys) -> None:
+    _print_audit_fields("输入字段", [{
+        "field": "CashPoolModule.cash",
+        "values": [
+            {"scope": "ledger", "ledger": "L1", "cash_pool": "P1", "strategies": ["A1"], "value": 100},
+        ],
+    }])
+
+    out = capsys.readouterr().out
+    plain = _strip_ansi(out)
+    assert "cash pool 总表: cash [CashPoolModule.cash]" in plain
+    assert "cash pool" in out
+    assert "ledgers" in out
+    assert "cash" in out
 
 
 def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, monkeypatch) -> None:
@@ -538,6 +613,30 @@ def test_step_audit_keeps_moderate_combined_ledger_fields_in_one_table(capsys, m
     assert "margin_mode" in out
     assert "cost_basis_method" in out
     assert "columns 1/" not in out
+
+
+def test_step_audit_displays_auto_dmtm_ledger_config_as_runtime_resolved(capsys) -> None:
+    values = [
+        {
+            "scope": "ledger_config",
+            "ledger": "private:L1",
+            "cash_pool": "private:P1",
+            "strategies": ["A1"],
+            "value": None,
+        }
+    ]
+
+    _print_audit_fields("输入字段", [
+        {"field": "TradingRuleModule.cost_basis_method", "values": values},
+        {"field": "TradingRuleModule.daily_mark_to_market_enabled", "values": values},
+    ])
+
+    out = capsys.readouterr().out
+    assert "合并账本字段" in out
+    assert "cost_basis_method" in out
+    assert "daily_mark_to_market_enabled" in out
+    assert "auto（逐产品按历史字段解析）" in out
+    assert "null" not in out
 
 
 def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
@@ -581,8 +680,9 @@ def test_step_audit_reuses_identical_ledger_route_within_flow(capsys) -> None:
     assert out.count("private:L1") == 3
     assert out.count("pool-1") == 3
     assert "ledger/cash pool/strategy 路由同上" not in out
-    assert "value" in out
-    assert "change" in out
+    assert "accounting_mode" in out
+    assert "cost_basis_method" in out
+    assert "cash" in out
     assert "null -> 100" in out
     assert "Auto" in out
     assert "100" in out
@@ -952,7 +1052,8 @@ def test_step_audit_lifecycle_notice_changes_prefer_merged_context(capsys) -> No
     out = capsys.readouterr().out
     assert "合并事件草稿（所有 active strategies）" in out
     assert out.count("force_close_notices [DeliveryForceCloseModule.force_close_notices]") == 1
-    assert out.count("before =") == 1
+    assert "before =" not in out
+    assert "after =" not in out
     assert "策略上下文 A1" not in out
     assert "lifecycle_source_function" in out
 
@@ -1154,7 +1255,7 @@ def test_step_audit_identical_strategy_context_values_are_merged_in_strategy_tab
     out = capsys.readouterr().out
     assert "[共享]" not in out
     assert "strategies" in out
-    assert "value" in out
+    assert "products" in out
     assert "A1, A2" in out
 
 
@@ -1172,7 +1273,7 @@ def test_step_audit_compacts_long_strategy_input_lists_in_strategy_table(capsys)
     out = capsys.readouterr().out
     assert "source" not in out
     assert "strategies" in out
-    assert "value" in out
+    assert "products" in out
     assert "A1, A2" in out
     assert "P0.EX, P1.EX, P2.EX, ..." in out
     assert "共 12 个" not in out
