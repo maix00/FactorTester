@@ -33,6 +33,7 @@ from tools.cli.modules.backtest.controller import (
     _print_audit_fields,
     _print_audit_diff_value,
     _print_audit_value,
+    _print_step_badge_box,
     _print_strategy_context,
     _serialize_group_for_run,
     _serialize_strategy_book_for_run,
@@ -129,9 +130,27 @@ def test_step_audit_changes_follow_backend_display_order(capsys) -> None:
 def test_step_audit_change_cell_uses_distinct_highlight() -> None:
     cell = _audit_change_cell("100", "90")
 
-    assert "\x1b[30m" in cell
-    assert "\x1b[43m" in cell
+    assert "\x1b[93m" in cell
+    assert "\x1b[43m" not in cell
     assert "100 -> 90" in cell
+
+
+def test_step_badge_uses_light_foreground_without_red_background(capsys) -> None:
+    _print_step_badge_box(
+        {
+            "current_event": {"event_kind": "ORDER", "batch_count": 1},
+            "timestamp": "2026-01-05 09:01:00+08:00",
+        },
+        "PER_EVENT (事件回放)",
+        "apply_order_fill",
+        "成交落账",
+        "2026-01-05 09:01:00+08:00",
+    )
+
+    out = capsys.readouterr().out
+    assert "\x1b[91m" in out
+    assert "\x1b[41m" not in out
+    assert "apply_order_fill" in out
 
 
 def test_data_money_repr_distinguishes_minor_int_and_major_float() -> None:
@@ -140,6 +159,41 @@ def test_data_money_repr_distinguishes_minor_int_and_major_float() -> None:
 
     assert repr(minor) == "DataMoney(100,000,000,00 CNY)"
     assert repr(major) == "DataMoney(100,000,000.00 CNY)"
+
+
+def test_step_audit_multiline_diff_uses_arrow_without_old_new_labels(capsys) -> None:
+    _print_audit_diff_value(
+        "  ",
+        "value",
+        None,
+        {"RB.SHF": {"quantity": 1, "average_cost": 3000}},
+    )
+
+    out = capsys.readouterr().out
+    assert "null ->" in out
+    assert "旧值" not in out
+    assert "新值" not in out
+    assert "before" not in out
+    assert "after" not in out
+    assert "RB.SHF" in out
+
+
+def test_step_audit_transposed_long_list_wraps_and_truncates(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback: shutil.os.terminal_size((54, 20)))
+    long_list = "[" + ", ".join(f"P{index}.EX" for index in range(30)) + "]"
+
+    lines = _audit_table_lines(
+        ("strategies", "products"),
+        [("A1, A2", long_list)],
+        indent="    ",
+    )
+    text = "\n".join(lines)
+
+    assert "表格已转置" in text
+    assert "products" in text
+    assert "P0.EX" in text
+    assert "已截断" in text
+    assert any(line.startswith("      ") and "P" in line for line in lines[2:])
 
 
 def test_step_audit_groups_identical_changes_inline_without_before_after_sections(capsys) -> None:
@@ -1839,7 +1893,8 @@ def test_step_flow_header_is_red(capsys, monkeypatch) -> None:
     )
 
     out = capsys.readouterr().out
-    assert "\x1b[37m\x1b[41m\x1b[1m┏" in out
+    assert "\x1b[91m\x1b[1m┏" in out
+    assert "\x1b[41m" not in out
     assert "FLOW PRE_REPLAY" in out
     assert "timestamp: 2026-01-05 09:02:00+08:00" in out
     assert "event: kind=ORDER; batch_count=1" in out

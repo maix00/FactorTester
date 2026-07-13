@@ -52,7 +52,11 @@ def _pad_audit_cell(value: object, width: int) -> str:
 
 
 def _audit_change_cell(before: Any, after: Any) -> str:
-    return click.style(f"{before} -> {after}", fg="black", bg="yellow")
+    return click.style(f"{before} -> {after}", fg="bright_yellow", bold=True)
+
+
+def _audit_change_prefix(before: Any) -> str:
+    return click.style(f"{before} ->", fg="bright_yellow", bold=True)
 
 
 @dataclass(frozen=True)
@@ -3744,7 +3748,16 @@ def _audit_transposed_table_lines(
             or (len(header_list) > 16 and value_column_count > max(len(scalar_rows), 1))
         )
     )
-    if not should_transpose_dense and (len(header_list) <= 8 or len(scalar_rows) > 3):
+    should_transpose_long_cell = (
+        key_count <= 2
+        and len(scalar_rows) <= 3
+        and any(
+            _audit_display_width(row[column]) > 48
+            for row in scalar_rows
+            for column in range(key_count, len(header_list))
+        )
+    )
+    if not (should_transpose_dense or should_transpose_long_cell) and (len(header_list) <= 8 or len(scalar_rows) > 3):
         return None
     if key_count < 1 or key_count > 2:
         return None
@@ -3781,7 +3794,7 @@ def _audit_transposed_table_lines(
     key_label = " + ".join(header_list[:key_count])
     lines = [f"{indent}（表格已转置：原列数 {len(header_list)}，原行数 {len(scalar_rows)}，行标={key_label}）"]
     lines.extend(key_detail_lines)
-    lines.extend(_audit_table_block_lines(
+    lines.extend(_audit_wrapped_table_block_lines(
         transposed_headers,
         [[str(item) for item in row] for row in transposed_rows],
         transposed_widths,
@@ -3805,6 +3818,46 @@ def _audit_table_block_lines(
     for row in scalar_rows:
         lines.append(indent + "  ".join(_pad_audit_cell(row[column], widths[column]) for column in columns).rstrip())
     return lines
+
+
+def _audit_wrapped_table_block_lines(
+    header_list: list[str],
+    scalar_rows: list[list[str]],
+    widths: list[int],
+    columns: list[int],
+    *,
+    indent: str = "",
+) -> list[str]:
+    if len(columns) <= 1:
+        return _audit_table_block_lines(header_list, scalar_rows, widths, columns, indent=indent)
+    max_width = _audit_max_width()
+    available = max(18, max_width - len(indent) - sum(widths[column] + 2 for column in columns[:-1]))
+    lines = [
+        indent + "  ".join(_pad_audit_cell(header_list[column], widths[column]) for column in columns).rstrip()
+    ]
+    for row in scalar_rows:
+        wrapped_last = _audit_wrapped_table_cell(row[columns[-1]], width=available)
+        first_line_cells = [
+            _pad_audit_cell(row[column], widths[column])
+            for column in columns[:-1]
+        ]
+        lines.append(indent + "  ".join([*first_line_cells, wrapped_last[0]]).rstrip())
+        continuation_prefix = indent + "  ".join(" " * widths[column] for column in columns[:-1]) + "  "
+        for continuation in wrapped_last[1:]:
+            lines.append(continuation_prefix + continuation)
+    return lines
+
+
+def _audit_wrapped_table_cell(value: str, *, width: int, max_lines: int = 4) -> list[str]:
+    if not value:
+        return [value]
+    subsequent_indent = "  "
+    wrapped = _wrap_audit_text(value, width=width, subsequent_indent=subsequent_indent)
+    if len(wrapped) <= max_lines:
+        return wrapped
+    kept = wrapped[: max_lines - 1]
+    kept.append(f"{subsequent_indent}...（已截断 {len(wrapped) - len(kept)} 行）")
+    return kept
 
 
 def _audit_table_column_groups(
@@ -4841,9 +4894,7 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
         return
     if _audit_repeated_owner_groups(before) or _audit_repeated_owner_groups(after):
         click.echo(f"{prefix}{label}:")
-        click.echo(f"{prefix}  {_audit_change_cell(_audit_inline_summary(before), _audit_inline_summary(after))}")
-        _print_audit_value(f"{prefix}  ", "旧值", before)
-        _print_audit_value(f"{prefix}  ", "新值", after)
+        _print_audit_arrow_diff(f"{prefix}  ", before, after)
         return
     before_lines = _audit_text(before).splitlines() or [""]
     after_lines = _audit_text(after).splitlines() or [""]
@@ -4851,13 +4902,14 @@ def _print_audit_diff_value(prefix: str, label: str, before: Any, after: Any) ->
         _print_key_value_line(prefix, label, _audit_change_cell(before_lines[0], after_lines[0]))
         return
     click.echo(f"{prefix}{label}:")
-    click.echo(f"{prefix}  {_audit_change_cell(_audit_inline_summary(before), _audit_inline_summary(after))}")
-    click.echo(f"{prefix}  旧值:")
-    for line in before_lines:
-        _print_audit_block_line(f"{prefix}    ", line)
-    click.echo(f"{prefix}  新值:")
+    _print_audit_arrow_diff(f"{prefix}  ", before, after)
+
+
+def _print_audit_arrow_diff(prefix: str, before: Any, after: Any) -> None:
+    after_lines = _audit_text(after).splitlines() or [""]
+    click.echo(f"{prefix}{_audit_change_prefix(_audit_inline_summary(before))}")
     for line in after_lines:
-        _print_audit_block_line(f"{prefix}    ", line)
+        _print_audit_block_line(f"{prefix}  ", line)
 
 
 def _audit_inline_summary(value: Any) -> str:
@@ -5243,10 +5295,10 @@ def _print_step_badge_box(data: dict[str, Any], phase_text: str, flow_id: str, f
         display_lines.extend(_wrap_audit_text(line, width=max_width, subsequent_indent=continuation))
     box_width = min(max_width, max(_audit_display_width(line) for line in display_lines))
     border = "━" * (box_width + 2)
-    click.secho(f"┏{border}┓", fg="white", bg="red", bold=True, color=True)
+    click.secho(f"┏{border}┓", fg="bright_red", bold=True, color=True)
     for line in display_lines:
-        click.secho(f"┃ {_pad_audit_cell(line, box_width)} ┃", fg="white", bg="red", bold=True, color=True)
-    click.secho(f"┗{border}┛", fg="white", bg="red", bold=True, color=True)
+        click.secho(f"┃ {_pad_audit_cell(line, box_width)} ┃", fg="bright_red", bold=True, color=True)
+    click.secho(f"┗{border}┛", fg="bright_red", bold=True, color=True)
 
 
 def _print_contract_audit(violations: list[dict[str, Any]]) -> None:
